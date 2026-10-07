@@ -392,6 +392,8 @@ def start_managed_run(
     prepared: _PreparedAttempt,
     deadline: Deadline,
     before_possible_dispatch: Callable[[], None] | None = None,
+    before_delivery: Callable[[], None] | None = None,
+    publish_candidate: Callable[[ManagedStartCandidate], None] | None = None,
 ) -> ManagedStartAttempt:
     """Commit possible dispatch, attempt once, and reconcile only admitted launch fact."""
     if (
@@ -417,7 +419,11 @@ def start_managed_run(
         def boundary(run: ManagedRunRecord) -> ManagedLaunchObservation:
             nonlocal candidate
             assert run.identity == reserved.identity
+            if before_delivery is not None:
+                before_delivery()
             candidate = _exchange(carrier, prepared, deadline)
+            if publish_candidate is not None:
+                publish_candidate(candidate)
             observed = candidate.observation
             receipt = (
                 ManagedRunReceipt(reserved.identity, reserved.identity.unit_name, reserved.spec)

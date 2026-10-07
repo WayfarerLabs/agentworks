@@ -18,7 +18,7 @@ from ._managed_runs import (
     ManagedRunRecord,
     ManagedTargetKind,
 )
-from ._managed_start_exchange import ManagedStartAttempt, _PreparedAttempt, start_managed_run
+from ._managed_start_exchange import ManagedStartAttempt, ManagedStartCandidate, _PreparedAttempt, start_managed_run
 from .carrier import Deadline
 
 if TYPE_CHECKING:
@@ -62,6 +62,47 @@ class ManagedStartControlFact(Exception):
     def __init__(self, outcome: ManagedStartOutcome) -> None:
         self.outcome = outcome
         super().__init__("managed start stopped with retained operation state")
+
+
+def start_borrowed_managed_run(
+    repository: ManagedRunRepository,
+    reserved: ManagedRunRecord,
+    operation: BorrowedFixedHelperCarrier,
+    *,
+    prepared: _PreparedAttempt,
+    deadline: Deadline,
+    before_possible_dispatch: Callable[[], None] | None = None,
+    before_delivery: Callable[[], None] | None = None,
+    publish_candidate: Callable[[ManagedStartCandidate], None] | None = None,
+) -> ManagedStartOutcome:
+    """Consume already-claimed preparation and actual supplied helper custody.
+
+    The caller owns registration and release. Candidate publication precedes
+    receipt reconciliation, so an interrupted database reply cannot hide the
+    actual helper evidence from its retained tracked call.
+    """
+    attempt = start_managed_run(
+        repository,
+        reserved,
+        operation,
+        prepared=prepared,
+        deadline=deadline,
+        before_possible_dispatch=before_possible_dispatch,
+        before_delivery=before_delivery,
+        publish_candidate=publish_candidate,
+    )
+    operation.settle(attempt.candidate.dispatch, attempt.candidate.carrier_completion)
+    confirmed = (
+        attempt.record.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED and not operation.has_outstanding_attempt
+    )
+    return ManagedStartOutcome(
+        attempt,
+        attempt.record.launch_state,
+        deadline.expired,
+        operation.pending_remote_effects,
+        operation.coordination_uncertain,
+        not confirmed or operation.requires_owner_retention,
+    )
 
 
 def start_owned_managed_run(
@@ -110,7 +151,15 @@ def start_owned_managed_run(
     except BaseException:
         prepared.discard()
         raise
-    operation = BorrowedFixedHelperCarrier(carrier, borrow)
+    try:
+        operation = BorrowedFixedHelperCarrier(carrier, borrow)
+    except BaseException as control:
+        prepared.discard()
+        try:
+            borrow.close()
+        except BaseException:
+            raise control from control.__cause__
+        raise
     attempt: ManagedStartAttempt | None = None
     registration_started = False
     retained = False
@@ -128,7 +177,7 @@ def start_owned_managed_run(
             if before_dispatch is not None:
                 before_dispatch()
 
-        attempt = start_managed_run(
+        outcome = start_borrowed_managed_run(
             repository,
             reserved,
             operation,
@@ -136,26 +185,17 @@ def start_owned_managed_run(
             deadline=deadline,
             before_possible_dispatch=before_possible_dispatch,
         )
-        operation.settle(attempt.candidate.dispatch, attempt.candidate.carrier_completion)
-        confirmed = (
-            attempt.record.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
-            and not operation.has_outstanding_attempt
-        )
-        retained = not confirmed or operation.requires_owner_retention
-        outcome = ManagedStartOutcome(
-            attempt,
-            attempt.record.launch_state,
-            deadline.expired,
-            operation.pending_remote_effects,
-            operation.coordination_uncertain,
-            retained,
-        )
+        attempt = outcome.attempt
+        retained = outcome.requires_owner_retention
         release_borrow_after_custody(borrow, retain_effect=retained)
         return outcome
     except BaseException as control:
         if _is_pre_registration_refusal(control):
             prepared.discard()
-            borrow.close()
+            try:
+                borrow.close()
+            except BaseException:
+                raise control from control.__cause__
             raise
         prepared.discard()
         armed_effect = borrow.dispatch_obligation_may_be_armed
@@ -179,4 +219,5 @@ def start_owned_managed_run(
                 retained or release_failed,
             )
         )
+        fact.__cause__ = control.__cause__
         raise control from fact

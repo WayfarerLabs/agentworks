@@ -136,13 +136,14 @@ these values, never carrier, account, command, path, provider, credential, outpu
 `access.py` contains a private, non-production `ExecutionAccess` increment. It binds an existing
 `ExecutionOperation`, carrier, runtime, ordinary and optional elevated identity plans, logical
 diagnostic identity, and deadline policy. Its `run(...)` accepts the intended stable foreground
-options for DIRECT inline execution and MANAGED launch followed by wait, initially with OPERATION
-lifetime only. Both preserve finite input, capture/discard/sensitivity policy and bound identity or
-elevation choices. Independent lifetime, non-Linux runtime, unsupported shell startup, unavailable
-elevation, invalid values and initially expired deadlines refuse before workload launch. DIRECT
-performs one preparation and dispatch attempt, then uses the contextual result reducer. It is not
-exported from the package root, placed in an `ExecutionTarget`, or supplied through RunContext. Its
-private `start(...)` now accepts explicit MANAGED protection and OPERATION lifetime for finite
+options for DIRECT inline execution and MANAGED launch followed by wait. MANAGED also accepts
+INDEPENDENT lifetime under an exact core RESOURCE namespace and an explicit no-idle-stop platform
+binding. Both preserve finite input, capture/discard/sensitivity policy and bound identity or
+elevation choices. DIRECT independent lifetime, non-Linux runtime, unsupported shell startup,
+unavailable elevation, invalid values and initially expired deadlines refuse before workload launch.
+DIRECT performs one preparation and dispatch attempt, then uses the contextual result reducer. It is
+not exported from the package root, placed in an `ExecutionTarget`, or supplied through RunContext.
+Its private `start(...)` accepts explicit MANAGED protection and either admitted lifetime for finite
 commands or scripts with SH, BASH or USER_DEFAULT selection, including optional elevation.
 USER_DEFAULT freezes and validates the finite body before observing the selected workload account's
 supported shell through the operation's tracked helper lifetime. The shell is resolved before
@@ -173,33 +174,48 @@ the budget still returns UNKNOWN application progress, DEADLINE, incomplete outp
 effective retention policy, and its safe `JobRef`, without further I/O or cleanup. Checked MANAGED
 run and wait use the bound logical entity and existing contextual checker, preserving the exact
 result/reference; known application failures remain application-phase, while deadline and
-observation-collection failures retain observation phase. Start's existing overlap boundaries can
-retain a reservation and keeper-admission uncertainty when ownership is already borrowed, or
-admitted initial-clock keeper evidence when a later borrow refuses actual launch. Foreground
-composition does not bypass or erase either retained state. Stop first acquires the whole owner's
-ordinary serial borrow, then drains only the selected OPERATION keeper. RESOURCE stop owns no keeper
-and never adopts the independent job. Both deliver through the existing lifetime row and actual
-borrowed helper attempt, retaining unknown helper debt before any fresh observation. An overlapping
-file or other component's borrow refuses before drain or dispatch. Accepted intent is independent of
-proved termination; RESOURCE stop requires a fresh exact observation for closure and shares its
-original finite deadline. Its settled helpers reuse the same empty-payload lifetime row, while
-unknown helper custody blocks new work and observer finish. Observer finish never stops or cleans
-the independent job. OPERATION disposal observes terminal proof before draining; active or unproved
-work stays not ready without stopping it. RESOURCE disposal likewise requires fresh positive exact
-terminal proof before its first effect, but never owns a keeper or adopts the job. It uses a
-dedicated run-ID-only `managed-dispose` obligation in the same actual helper tracker. A pending
-disposal retains its exact receipt and positive terminal observation for later explicitly requested
-retries, including after guest artifacts have disappeared. Helper termination is not disposal
-settlement: only a known no-delivery result or a clean validated NOT_READY/DISPOSED response can
-resolve the action. A retry's no-delivery result cannot erase an earlier unresolved remote action.
-Uncertain stop or disposal remains distinct from a proved refusal. Unknown helper custody blocks
-ordinary admission and finish; bookkeeping retries and finish never dispatch disposal. A resolved
-prior action receipt permits a fresh attempt ID, not rearming or an inference that disposal
-succeeded. RESOURCE closure requires a reconciled reservation, authentic launch, both stream ends,
-positive boundary-empty and positive exact controller termination under a settled helper. A missing
-WAIT preserves UNKNOWN application precision without blocking proved resource closure; live or
-unknown controller state can still be polled within the original deadline. No RESOURCE terminal
-observation is cached on an owned run. These private controls do not establish independent launch,
+observation-collection failures retain observation phase. OPERATION start's existing overlap
+boundaries can retain a reservation and keeper-admission uncertainty when ownership is already
+borrowed, or admitted initial-clock keeper evidence when a later borrow refuses actual launch.
+Foreground composition does not bypass or erase either retained state. Stop first acquires the whole
+owner's ordinary serial borrow, then drains only the selected OPERATION keeper. RESOURCE stop owns
+no keeper and never adopts the independent job. Both deliver through the existing lifetime row and
+actual borrowed helper attempt, retaining unknown helper debt before any fresh observation. An
+overlapping file or other component's borrow refuses before drain or dispatch. Accepted intent is
+independent of proved termination; RESOURCE stop requires a fresh exact observation for closure and
+shares its original finite deadline. Its settled helpers reuse the same empty-payload lifetime row,
+while unknown helper custody blocks new work and observer finish. Observer finish never stops or
+cleans the independent job. OPERATION disposal observes terminal proof before draining; active or
+unproved work stays not ready without stopping it. RESOURCE disposal likewise requires fresh
+positive exact terminal proof before its first effect, but never owns a keeper or adopts the job. It
+uses a dedicated run-ID-only `managed-dispose` obligation in the same actual helper tracker. A
+pending disposal retains its exact receipt and positive terminal observation for later explicitly
+requested retries, including after guest artifacts have disappeared. Helper termination is not
+disposal settlement: only a known no-delivery result or a clean validated NOT_READY/DISPOSED
+response can resolve the action. A retry's no-delivery result cannot erase an earlier unresolved
+remote action. Uncertain stop or disposal remains distinct from a proved refusal. Unknown helper
+custody blocks ordinary admission and finish; bookkeeping retries and finish never dispatch
+disposal. A resolved prior action receipt permits a fresh attempt ID, not rearming or an inference
+that disposal succeeded. RESOURCE closure requires a reconciled reservation, authentic launch, both
+stream ends, positive boundary-empty and positive exact controller termination under a settled
+helper. A missing WAIT preserves UNKNOWN application precision without blocking proved resource
+closure; live or unknown controller state can still be polled within the original deadline. No
+RESOURCE terminal observation is cached on an owned run. RESOURCE start freezes the caller body
+before shell lookup, then retains its generated identity, planned receipt, output policy and actual
+helper/borrow before reservation. It uses a dedicated run-ID-only `managed-start` row in the
+existing tracker and the same dispatch kernel as originating OPERATION and standalone starts.
+Candidate publication precedes receipt reconciliation; a confirmed receipt cannot hide actual helper
+or local delivery debt. Interrupted reservation is inspected exactly without reserving or launching
+again. Exact real wrapper/owner/attempt proof of never entering delivery can resolve only its START
+action, leaving a POSSIBLE_DISPATCH run unchanged and unacknowledged; it does not fabricate receipt
+absence. Bookkeeping and finish never launch, and an acknowledged independent job has no operation
+keeper or aggregate job cleanup owner. Foreground RESOURCE run shares its original deadline with
+wait; a cause-free expiry before the first observation uses only its same-invocation acknowledgement
+and frozen output policy. Explicit wait receives no such acknowledgement. Proxmox alone currently
+supplies the immutable no-idle-stop fact, separate from live operation and prepared guest admission.
+WSL2 leaves it absent and refuses independent launch, even with an operation command hold; a
+physical recoverable job-length availability hold remains future work. Explicit VM stop/reboot and
+host loss are outside that no-idle-stop fact. These private increments do not establish all-platform
 duration availability, session namespaces or a public RunContext surface.
 
 `ExecutionOperation` requires an explicit managed target matching its owner's scope. An optional

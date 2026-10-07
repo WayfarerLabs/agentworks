@@ -633,7 +633,7 @@ class ProxmoxPlatform(VMPlatform):
     ) -> NativeExecutionBinding:
         """Bind verified QGA delivery without probing or constructing legacy execution."""
         from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
-        from agentworks.execution.binding import NativeExecutionBinding
+        from agentworks.execution.binding import NativeExecutionBinding, _IndependentJobAvailability
         from agentworks.execution.carriers.proxmox import ProxmoxCarrier
 
         del deadline, config
@@ -643,6 +643,7 @@ class ProxmoxPlatform(VMPlatform):
             "root",
             RuntimeSelection(RuntimeTargetOS.LINUX),
             _new_managed_delivery=lambda: ProxmoxCarrier(connection),
+            _independent_availability=_IndependentJobAvailability.NO_IDLE_STOP,
         )
 
     def observe_execution_power(

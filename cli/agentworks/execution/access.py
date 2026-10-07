@@ -32,12 +32,14 @@ from ._file_result_transfer import (
 )
 from ._helper_launcher import IdentityPlan
 from ._json import serialize_json_source, validate_json_object
+from ._managed_bound_run import ManagedDeadlineExpired
 from ._managed_job_protocol import StreamDisposition, WorkloadWaitFact
 from ._managed_job_store import FactName, Stream
 from ._managed_observation_exchange import ManagedObservationState
 from ._managed_result import _fact
+from ._managed_runs import ManagedOutputMode
 from ._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
-from .carrier import Deadline, Failure, Retention
+from .carrier import Deadline, Dispatch, Failure, Retention
 from .diagnostics import ExecutionPhase, check_execution_result
 from .files import (
     Change,
@@ -65,14 +67,14 @@ from .files import (
 from .jobs import JobDisposal, JobOutput, JobStatus, JobStop, JobStream
 from .models import Command, Input, JobRef, Lifetime, Output, Script
 from .profiles import Protection
-from .result import ApplicationState, ExecutionFailure, ExitCode, Signal
+from .result import ApplicationState, ExecutionFailure, ExecutionOutput, ExecutionResult, ExitCode, Signal
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from typing import Never
 
+    from ._managed_resource_start import ResourceStartAcknowledgement
     from .carrier import Carrier
-    from .result import ExecutionResult
 
 _DEFAULT_JSON_MAX_BYTES = 64 * 1_024
 _DEFAULT_JSON_MAX_DEPTH = 64
@@ -242,13 +244,39 @@ class ExecutionAccess:
         selected = self._job_deadline(deadline)
         return self._wait_managed(job, selected, check=check)
 
-    def _wait_managed(self, job: JobRef, selected: Deadline, *, check: bool) -> ExecutionResult:
+    def _wait_managed(
+        self,
+        job: JobRef,
+        selected: Deadline,
+        *,
+        check: bool,
+        acknowledgement: ResourceStartAcknowledgement | None = None,
+    ) -> ExecutionResult:
         """Compose managed observation under an already selected finite budget."""
         try:
             outcome = self._operation.wait_job(job, self._carrier, selected)
+        except ManagedDeadlineExpired as control:
+            if acknowledgement is None or acknowledgement.reference != job or control.__cause__ is not None:
+                self._raise_job_control(control, job)
+            retention = {
+                ManagedOutputMode.CAPTURE: Retention.CAPTURED,
+                ManagedOutputMode.DISCARD: Retention.DISCARDED,
+                ManagedOutputMode.SENSITIVITY_SUPPRESSED: Retention.SUPPRESSED,
+            }[acknowledgement.output_policy.mode]
+            missing = ExecutionOutput(retention=retention)
+            result = ExecutionResult(
+                Dispatch.UNKNOWN,
+                ApplicationState.UNKNOWN,
+                stdout=missing,
+                stderr=missing,
+                failure=ExecutionFailure.DEADLINE,
+                deadline_exceeded=True,
+                job=job,
+            )
         except BaseException as control:
             self._raise_job_control(control, job)
-        result = replace(outcome.result, job=job)
+        else:
+            result = replace(outcome.result, job=job)
         if not check:
             return result
         return check_execution_result(
@@ -290,9 +318,9 @@ class ExecutionAccess:
         sensitive: bool = False,
         deadline: Deadline | None = None,
     ) -> JobRef:
-        """Start one private operation-lifetime managed command or explicit script."""
-        if profile is not Protection.MANAGED or lifetime is not Lifetime.OPERATION:
-            raise ValidationError("Managed start requires explicit MANAGED and OPERATION choices")
+        """Start one exact managed job under operation or resource custody."""
+        if profile is not Protection.MANAGED or type(lifetime) is not Lifetime:
+            raise ValidationError("Managed start requires explicit MANAGED and lifetime choices")
         if self._runtime_selection.target_os is not RuntimeTargetOS.LINUX:
             raise StateError("Managed execution is unavailable on this runtime")
         if type(request) not in {Command, Script} or type(stdin) is not Input or type(output) is not Output:
@@ -311,6 +339,19 @@ class ExecutionAccess:
                 selected = deadline
         plan = self._elevated_plan if sudo else self._ordinary_plan
         assert plan is not None
+        if lifetime is Lifetime.INDEPENDENT:
+            return self._operation.start_resource_managed(
+                self._carrier,
+                request,
+                plan=plan,
+                runtime_selection=self._runtime_selection,
+                deadline=selected,
+                input=stdin,
+                output=output,
+                env=env,
+                cwd=cwd,
+                sensitive=sensitive or stdin.is_sensitive,
+            ).reference
         return self._operation.start_managed(
             self._carrier,
             request,
@@ -339,10 +380,10 @@ class ExecutionAccess:
         deadline: Deadline | None = None,
         check: bool = False,
     ) -> ExecutionResult:
-        """Run DIRECT inline or launch then observe MANAGED OPERATION work."""
+        """Run DIRECT inline or launch then observe exact MANAGED work."""
         if type(profile) is not Protection or type(lifetime) is not Lifetime:
             raise ValidationError("Foreground execution requires explicit profile and lifetime values")
-        if lifetime is Lifetime.INDEPENDENT:
+        if lifetime is Lifetime.INDEPENDENT and profile is Protection.DIRECT:
             raise StateError("INDEPENDENT execution lifetime is unavailable")
         if self._runtime_selection.target_os is not RuntimeTargetOS.LINUX:
             raise StateError("Foreground execution is unavailable on this runtime")
@@ -372,6 +413,25 @@ class ExecutionAccess:
         effective_sensitive = sensitive or stdin.is_sensitive
 
         if profile is Protection.MANAGED:
+            if lifetime is Lifetime.INDEPENDENT:
+                acknowledgement = self._operation.start_resource_managed(
+                    self._carrier,
+                    request,
+                    plan=plan,
+                    runtime_selection=self._runtime_selection,
+                    deadline=selected_deadline,
+                    input=stdin,
+                    output=output,
+                    env=env,
+                    cwd=cwd,
+                    sensitive=effective_sensitive,
+                )
+                return self._wait_managed(
+                    acknowledgement.reference,
+                    selected_deadline,
+                    check=check,
+                    acknowledgement=acknowledgement,
+                )
             job = self._operation.start_managed(
                 self._carrier,
                 request,

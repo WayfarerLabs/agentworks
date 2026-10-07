@@ -54,6 +54,12 @@ from agentworks.execution._managed_resource_disposal import (
     dispose_resource_job,
     settle_unused_disposal_call,
 )
+from agentworks.execution._managed_resource_start import (
+    ManagedResourceStartBinding,
+    ResourceStartAcknowledgement,
+    capture_resource_start,
+    start_resource_job,
+)
 from agentworks.execution._managed_resource_stop import stop_resource_job
 from agentworks.execution._managed_result import ManagedResultOutcome, wait_bound_managed_result
 from agentworks.execution._managed_runs import (
@@ -69,6 +75,7 @@ from agentworks.execution._managed_runs import (
     ManagedTargetIdentity,
     ManagedTargetKind,
 )
+from agentworks.execution._managed_start_operation import ManagedStartControlFact, ManagedStartOutcome
 from agentworks.execution._managed_stop_access import ManagedStopOutcome
 from agentworks.execution._managed_stop_exchange import ManagedStopCandidate, ManagedStopState, stop_managed_run
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
@@ -94,6 +101,7 @@ if TYPE_CHECKING:
 
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._managed_job_store import Stream
+    from agentworks.execution._managed_start_exchange import ManagedStartCandidate
     from agentworks.execution._runtime_prerequisite import RuntimeSelection, _NumericGuestBootstrap
     from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
     from agentworks.execution._wsl2_owned_operation import WSL2OwnedOperation
@@ -150,11 +158,13 @@ class _ActiveHelperCall:
         | ManagedObservationCandidate
         | ManagedStopCandidate
         | DisposalCandidate
+        | ManagedStartCandidate
         | WorkloadShellObservationResult
         | None
     ) = None
     outcome: OwnedInlineOutcome | None = None
     disposal: ManagedDisposalBinding | None = None
+    start: ManagedResourceStartBinding | None = None
     tracking_key: object = field(default_factory=object)
 
 
@@ -166,7 +176,7 @@ class UnfinishedInlineExecution:
 
 
 class ExecutionOperation:
-    """Own serial helper custody, sharing a lifetime row except for disposal actions."""
+    """Own serial helper custody, with exact start/disposal action rows."""
 
     def __init__(
         self,
@@ -723,6 +733,35 @@ class ExecutionOperation:
                 deadline.expired,
             )
 
+    def start_resource_managed(
+        self,
+        carrier: Carrier,
+        invocation: Command | Script,
+        *,
+        plan: IdentityPlan,
+        runtime_selection: RuntimeSelection,
+        deadline: Deadline,
+        input: Input,
+        output: Output,
+        env: Mapping[str, str] | None,
+        cwd: str | None,
+        sensitive: bool,
+    ) -> ResourceStartAcknowledgement:
+        """Start exact RESOURCE work without adopting its job lifetime."""
+        return start_resource_job(
+            self,
+            carrier,
+            invocation,
+            plan=plan,
+            runtime_selection=runtime_selection,
+            deadline=deadline,
+            input=input,
+            output=output,
+            env=env,
+            cwd=cwd,
+            sensitive=sensitive,
+        )
+
     def start_managed(
         self,
         carrier: Carrier,
@@ -908,6 +947,11 @@ class ExecutionOperation:
     def _retry_bookkeeping(self, *, finishing: bool) -> None:
         for active in tuple(self._active_inline_calls.values()):
             self._settle_retained_helper(active)
+            if active.start is not None:
+                self._capture(active, OwnedInlineOutcome())
+                if active.tracking_key in self._active_inline_calls:
+                    raise StateError("Managed start retains unresolved launch custody")
+                continue
             if active.disposal is not None:
                 if active.candidate is None:
                     settle_unused_disposal_call(self, active)
@@ -974,15 +1018,17 @@ class ExecutionOperation:
             identity, kind, version, payload = self._helper_registration(active)
             row = owner._repository.inspect_lifecycle_obligation(owner.ownership, identity)  # noqa: SLF001
             if row is None:
-                if active.installed or (active.disposal is None and self._dispatch_obligation is not None):
+                if active.installed or (
+                    active.disposal is None and active.start is None and self._dispatch_obligation is not None
+                ):
                     raise StateError("Inline lifetime obligation disappeared")
                 return
             if (row.obligation_kind, row.payload_version, row.payload) != (kind, version, payload) or (
-                active.disposal is not None and row.payload_revision != 0
+                (active.disposal is not None or active.start is not None) and row.payload_revision != 0
             ):
                 raise StateError("Inline lifetime obligation identity conflicts")
             borrow._dispatch_obligation = row  # noqa: SLF001
-            if active.disposal is None:
+            if active.disposal is None and active.start is None:
                 self._dispatch_obligation = LifecycleObligation(owner, row)
             active.installed = True
 
@@ -992,6 +1038,7 @@ class ExecutionOperation:
         | ManagedObservationCandidate
         | ManagedStopCandidate
         | DisposalCandidate
+        | ManagedStartCandidate
         | WorkloadShellObservationResult,
     ) -> bool:
         return candidate.dispatch is Dispatch.NOT_SENT or (
@@ -1004,7 +1051,7 @@ class ExecutionOperation:
             obligation = active.borrow.install_dispatch_obligation(
                 dispatch_id, kind, payload_version=version, payload=payload
             )
-            if active.disposal is None:
+            if active.disposal is None and active.start is None:
                 self._dispatch_obligation = obligation
             active.installed = True
         if not active.armed:
@@ -1012,6 +1059,8 @@ class ExecutionOperation:
             active.armed = True
 
     def _helper_registration(self, active: _ActiveHelperCall) -> tuple[str, str, int, bytes]:
+        if active.start is not None:
+            return active.start.registration
         if active.disposal is not None:
             return active.disposal.registration
         assert self._dispatch_id is not None
@@ -1023,6 +1072,7 @@ class ExecutionOperation:
         prepared: PreparedInlineCandidate | None,
         *,
         disposal: ManagedDisposalBinding | None = None,
+        start: ManagedResourceStartBinding | None = None,
         replacing: _ActiveHelperCall | None = None,
     ) -> _ActiveHelperCall:
         """Borrow and publish one helper call while its admission guard is held."""
@@ -1030,10 +1080,10 @@ class ExecutionOperation:
         active = None
         try:
             operation = BorrowedFixedHelperCarrier(carrier, borrow)
-            active = _ActiveHelperCall(carrier, borrow, prepared, operation, disposal=disposal)
+            active = _ActiveHelperCall(carrier, borrow, prepared, operation, disposal=disposal, start=start)
             if replacing is not None:
                 active.tracking_key = replacing.tracking_key
-            if disposal is None and self._dispatch_id is None:
+            if disposal is None and start is None and self._dispatch_id is None:
                 self._dispatch_id = uuid4().hex
             self._active_inline_calls[active.tracking_key] = active
             return active
@@ -1133,7 +1183,7 @@ class ExecutionOperation:
                 retryable = (active.candidate is not None and self._known_termination(active.candidate)) or (
                     operation.coordination_uncertain and not operation.pending_remote_effects
                 )
-                if active.disposal is not None:
+                if active.disposal is not None or active.start is not None:
                     self._capture(active, outcome)
                     assert active.outcome is not None
                     outcome = active.outcome
@@ -1153,7 +1203,16 @@ class ExecutionOperation:
                     raise control from control.__cause__
             try:
                 fact: Exception = (
-                    ManagedDisposalControlFact(
+                    ManagedStartControlFact(
+                        ManagedStartOutcome(
+                            deadline_exceeded=outcome.deadline_exceeded,
+                            pending_remote_effects=outcome.pending_remote_effects,
+                            coordination_uncertain=outcome.coordination_uncertain,
+                            requires_owner_retention=outcome.requires_owner_retention,
+                        )
+                    )
+                    if active.start is not None
+                    else ManagedDisposalControlFact(
                         ManagedDisposalOutcome(
                             pending_remote_effects=outcome.pending_remote_effects,
                             coordination_uncertain=outcome.coordination_uncertain,
@@ -1177,6 +1236,9 @@ class ExecutionOperation:
         raise control from fact
 
     def _capture(self, active: _ActiveHelperCall, outcome: OwnedInlineOutcome) -> None:
+        if active.start is not None:
+            capture_resource_start(self, active, outcome)
+            return
         if active.disposal is not None:
             capture_disposal_call(self, active, outcome)
             return
