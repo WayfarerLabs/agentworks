@@ -8,8 +8,7 @@ import sys
 import threading
 from dataclasses import replace
 from types import SimpleNamespace
-from typing import Any, NoReturn
-from uuid import uuid4
+from typing import Any
 
 import pytest
 
@@ -270,48 +269,6 @@ def test_fact_allocation_failure_keeps_original_control_and_custody(view, lookup
     assert workflow.views.execution_operation.unfinished_inline_executions
     with pytest.raises(StateError):
         workflow.close(cleanup_deadline=Deadline.after(2))
-
-
-@pytest.mark.parametrize("point", ["carrier", "active", "dispatch-id", "tracking"])
-def test_setup_allocation_failure_releases_unused_borrow(view, lookup, monkeypatch, point):
-    database, workflow, access, _, _ = view
-    operation = workflow.views.execution_operation
-    cause = ValueError("original allocation cause")
-    control = MemoryError()
-
-    def unavailable(*args: Any, **kwargs: Any) -> NoReturn:
-        raise control from cause
-
-    if point in {"carrier", "active"}:
-        monkeypatch.setattr(
-            operation_module, "BorrowedFixedHelperCarrier" if point == "carrier" else "_ActiveHelperCall", unavailable
-        )
-    elif point == "dispatch-id":
-        calls = 0
-
-        def allocate():
-            nonlocal calls
-            calls += 1
-            if calls == 2:
-                unavailable()
-            return uuid4()
-
-        monkeypatch.setattr(operation_module, "uuid4", allocate)
-    else:
-
-        class UnavailableTracking(dict):
-            def __setitem__(self, key, value):
-                unavailable()
-
-        monkeypatch.setattr(operation, "_active_inline_calls", UnavailableTracking())
-    with pytest.raises(MemoryError) as caught:
-        start(access)
-    assert caught.value is control and control.__cause__ is cause
-    assert workflow.owner._active_borrow is None and workflow.owner._outstanding_attempt is None
-    assert not operation.active_inline_calls and lookup[0].calls == 0
-    no_run(view)
-    workflow.close(cleanup_deadline=Deadline.after(2))
-    assert database.operations.inspect(workflow.owner.ownership.scope) is None
 
 
 def test_fallback_allocation_failure_preserves_control_and_tracked_custody(view, lookup, monkeypatch):

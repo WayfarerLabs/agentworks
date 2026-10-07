@@ -267,12 +267,8 @@ class ExecutionOperation:
             binding = self._native_binding
             if binding is None or carrier is not binding.carrier:
                 raise ValidationError("Managed read requires its selected native carrier")
-            borrow = self._owner.borrow()
-            operation = BorrowedFixedHelperCarrier(carrier, borrow)
-            active = _ActiveHelperCall(carrier, borrow, None, operation)
-            if self._dispatch_id is None:
-                self._dispatch_id = uuid4().hex
-            self._active_inline_calls[id(active)] = active
+            active = self._borrow_helper_call(carrier, None)
+            operation = active.operation
         try:
             self._admit(active)
             if self._wsl2_route is not None:
@@ -501,12 +497,8 @@ class ExecutionOperation:
         with self._admission_guard:
             if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
                 raise StateError("Execution operation cannot admit a managed stop")
-            borrow = self._owner.borrow()
-            operation = BorrowedFixedHelperCarrier(binding.carrier, borrow)
-            active = _ActiveHelperCall(binding.carrier, borrow, None, operation)
-            if self._dispatch_id is None:
-                self._dispatch_id = uuid4().hex
-            self._active_inline_calls[id(active)] = active
+            active = self._borrow_helper_call(binding.carrier, None)
+            operation = active.operation
         candidate = None
         try:
             self._admit(active)
@@ -747,19 +739,8 @@ class ExecutionOperation:
         with self._admission_guard:
             if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
                 raise StateError("Execution operation cannot admit a shell lookup")
-            borrow = self._owner.borrow()
-            try:
-                operation = BorrowedFixedHelperCarrier(carrier, borrow)
-                active = _ActiveHelperCall(carrier, borrow, None, operation)
-                if self._dispatch_id is None:
-                    self._dispatch_id = uuid4().hex
-                self._active_inline_calls[id(active)] = active
-            except BaseException as control:
-                try:
-                    borrow.close()
-                except BaseException:
-                    raise control from control.__cause__
-                raise
+            active = self._borrow_helper_call(carrier, None)
+            operation = active.operation
         try:
             self._admit(active)
             if self._wsl2_route is not None:
@@ -926,6 +907,23 @@ class ExecutionOperation:
             active.borrow.arm_dispatch_obligation()
             active.armed = True
 
+    def _borrow_helper_call(self, carrier: Carrier, prepared: PreparedInlineCandidate | None) -> _ActiveHelperCall:
+        """Borrow and publish one helper call while its admission guard is held."""
+        borrow = self._owner.borrow()
+        try:
+            operation = BorrowedFixedHelperCarrier(carrier, borrow)
+            active = _ActiveHelperCall(carrier, borrow, prepared, operation)
+            if self._dispatch_id is None:
+                self._dispatch_id = uuid4().hex
+            self._active_inline_calls[id(active)] = active
+            return active
+        except BaseException as control:
+            try:
+                borrow.close()
+            except BaseException:
+                raise control from control.__cause__
+            raise
+
     def run_inline(
         self,
         carrier: Carrier,
@@ -957,16 +955,8 @@ class ExecutionOperation:
         with self._admission_guard:
             if self._finishing or self._active_inline_calls or self._unfinished_inline_executions:
                 raise StateError("Inline execution cannot admit new work")
-            borrow = self._owner.borrow()
-            try:
-                operation = BorrowedFixedHelperCarrier(carrier, borrow)
-                active = _ActiveHelperCall(carrier, borrow, prepared, operation)
-                if self._dispatch_id is None:
-                    self._dispatch_id = uuid4().hex
-                self._active_inline_calls[id(active)] = active
-            except BaseException:
-                borrow.close()
-                raise
+            active = self._borrow_helper_call(carrier, prepared)
+            operation = active.operation
         try:
             self._admit(active)
             candidate = execute_inline_candidate(operation, prepared, deadline=deadline)
