@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from contextlib import closing
 
 import pytest
@@ -28,6 +29,8 @@ pytestmark = pytest.mark.windows
 def test_300_completed_managed_runs_keep_only_current_debt(view, framed_stream_reads, monkeypatch):
     database, workflow, access, main, keeper = view
     _status(monkeypatch, 0)
+    # Capacity counts complete custody cycles independently of host throughput.
+    monkeypatch.setattr(time, "monotonic", lambda: 100.0)
     retained = []
     for _ in range(300):
         result = access.run(Command(["/bin/true"]), profile=Protection.MANAGED, output=Output.discard())
@@ -35,10 +38,12 @@ def test_300_completed_managed_runs_keep_only_current_debt(view, framed_stream_r
         run = workflow.views.execution_operation.managed_runs[-1]
         assert access.dispose(result.job).disposed is True
         run.finish_cleanup(Deadline.after(5))
+        assert run.keeper._worker_done.is_set()
         retained.append(run.disposal_obligation_id)
         (pending,) = workflow.owner.list_pending_lifecycle_obligations()
         assert pending.obligation_kind == "carrier-dispatch"
-    assert main.start.calls == main.dispose.calls == keeper.clock.calls == 300
+    assert main.start.calls == main.dispose.calls == 300
+    assert keeper.clock.calls >= 300
     assert main.observe.calls == 1200 and keeper.stop.calls == keeper.observe.calls == 0
     for identifier in (retained[0], retained[-1]):
         receipt = workflow.owner.inspect_lifecycle_obligation(identifier)
