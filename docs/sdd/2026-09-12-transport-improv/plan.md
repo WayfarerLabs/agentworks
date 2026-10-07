@@ -3038,6 +3038,25 @@ full platform/target and RunContext composition, hosted validation of the new wo
 native acceptance remain open. No ready or review-requested edge, public loop closeout or merge
 intent follows.
 
+- [ ] Compose private foreground MANAGED/OPERATION execution from the same managed launch and wait
+      implementation. Validate flags before launch, use one finite budget across both phases, and
+      preserve the acknowledged safe reference when launch consumes that budget. Timeout or loss of
+      observation must neither stop/drain/dispose the job nor replay start or release its owner.
+      Checked run and wait failures use the existing safe target/phase diagnostic projection and
+      retain the same result/reference. Prove ordinary admission, interruption and keeper survival
+      without changing DIRECT, independent-job admission, shared carrier or public RunContext.
+
+The lead's read-only completion inventory at `ed3603c23` confirms that this next foreground unit is
+not the rest of the execution surface. Required work still includes unified independent launch and
+subsequent-operation reconnect/control with exact resource-owned admission and job-length
+availability; cursor-bounded active output rather than slicing a fully fetched closed stream;
+supported shell/default-user/startup choices; and provider-independent staged payloads plus usable
+production capture/spooling budgets. Native terminals and direct live stdio are optional by channel,
+but discoverability/refusal and canonical interaction remain required. The private 4,096-byte
+capture ceiling is not production acceptance. Keep these requirements with the existing complete
+target/RunContext gates; no additional API family or new recovery framework is authorized by this
+inventory. Platform-factory and SSH ownership remain as previously assigned.
+
 - [ ] Preserve exact signal termination evidence in the managed supervisor when child entry is
       proved and `waitpid` returns a signaled status. The existing producer currently publishes a
       wait fact only for an ordinary exit, so the private signaled case establishes resource closure
