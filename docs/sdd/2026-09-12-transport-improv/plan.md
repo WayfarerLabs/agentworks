@@ -1025,7 +1025,7 @@ associated pending acceptance gates are superseded by this ruling.
       unknown provider states explicitly rather than assuming they are stopped. Implement this
       boundary with its concrete activation producer and selected platform hold; a freely
       constructible active-now token or test-only no-op adapter does not prove availability.
-- [ ] Extract WSL2 and Proxmox owned native access behind one passive platform factory, retaining
+- [x] Extract WSL2 and Proxmox owned native access behind one passive platform factory, retaining
       actual preparation/activation/hold progress before effects. Keep one core owner and aggregate
       close, passive native bindings, optional bound route checks at all existing managed
       checkpoints and the shared guest-preparation helper. Preserve durable WSL READY matching,
@@ -1042,6 +1042,16 @@ associated pending acceptance gates are superseded by this ruling.
       not introduce private SDK timeout mutation or a transport framework to imply hard preemption.
       Keep activation, selected execution routes and whole-workflow native evidence open; these
       observations alone cannot supply usable cloud RunContext targets.
+
+The bounded owned-native extraction at `df6ab210a` clears all three independent private lanes
+against `c1c1e14c6`, including the corrected stopped-Proxmox tests and all managed route-check
+callbacks. Project review observes 689 adjacent passes; complexity review observes 437 passes;
+generic review exercises 681 cases, with six fixture-environment failures passing on a corrected
+private fixture parent. A fresh-process probe of both actual platform factories blocks all six
+retired execution roots and process/network I/O while preserving caller ownership and passive
+construction. At combined source `f4ce1b9b7`, all 17,157 CI-selected tests pass with 50 skips using
+short, private fixtures; three SSH enrollment typing errors remain. This records only the
+extraction, not cloud/Lima availability, complete RunContext, native acceptance or merge readiness.
 
 The bounded cloud power unit at `58a27b550` clears all three independent private lanes against
 `ad471c8a0`. Project review observes 372 focused/adjacent passes; generic review observes 307
