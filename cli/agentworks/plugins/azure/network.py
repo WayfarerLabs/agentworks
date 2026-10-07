@@ -38,10 +38,12 @@ priority band [100, 199] under the deny:
 from __future__ import annotations
 
 import contextlib
+import re
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.capabilities.vm_platform.base import provider_locator_remaining
 
 # The provider-neutral egress detection and ssh_allow_cidrs fold were hoisted
 # to the shared vm_platform home (aws reuses them); re-exported here so this
@@ -53,7 +55,7 @@ from agentworks.capabilities.vm_platform.ssh_exposure import (
     normalize_allow_cidrs,
     operator_ssh_prefixes,
 )
-from agentworks.errors import AuthorizationError, ProvisioningError
+from agentworks.errors import AuthorizationError, ProvisioningError, StateError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -61,6 +63,8 @@ if TYPE_CHECKING:
     from azure.mgmt.compute import ComputeManagementClient
     from azure.mgmt.network import NetworkManagementClient
     from azure.mgmt.network.models import SecurityRule
+
+    from agentworks.execution.carrier import Deadline
 
 __all__ = [
     "_EGRESS_IP_URL",
@@ -452,6 +456,83 @@ def ensure_public_ip(
 
     except Exception as exc:
         raise wrap_azure_error(exc) from exc
+
+
+def read_native_public_ipv4(
+    network: NetworkManagementClient,
+    vm_info: object,
+    *,
+    subscription_id: str,
+    vm_name: str,
+    deadline: Deadline,
+) -> object:
+    """Read linked NIC/PIP identities using one original deadline, without writes.
+
+    Service retries are disabled. SDK credential work and authentication resends
+    remain non-preemptible; each successful read is checked for late completion.
+    Resource groups may differ, but subscription authority must match the VM.
+    """
+    refs = getattr(getattr(vm_info, "network_profile", None), "network_interfaces", None) or []
+    for ref in refs:
+        nic_id = getattr(ref, "id", None)
+        group, name = _native_network_reference(nic_id, "networkInterfaces", subscription_id, vm_name)
+        remaining = provider_locator_remaining(deadline, vm_name=vm_name)
+        try:
+            nic = network.network_interfaces.get(group, name, expand=None, **_native_read_options(remaining))
+        except Exception as exc:
+            raise wrap_azure_error(exc) from exc
+        provider_locator_remaining(deadline, vm_name=vm_name)
+        if nic.id != nic_id:
+            raise StateError("Azure NIC returned a different resource identity", entity_kind="vm", entity_name=vm_name)
+        for ip_config in nic.ip_configurations or []:
+            pip_ref = ip_config.public_ip_address
+            if pip_ref is None:
+                continue
+            pip_id = pip_ref.id
+            group, name = _native_network_reference(pip_id, "publicIPAddresses", subscription_id, vm_name)
+            remaining = provider_locator_remaining(deadline, vm_name=vm_name)
+            try:
+                pip = network.public_ip_addresses.get(group, name, expand=None, **_native_read_options(remaining))
+            except Exception as exc:
+                raise wrap_azure_error(exc) from exc
+            provider_locator_remaining(deadline, vm_name=vm_name)
+            if pip.id != pip_id:
+                raise StateError(
+                    "Azure public IP returned a different resource identity", entity_kind="vm", entity_name=vm_name
+                )
+            return pip.properties.ip_address if pip.properties is not None else None
+    return None
+
+
+def _native_network_reference(reference: object, kind: str, subscription: str, vm_name: str) -> tuple[str, str]:
+    """Validate linked provider identities before passing names to the SDK."""
+    match = (
+        re.fullmatch(
+            r"/subscriptions/([^/\x00]+)/resourceGroups/([^/\x00]+)/providers/Microsoft\.Network/"
+            + kind
+            + r"/([^/\x00]+)",
+            reference,
+        )
+        if isinstance(reference, str)
+        else None
+    )
+    if match is None or match[1] != subscription:
+        raise StateError(
+            "Azure endpoint has an invalid linked resource identity", entity_kind="vm", entity_name=vm_name
+        )
+    return match[2], match[3]
+
+
+def _native_read_options(remaining: float) -> dict[str, float | int]:
+    return {
+        "timeout": remaining,
+        "connection_timeout": remaining,
+        "read_timeout": remaining,
+        "retry_total": 0,
+        "retry_connect": 0,
+        "retry_read": 0,
+        "retry_status": 0,
+    }
 
 
 def get_vm_public_ip(network: NetworkManagementClient, vm_info: object) -> str:
