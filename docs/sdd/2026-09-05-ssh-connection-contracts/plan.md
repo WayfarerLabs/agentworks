@@ -505,6 +505,60 @@ coexistence/rollback, enclosing-consumer, RunContext and supported-workstation R
 gates remain open. All 25 completed plan blocks are unchanged, no public final-product fix round is
 consumed, and the SDD remains unlocked.
 
+Published SSH `e58c47d73ab7bd474d4da0232d3d32ca9fa2a9f6` has a complete
+[hosted report](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6030840279) on
+transport `8ac6e625b`. Run `37569107178` passes all four pytest jobs: Linux Python 3.12-3.14 each
+report 16,560 passed, 203 skipped and 29 warnings; Windows Server 2025/Python 3.13 reports 1,613
+passed, 68 skipped and 25 warnings in 1,041.39 seconds. Checkout merge
+`fa6d7b89c3de05d09ebe5272da47e455f5e514e2` has those exact parents and tree
+`15f67918894afe10abf5aa626821661846517c09`, equal to the published SSH source. The run fails only on
+the three held enrollment typing errors across 1,320 sources and their aggregate gate. Other
+repository gates pass; hosted Typer isolation is skipped after mypy failure. Website passes 160
+Python and 103 Node tests, four builds and both deterministic comparisons. Transport's exact-base
+run `37568074729` passes all ten jobs: Linux Python 3.12-3.14 each report 16,138 passed, 203 skipped
+and 29 warnings; Windows Python 3.13 reports 1,398 passed, 58 skipped and 25 warnings. Its checkout
+merge `40c668235cac4ee96d15b4cfc4e06a0e34fc2e87` has main `cea5e8523` and transport `8ac6e625b` as
+parents and exactly the transport source tree. These hosted fixtures do not establish complete
+native or production RunContext acceptance.
+
+Transport's
+[reviewed independent-control increment](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6030804264)
+`b54461580c2369700ee95eb442f54d36ab196dd3` requires the exact core-supplied RESOURCE owner before
+private observation, output, wait, stop, disposal or reconciliation. Same-VM foreign resource and
+prior-operation references refuse before borrowing or dispatch; JobRef is not authority. Unused
+helper setup closes acquired but never-used borrows after constructor failure, preserves original
+control identity and distinguishes interrupted relinquishment from a lost reply after successful
+close. All three transport private lanes clear both units. Carrier/custody wire and SSH production
+are unchanged. This establishes namespace correctness and setup custody, not permission activation,
+independent launch/availability or the complete additive RunContext. Transport's demonstrated second
+environment traversal during independent USER_DEFAULT lookup remains a separate private correction.
+
+SSH rebases without conflicts at `f353c9128f176c1c7ec0abd7415a6fa244c7fb05`, preserving all 177
+patches exactly. SSH production and fixture files are unchanged, and shared process/custody/pump
+files match transport. The full combined Linux Python 3.12 non-integration suite passes 16,818 tests
+with 49 skips and 29 warnings, exit 0 in 345.62 seconds. Full strict mypy checks 1,322 sources and
+repeats only the three held enrollment errors. Ruff/format (1,359 files), local Typer isolation and
+Rulesync through Node pass. The exact private pytest root has no same-user argv/cwd/fd references or
+permission gaps and is removed; logs remain. Website files are unchanged; local website and native
+checks were not rerun for this draft rebase. Fresh combined hosted evidence requires its own report.
+
+Transport's exact-base hosted run `37570594566` is complete with failure. Linux Python 3.12-3.14
+each report 16,240 passed, 203 skipped and 29 warnings. Windows Server 2025/Python 3.13 reports one
+failure, 1,397 passed, 58 skipped and 25 warnings in 921.28 seconds. The 300-run lifecycle-capacity
+test raises "Operation keeper renewal is closed or expired" during initial sampling; the trace does
+not distinguish a closed keeper from an expired deadline, and its cause is unproved. The test,
+fixture and keeper code match transport exactly. Checkout merge
+`3dcd2ae367b76a4b0b8387bdc9602442d730f995` has main `cea5e8523` and transport `b54461580` as parents
+and tree `6a01436d789a77eb1d4a319a297ed082cf7e0a03`, equal to the transport source. Ruff,
+formatting, full mypy (1,278 sources), Typer isolation and other repository gates pass. Website
+passes 160 Python and 103 Node tests, four builds and both deterministic comparisons. Only Windows
+pytest and the aggregate gate fail. No transport-owned correction or rerun is made here.
+
+Both operator resource decisions and the recorded terminal, trust/creation, writer
+coexistence/rollback, enclosing-consumer, RunContext and supported-workstation R1-R5 acceptance
+gates remain open. All 25 completed plan blocks are unchanged, no public final-product fix round is
+consumed, and the SDD remains unlocked.
+
 Combined code pin `38934134e3b8d12af814f9371b62075daa49db3e` preserves all 64 Python paths in the
 SSH contribution, including deletions, from published `186458307b`. Its full suite passes 16,125
 non-integration tests with 51 skips and 27 warnings, exit 0 in 267.18 seconds. Full Ruff/format
