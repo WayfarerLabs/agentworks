@@ -1036,21 +1036,27 @@ proves that folding their typed schema into opaque obligations would simplify ra
 
 Pending-obligation enumeration returns only the bounded unfinished rows. Exact receipt lookup
 separately checks current operation ownership, returning absence only under that valid fence;
-resolved receipt consumers must not treat exclusion from pending enumeration as missing history. Use
-a matching partial index for the fixed `state IS NOT 'resolved'` predicate so admission counts and
-pending queries do not scan completed history. Unexpected states remain unfinished for query
-purposes and must fail decoding, never count as completed. Bound enumeration before decoding.
-Whole-operation resolution and release use unfinished-row existence checks; reserved abandonment
-still refuses if any obligation exists, including a resolved receipt. A known never-dispatched
-registration refusal may relinquish its local admission only with current-owner absence evidence;
-interrupted replies, present/conflicting receipts and failed/stale observations retain original
-custody. Preserve the original registration exception object and traceback, including ordinary
-errors as well as control flow. An internal typed immediate cause may carry proved-absent
-registration evidence for local cleanup, preserving the original explicit cause beneath it;
-consumers use one shared recognition rule rather than infer absence from error text. Cancellation
-does not become an ordinary refusal or receive invented no-registration evidence. Absence evidence
-belongs to one registration attempt. Reusing an exception object must not carry its previous absence
-marker into a later attempt that persisted or became uncertain.
+ownership and queried rows must come from one coherent database snapshot. A takeover between
+separate autocommit reads must not turn stale ownership into an empty ledger or missing receipt. The
+snapshot's owner read is its linearization point, not a promise that ownership cannot change after
+the read returns. Resolved receipt consumers must not treat exclusion from pending enumeration as
+missing history. Use a matching partial index for the fixed `state IS NOT 'resolved'` predicate so
+admission counts and pending queries do not scan completed history. Unexpected states remain
+unfinished for query purposes and must fail decoding, never count as completed. Bound enumeration
+before decoding. Whole-operation resolution and release use unfinished-row existence checks;
+reserved abandonment still refuses if any obligation exists, including a resolved receipt. A known
+never-dispatched registration refusal may relinquish its local admission only with current-owner
+absence evidence; interrupted replies, present/conflicting receipts and failed/stale observations
+retain original custody. When failure classification completes, preserve the original registration
+exception object and traceback, including ordinary errors as well as control flow. A new control
+interruption during the absence read escapes without classifying the registration as clean; the
+original registration error remains its exception context and custody remains uncertain. An internal
+typed immediate cause may carry proved-absent registration evidence for local cleanup, preserving
+the original explicit cause beneath it; consumers use one shared recognition rule rather than infer
+absence from error text. Cancellation does not become an ordinary refusal or receive invented
+no-registration evidence. Absence evidence belongs to one registration attempt. Reusing an exception
+object must not carry its previous absence marker into a later attempt that persisted or became
+uncertain.
 
 The bound is on unfinished debt and decoded recovery work, not total within-operation disk use or
 constant memory/close time for the complete operation. Completed receipt rows and retained managed

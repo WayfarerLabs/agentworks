@@ -3100,6 +3100,16 @@ working head or native acceptance. No new public handoff edge follows.
       Review the complete ownership consumers and finalization paths; this is not a constant-memory
       or constant-close-time promise for the whole operation.
 
+The first private implementation candidate passes 16,232 non-integration tests, but both independent
+correctness lanes reproduce a read race using separate database connections. Takeover between an
+owner check and its receipt query can report missing history under a stale owner; takeover followed
+by release also demonstrates that no valid-owner absence existed. Pending enumeration has the same
+snapshot requirement. Correct both reads with one bounded ownership-and-data snapshot and real
+takeover regressions before accepting this unit. A new control interruption during absence
+classification remains primary, retains the original registration error as context and never
+supplies clean-refusal evidence. The passing first candidate is not acceptance of the correction;
+the checkbox remains open until final review and gates.
+
 The delegated capacity probe uses actual SQLite and controlled framed carriers, not live systemd.
 Forty-two completed MANAGED run/wait/dispose/cleanup cycles succeed under one owner; the forty-third
 start reaches the 128-row limit before workload delivery. One preceding resolved file call moves

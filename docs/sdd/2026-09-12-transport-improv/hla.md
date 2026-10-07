@@ -72,6 +72,8 @@ obligations and each versioned, non-secret recovery payload; completed receipts 
 until operation release so exact retries can distinguish completion from absence. Receipt history
 therefore grows with completed work within that operation. Pending-work enumeration is bounded and
 does not load completed history; an ownership-fenced exact lookup serves receipt reconciliation.
+Both reads use a coherent ownership-and-data snapshot so concurrent takeover cannot appear as
+valid-owner absence. That read fence supplies a linearization point, not continuing authority.
 Activation, platform holds, routes, nested teardown and other effect owners register independent
 obligations; several obligations of the same kind may coexist. Only the registered adapter
 interprets its payload. Core seals the ledger after the workflow can create no more obligations and
