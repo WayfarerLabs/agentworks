@@ -359,6 +359,34 @@ native validation were not rerun for this draft rebase; new hosted results need 
 report. Both resource decisions and all recorded terminal, trust, RunContext and native acceptance
 gates remain open. No final-product feedback/fix round is consumed.
 
+Published SSH `933eaac48c92b42dc1f82a0caef4326dd7f24613` has a complete
+[hosted report](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6028131142) on
+transport `fa730f1fc`. Run `37551266260` passes every pytest job: Linux Python 3.12-3.14 each report
+16,373 passed, 203 skipped and 27 warnings; Windows Server 2025/Python 3.13 reports 1,431 passed, 64
+skipped and 25 warnings. Merge `99ba6924e0b8817c924497b6c3c73a205abb212d` has those exact
+transport/SSH parents, with tree `6cb4410fe79421e6acade33009a9c723edf7d9ea` equal to the published
+SSH tree. The overall result remains red on the three held enrollment typing errors. Other
+repository and website jobs pass; hosted Typer isolation is skipped after mypy fails. This is
+combined hosted fixture evidence, not native workflow or physical-key proof.
+
+Transport's next
+[reviewed private increment](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6028912666)
+`ebc8eedd43921fff57d6a72d4e11fe16430aec59` adds managed observe, selected-stream output, bounded
+wait, explicit stop and terminal disposal. It separates positive resource/controller closure from
+application-exit precision and preserves exact settled disposal retry identity. Three private lanes
+clear the whole unit at `ed3603c23`; public RunContext and native acceptance remain open. SSH
+rebases without conflicts at `1266b3ae82977328c001ae7fc3b2382532a224a3`. All 172 SSH patches match
+exactly across the rebase; the SSH implementation directory is unchanged and shared native
+process/custody/pump files match transport exactly. The full combined Linux Python 3.12
+non-integration suite passes 16,583 tests with 49 skips and 29 warnings, exit 0 in 209.85 seconds.
+Full strict mypy checks 1,315 sources and repeats only the three held enrollment errors, exit 1.
+Ruff/format (1,352 files), local Typer isolation, locked-SDD, Rulesync and whitespace checks pass.
+The exact private pytest root has no same-user argv/cwd/fd references and is removed; logs remain.
+New hosted results need their own complete report. Local website/native validation was not rerun for
+this draft dependency refresh. Both operator resource decisions and the recorded terminal, trust,
+writer coexistence, enclosing-consumer, RunContext and native acceptance gates remain open. All 25
+completed plan blocks remain unchanged. No final-product feedback/fix round is consumed.
+
 Combined code pin `38934134e3b8d12af814f9371b62075daa49db3e` preserves all 64 Python paths in the
 SSH contribution, including deletions, from published `186458307b`. Its full suite passes 16,125
 non-integration tests with 51 skips and 27 warnings, exit 0 in 267.18 seconds. Full Ruff/format
