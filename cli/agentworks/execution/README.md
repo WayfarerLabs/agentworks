@@ -145,11 +145,14 @@ precision from positive resource closure; output cursors address the verified re
 EOF does not imply complete source capture. `capture_complete` describes the whole verified capture,
 not consumption of this returned slice; intentional discard or suppression leaves it false without
 an output-limit failure. Wait returns the existing `ExecutionResult` with a safe managed reference
-and never stops the workload or drains renewal. Stop drains only the selected keeper and reports
-accepted intent independently of proved termination. Disposal observes terminal proof before
-draining; active or unproved work stays not ready without stopping it. Uncertain stop or disposal
-remains distinct from a proved refusal. These private controls do not establish independent-job
-access after reconnection, complete target composition or a public RunContext surface.
+and never stops the workload or drains renewal. Stop first acquires the whole owner's ordinary
+serial borrow, then drains only the selected keeper. It delivers through the existing lifetime row
+and actual borrowed helper attempt, retaining unknown helper debt before any fresh observation. An
+overlapping file or other component's borrow refuses before drain or dispatch. Accepted intent is
+independent of proved termination. Disposal observes terminal proof before draining; active or
+unproved work stays not ready without stopping it. Uncertain stop or disposal remains distinct from
+a proved refusal. These private controls do not establish independent-job access after reconnection,
+complete target composition or a public RunContext surface.
 
 `ExecutionOperation` requires an explicit managed target matching its owner's scope. An optional
 numeric bootstrap must match that VM's derived boot identity; platform-host targets cannot select

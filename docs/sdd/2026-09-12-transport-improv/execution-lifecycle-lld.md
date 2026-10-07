@@ -202,12 +202,16 @@ is required after artifacts may have been deleted. Neither successful disposal n
 clears original start or unrelated helper uncertainty.
 
 Explicit job control is ordinary work, not authority to enter aggregate teardown. Refuse stale
-persisted ownership before draining the selected keeper; fence each explicit stop and follow-up
-observation at actual delivery through the existing exact keeper obligation. The read-only admission
-check alone is not the delivery fence. These checks narrow the takeover window but cannot make a
-database transition and remote dispatch atomic. Aggregate CLOSING cleanup retains its already
-admitted support authority after ordinary admission closes; explicit control cannot obtain that
-authority merely by reusing the same fixed helper.
+persisted ownership and acquire the whole owner's ordinary serial borrow before draining the
+selected keeper. Register and arm the existing lifetime dispatch row, then fence explicit stop at
+actual delivery through its borrowed helper attempt. Settle and retain that helper before a fresh
+ordinary observation. A borrow held by file work or another component refuses stop before either
+drain or dispatch. An uncertain stop helper retains the same ordinary custody and blocks new work;
+keeper support custody is not a substitute. The read-only admission check alone is not the delivery
+fence. These checks narrow the takeover window but cannot make a database transition and remote
+dispatch atomic. Aggregate CLOSING cleanup retains its already admitted support authority after
+ordinary admission closes; explicit control cannot obtain that authority merely by reusing the same
+fixed helper.
 
 ## Supervisor and evidence
 

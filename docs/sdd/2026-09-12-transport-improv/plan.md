@@ -2937,6 +2937,37 @@ completion; the isolated environment remains for follow-up. Independent whole-un
 validation are still required before closing the two leaves or publishing the increment. No public
 export, full target/RunContext, guest wire/helper, schema or native platform claim follows.
 
+The three private lanes reviewed the complete code and collateral at `44a67cd12`. The project review
+found Linux-only producer cases inside the Windows-selected test module and questioned explicit stop
+bypassing a borrow held by another component. The generic review proved an interruption window
+between confirmed disposal and a second cleanup flag: a retry could report disposal while aggregate
+teardown still tried to observe deleted artifacts. The lead accepted all three as material
+corrections within this unit. Explicit stop must use an ordinary owner borrow and actual helper
+attempt before draining its selected keeper; keeper support custody is not ordinary admission.
+Confirmed disposal plus retained positive closure must directly establish cleanup without a second
+publication flag. Keep portable Windows custody coverage and isolate only the Linux producer cases.
+The complexity pass also identified an unused disposal-outcome field, redundant fact parsing after
+observation validation and duplicate terminal handoff; remove them without weakening the retained
+positive-proof gates. The existing aggregate CLOSING support methods remain separate. Re-review the
+complete corrected unit in all three lanes before publication.
+
+Lead validation of that pre-fix pin passed Ruff/format, strict mypy over 1,271 sources, file
+quality, locked-SDD and whitespace checks. Its full suite did not pass: 208 failed, 15,894 passed,
+50 skipped, 29 warnings and 38 errors in 279.02 seconds, exit 1. The fixture root was incorrectly
+placed in the deeply nested workspace: observed failures include Unix socket path limits and
+deliberate file safety refusal of workspace ancestors. This is not acceptance evidence. Repeat the
+corrected pin with a short, owned fixture root, retaining production safety checks and deleting only
+that exact test scratch after resources settle. The implementer's earlier passing run remains
+separate.
+
+- [ ] Preserve exact signal termination evidence in the managed supervisor when child entry is
+      proved and `waitpid` returns a signaled status. The existing producer currently publishes a
+      wait fact only for an ordinary exit, so the private signaled case establishes resource closure
+      but returns UNKNOWN application status. Keep missing-executable status unknown when entry is
+      not proved. Reuse the existing optional signal representation rather than extend the wire;
+      prove producer and caller-facing projection, then native delivery. This supervisor acceptance
+      work is not implemented by the bounded job-control correction above.
+
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one
       in-flight exchange, exact uncertainty retention and drain before release/disposal. Bind it to
