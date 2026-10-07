@@ -2890,6 +2890,53 @@ WSL2/Proxmox acceptance. Full public RunContext, job observation/stop/output, ot
 factories, recovery disposition and native proof remain open; no broad completion checkbox or public
 OPERATION admission follows from this private checkpoint.
 
+The published bookkeeping head `fa730f1fc` subsequently completes
+[hosted CI run 37550583809](https://github.com/WayfarerLabs/agentworks/actions/runs/37550583809)
+with every job green. Linux Python 3.12, 3.13 and 3.14 each pass 15,951 cases with 203 skips and 27
+warnings. Native Windows Python 3.13 passes 1,216 cases with 54 skips and 25 warnings in 738.44
+seconds. This verifies the corrected originating-caller fixture on hosted Windows; it does not
+identify the old two-second failure's precise scheduling cause or supply live WSL2/QGA, systemd,
+native SSH or production RunContext acceptance. Static, file, locked-SDD, Rulesync and website jobs
+also pass. These hosted counts are their own test selection, not replacements for the complete local
+suite recorded above.
+
+- [ ] Complete the private unified OPERATION job-control unit on the originating `ExecutionAccess`:
+      observe, selected-stream output with cursors, bounded wait carrying the safe reference,
+      explicit selected-run stop and terminal-artifact disposal. Reuse the exact operation-lifetime
+      dispatch row for settled reads; prove more than 128 mixed polls without relaxing the ledger
+      bound or reopening resolved rows. Use one concrete operation binding through the existing
+      helpers, not a third job-access object or parallel result collector. Require the retained
+      acknowledged run and exact current ownership before effects; ordinary observation never
+      reconciles uncertain start. Keep independent-job behavior unchanged.
+- [ ] In that same unit, separate resource closure from application exit evidence. Prove authentic
+      launch, both closed streams, boundary emptiness and independently positive exact controller
+      termination without requiring `wait`; validate it when present and preserve UNKNOWN when
+      absent. Cover the actual missing-executable and signaled producer shapes, a later-observed
+      wait fact, unknown helper custody, selected keeper stop and disposal after terminal proof.
+      Active disposal must neither stop the workload nor drain renewal. Retain terminal evidence
+      before disposal removes artifacts, use confirmed disposal as the publication fence, and prove
+      exact receipt retry only after helper termination is separately established. Original start
+      debt and unrelated helpers remain unresolved. Correct normal aggregate cleanup in the same
+      unit; full public RunContext, native acceptance and broader gates remain open.
+
+Private candidate `4c63a78c4`, integrated at `5838780de`, implements those two bounded leaves. All
+five methods use the originating operation's acknowledged run; settled reads share its existing
+lifetime row. Explicit stop and its observation fence the current generation at actual delivery,
+while aggregate CLOSING cleanup retains its distinct already-admitted authority. The same terminal
+proof drives observation, OPERATION wait progress, pre-disposal admission and normal cleanup without
+requiring wait evidence. Disposal retains proof before artifact deletion and rotates only a
+known-settled refusal's resolved row for a fresh explicit attempt; unknown effect retry retains the
+exact original row. Capture completeness and retained-prefix EOF are separate.
+
+The implementer reports 121 affected tests and a final full Linux suite of 16,140 passed, 50 skipped
+and 29 warnings in 243.06 seconds, exit 0. Two additional fork warnings accompany real local
+missing-executable/signaled controller cases under a synthetic boundary. Those cases prove the
+existing producer shape, not native cgroup or controller termination. Ruff/format, strict mypy
+(1,271 sources), file quality and whitespace checks pass. Generated test scratch is removed after
+completion; the isolated environment remains for follow-up. Independent whole-unit reviews and lead
+validation are still required before closing the two leaves or publishing the increment. No public
+export, full target/RunContext, guest wire/helper, schema or native platform claim follows.
+
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one
       in-flight exchange, exact uncertainty retention and drain before release/disposal. Bind it to

@@ -139,8 +139,17 @@ MANAGED protection and OPERATION lifetime for finite commands or explicitly sele
 including optional elevation. It returns an immutable, credential-free `JobRef` only after exact
 clean launch acknowledgement. Other modes refuse before managed reservation. Ordinary uncertain
 starts raise `StateError` with a safe run-reference cause; escaping control exceptions preserve
-their identity. Job observation, output, stop and complete target composition remain required before
-that public surface exists.
+their identity. Its private `observe`, selected-stream `read_output`, `wait`, `stop` and `dispose`
+address only acknowledged runs retained by that originating operation. Status separates application
+precision from positive resource closure; output cursors address the verified retained prefix, whose
+EOF does not imply complete source capture. `capture_complete` describes the whole verified capture,
+not consumption of this returned slice; intentional discard or suppression leaves it false without
+an output-limit failure. Wait returns the existing `ExecutionResult` with a safe managed reference
+and never stops the workload or drains renewal. Stop drains only the selected keeper and reports
+accepted intent independently of proved termination. Disposal observes terminal proof before
+draining; active or unproved work stays not ready without stopping it. Uncertain stop or disposal
+remains distinct from a proved refusal. These private controls do not establish independent-job
+access after reconnection, complete target composition or a public RunContext surface.
 
 `ExecutionOperation` requires an explicit managed target matching its owner's scope. An optional
 numeric bootstrap must match that VM's derived boot identity; platform-host targets cannot select
@@ -726,10 +735,11 @@ and leaves, publishes a fact only after a synced same-directory stage, and retur
 only after the matching launch-bound stream-end fact closes and authenticates the spool.
 Exact-source tests bundle the wire and store together under Python 3.11. The host reservation also
 persists the requested output policy, but a later observer must still compare that request to the
-stream disposition; self-describing facts alone do not prove policy fulfillment. The first service
-host start slice is limited to independent lifetime until operation-owner liveness and cleanup are
-proved. Private fixed start, observe, closed read-output, stop and disposal exchanges exist.
-Production carrier wiring, live target evidence and SSH/QGA proof remain open.
+stream disposition; self-describing facts alone do not prove policy fulfillment. Independent host
+preparation binds resource ownership; `_managed_operation_run.py` supplies the separate retained
+operation-owned start and keeper composition. Private fixed start, observe, closed read-output, stop
+and disposal exchanges exist. Production carrier wiring, live target evidence and SSH/QGA proof
+remain open.
 
 `_managed_job_request.py` defines the separate private request assets for the managed controller.
 The five fixed root-owned, mode-0400 leaves are `request-launch`, `request-control`,
@@ -818,13 +828,15 @@ are not whole-operation settlement. Private `ExecutionOperation.start_managed(..
 run before reservation and binds the actual dedicated native delivery. Normal VM close first stops
 admission and attempts every keeper drain using one shared finite budget, before guarded execution
 bookkeeping. A drained run's cleanup separately requires permanent mutation closure, authentic exact
-launch, canonical wait, both closed streams, empty workload boundary and terminated or reconciled
-absent controller before resolving its keeper row. Valid nonzero or signaled wait is cleanup
-evidence, not workload success; cgroup-directory removal is not required. Original uncertain start
-debt is never resolved by this path. Remaining components, activation and all obligations other than
-the exact retained hold must settle before availability is released last. Unknown delivery blocks
-release and may be retried only as retained cleanup, never as start replay. This does not expose a
-public job surface or establish native acceptance.
+launch, both closed streams, empty workload boundary and terminated or reconciled absent controller
+before resolving its keeper row. A canonical wait is validated when present, but absence does not
+prevent independently proved resource closure; missing-executable and signaled applications can
+terminate without publishing it. Missing application evidence remains unknown, not an invented exit.
+An absent wait in one observation is not permanent negative evidence. Cgroup-directory removal is
+not required. Original uncertain start debt is never resolved by this path. Remaining components,
+activation and all obligations other than the exact retained hold must settle before availability is
+released last. Unknown delivery blocks release and may be retried only as retained cleanup, never as
+start replay. This does not expose a public job surface or establish native acceptance.
 
 `_managed_operation_recovery.py` retains one exact admitted start or keeper obligation and its
 persisted OPERATION run after database takeover. Construction reads and rebinds SQLite state only;
@@ -866,16 +878,23 @@ systemd and carrier acceptance, keeper consumption and whole-owner settlement re
 `_managed_observe_access.py` privately admits one exact, persisted independent VM run under a
 caller-held VM operation owner. It derives the expected launch from that row, borrows dispatch
 custody for one fenced observation attempt, and reports both the raw candidate and whether the owner
-must be retained after uncertain delivery. Escaping control flow keeps its original exception with
-custody facts attached as its cause. The caller must supply fresh target and guest facts, keep the
-selected provider route current, and retain or release the owner explicitly. The read-only observe
-action neither reconciles run state nor establishes production routing; it is not JobAccess or
-RunContext. Its private read-output sibling uses the same exact-run admission and custody path for
-one selected closed stream. It accepts bytes only after the validated end fact agrees with the run's
-persisted capture policy and prefix bound. Discard and sensitivity suppression accept only their
-matching no-output end facts. The raw candidate remains internal evidence even when policy admission
-fails; it must not be forwarded as a caller-facing output view. Missing or conflicting evidence
-stays unaccepted.
+must be retained after uncertain delivery. The independent preflight remains its default; the
+concrete originating `ExecutionOperation` admits only its own retained acknowledged OPERATION runs
+and supplies the same lifetime dispatch row used by inline calls. Settled repeated observations and
+output reads reuse that row without relaxing the ledger's bound or reopening resolved obligations.
+Escaping control flow keeps its original exception with custody facts attached as its cause. The
+caller must supply fresh target and guest facts, keep the selected provider route current, and
+retain or release the owner explicitly. The read-only observe action neither reconciles run state
+nor establishes production routing or public RunContext. Its private read-output sibling uses the
+same exact-run admission and custody path for one selected closed stream. It accepts bytes only
+after the validated end fact agrees with the run's persisted capture policy and prefix bound.
+Discard and sensitivity suppression accept only their matching no-output end facts. The originating
+operation retains positive terminal observations before disposal can remove their source facts.
+Confirmed disposal supplies publication closure, so later aggregate cleanup neither stops that
+disposed run nor rereads deleted launch facts. A lost disposal response preserves exact terminal
+proof and helper debt; an exact receipt retry still requires separately proved helper termination.
+The raw candidate remains internal evidence even when policy admission fails; it must not be
+forwarded as a caller-facing output view. Missing or conflicting evidence stays unaccepted.
 
 A separate private observe-and-reconcile action uses one complete, validated observation's exact
 launch receipt to reconcile a `POSSIBLE_DISPATCH` row idempotently. It records historical launch
@@ -887,16 +906,17 @@ obligation or release retained operation ownership.
 observes once and reads only streams with observed exact end facts, all under the same finite
 deadline and caller-held VM claim. The result keeps historical dispatch unknown, derives exit or
 signal only from `wait`, preserves each output disposition, and needs positive boundary-empty plus
-settled current attempts for `owned_cleanup_confirmed`. A zero exit without both policy-admitted
-streams or boundary proof is not successful. Expiry before a later read's admission returns partial
-deadline evidence only for the distinct pre-borrow deadline refusal; unrelated validation failures
-still escape with custody. Interrupted admitted attempts carry aggregate custody. The separate
-private bounded wait repeats this collection only after a clean, settled observation with missing
-facts, under the original finite deadline and VM owner. A nonzero main-process exit may still need
-stream-end and descendant-boundary evidence; it is never re-executed or reported as success. Expiry,
-including at the next poll's admission, returns the latest partial evidence without stopping the
-workload. Neither path clears prior start obligations, releases the owner, proves production routing
-or provides public JobAccess.
+settled current attempts for the independent collector's `owned_cleanup_confirmed`. The originating
+OPERATION view additionally requires its positive stream and native controller closure evidence. A
+zero exit without both policy-admitted streams or boundary proof is not successful. Expiry before a
+later read's admission returns partial deadline evidence only for the distinct pre-borrow deadline
+refusal; unrelated validation failures still escape with custody. Interrupted admitted attempts
+carry aggregate custody. The separate private bounded wait repeats this collection only after a
+clean, settled observation with missing facts, under the original finite deadline and VM owner. A
+nonzero main-process exit may still need stream-end and descendant-boundary evidence; it is never
+re-executed or reported as success. Expiry, including at the next poll's admission, returns the
+latest partial evidence without stopping the workload. Neither path clears prior start obligations,
+releases the owner, proves production routing or provides a public RunContext job surface.
 
 `_managed_stop_exchange.py` supplies the separate private stop attempt over the same carrier
 interface. Its fixed Python 3.11 Linux root helper revalidates the exact launch, publishes the

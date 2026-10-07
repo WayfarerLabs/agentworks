@@ -153,6 +153,62 @@ Ctrl-C, terminal hangup, detach, local wait interruption and explicit stop need 
 policies. None is silently promoted into whole-workload cancellation. Terminal output is combined;
 non-terminal capture preserves separate guest streams and sensitive-output rules.
 
+### Bound job controls and independent evidence
+
+`ExecutionAccess` owns `observe`, `read_output`, `wait`, `stop` and `dispose` as well as `run` and
+`start`; no third job-access object sits between the caller and the same owning composition. The
+first OPERATION implementation resolves a `JobRef` only through the acknowledged runs retained by
+its originating `ExecutionOperation`. It revalidates the exact owner, VM, complete guest identity
+and persisted launch before dispatch. A reference alone cannot adopt another operation's run or
+reconcile an uncertain start. Independent-job admission retains its separate resource-owned
+preflight; this OPERATION lookup does not establish independent-job access after reconnection.
+
+Read-only observation, output and wait use the existing operation-lifetime dispatch obligation and
+fresh serial borrows. Repeated settled polls reuse that exact row rather than consuming the bounded
+ledger one row at a time. The same interrupted registration, arming, helper settlement and retained
+handoff rules apply to inline work and job reads. An uncertain helper blocks new work; a wait
+deadline neither drains the keeper nor stops the job or releases its operation.
+
+Caller-facing values project the existing evidence rather than add another lifecycle state machine.
+Status distinguishes application state and optional exit status from resource cleanup. Output
+returns a selected stream's verified retained bytes and cursor, distinguishing EOF of that retained
+prefix from complete source capture. `capture_complete` describes the whole verified source capture,
+not consumption of the returned slice; only complete capture makes it true. Intentional discard or
+sensitivity suppression can have verified empty-prefix EOF without complete capture or an
+output-limit failure. Stop distinguishes accepted intent, proved termination and uncertain delivery.
+Disposal distinguishes confirmed release, proved not-ready and uncertainty; `False` alone cannot
+stand for both a refusal and an unknown effect. Waiting returns the existing `ExecutionResult` with
+the safe managed reference, including on partial or checked-error paths.
+
+For an acknowledged OPERATION run, resource closure requires its authentic exact launch, both stream
+ends, positive boundary emptiness and positive exact controller termination. A canonical `wait` fact
+is validated when present but is not a cleanup prerequisite. The existing controller can close a
+missing-executable or signaled application without publishing that fact. Missing exit evidence
+leaves application state UNKNOWN and status absent; it does not invalidate independently proved
+resource closure. Observation reads facts before querying the controller, so an absent `wait` is a
+snapshot, never a permanent negative fact. A later fresh observation may recover it. Controller
+absence remains usable only after acknowledged one-shot admission rules out a pending launch. Local
+helper drain, permanent mutation closure and original uncertain dispatch obligations remain separate
+requirements.
+
+Disposal observes terminal resource evidence before draining the selected keeper. Active or unproved
+work returns not ready without stopping the workload or changing renewal. Once terminal evidence
+exists, it retains that evidence on the existing run, drains only its keeper and invokes the
+existing exact fenced disposal protocol. Confirmed disposal supplies permanent publication closure;
+aggregate cleanup must then use retained closure evidence rather than stop or reread deleted launch
+facts. A lost disposal response retains the same terminal evidence and temporary helper debt. Only
+separately proved helper termination permits an exact receipt-based retry; no new launch observation
+is required after artifacts may have been deleted. Neither successful disposal nor retained evidence
+clears original start or unrelated helper uncertainty.
+
+Explicit job control is ordinary work, not authority to enter aggregate teardown. Refuse stale
+persisted ownership before draining the selected keeper; fence each explicit stop and follow-up
+observation at actual delivery through the existing exact keeper obligation. The read-only admission
+check alone is not the delivery fence. These checks narrow the takeover window but cannot make a
+database transition and remote dispatch atomic. Aggregate CLOSING cleanup retains its already
+admitted support authority after ordinary admission closes; explicit control cannot obtain that
+authority merely by reusing the same fixed helper.
+
 ## Supervisor and evidence
 
 The transport effort owns shared lifecycle, native/SSH application of it, and session adoption. SSH
