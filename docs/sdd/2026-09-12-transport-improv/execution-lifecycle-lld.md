@@ -1022,6 +1022,45 @@ Closing an owner with a possible-dispatch claim but no explicit whole-operation 
 it never promotes "no child attempt is currently open" into quiescence. Interrupted admission,
 resolution and release reconcile the same fenced record before any later dispatch or release.
 
+### Owned native platform access
+
+The planned remaining-platform composition keeps one core operation owner and one aggregate
+teardown, but moves concrete activation and keep-awake evidence out of that orchestrator. A passive
+platform factory builds a private owned access object under the already-acquired VM owner. Core
+retains that object before preparation can perform effects. The passive native binding remains a
+route description, not an activation method or a lifecycle owner.
+
+The small access contract exposes its selected binding, existing target-preparation result, and
+optional bound route-check callable. Preparation receives the observed power and original deadline;
+settlement receives a finite cleanup deadline and reports whether its own effects are settled. The
+object retains actual partial progress and interrupted-reply evidence, never resolves or closes the
+whole operation, and does not copy a second guest-identity field. Platform preparation calls the
+shared locator/guest helper rather than reimplementing it. WSL2 additionally compares the prepared
+guest with its durable held READY identity before admission. Core performs the common numeric
+account preparation and supplies file/execution views only afterward.
+
+Keep the existing WSL2 route checks at managed read, shell lookup, stop, disposal and launch
+admission by binding its route-check callable. An absent callable does not assert fresh route
+evidence. No dummy hold is constructed for a platform without idle-stop, and there is no shared task
+model for Windows anchors, Proxmox UPIDs or cloud-provider payloads.
+
+Aggregate close first stops body admission and settles execution, files, keepers and local delivery.
+Only then may platform settlement reconcile its existing activation or release its real hold. WSL2
+must refuse hold release while unrelated obligations remain and preserve exact native-client and
+guest-anchor absence evidence. Proxmox observes or reconciles its single retained activation, never
+retries the POST, and never substitutes running power or HA handoff for supported task settlement.
+The core subsequently checks the final ledger and local custody independently before sealing,
+resolving and releasing its owner. RESOURCE jobs remain outside operation-owned cleanup. Ordinary
+teardown does not stop a VM merely because this operation activated it.
+
+Cloud passive observations use deadline-derived SDK budgets and reject successful late results, not
+hard preemption. AWS configures socket timeouts at client construction, so setup can consume part of
+that budget before the request. Azure and GCP disable service/network retry middleware but SDK
+authentication can still resend a read. Core does not manually replay the provider query or accept
+late evidence as activation authority. These limitations do not weaken the separate one-shot
+execution/activation admission rules. Cloud activation and route factories still require their own
+reviewed evidence; passive power observation alone is not full native access.
+
 ### Proxmox activation evidence boundary
 
 Stopped Proxmox startup needs a new bounded producer, not the retired start waiter. Its first

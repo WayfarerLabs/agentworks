@@ -1025,6 +1025,23 @@ associated pending acceptance gates are superseded by this ruling.
       unknown provider states explicitly rather than assuming they are stopped. Implement this
       boundary with its concrete activation producer and selected platform hold; a freely
       constructible active-now token or test-only no-op adapter does not prove availability.
+- [ ] Extract WSL2 and Proxmox owned native access behind one passive platform factory, retaining
+      actual preparation/activation/hold progress before effects. Keep one core owner and aggregate
+      close, passive native bindings, optional bound route checks at all existing managed
+      checkpoints and the shared guest-preparation helper. Preserve durable WSL READY matching,
+      refusal to release a hold with unrelated debt, exact native/guest release evidence, single
+      Proxmox POST/UPID interpretation, lost replies and HA uncertainty. Do not add dummy holds,
+      duplicate guest-identity fields, a generic task registry or whole-owner closure by adapters.
+      Prove fresh import behavior and unchanged legacy hooks; cloud/Lima access and complete
+      RunContext/native acceptance remain separate requirements.
+- [ ] Implement and privately review passive exact-instance power observations for AWS, Azure and
+      GCP using their provider-owned locator reads. Cover stable/transitional/malformed states,
+      identity/account mismatch, setup expiry, actual SDK request serialization and successful
+      late-result refusal. SDK timeouts are best-effort: AWS construction can consume configured
+      timeout budget and Azure/GCP authentication can resend despite disabled service retries. Do
+      not introduce private SDK timeout mutation or a transport framework to imply hard preemption.
+      Keep activation, selected execution routes and whole-workflow native evidence open; these
+      observations alone cannot supply usable cloud RunContext targets.
 - [ ] Add fixed bounded Proxmox start/task-status wire primitives, preserving scalar acknowledgment
       and object observation as separate envelopes. Prove exact body-free routes, literal task-ID
       encoding, verified authority, finite local worker custody and unchanged guest/power/config
