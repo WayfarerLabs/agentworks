@@ -3321,7 +3321,7 @@ locked-SDD, website and aggregate jobs succeed. Primary API parents and tree ide
 increment, the combined SSH branch or live platform acceptance. The full report is published on #833
 as comment `6031565162` and the dependency notice on #832 as comment `6031568729`.
 
-- [ ] Integrate private RESOURCE disposal only after positive terminal evidence, retaining that
+- [x] Integrate private RESOURCE disposal only after positive terminal evidence, retaining that
       evidence with the exact disposal attempt rather than adopting the job. Add a typed dedicated
       action binding to existing helper tracking without duplicating its helper, borrow or
       candidate. Retain the entry and terminal proof until action settlement or its unresolved
@@ -3333,6 +3333,32 @@ as comment `6031565162` and the dependency notice on #832 as comment `6031568729
       reopening a resolved attempt or rereading removed launch artifacts. Prove invalid response
       despite exit zero, commit/reply loss, no silent stop or replay and retained OPERATION
       behavior. Complete all three private lanes and lead gates before closing this leaf.
+
+The complete private disposal unit is clear at integrated code `4a02c9900`, against `416503df2`.
+It adds the exact receipt and positive terminal evidence to the existing actual helper tracker,
+with a dedicated version-one disposal action row and stable replacement key. Explicit retries
+preserve prior action uncertainty and reconcile the exact row without rearming a resolved attempt
+or rereading removed launch artifacts. Helper termination and action settlement remain separate;
+bookkeeping and finish never dispatch. Review found an initial and replacement admission race with
+operation finish; the corrected unit checks closing under the existing admission guard and proves
+both refusals without another borrow or disposal. The README describes the same bounded surface.
+
+All three independent lanes re-review the complete corrected unit. Project passes 246 focused and
+adjacent cases plus nine independent custody/closing probes. Generic correctness passes 329 distinct
+cases across 332 executions, including closing between retry reconciliation and replacement.
+Complexity passes 86 focused/adjacent cases; deleting the closing checks fails both new regressions,
+and restoring them passes. None reports a remaining material finding. These are private unit
+reviews, not complete-product or native acceptance.
+
+Final lead Linux Python 3.12 gates at that exact code pass 16,561 non-integration tests, 49 explicit
+platform/capability skips and 29 fork warnings in 292.01 seconds, exit 0. The package-fingerprint
+comparison uses verified main `cea5e8523`; there is no missing-base skip. Ruff and formatting pass
+1,320 files, full mypy passes 1,284 sources, and Typer isolation, file quality, locked-SDD, Rulesync
+and whitespace checks pass. Website passes 160 Python cases in 50.055 seconds and 103 Node cases in
+6.156 seconds, with four builds and both deterministic comparisons. Owned fixture roots are removed
+after terminal completion; no operator database is modified or deleted. Independent launch,
+job-length availability, active output, remaining factories, full RunContext and native acceptance
+remain open. This closes only the private disposal leaf, with no merge intent or public review edge.
 
 - [ ] Integrate private MANAGED RESOURCE start and foreground wait through the same ExecutionAccess
       on a core-selected proved no-idle-stop native binding. Reject unsupported independent
