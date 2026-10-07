@@ -809,7 +809,7 @@ class AzureVMPlatform(VMPlatform):
         deadline: Deadline,
         custody: LocalDeliveryCustody,
     ) -> ProviderLocatorObservation:
-        """Read the persisted ARM resource once and require its exact identity."""
+        """Observe the persisted ARM identity through one SDK read invocation."""
         resource_id = _resource_id(vm)
         resource_group, vm_name, config = _parse_locator_resource_id(resource_id, vm_name=vm.name)
         provider_locator_remaining(deadline, vm_name=vm.name)
@@ -820,7 +820,7 @@ class AzureVMPlatform(VMPlatform):
     def observe_execution_power(
         self, vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody: LocalDeliveryCustody
     ) -> VMStatus:
-        """Read ARM identity and instance-view power in one passive bounded request."""
+        """Passively read ARM identity and power, rejecting successful late results."""
         resource_id = _resource_id(vm)
         identity = _parse_locator_resource_id(resource_id, vm_name=vm.name)
         execution_power_remaining(deadline, vm_name=vm.name)
@@ -854,15 +854,20 @@ class AzureVMPlatform(VMPlatform):
         deadline: Deadline,
         expand: str | None = None,
     ) -> Any:
-        """Read the persisted ARM resource and reject a different returned identity."""
+        """Invoke one SDK read and reject a different persisted ARM identity.
+
+        Request budgets use the remaining deadline at dispatch. Disabled service
+        retries do not prevent SDK authentication resends; callers reject late
+        success against the original deadline and never manually replay reads.
+        """
         resource_group, vm_name, config = identity
         compute = self._compute_client(config, ctx)
-        options = {} if expand is None else {"expand": expand}
         remaining = provider_locator_remaining(deadline, vm_name=vm.name)
         try:
             observed = compute.virtual_machines.get(
                 resource_group,
                 vm_name,
+                expand=expand,
                 timeout=remaining,
                 connection_timeout=remaining,
                 read_timeout=remaining,
@@ -870,7 +875,6 @@ class AzureVMPlatform(VMPlatform):
                 retry_connect=0,
                 retry_read=0,
                 retry_status=0,
-                **options,
             )
         except Exception as exc:
             from azure.core.exceptions import ResourceNotFoundError

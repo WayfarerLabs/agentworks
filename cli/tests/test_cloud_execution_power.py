@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from contextlib import nullcontext
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock
@@ -105,7 +106,7 @@ def _positive_budget(value: object) -> None:
     assert isinstance(value, float) and math.isfinite(value) and 0 < value <= 10
 
 
-def test_power_uses_one_exact_read_with_finite_sdk_timeouts_and_no_retry(observer: SimpleNamespace) -> None:
+def test_power_uses_one_sdk_read_with_finite_timeouts_and_disabled_service_retries(observer: SimpleNamespace) -> None:
     assert _observe(observer) is VMStatus.RUNNING
     observer.read.assert_called_once()
     kwargs = observer.read.call_args.kwargs
@@ -394,10 +395,19 @@ def test_sdk_timeout_uses_budget_remaining_after_setup(
         assert observer.read.call_args.kwargs["timeout"] == 6
 
 
+@pytest.mark.parametrize("late", [False, True])
 def test_actual_sdk_exact_request_and_response_contract(
-    observer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    observer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, late: bool
 ) -> None:
     """Exercise installed SDK serialization with all network delivery replaced."""
+    now = 100.0
+    monkeypatch.setattr("agentworks.execution.carrier.time.monotonic", lambda: now)
+
+    def received(**_kwargs: object) -> None:
+        nonlocal now
+        if late:
+            now = 111.0
+
     if observer.kind == "aws":
         import boto3
         from botocore.stub import Stubber
@@ -411,12 +421,14 @@ def test_actual_sdk_exact_request_and_response_contract(
             stubber = Stubber(ec2)
             stubber.add_response("describe_instances", _aws_response(), {"InstanceIds": [_INSTANCE_ID]})
             stubber.activate()
+            ec2.meta.events.register("after-call.ec2.DescribeInstances", received)
             stubbers.append(stubber)
             clients.append(ec2)
             return ec2
 
         monkeypatch.setattr(observer.platform, "_get_session", lambda _ctx: SimpleNamespace(client=client))
-        assert _observe(observer) is VMStatus.RUNNING
+        with pytest.raises(LimitExceededError) if late else nullcontext():
+            assert _observe(observer) is VMStatus.RUNNING
         stubbers[0].assert_no_pending_responses()
         config = clients[0].meta.config
         _positive_budget(config.connect_timeout)
@@ -430,7 +442,12 @@ def test_actual_sdk_exact_request_and_response_contract(
     response._content_consumed = True
     response.raw = SimpleNamespace(enforce_content_length=False)
     response.headers["Content-Type"] = "application/json"
-    delivered = Mock(return_value=response)
+
+    def deliver(*_args: object, **_kwargs: object) -> object:
+        received()
+        return response
+
+    delivered = Mock(side_effect=deliver)
     if observer.kind == "azure":
         from azure.core.credentials import AccessToken
         from azure.core.pipeline.transport import RequestsTransport
@@ -449,12 +466,12 @@ def test_actual_sdk_exact_request_and_response_contract(
         )
         monkeypatch.setattr(observer.platform, "_compute_client", lambda _config, _ctx: azure)
         try:
-            assert _observe(observer) is VMStatus.RUNNING
+            with pytest.raises(LimitExceededError) if late else nullcontext():
+                assert _observe(observer) is VMStatus.RUNNING
         finally:
             azure.close()
         delivered.assert_called_once()
-        args = delivered.call_args.args
-        kwargs = delivered.call_args.kwargs
+        args, kwargs = delivered.call_args
         assert args[0] == "GET"
         assert _ARM_ID in args[1]
         assert "$expand=instanceView" in args[1] or "%24expand=instanceView" in args[1]
@@ -471,12 +488,12 @@ def test_actual_sdk_exact_request_and_response_contract(
         monkeypatch.setattr(transport._session, "request", delivered)
         monkeypatch.setattr(observer.platform._clients, "client", lambda _kind, _ctx: gcp)
         try:
-            assert _observe(observer) is VMStatus.RUNNING
+            with pytest.raises(LimitExceededError) if late else nullcontext():
+                assert _observe(observer) is VMStatus.RUNNING
         finally:
             transport.close()
         delivered.assert_called_once()
-        args = delivered.call_args.args
-        kwargs = delivered.call_args.kwargs
+        args, kwargs = delivered.call_args
         assert args[0] == "GET"
         assert args[1].endswith("/projects/project-a/zones/us-central1-a/instances/vm-a")
         _positive_budget(kwargs["timeout"])

@@ -188,21 +188,21 @@ def test_aws_locator_close_does_not_mask_describe_error(monkeypatch: pytest.Monk
 
 def test_aws_locator_rejects_a_late_provider_result(monkeypatch: pytest.MonkeyPatch) -> None:
     local_delivery = LocalDeliveryCustody()
-    from agentworks.plugins.aws import platform as aws_platform
 
     platform = EC2Platform("aws", {"region": "us-east-1", "auth": {"mode": "ambient"}})
     ec2 = _EC2()
     monkeypatch.setattr(platform, "_get_session", lambda _ctx: SimpleNamespace(client=lambda *_a, **_k: ec2))
-    calls = 0
+    now = 100.0
+    monkeypatch.setattr("agentworks.execution.carrier.time.monotonic", lambda: now)
+    read = ec2.describe_instances
 
-    def remaining(_deadline: Deadline, *, vm_name: str) -> float:
-        nonlocal calls
-        calls += 1
-        if calls == 4:
-            raise LimitExceededError("expired", entity_kind="vm", entity_name=vm_name)
-        return 1
+    def late_read(**kwargs: object) -> object:
+        nonlocal now
+        result = read(**kwargs)
+        now = 111.0
+        return result
 
-    monkeypatch.setattr(aws_platform, "provider_locator_remaining", remaining)
+    monkeypatch.setattr(ec2, "describe_instances", late_read)
 
     with pytest.raises(LimitExceededError):
         platform.observe_provider_locator(_aws_vm(), RunContext(), deadline=Deadline.after(10), custody=local_delivery)
@@ -327,7 +327,6 @@ def test_azure_locator_rejects_expired_observation_before_compute_client(monkeyp
 
 def test_azure_locator_rejects_a_late_provider_result(monkeypatch: pytest.MonkeyPatch) -> None:
     local_delivery = LocalDeliveryCustody()
-    from agentworks.plugins.azure import platform as azure_platform
 
     platform = AzureVMPlatform(
         "azure",
@@ -335,16 +334,17 @@ def test_azure_locator_rejects_a_late_provider_result(monkeypatch: pytest.Monkey
     )
     vms = _AzureVMs()
     monkeypatch.setattr(platform, "_compute_client", lambda _az, _ctx: SimpleNamespace(virtual_machines=vms))
-    calls = 0
+    now = 100.0
+    monkeypatch.setattr("agentworks.execution.carrier.time.monotonic", lambda: now)
+    read = vms.get
 
-    def remaining(_deadline: Deadline, *, vm_name: str) -> float:
-        nonlocal calls
-        calls += 1
-        if calls == 3:
-            raise LimitExceededError("expired", entity_kind="vm", entity_name=vm_name)
-        return 1
+    def late_read(resource_group: str, name: str, **kwargs: object) -> object:
+        nonlocal now
+        result = read(resource_group, name, **kwargs)
+        now = 111.0
+        return result
 
-    monkeypatch.setattr(azure_platform, "provider_locator_remaining", remaining)
+    monkeypatch.setattr(vms, "get", late_read)
 
     with pytest.raises(LimitExceededError):
         platform.observe_provider_locator(
@@ -501,7 +501,6 @@ def test_gcp_locator_maps_provider_not_found() -> None:
 
 def test_gcp_locator_rejects_a_late_provider_result(monkeypatch: pytest.MonkeyPatch) -> None:
     local_delivery = LocalDeliveryCustody()
-    from agentworks.plugins.gcp import platform as gcp_platform
 
     platform = GCEPlatform(
         "gcp",
@@ -511,16 +510,17 @@ def test_gcp_locator_rejects_a_late_provider_result(monkeypatch: pytest.MonkeyPa
     platform._clients = cast(
         "Any", SimpleNamespace(client=lambda service, _ctx: instances if service == "instances" else None)
     )
-    calls = 0
+    now = 100.0
+    monkeypatch.setattr("agentworks.execution.carrier.time.monotonic", lambda: now)
+    read = instances.get
 
-    def remaining(_deadline: Deadline, *, vm_name: str) -> float:
-        nonlocal calls
-        calls += 1
-        if calls == 3:
-            raise LimitExceededError("expired", entity_kind="vm", entity_name=vm_name)
-        return 1
+    def late_read(**kwargs: object) -> object:
+        nonlocal now
+        result = read(**kwargs)
+        now = 111.0
+        return result
 
-    monkeypatch.setattr(gcp_platform, "provider_locator_remaining", remaining)
+    monkeypatch.setattr(instances, "get", late_read)
 
     with pytest.raises(LimitExceededError):
         platform.observe_provider_locator(_gcp_vm(), RunContext(), deadline=Deadline.after(10), custody=local_delivery)

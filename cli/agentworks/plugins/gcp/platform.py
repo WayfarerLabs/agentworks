@@ -645,7 +645,12 @@ class GCEPlatform(VMPlatform):
     def _read_exact_instance(
         self, vm: VMRow, ctx: RunContext, identity: tuple[str, str, str, str], *, deadline: Deadline
     ) -> Any:
-        """Read only the persisted GCE provider incarnation."""
+        """Invoke one SDK read of the persisted GCE provider incarnation.
+
+        Request budgets use the remaining deadline at dispatch. Disabled service
+        retries do not prevent SDK authentication resends; callers reject late
+        success against the original deadline and never manually replay reads.
+        """
         project_id, zone, instance_name, instance_id = identity
         instances = self._clients.client("instances", ctx)
         remaining = provider_locator_remaining(deadline, vm_name=vm.name)

@@ -734,7 +734,12 @@ class EC2Platform(VMPlatform):
     def _read_exact_instance(
         self, vm: VMRow, ctx: RunContext, identity: tuple[str, str, str], *, deadline: Deadline
     ) -> dict[str, Any]:
-        """Read one persisted instance and verify its reservation's account owner."""
+        """Invoke one SDK read and verify the persisted instance's account owner.
+
+        Timeouts are deadline-derived at client construction and cannot shrink
+        during setup. SDK credential work is non-preemptible; callers reject
+        successful results after the original deadline without replaying reads.
+        """
         instance_id, region, account_id = identity
 
         from botocore.config import Config
