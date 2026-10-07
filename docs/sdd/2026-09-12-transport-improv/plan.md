@@ -3215,6 +3215,41 @@ these bounded private leaves close. Unified independent admission, job-length av
 output, remaining platform factories, complete additive RunContext and native acceptance remain
 open. Hosted acceptance of this increment and public round 1 of 3 remain open as well.
 
+- [x] Freeze the complete private independent `USER_DEFAULT` managed body before selected-account
+      lookup. Reuse the existing immutable body composition, then replace only its resolved launch
+      receipt; do not reread caller environment, input or output policy after lookup. Preserve fixed
+      shells and literal commands, receipt/spec agreement and validation before reservation. Prove
+      mutable and one-shot inputs against real SQLite and framed carriers, with all three private
+      review lanes and final lead gates. This does not deliver unified independent admission.
+
+This bounded composition leaf is accepted locally at `79fca5288`, against published `b54461580`.
+Project, generic correctness and complexity lanes clear the complete unit, passing 206, 142 and 24
+focused cases respectively. Project and generic each pass twelve independent probes. Restoring the
+discard-and-recompose behavior makes four complexity probes fail: caller environment is traversed
+twice and changed values reach delivery. The correction retains the existing prepared body rather
+than introducing another preparation framework or changing carrier, custody or schema contracts.
+
+Final lead validation passes 16,403 non-integration tests with 49 skips and 29 fork warnings in
+427.44 seconds, exit 0. Ruff/format (1,314 files), strict mypy (1,278 sources), Typer isolation,
+file quality, locked-SDD, Rulesync and whitespace gates pass. Website passes 160 Python and 103
+Node cases, four builds and both deterministic comparisons. An earlier unchanged-source suite run
+fails nine socket-fixture setups because the automatically extended temporary path exceeds Unix
+socket limits; rerunning with an explicit short pytest fixture root passes. Both reports are
+retained, and exact owned fixture roots are removed after terminal completion. These local results
+do not provide hosted or native acceptance of this later unit. The preceding published head's
+hosted Windows capacity-clock failure remains separately tracked; no production deadline relaxation
+or green aggregate is claimed. Full execution, availability, RunContext and native gates remain open.
+
+- [ ] Integrate private RESOURCE observe, output and wait into the existing ExecutionAccess using
+      explicit core-bound ownership and fresh operation admission before lookup. Route helpers
+      through the current operation's tracked dispatch without adopting the independent run into
+      its OPERATION cleanup list. Share the existing exact terminal-proof predicate, keep ordinary
+      reads distinct from reconciliation, and require confirmed receipts for output collection.
+      Preserve originating OPERATION behavior and mutating-control admission. Prove reconnect,
+      foreign and stale identities, missing wait facts, unknown helper/controller custody, bounded
+      helper accounting and observer-only cleanup. Independent launch, mutations, job-length holds
+      and complete RunContext remain subsequent required work, not claims of this read-only leaf.
+
 The lead's read-only completion inventory at `ed3603c23` confirms that this next foreground unit is
 not the rest of the execution surface. Required work still includes unified independent launch and
 subsequent-operation reconnect/control with exact resource-owned admission and job-length
