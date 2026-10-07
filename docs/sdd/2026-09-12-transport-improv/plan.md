@@ -3334,6 +3334,25 @@ as comment `6031565162` and the dependency notice on #832 as comment `6031568729
       despite exit zero, commit/reply loss, no silent stop or replay and retained OPERATION
       behavior. Complete all three private lanes and lead gates before closing this leaf.
 
+- [ ] Integrate private MANAGED RESOURCE start and foreground wait through the same ExecutionAccess
+      on a core-selected proved no-idle-stop native binding. Reject unsupported independent
+      availability and foreign/stale context before shell lookup or reservation; never infer
+      authority from a request or reference. Freeze the body once, then retain generated identity,
+      planned receipt/output policy and actual temporary launch custody before reservation. Reuse
+      the start v1 obligation, existing one-shot exchange and monotonic repository transitions;
+      factor supplied tracked custody from the existing allocating start wrapper without a second
+      borrow or executor. Publish the actual candidate before receipt reconciliation can lose its
+      reply. Recover exact reservation, registration and receipt bookkeeping without redispatch, and
+      require actual helper/local settlement as well as confirmed receipt for a dispatched start.
+      Preserve original controls and discard ended preparation references. Never adopt the
+      independent run into OPERATION keeper/cleanup state; start plus wait shares one deadline and
+      context close does not stop the job. Prove source/finite-input separation, lookup ordering,
+      reserve and reconcile commit/reply loss, setup/publication failures, late helper uncertainty,
+      bounded action accounting, lost acknowledgement and retained OPERATION behavior. Complete all
+      three private lanes and lead gates. This initial no-op-backed increment does not close
+      recoverable WSL2/job-length holds, all-platform factories, production RunContext or native
+      acceptance.
+
 The lead's read-only completion inventory at `ed3603c23` confirms that this next foreground unit is
 not the rest of the execution surface. Required work still includes unified independent launch and
 subsequent-operation reconnect/control with exact resource-owned admission and job-length

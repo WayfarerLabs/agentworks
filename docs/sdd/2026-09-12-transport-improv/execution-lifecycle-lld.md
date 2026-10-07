@@ -190,6 +190,38 @@ interprets row resolution or artifact absence as confirmed disposal. Concrete co
 belongs in a focused private module; admission, helper tracking and finish remain with the existing
 operation owner.
 
+Unified RESOURCE launch uses that same access and tracker, not a second job executor or an OPERATION
+run with a disabled keeper. Before shell lookup or reservation, require the core-bound RESOURCE
+namespace, current native binding and platform-owned independent availability. A proved no-idle-stop
+platform may select the existing no-op guarantee; callers cannot request a bypass or infer it from
+carrier features. An idle-stoppable platform still needs its recoverable job-length hold. An initial
+no-op-backed implementation is only an increment, not acceptance of all platforms.
+
+Freeze the complete finite invocation before tracked shell lookup. Retain its generated run
+identity, planned receipt and output policy with one concrete START binding before reservation,
+alongside the actual helper, borrow and local delivery in existing tracking. Use the dedicated
+`managed-start` version-one run-ID obligation and existing one-shot preparation, reservation,
+possible-dispatch and receipt-validation transitions. Factor the current owned-start work to consume
+supplied tracked custody; keep an allocating wrapper for existing callers, rather than nesting
+another borrow. Guard that wrapper's unused setup and original control flow as well.
+
+Publish the actual start candidate into the retained entry before repository receipt reconciliation
+can commit or raise. A later confirmed database row does not prove that the original helper or local
+delivery settled. START bookkeeping therefore requires both exact receipt confirmation and actual
+helper/local-custody settlement for a dispatched launch, not code-zero completion alone. Interrupted
+reservation is inspected only by its already retained exact identity: proved absence or a matching
+RESERVED record can settle reservation uncertainty without launching, while conflict or unreadable
+state stays retained. Preserve unknown registration, possible dispatch and helper debt. Bookkeeping
+and finish never launch or reserve again; no replay uses the retained frozen body.
+
+Discard preparation/source references when their one-shot attempt ends. Retain only the exact launch
+evidence and custody needed for zero-dispatch recovery; safe facts and durable payloads carry no
+source, environment or input. Acknowledgement resolves temporary launch custody, not the continuing
+RESOURCE job. It never enters the initiating operation's managed-run cleanup list.
+`run(..., lifetime=INDEPENDENT)` can compose this start with existing RESOURCE wait under the same
+finite deadline; timeout and observer cleanup do not become implicit stop. Physical job holds, other
+native factories and full RunContext remain separate required gates.
+
 The private foreground composition now supports `run(..., profile=MANAGED)` with OPERATION lifetime
 by invoking that same one-shot managed launch and existing operation-owned wait. It does not require
 the caller to invoke `start` separately, add a supervisor, or enable INDEPENDENT lifetime. All run
