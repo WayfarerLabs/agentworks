@@ -365,6 +365,25 @@ def test_unknown_read_helper_blocks_observer_close_without_adopting_job(observer
     assert main.stop.calls == main.dispose.calls == 0
 
 
+def test_resource_observation_proof_does_not_override_later_unknown_output_helper(observer):
+    _, repository, operation, _, main, _ = observer
+    before = repository.inspect(RUN)
+    response = main.observe.response
+
+    def unknown_output(request):
+        if request.stream is not None:
+            main.observe.dispatch = Dispatch.UNKNOWN
+            main.observe.code = None
+        return response(request)
+
+    main.observe.response = unknown_output
+    outcome = collect_bound_managed_result(repository, RUN, carrier=main, **options(observer))
+    assert outcome.attempts[0].terminal_proved and outcome.attempts[1].requires_owner_retention
+    assert not outcome.result.owned_cleanup_confirmed and not outcome.awaiting_facts
+    assert outcome.result.failure is ExecutionFailure.OBSERVATION and operation.unfinished_inline_executions
+    assert repository.inspect(RUN) == before and operation.managed_runs == () and main.observe.calls == 2
+
+
 def test_planned_unacknowledged_op_id_never_falls_back_to_matching_resource(observer, monkeypatch):
     _, repository, operation, access, main, _ = observer
     before = repository.inspect(RUN)
