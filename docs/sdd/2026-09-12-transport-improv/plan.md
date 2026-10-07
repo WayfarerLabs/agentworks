@@ -3279,6 +3279,30 @@ Project, generic and complexity clear that whole correction with 91, 14 and one 
 independent mutation/renewal probes. Production deadlines are unchanged. The preceding published
 Windows failure is not yet a green hosted result for this correction.
 
+- [ ] Integrate private RESOURCE stop through the existing ExecutionAccess and tracked ordinary
+      helper lifetime. Require fresh selected binding, exact core resource namespace and confirmed
+      launch before borrowing or delivery; planned originating OPERATION IDs never fall back after
+      refusal. Do not adopt an independent run, create or drain its keeper, or cache OPERATION
+      terminal proof. Distinguish accepted intent from fresh positive closure, retain uncertain
+      helper custody, share the original finite deadline and route fence, and preserve original
+      control exceptions and existing OPERATION behavior. Prove reconnect, stale/foreign/unconfirmed
+      binding refusal, overlapping borrows, close/takeover races, bounded row accounting and
+      bookkeeping retry without dispatch. Complete all three private review lanes and lead gates;
+      native availability and full RunContext remain separate required work.
+
+- [ ] Integrate private RESOURCE disposal only after positive terminal evidence, retaining that
+      evidence with the exact disposal attempt rather than adopting the job. Add a typed dedicated
+      action binding to existing helper tracking without duplicating its helper, borrow or
+      candidate. Retain the entry and terminal proof until action settlement or its unresolved
+      explicit retry; derive the dedicated row's kind/version/non-secret run-ID payload from the
+      exact receipt. Preserve NOT_SENT or clean accepted-response settlement, exact interrupted
+      registration/release recovery, unknown-helper admission/finish refusal and original control
+      identity. Bookkeeping retries must never dispatch; separately requested receipt-bound retry
+      after proved helper termination and lost response must reconcile the exact row without
+      reopening a resolved attempt or rereading removed launch artifacts. Prove invalid response
+      despite exit zero, commit/reply loss, no silent stop or replay and retained OPERATION
+      behavior. Complete all three private lanes and lead gates before closing this leaf.
+
 The lead's read-only completion inventory at `ed3603c23` confirms that this next foreground unit is
 not the rest of the execution surface. Required work still includes unified independent launch and
 subsequent-operation reconnect/control with exact resource-owned admission and job-length

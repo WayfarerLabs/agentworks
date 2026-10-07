@@ -163,6 +163,33 @@ and persisted launch before dispatch. A reference alone cannot adopt another ope
 reconcile an uncertain start. Independent-job admission retains its separate resource-owned
 preflight; this OPERATION lookup does not establish independent-job access after reconnection.
 
+Unified RESOURCE controls use the same `ExecutionAccess` and `ExecutionOperation`. Select a planned
+originating OPERATION run explicitly, with no fallback after its admission fails. Otherwise require
+the operation's core-bound RESOURCE namespace and exact repository, VM, complete guest identity,
+root plan and runtime before inspecting the independent reservation. Mutations require a confirmed
+launch receipt. The observer does not adopt the independent run, create or drain its keeper, or put
+terminal evidence into an OPERATION cache. RESOURCE stop uses the existing tracked ordinary helper
+and operation-lifetime dispatch row. Its empty payload remains appropriate; the exact run-ID payload
+belongs to the dedicated disposal attempt, not every ordinary control helper. Accepted stop intent
+still requires a fresh settled observation to establish termination.
+
+RESOURCE disposal retains positive terminal evidence only with its exact pending disposal attempt.
+Extend the existing active-helper tracking with a typed per-attempt binding for the exact attempt
+ID, receipt and terminal evidence. Keep its actual helper, borrow and candidate in the existing
+entry; derive the dedicated `managed-dispose` kind, payload version and canonical run-ID payload
+from the existing constants and receipt. Retain this entry through unsettled bookkeeping or an
+unresolved explicit receipt-bound retry. No separate executor, registry or synthetic OPERATION run
+is needed. Resolving this action requires NOT_SENT or clean SENT with zero helper completion and a
+validated NOT_READY or DISPOSED response; helper termination alone is insufficient. Registration and
+settlement recovery must reconcile that exact row. A retained actual helper blocks ordinary
+admission and aggregate finish until custody permits settlement. Bookkeeping retry and finish
+perform no carrier calls. A separately requested exact receipt-bound disposal retry may use retained
+terminal evidence after proved helper termination and a lost response, because launch artifacts may
+already be gone. It reconciles the prior attempt first, never rearms a RESOLVED row and never
+interprets row resolution or artifact absence as confirmed disposal. Concrete control orchestration
+belongs in a focused private module; admission, helper tracking and finish remain with the existing
+operation owner.
+
 The private foreground composition now supports `run(..., profile=MANAGED)` with OPERATION lifetime
 by invoking that same one-shot managed launch and existing operation-owned wait. It does not require
 the caller to invoke `start` separately, add a supervisor, or enable INDEPENDENT lifetime. All run
