@@ -2153,6 +2153,21 @@ batches may land independently against its pinned contract. Temporary released c
 explicitly authorized; final removal remains this effort's responsibility. Refresh the inventory at
 each integration boundary and prohibit new legacy consumers.
 
+The final implementation dependency is the complete new SSH contribution and shared foundation in
+#832, followed by transport-owned platform factories and the additive RunContext in #833. Build
+those factories against the pinned new SSH connection and trust API, without dual-version
+construction or fallback to legacy policy. Missing explicit configuration or admitted trust is a
+prerequisite, not permission to use ambient SSH state. Remote Lima is one SSH-backed platform-access
+consumer; both the placement-host and guest hops need their own explicit delivery facts. Before
+either merge-intent handoff, validate the complete combined candidate with both usable old and new
+RunContext paths, full gates, native evidence and whole-PR reviews. Shared code remains transport
+owned regardless of which PR carries its commits. Restack the two PRs only after complete current
+integration reports and stable shared/carrier implementation, preserve reviewed provenance, and land
+#832 before #833. There is no third foundation PR or compatibility bridge. The initial private
+composition `ad471c8a0` combines transport `fa20e5a95` and SSH `642dd8af4` without changing either
+public head or dependency; it is development state, not joint acceptance. This ordering does not
+decide operator-held SSH resource APIs, waive carrier requirements or start migration and deletion.
+
 ## 1. Specify the small contract and proof charter
 
 - [ ] Specify `PreparedInvocation`, the single input choice in `CarrierIO`, stream ownership,
@@ -3360,7 +3375,7 @@ after terminal completion; no operator database is modified or deleted. Independ
 job-length availability, active output, remaining factories, full RunContext and native acceptance
 remain open. This closes only the private disposal leaf, with no merge intent or public review edge.
 
-- [ ] Integrate private MANAGED RESOURCE start and foreground wait through the same ExecutionAccess
+- [x] Integrate private MANAGED RESOURCE start and foreground wait through the same ExecutionAccess
       on a core-selected proved no-idle-stop native binding. Reject unsupported independent
       availability and foreign/stale context before shell lookup or reservation; never infer
       authority from a request or reference. Freeze the body once, then retain generated identity,
@@ -3390,10 +3405,44 @@ allocating launch precision when settlement or outcome construction is interrupt
 settlement accepts supported NOT_SENT only with actual custody closure and matching ownership and
 reservation; uncertain run state remains unchanged, and no acknowledgement or replay follows. The
 correction also removes two dormant RESOURCE WSL route checks: unsupported independent availability
-already refuses before admission, while real WSL job-length holds remain required work. Corrected
-whole-unit reviews and final lead gates are pending; this leaf remains unchecked. Public testing
-head `dd10ebbee` stays fixed while complete native reports are awaited, with no new public fix
-round.
+already refuses before admission, while real WSL job-length holds remain required work.
+
+All three independent lanes clear the corrected complete unit at `fa20e5a95`. Project passes 545
+focused/adjacent cases and twelve independent custody/control probes; generic correctness passes 683
+distinct cases including eleven independent probes. Complexity passes 410 focused/adjacent cases,
+then independently removes each retained proof: omitting NOT_SENT recovery causes three failures,
+omitting the receipt-confirmation return guard causes two failures, and assigning the allocating
+attempt only after settlement causes six failures. Restoring the source passes the ten targeted
+regressions. Each lane reviews the complete source, tests, README, lifecycle LLD and open plan leaf;
+none reports a remaining material finding. These are private increment reviews, not whole-product or
+native acceptance.
+
+Final lead gates at that exact head pass 16,637 non-integration tests, 49 explicit
+platform/capability skips and 29 fork warnings in 340.31 seconds, exit 0. The package-fingerprint
+comparison uses verified main `cea5e8523`. Ruff/format (1,323 files), strict mypy (1,287 sources),
+exact CI Typer isolation, file quality (475 Markdown and 448 spelling inputs), locked-SDD, Rulesync
+and whitespace pass. Website passes 160 Python cases in 54.659 seconds and 103 Node cases in 11.956
+seconds, four builds and both deterministic comparisons. Owned fixture roots are removed after
+terminal completion; operator databases are untouched. Only this private no-idle-stop-backed start
+leaf closes. Job-length availability, active output, remaining factories, full RunContext and native
+acceptance remain required. Public testing head `dd10ebbee` stays fixed while complete native
+reports are awaited, with no new public fix round; round 1 of 3 remains open.
+
+The separate combined SSH hosted run `37583088687` fails a shared Windows success fixture at
+`test_managed_operation_run.py:110`, with start custody retained unexpectedly. Its shared fixture
+and start/run source match transport `dd10ebbee`; the trace does not establish a unique cause. Two
+controlled probes against that exact transport source show that freezing local monotonic time lets
+the unchanged success/renewal fixture pass, while expiry after the real possible-dispatch mark
+produces retained NOT_SENT/DEADLINE custody with zero delivery. Test-only candidate `907ca2343`
+removes that success fixture's host-throughput coupling without changing production deadlines,
+custody assertions, real SQLite, real threads or bounded Event handshakes. All three independent
+lanes clear the complete three-line correction. Project passes 125 affected/adjacent cases and an
+independent reservation-latency probe beyond the original two-second budget. Generic correctness
+passes 178 affected/adjacent cases plus three sensitivity probes: removing acknowledgement or the
+renewal handshake still fails the corrected fixture. Complexity independently verifies that frozen
+monotonic time leaves Event waits bounded by real time and selects the existing three-line pattern
+without another clock framework. Integrated gates remain pending. This does not identify the hosted
+failure's unique cause or supply a green combined hosted run.
 
 The lead's read-only completion inventory at `ed3603c23` confirms that this next foreground unit is
 not the rest of the execution surface. Required work still includes unified independent launch and
