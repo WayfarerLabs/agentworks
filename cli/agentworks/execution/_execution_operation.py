@@ -125,7 +125,7 @@ class UnfinishedInlineExecution:
 
 
 class ExecutionOperation:
-    """Run serial inline and managed read candidates under one lifetime row."""
+    """Share one lifetime row for serial inline, managed read and stop helpers."""
 
     def __init__(
         self,
