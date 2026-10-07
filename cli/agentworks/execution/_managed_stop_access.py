@@ -100,8 +100,15 @@ def stop_bound_managed_run(
 
     payload = encode_managed_stop_obligation(record.identity.run_id)
     borrow = owner.borrow()
-    operation = BorrowedFixedHelperCarrier(carrier, borrow)
-    custody = ManagedActionCustody(borrow, operation)
+    try:
+        operation = BorrowedFixedHelperCarrier(carrier, borrow)
+        custody = ManagedActionCustody(borrow, operation)
+    except BaseException as control:
+        try:
+            borrow.close()
+        except BaseException:
+            raise control from control.__cause__
+        raise
     candidate: ManagedStopCandidate | None = None
     try:
         custody.register(

@@ -84,14 +84,18 @@ nonce-bound response. The controller rechecks that account shell before applicat
 private start kernel accepts pre-reservation carrier preparation. `_managed_job_access.py` privately
 composes a supplied exact-VM target, workload and root identity plans, finite request, carrier
 preflight, reservation and owned start. `USER_DEFAULT` first observes the workload account shell
-under a borrow; unresolved or uncertain observation creates no run row. This is not a production
-caller or job API. The caller must still hold the selected route and revalidate the provider locator
-and current target before launch. The guest helper independently rereads its fixed identity paths
-and refuses a mismatch before opening the store. Once a reservation succeeds, a later refusal may
-retain its `RESERVED` row as a one-shot tombstone. The caller keeps the supplied run ID, inspects it
-after any escaping failure, and never retries start with that ID. A still-armed or uncertain
-obligation keeps owner custody. Recovery, later job actions, native SSH/QGA proof and RunContext
-delivery remain open.
+under a borrow; unresolved or uncertain observation creates no run row. Independent shell lookup,
+observation, stop and disposal close an unused borrow if helper-wrapper or action-custody setup
+fails before registration or delivery. The original exception and cause escape unchanged. If that
+local close also fails, the exact borrow remains on its operation owner for explicit cleanup; no
+helper effect or automatic recovery is claimed. This is not a production caller or job API. The
+caller must still hold the selected route and revalidate the provider locator and current target
+before launch. The guest helper independently rereads its fixed identity paths and refuses a
+mismatch before opening the store. Once a reservation succeeds, a later refusal may retain its
+`RESERVED` row as a one-shot tombstone. The caller keeps the supplied run ID, inspects it after any
+escaping failure, and never retries start with that ID. A still-armed or uncertain obligation keeps
+owner custody. Recovery, later job actions, native SSH/QGA proof and RunContext delivery remain
+open.
 
 `models.py` defines immutable literal commands and scripts with explicit `Shell.SH`, `Shell.BASH` or
 `Shell.USER_DEFAULT` selection and separate startup flags. It also defines finite `Input`, bounded

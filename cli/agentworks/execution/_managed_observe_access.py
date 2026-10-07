@@ -241,7 +241,14 @@ def _bound_exchange(
         return record, managed_candidate, outcome
 
     borrow = owner.borrow()
-    operation = BorrowedFixedHelperCarrier(carrier, borrow)
+    try:
+        operation = BorrowedFixedHelperCarrier(carrier, borrow)
+    except BaseException as control:
+        try:
+            borrow.close()
+        except BaseException:
+            raise control from control.__cause__
+        raise
     candidate: ManagedObservationCandidate | None = None
     try:
         if stream is None:

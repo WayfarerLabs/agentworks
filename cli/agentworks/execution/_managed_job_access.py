@@ -148,7 +148,14 @@ def start_bound_managed_job(
                 spec=provisional_spec,
             )
             borrow = owner.borrow()
-            operation = BorrowedFixedHelperCarrier(carrier, borrow)
+            try:
+                operation = BorrowedFixedHelperCarrier(carrier, borrow)
+            except BaseException as control:
+                try:
+                    borrow.close()
+                except BaseException:
+                    raise control from control.__cause__
+                raise
             result: WorkloadShellObservationResult | None = None
             try:
                 result = observe_workload_shell(
