@@ -198,7 +198,7 @@ def test_aws_locator_rejects_a_late_provider_result(monkeypatch: pytest.MonkeyPa
     def remaining(_deadline: Deadline, *, vm_name: str) -> float:
         nonlocal calls
         calls += 1
-        if calls == 2:
+        if calls == 4:
             raise LimitExceededError("expired", entity_kind="vm", entity_name=vm_name)
         return 1
 
@@ -340,7 +340,7 @@ def test_azure_locator_rejects_a_late_provider_result(monkeypatch: pytest.Monkey
     def remaining(_deadline: Deadline, *, vm_name: str) -> float:
         nonlocal calls
         calls += 1
-        if calls == 2:
+        if calls == 3:
             raise LimitExceededError("expired", entity_kind="vm", entity_name=vm_name)
         return 1
 
@@ -516,7 +516,7 @@ def test_gcp_locator_rejects_a_late_provider_result(monkeypatch: pytest.MonkeyPa
     def remaining(_deadline: Deadline, *, vm_name: str) -> float:
         nonlocal calls
         calls += 1
-        if calls == 2:
+        if calls == 3:
             raise LimitExceededError("expired", entity_kind="vm", entity_name=vm_name)
         return 1
 

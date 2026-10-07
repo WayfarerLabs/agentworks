@@ -14,6 +14,7 @@ from agentworks.capabilities.vm_platform.base import (
     ProvisionRequest,
     ProvisionResult,
     VMPlatform,
+    execution_power_remaining,
     provider_locator_remaining,
 )
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
@@ -811,8 +812,53 @@ class AzureVMPlatform(VMPlatform):
         """Read the persisted ARM resource once and require its exact identity."""
         resource_id = _resource_id(vm)
         resource_group, vm_name, config = _parse_locator_resource_id(resource_id, vm_name=vm.name)
-        remaining = provider_locator_remaining(deadline, vm_name=vm.name)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        self._read_exact_vm(vm, ctx, resource_id, (resource_group, vm_name, config), deadline=deadline)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        return ProviderLocator(f"azure-vm:{resource_id}")
+
+    def observe_execution_power(
+        self, vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody: LocalDeliveryCustody
+    ) -> VMStatus:
+        """Read ARM identity and instance-view power in one passive bounded request."""
+        resource_id = _resource_id(vm)
+        identity = _parse_locator_resource_id(resource_id, vm_name=vm.name)
+        execution_power_remaining(deadline, vm_name=vm.name)
+        observed = self._read_exact_vm(vm, ctx, resource_id, identity, deadline=deadline, expand="instanceView")
+        execution_power_remaining(deadline, vm_name=vm.name)
+        statuses = getattr(getattr(observed, "instance_view", None), "statuses", None)
+        if not isinstance(statuses, list):
+            return VMStatus.UNKNOWN
+        power_codes = []
+        for status in statuses:
+            code = getattr(status, "code", None)
+            if type(code) is not str:
+                return VMStatus.UNKNOWN
+            if code.startswith("PowerState/"):
+                power_codes.append(code)
+        if len(power_codes) != 1:
+            return VMStatus.UNKNOWN
+        return {
+            "PowerState/running": VMStatus.RUNNING,
+            "PowerState/stopped": VMStatus.STOPPED,
+            "PowerState/deallocated": VMStatus.DEALLOCATED,
+        }.get(power_codes[0], VMStatus.UNKNOWN)
+
+    def _read_exact_vm(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        resource_id: str,
+        identity: tuple[str, str, _MinimalAzureConfig],
+        *,
+        deadline: Deadline,
+        expand: str | None = None,
+    ) -> Any:
+        """Read the persisted ARM resource and reject a different returned identity."""
+        resource_group, vm_name, config = identity
         compute = self._compute_client(config, ctx)
+        options = {} if expand is None else {"expand": expand}
+        remaining = provider_locator_remaining(deadline, vm_name=vm.name)
         try:
             observed = compute.virtual_machines.get(
                 resource_group,
@@ -824,6 +870,7 @@ class AzureVMPlatform(VMPlatform):
                 retry_connect=0,
                 retry_read=0,
                 retry_status=0,
+                **options,
             )
         except Exception as exc:
             from azure.core.exceptions import ResourceNotFoundError
@@ -843,8 +890,7 @@ class AzureVMPlatform(VMPlatform):
                 entity_name=vm.name,
                 hint="do not target the same-name Azure VM; restore the persisted resource identity before retrying",
             )
-        provider_locator_remaining(deadline, vm_name=vm.name)
-        return ProviderLocator(f"azure-vm:{observed_id}")
+        return observed
 
     def native_transport(
         self,
