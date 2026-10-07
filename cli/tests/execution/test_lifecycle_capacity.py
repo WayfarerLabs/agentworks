@@ -31,7 +31,15 @@ def test_300_completed_managed_runs_keep_only_current_debt(view, framed_stream_r
     _status(monkeypatch, 0)
     # Capacity counts complete custody cycles independently of host throughput.
     monkeypatch.setattr(time, "monotonic", lambda: 100.0)
-    retained = []
+    retained: list[str] = []
+    response = main.observe.response
+
+    def bounded_response(request):
+        # Missing terminal proof must fail instead of polling a frozen clock.
+        assert main.observe.calls <= 4 * (len(retained) + 1), "Capacity cycle exceeded four observations"
+        return response(request)
+
+    monkeypatch.setattr(main.observe, "response", bounded_response)
     for _ in range(300):
         result = access.run(Command(["/bin/true"]), profile=Protection.MANAGED, output=Output.discard())
         assert result.ok and result.job is not None
