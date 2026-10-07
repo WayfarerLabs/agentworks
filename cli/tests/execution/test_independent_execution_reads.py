@@ -337,14 +337,12 @@ def test_context_mismatch_refuses_before_managed_lookup(observer, mismatch):
     assert main.observe.calls == 0
 
 
-def test_resource_binding_does_not_grant_mutating_preflight_or_expired_wait_fallback(observer):
-    _, repository, operation, access, main, _ = observer
+def test_resource_binding_keeps_strict_operation_preflight_and_expired_wait_refusal(observer):
+    _, repository, operation, _, main, _ = observer
     with pytest.raises(ValidationError):
         preflight_bound_run(repository, RUN, **options(observer))
     with pytest.raises(ManagedDeadlineExpired):
         operation.wait_job(JobRef(RUN.run_id), main, Deadline.after(0))
-    with pytest.raises(ValidationError):
-        access.dispose(JobRef(RUN.run_id))
     assert main.observe.calls == main.stop.calls == main.dispose.calls == 0
 
 

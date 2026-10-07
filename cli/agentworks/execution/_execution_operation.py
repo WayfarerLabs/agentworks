@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from threading import Lock
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -22,10 +22,11 @@ from agentworks.execution._managed_disposal_access import (
     MANAGED_DISPOSAL_OBLIGATION_KIND,
     MANAGED_DISPOSAL_PAYLOAD_VERSION,
     ManagedDisposalControlFact,
+    ManagedDisposalOutcome,
     dispose_bound_managed_run,
     encode_managed_disposal_obligation,
 )
-from agentworks.execution._managed_disposal_exchange import DisposalState
+from agentworks.execution._managed_disposal_exchange import DisposalCandidate, DisposalState
 from agentworks.execution._managed_job_access import (
     ManagedJobShellFact,
     ManagedJobShellRefusal,
@@ -47,6 +48,12 @@ from agentworks.execution._managed_observe_access import (
 )
 from agentworks.execution._managed_operation_run import ManagedOperationRun
 from agentworks.execution._managed_request_adapter import compose_managed_body
+from agentworks.execution._managed_resource_disposal import (
+    ManagedDisposalBinding,
+    capture_disposal_call,
+    dispose_resource_job,
+    settle_unused_disposal_call,
+)
 from agentworks.execution._managed_resource_stop import stop_resource_job
 from agentworks.execution._managed_result import ManagedResultOutcome, wait_bound_managed_result
 from agentworks.execution._managed_runs import (
@@ -142,10 +149,13 @@ class _ActiveHelperCall:
         InlineCandidateResult
         | ManagedObservationCandidate
         | ManagedStopCandidate
+        | DisposalCandidate
         | WorkloadShellObservationResult
         | None
     ) = None
     outcome: OwnedInlineOutcome | None = None
+    disposal: ManagedDisposalBinding | None = None
+    tracking_key: object = field(default_factory=object)
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -156,7 +166,7 @@ class UnfinishedInlineExecution:
 
 
 class ExecutionOperation:
-    """Share one lifetime row for serial inline, managed read and stop helpers."""
+    """Own serial helper custody, sharing a lifetime row except for disposal actions."""
 
     def __init__(
         self,
@@ -193,7 +203,7 @@ class ExecutionOperation:
         self._resource_owner = resource_owner
         self._wsl2_route = wsl2_route
         self._managed_runs: list[ManagedOperationRun] = []
-        self._active_inline_calls: dict[int, _ActiveHelperCall] = {}
+        self._active_inline_calls: dict[object, _ActiveHelperCall] = {}
         self._unfinished_inline_executions: list[UnfinishedInlineExecution] = []
         self._admission_guard = Lock()
         self._finishing = False
@@ -616,6 +626,10 @@ class ExecutionOperation:
 
     def dispose_job(self, reference: JobRef, carrier: Carrier, deadline: Deadline) -> JobDisposal:
         """Observe terminal proof before draining, then dispose with exact retry custody."""
+        if type(reference) is JobRef and not any(
+            run.receipt.identity.run_id == reference.run_id for run in self._managed_runs
+        ):
+            return dispose_resource_job(self, reference, carrier, deadline)
         run = self._control_run(reference, deadline)
         if run.disposal_confirmed:
             return JobDisposal(reference, True)
@@ -893,43 +907,23 @@ class ExecutionOperation:
 
     def _retry_bookkeeping(self, *, finishing: bool) -> None:
         for active in tuple(self._active_inline_calls.values()):
-            if not active.bookkeeping_retained:
-                raise StateError("Inline execution still has an active call")
-            operation = active.operation
-            candidate = active.candidate
-            if candidate is not None and self._known_termination(candidate):
-                # The recorded candidate proves termination independently of
-                # whether the exact local settlement returned successfully.
-                if not active.borrow.has_outstanding_attempt:
-                    operation.outstanding_attempt = None
+            self._settle_retained_helper(active)
+            if active.disposal is not None:
+                if active.candidate is None:
+                    settle_unused_disposal_call(self, active)
                 else:
-                    operation.settle(candidate.dispatch, candidate.carrier_completion)
-                operation.coordination_uncertain = False
-            elif not operation.pending_remote_effects and operation.outstanding_attempt is None:
-                # begin_attempt can lose its reply before the wrapper receives
-                # permission. The actual carrier was never entered in this case.
-                with self._owner._guard:  # noqa: SLF001
-                    self._owner._reconcile_transition_locked()  # noqa: SLF001
-                    borrower = self._owner._active_borrow  # noqa: SLF001
-                    if borrower is not active.borrow and (borrower is not None or not active.borrow._closed):  # noqa: SLF001
-                        raise StateError("Inline call no longer owns its admission borrow")
-                    attempt = self._owner._outstanding_attempt  # noqa: SLF001
-                    if attempt is not None and (
-                        not isinstance(attempt, OperationAttempt) or attempt._borrow is not active.borrow  # noqa: SLF001
-                    ):
-                        raise StateError("Inline call no longer owns its admission attempt")
-                if attempt is not None:
-                    attempt.settle()
-                operation.coordination_uncertain = False
-            elif operation.requires_owner_retention:
-                raise StateError("Inline execution retains unknown helper custody")
+                    self._capture(active, OwnedInlineOutcome())
+                if active.tracking_key in self._active_inline_calls:
+                    raise StateError("Managed disposal retains unresolved action custody")
+                continue
+            operation = active.operation
             if not active.armed:
                 if finishing:
                     if not active.installed and not self._borrow_closed(active):
                         self._recover_registration(active)
                     if not self._borrow_closed(active):
                         active.borrow.close()
-                    self._active_inline_calls.pop(id(active))
+                    self._active_inline_calls.pop(active.tracking_key)
                     continue
                 self._admit(active)
             outcome = OwnedInlineOutcome(
@@ -939,6 +933,36 @@ class ExecutionOperation:
             )
             self._capture(active, outcome)
 
+    def _settle_retained_helper(self, active: _ActiveHelperCall) -> None:
+        """Reconcile this actual helper's local custody without any delivery."""
+        if not active.bookkeeping_retained:
+            raise StateError("Inline execution still has an active call")
+        operation = active.operation
+        candidate = active.candidate
+        if candidate is not None and self._known_termination(candidate):
+            if not active.borrow.has_outstanding_attempt:
+                operation.outstanding_attempt = None
+            else:
+                operation.settle(candidate.dispatch, candidate.carrier_completion)
+            operation.coordination_uncertain = False
+        elif not operation.pending_remote_effects and operation.outstanding_attempt is None:
+            # A lost begin reply precedes entry into the actual carrier.
+            with self._owner._guard:  # noqa: SLF001
+                self._owner._reconcile_transition_locked()  # noqa: SLF001
+                borrower = self._owner._active_borrow  # noqa: SLF001
+                if borrower is not active.borrow and (borrower is not None or not active.borrow._closed):  # noqa: SLF001
+                    raise StateError("Inline call no longer owns its admission borrow")
+                attempt = self._owner._outstanding_attempt  # noqa: SLF001
+                if attempt is not None and (
+                    not isinstance(attempt, OperationAttempt) or attempt._borrow is not active.borrow  # noqa: SLF001
+                ):
+                    raise StateError("Inline call no longer owns its admission attempt")
+            if attempt is not None:
+                attempt.settle()
+            operation.coordination_uncertain = False
+        elif operation.requires_owner_retention:
+            raise StateError("Inline execution retains unknown helper custody")
+
     def _recover_registration(self, active: _ActiveHelperCall) -> None:
         """Read an interrupted, never-dispatched registration during finish."""
         owner = self._owner
@@ -947,16 +971,19 @@ class ExecutionOperation:
             owner._reconcile_transition_locked()  # noqa: SLF001
             if owner._active_borrow is not borrow or borrow._attempt_started:  # noqa: SLF001
                 raise StateError("Inline registration no longer owns its unused borrow")
-            assert self._dispatch_id is not None
-            row = owner._repository.inspect_lifecycle_obligation(owner.ownership, self._dispatch_id)  # noqa: SLF001
+            identity, kind, version, payload = self._helper_registration(active)
+            row = owner._repository.inspect_lifecycle_obligation(owner.ownership, identity)  # noqa: SLF001
             if row is None:
-                if self._dispatch_obligation is not None:
+                if active.installed or (active.disposal is None and self._dispatch_obligation is not None):
                     raise StateError("Inline lifetime obligation disappeared")
                 return
-            if (row.obligation_kind, row.payload_version, row.payload) != ("carrier-dispatch", 1, b""):
+            if (row.obligation_kind, row.payload_version, row.payload) != (kind, version, payload) or (
+                active.disposal is not None and row.payload_revision != 0
+            ):
                 raise StateError("Inline lifetime obligation identity conflicts")
             borrow._dispatch_obligation = row  # noqa: SLF001
-            self._dispatch_obligation = LifecycleObligation(owner, row)
+            if active.disposal is None:
+                self._dispatch_obligation = LifecycleObligation(owner, row)
             active.installed = True
 
     @staticmethod
@@ -964,6 +991,7 @@ class ExecutionOperation:
         candidate: InlineCandidateResult
         | ManagedObservationCandidate
         | ManagedStopCandidate
+        | DisposalCandidate
         | WorkloadShellObservationResult,
     ) -> bool:
         return candidate.dispatch is Dispatch.NOT_SENT or (
@@ -971,28 +999,49 @@ class ExecutionOperation:
         )
 
     def _admit(self, active: _ActiveHelperCall) -> None:
-        dispatch_id = self._dispatch_id
-        assert dispatch_id is not None
+        dispatch_id, kind, version, payload = self._helper_registration(active)
         if not active.installed:
-            self._dispatch_obligation = active.borrow.install_dispatch_obligation(
-                dispatch_id, "carrier-dispatch", payload_version=1, payload=b""
+            obligation = active.borrow.install_dispatch_obligation(
+                dispatch_id, kind, payload_version=version, payload=payload
             )
+            if active.disposal is None:
+                self._dispatch_obligation = obligation
             active.installed = True
         if not active.armed:
             active.borrow.arm_dispatch_obligation()
             active.armed = True
 
-    def _borrow_helper_call(self, carrier: Carrier, prepared: PreparedInlineCandidate | None) -> _ActiveHelperCall:
+    def _helper_registration(self, active: _ActiveHelperCall) -> tuple[str, str, int, bytes]:
+        if active.disposal is not None:
+            return active.disposal.registration
+        assert self._dispatch_id is not None
+        return self._dispatch_id, "carrier-dispatch", 1, b""
+
+    def _borrow_helper_call(
+        self,
+        carrier: Carrier,
+        prepared: PreparedInlineCandidate | None,
+        *,
+        disposal: ManagedDisposalBinding | None = None,
+        replacing: _ActiveHelperCall | None = None,
+    ) -> _ActiveHelperCall:
         """Borrow and publish one helper call while its admission guard is held."""
         borrow = self._owner.borrow()
+        active = None
         try:
             operation = BorrowedFixedHelperCarrier(carrier, borrow)
-            active = _ActiveHelperCall(carrier, borrow, prepared, operation)
-            if self._dispatch_id is None:
+            active = _ActiveHelperCall(carrier, borrow, prepared, operation, disposal=disposal)
+            if replacing is not None:
+                active.tracking_key = replacing.tracking_key
+            if disposal is None and self._dispatch_id is None:
                 self._dispatch_id = uuid4().hex
-            self._active_inline_calls[id(active)] = active
+            self._active_inline_calls[active.tracking_key] = active
             return active
         except BaseException as control:
+            # A mapping publication may commit before its reply is interrupted.
+            # Keep the actual replacement visible rather than restoring its predecessor.
+            if active is not None and self._active_inline_calls.get(active.tracking_key) is active:
+                active.bookkeeping_retained = True
             try:
                 borrow.close()
             except BaseException:
@@ -1084,9 +1133,13 @@ class ExecutionOperation:
                 retryable = (active.candidate is not None and self._known_termination(active.candidate)) or (
                     operation.coordination_uncertain and not operation.pending_remote_effects
                 )
-                if _is_pre_registration_refusal(control) and not active.installed and not active.armed:
+                if active.disposal is not None:
+                    self._capture(active, outcome)
+                    assert active.outcome is not None
+                    outcome = active.outcome
+                elif _is_pre_registration_refusal(control) and not active.installed and not active.armed:
                     active.borrow.close()
-                    self._active_inline_calls.pop(id(active))
+                    self._active_inline_calls.pop(active.tracking_key)
                 elif active.armed and not retryable:
                     self._capture(active, outcome)
                 else:
@@ -1100,7 +1153,15 @@ class ExecutionOperation:
                     raise control from control.__cause__
             try:
                 fact: Exception = (
-                    ManagedObserveControlFact(
+                    ManagedDisposalControlFact(
+                        ManagedDisposalOutcome(
+                            pending_remote_effects=outcome.pending_remote_effects,
+                            coordination_uncertain=outcome.coordination_uncertain,
+                            requires_owner_retention=outcome.requires_owner_retention,
+                        )
+                    )
+                    if active.disposal is not None
+                    else ManagedObserveControlFact(
                         ManagedObserveOutcome(
                             pending_remote_effects=outcome.pending_remote_effects,
                             coordination_uncertain=outcome.coordination_uncertain,
@@ -1116,6 +1177,9 @@ class ExecutionOperation:
         raise control from fact
 
     def _capture(self, active: _ActiveHelperCall, outcome: OwnedInlineOutcome) -> None:
+        if active.disposal is not None:
+            capture_disposal_call(self, active, outcome)
+            return
         active.outcome = outcome
         # Both handoffs are local core transitions. A reply can be lost after
         # the borrow relinquishes authority, so observe that exact local fact
@@ -1124,7 +1188,7 @@ class ExecutionOperation:
             release_borrow_after_custody(active.borrow, retain_effect=True)
         if outcome.requires_owner_retention:
             self._unfinished_inline_executions.append(UnfinishedInlineExecution(replace(outcome, candidate=None)))
-        self._active_inline_calls.pop(id(active))
+        self._active_inline_calls.pop(active.tracking_key)
 
     def _borrow_closed(self, active: _ActiveHelperCall) -> bool:
         with self._owner._guard:  # noqa: SLF001

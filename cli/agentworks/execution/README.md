@@ -183,13 +183,22 @@ file or other component's borrow refuses before drain or dispatch. Accepted inte
 proved termination; RESOURCE stop requires a fresh exact observation for closure and shares its
 original finite deadline. Its settled helpers reuse the same empty-payload lifetime row, while
 unknown helper custody blocks new work and observer finish. Observer finish never stops or cleans
-the independent job. Disposal observes terminal proof before draining; active or unproved work stays
-not ready without stopping it. Uncertain stop or disposal remains distinct from a proved refusal.
-RESOURCE closure requires a reconciled reservation, authentic launch, both stream ends, positive
-boundary-empty and positive exact controller termination under a settled helper. A missing WAIT
-preserves UNKNOWN application precision without blocking proved resource closure; live or unknown
-controller state can still be polled within the original deadline. No RESOURCE terminal observation
-is cached on an owned run. These private reads do not establish independent launch or disposal,
+the independent job. OPERATION disposal observes terminal proof before draining; active or unproved
+work stays not ready without stopping it. RESOURCE disposal likewise requires fresh positive exact
+terminal proof before its first effect, but never owns a keeper or adopts the job. It uses a
+dedicated run-ID-only `managed-dispose` obligation in the same actual helper tracker. A pending
+disposal retains its exact receipt and positive terminal observation for later explicitly requested
+retries, including after guest artifacts have disappeared. Helper termination is not disposal
+settlement: only a known no-delivery result or a clean validated NOT_READY/DISPOSED response can
+resolve the action. A retry's no-delivery result cannot erase an earlier unresolved remote action.
+Uncertain stop or disposal remains distinct from a proved refusal. Unknown helper custody blocks
+ordinary admission and finish; bookkeeping retries and finish never dispatch disposal. A resolved
+prior action receipt permits a fresh attempt ID, not rearming or an inference that disposal
+succeeded. RESOURCE closure requires a reconciled reservation, authentic launch, both stream ends,
+positive boundary-empty and positive exact controller termination under a settled helper. A missing
+WAIT preserves UNKNOWN application precision without blocking proved resource closure; live or
+unknown controller state can still be polled within the original deadline. No RESOURCE terminal
+observation is cached on an owned run. These private controls do not establish independent launch,
 duration availability, session namespaces or a public RunContext surface.
 
 `ExecutionOperation` requires an explicit managed target matching its owner's scope. An optional
