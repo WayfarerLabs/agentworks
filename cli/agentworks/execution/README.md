@@ -896,8 +896,11 @@ operation retains positive terminal observations before disposal can remove thei
 Confirmed disposal supplies publication closure, so later aggregate cleanup neither stops that
 disposed run nor rereads deleted launch facts. A lost disposal response preserves exact terminal
 proof and helper debt; an exact receipt retry still requires separately proved helper termination.
-The raw candidate remains internal evidence even when policy admission fails; it must not be
-forwarded as a caller-facing output view. Missing or conflicting evidence stays unaccepted.
+Retry inspects the existing exact lifecycle row: only confirmed resolution permits a fresh ID, while
+unknown debt retains its original ID. Retained terminal proof permits receipt-based retry even when
+interruption preceded local bookkeeping and the artifacts are already deleted. The raw candidate
+remains internal evidence even when policy admission fails; it must not be forwarded as a
+caller-facing output view. Missing or conflicting evidence stays unaccepted.
 
 A separate private observe-and-reconcile action uses one complete, validated observation's exact
 launch receipt to reconcile a `POSSIBLE_DISPATCH` row idempotently. It records historical launch

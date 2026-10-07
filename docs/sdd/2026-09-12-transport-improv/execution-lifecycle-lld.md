@@ -198,7 +198,11 @@ existing exact fenced disposal protocol. Confirmed disposal supplies permanent p
 aggregate cleanup must then use retained closure evidence rather than stop or reread deleted launch
 facts. A lost disposal response retains the same terminal evidence and temporary helper debt. Only
 separately proved helper termination permits an exact receipt-based retry; no new launch observation
-is required after artifacts may have been deleted. Neither successful disposal nor retained evidence
+is required after artifacts may have been deleted. Before retry, reconcile the exact current
+disposal row under current ownership. A matching RESOLVED row uses a fresh attempt ID, even if
+interruption prevented local completion bookkeeping. Retained terminal proof permits receipt-based
+retry without rereading deleted artifacts. Missing or unresolved rows are not settlement evidence
+and retain the existing ID and helper gates. Neither successful disposal nor retained evidence
 clears original start or unrelated helper uncertainty.
 
 Explicit job control is ordinary work, not authority to enter aggregate teardown. Refuse stale

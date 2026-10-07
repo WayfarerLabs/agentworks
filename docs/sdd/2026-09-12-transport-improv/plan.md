@@ -2994,6 +2994,16 @@ aggregate ownership. The lead accepts publishing the fresh ID before making the 
 eligible, with both interruption paths and aggregate cleanup covered. This surviving correction
 keeps both bounded leaves open despite green suites; no public handoff follows.
 
+The worker identified the earlier interruption window before fresh-ID publication, after the old
+helper has already settled and resolved its row. Ordering alone cannot reconcile that window. The
+lead authorizes one concrete read of the existing bounded lifecycle ledger on explicit retry: only
+the exact expected disposal row confirmed RESOLVED under current ownership may rotate to a fresh
+attempt ID. Preserve terminal proof and receipt-based retry without rereading deleted launch
+artifacts; missing or unresolved rows preserve the existing ID and helper-termination gates. No
+schema, repository API, new flag or recovery framework is needed. Cover interrupted refusal and
+success before publication as well as unknown-helper debt. This is in-scope retry of a known-settled
+attempt, not replay of an unknown effect.
+
 - [ ] Preserve exact signal termination evidence in the managed supervisor when child entry is
       proved and `waitpid` returns a signaled status. The existing producer currently publishes a
       wait fact only for an ordinary exit, so the private signaled case establishes resource closure
