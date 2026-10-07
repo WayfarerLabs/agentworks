@@ -3038,7 +3038,7 @@ full platform/target and RunContext composition, hosted validation of the new wo
 native acceptance remain open. No ready or review-requested edge, public loop closeout or merge
 intent follows.
 
-- [ ] Compose private foreground MANAGED/OPERATION execution from the same managed launch and wait
+- [x] Compose private foreground MANAGED/OPERATION execution from the same managed launch and wait
       implementation. Validate flags before launch, use one finite budget across both phases, and
       preserve the acknowledged safe reference when launch consumes that budget. Timeout or loss of
       observation must neither stop/drain/dispose the job nor replay start or release its owner.
@@ -3071,6 +3071,17 @@ corrected complete pin still requires all three re-reviews and final gates befor
 leaf closes; production capacity, full target/RunContext composition and native acceptance are not
 established here.
 
+All three complete-unit re-reviews clear corrected `0a8ceaf6c` against `ebc8eedd4`, with 146
+affected/neighbor cases in each lane. Both findings are taken: separate launch and application-entry
+acknowledgments, and tag results only at the access boundary. The final lead Linux Python 3.12 suite
+at that pin passes 16,205 tests, 50 skips and 29 warnings in 279.63 seconds, exit 0. Frozen sync,
+Ruff/check-format (1,308 files), full mypy (1,272 sources), Typer isolation, file quality,
+locked-SDD, Rulesync and whitespace checks pass. Website gates pass 160 Python and 103 Node tests,
+four builds and both deterministic comparisons. Exact owned temporary pytest/site fixtures are
+removed after terminal runs. This completes only the private foreground leaf; it does not complete
+production capacity, remaining execution features, full RunContext, hosted validation of the new
+working head or native acceptance. No new public handoff edge follows.
+
 - [ ] Audit cumulative managed-run and lifecycle-ledger bounds before public composition. Both
       lifecycle INSERT paths count all rows for the operation, including resolved rows, against the
       unchanged 128-row bound (`db/operations.py`). Settled polling now reuses one row, but repeated
@@ -3079,6 +3090,17 @@ established here.
       stranding ownership or silently bypassing bounded recovery. Resolve this with the existing
       owned lifecycle, not a per-call synthetic owner or a relaxed polling bound. The private
       foreground checkpoint does not establish those production capacity guarantees.
+
+The delegated capacity probe uses actual SQLite and controlled framed carriers, not live systemd.
+Forty-two completed MANAGED run/wait/dispose/cleanup cycles succeed under one owner; the forty-third
+start reaches the 128-row limit before workload delivery. One preceding resolved file call moves
+that refusal to keeper registration, leaving admission uncertain and aggregate close blocked even
+after all persisted rows resolve. Separately, 128 clean NOT_SENT file-stat admissions exhaust the
+limit and the next call retains its attached call/borrow. A DIRECT inline control completes 160
+admissions using one lifetime row. Four probe cases and three serial-package neighbors pass; keepers
+and owned scratch are cleaned. The proposed core unfinished-debt bound plus immutable completed
+receipts is under design review, not implemented. It must account for exact retry lookup, bounded
+recovery enumeration and query cost; merely changing the INSERT count is insufficient.
 
 The lead's read-only completion inventory at `ed3603c23` confirms that this next foreground unit is
 not the rest of the execution surface. Required work still includes unified independent launch and
