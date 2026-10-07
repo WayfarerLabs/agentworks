@@ -136,7 +136,11 @@ elevation, invalid values and initially expired deadlines refuse before workload
 performs one preparation and dispatch attempt, then uses the contextual result reducer. It is not
 exported from the package root, placed in an `ExecutionTarget`, or supplied through RunContext. Its
 private `start(...)` now accepts explicit MANAGED protection and OPERATION lifetime for finite
-commands or explicitly selected scripts, including optional elevation. It returns an immutable,
+commands or scripts with SH, BASH or USER_DEFAULT selection, including optional elevation.
+USER_DEFAULT freezes and validates the finite body before observing the selected workload account's
+supported shell through the operation's tracked helper lifetime. The resolved path is persisted
+before reservation; refused or unsettled lookup never creates a run. Lookup shares the launch and
+wait budget, and selected-route checks precede lookup and launch. It returns an immutable,
 credential-free `JobRef` only after exact clean launch acknowledgement. Other modes refuse before
 managed reservation. Ordinary uncertain starts raise `StateError` with a safe run-reference cause;
 escaping control exceptions preserve their identity. Its private `observe`, selected-stream

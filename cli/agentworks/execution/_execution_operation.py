@@ -26,7 +26,11 @@ from agentworks.execution._managed_disposal_access import (
     encode_managed_disposal_obligation,
 )
 from agentworks.execution._managed_disposal_exchange import DisposalState
-from agentworks.execution._managed_job_access import _explicit_managed_shell
+from agentworks.execution._managed_job_access import (
+    ManagedJobShellFact,
+    ManagedJobShellRefusal,
+    _explicit_managed_shell,
+)
 from agentworks.execution._managed_job_protocol import encode_managed_job_fact
 from agentworks.execution._managed_observation_exchange import (
     ManagedObservationCandidate,
@@ -53,15 +57,22 @@ from agentworks.execution._managed_runs import (
     ManagedRunReceipt,
     ManagedRunRepository,
     ManagedRunSpec,
+    ManagedShellIdentity,
     ManagedTargetIdentity,
     ManagedTargetKind,
 )
 from agentworks.execution._managed_stop_access import ManagedStopOutcome
 from agentworks.execution._managed_stop_exchange import ManagedStopCandidate, ManagedStopState, stop_managed_run
+from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution._vm_guest_identity_protocol import vm_guest_boot_id
+from agentworks.execution._workload_shell import (
+    WorkloadShellObservationResult,
+    WorkloadShellObservationState,
+    observe_workload_shell,
+)
 from agentworks.execution.carrier import Dispatch, ExitStatus, Retention
 from agentworks.execution.jobs import JobDisposal, JobStop
-from agentworks.execution.models import JobRef
+from agentworks.execution.models import JobRef, Script, Shell
 from agentworks.execution.result import ApplicationState, ExecutionFailure, ExecutionOutput, ExecutionResult
 from agentworks.operations import (
     LifecycleObligation,
@@ -80,7 +91,7 @@ if TYPE_CHECKING:
     from agentworks.execution._wsl2_owned_operation import WSL2OwnedOperation
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Carrier, Deadline
-    from agentworks.execution.models import Command, Input, Output, Script
+    from agentworks.execution.models import Command, Input, Output
     from agentworks.operations import OperationBorrow, OperationOwner
 
 
@@ -126,7 +137,13 @@ class _ActiveHelperCall:
     installed: bool = False
     armed: bool = False
     bookkeeping_retained: bool = False
-    candidate: InlineCandidateResult | ManagedObservationCandidate | ManagedStopCandidate | None = None
+    candidate: (
+        InlineCandidateResult
+        | ManagedObservationCandidate
+        | ManagedStopCandidate
+        | WorkloadShellObservationResult
+        | None
+    ) = None
     outcome: OwnedInlineOutcome | None = None
 
 
@@ -642,7 +659,7 @@ class ExecutionOperation:
         """Freeze a body, retain its run, then reserve and start exactly once."""
         with self._admission_guard:
             binding, repository, bootstrap = self._native_binding, self._managed_repository, self._bootstrap
-            if self._finishing or self._finished:
+            if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
                 raise StateError("Execution operation is closing")
             with self._owner._guard:  # noqa: SLF001
                 self._owner._require_dispatch_admission_locked()  # noqa: SLF001
@@ -651,10 +668,16 @@ class ExecutionOperation:
             if carrier is not binding.carrier or runtime_selection != binding.runtime_selection:
                 raise ValidationError("Managed start requires the selected native binding")
             identity = ManagedRunIdentity(uuid4().hex)
+            user_default = isinstance(invocation, Script) and invocation.shell is Shell.USER_DEFAULT
+            shell = (
+                ManagedShellIdentity(Shell.USER_DEFAULT, "/bin/sh", invocation.login, invocation.interactive)
+                if user_default and isinstance(invocation, Script)
+                else _explicit_managed_shell(invocation)
+            )
             spec = ManagedRunSpec(
                 self._target,
                 _validate_plan(plan),
-                _explicit_managed_shell(invocation),
+                shell,
                 ManagedRunOwner(ManagedRunOwnerKind.OPERATION, self._owner.ownership.operation_id),
                 ManagedRunLifetime.OPERATION,
             )
@@ -668,6 +691,20 @@ class ExecutionOperation:
                 identity=identity,
                 spec=spec,
             )
+        if user_default:
+            resolved = self._observe_workload_shell(carrier, plan, runtime_selection, deadline)
+            spec = replace(spec, shell=replace(shell, resolved_executable=resolved))
+            # Rebind only the launch identity. Caller input was frozen before
+            # lookup and must not be read again after guest effects.
+            receipt = ManagedRunReceipt(identity, identity.unit_name, spec)
+            body = replace(body, request=replace(body.request, launch=encode_managed_job_fact(receipt)))
+        with self._admission_guard:
+            if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
+                raise StateError("Execution operation cannot admit a managed start")
+            with self._owner._guard:  # noqa: SLF001
+                self._owner._require_dispatch_admission_locked()  # noqa: SLF001
+            if deadline.expired:
+                raise ValidationError("Managed start deadline expired before reservation")
             receipt = ManagedRunReceipt(identity, "agw-managed-" + identity.run_id + ".service", spec)
             run = ManagedOperationRun(
                 repository,
@@ -698,6 +735,61 @@ class ExecutionOperation:
             if not run.acknowledged:
                 raise StateError("Managed start was not acknowledged") from ManagedExecutionControlFact(reference)
             return reference
+
+    def _observe_workload_shell(
+        self,
+        carrier: Carrier,
+        plan: IdentityPlan,
+        runtime_selection: RuntimeSelection,
+        deadline: Deadline,
+    ) -> str:
+        """Resolve the selected account through the tracked helper lifetime."""
+        with self._admission_guard:
+            if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
+                raise StateError("Execution operation cannot admit a shell lookup")
+            borrow = self._owner.borrow()
+            operation = BorrowedFixedHelperCarrier(carrier, borrow)
+            active = _ActiveHelperCall(carrier, borrow, None, operation)
+            if self._dispatch_id is None:
+                self._dispatch_id = uuid4().hex
+            self._active_inline_calls[id(active)] = active
+        try:
+            self._admit(active)
+            if self._wsl2_route is not None:
+                self._wsl2_route.require_selected_route(deadline)
+            result = observe_workload_shell(
+                operation, plan=plan, runtime_selection=runtime_selection, deadline=deadline
+            )
+            active.candidate = result
+            operation.settle(result.dispatch, result.carrier_completion)
+            custody = self._outcome(active, operation, deadline, include_candidate=False)
+        except BaseException as control:
+            self._raise_control(control, active, operation, deadline)
+        try:
+            with self._admission_guard:
+                self._capture(active, custody)
+        except BaseException as control:
+            self._raise_control(control, active, operation, deadline)
+        observed = result.observation
+        if (
+            result.dispatch is not Dispatch.SENT
+            or result.carrier_completion != ExitStatus(code=0)
+            or result.carrier_failure is not None
+            or result.runtime_prerequisite.state is not RuntimePrerequisiteState.READY
+            or observed is None
+            or observed.state is not WorkloadShellObservationState.RESOLVED
+            or observed.shell is None
+            or custody.requires_owner_retention
+        ):
+            raise ManagedJobShellRefusal(
+                ManagedJobShellFact(
+                    result,
+                    custody.pending_remote_effects,
+                    custody.coordination_uncertain,
+                    custody.requires_owner_retention,
+                )
+            )
+        return observed.shell
 
     @property
     def active_inline_calls(self) -> tuple[_ActiveHelperCall, ...]:
@@ -806,7 +898,10 @@ class ExecutionOperation:
 
     @staticmethod
     def _known_termination(
-        candidate: InlineCandidateResult | ManagedObservationCandidate | ManagedStopCandidate,
+        candidate: InlineCandidateResult
+        | ManagedObservationCandidate
+        | ManagedStopCandidate
+        | WorkloadShellObservationResult,
     ) -> bool:
         return candidate.dispatch is Dispatch.NOT_SENT or (
             candidate.dispatch is Dispatch.SENT and candidate.carrier_completion == ExitStatus(code=0)
@@ -911,6 +1006,9 @@ class ExecutionOperation:
             active.bookkeeping_retained = True
             try:
                 outcome = self._outcome(active, operation, deadline, include_candidate=False)
+            except BaseException:
+                raise control from control.__cause__
+            try:
                 retryable = (active.candidate is not None and self._known_termination(active.candidate)) or (
                     operation.coordination_uncertain and not operation.pending_remote_effects
                 )
@@ -922,6 +1020,10 @@ class ExecutionOperation:
                 else:
                     outcome = replace(outcome, coordination_uncertain=True, requires_owner_retention=True)
                     active.outcome = outcome
+            except BaseException:
+                outcome = replace(outcome, coordination_uncertain=True, requires_owner_retention=True)
+                active.outcome = outcome
+            try:
                 fact: Exception = (
                     ManagedObserveControlFact(
                         ManagedObserveOutcome(
@@ -935,7 +1037,7 @@ class ExecutionOperation:
                 )
                 fact.__cause__ = control.__cause__
             except BaseException:
-                raise control from None
+                raise control from control.__cause__
         raise control from fact
 
     def _capture(self, active: _ActiveHelperCall, outcome: OwnedInlineOutcome) -> None:

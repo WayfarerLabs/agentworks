@@ -745,7 +745,7 @@ def test_invalid_admission_has_no_reservation_or_clock(view, change):
     if change == "lifetime":
         args["lifetime"] = Lifetime.INDEPENDENT
     if change == "shell":
-        invocation = Script("true", Shell.USER_DEFAULT)
+        invocation = Script("true", Shell.USER_DEFAULT, interactive=True)
     if change == "body":
         args["env"] = {"BAD=NAME": "value"}
     if change == "unsupported":
