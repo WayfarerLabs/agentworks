@@ -404,7 +404,7 @@ def test_selected_route_refusal_fences_resource_helper_delivery(observer):
     route = Mock(spec=WSL2OwnedOperation)
     refusal = StateError("selected route changed")
     route.require_selected_route.side_effect = refusal
-    operation._wsl2_route = route
+    operation._route_check = route.require_selected_route
     with pytest.raises(StateError) as raised:
         access.observe(JobRef(RUN.run_id))
     assert raised.value is refusal

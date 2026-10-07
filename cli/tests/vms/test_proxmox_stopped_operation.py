@@ -22,6 +22,8 @@ from agentworks.execution.carriers.proxmox import _ProxmoxWire
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
 from agentworks.operations import OperationOwner
+from agentworks.plugins.proxmox import _native_access
+from agentworks.plugins.proxmox._native_access import ProxmoxOwnedNativePlatformAccess
 from agentworks.vms import _native_operation as native
 from agentworks.vms._native_operation import NativeVMOperation, NativeVMOperationControlFact, native_vm_operation
 from tests.vms.test_proxmox_native_operation import _install, _scope
@@ -188,10 +190,14 @@ def test_stopped_start_prepares_file_and_direct_body_under_same_owner(
     assert startup.events == ["start", "task", "task", "power", "info", "info", "guest"]
     assert all(value is deadline for value in startup.route.deadlines)
     assert startup.route.guest.calls == 1 and startup.route.local.calls == 3
-    assert startup.workflow is not None and startup.workflow.activation_observation is not None
-    assert startup.workflow.activation_observation.outcome is expected
-    assert startup.workflow.activation_observation.warning_count == (2 if expected is TaskOutcome.WARNINGS else None)
-    assert startup.workflow.activation_observation.request_settled
+    assert startup.workflow is not None
+    access = startup.workflow.access
+    assert isinstance(access, ProxmoxOwnedNativePlatformAccess) and access.activation is not None
+    terminal = access.activation._terminal
+    assert terminal is not None and terminal.outcome is expected
+    assert terminal.warning_count == (2 if expected is TaskOutcome.WARNINGS else None)
+    obligation = access.activation.obligation
+    assert obligation is not None and obligation.state is LifecycleObligationState.RESOLVED
     assert database.operations.inspect(_scope()) is None
     with pytest.raises(StateError):
         views.execution.run(Command(["/usr/bin/true"]), profile=Protection.DIRECT)
@@ -219,7 +225,8 @@ def test_uncertain_activation_never_prepares_or_replays(database, tmp_path, monk
     assert "untrusted provider text" not in str(caught.value)
     fact = caught.value.__cause__
     assert isinstance(fact, NativeVMOperationControlFact)
-    assert fact._workflow.activation is not None
+    assert isinstance(fact._workflow.access, ProxmoxOwnedNativePlatformAccess)
+    assert fact._workflow.access.activation is not None
     assert database.operations.inspect(_scope()) is not None
     assert startup.activation_row().state is LifecycleObligationState.POSSIBLE_EFFECT
     with pytest.raises(StateError):
@@ -364,7 +371,7 @@ def test_bad_guest_info_uses_only_passive_wait_until_deadline(database, tmp_path
     def expired(deadline):
         raise StateError("deadline expired")
 
-    monkeypatch.setattr(native, "_pause", expired)
+    monkeypatch.setattr(_native_access, "_pause", expired)
     with pytest.raises(StateError), startup.operation(tmp_path, Deadline.after(10)):
         pytest.fail("malformed info admitted helper")
     assert startup.events == ["start", "task", "power", "info"]

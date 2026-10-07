@@ -220,6 +220,13 @@ command hold; a physical recoverable job-length availability hold remains future
 stop/reboot and host loss are outside that no-idle-stop fact. These private increments do not
 establish all-platform duration availability, session namespaces or a public RunContext surface.
 
+The private native composition acquires the exact VM owner, then retains the passive
+`VMPlatform.build_native_execution_access()` result before preparation effects. Its
+`OwnedNativePlatformAccess` keeps platform activation, hold and partial preparation evidence; only
+core closes child work and local delivery, checks the complete ledger, seals obligations and
+releases the aggregate owner. WSL2 and Proxmox supply these private adapters. Other platforms and
+the public RunContext surface remain pending.
+
 `ExecutionOperation` requires an explicit managed target matching its owner's scope. An optional
 numeric bootstrap must match that VM's derived boot identity; platform-host targets cannot select
 it. The operation forwards its immutable context before preparation and borrowing, while each call
@@ -236,16 +243,19 @@ activation or preparation. Normal teardown leaves an activated VM running. Alrea
 activation and the new responsiveness wait. Both retain the same exact owner through preparation,
 file, DIRECT execution and private MANAGED OPERATION start, and aggregate cleanup. The same frozen
 native binding supplies a distinct passive WSL2 or Proxmox carrier for each managed keeper. WSL2
-rechecks the selected route at the armed start boundary; this is not broader provider-route or boot
-acceptance. Proxmox retains one selected QGA binding and checks its locator before and after target
-preparation. The bounded read-only account probe is not itself guest-fenced; account facts grant no
-body authority without the prepared full guest and numeric identity checks at each body helper.
-Per-dispatch provider-route freshness, complete availability, public RunContext composition and
-native acceptance remain unproved. The native operation module and shipped-plugin registration
-import without retired execution packages. Existing legacy operations import their dependencies only
-when invoked; this does not supply new cloud/Lima bindings or migrate provisioning. Identity
-preparation retains completed or partial account evidence and conservative custody on borrow-release
-failure, preserving original escaping control. No target or root identity is inferred as a fallback.
+binds its selected-route check as an optional `route_check` callable. Execution invokes it at the
+existing managed reads, stop/disposal, shell observation and armed start checkpoints. Absence binds
+no additional route check beyond shared preparation; it supplies no route-freshness evidence. This
+is not broader provider-route or boot acceptance. Proxmox retains one selected QGA binding and
+checks its locator before and after target preparation. The bounded read-only account probe is not
+itself guest-fenced; account facts grant no body authority without the prepared full guest and
+numeric identity checks at each body helper. Per-dispatch provider-route freshness, complete
+availability, public RunContext composition and native acceptance remain unproved. The native
+operation module and shipped-plugin registration import without retired execution packages. Existing
+legacy operations import their dependencies only when invoked; this does not supply new cloud/Lima
+bindings or migrate provisioning. Identity preparation retains completed or partial account evidence
+and conservative custody on borrow-release failure, preserving original escaping control. No target
+or root identity is inferred as a fallback.
 
 One shared `ExecutionOperation` keeps one lazily registered empty carrier-dispatch row for its
 lifetime, rather than consuming a row per clean command. Every call still uses a fresh serial

@@ -51,7 +51,9 @@ if TYPE_CHECKING:
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
     from agentworks.execution.carriers.proxmox import ProxmoxConnection
+    from agentworks.operations import OperationOwner
     from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
+    from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 
 def _warn_bootstrap_file_residue() -> None:
@@ -622,6 +624,19 @@ class ProxmoxPlatform(VMPlatform):
         locator = ProviderLocator("proxmox:v1:" + hashlib.sha256(framed).hexdigest())
         provider_locator_remaining(deadline, vm_name=vm.name)
         return locator
+
+    def build_native_execution_access(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
+    ) -> OwnedNativePlatformAccess:
+        """Construct passive access for core to retain before preparation effects."""
+        from agentworks.plugins.proxmox._native_access import ProxmoxOwnedNativePlatformAccess
+
+        return ProxmoxOwnedNativePlatformAccess(vm, self, ctx, owner, custody)
 
     def resolve_native_execution_binding(
         self,
