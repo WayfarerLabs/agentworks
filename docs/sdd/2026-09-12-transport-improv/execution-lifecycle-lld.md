@@ -1044,7 +1044,13 @@ Whole-operation resolution and release use unfinished-row existence checks; rese
 still refuses if any obligation exists, including a resolved receipt. A known never-dispatched
 registration refusal may relinquish its local admission only with current-owner absence evidence;
 interrupted replies, present/conflicting receipts and failed/stale observations retain original
-custody. Preserve control identity instead of converting cancellation into an ordinary refusal.
+custody. Preserve the original registration exception object and traceback, including ordinary
+errors as well as control flow. An internal typed immediate cause may carry proved-absent
+registration evidence for local cleanup, preserving the original explicit cause beneath it;
+consumers use one shared recognition rule rather than infer absence from error text. Cancellation
+does not become an ordinary refusal or receive invented no-registration evidence. Absence evidence
+belongs to one registration attempt. Reusing an exception object must not carry its previous absence
+marker into a later attempt that persisted or became uncertain.
 
 The bound is on unfinished debt and decoded recovery work, not total within-operation disk use or
 constant memory/close time for the complete operation. Completed receipt rows and retained managed

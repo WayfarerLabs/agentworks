@@ -3094,7 +3094,7 @@ working head or native acceptance. No new public handoff edge follows.
 - [ ] Implement the selected core unfinished-debt bound: 128 pending obligations, immutable resolved
       receipts until operation release, bounded pending enumeration, fenced exact lookup and
       history-independent SQL. Preserve any-row abandonment, exact-ID retries, no-rearm semantics
-      and original control identity. Add the state index through ordinary migration 42 without
+      and original exception identity. Add the state index through ordinary migration 42 without
       altering 39-41 or deleting existing data. Prove sequential work beyond the former limit and
       clean genuine-cap refusal without clearing present, conflicting, stale or unreadable custody.
       Review the complete ownership consumers and finalization paths; this is not a constant-memory
@@ -3177,6 +3177,16 @@ Full mypy passes 1,271 sources; static, file, locked-SDD, Rulesync and website j
 verifies selected Windows custody behavior on that published pin, not live WSL/QGA/systemd/SSH,
 complete target/RunContext or later working changes. Public round 1 of 3 and the broad additive
 gates remain open without a new ready or review-requested edge.
+
+Published foreground head `62164b4a8` subsequently completes
+[hosted CI run 37560542843](https://github.com/WayfarerLabs/agentworks/actions/runs/37560542843)
+with every job green. Linux Python 3.12, 3.13 and 3.14 each pass 16,050 cases with 203 skips and 29
+warnings. Windows Python 3.13 passes 1,312 cases with 57 skips and 25 warnings in 725.17 seconds.
+Full mypy passes 1,272 sources; all static, file, locked-SDD, Rulesync and website jobs pass.
+Test/static logs identify checkout merge `e988cf0ce` into main `cea5e8523`; the locked-SDD job
+checks the transport head itself. This validates selected hosted behavior at that pin, not later
+private capacity work, native backend workflows or full RunContext acceptance. No new public handoff
+edge follows.
 
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one
