@@ -2960,6 +2960,21 @@ corrected pin with a short, owned fixture root, retaining production safety chec
 that exact test scratch after resources settle. The implementer's earlier passing run remains
 separate.
 
+The correction is integrated at `a1b9958fc` from worker behavior pin `63f9d0cbd` and its one-line
+docstring follow-up `7229cef5a`. Explicit stop uses the existing ordinary lifetime-helper admission,
+dispatch and interrupted-bookkeeping path, not a new guard or ledger; the extra keeper carrier and
+two explicit keeper methods are removed. Follow-up observation uses fresh ordinary custody.
+Confirmed disposal derives aggregate closure idempotently from its retained positive proof.
+Regressions cover file-operation overlap, unused and outstanding owner borrows, unknown stop and
+closing helpers, interrupted stop bookkeeping and interrupted disposal publication. Portable
+Windows-selected custody cases remain, while only Linux filesystem and real producer cases skip on
+other systems. The three redundant retained/check paths are deleted without removing positive
+controller proof. The worker reports 212 targeted cases and a full behavioral run with 16,150
+passed, 50 skipped and 29 warnings in 259.77 seconds, exit 0, using a short owned fixture root.
+Ruff/format, strict mypy over 1,271 sources and file quality pass; all completed fixture roots are
+removed. The final worker pin changes only the class docstring and repeats style/type checks.
+Whole-unit re-review and corrected lead validation remain open. No native result is claimed.
+
 - [ ] Preserve exact signal termination evidence in the managed supervisor when child entry is
       proved and `waitpid` returns a signaled status. The existing producer currently publishes a
       wait fact only for an ordinary exit, so the private signaled case establishes resource closure
