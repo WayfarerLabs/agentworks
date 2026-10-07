@@ -3207,7 +3207,7 @@ Final combined lead validation passes 16,396 non-integration tests with 49 skips
 warnings in 318.32 seconds, exit 0. Ruff/format (1,314 files), strict mypy (1,278 sources), Typer
 isolation, file quality, locked-SDD, Rulesync and whitespace gates pass. Website passes 160 Python
 and 103 Node cases, four builds and both deterministic comparisons. The normal Rulesync check uses
-its declared npm fallback with an isolated cache; the unrelated malformed shared Bunx dependency
+its declared npm fallback with an isolated cache; the unrelated malformed shared `bunx` dependency
 cache is left unchanged. A preceding resource-binding website run failed one mouse-hold case; five
 isolated repeats and two subsequent full website runs pass, but the original cause is not proved and
 no website fix is claimed. Exact owned pytest/site fixtures are removed after terminal runs. Only
