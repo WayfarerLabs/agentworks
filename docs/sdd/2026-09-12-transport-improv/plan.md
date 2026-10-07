@@ -3174,7 +3174,7 @@ identity/startup choices, independent-job availability, active output, remaining
 complete additive RunContext and public round 1 of 3 remain open. Hosted and native acceptance are
 not supplied by these local results.
 
-- [ ] Bind private independent-run controls to an explicit core-supplied resource owner before
+- [x] Bind private independent-run controls to an explicit core-supplied resource owner before
       adopting them into unified ExecutionAccess. A matching RESOURCE kind alone is insufficient:
       exact resource identity and freshly bound VM/guest facts must agree with the immutable run.
       Refuse a missing or mismatched binding before borrowing, dispatch or control, and do not infer
@@ -3184,7 +3184,7 @@ not supplied by these local results.
       enforcement, an independent availability proof or a second public job interface; complete
       unified admission and platform-owned job-length holds remain required.
 
-- [ ] Guard unused borrowed-helper setup in private independent observation, stop, disposal and
+- [x] Guard unused borrowed-helper setup in private independent observation, stop, disposal and
       default-shell lookup before adopting these controls into unified execution. Construction can
       fail after a borrow is acquired but before the existing cleanup path exists. Close only that
       unused borrow without registering or dispatching, and preserve the original control object,
@@ -3193,6 +3193,27 @@ not supplied by these local results.
       actual existing custody. Keep registration/effect handlers unchanged, with no new recovery
       framework. Prove all current constructor sites and complete private reviews and final gates;
       this does not establish native recovery or independent availability.
+
+These two private leaves are accepted locally at `888dc58b4`. The resource-binding unit clears
+project, generic correctness and complexity review at `f040b358a`; the unused-helper unit clears all
+three lanes at `240c1023c`, followed by project clearance of its platform-selection-only correction
+at `ca1d084d1`. Exact RESOURCE identity is supplied by core rather than inferred from JobRef. The
+helper tests exercise six constructor sites, three primary control types and successful,
+interrupted-before-close and lost-reply-after-close outcomes, preserving original exception identity
+and actual remaining custody. These changes neither activate permissions nor change existing
+registration/effect handlers, wire contracts or SSH implementation.
+
+Final combined lead validation passes 16,396 non-integration tests with 49 skips and 29 fork warnings
+in 318.32 seconds, exit 0. Ruff/format (1,314 files), strict mypy (1,278 sources), Typer isolation,
+file quality, locked-SDD, Rulesync and whitespace gates pass. Website passes 160 Python and 103
+Node cases, four builds and both deterministic comparisons. The normal Rulesync check uses its
+declared npm fallback with an isolated cache; the unrelated malformed shared Bunx dependency cache
+is left unchanged. A preceding resource-binding website run failed one mouse-hold case; five
+isolated repeats and two subsequent full website runs pass, but the original cause is not proved
+and no website fix is claimed. Exact owned pytest/site fixtures are removed after terminal runs.
+Only these bounded private leaves close. Unified independent admission, job-length availability,
+active output, remaining platform factories, complete additive RunContext and native acceptance
+remain open. Hosted acceptance of this increment and public round 1 of 3 remain open as well.
 
 The lead's read-only completion inventory at `ed3603c23` confirms that this next foreground unit is
 not the rest of the execution surface. Required work still includes unified independent launch and
