@@ -3240,7 +3240,7 @@ hosted or native acceptance of this later unit. The preceding published head's h
 capacity-clock failure remains separately tracked; no production deadline relaxation or green
 aggregate is claimed. Full execution, availability, RunContext and native gates remain open.
 
-- [ ] Integrate private RESOURCE observe, output and wait into the existing ExecutionAccess using
+- [x] Integrate private RESOURCE observe, output and wait into the existing ExecutionAccess using
       explicit core-bound ownership and fresh operation admission before lookup. Route helpers
       through the current operation's tracked dispatch without adopting the independent run into its
       OPERATION cleanup list. Share the existing exact terminal-proof predicate, keep ordinary reads
@@ -3249,6 +3249,35 @@ aggregate is claimed. Full execution, availability, RunContext and native gates 
       stale identities, missing wait facts, unknown helper/controller custody, bounded helper
       accounting and observer-only cleanup. Independent launch, mutations, job-length holds and
       complete RunContext remain subsequent required work, not claims of this read-only leaf.
+
+This private read leaf is accepted locally at `9a6809a1e`, integrated at `e23261a71`. Project,
+generic correctness and complexity clear the complete corrected unit, passing 279, 327 and 117
+focused/adjacent cases respectively. Project and generic additionally pass eight and six
+later-helper probes. The native VM factory supplies the validated persisted VM namespace; session
+binding and full RunContext remain open. RESOURCE reads use current operation dispatch custody
+without entering its managed-run list or terminal cache. Ordinary observation does not reconcile
+uncertain launch, and output collection requires a confirmed receipt. Shared positive terminal proof
+permits UNKNOWN application precision when WAIT is missing, never unknown controller or helper
+custody. Review removes repeated proof computation; a terminal observation followed by an uncertain
+output helper still blocks cleanup confirmation. Removing that settlement guard makes the new
+regression fail.
+
+Final combined lead gates at `e23261a71` pass 16,451 non-integration tests, 50 skips and 29 fork
+warnings in 295.43 seconds, exit 0. One skip is the unavailable `origin/main` ref on the local
+recovery remote; that exact package-fingerprint check separately passes against verified main
+`cea5e8523`. The remaining skips are explicit host/platform/capability limitations. Ruff/format
+(1,316 files), strict mypy (1,280 sources), Typer isolation, file quality, locked-SDD, Rulesync and
+whitespace pass. Website passes 160 Python and 103 Node cases, four builds and both deterministic
+comparisons. Exact owned fixture roots are removed after terminal completion. Hosted and native
+acceptance are not supplied by these local results; all broader execution and RunContext gates and
+public round 1 of 3 remain open.
+
+The same integrated tree contains the reviewed test-only capacity correction from `88de25edd`. Its
+count test controls monotonic time while retaining all 300 real SQLite/framed custody cycles and
+renewal threads; a small observation bound fails promptly if terminal recognition regresses.
+Project, generic and complexity clear that whole correction with 91, 14 and one focused cases, plus
+independent mutation/renewal probes. Production deadlines are unchanged. The preceding published
+Windows failure is not yet a green hosted result for this correction.
 
 The lead's read-only completion inventory at `ed3603c23` confirms that this next foreground unit is
 not the rest of the execution surface. Required work still includes unified independent launch and
