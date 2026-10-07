@@ -12,6 +12,7 @@ import pytest
 
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import ConflictError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_obligation import decode_file_call_obligation
 from agentworks.execution._file_operation import FileOperation
 from agentworks.execution._file_publication import Create, Match
@@ -19,7 +20,7 @@ from agentworks.execution._file_result_transfer import reduce_file_upload
 from agentworks.execution._file_upload import FileUploadFailure, FileUploadOutcome, FileUploadStatus
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState, RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._scratch_receipt import scratch_name
-from agentworks.execution.carrier import Deadline
+from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, PreparedInvocation
 from agentworks.execution.carriers.ssh import SSHConnection
 from agentworks.execution.files import Change, FileFailureReason
 from agentworks.operations import OperationOwner
@@ -39,6 +40,21 @@ pytestmark = [
 
 _RUNTIME = RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
 _DESTINATION = "file-operation-destination-canary"
+
+
+class _UploadReceiptSSHCarrier(_ObservedSSHCarrier):
+    def __init__(self, connection: SSHConnection, owner: OperationOwner) -> None:
+        super().__init__(connection)
+        self._owner = owner
+        self.receipt_ids: set[str] = set()
+
+    def execute(
+        self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody
+    ) -> CarrierReport:
+        (obligation,) = self._owner.list_pending_lifecycle_obligations()
+        assert obligation.obligation_kind == "file-call"
+        self.receipt_ids.add(obligation.obligation_id)
+        return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 def _upload(
@@ -105,7 +121,7 @@ def test_file_operation_upload_conditions_and_cleanup_over_real_ssh(
     )
     managed_target = target_for_owner(owner)
     operation = FileOperation(owner, managed_target)
-    carrier = _ObservedSSHCarrier(local_sshd)
+    carrier = _UploadReceiptSSHCarrier(local_sshd, owner)
     created_content = bytes(range(256)) + b"\x00\xffcreated-over-ssh\r\n"
     updated_content = bytes(reversed(range(256))) + b"\xff\x00updated-over-ssh\n"
     refused_content = b"must-not-replace-destination\x00\xff"
@@ -173,7 +189,12 @@ def test_file_operation_upload_conditions_and_cleanup_over_real_ssh(
                 "must-not-replace-destination",
             )
         outcomes = (created, matched, duplicate, stale)
-        obligations = database.operations.list_lifecycle_obligations(owner.ownership)
+        assert owner.list_pending_lifecycle_obligations() == ()
+        obligations = []
+        for identifier in sorted(carrier.receipt_ids):
+            obligation = owner.inspect_lifecycle_obligation(identifier)
+            assert obligation is not None
+            obligations.append(obligation)
         assert len(obligations) == len(outcomes)
         payloads = [decode_file_call_obligation(obligation.payload) for obligation in obligations]
         assert {payload.token for payload in payloads} == {outcome.token for outcome in outcomes}
