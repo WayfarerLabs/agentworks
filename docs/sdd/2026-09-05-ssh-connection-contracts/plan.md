@@ -559,6 +559,58 @@ coexistence/rollback, enclosing-consumer, RunContext and supported-workstation R
 gates remain open. All 25 completed plan blocks are unchanged, no public final-product fix round is
 consumed, and the SDD remains unlocked.
 
+Published SSH `c46c9cd8714a425a455bea5a7e8a75e9f6a05261` has a complete
+[hosted report](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6031204274) on
+transport `b54461580`. Run `37572192872` passes all four pytest jobs: Linux Python 3.12-3.14 each
+report 16,662 passed, 203 skipped and 29 warnings; Windows Server 2025/Python 3.13 reports 1,613
+passed, 68 skipped and 25 warnings in 927.62 seconds. All six test/static/website logs identify
+checkout merge `27c94d2d5e1afc400db2a819ce5ce325501ac7e2`, whose exact transport/SSH parents and
+tree `995b9538996702c7e75feb99a32f4fe6f334f14e` match the published source. The run fails only on
+the three held enrollment typing errors across 1,322 sources and their aggregate gate. Other
+repository gates pass; hosted Typer isolation is skipped after mypy failure. Website passes 160
+Python and 103 Node tests, four builds and both deterministic comparisons. The combined Windows pass
+does not establish the preceding transport capacity failure's cause or validate its later private
+correction. These fixtures do not establish full native or production RunContext acceptance.
+
+Transport's
+[reviewed RESOURCE-read increment](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6031314958)
+`d8b4dfcee2edf340e7efff6676989e1060c22734` composes private observe, read_output and wait through
+ExecutionAccess under a fresh core-bound operation. The native VM factory supplies its persisted
+resource namespace; foreign resources and stale contexts refuse before effects. Reads retain the
+observer's helper custody without adopting the independent run, its keeper or its terminal cache;
+observer cleanup leaves the run alone. Missing WAIT can leave application status unknown with
+positive resource-closure facts, never unknown controller or helper custody. Later uncertain output
+helpers prevent cleanup confirmation even after a terminal observation. Ordinary observation does
+not reconcile uncertain launch; output collection requires a confirmed receipt.
+
+The same increment retains the complete independent USER_DEFAULT body through selected-account shell
+lookup, avoiding a second traversal of caller environment. Its reviewed test-only capacity
+correction controls monotonic time while preserving renewal threads and all 300 SQLite/framed
+custody cycles; unexpected fifth observations fail promptly instead of polling a frozen clock.
+Production deadline enforcement is unchanged. All three transport private lanes clear the complete
+units. Carrier/custody wire, schema and SSH implementation are unchanged. Hosted Windows acceptance,
+unified independent launch/mutations, job-length availability, full additive RunContext and native
+acceptance remain open. The
+[coordination response](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6031322885)
+adds no carrier requirement or operator resource-ownership ruling.
+
+SSH rebases without conflicts at `e07cd70b671644e88acb676e3c4d328d77a6cf80`, preserving all 178
+patches exactly. SSH production and fixtures are unchanged, and shared process/custody/pump files
+match transport. Full combined Linux Python 3.12 non-integration validation passes 16,874 tests, 49
+skips and 29 warnings, exit 0 in 232.05 seconds. Full strict mypy checks 1,324 sources and repeats
+only the three held enrollment errors. Ruff/format (1,361 files), exact local CI Typer isolation,
+frozen dependency sync and Rulesync through Node pass. The exact private pytest root has no
+same-user argv/cwd/fd references or permission gaps and is removed; logs remain. Website files are
+unchanged; local website and native tests were not rerun for this draft rebase. Transport's
+exact-head hosted static and website jobs pass on source-equivalent checkout
+`d5c7ddd295508e7994b5d805132c685d733aa802`; its pytest and aggregate results remain pending. Fresh
+combined hosted evidence requires its own full report.
+
+Both operator resource decisions and the recorded terminal, trust/creation, writer
+coexistence/rollback, enclosing-consumer, complete RunContext and supported-workstation R1-R5
+acceptance gates remain open. All 25 completed plan blocks are unchanged, no public final-product
+fix round is consumed, and the SDD remains unlocked.
+
 Combined code pin `38934134e3b8d12af814f9371b62075daa49db3e` preserves all 64 Python paths in the
 SSH contribution, including deletions, from published `186458307b`. Its full suite passes 16,125
 non-integration tests with 51 skips and 27 warnings, exit 0 in 267.18 seconds. Full Ruff/format
