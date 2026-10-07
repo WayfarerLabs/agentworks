@@ -3279,7 +3279,7 @@ Project, generic and complexity clear that whole correction with 91, 14 and one 
 independent mutation/renewal probes. Production deadlines are unchanged. The preceding published
 Windows failure is not yet a green hosted result for this correction.
 
-- [ ] Integrate private RESOURCE stop through the existing ExecutionAccess and tracked ordinary
+- [x] Integrate private RESOURCE stop through the existing ExecutionAccess and tracked ordinary
       helper lifetime. Require fresh selected binding, exact core resource namespace and confirmed
       launch before borrowing or delivery; planned originating OPERATION IDs never fall back after
       refusal. Do not adopt an independent run, create or drain its keeper, or cache OPERATION
@@ -3289,6 +3289,37 @@ Windows failure is not yet a green hosted result for this correction.
       binding refusal, overlapping borrows, close/takeover races, bounded row accounting and
       bookkeeping retry without dispatch. Complete all three private review lanes and lead gates;
       native availability and full RunContext remain separate required work.
+
+This private stop leaf is accepted at `a86d1261b`, integrated at `f1fb84632`. All three private
+lanes clear the complete corrected unit: project passes 215 focused/adjacent cases and four
+classification and custody probes; generic correctness passes 459 focused/neighbor cases and 11
+fault probes; complexity passes all 36 stop cases. Restoring the old expiry classification makes its
+new regression fail. RESOURCE stop shares ordinary tracked helper custody, not independent-job
+ownership; accepted intent remains distinct from fresh positive closure. The corrected late
+pre-observation expiry reports DEADLINE without another dispatch or a renewed budget. The unchanged
+OPERATION analogue is recorded for the subsequent shared-control work, not claimed fixed by this
+leaf.
+
+Final lead gates at `f1fb84632` pass 16,488 non-integration cases, 49 explicit platform/capability
+skips and 29 fork warnings in 285.61 seconds, exit 0. The suite uses verified main `cea5e8523` for
+the package-fingerprint comparison, with no missing-ref skip. Ruff/format (1,318 files), strict mypy
+(1,282 sources), Typer isolation, file quality (475 Markdown and 448 spelling inputs), locked-SDD,
+Rulesync and whitespace pass. Website passes 160 Python cases in 44.167 seconds and 103 Node cases
+in 7.492 seconds, four builds and both deterministic comparisons. The Python fixture emits a
+nonfatal HTTP BrokenPipe traceback; its full suite still exits 0, and no website fix is claimed.
+Exact owned fixture roots are removed after terminal completion; operator databases are untouched.
+Disposal, independent launch/job-length availability, full RunContext and native acceptance remain
+open. This is a bounded private closeout, not a public review edge or merge-ready claim; public
+round 1 of 3 remains open.
+
+Separately, the earlier published source `d8b4dfcee` has complete green hosted evidence from run
+`37574481185`: all ten jobs succeed. Linux Python 3.12, 3.13 and 3.14 each pass 16,296 cases with
+203 skips and 29 warnings; Windows Server 2025 Python 3.13 passes 1,398 cases with 58 skips and 25
+warnings. The 300-cycle capacity case passes on Windows in 135.56 seconds. Static/file/Rulesync,
+locked-SDD, website and aggregate jobs succeed. Primary API parents and tree identify main
+`cea5e8523` plus source `d8b4dfcee`; this hosted result covers that source, not the later stop
+increment, the combined SSH branch or live platform acceptance. The full report is published on #833
+as comment `6031565162` and the dependency notice on #832 as comment `6031568729`.
 
 - [ ] Integrate private RESOURCE disposal only after positive terminal evidence, retaining that
       evidence with the exact disposal attempt rather than adopting the job. Add a typed dedicated
