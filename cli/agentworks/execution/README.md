@@ -160,15 +160,16 @@ admission. RESOURCE reads reconnect under a fresh operation and reuse its ordina
 row, but never reconcile launch, adopt the job, drain a keeper or register it among owned runs.
 Observer close resolves only its own read-helper custody and leaves the independent job untouched;
 unknown helper custody still prevents that close. `stop` also admits exact constructor-bound
-RESOURCE jobs with confirmed launch receipts; `dispose` remains limited to acknowledged originating
-OPERATION runs. Status separates application precision from positive resource closure; output
-cursors address the verified retained prefix, whose EOF does not imply complete source capture.
-`capture_complete` describes the whole verified capture, not consumption of this returned slice;
-intentional discard or suppression leaves it false without an output-limit failure. Wait returns the
-existing `ExecutionResult` with a safe managed reference and never stops the workload or drains
-renewal. MANAGED `run` composes that same launch and wait without requiring a separate caller-facing
-start step. It selects its finite observation budget once for both phases; acknowledgement that
-exhausts the budget still returns UNKNOWN application progress, DEADLINE, incomplete output with the
+RESOURCE jobs with confirmed launch receipts. `dispose` admits acknowledged originating OPERATION
+runs and exact confirmed RESOURCE jobs, requiring positive terminal proof before its first effect.
+Status separates application precision from positive resource closure; output cursors address the
+verified retained prefix, whose EOF does not imply complete source capture. `capture_complete`
+describes the whole verified capture, not consumption of this returned slice; intentional discard or
+suppression leaves it false without an output-limit failure. Wait returns the existing
+`ExecutionResult` with a safe managed reference and never stops the workload or drains renewal.
+MANAGED `run` composes that same launch and wait without requiring a separate caller-facing start
+step. It selects its finite observation budget once for both phases; acknowledgement that exhausts
+the budget still returns UNKNOWN application progress, DEADLINE, incomplete output with the
 effective retention policy, and its safe `JobRef`, without further I/O or cleanup. Checked MANAGED
 run and wait use the bound logical entity and existing contextual checker, preserving the exact
 result/reference; known application failures remain application-phase, while deadline and

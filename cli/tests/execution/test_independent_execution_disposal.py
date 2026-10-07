@@ -13,7 +13,9 @@ import pytest
 from agentworks.db import LifecycleObligationState
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _execution_operation as execution_module
+from agentworks.execution import _managed_resource_disposal as resource_disposal
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
+from agentworks.execution._managed_bound_run import preflight_bound_run
 from agentworks.execution._managed_disposal_access import encode_managed_disposal_obligation
 from agentworks.execution._managed_job_store import FactName
 from agentworks.execution._managed_observation_protocol import ControllerState
@@ -714,3 +716,46 @@ def test_prior_action_binding_reinstall_rechecks_takeover_and_closing_before_loc
     (active,) = operation.active_inline_calls
     assert active.disposal.obligation_id == identity and workflow.owner._active_borrow is active.borrow
     assert main.observe.calls == main.dispose.calls == 1
+
+
+def test_finished_after_terminal_observation_refuses_initial_disposal_admission(observer):
+    _, _, operation, access, main, workflow = observer
+    observe = operation.observe_job
+
+    def observe_then_finish(reference, carrier, deadline):
+        outcome = observe(reference, carrier, deadline)
+        assert outcome.terminal_proved
+        operation.finish()
+        return outcome
+
+    operation.observe_job = observe_then_finish
+    with patch.object(workflow.owner, "borrow", wraps=workflow.owner.borrow) as borrow, pytest.raises(StateError):
+        access.dispose(JobRef(RUN.run_id))
+    assert borrow.call_count == 1
+    assert operation._finished and not operation.active_inline_calls
+    assert main.observe.calls == 1 and main.dispose.calls == main.stop.calls == 0
+    assert workflow.owner.list_pending_lifecycle_obligations() == ()
+
+
+def test_finishing_during_retry_preflight_preserves_pending_action_without_replacement(observer):
+    _, _, operation, access, main, workflow = observer
+    old = lose_response(observer)
+    identity = old.disposal.obligation_id
+
+    def preflight_then_finish(*args, **kwargs):
+        result = preflight_bound_run(*args, **kwargs)
+        with pytest.raises(StateError):
+            operation.finish()
+        return result
+
+    main.dispose.response = disposal._disposed
+    with (
+        patch.object(resource_disposal, "preflight_bound_run", preflight_then_finish),
+        patch.object(workflow.owner, "borrow", wraps=workflow.owner.borrow) as borrow,
+        pytest.raises(StateError),
+    ):
+        access.dispose(JobRef(RUN.run_id))
+    borrow.assert_not_called()
+    assert operation._finishing and operation.active_inline_calls == (old,)
+    assert workflow.owner.inspect_lifecycle_obligation(identity).state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert main.observe.calls == main.dispose.calls == 1 and main.stop.calls == 0

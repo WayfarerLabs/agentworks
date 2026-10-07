@@ -192,6 +192,8 @@ def dispose_resource_job(
         raise ValidationError("Managed resource disposal requires a confirmed launch receipt")
     active: _ActiveHelperCall | None
     with operation._admission_guard:
+        if operation._finishing or operation._finished:
+            raise StateError("Execution operation is closing")
         retained = tuple(operation._active_inline_calls.values())
         if retained:
             if (
@@ -234,11 +236,15 @@ def dispose_resource_job(
         if deadline.expired:
             return JobDisposal(reference, False, ExecutionFailure.DEADLINE, True)
         with operation._admission_guard:
+            if operation._finishing or operation._finished:
+                raise StateError("Execution operation is closing")
             if operation._active_inline_calls or operation._unfinished_inline_executions:
                 raise StateError("Managed disposal cannot overlap unfinished ordinary delivery")
             active = operation._borrow_helper_call(carrier, None, disposal=action)
     else:
         with operation._admission_guard:
+            if operation._finishing or operation._finished:
+                raise StateError("Execution operation is closing")
             row = inspect_disposal_row(operation, active)
             assert active.disposal is not None
             action = active.disposal
