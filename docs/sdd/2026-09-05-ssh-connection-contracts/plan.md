@@ -321,6 +321,20 @@ the six shared fixture failures; it neither implements the retained resources no
 terminal, production RunContext or whole-PR acceptance. No public final-product fix round is
 consumed.
 
+Hosted CI for draft `cb071a8b163130c23a88a831acf308ee3a151fd8`, run
+[`37548572709`](https://github.com/WayfarerLabs/agentworks/actions/runs/37548572709), completes with
+failure. Checkout merge `e09c04e569b44cf150edea6e1e0788f4b1bf8a1b` has transport `fc2e1992d` and
+that SSH head as parents; tree `702fd25f18919aa24c8eb3f471e08fd019369696` exactly matches the SSH
+head. Linux Python 3.12-3.14 each pass 16,339 tests with 203 skips and 27 warnings. Windows Server
+2025/Python 3.13 reports 1 failed, 1,403 passed, 64 skipped and 25 warnings. The sole pytest failure
+is `test_non_main_originating_caller_owns_database_and_actual_start`: its two-second thread join
+expires while the caller remains alive. That transport-owned test matches the base exactly and also
+fails in predecessor run `37547767878`; its cause remains unproved. All SSH custody fixtures now
+pass. Full mypy repeats the three held enrollment errors across 1,312 sources. Ruff/format,
+Rulesync, file quality, locked-SDD and website jobs pass; Typer isolation is skipped after mypy
+fails. This is hosted gate evidence, not native acceptance or a complete handoff. Both operator
+resource decisions, implementation and the recorded terminal/RunContext/native gates remain open.
+
 Combined code pin `38934134e3b8d12af814f9371b62075daa49db3e` preserves all 64 Python paths in the
 SSH contribution, including deletions, from published `186458307b`. Its full suite passes 16,125
 non-integration tests with 51 skips and 27 warnings, exit 0 in 267.18 seconds. Full Ruff/format
