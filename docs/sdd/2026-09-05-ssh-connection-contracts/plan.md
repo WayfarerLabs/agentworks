@@ -467,6 +467,44 @@ complete additive RunContext and supported-workstation R1-R5 acceptance remain o
 dependency refresh consumes no public final-product fix round and changes none of the 25 completed
 plan blocks. The SDD remains unlocked.
 
+Published SSH `35585959fbf108fcb84ffcd0698d2f52483aa01f` has a complete
+[hosted report](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6030473477) on
+transport `94054f4ce`. Run `37566943581` passes all four pytest jobs: Linux Python 3.12-3.14 each
+report 16,510 passed, 203 skipped and 29 warnings; Windows Server 2025/Python 3.13 reports 1,564
+passed, 67 skipped and 25 warnings in 800.31 seconds. Checkout merge
+`d58f602a7db64601866dd8d6ecbcb430af6d1e4d` has those exact parents and tree
+`5fab66e9d11025b62d79d48839662f6e7651e0cf`, equal to the published SSH tree. The run fails only on
+the three held enrollment typing errors across 1,318 sources and their aggregate gate. Other
+repository gates pass; hosted Typer isolation is skipped after mypy failure. Website passes 160
+Python and 103 Node tests, four builds and both deterministic comparisons. The preceding Chromium
+startup cause remains unproved. Transport's exact-base run `37565868558` passes all ten jobs: Linux
+Python 3.12-3.14 each report 16,088 passed, 203 skipped and 29 warnings; Windows Python 3.13 reports
+1,349 passed, 57 skipped and 25 warnings. Its checkout tree equals the transport source. These
+hosted fixtures establish neither full native nor production RunContext acceptance.
+
+Transport's
+[reviewed default-shell increment](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6030455006)
+`8ac6e625bbf0cc5e077cd6cae348914f38bd2394` freezes finite caller input before observing the selected
+numeric workload account's shell. Resolution precedes reservation, its interpreter is persisted with
+the run, and lookup and launch share the original deadline. Unsupported or unsettled lookup creates
+no run. Shared helper setup preserves original control identity and exact custody across allocation
+failures for inline, lookup, observation and stop calls. Three transport private lanes clear code
+`332a7d501`; independent controls, complete additive RunContext and native acceptance remain open.
+No shared carrier/custody wire changes.
+
+SSH rebases without conflicts at `c036e50e49bd54c898933542e36e41b9bfcac27e`, preserving all 176
+patches exactly. SSH production and fixture files are unchanged, and shared process/custody/pump
+files match transport. The full combined Linux Python 3.12 non-integration suite passes 16,716 tests
+with 49 skips and 29 warnings, exit 0 in 344.69 seconds. Full strict mypy checks 1,320 sources and
+repeats only the three held enrollment errors. Ruff/format (1,357 files), local Typer isolation and
+Rulesync through Node pass. The exact private pytest root has no same-user argv/cwd/fd references or
+permission gaps and is removed; logs remain. Website files are unchanged; local website and native
+checks were not rerun for this draft rebase. Fresh combined hosted evidence requires its own
+complete report. Both operator resource decisions and the recorded terminal, trust/creation, writer
+coexistence/rollback, enclosing-consumer, RunContext and supported-workstation R1-R5 acceptance
+gates remain open. All 25 completed plan blocks are unchanged, no public final-product fix round is
+consumed, and the SDD remains unlocked.
+
 Combined code pin `38934134e3b8d12af814f9371b62075daa49db3e` preserves all 64 Python paths in the
 SSH contribution, including deletions, from published `186458307b`. Its full suite passes 16,125
 non-integration tests with 51 skips and 27 warnings, exit 0 in 267.18 seconds. Full Ruff/format
