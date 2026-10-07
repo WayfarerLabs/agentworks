@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 import threading
 import time
 from dataclasses import replace
@@ -237,7 +238,7 @@ def test_bound_ack_and_normal_aggregate_close(view, invocation):
     assert database.operations.inspect(workflow.owner.ownership.scope) is None
 
 
-def test_bound_job_reads_share_one_lifetime_row(view, tmp_path, monkeypatch):
+def test_bound_job_reads_share_one_lifetime_row(view, monkeypatch):
     database, workflow, access, main, keeper = view
     reference = access.start(
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
@@ -246,13 +247,8 @@ def test_bound_job_reads_share_one_lifetime_row(view, tmp_path, monkeypatch):
         status = access.observe(reference)
         assert status.application_state is ApplicationState.COMPLETED
         assert status.status.value == 7 and status.workload_cleanup_confirmed
-    import sys
-
     from agentworks.execution.carrier import CarrierReport, Dispatch
 
-    from .files._file_read_support import LocalCarrier
-    from .files._file_snapshot_support import install_fixture_bundle
-    from .files._runtime_support import runtime_selection
     from .test_execution_operation import RecordingCarrier
 
     ordinary = RecordingCarrier(CarrierReport(Dispatch.NOT_SENT))
@@ -265,6 +261,35 @@ def test_bound_job_reads_share_one_lifetime_row(view, tmp_path, monkeypatch):
             return ordinary
 
     monkeypatch.setattr(main, "selected", select)
+    for _ in range(3):
+        access.run(Command(["/bin/true"]), profile=Protection.DIRECT)
+        access.observe(reference)
+    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
+    assert len([row for row in rows if row.obligation_kind == "carrier-dispatch"]) == 1
+    assert keeper.stop.calls == 0
+    main.observe.response = lambda request: observation_tests._records(
+        request.nonce,
+        ManagedResultControl((FactName.LAUNCH, FactName.STDOUT_END)),
+        (request.expected_launch, fact(FactName.STDOUT_END, request.expected_launch)),
+    )
+    output = access.read_output(reference, stream=JobStream.STDOUT)
+    assert output.eof and not output.capture_complete and output.data == b""
+    assert output.failure is None
+    workflow.close(cleanup_deadline=Deadline.after(5))
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Actual POSIX helper filesystem requires Linux")
+def test_actual_file_calls_mix_with_lifetime_job_reads(view, tmp_path, monkeypatch):
+    from .files._file_read_support import LocalCarrier
+    from .files._file_snapshot_support import install_fixture_bundle
+    from .files._runtime_support import runtime_selection
+
+    database, workflow, access, _, keeper = view
+    reference = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    for _ in range(150):
+        assert access.observe(reference).workload_cleanup_confirmed
     scratch = tmp_path / "scratch"
     scratch.mkdir(mode=0o1777)
     scratch.chmod(0o1777)
@@ -286,22 +311,11 @@ def test_bound_job_reads_share_one_lifetime_row(view, tmp_path, monkeypatch):
     )
     (tmp_path / "data").write_bytes(b"mixed-file-bytes")
     for _ in range(3):
-        access.run(Command(["/bin/true"]), profile=Protection.DIRECT)
         read = files.read_file(PurePosixPath(tmp_path / "data"), max_bytes=100)
         assert read is not None and read.data == b"mixed-file-bytes"
         access.observe(reference)
     rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
     assert len([row for row in rows if row.obligation_kind == "carrier-dispatch"]) == 1
-    assert keeper.stop.calls == 0
-    # Closed discarded output has EOF without synthesizing bytes.
-    main.observe.response = lambda request: observation_tests._records(
-        request.nonce,
-        ManagedResultControl((FactName.LAUNCH, FactName.STDOUT_END)),
-        (request.expected_launch, fact(FactName.STDOUT_END, request.expected_launch)),
-    )
-    output = access.read_output(reference, stream=JobStream.STDOUT)
-    assert output.eof and not output.capture_complete and output.data == b""
-    assert output.failure is None
     assert keeper.stop.calls == 0
     workflow.close(cleanup_deadline=Deadline.after(5))
 
@@ -359,15 +373,16 @@ def test_active_disposal_keeps_keeper_live(view):
 
 
 def test_explicit_stop_retains_terminal_proof_and_closes_normally(view):
-    _, workflow, access, _, keeper = view
+    _, workflow, access, main, keeper = view
     reference = access.start(
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
     outcome = access.stop(reference)
     assert outcome.accepted and outcome.terminated
-    assert keeper.stop.calls == keeper.observe.calls == 1
+    assert main.stop.calls == main.observe.calls == 1
+    assert keeper.stop.calls == keeper.observe.calls == 0
     workflow.close(cleanup_deadline=Deadline.after(5))
-    assert keeper.stop.calls == keeper.observe.calls == 1
+    assert keeper.stop.calls == keeper.observe.calls == 0
 
 
 def test_stop_drains_only_selected_keeper(view):
@@ -382,7 +397,8 @@ def test_stop_drains_only_selected_keeper(view):
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
     assert access.stop(first).accepted
-    assert first_keeper.stop.calls == 1 and second_keeper.stop.calls == 0
+    assert main.stop.calls == 1 and first_keeper.stop.calls == second_keeper.stop.calls == 0
+    assert operation.managed_runs[0].keeper._stop.is_set()
     assert not operation.managed_runs[1].keeper._stop.is_set()
     assert access.observe(second).reference == second
     workflow.close(cleanup_deadline=Deadline.after(5))
@@ -390,25 +406,24 @@ def test_stop_drains_only_selected_keeper(view):
 
 
 def test_accepted_stop_keeps_intent_when_observation_deadline_expires(view, monkeypatch):
-    _, workflow, access, _, keeper = view
+    _, workflow, access, main, _ = view
     reference = access.start(
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
-    run = workflow.views.execution_operation.managed_runs[0]
-    original = run.keeper.request_explicit_stop
+    original = main.stop.execute
     clock = [0.0]
 
-    def stop(deadline):
-        result = original(deadline)
+    def stop(*args, **kwargs):
+        result = original(*args, **kwargs)
         clock[0] = 2.0
         return result
 
     with monkeypatch.context() as patch:
         patch.setattr(time, "monotonic", lambda: clock[0])
-        patch.setattr(run.keeper, "request_explicit_stop", stop)
+        patch.setattr(main.stop, "execute", stop)
         result = access.stop(reference, deadline=Deadline.after(1))
     assert result.accepted and not result.terminated and result.deadline_exceeded
-    assert result.failure is ExecutionFailure.DEADLINE and keeper.observe.calls == 0
+    assert result.failure is ExecutionFailure.DEADLINE and main.observe.calls == 0
     workflow.close(cleanup_deadline=Deadline.after(5))
 
 
@@ -562,6 +577,7 @@ def test_retained_output_eof_is_separate_from_capture_completeness(view, disposi
 
 
 @pytest.mark.parametrize("argv", [("/definitely-absent-agw-executable",), ("/bin/sh", "-c", "kill -TERM $$")])
+@pytest.mark.skipif(sys.platform != "linux", reason="Actual forked guest producer requires Linux")
 def test_real_controller_without_wait_can_close_operation(view, tmp_path, argv):
     _, workflow, access, main, keeper = view
     access._ordinary_plan = IdentityPlan(

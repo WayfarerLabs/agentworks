@@ -118,19 +118,6 @@ class _ClosingCarrier:
         return report
 
 
-class _ExplicitStopCarrier(_ClosingCarrier):
-    """Fence explicit stop and its cleanup observation at actual delivery."""
-
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        keeper = self._keeper
-        keeper._require_cleanup(deadline)  # noqa: SLF001
-        obligation = keeper.obligation
-        assert obligation is not None
-        obligation.mark_possible_effect()
-        keeper._check_binding()  # noqa: SLF001
-        return super().execute(invocation, io=io, deadline=deadline)
-
-
 class _LeaseCarrier:
     """Fence the actual LIVE delivery after helper preparation and validation."""
 
@@ -455,42 +442,6 @@ class ManagedOperationKeeper:
         try:
             self.last_cleanup = observe_managed_run(
                 _ClosingCarrier(self),
-                expected_launch=self._expected_launch,
-                plan=self._plan,
-                deadline=deadline,
-                runtime_selection=self._runtime,
-                guest=self._guest,
-            )
-            self._settle_closing(deadline)
-            return self.last_cleanup
-        except BaseException:
-            self.failed = True
-            raise
-
-    def request_explicit_stop(self, deadline: Deadline) -> ManagedStopCandidate:
-        """Stop a selected drained run under current ordinary owner authority."""
-        self._require_cleanup(deadline)
-        try:
-            self.last_stop = stop_managed_run(
-                _ExplicitStopCarrier(self),
-                expected_launch=self._expected_launch,
-                plan=self._plan,
-                deadline=deadline,
-                runtime_selection=self._runtime,
-                guest=self._guest,
-            )
-            self._settle_closing(deadline)
-            return self.last_stop
-        except BaseException:
-            self.failed = True
-            raise
-
-    def observe_explicit_cleanup(self, deadline: Deadline) -> ManagedObservationCandidate:
-        """Observe explicit stop closure under a fresh current-generation fence."""
-        self._require_cleanup(deadline)
-        try:
-            self.last_cleanup = observe_managed_run(
-                _ExplicitStopCarrier(self),
                 expected_launch=self._expected_launch,
                 plan=self._plan,
                 deadline=deadline,

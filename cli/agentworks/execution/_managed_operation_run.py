@@ -16,7 +16,7 @@ from agentworks.errors import StateError, ValidationError
 from ._managed_job_protocol import encode_managed_job_fact
 from ._managed_job_store import FactName
 from ._managed_observation_exchange import ManagedObservationCandidate, ManagedObservationState
-from ._managed_observation_protocol import ControllerState, ManagedObservationError, checked_controller, checked_fact
+from ._managed_observation_protocol import ControllerState
 from ._managed_operation_keeper import ManagedOperationKeeper, _clean_start_acknowledged
 from ._managed_request_adapter import _ManagedBody
 from ._managed_runs import ManagedLaunchState
@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from agentworks.operations import OperationOwner
 
     from ._helper_launcher import IdentityPlan
-    from ._managed_disposal_access import ManagedDisposalOutcome
     from ._managed_runs import ManagedRunReceipt, ManagedRunRecord, ManagedRunRepository, ManagedTargetIdentity
     from ._managed_start_exchange import _PreparedAttempt
     from ._runtime_prerequisite import RuntimeSelection
@@ -96,32 +95,23 @@ class ManagedOperationRun:
         self.disposal_confirmed = False
         self.disposal_attempted = False
         self.disposal_obligation_id = uuid4().hex
-        self.disposal_outcome: ManagedDisposalOutcome | None = None
 
     def terminal_proved(self, candidate: ManagedObservationCandidate | None) -> bool:
         """Positive resource closure is independent of application exit precision."""
         observation = None if candidate is None else candidate.observation
         required = {FactName.LAUNCH, FactName.STDOUT_END, FactName.STDERR_END, FactName.BOUNDARY_EMPTY}
-        if (
-            not self.acknowledged
-            or candidate is None
-            or candidate.dispatch is not Dispatch.SENT
-            or candidate.carrier_completion != ExitStatus(0)
-            or candidate.carrier_failure is not None
-            or observation is None
-            or observation.state is not ManagedObservationState.OBSERVED
-            or not required.issubset({name for name, _ in observation.facts})
-            or observation.controller is None
-            or observation.controller.state not in {ControllerState.EXITED, ControllerState.ABSENT}
-        ):
-            return False
-        try:
-            for name, data in observation.facts:
-                checked_fact(name, data, self._expected_launch)
-            checked_controller(observation.controller, self._expected_launch)
-        except ManagedObservationError:
-            return False
-        return True
+        return (
+            self.acknowledged
+            and candidate is not None
+            and candidate.dispatch is Dispatch.SENT
+            and candidate.carrier_completion == ExitStatus(0)
+            and candidate.carrier_failure is None
+            and observation is not None
+            and observation.state is ManagedObservationState.OBSERVED
+            and required.issubset({name for name, _ in observation.facts})
+            and observation.controller is not None
+            and observation.controller.state in {ControllerState.EXITED, ControllerState.ABSENT}
+        )
 
     @property
     def acknowledged(self) -> bool:
@@ -136,6 +126,11 @@ class ManagedOperationRun:
         obligation = self.keeper.obligation
         if self.reservation_uncertain or self.keeper.admission_uncertain:
             raise StateError("Managed run admission remains uncertain")
+        # Confirmed disposal is the permanent publication fence. Derive this
+        # idempotently: interruption may follow its publication before any
+        # separate local cleanup flag can be assigned, and launch is now gone.
+        if self.disposal_confirmed and self.terminal_proved(self.terminal_observation):
+            self.cleanup_complete = True
         if not self.keeper.registration_started and self.start_outcome is None:
             self.cleanup_complete = True
         if not self.cleanup_complete and not self.acknowledged:

@@ -20,6 +20,7 @@ from agentworks.execution._managed_bound_run import preflight_bound_run
 from agentworks.execution._managed_disposal_access import ManagedDisposalControlFact, dispose_bound_managed_run
 from agentworks.execution._managed_disposal_exchange import DisposalState
 from agentworks.execution._managed_job_access import _explicit_managed_shell
+from agentworks.execution._managed_job_protocol import encode_managed_job_fact
 from agentworks.execution._managed_observation_exchange import (
     ManagedObservationCandidate,
     observe_managed_run,
@@ -47,7 +48,8 @@ from agentworks.execution._managed_runs import (
     ManagedTargetIdentity,
     ManagedTargetKind,
 )
-from agentworks.execution._managed_stop_exchange import ManagedStopState
+from agentworks.execution._managed_stop_access import ManagedStopOutcome
+from agentworks.execution._managed_stop_exchange import ManagedStopCandidate, ManagedStopState, stop_managed_run
 from agentworks.execution._vm_guest_identity_protocol import vm_guest_boot_id
 from agentworks.execution.carrier import Dispatch, ExitStatus
 from agentworks.execution.jobs import JobDisposal, JobStop
@@ -111,7 +113,7 @@ class _ActiveHelperCall:
     installed: bool = False
     armed: bool = False
     bookkeeping_retained: bool = False
-    candidate: InlineCandidateResult | ManagedObservationCandidate | None = None
+    candidate: InlineCandidateResult | ManagedObservationCandidate | ManagedStopCandidate | None = None
     outcome: OwnedInlineOutcome | None = None
 
 
@@ -303,8 +305,6 @@ class ExecutionOperation:
             owner=self._owner,
             execution_operation=self,
         )
-        if not outcome.requires_owner_retention:
-            self.retain_job_terminal_observation(reference, outcome.candidate)
         return outcome
 
     def retain_job_terminal_observation(
@@ -391,47 +391,91 @@ class ExecutionOperation:
     def stop_job(self, reference: JobRef, deadline: Deadline) -> JobStop:
         """Drain and permanently stop only this run, retaining its closure facts."""
         run = self._control_run(reference, deadline)
-        with self._admission_guard:
-            if self._active_inline_calls or self._unfinished_inline_executions:
-                raise StateError("Managed stop cannot overlap unfinished ordinary delivery")
-            if run.disposal_confirmed:
-                return JobStop(reference, True, True)
-            if not run.keeper.drain(deadline).drained:
-                return JobStop(reference, None, False, ExecutionFailure.CLEANUP, deadline.expired)
-            candidate = run.keeper.request_explicit_stop(deadline)
-            state = None if candidate.observation is None else candidate.observation.state
-            accepted = state in {ManagedStopState.ACCEPTED, ManagedStopState.TERMINATED}
-            if not accepted:
-                return JobStop(
-                    reference,
-                    False if candidate.dispatch is Dispatch.NOT_SENT else None,
-                    False,
-                    ExecutionFailure.DEADLINE if deadline.expired else ExecutionFailure.OBSERVATION,
-                    deadline.expired,
-                )
-            if deadline.expired:
-                return JobStop(reference, True, False, ExecutionFailure.DEADLINE, True)
-            try:
-                terminal = run.keeper.observe_explicit_cleanup(deadline)
-            except (StateError, ValidationError):
-                return JobStop(
-                    reference,
-                    True,
-                    False,
-                    ExecutionFailure.DEADLINE if deadline.expired else ExecutionFailure.OBSERVATION,
-                    deadline.expired,
-                )
-            proved = run.terminal_proved(terminal)
-            if proved:
-                run.terminal_observation = terminal
-                run.cleanup_complete = True
+        if run.disposal_confirmed:
+            return JobStop(reference, True, True)
+        outcome = self._stop_managed(run, deadline)
+        accepted = outcome.state in {ManagedStopState.ACCEPTED, ManagedStopState.TERMINATED}
+        if not accepted:
             return JobStop(
                 reference,
-                True,
-                proved,
-                ExecutionFailure.DEADLINE if deadline.expired else None if proved else ExecutionFailure.OBSERVATION,
+                False if outcome.candidate is not None and outcome.candidate.dispatch is Dispatch.NOT_SENT else None,
+                False,
+                ExecutionFailure.DEADLINE if deadline.expired else ExecutionFailure.OBSERVATION,
                 deadline.expired,
             )
+        if deadline.expired:
+            return JobStop(reference, True, False, ExecutionFailure.DEADLINE, True)
+        binding = self._native_binding
+        assert binding is not None
+        try:
+            terminal = self.observe_job(reference, binding.carrier, deadline)
+        except (StateError, ValidationError):
+            return JobStop(reference, True, False, ExecutionFailure.OBSERVATION, deadline.expired)
+        proved = not terminal.requires_owner_retention and self.retain_job_terminal_observation(
+            reference, terminal.candidate
+        )
+        if proved:
+            run.cleanup_complete = True
+        return JobStop(
+            reference,
+            True,
+            proved,
+            ExecutionFailure.DEADLINE if deadline.expired else None if proved else ExecutionFailure.OBSERVATION,
+            deadline.expired,
+        )
+
+    def _stop_managed(self, run: ManagedOperationRun, deadline: Deadline) -> ManagedStopOutcome:
+        """Acquire ordinary lifetime custody before draining this selected keeper."""
+        binding, bootstrap = self._native_binding, self._bootstrap
+        assert binding is not None and bootstrap is not None
+        with self._admission_guard:
+            if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
+                raise StateError("Execution operation cannot admit a managed stop")
+            borrow = self._owner.borrow()
+            operation = BorrowedFixedHelperCarrier(binding.carrier, borrow)
+            active = _ActiveHelperCall(binding.carrier, borrow, None, operation)
+            if self._dispatch_id is None:
+                self._dispatch_id = uuid4().hex
+            self._active_inline_calls[id(active)] = active
+        candidate = None
+        try:
+            self._admit(active)
+            if run.keeper.drain(deadline).drained:
+                # A drained worker does not clear an earlier unknown closing
+                # helper; reuse its existing local-custody/binding gate.
+                run.keeper._require_cleanup(deadline)  # noqa: SLF001
+                if self._wsl2_route is not None:
+                    self._wsl2_route.require_selected_route(deadline)
+                candidate = stop_managed_run(
+                    operation,
+                    expected_launch=encode_managed_job_fact(run.receipt),
+                    plan=bootstrap.root_entry,
+                    deadline=deadline,
+                    runtime_selection=binding.runtime_selection,
+                    guest=bootstrap.guest,
+                )
+                active.candidate = candidate
+                run.keeper.last_stop = candidate
+                operation.settle(candidate.dispatch, candidate.carrier_completion)
+            custody = self._outcome(active, operation, deadline, include_candidate=False)
+        except BaseException as control:
+            self._raise_control(control, active, operation, deadline)
+        with self._admission_guard:
+            try:
+                self._capture(active, custody)
+            except BaseException:
+                active.bookkeeping_retained = True
+                raise
+        state = None if candidate is None or candidate.observation is None else candidate.observation.state
+        return ManagedStopOutcome(
+            candidate,
+            state
+            if not custody.requires_owner_retention and candidate is not None and candidate.dispatch is Dispatch.SENT
+            else None,
+            custody.pending_remote_effects,
+            custody.coordination_uncertain,
+            custody.requires_owner_retention,
+        )
 
     def dispose_job(self, reference: JobRef, carrier: Carrier, deadline: Deadline) -> JobDisposal:
         """Observe terminal proof before draining, then dispose with exact retry custody."""
@@ -456,6 +500,7 @@ class ExecutionOperation:
                 return JobDisposal(reference, None, ExecutionFailure.CLEANUP, deadline.expired)
             if deadline.expired:
                 return JobDisposal(reference, False, ExecutionFailure.DEADLINE, True)
+            run.keeper._require_cleanup(deadline)  # noqa: SLF001
             repository, bootstrap, binding = self._managed_repository, self._bootstrap, self._native_binding
             assert repository is not None and bootstrap is not None and binding is not None
             if self._wsl2_route is not None:
@@ -477,8 +522,7 @@ class ExecutionOperation:
                 )
             except BaseException as control:
                 if isinstance(control.__cause__, ManagedDisposalControlFact):
-                    run.disposal_outcome = control.__cause__.outcome
-                    retained = run.disposal_outcome
+                    retained = control.__cause__.outcome
                     if not (
                         retained.requires_owner_retention
                         or retained.pending_remote_effects
@@ -487,11 +531,9 @@ class ExecutionOperation:
                         run.disposal_attempted = False
                         run.disposal_obligation_id = uuid4().hex
                 raise
-            run.disposal_outcome = outcome
             confirmed = outcome.state is DisposalState.DISPOSED and not outcome.requires_owner_retention
             if confirmed:
                 run.disposal_confirmed = True
-                run.cleanup_complete = True
             elif not (
                 outcome.requires_owner_retention or outcome.pending_remote_effects or outcome.coordination_uncertain
             ):
@@ -690,7 +732,9 @@ class ExecutionOperation:
             active.installed = True
 
     @staticmethod
-    def _known_termination(candidate: InlineCandidateResult | ManagedObservationCandidate) -> bool:
+    def _known_termination(
+        candidate: InlineCandidateResult | ManagedObservationCandidate | ManagedStopCandidate,
+    ) -> bool:
         return candidate.dispatch is Dispatch.NOT_SENT or (
             candidate.dispatch is Dispatch.SENT and candidate.carrier_completion == ExitStatus(code=0)
         )
