@@ -24,8 +24,6 @@ from .test_managed_observation import ScriptedCarrier
 from .test_managed_observe_access import RUN, _options
 from .test_managed_result import _confirmed, _reply
 
-pytestmark = pytest.mark.windows
-
 SETUPS = (
     (observe, "BorrowedFixedHelperCarrier"),
     (stop, "BorrowedFixedHelperCarrier"),
