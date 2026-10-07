@@ -7,6 +7,7 @@ from threading import Lock
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from agentworks.db import LifecycleObligationState
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._helper_launcher import _validate_plan
@@ -17,7 +18,13 @@ from agentworks.execution._inline import (
     prepare_inline_candidate,
 )
 from agentworks.execution._managed_bound_run import preflight_bound_run
-from agentworks.execution._managed_disposal_access import ManagedDisposalControlFact, dispose_bound_managed_run
+from agentworks.execution._managed_disposal_access import (
+    MANAGED_DISPOSAL_OBLIGATION_KIND,
+    MANAGED_DISPOSAL_PAYLOAD_VERSION,
+    ManagedDisposalControlFact,
+    dispose_bound_managed_run,
+    encode_managed_disposal_obligation,
+)
 from agentworks.execution._managed_disposal_exchange import DisposalState
 from agentworks.execution._managed_job_access import _explicit_managed_shell
 from agentworks.execution._managed_job_protocol import encode_managed_job_fact
@@ -482,6 +489,24 @@ class ExecutionOperation:
         run = self._control_run(reference, deadline)
         if run.disposal_confirmed:
             return JobDisposal(reference, True)
+        if run.disposal_attempted:
+            rows = self._owner.list_lifecycle_obligations()
+            row = next((row for row in rows if row.obligation_id == run.disposal_obligation_id), None)
+            if row is not None:
+                if (
+                    row.ownership != self._owner.ownership
+                    or row.obligation_kind != MANAGED_DISPOSAL_OBLIGATION_KIND
+                    or row.payload_version != MANAGED_DISPOSAL_PAYLOAD_VERSION
+                    or row.payload != encode_managed_disposal_obligation(reference.run_id)
+                    or row.payload_revision != 0
+                ):
+                    raise StateError("Managed disposal lifecycle binding changed")
+                if row.state is LifecycleObligationState.RESOLVED:
+                    # A settled helper may lose its reply before fresh-ID or
+                    # confirmation publication. Never rearm its resolved row.
+                    # Keep attempted=True and retained proof: disposal may
+                    # already have removed launch artifacts before that loss.
+                    run.disposal_obligation_id = uuid4().hex
         if not run.disposal_attempted:
             observed = self.observe_job(reference, carrier, deadline)
             if observed.requires_owner_retention:
@@ -528,8 +553,8 @@ class ExecutionOperation:
                         or retained.pending_remote_effects
                         or retained.coordination_uncertain
                     ):
-                        run.disposal_attempted = False
                         run.disposal_obligation_id = uuid4().hex
+                        run.disposal_attempted = False
                 raise
             confirmed = outcome.state is DisposalState.DISPOSED and not outcome.requires_owner_retention
             if confirmed:
@@ -539,8 +564,11 @@ class ExecutionOperation:
             ):
                 # A clean refusal resolved its one-attempt row. A later
                 # explicit attempt must register a fresh row, never reopen it.
-                run.disposal_attempted = False
+                # Publish its fresh identity first: interruption may retain
+                # attempted=True, but terminal proof and old helper settlement
+                # still permit a safe receipt-bound attempt on this new row.
                 run.disposal_obligation_id = uuid4().hex
+                run.disposal_attempted = False
             return JobDisposal(
                 reference,
                 True if confirmed else None if outcome.requires_owner_retention else False,

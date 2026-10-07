@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 
 import pytest
 
+from agentworks.db import LifecycleObligationState
 from agentworks.errors import StateError
+from agentworks.execution import _execution_operation as operation_module
 from agentworks.execution._file_operation import FileOperation
+from agentworks.execution._managed_disposal_access import dispose_bound_managed_run
 from agentworks.execution._managed_job_store import FactName
 from agentworks.execution._managed_job_wire import decode_fact, encode_fact
 from agentworks.execution._managed_observation_protocol import FACT_ORDER, ControllerState, ManagedResultControl
@@ -21,12 +25,155 @@ from agentworks.operations import OperationBorrow, OperationOwner
 
 from . import test_managed_observation as observation_tests
 from .test_execution_operation import RecordingCarrier
+from .test_managed_disposal import _disposed
+from .test_managed_disposal_access import _not_ready
 from .test_managed_execution_access import bound as bound
 from .test_managed_execution_access import fact
 from .test_managed_execution_access import view as view
 from .test_managed_lease_exchange import PLAN, RUNTIME
 
 pytestmark = pytest.mark.windows
+
+
+@pytest.mark.parametrize("refusal", ["not-ready", "not-sent", "pre-dispatch"])
+def test_disposal_fresh_identity_publication_survives_interruption(view, monkeypatch, refusal):
+    database, workflow, access, main, keeper = view
+    reference = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    run = workflow.views.execution_operation.managed_runs[0]
+    old_id = run.disposal_obligation_id
+    assign = ManagedOperationRun.__setattr__
+    published: list[str] = []
+
+    def publish(self, name, value):
+        assign(self, name, value)
+        if self is run and name == "disposal_obligation_id" and value != old_id and not published:
+            published.append(value)
+            raise KeyboardInterrupt("fresh disposal identity publication interrupted")
+
+    main.dispose.response = _not_ready
+    main.dispose.dispatch = Dispatch.NOT_SENT if refusal == "not-sent" else Dispatch.SENT
+    main.dispose.refuse_validation = refusal == "pre-dispatch"
+    with monkeypatch.context() as patch:
+        patch.setattr(ManagedOperationRun, "__setattr__", publish)
+        with pytest.raises(KeyboardInterrupt):
+            access.dispose(reference)
+    assert run.disposal_attempted and run.disposal_obligation_id == published[0]
+    assert run.terminal_proved(run.terminal_observation)
+    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
+    old_row = next(row for row in rows if row.obligation_id == old_id)
+    assert old_row.state is LifecycleObligationState.RESOLVED
+    assert not any(row.obligation_id == published[0] for row in rows)
+    before = main.dispose.calls
+
+    # The intermediate state can deliver on its new, unregistered identity
+    # using retained positive proof; it never rearms the settled old helper.
+    main.dispose.refuse_validation = False
+    main.dispose.dispatch = Dispatch.SENT
+    assert access.dispose(reference).disposed is False
+    assert main.dispose.calls == before + 1 and main.observe.calls == 1
+    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
+    assert any(row.obligation_id == published[0] for row in rows)
+    main.dispose.response = _disposed
+    assert access.dispose(reference).disposed is True
+    assert access.dispose(reference).disposed is True
+    assert main.dispose.calls == before + 2
+    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
+    disposal_rows = [row for row in rows if row.obligation_kind == "managed-dispose"]
+    assert len(disposal_rows) == 3
+    assert all(row.state is LifecycleObligationState.RESOLVED for row in disposal_rows)
+    assert next(row for row in disposal_rows if row.obligation_id == old_id) == old_row
+    workflow.close(cleanup_deadline=Deadline.after(5))
+    assert keeper.stop.calls == keeper.observe.calls == 0
+    assert database.operations.inspect(workflow.owner.ownership.scope) is None
+
+
+@pytest.mark.parametrize("boundary", ["fresh-id-before-publication", "refusal-helper-return", "disposed-helper-return"])
+def test_disposal_settled_row_recovers_without_deleted_launch_observation(view, monkeypatch, boundary):
+    database, workflow, access, main, keeper = view
+    reference = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    run = workflow.views.execution_operation.managed_runs[0]
+    old_id = run.disposal_obligation_id
+    main.dispose.response = _disposed if boundary == "disposed-helper-return" else _not_ready
+    with monkeypatch.context() as patch:
+        if boundary == "fresh-id-before-publication":
+            assign = ManagedOperationRun.__setattr__
+
+            def before_publish(self, name, value):
+                if self is run and name == "disposal_obligation_id":
+                    raise KeyboardInterrupt("before fresh disposal identity publication")
+                assign(self, name, value)
+
+            patch.setattr(ManagedOperationRun, "__setattr__", before_publish)
+        else:
+            original = dispose_bound_managed_run
+
+            def lose_helper_reply(*args, **kwargs):
+                outcome = original(*args, **kwargs)
+                assert not outcome.requires_owner_retention
+                raise KeyboardInterrupt("settled disposal helper reply lost")
+
+            patch.setattr(operation_module, "dispose_bound_managed_run", lose_helper_reply)
+        with pytest.raises(KeyboardInterrupt):
+            access.dispose(reference)
+    assert run.disposal_attempted and run.disposal_obligation_id == old_id and not run.disposal_confirmed
+    assert run.terminal_proved(run.terminal_observation)
+    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
+    old_row = next(row for row in rows if row.obligation_id == old_id)
+    assert old_row.state is LifecycleObligationState.RESOLVED
+    # A successful disposal can already have erased launch and output facts.
+    # All these retries must use retained positive proof, not observe again.
+    main.facts = ()
+    main.dispose.response = _disposed
+    assert access.dispose(reference).disposed is True
+    assert access.dispose(reference).disposed is True
+    assert main.dispose.calls == 2 and main.observe.calls == 1
+    assert run.disposal_obligation_id != old_id
+    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
+    disposal_rows = [row for row in rows if row.obligation_kind == "managed-dispose"]
+    assert len(disposal_rows) == 2 and all(row.state is LifecycleObligationState.RESOLVED for row in disposal_rows)
+    assert next(row for row in disposal_rows if row.obligation_id == old_id) == old_row
+    workflow.close(cleanup_deadline=Deadline.after(5))
+    assert keeper.stop.calls == keeper.observe.calls == 0
+    assert database.operations.inspect(workflow.owner.ownership.scope) is None
+
+
+@pytest.mark.parametrize("field", ["obligation_kind", "payload_version", "payload", "payload_revision"])
+def test_disposal_retry_refuses_mismatched_resolved_row(view, monkeypatch, field):
+    _, workflow, access, main, _ = view
+    reference = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    run = workflow.views.execution_operation.managed_runs[0]
+    original_dispose = dispose_bound_managed_run
+
+    def lose_helper_reply(*args, **kwargs):
+        original_dispose(*args, **kwargs)
+        raise KeyboardInterrupt("settled disposal reply lost")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(operation_module, "dispose_bound_managed_run", lose_helper_reply)
+        with pytest.raises(KeyboardInterrupt):
+            access.dispose(reference)
+    old_id = run.disposal_obligation_id
+    read_rows = workflow.owner.list_lifecycle_obligations
+    wrong = {"obligation_kind": "managed-stop", "payload_version": 2, "payload": b"wrong-run", "payload_revision": 1}
+
+    def mismatched_rows():
+        return tuple(
+            replace(row, **{field: wrong[field]}) if row.obligation_id == old_id else row for row in read_rows()
+        )
+
+    with monkeypatch.context() as patch:
+        patch.setattr(workflow.owner, "list_lifecycle_obligations", mismatched_rows)
+        with pytest.raises(StateError):
+            access.dispose(reference)
+    assert main.dispose.calls == 1 and run.disposal_obligation_id == old_id
+    assert access.dispose(reference).disposed is True
+    workflow.close(cleanup_deadline=Deadline.after(5))
 
 
 @pytest.mark.parametrize("attempt_started", [False, True])

@@ -474,11 +474,14 @@ def test_known_terminated_lost_disposal_reply_reuses_exact_obligation(view):
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
     main.dispose.response = lambda request: b""
+    (run,) = workflow.views.execution_operation.managed_runs
+    old_id = run.disposal_obligation_id
     first = access.dispose(reference)
     assert first.disposed is None and first.failure is ExecutionFailure.OBSERVATION
     assert main.observe.calls == 1
     main.dispose.response = disposal_tests._disposed
     assert access.dispose(reference).disposed
+    assert run.disposal_obligation_id == old_id
     assert main.observe.calls == 1 and keeper.stop.calls == 0
     rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
     assert len([row for row in rows if row.obligation_kind == "managed-dispose"]) == 1
@@ -523,10 +526,13 @@ def test_unknown_disposal_helper_blocks_retry_and_aggregate_release(view):
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
     main.dispose.code = None
+    (run,) = workflow.views.execution_operation.managed_runs
+    old_id = run.disposal_obligation_id
     outcome = access.dispose(reference)
     assert outcome.disposed is None
     with pytest.raises(StateError):
         access.dispose(reference)
+    assert run.disposal_obligation_id == old_id
     assert main.dispose.calls == 1 and main.observe.calls == 1
     with pytest.raises(StateError):
         workflow.close(cleanup_deadline=Deadline.after(5))
