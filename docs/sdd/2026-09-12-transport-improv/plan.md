@@ -3004,6 +3004,19 @@ schema, repository API, new flag or recovery framework is needed. Cover interrup
 success before publication as well as unknown-helper debt. This is in-scope retry of a known-settled
 attempt, not replay of an unknown effect.
 
+Worker correction `f56350edb`, integrated at `e1deabcbd`, implements that exact-row retry and both
+publication-order fixes. Tests cover interrupted clean refusal, NOT_SENT and pre-dispatch exception;
+interruption before fresh-ID publication and after settled refusal/success; changed row metadata;
+unknown-helper and POSSIBLE_EFFECT identity retention; unchanged resolved old rows and eventual
+aggregate close. The final worker full Linux suite passes 16,160 tests, 50 skips and 29 warnings in
+245.93 seconds, exit 0. Its 212 affected/neighbor tests, Ruff/format, strict mypy over 1,271
+sources, file quality and whitespace checks pass. Its final fixture roots are removed and tracked
+tree is clean. The earlier ordering-only 16,153-test run is not final evidence. Lead verifies that
+the integrated Python files match the final worker pin exactly. Whole-unit three-lane re-review
+remains required: the agent runner currently rejects both new agents and the completed generic lane
+with `agent thread limit reached`. The lead escalates runner restoration; no public publication,
+completion checkbox or ready signal substitutes for the missing review.
+
 - [ ] Preserve exact signal termination evidence in the managed supervisor when child entry is
       proved and `waitpid` returns a signaled status. The existing producer currently publishes a
       wait fact only for an ordinary exit, so the private signaled case establishes resource closure
