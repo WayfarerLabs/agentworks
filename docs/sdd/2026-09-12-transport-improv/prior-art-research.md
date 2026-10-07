@@ -1302,6 +1302,39 @@ proved job-length availability hold. Independent WSL work needs independently ow
 lifetime evidence, not just a longer guest loop or the managed cgroup. This is source evidence, not
 native acceptance or an approved host-daemon design.
 
+### Independent Windows-client launch boundary
+
+Microsoft's
+[creation flags](https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags)
+distinguish console detachment from Job Object breakaway. `DETACHED_PROCESS` changes console
+attachment; `CREATE_BREAKAWAY_FROM_JOB` requires the enclosing job to permit breakaway.
+[Nested jobs](https://learn.microsoft.com/en-us/windows/win32/procthread/nested-jobs) retain
+ancestor limits. Therefore a detached child or a new private job is not a proved escape from an
+enclosing kill-on-close job. Survival of ordinary parent exit is insufficient evidence about
+connection loss.
+
+The current `_wsl2_windows.py` creates its own kill-on-close job, `_wsl2_win32.py` supplies
+creation-time job membership without breakaway, and `_wsl2_lifecycle.py` deliberately ends its guest
+anchor on stdin EOF. These are appropriate operation-lifetime mechanisms, not an independent
+job-length hold unchanged. This is source analysis, not a native failure or acceptance report.
+
+[Microsoft's Job Object guidance](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
+identifies local `Win32_Process.Create` as a route whose child does not inherit the caller's job.
+However, the
+[WMI method contract](https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/create-method-in-class-win32-process)
+also documents provider-job limits and breakaway requirements. WMI is a candidate to investigate,
+not a selected unrestricted broker. Its actual ordinary-user identity, profile/distribution access,
+provider limits and disconnected lifetime remain unproved.
+
+Decision: require a bounded native experiment before selecting independent host launch. Compare
+ordinary, console-detached and permitted-breakaway candidates with no enclosing job, an allowed
+breakaway job, a restrictive job and a restrictive nested ancestor. Observe outside the controller's
+job, lose both controller and actual connection, and verify the same client and distribution beyond
+the measured idle interval. Reconnect and clean up by exact process identity, not PID/name alone;
+host-client exit still does not establish guest cleanup. No service, scheduled task, provider-policy
+change or deployed broker follows from this research. Any necessary host setup returns for operator
+direction; generic availability and the existing unfinished native proof remain the governing gates.
+
 The legacy WSL keepalive starts `wsl.exe` and assigns it to a Job Object afterward. That is useful
 Job-limit prior art but not an acceptable new-stack ownership mechanism: controller death between
 process creation and assignment can leave an unowned client. `subprocess.Popen` also cannot express

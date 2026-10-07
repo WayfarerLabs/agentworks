@@ -3309,7 +3309,14 @@ edge follows.
       to exact VM/job identity, retain uncertainty on controller loss or boot change, and release it
       only after terminal cleanup evidence. Refuse `INDEPENDENT` on that platform until proved; test
       explicit VM stop/reboot and terminal-record observation separately. A no-op hold is valid only
-      where platform lifecycle evidence proves idle shutdown cannot end active work.
+      where platform lifecycle evidence proves idle shutdown cannot end active work. The Windows
+      proof must include the actual connection's enclosing Job Object and a restrictive nested
+      ancestor: console detachment alone is not independent lifetime. Compare supported
+      ordinary-authority launch candidates, observe outside the controller's job, verify
+      availability beyond the measured idle interval and reconnect by exact identity. WMI provider
+      launch remains research, not selected architecture or acceptance; service/task/provider-policy
+      changes require separate operator direction. See the independent Windows-client launch
+      research.
 - [ ] Prove a distribution-scoped WSL2 boot fence before production managed-run adoption. The kernel
       boot UUID alone survives a distribution stop and restart inside the same utility VM. The
       private guest probe now combines that UUID with PID 1 start ticks; validate stable identity
