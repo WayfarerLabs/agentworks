@@ -16,10 +16,10 @@ from ._managed_job_protocol import encode_managed_job_fact
 from ._managed_job_store import FactName
 from ._managed_observation_exchange import ManagedObservationState
 from ._managed_observation_protocol import ControllerState
-from ._managed_operation_keeper import ManagedOperationKeeper
+from ._managed_operation_keeper import ManagedOperationKeeper, _clean_start_acknowledged
 from ._managed_request_adapter import _ManagedBody
 from ._managed_runs import ManagedLaunchState
-from ._managed_start_exchange import ManagedStartState, prepare_managed_start
+from ._managed_start_exchange import prepare_managed_start
 from ._managed_start_operation import ManagedStartControlFact, ManagedStartOutcome, start_owned_managed_run
 from ._managed_stop_exchange import ManagedStopState
 from .carrier import Dispatch, ExitStatus
@@ -93,28 +93,7 @@ class ManagedOperationRun:
 
     @property
     def acknowledged(self) -> bool:
-        outcome = self.start_outcome
-        attempt = outcome.attempt if outcome is not None else None
-        observation = attempt.candidate.observation if attempt is not None else None
-        return bool(
-            outcome is not None
-            and attempt is not None
-            and observation is not None
-            and observation.state is ManagedStartState.ACKNOWLEDGED
-            and observation.launch_fact == self._expected_launch
-            and observation.issue is None
-            and attempt.record.identity == self.receipt.identity
-            and attempt.record.spec == self.receipt.spec
-            and attempt.record.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
-            and outcome.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
-            and attempt.candidate.dispatch is Dispatch.SENT
-            and attempt.candidate.carrier_completion == ExitStatus(0)
-            and attempt.candidate.carrier_failure is None
-            and not outcome.deadline_exceeded
-            and not outcome.pending_remote_effects
-            and not outcome.coordination_uncertain
-            and not outcome.requires_owner_retention
-        )
+        return _clean_start_acknowledged(self.start_outcome, self.receipt, self._expected_launch)
 
     def finish_cleanup(self, deadline: Deadline) -> None:
         """Settle only this run after its keeper's separate local drain.
@@ -273,15 +252,7 @@ class ManagedOperationRun:
                 before_dispatch=before_dispatch,
             )
             outcome = self.start_outcome
-            observation = outcome.attempt.candidate.observation if outcome.attempt is not None else None
-            if (
-                observation is not None
-                and observation.state is ManagedStartState.ACKNOWLEDGED
-                and not outcome.deadline_exceeded
-                and not outcome.pending_remote_effects
-                and not outcome.coordination_uncertain
-                and not outcome.requires_owner_retention
-            ):
+            if self.acknowledged:
                 self.keeper.acknowledge_start(outcome)
             return outcome
         except BaseException as control:

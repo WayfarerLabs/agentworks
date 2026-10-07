@@ -474,6 +474,7 @@ def test_ack_handoff_startup_refusal_preserves_completed_start_evidence(bound, m
         with pytest.raises(RuntimeError) as caught:
             run.start(body_for(receipt), Deadline.after(1))
         assert caught.value is error and run.start_outcome is not None
+        assert run.acknowledged
         assert run.start_outcome.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
         assert not run.start_outcome.requires_owner_retention
         assert start.calls == 1 and clock.calls == 1 and run._prepared is None
@@ -483,6 +484,39 @@ def test_ack_handoff_startup_refusal_preserves_completed_start_evidence(bound, m
         )
     finally:
         assert run.keeper.drain(Deadline.after(1)).drained
+
+
+def test_clean_ack_survives_interrupted_late_worker_start(bound, monkeypatch) -> None:
+    _, _, receipt = bound
+    run, _, start, clock = make_run(bound)
+    entered, release = threading.Event(), threading.Event()
+    error = KeyboardInterrupt("worker start interrupted")
+    original_start, renew = threading.Thread.start, run.keeper._renew
+
+    def delayed_target():
+        entered.set()
+        assert release.wait(10)
+        renew()
+
+    def interrupted(worker):
+        original_start(worker)
+        raise error
+
+    monkeypatch.setattr(run.keeper, "_renew", delayed_target)
+    monkeypatch.setattr(threading.Thread, "start", interrupted)
+    try:
+        with pytest.raises(KeyboardInterrupt) as caught:
+            run.start(body_for(receipt), Deadline.after(5))
+        assert caught.value is error and entered.wait(5)
+        assert run.acknowledged and run.control_escaped
+        assert run.start_outcome is not None and not run.start_outcome.requires_owner_retention
+        assert not run.keeper._worker_permission and start.calls == clock.calls == 1
+        facts = run.keeper.drain(Deadline.after(0.01))
+        assert facts.worker_active and facts.startup_pending and not facts.drained
+    finally:
+        release.set()
+        assert run.keeper.drain(Deadline.after(10)).drained
+    assert run.acknowledged and start.calls == clock.calls == 1
 
 
 @pytest.mark.parametrize("fault", ["owner", "boot", "shared_carrier", "body"])

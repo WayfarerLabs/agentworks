@@ -48,6 +48,33 @@ _CYCLE_SECONDS = 5.0
 _CADENCE_SECONDS = 10.0
 
 
+def _clean_start_acknowledged(
+    outcome: ManagedStartOutcome | None, receipt: ManagedRunReceipt, expected_launch: bytes
+) -> bool:
+    """Exact launch and settled start custody, independent of worker startup."""
+    attempt = outcome.attempt if outcome is not None else None
+    observation = attempt.candidate.observation if attempt is not None else None
+    return bool(
+        outcome is not None
+        and attempt is not None
+        and observation is not None
+        and observation.state is ManagedStartState.ACKNOWLEDGED
+        and observation.launch_fact == expected_launch
+        and observation.issue is None
+        and attempt.record.identity == receipt.identity
+        and attempt.record.spec == receipt.spec
+        and attempt.record.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
+        and outcome.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
+        and attempt.candidate.dispatch is Dispatch.SENT
+        and attempt.candidate.carrier_completion == ExitStatus(0)
+        and attempt.candidate.carrier_failure is None
+        and not outcome.deadline_exceeded
+        and not outcome.pending_remote_effects
+        and not outcome.coordination_uncertain
+        and not outcome.requires_owner_retention
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class InitialOperationLease:
     clock: ManagedLeaseCandidate
@@ -290,28 +317,11 @@ class ManagedOperationKeeper:
         if self._start_handoff_used:
             raise StateError("Operation keeper start handoff is one-shot")
         self._start_handoff_used = True
-        attempt = outcome.attempt
-        observation = attempt.candidate.observation if attempt is not None else None
         if (
             self.initial is None
             or self.initial.lease is None
             or self._stop.is_set()
-            or attempt is None
-            or attempt.record.identity != self._receipt.identity
-            or attempt.record.spec != self._receipt.spec
-            or attempt.record.launch_state is not ManagedLaunchState.RECEIPT_CONFIRMED
-            or outcome.launch_state is not ManagedLaunchState.RECEIPT_CONFIRMED
-            or outcome.deadline_exceeded
-            or outcome.pending_remote_effects
-            or outcome.coordination_uncertain
-            or outcome.requires_owner_retention
-            or attempt.candidate.dispatch is not Dispatch.SENT
-            or attempt.candidate.carrier_completion != ExitStatus(0)
-            or attempt.candidate.carrier_failure is not None
-            or observation is None
-            or observation.state is not ManagedStartState.ACKNOWLEDGED
-            or observation.issue is not None
-            or observation.launch_fact != self._expected_launch
+            or not _clean_start_acknowledged(outcome, self._receipt, self._expected_launch)
         ):
             self._stop.set()
             raise StateError("Operation keeper requires a clean exact acknowledged start")

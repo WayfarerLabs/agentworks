@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import inspect
-import sys
 import threading
 from dataclasses import replace
 from pathlib import PurePosixPath
@@ -406,33 +404,36 @@ def test_interrupted_known_cleanup_bookkeeping_is_retryable(view, monkeypatch, b
     access.start(Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION)
     (run,) = workflow.views.execution_operation.managed_runs
     control = KeyboardInterrupt("cleanup bookkeeping interrupted")
-    method = _ClosingCarrier.execute if boundary == "delivery" else run.keeper.request_stop
     if boundary == "resolution":
-        original = LifecycleObligation.resolve
+        original_resolve = LifecycleObligation.resolve
 
         def resolve(handle):
-            original(handle)
+            original_resolve(handle)
             raise control
 
         monkeypatch.setattr(LifecycleObligation, "resolve", resolve)
+    elif boundary == "delivery":
+        original_execute = _ClosingCarrier.execute
+
+        def execute(*args, **kwargs):
+            original_execute(*args, **kwargs)
+            raise control
+
+        monkeypatch.setattr(_ClosingCarrier, "execute", execute)
     else:
-        lines, first = inspect.getsourcelines(method)
-        statement = "return report" if boundary == "delivery" else "self._settle_closing(deadline)"
-        target = first + next(index for index, line in enumerate(lines) if line.strip() == statement)
+        original_settle = run.keeper._settle_closing
 
-        def interrupt(frame, event, arg):
-            if event == "line" and frame.f_code is method.__code__ and frame.f_lineno == target:
-                sys.settrace(None)
+        def settle(deadline):
+            if run.keeper._closing_pending:
                 raise control
-            return interrupt
+            original_settle(deadline)
 
-        sys.settrace(interrupt)
+        monkeypatch.setattr(run.keeper, "_settle_closing", settle)
     try:
         with pytest.raises(KeyboardInterrupt) as caught:
             workflow.close(cleanup_deadline=Deadline.after(2))
         assert caught.value is control
     finally:
-        sys.settrace(None)
         monkeypatch.undo()
     assert database.operations.inspect(workflow.owner.ownership.scope) is not None
     workflow.close(cleanup_deadline=Deadline.after(2))
