@@ -406,7 +406,6 @@ class ExecutionOperation:
                     stderr=missing,
                     failure=ExecutionFailure.DEADLINE,
                     deadline_exceeded=True,
-                    job=reference,
                 ),
                 (),
             )
