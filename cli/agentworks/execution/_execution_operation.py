@@ -17,7 +17,7 @@ from agentworks.execution._inline import (
     execute_inline_candidate,
     prepare_inline_candidate,
 )
-from agentworks.execution._managed_bound_run import preflight_bound_run
+from agentworks.execution._managed_bound_run import ManagedDeadlineExpired, preflight_bound_run
 from agentworks.execution._managed_disposal_access import (
     MANAGED_DISPOSAL_OBLIGATION_KIND,
     MANAGED_DISPOSAL_PAYLOAD_VERSION,
@@ -45,6 +45,7 @@ from agentworks.execution._managed_operation_run import ManagedOperationRun
 from agentworks.execution._managed_request_adapter import compose_managed_body
 from agentworks.execution._managed_result import ManagedResultOutcome, wait_bound_managed_result
 from agentworks.execution._managed_runs import (
+    ManagedOutputMode,
     ManagedRunIdentity,
     ManagedRunLifetime,
     ManagedRunOwner,
@@ -58,10 +59,10 @@ from agentworks.execution._managed_runs import (
 from agentworks.execution._managed_stop_access import ManagedStopOutcome
 from agentworks.execution._managed_stop_exchange import ManagedStopCandidate, ManagedStopState, stop_managed_run
 from agentworks.execution._vm_guest_identity_protocol import vm_guest_boot_id
-from agentworks.execution.carrier import Dispatch, ExitStatus
+from agentworks.execution.carrier import Dispatch, ExitStatus, Retention
 from agentworks.execution.jobs import JobDisposal, JobStop
 from agentworks.execution.models import JobRef
-from agentworks.execution.result import ExecutionFailure
+from agentworks.execution.result import ApplicationState, ExecutionFailure, ExecutionOutput, ExecutionResult
 from agentworks.operations import LifecycleObligation, OperationAttempt, release_borrow_after_custody
 
 if TYPE_CHECKING:
@@ -354,20 +355,61 @@ class ExecutionOperation:
     def wait_job(self, reference: JobRef, carrier: Carrier, deadline: Deadline) -> ManagedResultOutcome:
         """Wait only for observations; the selected keeper remains independent."""
         repository, bootstrap = self._managed_repository, self._bootstrap
-        if type(reference) is not JobRef or repository is None or bootstrap is None or self._native_binding is None:
+        if (
+            type(reference) is not JobRef
+            or repository is None
+            or bootstrap is None
+            or self._native_binding is None
+            or carrier is not self._native_binding.carrier
+        ):
             raise ValidationError("Managed wait requires its bound operation")
-        return wait_bound_managed_result(
-            repository,
-            ManagedRunIdentity(reference.run_id),
-            target=self._target,
-            guest=bootstrap.guest,
-            root_plan=bootstrap.root_entry,
-            carrier=carrier,
-            runtime_selection=self._native_binding.runtime_selection,
-            deadline=deadline,
-            owner=self._owner,
-            execution_operation=self,
-        )
+        try:
+            return wait_bound_managed_result(
+                repository,
+                ManagedRunIdentity(reference.run_id),
+                target=self._target,
+                guest=bootstrap.guest,
+                root_plan=bootstrap.root_entry,
+                carrier=carrier,
+                runtime_selection=self._native_binding.runtime_selection,
+                deadline=deadline,
+                owner=self._owner,
+                execution_operation=self,
+            )
+        except ManagedDeadlineExpired as control:
+            if control.__cause__ is not None:
+                raise
+            # Launch acknowledgement may consume the selected wait budget.
+            # Resolve only retained local evidence: no renewed deadline, I/O
+            # or invented application-entry/termination precision after expiry.
+            run = self.require_managed_run(
+                ManagedRunIdentity(reference.run_id),
+                repository=repository,
+                owner=self._owner,
+                target=self._target,
+                guest=bootstrap.guest,
+                root_plan=bootstrap.root_entry,
+                runtime_selection=self._native_binding.runtime_selection,
+            )
+            assert run.reserved is not None
+            retention = {
+                ManagedOutputMode.CAPTURE: Retention.CAPTURED,
+                ManagedOutputMode.DISCARD: Retention.DISCARDED,
+                ManagedOutputMode.SENSITIVITY_SUPPRESSED: Retention.SUPPRESSED,
+            }[run.reserved.output_policy.mode]
+            missing = ExecutionOutput(retention=retention)
+            return ManagedResultOutcome(
+                ExecutionResult(
+                    Dispatch.UNKNOWN,
+                    ApplicationState.UNKNOWN,
+                    stdout=missing,
+                    stderr=missing,
+                    failure=ExecutionFailure.DEADLINE,
+                    deadline_exceeded=True,
+                    job=reference,
+                ),
+                (),
+            )
 
     def _control_run(self, reference: JobRef, deadline: Deadline) -> ManagedOperationRun:
         repository, bootstrap, binding = self._managed_repository, self._bootstrap, self._native_binding

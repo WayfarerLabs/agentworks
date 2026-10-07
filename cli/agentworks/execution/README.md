@@ -129,30 +129,40 @@ these values, never carrier, account, command, path, provider, credential, outpu
 `access.py` contains a private, non-production `ExecutionAccess` increment. It binds an existing
 `ExecutionOperation`, carrier, runtime, ordinary and optional elevated identity plans, logical
 diagnostic identity, and deadline policy. Its `run(...)` accepts the intended stable foreground
-options but currently implements only DIRECT execution with operation lifetime, finite input, and
-bounded capture or discard on the Linux inline helper. MANAGED, independent lifetime, non-Linux
-runtime, unsupported shell startup, unavailable elevation, invalid values and expired deadlines
-refuse before owner custody or dispatch. It performs one preparation and one dispatch attempt, then
-uses the contextual result reducer. It is not exported from the package root, placed in an
-`ExecutionTarget`, or supplied through RunContext. Its private `start(...)` now accepts explicit
-MANAGED protection and OPERATION lifetime for finite commands or explicitly selected scripts,
-including optional elevation. It returns an immutable, credential-free `JobRef` only after exact
-clean launch acknowledgement. Other modes refuse before managed reservation. Ordinary uncertain
-starts raise `StateError` with a safe run-reference cause; escaping control exceptions preserve
-their identity. Its private `observe`, selected-stream `read_output`, `wait`, `stop` and `dispose`
-address only acknowledged runs retained by that originating operation. Status separates application
-precision from positive resource closure; output cursors address the verified retained prefix, whose
-EOF does not imply complete source capture. `capture_complete` describes the whole verified capture,
-not consumption of this returned slice; intentional discard or suppression leaves it false without
-an output-limit failure. Wait returns the existing `ExecutionResult` with a safe managed reference
-and never stops the workload or drains renewal. Stop first acquires the whole owner's ordinary
-serial borrow, then drains only the selected keeper. It delivers through the existing lifetime row
-and actual borrowed helper attempt, retaining unknown helper debt before any fresh observation. An
-overlapping file or other component's borrow refuses before drain or dispatch. Accepted intent is
-independent of proved termination. Disposal observes terminal proof before draining; active or
-unproved work stays not ready without stopping it. Uncertain stop or disposal remains distinct from
-a proved refusal. These private controls do not establish independent-job access after reconnection,
-complete target composition or a public RunContext surface.
+options for DIRECT inline execution and MANAGED launch followed by wait, initially with OPERATION
+lifetime only. Both preserve finite input, capture/discard/sensitivity policy and bound identity or
+elevation choices. Independent lifetime, non-Linux runtime, unsupported shell startup, unavailable
+elevation, invalid values and initially expired deadlines refuse before workload launch. DIRECT
+performs one preparation and dispatch attempt, then uses the contextual result reducer. It is not
+exported from the package root, placed in an `ExecutionTarget`, or supplied through RunContext. Its
+private `start(...)` now accepts explicit MANAGED protection and OPERATION lifetime for finite
+commands or explicitly selected scripts, including optional elevation. It returns an immutable,
+credential-free `JobRef` only after exact clean launch acknowledgement. Other modes refuse before
+managed reservation. Ordinary uncertain starts raise `StateError` with a safe run-reference cause;
+escaping control exceptions preserve their identity. Its private `observe`, selected-stream
+`read_output`, `wait`, `stop` and `dispose` address only acknowledged runs retained by that
+originating operation. Status separates application precision from positive resource closure; output
+cursors address the verified retained prefix, whose EOF does not imply complete source capture.
+`capture_complete` describes the whole verified capture, not consumption of this returned slice;
+intentional discard or suppression leaves it false without an output-limit failure. Wait returns the
+existing `ExecutionResult` with a safe managed reference and never stops the workload or drains
+renewal. MANAGED `run` composes that same launch and wait without requiring a separate caller-facing
+start step. It selects its finite observation budget once for both phases; acknowledgement that
+exhausts the budget still returns UNKNOWN application progress, DEADLINE, incomplete output with the
+effective retention policy, and its safe `JobRef`, without further I/O or cleanup. Checked MANAGED
+run and wait use the bound logical entity and existing contextual checker, preserving the exact
+result/reference; known application failures remain application-phase, while deadline and
+observation-collection failures retain observation phase. Start's existing overlap boundaries can
+retain a reservation and keeper-admission uncertainty when ownership is already borrowed, or
+admitted initial-clock keeper evidence when a later borrow refuses actual launch. Foreground
+composition does not bypass or erase either retained state. Stop first acquires the whole owner's
+ordinary serial borrow, then drains only the selected keeper. It delivers through the existing
+lifetime row and actual borrowed helper attempt, retaining unknown helper debt before any fresh
+observation. An overlapping file or other component's borrow refuses before drain or dispatch.
+Accepted intent is independent of proved termination. Disposal observes terminal proof before
+draining; active or unproved work stays not ready without stopping it. Uncertain stop or disposal
+remains distinct from a proved refusal. These private controls do not establish independent-job
+access after reconnection, complete target composition or a public RunContext surface.
 
 `ExecutionOperation` requires an explicit managed target matching its owner's scope. An optional
 numeric bootstrap must match that VM's derived boot identity; platform-host targets cannot select

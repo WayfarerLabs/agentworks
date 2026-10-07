@@ -38,6 +38,7 @@ from ._managed_observation_exchange import ManagedObservationState
 from ._managed_result import _fact
 from ._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from .carrier import Deadline, Failure, Retention
+from .diagnostics import ExecutionPhase, check_execution_result
 from .files import (
     Change,
     Create,
@@ -239,12 +240,25 @@ class ExecutionAccess:
         if type(check) is not bool:
             raise ValidationError("Managed wait check must be boolean")
         selected = self._job_deadline(deadline)
+        return self._wait_managed(job, selected, check=check)
+
+    def _wait_managed(self, job: JobRef, selected: Deadline, *, check: bool) -> ExecutionResult:
+        """Compose managed observation under an already selected finite budget."""
         try:
             outcome = self._operation.wait_job(job, self._carrier, selected)
         except BaseException as control:
             self._raise_job_control(control, job)
         result = replace(outcome.result, job=job)
-        return result.check() if check else result
+        if not check:
+            return result
+        return check_execution_result(
+            result,
+            entity_kind=self._entity_kind,
+            entity_name=self._entity_name,
+            phase=ExecutionPhase.OBSERVATION
+            if result.failure in {ExecutionFailure.DEADLINE, ExecutionFailure.OBSERVATION}
+            else None,
+        )
 
     def stop(self, job: JobRef, *, deadline: Deadline | None = None) -> JobStop:
         """Request permanent stop and report separate positive workload closure."""
@@ -325,11 +339,9 @@ class ExecutionAccess:
         deadline: Deadline | None = None,
         check: bool = False,
     ) -> ExecutionResult:
-        """Run one supported inline candidate under existing operation custody."""
+        """Run DIRECT inline or launch then observe MANAGED OPERATION work."""
         if type(profile) is not Protection or type(lifetime) is not Lifetime:
             raise ValidationError("Foreground execution requires explicit profile and lifetime values")
-        if profile is Protection.MANAGED:
-            raise StateError("MANAGED execution is unavailable")
         if lifetime is Lifetime.INDEPENDENT:
             raise StateError("INDEPENDENT execution lifetime is unavailable")
         if self._runtime_selection.target_os is not RuntimeTargetOS.LINUX:
@@ -353,9 +365,26 @@ class ExecutionAccess:
             or (deadline.expires_at is not None and deadline.expires_at < composition_deadline.expires_at)
         ):
             selected_deadline = deadline
+        if profile is Protection.MANAGED and selected_deadline.expires_at is None:
+            raise ValidationError("Managed execution requires a finite deadline")
         plan = self._elevated_plan if sudo else self._ordinary_plan
         assert plan is not None
         effective_sensitive = sensitive or stdin.is_sensitive
+
+        if profile is Protection.MANAGED:
+            job = self._operation.start_managed(
+                self._carrier,
+                request,
+                plan=plan,
+                runtime_selection=self._runtime_selection,
+                deadline=selected_deadline,
+                input=stdin,
+                output=output,
+                env=env,
+                cwd=cwd,
+                sensitive=effective_sensitive,
+            )
+            return self._wait_managed(job, selected_deadline, check=check)
 
         outcome = self._operation.run_inline(
             self._carrier,

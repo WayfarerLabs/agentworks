@@ -163,6 +163,20 @@ and persisted launch before dispatch. A reference alone cannot adopt another ope
 reconcile an uncertain start. Independent-job admission retains its separate resource-owned
 preflight; this OPERATION lookup does not establish independent-job access after reconnection.
 
+The private foreground composition now supports `run(..., profile=MANAGED)` with OPERATION lifetime
+by invoking that same one-shot managed launch and existing operation-owned wait. It does not require
+the caller to invoke `start` separately, add a supervisor, or enable INDEPENDENT lifetime. All run
+flags, including `check`, are validated before launch. One selected finite observation deadline
+covers both launch and wait; it is never renewed by selecting a second deadline policy. If clean
+acknowledgement exhausts that budget before the first wait attempt, only locally retained exact
+acknowledged-run and output-policy evidence supplies an UNKNOWN application/dispatch result with
+DEADLINE and the safe reference. It performs no extra I/O, keeper drain, stop or owner resolution.
+Initially expired explicit deadlines still refuse admission. Checked MANAGED run and wait preserve
+the exact safe result/reference with the bound logical entity through the existing contextual
+checker; known application failures retain application phase, and deadline or observation collection
+failures may refine otherwise unknown phase to observation. DIRECT behavior remains unchanged. This
+private composition does not establish public RunContext availability or native backend acceptance.
+
 Read-only observation, output and wait use the existing operation-lifetime dispatch obligation and
 fresh serial borrows. Repeated settled polls reuse that exact row rather than consuming the bounded
 ledger one row at a time. The same interrupted registration, arming, helper settlement and retained
