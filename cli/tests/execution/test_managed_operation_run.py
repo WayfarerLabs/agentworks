@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gc
 import threading
+import time
 import weakref
 from dataclasses import replace
 from pathlib import Path
@@ -102,6 +103,8 @@ def test_real_sample_reservation_ack_and_renewal_during_ordinary_attempt(bound, 
         return _success(request)
 
     clock.response = response
+    # Custody and thread handshakes succeed independently of host throughput.
+    monkeypatch.setattr(time, "monotonic", lambda: 100.0)
     deadline = Deadline.after(2)
     try:
         assert repository.inspect(receipt.identity) is None and not run.reservation_started
