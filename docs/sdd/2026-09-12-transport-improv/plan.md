@@ -2154,19 +2154,20 @@ explicitly authorized; final removal remains this effort's responsibility. Refre
 each integration boundary and prohibit new legacy consumers.
 
 The final implementation dependency is the complete new SSH contribution and shared foundation in
-#832, followed by transport-owned platform factories and the additive RunContext in #833. Build
-those factories against the pinned new SSH connection and trust API, without dual-version
-construction or fallback to legacy policy. Missing explicit configuration or admitted trust is a
-prerequisite, not permission to use ambient SSH state. Remote Lima is one SSH-backed platform-access
-consumer; both the placement-host and guest hops need their own explicit delivery facts. Before
-either merge-intent handoff, validate the complete combined candidate with both usable old and new
-RunContext paths, full gates, native evidence and whole-PR reviews. Shared code remains transport
-owned regardless of which PR carries its commits. Restack the two PRs only after complete current
-integration reports and stable shared/carrier implementation, preserve reviewed provenance, and land
-#832 before #833. There is no third foundation PR or compatibility bridge. The initial private
-composition `ad471c8a0` combines transport `fa20e5a95` and SSH `642dd8af4` without changing either
-public head or dependency; it is development state, not joint acceptance. This ordering does not
-decide operator-held SSH resource APIs, waive carrier requirements or start migration and deletion.
+[PR #832](https://github.com/WayfarerLabs/agentworks/pull/832), followed by transport-owned platform
+factories and the additive RunContext in #833. Build those factories against the pinned new SSH
+connection and trust API, without dual-version construction or fallback to legacy policy. Missing
+explicit configuration or admitted trust is a prerequisite, not permission to use ambient SSH state.
+Remote Lima is one SSH-backed platform-access consumer; both the placement-host and guest hops need
+their own explicit delivery facts. Before either merge-intent handoff, validate the complete
+combined candidate with both usable old and new RunContext paths, full gates, native evidence and
+whole-PR reviews. Shared code remains transport owned regardless of which PR carries its commits.
+Restack the two PRs only after complete current integration reports and stable shared/carrier
+implementation, preserve reviewed provenance, and land the SSH PR before the transport PR. There is
+no third foundation PR or compatibility bridge. The initial private composition `ad471c8a0` combines
+transport `fa20e5a95` and SSH `642dd8af4` without changing either public head or dependency; it is
+development state, not joint acceptance. This ordering does not decide operator-held SSH resource
+APIs, waive carrier requirements or start migration and deletion.
 
 ## 1. Specify the small contract and proof charter
 
@@ -3441,8 +3442,18 @@ independent reservation-latency probe beyond the original two-second budget. Gen
 passes 178 affected/adjacent cases plus three sensitivity probes: removing acknowledgement or the
 renewal handshake still fails the corrected fixture. Complexity independently verifies that frozen
 monotonic time leaves Event waits bounded by real time and selects the existing three-line pattern
-without another clock framework. Integrated gates remain pending. This does not identify the hosted
-failure's unique cause or supply a green combined hosted run.
+without another clock framework.
+
+Final integrated source `a8fbe36e0` passes 16,637 non-integration tests, 49 explicit
+platform/capability skips and 29 fork warnings in 283.82 seconds, exit 0. Ruff/format (1,323 files),
+full mypy (1,287 sources), exact CI Typer isolation, locked-SDD, Rulesync and whitespace pass.
+Website passes 160 Python cases in 44.541 seconds and 103 Node cases in 8.078 seconds, four builds
+and both deterministic comparisons. The first file-quality run finds two Markdown heading errors
+caused by wrapped PR numbers; the formatting-only correction passes the complete file-quality
+recheck (475 Markdown and 448 spell-checked files), exit 0. Owned disposable fixtures are removed
+only after terminal completion, with operator data preserved. These are local transport gates, not a
+unique diagnosis of the hosted failure or a green combined hosted run. The published testing head
+remains unchanged pending complete native reports.
 
 The lead's read-only completion inventory at `ed3603c23` confirms that this next foreground unit is
 not the rest of the execution surface. Required work still includes unified independent launch and
