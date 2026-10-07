@@ -1289,6 +1289,19 @@ through the active job; the current command-scoped client/guest anchor does not 
 after the initiating operation ends. Other VM platforms use the same availability contract, with a
 no-op hold only where their lifecycle semantics justify one.
 
+A source audit of released WSL 2.7.14 (`372dd3499`) makes the observer-loss boundary explicit.
+[`Lifetime.cpp`](https://github.com/microsoft/WSL/blob/372dd3499231809730b551fddb58ce50baff6ee5/src/windows/service/exe/Lifetime.cpp)
+tracks Windows client process termination; the instance's idle timer starts after its last
+registered client exits.
+[`LxssUserSession.cpp`](https://github.com/microsoft/WSL/blob/372dd3499231809730b551fddb58ce50baff6ee5/src/windows/service/exe/LxssUserSession.cpp)
+checks that client registration before requesting distribution shutdown.
+[`InitTerminateInstance`](https://github.com/microsoft/WSL/blob/372dd3499231809730b551fddb58ce50baff6ee5/src/linux/init/init.cpp)
+can then shut down the distribution after its Plan 9 check; it does not establish that every Linux
+job has finished. A Linux helper that merely keeps running after client loss is therefore not a
+proved job-length availability hold. Independent WSL work needs independently owned platform
+lifetime evidence, not just a longer guest loop or the managed cgroup. This is source evidence, not
+native acceptance or an approved host-daemon design.
+
 The legacy WSL keepalive starts `wsl.exe` and assigns it to a Job Object afterward. That is useful
 Job-limit prior art but not an acceptable new-stack ownership mechanism: controller death between
 process creation and assignment can leave an unowned client. `subprocess.Popen` also cannot express

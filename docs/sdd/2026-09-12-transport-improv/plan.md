@@ -3130,6 +3130,17 @@ capture ceiling is not production acceptance. Keep these requirements with the e
 target/RunContext gates; no additional API family or new recovery framework is authorized by this
 inventory. Platform-factory and SSH ownership remain as previously assigned.
 
+- [ ] Settle active managed-output meaning before extending cursor reads. The current preparation
+      contract withholds bytes until successful application exec is proved; UNKNOWN status alone
+      does not admit provisional output. A controlled three-case probe against the actual child
+      shows silent caught exec failure, fatal interpreter diagnostics on its redirected stderr
+      before exec, and ordinary application output. The fatal case is injected, not a reproduced
+      normal-request failure. The operator is asked whether output may instead mean exact
+      supervised-child pipe bytes, with application entry/status still proved separately. No changed
+      contract, active-output implementation or tracing mechanism follows before that decision.
+      Sensitive suppression and exclusion of unrelated bootstrap/carrier noise remain required under
+      either choice.
+
 - [ ] Preserve exact signal termination evidence in the managed supervisor when child entry is
       proved and `waitpid` returns a signaled status. The existing producer currently publishes a
       wait fact only for an ordinary exit, so the private signaled case establishes resource closure
