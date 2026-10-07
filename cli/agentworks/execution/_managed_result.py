@@ -1,4 +1,4 @@
-"""One private, bounded reduction of an independent managed VM run."""
+"""One private, bounded reduction of an exactly bound managed VM run."""
 
 from __future__ import annotations
 
@@ -32,11 +32,13 @@ from ._managed_runs import (
     ManagedRunRepository,
 )
 from .carrier import Deadline, Dispatch, Failure, Retention
+from .models import JobRef
 from .result import ApplicationState, ExecutionFailure, ExecutionOutput, ExecutionResult, ExitCode, Signal
 
 if TYPE_CHECKING:
     from agentworks.operations import OperationOwner
 
+    from ._execution_operation import ExecutionOperation
     from ._helper_launcher import IdentityPlan
     from ._managed_runs import ManagedTargetIdentity
     from ._runtime_prerequisite import RuntimeSelection
@@ -80,6 +82,7 @@ def wait_bound_managed_result(
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
+    execution_operation: ExecutionOperation | None = None,
 ) -> ManagedResultOutcome:
     """Poll only a clean, settled pending run under one finite deadline.
 
@@ -100,6 +103,7 @@ def wait_bound_managed_result(
                 runtime_selection=runtime_selection,
                 deadline=deadline,
                 owner=owner,
+                execution_operation=execution_operation,
             )
         except ManagedDeadlineExpired as error:
             if previous is None or error.__cause__ is not None:
@@ -134,6 +138,7 @@ def collect_bound_managed_result(
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
+    execution_operation: ExecutionOperation | None = None,
 ) -> ManagedResultOutcome:
     """Collect once under one finite deadline and caller-held owner.
 
@@ -149,6 +154,7 @@ def collect_bound_managed_result(
         runtime_selection=runtime_selection,
         deadline=deadline,
         owner=owner,
+        execution_operation=execution_operation,
     )
     if record.launch_state is not ManagedLaunchState.RECEIPT_CONFIRMED:
         raise ValidationError("Managed result requires a reconciled launch receipt")
@@ -164,6 +170,7 @@ def collect_bound_managed_result(
             runtime_selection=runtime_selection,
             deadline=deadline,
             owner=owner,
+            execution_operation=execution_operation,
         )
         attempts.append(observed)
         return _reduce(
@@ -178,6 +185,7 @@ def collect_bound_managed_result(
             runtime_selection=runtime_selection,
             deadline=deadline,
             owner=owner,
+            execution_operation=execution_operation,
         )
     except BaseException as control:
         if isinstance(control.__cause__, ManagedObserveControlFact):
@@ -200,6 +208,7 @@ def _reduce(
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
+    execution_operation: ExecutionOperation | None = None,
 ) -> ManagedResultOutcome:
     observed = attempts[0]
     candidate = observed.candidate
@@ -243,6 +252,7 @@ def _reduce(
                 runtime_selection=runtime_selection,
                 deadline=deadline,
                 owner=owner,
+                execution_operation=execution_operation,
             )
         except ManagedDeadlineExpired as error:
             # The bound reader refuses an expired deadline before borrowing.
@@ -321,7 +331,7 @@ def _reduce(
         owned_cleanup_confirmed=boundary is not None and settled,
         deadline_exceeded=deadline_exceeded,
     )
-    awaiting_facts = (
+    can_poll = (
         candidate is not None
         and candidate.carrier_failure is None
         and observation is not None
@@ -329,10 +339,17 @@ def _reduce(
         and settled
         and not deadline_exceeded
         and not refused_read
-        and (status is not None or boundary is None)
-        and (status is None or boundary is None or len(outputs) != 2)
         and output_failure is None
     )
+    awaiting_facts = (
+        can_poll
+        and (status is not None or boundary is None)
+        and (status is None or boundary is None or len(outputs) != 2)
+    )
+    if execution_operation is not None:
+        closed = settled and execution_operation.retain_job_terminal_observation(JobRef(identity.run_id), candidate)
+        result = replace(result, owned_cleanup_confirmed=result.owned_cleanup_confirmed and closed)
+        awaiting_facts = can_poll and not closed
     return ManagedResultOutcome(result, tuple(attempts), awaiting_facts)
 
 

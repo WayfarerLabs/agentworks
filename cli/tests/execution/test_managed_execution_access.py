@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import threading
+import time
 from dataclasses import replace
 from pathlib import PurePosixPath
 from typing import Any
@@ -13,6 +15,7 @@ import pytest
 from agentworks.db import LifecycleObligationState
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import (
+    _managed_disposal_bundle,
     _managed_lease_bundle,
     _managed_observation_bundle,
     _managed_start_bundle,
@@ -21,11 +24,17 @@ from agentworks.execution import (
 from agentworks.execution import (
     _managed_operation_keeper as keeper_module,
 )
+from agentworks.execution import _managed_service_guest as service_guest
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._execution_operation import ExecutionOperation, ManagedExecutionControlFact
 from agentworks.execution._file_operation import FileOperation
-from agentworks.execution._managed_job_store import FactName
+from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._managed_job_protocol import encode_managed_job_fact
+from agentworks.execution._managed_job_request import ManagedJobRequest
+from agentworks.execution._managed_job_store import FactName, ManagedJobStore
 from agentworks.execution._managed_job_wire import decode_fact, encode_fact
+from agentworks.execution._managed_lease_wire import boottime_ns, sampled_lease
 from agentworks.execution._managed_observation_protocol import (
     FACT_ORDER,
     ControllerObservation,
@@ -48,16 +57,21 @@ from agentworks.execution.carrier import (
     FiniteInput,
     PreparedInvocation,
 )
+from agentworks.execution.jobs import JobStream
 from agentworks.execution.models import Command, Input, JobRef, Lifetime, Output, Script, Shell
 from agentworks.execution.profiles import Protection
+from agentworks.execution.result import ApplicationState, ExecutionFailure
+from agentworks.operations import OperationBorrow
 from agentworks.vms._native_operation import NativeVMOperation, _Workflow
 
+from . import test_managed_disposal as disposal_tests
 from . import test_managed_observation as observation_tests
 from . import test_managed_operation_keeper as keeper_tests
 from . import test_managed_stop as stop_tests
 from .test_managed_lease_exchange import PLAN, RUNTIME
 from .test_managed_lease_exchange import ScriptedCarrier as LeaseCarrier
 from .test_managed_lease_exchange import _success as lease_success
+from .test_managed_service_guest import Boundary
 from .test_managed_start_operation import GUEST
 from .test_managed_start_operation import Carrier as StartCarrier
 from .test_managed_start_operation import _records as start_records
@@ -95,6 +109,7 @@ class Delivery:
         self.start = StartCarrier(lambda request: start_records(request, receipt=True))
         self.stop = stop_tests.Carrier(self.stop_response)
         self.observe = observation_tests.ScriptedCarrier(self.observe_response)
+        self.dispose = disposal_tests.ExchangeCarrier(disposal_tests._disposed)
         self.controller = ControllerState.EXITED
         self.facts = FACT_ORDER
         self.stop_empty = True
@@ -108,13 +123,20 @@ class Delivery:
 
     def selected(
         self, io: CarrierIO
-    ) -> LeaseCarrier | StartCarrier | stop_tests.Carrier | observation_tests.ScriptedCarrier:
+    ) -> (
+        LeaseCarrier
+        | StartCarrier
+        | stop_tests.Carrier
+        | observation_tests.ScriptedCarrier
+        | disposal_tests.ExchangeCarrier
+    ):
         assert isinstance(io.input, FiniteInput)
         for prefix, carrier in (
             (_managed_lease_bundle.FIXED_BUNDLE.prefix, self.clock),
             (_managed_start_bundle.FIXED_BUNDLE.prefix, self.start),
             (_managed_stop_bundle.FIXED_BUNDLE.prefix, self.stop),
             (_managed_observation_bundle.FIXED_BUNDLE.prefix, self.observe),
+            (_managed_disposal_bundle.FIXED_BUNDLE.prefix, self.dispose),
         ):
             if io.input.data.startswith(prefix):
                 return carrier
@@ -215,6 +237,447 @@ def test_bound_ack_and_normal_aggregate_close(view, invocation):
     assert database.operations.inspect(workflow.owner.ownership.scope) is None
 
 
+def test_bound_job_reads_share_one_lifetime_row(view, tmp_path, monkeypatch):
+    database, workflow, access, main, keeper = view
+    reference = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    for _ in range(150):
+        status = access.observe(reference)
+        assert status.application_state is ApplicationState.COMPLETED
+        assert status.status.value == 7 and status.workload_cleanup_confirmed
+    import sys
+
+    from agentworks.execution.carrier import CarrierReport, Dispatch
+
+    from .files._file_read_support import LocalCarrier
+    from .files._file_snapshot_support import install_fixture_bundle
+    from .files._runtime_support import runtime_selection
+    from .test_execution_operation import RecordingCarrier
+
+    ordinary = RecordingCarrier(CarrierReport(Dispatch.NOT_SENT))
+    selected = main.selected
+
+    def select(io):
+        try:
+            return selected(io)
+        except AssertionError:
+            return ordinary
+
+    monkeypatch.setattr(main, "selected", select)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir(mode=0o1777)
+    scratch.chmod(0o1777)
+    install_fixture_bundle(monkeypatch, scratch)
+    file_plan = IdentityPlan(
+        IdentityExpectation(os.geteuid(), os.getegid(), tuple(sorted(set(os.getgroups()) | {os.getegid()}))),
+        IdentityMode.DIRECT,
+    )
+    files = FileAccess(
+        FileOperation(workflow.owner, workflow.views.execution_operation.managed_runs[0].receipt.spec.target),
+        LocalCarrier(),
+        trusted_root=PurePosixPath(tmp_path),
+        runtime_selection=runtime_selection(sys.executable),
+        ordinary_plan=file_plan,
+        elevated_plan=None,
+        entity_kind="file",
+        entity_name="fixture",
+        deadline=lambda: Deadline.after(5),
+    )
+    (tmp_path / "data").write_bytes(b"mixed-file-bytes")
+    for _ in range(3):
+        access.run(Command(["/bin/true"]), profile=Protection.DIRECT)
+        read = files.read_file(PurePosixPath(tmp_path / "data"), max_bytes=100)
+        assert read is not None and read.data == b"mixed-file-bytes"
+        access.observe(reference)
+    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
+    assert len([row for row in rows if row.obligation_kind == "carrier-dispatch"]) == 1
+    assert keeper.stop.calls == 0
+    # Closed discarded output has EOF without synthesizing bytes.
+    main.observe.response = lambda request: observation_tests._records(
+        request.nonce,
+        ManagedResultControl((FactName.LAUNCH, FactName.STDOUT_END)),
+        (request.expected_launch, fact(FactName.STDOUT_END, request.expected_launch)),
+    )
+    output = access.read_output(reference, stream=JobStream.STDOUT)
+    assert output.eof and not output.capture_complete and output.data == b""
+    assert output.failure is None
+    assert keeper.stop.calls == 0
+    workflow.close(cleanup_deadline=Deadline.after(5))
+
+
+def test_foreign_job_reference_refused_before_delivery(view):
+    _, _, access, main, keeper = view
+    with pytest.raises(ValidationError):
+        access.observe(JobRef("a" * 32))
+    assert main.observe.calls == keeper.stop.calls == 0
+
+
+@pytest.mark.parametrize("fault", ["workload", "target", "owner", "output", "receipt"])
+def test_operation_row_mismatch_refused_before_job_effects(view, monkeypatch, fault):
+    from agentworks.execution._managed_runs import ManagedLaunchState, ManagedOutputMode, ManagedOutputPolicy
+
+    _, workflow, access, main, keeper = view
+    reference = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    operation = workflow.views.execution_operation
+    record = operation._managed_repository.inspect(operation.managed_runs[0].receipt.identity)
+    if fault == "workload":
+        record = replace(record, spec=replace(record.spec, workload=IdentityExpectation(111, 111, (111,))))
+    elif fault == "target":
+        record = replace(
+            record, spec=replace(record.spec, target=replace(record.spec.target, incarnation="v1:" + "f" * 64))
+        )
+    elif fault == "owner":
+        record = replace(record, spec=replace(record.spec, owner=replace(record.spec.owner, owner_id="e" * 32)))
+    elif fault == "output":
+        record = replace(record, output_policy=ManagedOutputPolicy(ManagedOutputMode.CAPTURE, 4))
+    else:
+        record = replace(record, launch_state=ManagedLaunchState.NOT_LAUNCHED)
+    with monkeypatch.context() as patch:
+        patch.setattr(operation._managed_repository, "inspect", lambda identity: record)
+        for method in (access.observe, access.wait, access.stop, access.dispose):
+            with pytest.raises(ValidationError):
+                method(reference)
+        with pytest.raises(ValidationError):
+            access.read_output(reference, stream=JobStream.STDOUT)
+    assert main.observe.calls == main.dispose.calls == keeper.stop.calls == 0
+    workflow.close(cleanup_deadline=Deadline.after(5))
+
+
+def test_active_disposal_keeps_keeper_live(view):
+    _, workflow, access, main, keeper = view
+    reference = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    main.facts = (FactName.LAUNCH,)
+    outcome = access.dispose(reference)
+    assert outcome.disposed is False and main.dispose.calls == keeper.stop.calls == 0
+    assert not workflow.views.execution_operation.managed_runs[0].keeper._stop.is_set()
+    workflow.close(cleanup_deadline=Deadline.after(5))
+
+
+def test_explicit_stop_retains_terminal_proof_and_closes_normally(view):
+    _, workflow, access, _, keeper = view
+    reference = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    outcome = access.stop(reference)
+    assert outcome.accepted and outcome.terminated
+    assert keeper.stop.calls == keeper.observe.calls == 1
+    workflow.close(cleanup_deadline=Deadline.after(5))
+    assert keeper.stop.calls == keeper.observe.calls == 1
+
+
+def test_stop_drains_only_selected_keeper(view):
+    _, workflow, access, main, first_keeper = view
+    first = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    operation = workflow.views.execution_operation
+    second_keeper = Delivery()
+    operation._native_binding = replace(operation._native_binding, _new_managed_delivery=lambda: second_keeper)
+    second = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    assert access.stop(first).accepted
+    assert first_keeper.stop.calls == 1 and second_keeper.stop.calls == 0
+    assert not operation.managed_runs[1].keeper._stop.is_set()
+    assert access.observe(second).reference == second
+    workflow.close(cleanup_deadline=Deadline.after(5))
+    assert second_keeper.stop.calls == 1 and main.start.calls == 2
+
+
+def test_accepted_stop_keeps_intent_when_observation_deadline_expires(view, monkeypatch):
+    _, workflow, access, _, keeper = view
+    reference = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    run = workflow.views.execution_operation.managed_runs[0]
+    original = run.keeper.request_explicit_stop
+    clock = [0.0]
+
+    def stop(deadline):
+        result = original(deadline)
+        clock[0] = 2.0
+        return result
+
+    with monkeypatch.context() as patch:
+        patch.setattr(time, "monotonic", lambda: clock[0])
+        patch.setattr(run.keeper, "request_explicit_stop", stop)
+        result = access.stop(reference, deadline=Deadline.after(1))
+    assert result.accepted and not result.terminated and result.deadline_exceeded
+    assert result.failure is ExecutionFailure.DEADLINE and keeper.observe.calls == 0
+    workflow.close(cleanup_deadline=Deadline.after(5))
+
+
+def test_operation_wait_requires_controller_and_stream_closure(view):
+    _, workflow, access, main, _ = view
+    reference = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    observe_response = main.observe_response
+
+    def response(request):
+        if request.stream is None:
+            return observe_response(request)
+        end = FactName.STDOUT_END if request.stream.value == "stdout" else FactName.STDERR_END
+        return observation_tests._records(
+            request.nonce,
+            ManagedResultControl((FactName.LAUNCH, end)),
+            (request.expected_launch, fact(end, request.expected_launch)),
+        )
+
+    main.observe.response = response
+    main.controller = ControllerState.UNKNOWN
+    assert not access.wait(reference, deadline=Deadline.after(0.01)).owned_cleanup_confirmed
+    main.controller = ControllerState.EXITED
+    assert access.wait(reference).owned_cleanup_confirmed
+    workflow.close(cleanup_deadline=Deadline.after(5))
+
+
+def test_confirmed_disposal_retains_proof_for_aggregate_close(view):
+    database, workflow, access, main, keeper = view
+    reference = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    assert access.dispose(reference).disposed
+    (run,) = workflow.views.execution_operation.managed_runs
+    assert run.disposal_confirmed and run.terminal_observation is not None
+    assert keeper.stop.calls == keeper.observe.calls == 0
+    main.facts = ()
+    assert access.dispose(reference).disposed and main.dispose.calls == 1
+    workflow.close(cleanup_deadline=Deadline.after(5))
+    assert keeper.stop.calls == keeper.observe.calls == 0
+    assert database.operations.inspect(workflow.owner.ownership.scope) is None
+
+
+def test_known_terminated_lost_disposal_reply_reuses_exact_obligation(view):
+    database, workflow, access, main, keeper = view
+    reference = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    main.dispose.response = lambda request: b""
+    first = access.dispose(reference)
+    assert first.disposed is None and first.failure is ExecutionFailure.OBSERVATION
+    assert main.observe.calls == 1
+    main.dispose.response = disposal_tests._disposed
+    assert access.dispose(reference).disposed
+    assert main.observe.calls == 1 and keeper.stop.calls == 0
+    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
+    assert len([row for row in rows if row.obligation_kind == "managed-dispose"]) == 1
+    workflow.close(cleanup_deadline=Deadline.after(5))
+
+
+@pytest.mark.parametrize("refusal", ["not-sent", "not-ready", "pre-dispatch"])
+def test_disposal_clean_refusal_uses_new_row_on_later_explicit_attempt(view, refusal):
+    from agentworks.execution.carrier import Dispatch
+
+    from .test_managed_disposal_access import _not_ready
+
+    database, workflow, access, main, _ = view
+    reference = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    if refusal == "not-sent":
+        main.dispose.dispatch = Dispatch.NOT_SENT
+    elif refusal == "not-ready":
+        main.dispose.response = _not_ready
+    else:
+        main.dispose.refuse_validation = True
+    if refusal == "pre-dispatch":
+        with pytest.raises(ValidationError):
+            access.dispose(reference)
+    else:
+        assert access.dispose(reference).disposed is False
+    main.dispose.dispatch = Dispatch.SENT
+    main.dispose.response = disposal_tests._disposed
+    main.dispose.refuse_validation = False
+    assert access.dispose(reference).disposed
+    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
+    disposed_rows = [row for row in rows if row.obligation_kind == "managed-dispose"]
+    assert len(disposed_rows) == 2 and all(row.state is LifecycleObligationState.RESOLVED for row in disposed_rows)
+    assert main.observe.calls == 2
+    workflow.close(cleanup_deadline=Deadline.after(5))
+
+
+def test_unknown_disposal_helper_blocks_retry_and_aggregate_release(view):
+    _, workflow, access, main, _ = view
+    reference = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    main.dispose.code = None
+    outcome = access.dispose(reference)
+    assert outcome.disposed is None
+    with pytest.raises(StateError):
+        access.dispose(reference)
+    assert main.dispose.calls == 1 and main.observe.calls == 1
+    with pytest.raises(StateError):
+        workflow.close(cleanup_deadline=Deadline.after(5))
+
+
+def test_late_wait_snapshot_recovers_precision(view):
+    _, workflow, access, main, _ = view
+    reference = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    main.facts = tuple(name for name in FACT_ORDER if name is not FactName.WAIT)
+    first = access.observe(reference)
+    assert first.status is None and first.application_state is ApplicationState.UNKNOWN
+    assert first.workload_cleanup_confirmed
+    main.facts = FACT_ORDER
+    assert access.observe(reference).status.value == 7
+    workflow.close(cleanup_deadline=Deadline.after(5))
+
+
+@pytest.mark.parametrize("disposition", ["truncated-capture", "complete-capture"])
+def test_retained_output_eof_is_separate_from_capture_completeness(view, disposition):
+    _, workflow, access, main, _ = view
+    reference = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.capture(3)
+    )
+
+    def response(request):
+        end = decode_fact(fact(FactName.STDOUT_END, request.expected_launch))
+        end.update(disposition=disposition, retained_bytes=3, retained_sha256=hashlib.sha256(b"abc").hexdigest())
+        return observation_tests._records(
+            request.nonce,
+            ManagedResultControl((FactName.LAUNCH, FactName.STDOUT_END)),
+            (request.expected_launch, encode_fact(end)),
+            b"abc",
+        )
+
+    main.observe.response = response
+    first = access.read_output(reference, stream=JobStream.STDOUT, max_bytes=2)
+    assert first.data == b"ab" and not first.eof
+    assert first.capture_complete is (disposition == "complete-capture")
+    second = access.read_output(reference, stream=JobStream.STDOUT, cursor=first.next_cursor)
+    assert second.data == b"c" and second.eof
+    assert second.capture_complete is (disposition == "complete-capture")
+    assert second.failure is (ExecutionFailure.OUTPUT_LIMIT if disposition == "truncated-capture" else None)
+    with pytest.raises(ValidationError):
+        access.read_output(reference, stream=JobStream.STDOUT, cursor=4)
+    workflow.close(cleanup_deadline=Deadline.after(5))
+
+
+@pytest.mark.parametrize("argv", [("/definitely-absent-agw-executable",), ("/bin/sh", "-c", "kill -TERM $$")])
+def test_real_controller_without_wait_can_close_operation(view, tmp_path, argv):
+    _, workflow, access, main, keeper = view
+    access._ordinary_plan = IdentityPlan(
+        IdentityExpectation(os.geteuid(), os.getegid(), tuple(sorted(set(os.getgroups()) | {os.getegid()}))),
+        IdentityMode.DIRECT,
+    )
+    reference = access.start(
+        Command(list(argv)), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    (run,) = workflow.views.execution_operation.managed_runs
+    launch = encode_managed_job_fact(run.receipt)
+    assert run.keeper.drain(Deadline.after(2)).drained
+    tmp_path.chmod(0o700)
+    fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        store = ManagedJobStore(reference.run_id, _anchor_fd=fd, _namespace="managed", _owner_uid=os.getuid())
+    finally:
+        os.close(fd)
+    try:
+        store.publish_request(
+            ManagedJobRequest(
+                launch,
+                "command",
+                argv,
+                None,
+                "discard",
+                None,
+                (),
+                b"",
+                b"",
+                operation_lease=sampled_lease(launch, boottime_ns()),
+            )
+        )
+        assert (
+            service_guest.run(
+                reference.run_id,
+                _store=store,
+                _boundary=Boundary(),
+                _notify=lambda: None,
+                _identity_check=False,
+                _apply_identity=False,
+            )
+            == 0
+        )
+        assert store.read_fact(FactName.WAIT) is None
+        names = tuple(name for name in FACT_ORDER if store.read_fact(name) is not None)
+        facts = tuple(store.read_fact(name) for name in names)
+
+        def response(request):
+            controller = ControllerObservation(
+                ControllerState.EXITED,
+                run.receipt.unit_name,
+                run.receipt.spec.target.boot_id,
+                hashlib.sha256(launch).hexdigest(),
+            )
+            return observation_tests._records(request.nonce, ManagedResultControl(names, controller), facts)
+
+        main.observe.response = keeper.observe.response = response
+        status = access.observe(reference)
+        assert status.application_state is ApplicationState.UNKNOWN and status.status is None
+        assert status.workload_cleanup_confirmed
+        workflow.close(cleanup_deadline=Deadline.after(5))
+        assert run.cleanup_complete
+    finally:
+        store.close()
+
+
+def test_wait_deadline_preserves_job_and_keeper(view, monkeypatch):
+    _, workflow, access, main, keeper = view
+    reference = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    main.facts = (FactName.LAUNCH,)
+    clock = [0.0]
+    with monkeypatch.context() as patch:
+        patch.setattr(time, "monotonic", lambda: clock[0])
+        patch.setattr(time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+        result = access.wait(reference, deadline=Deadline.after(0.3))
+    assert result.job == reference and result.deadline_exceeded
+    assert result.failure is ExecutionFailure.DEADLINE
+    assert keeper.stop.calls == 0
+    assert not workflow.views.execution_operation.managed_runs[0].keeper._stop.is_set()
+    workflow.close(cleanup_deadline=Deadline.after(5))
+
+
+@pytest.mark.parametrize(
+    "transition", ["install_dispatch_obligation", "arm_dispatch_obligation", "handoff_retained_effect"]
+)
+def test_read_lost_bookkeeping_reply_reuses_retained_lifetime_row(view, monkeypatch, transition):
+    database, workflow, access, main, _ = view
+    reference = access.start(
+        Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
+    )
+    original = getattr(OperationBorrow, transition)
+    lost = [False]
+
+    def interrupted(self, *args, **kwargs):
+        result = original(self, *args, **kwargs)
+        if not lost[0]:
+            lost[0] = True
+            raise KeyboardInterrupt("lost local reply")
+        return result
+
+    with monkeypatch.context() as patch:
+        patch.setattr(OperationBorrow, transition, interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            access.observe(reference)
+    operation = workflow.views.execution_operation
+    operation.retry_inline_bookkeeping()
+    access.observe(reference)
+    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
+    assert len([row for row in rows if row.obligation_kind == "carrier-dispatch"]) == 1
+    assert main.observe.calls <= 2
+    workflow.close(cleanup_deadline=Deadline.after(5))
+
+
 def test_uncommitted_reservation_interruption_is_not_a_launched_run(view, monkeypatch):
     database, workflow, access, main, keeper = view
     control = KeyboardInterrupt("reserve interrupted before commit")
@@ -274,9 +737,7 @@ def test_invalid_admission_has_no_reservation_or_clock(view, change):
     workflow.close(cleanup_deadline=Deadline.after(2))
 
 
-@pytest.mark.parametrize(
-    "missing", [FactName.WAIT, FactName.STDOUT_END, FactName.STDERR_END, FactName.BOUNDARY_EMPTY, "controller"]
-)
+@pytest.mark.parametrize("missing", [FactName.STDOUT_END, FactName.STDERR_END, FactName.BOUNDARY_EMPTY, "controller"])
 def test_cleanup_independent_facts_block_release_then_retry(view, missing):
     database, workflow, access, _, keeper = view
     access.start(Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION)
@@ -335,6 +796,12 @@ def test_unknown_start_keeps_independent_debt_even_with_terminal_store(view):
     assert isinstance(caught.value.__cause__, ManagedExecutionControlFact)
     assert caught.value.__cause__.reference.run_id == run.receipt.identity.run_id
     assert not run.acknowledged and run.keeper._worker is None
+    for method in (access.observe, access.wait, access.stop, access.dispose):
+        with pytest.raises(ValidationError):
+            method(caught.value.__cause__.reference)
+    with pytest.raises(ValidationError):
+        access.read_output(caught.value.__cause__.reference, stream=JobStream.STDOUT)
+    assert main.observe.calls == main.dispose.calls == 0
     with pytest.raises(StateError):
         workflow.close(cleanup_deadline=Deadline.after(2))
     rows = workflow.owner.list_lifecycle_obligations()

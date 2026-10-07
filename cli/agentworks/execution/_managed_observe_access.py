@@ -35,6 +35,7 @@ from .carrier import Dispatch
 if TYPE_CHECKING:
     from agentworks.operations import OperationOwner
 
+    from ._execution_operation import ExecutionOperation
     from ._helper_launcher import IdentityPlan
     from ._managed_runs import ManagedRunRecord
     from ._runtime_prerequisite import RuntimeSelection
@@ -130,12 +131,15 @@ def observe_bound_managed_run(
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
+    execution_operation: ExecutionOperation | None = None,
 ) -> ManagedObserveOutcome:
-    """Read one persisted independent VM run under borrowed dispatch custody.
+    """Read one exact VM run under its bound dispatch custody.
 
     The caller supplies freshly prepared target and guest facts and retains
     responsibility for route freshness. This does not reconcile launch state,
-    reduce output policy, or release the caller's operation owner.
+    reduce output policy, or release the caller's operation owner. Operation
+    runs require the concrete retained execution context; omission retains the
+    independent resource-owned admission path.
     """
     _, _, outcome = _bound_exchange(
         repository,
@@ -148,6 +152,7 @@ def observe_bound_managed_run(
         deadline=deadline,
         owner=owner,
         stream=None,
+        execution_operation=execution_operation,
     )
     return outcome
 
@@ -164,6 +169,7 @@ def read_bound_managed_output(
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
+    execution_operation: ExecutionOperation | None = None,
 ) -> ManagedReadOutputOutcome:
     """Read one exact closed stream and admit it under persisted output policy."""
     if type(stream) is not Stream:
@@ -179,6 +185,7 @@ def read_bound_managed_output(
         deadline=deadline,
         owner=owner,
         stream=stream,
+        execution_operation=execution_operation,
     )
     try:
         disposition, output = _admit_output(record, raw_candidate)
@@ -199,6 +206,7 @@ def _bound_exchange(
     deadline: Deadline,
     owner: OperationOwner,
     stream: Stream | None,
+    execution_operation: ExecutionOperation | None = None,
 ) -> tuple[ManagedRunRecord, ManagedObservationCandidate | None, ManagedObserveOutcome]:
     record, expected_launch = preflight_bound_run(
         repository,
@@ -209,7 +217,20 @@ def _bound_exchange(
         runtime_selection=runtime_selection,
         deadline=deadline,
         owner=owner,
+        execution_operation=execution_operation,
     )
+
+    if execution_operation is not None:
+        managed_candidate, outcome = execution_operation.observe_managed(
+            carrier,
+            expected_launch=expected_launch,
+            root_plan=root_plan,
+            runtime_selection=runtime_selection,
+            deadline=deadline,
+            guest=guest,
+            stream=stream,
+        )
+        return record, managed_candidate, outcome
 
     borrow = owner.borrow()
     operation = BorrowedFixedHelperCarrier(carrier, borrow)

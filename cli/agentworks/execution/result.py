@@ -8,6 +8,7 @@ from typing import Self
 
 from agentworks.errors import ErrorDetails, ExternalError, ValidationError
 from agentworks.execution.carrier import Dispatch, Retention
+from agentworks.execution.models import JobRef
 
 
 class ApplicationState(StrEnum):
@@ -104,6 +105,7 @@ class ExecutionResult:
     failure: ExecutionFailure | None = None
     owned_cleanup_confirmed: bool = False
     deadline_exceeded: bool = False
+    job: JobRef | None = None
 
     def __post_init__(self) -> None:
         """Validate the public value boundary without revalidating typed children."""
@@ -126,6 +128,8 @@ class ExecutionResult:
             raise ValidationError("Execution result requires a supported failure category")
         if type(self.owned_cleanup_confirmed) is not bool or type(self.deadline_exceeded) is not bool:
             raise ValidationError("Execution result flags must be boolean")
+        if self.job is not None and type(self.job) is not JobRef:
+            raise ValidationError("Execution result job requires a safe reference")
 
     @property
     def ok(self) -> bool:

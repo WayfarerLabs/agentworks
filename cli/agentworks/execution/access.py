@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from contextlib import suppress
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -11,7 +12,7 @@ from agentworks.errors import StateError, ValidationError
 
 from . import _file_memory_read
 from ._diagnostic_values import validate_logical_entity_value
-from ._execution_operation import ExecutionOperation
+from ._execution_operation import ExecutionOperation, ManagedExecutionControlFact
 from ._execution_result import check_owned_inline_result, reduce_owned_inline_result
 from ._file_local_download import FileLocalDownloadControlFact, FileLocalDownloadOutcome, download_to_local_file
 from ._file_operation import FileOperation
@@ -31,8 +32,12 @@ from ._file_result_transfer import (
 )
 from ._helper_launcher import IdentityPlan
 from ._json import serialize_json_source, validate_json_object
+from ._managed_job_protocol import StreamDisposition, WorkloadWaitFact
+from ._managed_job_store import FactName, Stream
+from ._managed_observation_exchange import ManagedObservationState
+from ._managed_result import _fact
 from ._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
-from .carrier import Deadline
+from .carrier import Deadline, Failure, Retention
 from .files import (
     Change,
     Create,
@@ -56,11 +61,14 @@ from .files import (
     _private_json_strategy,
     _private_write_condition,
 )
+from .jobs import JobDisposal, JobOutput, JobStatus, JobStop, JobStream
 from .models import Command, Input, JobRef, Lifetime, Output, Script
 from .profiles import Protection
+from .result import ApplicationState, ExecutionFailure, ExitCode, Signal
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+    from typing import Never
 
     from .carrier import Carrier
     from .result import ExecutionResult
@@ -111,6 +119,148 @@ class ExecutionAccess:
         self._entity_kind = entity_kind
         self._entity_name = entity_name
         self._deadline = deadline
+
+    def _job_deadline(self, deadline: Deadline | None) -> Deadline:
+        self._operation.require_job_binding(self._carrier, self._runtime_selection)
+        selected = self._deadline()
+        if type(selected) is not Deadline or selected.expires_at is None or selected.expired:
+            raise ValidationError("Managed access requires a live finite composition deadline")
+        if deadline is not None:
+            if type(deadline) is not Deadline or deadline.expires_at is None or deadline.expired:
+                raise ValidationError("Managed access requires a live finite deadline")
+            if deadline.expires_at < selected.expires_at:
+                selected = deadline
+        return selected
+
+    @staticmethod
+    def _raise_job_control(control: BaseException, job: JobRef) -> Never:
+        if type(job) is not JobRef:
+            raise control
+        fact = ManagedExecutionControlFact(job)
+        fact.__cause__ = control.__cause__
+        raise control from fact
+
+    def observe(self, job: JobRef, *, deadline: Deadline | None = None) -> JobStatus:
+        """Read application status and positive workload closure without control."""
+        selected = self._job_deadline(deadline)
+        try:
+            outcome = self._operation.observe_job(job, self._carrier, selected)
+        except BaseException as control:
+            self._raise_job_control(control, job)
+        candidate = outcome.candidate
+        observation = None if candidate is None else candidate.observation
+        facts = (
+            dict(observation.facts)
+            if observation is not None and observation.state is ManagedObservationState.OBSERVED
+            else {}
+        )
+        wait = _fact(facts.get(FactName.WAIT), WorkloadWaitFact)
+        status = None
+        if isinstance(wait, WorkloadWaitFact):
+            status = ExitCode(wait.exit_code) if wait.exit_code is not None else Signal(wait.signal)  # type: ignore[arg-type]
+        expired = selected.expired or (candidate is not None and candidate.carrier_failure is Failure.DEADLINE)
+        settled = not outcome.requires_owner_retention
+        valid = observation is not None and observation.state is ManagedObservationState.OBSERVED and settled
+        return JobStatus(
+            job,
+            ApplicationState.COMPLETED if status is not None else ApplicationState.UNKNOWN,
+            status,
+            ExecutionFailure.DEADLINE
+            if expired
+            else None
+            if valid and status is not None
+            else ExecutionFailure.OBSERVATION,
+            valid and self._operation.retain_job_terminal_observation(job, candidate),
+            expired,
+        )
+
+    def read_output(
+        self,
+        job: JobRef,
+        *,
+        stream: JobStream,
+        cursor: int = 0,
+        max_bytes: int = 4096,
+        deadline: Deadline | None = None,
+    ) -> JobOutput:
+        """Slice only verified immutable closed output using a byte offset."""
+        if type(stream) is not JobStream or type(cursor) is not int or cursor < 0:
+            raise ValidationError("Managed output requires a stream and nonnegative byte cursor")
+        if type(max_bytes) is not int or max_bytes <= 0:
+            raise ValidationError("Managed output requires a positive byte bound")
+        selected = self._job_deadline(deadline)
+        try:
+            outcome = self._operation.read_job(job, self._carrier, selected, Stream(stream.value))
+        except BaseException as control:
+            self._raise_job_control(control, job)
+        candidate = outcome.attempt.candidate
+        expired = selected.expired or (candidate is not None and candidate.carrier_failure is Failure.DEADLINE)
+        if not outcome.accepted or outcome.attempt.requires_owner_retention:
+            return JobOutput(
+                job,
+                stream,
+                cursor=cursor,
+                next_cursor=cursor,
+                failure=ExecutionFailure.DEADLINE if expired else ExecutionFailure.OBSERVATION,
+                deadline_exceeded=expired,
+            )
+        data = outcome.output or b""
+        if cursor > len(data):
+            raise ValidationError("Managed output cursor exceeds the verified retained prefix")
+        chunk = data[cursor : cursor + max_bytes]
+        disposition = outcome.disposition
+        retention = (
+            Retention.DISCARDED
+            if disposition is StreamDisposition.DISCARDED
+            else Retention.SUPPRESSED
+            if disposition is StreamDisposition.SUPPRESSED
+            else Retention.CAPTURED
+        )
+        capture_complete = disposition is StreamDisposition.COMPLETE_CAPTURE
+        return JobOutput(
+            job,
+            stream,
+            chunk,
+            cursor,
+            cursor + len(chunk),
+            cursor + len(chunk) == len(data),
+            capture_complete,
+            retention,
+            ExecutionFailure.DEADLINE
+            if expired
+            else ExecutionFailure.OUTPUT_LIMIT
+            if disposition is StreamDisposition.TRUNCATED_CAPTURE
+            else None,
+            expired,
+        )
+
+    def wait(self, job: JobRef, *, deadline: Deadline | None = None, check: bool = False) -> ExecutionResult:
+        """Wait within an observation budget without stopping or extending the job."""
+        if type(check) is not bool:
+            raise ValidationError("Managed wait check must be boolean")
+        selected = self._job_deadline(deadline)
+        try:
+            outcome = self._operation.wait_job(job, self._carrier, selected)
+        except BaseException as control:
+            self._raise_job_control(control, job)
+        result = replace(outcome.result, job=job)
+        return result.check() if check else result
+
+    def stop(self, job: JobRef, *, deadline: Deadline | None = None) -> JobStop:
+        """Request permanent stop and report separate positive workload closure."""
+        selected = self._job_deadline(deadline)
+        try:
+            return self._operation.stop_job(job, selected)
+        except BaseException as control:
+            self._raise_job_control(control, job)
+
+    def dispose(self, job: JobRef, *, deadline: Deadline | None = None) -> JobDisposal:
+        """Dispose only positively terminal artifacts; active work keeps its keeper."""
+        selected = self._job_deadline(deadline)
+        try:
+            return self._operation.dispose_job(job, self._carrier, selected)
+        except BaseException as control:
+            self._raise_job_control(control, job)
 
     def start(
         self,

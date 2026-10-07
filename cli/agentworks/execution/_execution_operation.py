@@ -1,4 +1,4 @@
-"""Core-owned lifetime custody for serial private foreground inline execution."""
+"""Core-owned lifetime custody for serial private ordinary execution helpers."""
 
 from __future__ import annotations
 
@@ -16,9 +16,26 @@ from agentworks.execution._inline import (
     execute_inline_candidate,
     prepare_inline_candidate,
 )
+from agentworks.execution._managed_bound_run import preflight_bound_run
+from agentworks.execution._managed_disposal_access import ManagedDisposalControlFact, dispose_bound_managed_run
+from agentworks.execution._managed_disposal_exchange import DisposalState
 from agentworks.execution._managed_job_access import _explicit_managed_shell
+from agentworks.execution._managed_observation_exchange import (
+    ManagedObservationCandidate,
+    observe_managed_run,
+    read_managed_output,
+)
+from agentworks.execution._managed_observe_access import (
+    ManagedObserveControlFact,
+    ManagedObserveOutcome,
+    ManagedReadOutputOutcome,
+    _without_output,
+    observe_bound_managed_run,
+    read_bound_managed_output,
+)
 from agentworks.execution._managed_operation_run import ManagedOperationRun
 from agentworks.execution._managed_request_adapter import compose_managed_body
+from agentworks.execution._managed_result import ManagedResultOutcome, wait_bound_managed_result
 from agentworks.execution._managed_runs import (
     ManagedRunIdentity,
     ManagedRunLifetime,
@@ -30,16 +47,21 @@ from agentworks.execution._managed_runs import (
     ManagedTargetIdentity,
     ManagedTargetKind,
 )
+from agentworks.execution._managed_stop_exchange import ManagedStopState
 from agentworks.execution._vm_guest_identity_protocol import vm_guest_boot_id
 from agentworks.execution.carrier import Dispatch, ExitStatus
+from agentworks.execution.jobs import JobDisposal, JobStop
 from agentworks.execution.models import JobRef
+from agentworks.execution.result import ExecutionFailure
 from agentworks.operations import LifecycleObligation, OperationAttempt, release_borrow_after_custody
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.execution._helper_launcher import IdentityPlan
+    from agentworks.execution._managed_job_store import Stream
     from agentworks.execution._runtime_prerequisite import RuntimeSelection, _NumericGuestBootstrap
+    from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
     from agentworks.execution._wsl2_owned_operation import WSL2OwnedOperation
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Carrier, Deadline
@@ -77,19 +99,19 @@ class ManagedExecutionControlFact(Exception):
 
     def __init__(self, reference: JobRef) -> None:
         self.reference = reference
-        super().__init__("Managed start retained its originating operation")
+        super().__init__("Managed execution retained its originating operation")
 
 
 @dataclass(slots=True, repr=False)
-class _ActiveInlineCall:
+class _ActiveHelperCall:
     carrier: Carrier
     borrow: OperationBorrow
-    prepared: PreparedInlineCandidate
+    prepared: PreparedInlineCandidate | None
     operation: BorrowedFixedHelperCarrier
     installed: bool = False
     armed: bool = False
     bookkeeping_retained: bool = False
-    candidate: InlineCandidateResult | None = None
+    candidate: InlineCandidateResult | ManagedObservationCandidate | None = None
     outcome: OwnedInlineOutcome | None = None
 
 
@@ -101,7 +123,7 @@ class UnfinishedInlineExecution:
 
 
 class ExecutionOperation:
-    """Run serial inline candidates under one bounded lifetime obligation."""
+    """Run serial inline and managed read candidates under one lifetime row."""
 
     def __init__(
         self,
@@ -132,7 +154,7 @@ class ExecutionOperation:
         self._native_binding = native_binding
         self._wsl2_route = wsl2_route
         self._managed_runs: list[ManagedOperationRun] = []
-        self._active_inline_calls: dict[int, _ActiveInlineCall] = {}
+        self._active_inline_calls: dict[int, _ActiveHelperCall] = {}
         self._unfinished_inline_executions: list[UnfinishedInlineExecution] = []
         self._admission_guard = Lock()
         self._finishing = False
@@ -143,6 +165,350 @@ class ExecutionOperation:
     @property
     def managed_runs(self) -> tuple[ManagedOperationRun, ...]:
         return tuple(self._managed_runs)
+
+    def require_job_binding(self, carrier: Carrier, runtime_selection: RuntimeSelection) -> None:
+        """Fence an ordinary job call to this live selected operation binding."""
+        binding = self._native_binding
+        if self._finishing or self._finished:
+            raise StateError("Execution operation is closing")
+        if binding is None or carrier is not binding.carrier or runtime_selection != binding.runtime_selection:
+            raise ValidationError("Managed access requires the selected native binding")
+        with self._owner._guard:  # noqa: SLF001
+            self._owner._require_dispatch_admission_locked()  # noqa: SLF001
+        # A passive generation check is admission evidence, not a replacement
+        # for the separate persisted fence immediately before delivery.
+        self._owner.list_lifecycle_obligations()
+
+    def require_managed_run(
+        self,
+        identity: ManagedRunIdentity,
+        *,
+        repository: ManagedRunRepository,
+        owner: OperationOwner,
+        target: ManagedTargetIdentity,
+        guest: VMGuestIdentity,
+        root_plan: IdentityPlan,
+        runtime_selection: RuntimeSelection,
+    ) -> ManagedOperationRun:
+        """Resolve authority from this operation's retained acknowledged start."""
+        bootstrap, binding = self._bootstrap, self._native_binding
+        if (
+            owner is not self._owner
+            or repository is not self._managed_repository
+            or target != self._target
+            or bootstrap is None
+            or guest != bootstrap.guest
+            or root_plan != bootstrap.root_entry
+            or binding is None
+            or runtime_selection != binding.runtime_selection
+        ):
+            raise ValidationError("Managed access does not match its originating operation")
+        run = next((run for run in self._managed_runs if run.receipt.identity == identity), None)
+        if (
+            run is None
+            or not run.acknowledged
+            or run.reservation_uncertain
+            or run.receipt.spec.target != target
+            or run.receipt.spec.owner != ManagedRunOwner(ManagedRunOwnerKind.OPERATION, owner.ownership.operation_id)
+            or run.receipt.spec.lifetime is not ManagedRunLifetime.OPERATION
+            or run.reserved is None
+            or run.reserved.spec != run.receipt.spec
+        ):
+            raise ValidationError("Managed access requires an exact retained acknowledged operation run")
+        return run
+
+    def observe_managed(
+        self,
+        carrier: Carrier,
+        *,
+        expected_launch: bytes,
+        root_plan: IdentityPlan,
+        runtime_selection: RuntimeSelection,
+        deadline: Deadline,
+        guest: VMGuestIdentity,
+        stream: Stream | None,
+    ) -> tuple[ManagedObservationCandidate, ManagedObserveOutcome]:
+        """Run one fixed read using the same lifetime row as inline execution."""
+        with self._admission_guard:
+            if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
+                raise StateError("Execution operation cannot admit a managed read")
+            binding = self._native_binding
+            if binding is None or carrier is not binding.carrier:
+                raise ValidationError("Managed read requires its selected native carrier")
+            borrow = self._owner.borrow()
+            operation = BorrowedFixedHelperCarrier(carrier, borrow)
+            active = _ActiveHelperCall(carrier, borrow, None, operation)
+            if self._dispatch_id is None:
+                self._dispatch_id = uuid4().hex
+            self._active_inline_calls[id(active)] = active
+        try:
+            self._admit(active)
+            if self._wsl2_route is not None:
+                self._wsl2_route.require_selected_route(deadline)
+            if stream is None:
+                candidate = observe_managed_run(
+                    operation,
+                    expected_launch=expected_launch,
+                    plan=root_plan,
+                    deadline=deadline,
+                    runtime_selection=runtime_selection,
+                    guest=guest,
+                )
+            else:
+                candidate = read_managed_output(
+                    operation,
+                    expected_launch=expected_launch,
+                    stream=stream,
+                    plan=root_plan,
+                    deadline=deadline,
+                    runtime_selection=runtime_selection,
+                    guest=guest,
+                )
+            active.candidate = _without_output(candidate)
+            operation.settle(candidate.dispatch, candidate.carrier_completion)
+            custody = OwnedInlineOutcome(
+                pending_remote_effects=operation.pending_remote_effects,
+                coordination_uncertain=operation.coordination_uncertain,
+                requires_owner_retention=operation.requires_owner_retention,
+            )
+        except BaseException as control:
+            self._raise_control(control, active, operation, deadline)
+        with self._admission_guard:
+            try:
+                self._capture(active, custody)
+            except BaseException:
+                active.bookkeeping_retained = True
+                raise
+        return candidate, ManagedObserveOutcome(
+            _without_output(candidate),
+            custody.pending_remote_effects,
+            custody.coordination_uncertain,
+            custody.requires_owner_retention,
+        )
+
+    def observe_job(self, reference: JobRef, carrier: Carrier, deadline: Deadline) -> ManagedObserveOutcome:
+        """Observe only a job retained by this exact operation."""
+        repository, bootstrap = self._managed_repository, self._bootstrap
+        if type(reference) is not JobRef or repository is None or bootstrap is None or self._native_binding is None:
+            raise ValidationError("Managed observation requires its bound operation")
+        outcome = observe_bound_managed_run(
+            repository,
+            ManagedRunIdentity(reference.run_id),
+            target=self._target,
+            guest=bootstrap.guest,
+            root_plan=bootstrap.root_entry,
+            carrier=carrier,
+            runtime_selection=self._native_binding.runtime_selection,
+            deadline=deadline,
+            owner=self._owner,
+            execution_operation=self,
+        )
+        if not outcome.requires_owner_retention:
+            self.retain_job_terminal_observation(reference, outcome.candidate)
+        return outcome
+
+    def retain_job_terminal_observation(
+        self,
+        reference: JobRef,
+        candidate: ManagedObservationCandidate | None,
+    ) -> bool:
+        """Retain only positive closure, without caching absent application facts."""
+        run = next((run for run in self._managed_runs if run.receipt.identity.run_id == reference.run_id), None)
+        if run is None or not run.terminal_proved(candidate):
+            return False
+        run.terminal_observation = candidate
+        return True
+
+    def read_job(
+        self,
+        reference: JobRef,
+        carrier: Carrier,
+        deadline: Deadline,
+        stream: Stream,
+    ) -> ManagedReadOutputOutcome:
+        """Read a closed output stream through retained operation custody."""
+        repository, bootstrap = self._managed_repository, self._bootstrap
+        if type(reference) is not JobRef or repository is None or bootstrap is None or self._native_binding is None:
+            raise ValidationError("Managed output requires its bound operation")
+        return read_bound_managed_output(
+            repository,
+            ManagedRunIdentity(reference.run_id),
+            stream=stream,
+            target=self._target,
+            guest=bootstrap.guest,
+            root_plan=bootstrap.root_entry,
+            carrier=carrier,
+            runtime_selection=self._native_binding.runtime_selection,
+            deadline=deadline,
+            owner=self._owner,
+            execution_operation=self,
+        )
+
+    def wait_job(self, reference: JobRef, carrier: Carrier, deadline: Deadline) -> ManagedResultOutcome:
+        """Wait only for observations; the selected keeper remains independent."""
+        repository, bootstrap = self._managed_repository, self._bootstrap
+        if type(reference) is not JobRef or repository is None or bootstrap is None or self._native_binding is None:
+            raise ValidationError("Managed wait requires its bound operation")
+        return wait_bound_managed_result(
+            repository,
+            ManagedRunIdentity(reference.run_id),
+            target=self._target,
+            guest=bootstrap.guest,
+            root_plan=bootstrap.root_entry,
+            carrier=carrier,
+            runtime_selection=self._native_binding.runtime_selection,
+            deadline=deadline,
+            owner=self._owner,
+            execution_operation=self,
+        )
+
+    def _control_run(self, reference: JobRef, deadline: Deadline) -> ManagedOperationRun:
+        repository, bootstrap, binding = self._managed_repository, self._bootstrap, self._native_binding
+        if type(reference) is not JobRef or repository is None or bootstrap is None or binding is None:
+            raise ValidationError("Managed control requires its bound operation")
+        identity = ManagedRunIdentity(reference.run_id)
+        preflight_bound_run(
+            repository,
+            identity,
+            target=self._target,
+            guest=bootstrap.guest,
+            root_plan=bootstrap.root_entry,
+            runtime_selection=binding.runtime_selection,
+            deadline=deadline,
+            owner=self._owner,
+            execution_operation=self,
+        )
+        return self.require_managed_run(
+            identity,
+            repository=repository,
+            owner=self._owner,
+            target=self._target,
+            guest=bootstrap.guest,
+            root_plan=bootstrap.root_entry,
+            runtime_selection=binding.runtime_selection,
+        )
+
+    def stop_job(self, reference: JobRef, deadline: Deadline) -> JobStop:
+        """Drain and permanently stop only this run, retaining its closure facts."""
+        run = self._control_run(reference, deadline)
+        with self._admission_guard:
+            if self._active_inline_calls or self._unfinished_inline_executions:
+                raise StateError("Managed stop cannot overlap unfinished ordinary delivery")
+            if run.disposal_confirmed:
+                return JobStop(reference, True, True)
+            if not run.keeper.drain(deadline).drained:
+                return JobStop(reference, None, False, ExecutionFailure.CLEANUP, deadline.expired)
+            candidate = run.keeper.request_explicit_stop(deadline)
+            state = None if candidate.observation is None else candidate.observation.state
+            accepted = state in {ManagedStopState.ACCEPTED, ManagedStopState.TERMINATED}
+            if not accepted:
+                return JobStop(
+                    reference,
+                    False if candidate.dispatch is Dispatch.NOT_SENT else None,
+                    False,
+                    ExecutionFailure.DEADLINE if deadline.expired else ExecutionFailure.OBSERVATION,
+                    deadline.expired,
+                )
+            if deadline.expired:
+                return JobStop(reference, True, False, ExecutionFailure.DEADLINE, True)
+            try:
+                terminal = run.keeper.observe_explicit_cleanup(deadline)
+            except (StateError, ValidationError):
+                return JobStop(
+                    reference,
+                    True,
+                    False,
+                    ExecutionFailure.DEADLINE if deadline.expired else ExecutionFailure.OBSERVATION,
+                    deadline.expired,
+                )
+            proved = run.terminal_proved(terminal)
+            if proved:
+                run.terminal_observation = terminal
+                run.cleanup_complete = True
+            return JobStop(
+                reference,
+                True,
+                proved,
+                ExecutionFailure.DEADLINE if deadline.expired else None if proved else ExecutionFailure.OBSERVATION,
+                deadline.expired,
+            )
+
+    def dispose_job(self, reference: JobRef, carrier: Carrier, deadline: Deadline) -> JobDisposal:
+        """Observe terminal proof before draining, then dispose with exact retry custody."""
+        run = self._control_run(reference, deadline)
+        if run.disposal_confirmed:
+            return JobDisposal(reference, True)
+        if not run.disposal_attempted:
+            observed = self.observe_job(reference, carrier, deadline)
+            if observed.requires_owner_retention:
+                return JobDisposal(reference, None, ExecutionFailure.OBSERVATION, deadline.expired)
+            if not run.terminal_proved(observed.candidate):
+                return JobDisposal(
+                    reference, False, ExecutionFailure.DEADLINE if deadline.expired else None, deadline.expired
+                )
+            run.terminal_observation = observed.candidate
+        if not run.terminal_proved(run.terminal_observation):
+            raise StateError("Managed disposal retains no positive terminal proof")
+        with self._admission_guard:
+            if self._active_inline_calls or self._unfinished_inline_executions:
+                raise StateError("Managed disposal cannot overlap unfinished ordinary delivery")
+            if not run.keeper.drain(deadline).drained:
+                return JobDisposal(reference, None, ExecutionFailure.CLEANUP, deadline.expired)
+            if deadline.expired:
+                return JobDisposal(reference, False, ExecutionFailure.DEADLINE, True)
+            repository, bootstrap, binding = self._managed_repository, self._bootstrap, self._native_binding
+            assert repository is not None and bootstrap is not None and binding is not None
+            if self._wsl2_route is not None:
+                self._wsl2_route.require_selected_route(deadline)
+            run.disposal_attempted = True
+            try:
+                outcome = dispose_bound_managed_run(
+                    repository,
+                    run.receipt.identity,
+                    target=self._target,
+                    guest=bootstrap.guest,
+                    root_plan=bootstrap.root_entry,
+                    carrier=carrier,
+                    runtime_selection=binding.runtime_selection,
+                    deadline=deadline,
+                    owner=self._owner,
+                    obligation_id=run.disposal_obligation_id,
+                    execution_operation=self,
+                )
+            except BaseException as control:
+                if isinstance(control.__cause__, ManagedDisposalControlFact):
+                    run.disposal_outcome = control.__cause__.outcome
+                    retained = run.disposal_outcome
+                    if not (
+                        retained.requires_owner_retention
+                        or retained.pending_remote_effects
+                        or retained.coordination_uncertain
+                    ):
+                        run.disposal_attempted = False
+                        run.disposal_obligation_id = uuid4().hex
+                raise
+            run.disposal_outcome = outcome
+            confirmed = outcome.state is DisposalState.DISPOSED and not outcome.requires_owner_retention
+            if confirmed:
+                run.disposal_confirmed = True
+                run.cleanup_complete = True
+            elif not (
+                outcome.requires_owner_retention or outcome.pending_remote_effects or outcome.coordination_uncertain
+            ):
+                # A clean refusal resolved its one-attempt row. A later
+                # explicit attempt must register a fresh row, never reopen it.
+                run.disposal_attempted = False
+                run.disposal_obligation_id = uuid4().hex
+            return JobDisposal(
+                reference,
+                True if confirmed else None if outcome.requires_owner_retention else False,
+                ExecutionFailure.DEADLINE
+                if deadline.expired
+                else ExecutionFailure.OBSERVATION
+                if outcome.requires_owner_retention
+                else None,
+                deadline.expired,
+            )
 
     def start_managed(
         self,
@@ -219,7 +585,7 @@ class ExecutionOperation:
             return reference
 
     @property
-    def active_inline_calls(self) -> tuple[_ActiveInlineCall, ...]:
+    def active_inline_calls(self) -> tuple[_ActiveHelperCall, ...]:
         """Return calls whose borrow has not yet been relinquished."""
         return tuple(self._active_inline_calls.values())
 
@@ -303,7 +669,7 @@ class ExecutionOperation:
             )
             self._capture(active, outcome)
 
-    def _recover_registration(self, active: _ActiveInlineCall) -> None:
+    def _recover_registration(self, active: _ActiveHelperCall) -> None:
         """Read an interrupted, never-dispatched registration during finish."""
         owner = self._owner
         borrow = active.borrow
@@ -324,12 +690,12 @@ class ExecutionOperation:
             active.installed = True
 
     @staticmethod
-    def _known_termination(candidate: InlineCandidateResult) -> bool:
+    def _known_termination(candidate: InlineCandidateResult | ManagedObservationCandidate) -> bool:
         return candidate.dispatch is Dispatch.NOT_SENT or (
             candidate.dispatch is Dispatch.SENT and candidate.carrier_completion == ExitStatus(code=0)
         )
 
-    def _admit(self, active: _ActiveInlineCall) -> None:
+    def _admit(self, active: _ActiveHelperCall) -> None:
         dispatch_id = self._dispatch_id
         assert dispatch_id is not None
         if not active.installed:
@@ -375,7 +741,7 @@ class ExecutionOperation:
             borrow = self._owner.borrow()
             try:
                 operation = BorrowedFixedHelperCarrier(carrier, borrow)
-                active = _ActiveInlineCall(carrier, borrow, prepared, operation)
+                active = _ActiveHelperCall(carrier, borrow, prepared, operation)
                 if self._dispatch_id is None:
                     self._dispatch_id = uuid4().hex
                 self._active_inline_calls[id(active)] = active
@@ -401,14 +767,16 @@ class ExecutionOperation:
 
     def _outcome(
         self,
-        active: _ActiveInlineCall,
+        active: _ActiveHelperCall,
         operation: BorrowedFixedHelperCarrier,
         deadline: Deadline,
         *,
         include_candidate: bool,
     ) -> OwnedInlineOutcome:
         return OwnedInlineOutcome(
-            candidate=active.candidate if include_candidate else None,
+            candidate=active.candidate
+            if include_candidate and isinstance(active.candidate, InlineCandidateResult)
+            else None,
             deadline_exceeded=deadline.expired,
             pending_remote_effects=operation.pending_remote_effects,
             coordination_uncertain=operation.coordination_uncertain,
@@ -418,7 +786,7 @@ class ExecutionOperation:
     def _raise_control(
         self,
         control: BaseException,
-        active: _ActiveInlineCall,
+        active: _ActiveHelperCall,
         operation: BorrowedFixedHelperCarrier,
         deadline: Deadline,
     ) -> None:
@@ -434,12 +802,22 @@ class ExecutionOperation:
                 else:
                     outcome = replace(outcome, coordination_uncertain=True, requires_owner_retention=True)
                     active.outcome = outcome
-                fact = InlineExecutionControlFact(outcome)
+                fact: Exception = (
+                    ManagedObserveControlFact(
+                        ManagedObserveOutcome(
+                            pending_remote_effects=outcome.pending_remote_effects,
+                            coordination_uncertain=outcome.coordination_uncertain,
+                            requires_owner_retention=outcome.requires_owner_retention,
+                        )
+                    )
+                    if active.prepared is None
+                    else InlineExecutionControlFact(outcome)
+                )
             except BaseException:
                 raise control from None
         raise control from fact
 
-    def _capture(self, active: _ActiveInlineCall, outcome: OwnedInlineOutcome) -> None:
+    def _capture(self, active: _ActiveHelperCall, outcome: OwnedInlineOutcome) -> None:
         active.outcome = outcome
         # Both handoffs are local core transitions. A reply can be lost after
         # the borrow relinquishes authority, so observe that exact local fact
@@ -450,6 +828,6 @@ class ExecutionOperation:
             self._unfinished_inline_executions.append(UnfinishedInlineExecution(replace(outcome, candidate=None)))
         self._active_inline_calls.pop(id(active))
 
-    def _borrow_closed(self, active: _ActiveInlineCall) -> bool:
+    def _borrow_closed(self, active: _ActiveHelperCall) -> bool:
         with self._owner._guard:  # noqa: SLF001
             return active.borrow._closed  # noqa: SLF001

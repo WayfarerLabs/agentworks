@@ -1,7 +1,8 @@
 """Private retained custody for one operation-owned run's fixed lease helpers.
 
-The caller-thread composition retains this object before admission and publishes
-ordinary close intent before draining it. No method resolves start or lifecycle debt.
+The caller-thread composition retains this object before admission. Local drain
+ends renewal; explicit control fences ordinary ownership, while aggregate close
+uses its retained closing authority. No method resolves start or lifecycle debt.
 """
 
 from __future__ import annotations
@@ -95,7 +96,7 @@ class KeeperDrain:
 
 
 class _ClosingCarrier:
-    """Private helper view, reachable only through the two bound cleanup methods."""
+    """Private helper delivery under retained aggregate closing authority."""
 
     def __init__(self, keeper: ManagedOperationKeeper) -> None:
         self._keeper = keeper
@@ -115,6 +116,19 @@ class _ClosingCarrier:
         report = keeper._carrier.execute(invocation, io=io, deadline=deadline, custody=keeper._custody)
         keeper._closing_delivery = (report.dispatch, report.completion)
         return report
+
+
+class _ExplicitStopCarrier(_ClosingCarrier):
+    """Fence explicit stop and its cleanup observation at actual delivery."""
+
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        keeper = self._keeper
+        keeper._require_cleanup(deadline)  # noqa: SLF001
+        obligation = keeper.obligation
+        assert obligation is not None
+        obligation.mark_possible_effect()
+        keeper._check_binding()  # noqa: SLF001
+        return super().execute(invocation, io=io, deadline=deadline)
 
 
 class _LeaseCarrier:
@@ -441,6 +455,42 @@ class ManagedOperationKeeper:
         try:
             self.last_cleanup = observe_managed_run(
                 _ClosingCarrier(self),
+                expected_launch=self._expected_launch,
+                plan=self._plan,
+                deadline=deadline,
+                runtime_selection=self._runtime,
+                guest=self._guest,
+            )
+            self._settle_closing(deadline)
+            return self.last_cleanup
+        except BaseException:
+            self.failed = True
+            raise
+
+    def request_explicit_stop(self, deadline: Deadline) -> ManagedStopCandidate:
+        """Stop a selected drained run under current ordinary owner authority."""
+        self._require_cleanup(deadline)
+        try:
+            self.last_stop = stop_managed_run(
+                _ExplicitStopCarrier(self),
+                expected_launch=self._expected_launch,
+                plan=self._plan,
+                deadline=deadline,
+                runtime_selection=self._runtime,
+                guest=self._guest,
+            )
+            self._settle_closing(deadline)
+            return self.last_stop
+        except BaseException:
+            self.failed = True
+            raise
+
+    def observe_explicit_cleanup(self, deadline: Deadline) -> ManagedObservationCandidate:
+        """Observe explicit stop closure under a fresh current-generation fence."""
+        self._require_cleanup(deadline)
+        try:
+            self.last_cleanup = observe_managed_run(
+                _ExplicitStopCarrier(self),
                 expected_launch=self._expected_launch,
                 plan=self._plan,
                 deadline=deadline,

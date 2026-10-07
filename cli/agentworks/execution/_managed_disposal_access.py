@@ -19,6 +19,7 @@ from .carrier import Deadline, Dispatch
 if TYPE_CHECKING:
     from agentworks.operations import OperationOwner
 
+    from ._execution_operation import ExecutionOperation
     from ._helper_launcher import IdentityPlan
     from ._runtime_prerequisite import RuntimeSelection
     from ._vm_guest_identity_protocol import VMGuestIdentity
@@ -70,6 +71,7 @@ def dispose_bound_managed_run(
     deadline: Deadline,
     owner: OperationOwner,
     obligation_id: str,
+    execution_operation: ExecutionOperation | None = None,
 ) -> ManagedDisposalOutcome:
     """Attempt one disposal; caller keeps its owner and unresolved custody.
 
@@ -91,6 +93,7 @@ def dispose_bound_managed_run(
         runtime_selection=runtime_selection,
         deadline=deadline,
         owner=owner,
+        execution_operation=execution_operation,
     )
     if record.launch_state is not ManagedLaunchState.RECEIPT_CONFIRMED:
         raise ValidationError("Managed disposal requires a reconciled launch receipt")
