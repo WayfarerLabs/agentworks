@@ -326,6 +326,29 @@ def test_stop_and_fresh_observation_use_the_same_selected_deadline(observer):
     assert len(deadlines) == 2 and all(deadline is selected for deadline in deadlines)
 
 
+def test_expiry_at_fresh_observation_preflight_preserves_accepted_stop(observer, monkeypatch):
+    _, repository, operation, access, main, _ = observer
+    before = repository.inspect(RUN)
+    observe = operation.observe_job
+    clock = [0.0]
+    deadlines = []
+
+    def late_observe(reference, carrier, deadline):
+        deadlines.append(deadline)
+        clock[0] = 2.0
+        return observe(reference, carrier, deadline)
+
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(operation, "observe_job", late_observe)
+    selected = Deadline.after(1)
+    result = access.stop(JobRef(RUN.run_id), deadline=selected)
+    assert result.accepted and not result.terminated and result.deadline_exceeded
+    assert result.failure is ExecutionFailure.DEADLINE and deadlines == [selected]
+    assert main.stop.calls == 1 and main.observe.calls == 0 and main.clock.calls == 0
+    assert repository.inspect(RUN) == before and operation.managed_runs == ()
+    assert not operation.active_inline_calls and not operation.unfinished_inline_executions
+
+
 @pytest.mark.windows
 def test_unused_stop_setup_control_closes_borrow_and_preserves_original_traceback(observer, monkeypatch):
     _, _, operation, access, main, workflow = observer

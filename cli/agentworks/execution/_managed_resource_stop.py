@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError, ValidationError
 
-from ._managed_bound_run import preflight_bound_run
+from ._managed_bound_run import ManagedDeadlineExpired, preflight_bound_run
 from ._managed_runs import ManagedLaunchState, ManagedRunIdentity, ManagedRunOwner
 from ._managed_stop_exchange import ManagedStopState
 from .carrier import Deadline, Dispatch
@@ -63,8 +63,15 @@ def stop_resource_job(operation: ExecutionOperation, reference: JobRef, deadline
         return JobStop(reference, True, False, ExecutionFailure.DEADLINE, True)
     try:
         terminal = operation.observe_job(reference, binding.carrier, deadline)
-    except (StateError, ValidationError):
-        return JobStop(reference, True, False, ExecutionFailure.OBSERVATION, deadline.expired)
+    except (StateError, ValidationError) as error:
+        expired = isinstance(error, ManagedDeadlineExpired) or deadline.expired
+        return JobStop(
+            reference,
+            True,
+            False,
+            ExecutionFailure.DEADLINE if expired else ExecutionFailure.OBSERVATION,
+            expired,
+        )
     proved = terminal.terminal_proved
     return JobStop(
         reference,
