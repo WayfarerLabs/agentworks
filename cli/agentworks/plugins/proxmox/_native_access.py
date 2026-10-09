@@ -54,6 +54,7 @@ class ProxmoxOwnedNativePlatformAccess:
         if type(locator) is not ProviderLocator:
             raise StateError("Native VM route is unavailable", entity_kind="vm", entity_name=self.vm.name)
         self.locator = locator
+        self.route_check = self._check_route
         binding = self.platform.resolve_native_execution_binding(
             self.vm, self.ctx, deadline=deadline, config=self.ctx.config
         )
@@ -80,6 +81,16 @@ class ProxmoxOwnedNativePlatformAccess:
                 self.preparation = control.__cause__.preparation
             raise
         self.preparation = preparation
+
+    def _check_route(self, deadline: Deadline) -> None:
+        """Re-observe the retained provider locator, not the guest boot identity."""
+        if deadline.expires_at is None or deadline.expired:
+            raise StateError("Proxmox route check requires a fresh finite deadline")
+        if not self.custody.close(deadline):
+            raise StateError("Proxmox route check retains unsettled local delivery")
+        locator = self.platform.observe_provider_locator(self.vm, self.ctx, deadline=deadline, custody=self.custody)
+        if deadline.expired or not self.custody.settled or self.locator is None or locator != self.locator:
+            raise StateError("Proxmox provider locator changed or is unavailable")
 
     def settle(self, deadline: Deadline) -> bool:
         activation = self.activation

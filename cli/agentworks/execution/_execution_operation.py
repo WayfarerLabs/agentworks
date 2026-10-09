@@ -98,10 +98,15 @@ from agentworks.operations import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from agentworks.execution._helper_closure import HelperClosureDelivery
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._managed_job_store import Stream
     from agentworks.execution._managed_start_exchange import ManagedStartCandidate
-    from agentworks.execution._runtime_prerequisite import RuntimeSelection, _NumericGuestBootstrap
+    from agentworks.execution._runtime_prerequisite import (
+        HelperClosureExpectation,
+        RuntimeSelection,
+        _NumericGuestBootstrap,
+    )
     from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Carrier, Deadline
@@ -156,6 +161,8 @@ class _ActiveHelperCall:
     borrow: OperationBorrow
     prepared: PreparedInlineCandidate | None
     operation: BorrowedFixedHelperCarrier
+    closure_delivery: HelperClosureDelivery | None = None
+    closure_expectation: HelperClosureExpectation | None = None
     installed: bool = False
     armed: bool = False
     bookkeeping_retained: bool = False
@@ -947,6 +954,55 @@ class ExecutionOperation:
         with self._admission_guard:
             self._retry_bookkeeping(finishing=self._finishing)
 
+    def observe_inline_cleanup(self, deadline: Deadline) -> None:
+        """Observe only retained exact helpers, without resuming application output."""
+        if deadline.expires_at is None or deadline.expired:
+            raise ValidationError("Inline cleanup observation requires a fresh finite deadline")
+        with self._admission_guard:
+            for active in tuple(self._active_inline_calls.values()):
+                delivery = active.closure_delivery
+                if delivery is None:
+                    continue
+                if not active.bookkeeping_retained:
+                    raise StateError("Inline helper is still active")
+                attempt = active.operation.outstanding_attempt
+                if attempt is None:
+                    continue
+                if not attempt.local_delivery.close(deadline):
+                    raise StateError("Inline helper local delivery remains unsettled")
+                self._validate_closure_call(active)
+                if self._route_check is not None:
+                    self._route_check(deadline)
+                self._validate_closure_call(active)
+                if not delivery.observe_closure(deadline=deadline, custody=attempt.local_delivery):
+                    raise StateError("Inline helper closure remains unknown")
+                self._validate_closure_call(active)
+                active.operation.settle_helper_closure()
+                self._capture(active, OwnedInlineOutcome())
+
+    def _validate_closure_call(self, active: _ActiveHelperCall) -> None:
+        """Fence held continuation to the exact local borrow and durable generation."""
+        owner = self._owner
+        with owner._guard:  # noqa: SLF001
+            if owner._active_borrow is not active.borrow or active.borrow._closed:  # noqa: SLF001
+                raise StateError("Inline closure no longer owns its borrow")
+            outstanding = owner._outstanding_attempt  # noqa: SLF001
+            if outstanding is not None and outstanding is not active.operation.outstanding_attempt:
+                raise StateError("Inline closure no longer owns its attempt")
+        if self._dispatch_id is None or owner.inspect_lifecycle_obligation(self._dispatch_id) is None:
+            raise StateError("Inline closure lifetime obligation is unavailable")
+        expectation = active.closure_expectation
+        bootstrap = self._bootstrap
+        binding = self._native_binding
+        if binding is None or binding.carrier is not active.carrier:
+            raise StateError("Inline closure native binding changed")
+        if (
+            expectation is None
+            or expectation.guest != (bootstrap.guest if bootstrap is not None else None)
+            or (expectation.guest is not None and vm_guest_boot_id(expectation.guest) != self._target.boot_id)
+        ):
+            raise StateError("Inline closure guest binding changed")
+
     def _retry_bookkeeping(self, *, finishing: bool) -> None:
         for active in tuple(self._active_inline_calls.values()):
             self._settle_retained_helper(active)
@@ -986,6 +1042,12 @@ class ExecutionOperation:
             raise StateError("Inline execution still has an active call")
         operation = active.operation
         candidate = active.candidate
+        if active.closure_delivery is not None and operation.outstanding_attempt is not None:
+            if not active.closure_delivery.closure_proven:
+                raise StateError("Inline execution retains unknown helper closure")
+            self._validate_closure_call(active)
+            operation.settle_helper_closure()
+            return
         if candidate is not None and self._known_termination(candidate):
             if not active.borrow.has_outstanding_attempt:
                 operation.outstanding_attempt = None
@@ -1135,10 +1197,19 @@ class ExecutionOperation:
             active = self._borrow_helper_call(carrier, prepared)
             operation = active.operation
         try:
+            binding = self._native_binding
+            if binding is not None and binding.carrier is carrier and binding._new_helper_delivery is not None:
+                active.closure_expectation = prepared.closure_expectation
+                active.closure_delivery = binding._new_helper_delivery(prepared.closure_expectation)
+                active.operation = BorrowedFixedHelperCarrier(active.closure_delivery, active.borrow)
+                operation = active.operation
             self._admit(active)
             candidate = execute_inline_candidate(operation, prepared, deadline=deadline)
             active.candidate = candidate
-            operation.settle(candidate.dispatch, candidate.carrier_completion)
+            completion = candidate.carrier_completion
+            if active.closure_delivery is not None and not active.closure_delivery.closure_proven:
+                completion = None
+            operation.settle(candidate.dispatch, completion)
             outcome = self._outcome(active, operation, deadline, include_candidate=True)
         except BaseException as control:
             self._raise_control(control, active, operation, deadline)
@@ -1230,12 +1301,16 @@ class ExecutionOperation:
                             requires_owner_retention=outcome.requires_owner_retention,
                         )
                     )
-                    if active.prepared is None
+                    if active.prepared is None and active.closure_delivery is None
                     else InlineExecutionControlFact(outcome)
                 )
                 fact.__cause__ = control.__cause__
             except BaseException:
                 raise control from control.__cause__
+            if active.closure_delivery is not None:
+                active.prepared = None
+                if isinstance(active.candidate, InlineCandidateResult):
+                    active.candidate = replace(active.candidate, observation=None)
         raise control from fact
 
     def _capture(self, active: _ActiveHelperCall, outcome: OwnedInlineOutcome) -> None:
@@ -1246,6 +1321,14 @@ class ExecutionOperation:
             capture_disposal_call(self, active, outcome)
             return
         active.outcome = outcome
+        if active.closure_delivery is not None and outcome.requires_owner_retention:
+            # The original attempt still needs its OPEN borrow for settlement.
+            # Detach all caller collectors, input and returned application bytes.
+            active.outcome = replace(outcome, candidate=None)
+            active.prepared = None
+            active.candidate = None
+            active.bookkeeping_retained = True
+            return
         # Both handoffs are local core transitions. A reply can be lost after
         # the borrow relinquishes authority, so observe that exact local fact
         # before repeating a handoff. Never default-close the lifetime row.

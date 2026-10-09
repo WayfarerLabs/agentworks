@@ -22,6 +22,7 @@ from agentworks.execution._inline_request import (
     encode_manifest,
 )
 from agentworks.execution._runtime_prerequisite import (
+    HelperClosureExpectation,
     RuntimePrefixSink,
     RuntimePrerequisiteObservation,
     RuntimePrerequisiteState,
@@ -65,6 +66,7 @@ class PreparedInlineCandidate:
     io: CarrierIO
     nonce: str
     output_mode: OutputMode
+    closure_expectation: HelperClosureExpectation
     _runtime: RuntimePrefixSink = field(repr=False)
     _reader: FrameReader = field(repr=False)
     _observer: InlineObserver = field(repr=False)
@@ -252,6 +254,9 @@ def prepare_inline_candidate(
         ),
         nonce=nonce,
         output_mode=output_mode,
+        closure_expectation=HelperClosureExpectation(
+            nonce, candidates, system_shim, plan.expected, bootstrap.guest if bootstrap is not None else None
+        ),
         _runtime=runtime,
         _reader=reader,
         _observer=observer,

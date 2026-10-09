@@ -148,6 +148,23 @@ class BorrowedFixedHelperCarrier:
         self.pending_remote_effects = True
         return False
 
+    def settle_helper_closure(self) -> None:
+        """Settle caller-proven closure, reconciling the same lost settlement reply."""
+        attempt = self.outstanding_attempt
+        if attempt is None:
+            raise StateError("Helper closure has no original attempt")
+        if not attempt.local_delivery.settled:
+            raise StateError("Helper closure retains unsettled local delivery")
+        try:
+            if self._borrow.has_outstanding_attempt:
+                attempt.settle()
+        except BaseException:
+            self.coordination_uncertain = True
+            raise
+        self.outstanding_attempt = None
+        self.pending_remote_effects = False
+        self.coordination_uncertain = False
+
     def release(self, *, control_escaped: bool = False) -> tuple[BorrowedHelperCustody, BaseException | None]:
         """Release or retain borrowed custody and report an interrupted release.
 

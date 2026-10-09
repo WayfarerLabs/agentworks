@@ -36,11 +36,11 @@ from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._proxmox_activation import ProxmoxActivation
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution.binding import NativeExecutionBinding
-from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, FiniteInput, PreparedInvocation
+from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, FiniteInput, PreparedInvocation, SinkOutput
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection, _ProxmoxWire
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
-from agentworks.execution.result import CheckedExecutionError
+from agentworks.execution.result import ApplicationState, CheckedExecutionError
 from agentworks.operations import OperationAttempt, OperationOwner, release_borrow_after_custody
 from agentworks.plugins.proxmox._native_access import ProxmoxOwnedNativePlatformAccess
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
@@ -195,6 +195,101 @@ def test_running_views_share_owner_bootstrap_and_settle(database, tmp_path, monk
     assert route.resolutions == 1 and route.local.calls == 3
     assert all(value is deadline for value in route.deadlines)
     assert database.operations.inspect(_scope()) is None
+
+
+@pytest.mark.parametrize("route_fault", [None, "changed", "failure", "guest"])
+def test_native_direct_selects_closure_factory_and_finite_cleanup_before_finish(
+    database, tmp_path, monkeypatch, route_fault
+):
+    platform, route = _install(database, monkeypatch)
+    connection = ProxmoxConnection("https://pve.test", "node", 101, "token", "secret")
+    monkeypatch.setattr(platform, "_execution_connection", lambda *_args: connection)
+    # Invoke the real composition factory rather than the scripted preparation binding.
+    monkeypatch.setattr(
+        platform,
+        "resolve_native_execution_binding",
+        lambda vm, ctx, **kwargs: ProxmoxPlatform.resolve_native_execution_binding(platform, vm, ctx, **kwargs),
+    )
+    deadline = Deadline.after(30)
+    calls: list[tuple[str, str]] = []
+    terminal: dict[str, object] = {}
+
+    class Collector:
+        def __init__(self) -> None:
+            self.data = bytearray()
+
+        def try_write(self, data: memoryview) -> int:
+            self.data.extend(data)
+            return len(data)
+
+    def request(_wire, method, suffix, *, custody, timeout, body=None):
+        calls.append((method, suffix))
+        if method == "POST":
+            assert suffix == "exec" and body is not None
+            value = json.loads(body)
+            stdout, stderr = Collector(), Collector()
+            report = route.local.execute(
+                PreparedInvocation(tuple(value["command"])),
+                io=CarrierIO(input=FiniteInput(value["input-data"].encode("ascii")), output=SinkOutput(stdout, stderr)),
+                deadline=Deadline.after(15),
+                custody=custody,
+            )
+            assert report.completion is not None and report.completion.code == 0
+            terminal.update(exited=True, exitcode=0, **{"out-data": stdout.data.decode("ascii")})
+            return {"pid": 81}
+        assert suffix == "exec-status?pid=81"
+        if len(calls) == 2:
+            object.__setattr__(deadline, "expires_at", 0.0)
+            return {"exited": False}
+        return terminal
+
+    monkeypatch.setattr(_ProxmoxWire, "request", request)
+    with (
+        pytest.raises(ValidationError) as caught,
+        native_vm_operation(
+            database, "box", platform, RunContext(), deadline=deadline, trusted_root=PurePosixPath(tmp_path)
+        ) as views,
+    ):
+        result = views.execution.run(Command(["/bin/echo", "private-output"]), profile=Protection.DIRECT)
+        assert result.application_state is ApplicationState.UNKNOWN
+        (active,) = views.execution_operation.active_inline_calls
+        assert active.closure_delivery is not None and active.closure_expectation is not None
+        assert views.execution_operation._bootstrap is not None
+        assert active.closure_expectation.guest == views.execution_operation._bootstrap.guest
+        assert active.prepared is None and active.candidate is None
+    fact = caught.value.__cause__
+    assert isinstance(fact, NativeVMOperationControlFact)
+    access = fact._workflow.access
+    assert isinstance(access, ProxmoxOwnedNativePlatformAccess) and access.route_check is not None
+    provider_calls = []
+
+    def locator(vm, ctx, *, deadline, custody):
+        assert custody is access.custody and deadline.expires_at is not None and not deadline.expired
+        provider_calls.append("current-config")
+        if route_fault == "failure":
+            raise ExternalError("provider lookup failed")
+        return ProviderLocator("changed" if route_fault else "pve:generation")
+
+    monkeypatch.setattr(platform, "observe_provider_locator", locator)
+    if route_fault == "guest":
+        operation = views.execution_operation
+        operation._target = replace(operation._target, boot_id="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+    if route_fault:
+        attempt = active.operation.outstanding_attempt
+        for _ in range(2):
+            with pytest.raises(ExternalError if route_fault == "failure" else StateError):
+                fact.retry_cleanup(Deadline.after(15))
+            assert views.execution_operation.active_inline_calls == (active,)
+            assert active.operation.outstanding_attempt is attempt and active.borrow.has_outstanding_attempt
+        assert calls == [("POST", "exec"), ("GET", "exec-status?pid=81")]
+        assert database.operations.inspect(_scope()) is not None and views.execution_operation.active_inline_calls
+    else:
+        fact.retry_cleanup(Deadline.after(15))
+        fact.retry_cleanup(Deadline.after(15))
+        assert calls == [("POST", "exec"), ("GET", "exec-status?pid=81"), ("GET", "exec-status?pid=81")]
+        assert database.operations.inspect(_scope()) is None
+        assert result.application_state is ApplicationState.UNKNOWN
+    assert provider_calls == ([] if route_fault == "guest" else ["current-config"] * (2 if route_fault else 1))
 
 
 @pytest.mark.parametrize("mode", ["success", "lost_ack", "ha", "interrupt"])
