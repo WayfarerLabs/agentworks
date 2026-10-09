@@ -120,7 +120,9 @@ class OperationOwner:
 
         This remains available after borrow handoff. The outstanding attempt
         and durable remote debt are unchanged, even when local cleanup succeeds.
-        Callers must have stopped all pipe use before requesting cleanup.
+        Plain delivery requires the caller to stop pipe use before cleanup.
+        Coordinated delivery retains that borrower shutdown and subsequent
+        resource cleanup with its exact local delivery coordinator.
         """
         with self._guard:
             attempt = self._outstanding_attempt
