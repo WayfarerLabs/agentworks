@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 from collections.abc import Iterator
-from contextlib import ExitStack, contextmanager
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from ipaddress import IPv4Address, IPv6Address
 from pathlib import Path
@@ -35,7 +35,7 @@ from agentworks.execution.carriers.ssh.trust import (
     resolve_trust,
     trust_status,
 )
-from tests.execution.carriers.ssh._held_resources import held_forwards, held_resource
+from tests.execution.carriers.ssh._held_resources import ForwardingCaller, SSHResourceCaller, held_resource
 
 pytestmark = pytest.mark.windows
 
@@ -78,7 +78,7 @@ class SyntheticForwarding:
 
 @contextmanager
 def _synthetic(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, forwarding_caller: ForwardingCaller
 ) -> Iterator[SyntheticForwarding]:
     tmp_path = tmp_path.resolve()
     identity, trust = tmp_path / "identity", tmp_path / "trust"
@@ -86,7 +86,8 @@ def _synthetic(
     trust.write_bytes(b"synthetic")
     value = SyntheticForwarding(
         SSHConnection("fixture.invalid", "fixture", identity, SSHTrustFiles((trust,)), ssh_executable=sys.executable),
-        custody,
+        forwarding_caller.delivery,
+        resources=forwarding_caller.resources,
     )
     original = subprocess.Popen
 
@@ -107,35 +108,26 @@ def _synthetic(
     try:
         yield value
     finally:
-        try:
-
-            def close(resource: OwnedForwarding) -> None:
-                assert resource.close(Deadline.after(3))
-
-            with ExitStack() as cleanup:
-                for resource in value.resources:
-                    cleanup.callback(close, resource)
-        finally:
-            assert custody.close(Deadline.after(3))
+        assert forwarding_caller.close(Deadline.after(3))
         value.assert_closed()
 
 
 @pytest.fixture
 def synthetic(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, forwarding_caller: ForwardingCaller
 ) -> Iterator[SyntheticForwarding]:
-    with _synthetic(tmp_path, monkeypatch, custody) as value:
+    with _synthetic(tmp_path, monkeypatch, forwarding_caller) as value:
         yield value
 
 
 @pytest.mark.parametrize("cleanup_failure", [False, True])
 def test_fixture_teardown_closes_retained_sessions_after_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody, cleanup_failure: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, forwarding_caller: ForwardingCaller, cleanup_failure: bool
 ) -> None:
     failure = RuntimeError("fixture failure")
     with (
         pytest.raises(RuntimeError) as caught,
-        _synthetic(tmp_path, monkeypatch, custody) as value,
+        _synthetic(tmp_path, monkeypatch, forwarding_caller) as value,
     ):
         first = value.open()
         assert first.close(Deadline.after(3))
@@ -152,8 +144,60 @@ def test_fixture_teardown_closes_retained_sessions_after_failure(
             raise failure
     assert caught.value is failure
     assert not first._thread.is_alive() and not second._thread.is_alive()
-    assert custody.settled
+    assert forwarding_caller.delivery.settled
     value.assert_closed()
+
+
+def test_fixture_retains_failed_startup_until_coordinator_settles(
+    synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = SSHResourceCaller()
+    caller = ForwardingCaller(owner.delivery)
+    owner.resources.append(caller)
+    native_closes: list[Deadline] = []
+    close = owner.delivery.close
+    release = threading.Event()
+    entered = threading.Event()
+    monotonic = time.monotonic
+    offset = [0.0]
+    drain = OwnedForwarding._drain_pipes
+
+    def record_close(deadline: Deadline) -> bool:
+        native_closes.append(deadline)
+        return close(deadline)
+
+    def paused_drain(self: OwnedForwarding, pipes: process_core.LocalProcessPipes) -> None:
+        entered.set()
+        offset[0] = 60.0
+        assert release.wait(10)
+        drain(self, pipes)
+
+    monkeypatch.setattr(time, "monotonic", lambda: monotonic() + offset[0])
+    monkeypatch.setattr(owner.delivery, "close", record_close)
+    monkeypatch.setattr(OwnedForwarding, "_drain_pipes", paused_drain)
+    try:
+        with (
+            pytest.raises(ForwardingError) as caught,
+            caller.session(synthetic.connection, [_forward()], deadline=Deadline.after(30)),
+        ):
+            pytest.fail("Refused startup returned a session")
+        assert caught.value.failure is Failure.DEADLINE
+        assert entered.is_set() and len(caller.resources) == 1
+        assert caller.resources[0]._drain_admitted.is_set()
+        # Expected startup failure cannot consume the fixture's later teardown
+        # assertion. An admitted borrower still prohibits native pipe closure.
+        with pytest.raises(AssertionError):
+            assert owner.close(Deadline.after(0))
+        assert native_closes == []
+        child = synthetic.children[-1]
+        assert child.poll() is None
+        assert all(pipe is not None and not pipe.closed for pipe in (child.stdin, child.stdout, child.stderr))
+    finally:
+        release.set()
+        assert owner.close(Deadline.after(3))
+    assert native_closes
+    assert not caller.resources[0]._thread.is_alive()
+    synthetic.assert_closed()
 
 
 @pytest.mark.parametrize(
@@ -540,7 +584,7 @@ def test_setup_failure_releases_partial_owned_listener(synthetic: SyntheticForwa
 
 @pytest.mark.integration
 def test_installed_ssh_forwards_bytes_and_releases_listener(
-    custody: LocalDeliveryCustody, local_sshd: SSHConnection
+    forwarding_caller: ForwardingCaller, local_sshd: SSHConnection
 ) -> None:
     with socket.socket() as destination:
         destination.bind(("127.0.0.1", 0))
@@ -561,7 +605,7 @@ def test_installed_ssh_forwards_bytes_and_releases_listener(
         spec = LocalForward(IPv4Address("127.0.0.1"), port, "127.0.0.1", destination.getsockname()[1])
         try:
             with (
-                held_forwards(local_sshd, [spec], deadline=Deadline.after(5), custody=custody),
+                forwarding_caller.session(local_sshd, [spec], deadline=Deadline.after(5)),
                 socket.create_connection(("127.0.0.1", port), timeout=2) as peer,
             ):
                 peer.sendall(b"\x00\xffowned-forward\n")
@@ -578,7 +622,7 @@ def test_installed_ssh_forwards_bytes_and_releases_listener(
 @pytest.mark.integration
 @pytest.mark.parametrize("occupied_first", [True, False])
 def test_installed_ssh_partial_failure_releases_listeners(
-    custody: LocalDeliveryCustody, local_sshd: SSHConnection, occupied_first: bool
+    forwarding_caller: ForwardingCaller, local_sshd: SSHConnection, occupied_first: bool
 ) -> None:
     with socket.socket() as occupied:
         occupied.bind(("127.0.0.1", 0))
@@ -589,7 +633,7 @@ def test_installed_ssh_partial_failure_releases_listeners(
             specs.reverse()
         with (
             pytest.raises(ForwardingError),
-            held_forwards(local_sshd, specs, deadline=Deadline.after(5), custody=custody),
+            forwarding_caller.session(local_sshd, specs, deadline=Deadline.after(5)),
         ):
             pytest.fail("Refused forwarding unexpectedly started")
         with socket.socket() as listener:
@@ -598,10 +642,10 @@ def test_installed_ssh_partial_failure_releases_listeners(
 
 @pytest.mark.integration
 def test_installed_ssh_readiness_does_not_claim_destination_health(
-    custody: LocalDeliveryCustody, local_sshd: SSHConnection
+    forwarding_caller: ForwardingCaller, local_sshd: SSHConnection
 ) -> None:
     spec = LocalForward(IPv4Address("127.0.0.1"), _unused_port(), "127.0.0.1", _unused_port())
-    with held_forwards(local_sshd, [spec], deadline=Deadline.after(5), custody=custody) as resource:
+    with forwarding_caller.session(local_sshd, [spec], deadline=Deadline.after(5)) as resource:
         with socket.create_connection(("127.0.0.1", spec.local_port), timeout=2) as peer:
             assert peer.recv(1) == b""
         assert resource._owner is not None
@@ -610,7 +654,7 @@ def test_installed_ssh_readiness_does_not_claim_destination_health(
 
 @pytest.mark.integration
 def test_installed_ssh_ipv6_success_cannot_hide_ipv4_failure(
-    custody: LocalDeliveryCustody, local_sshd: SSHConnection
+    forwarding_caller: ForwardingCaller, local_sshd: SSHConnection
 ) -> None:
     with socket.socket(socket.AF_INET6) as ipv6:
         try:
@@ -627,7 +671,7 @@ def test_installed_ssh_ipv6_success_cannot_hide_ipv4_failure(
         ]
         with (
             pytest.raises(ForwardingError),
-            held_forwards(local_sshd, specs, deadline=Deadline.after(5), custody=custody),
+            forwarding_caller.session(local_sshd, specs, deadline=Deadline.after(5)),
         ):
             pytest.fail("Refused forwarding unexpectedly started")
     with socket.socket(socket.AF_INET6) as released:
@@ -637,7 +681,7 @@ def test_installed_ssh_ipv6_success_cannot_hide_ipv4_failure(
 @pytest.mark.integration
 @pytest.mark.parametrize("refusal", ["trust", "identity", "exec"])
 def test_installed_ssh_refusal_releases_requested_port(
-    custody: LocalDeliveryCustody, local_sshd: SSHConnection, refusal: str
+    forwarding_caller: ForwardingCaller, local_sshd: SSHConnection, refusal: str
 ) -> None:
     assert isinstance(local_sshd.trust, SSHTrustFiles)
     if refusal == "trust":
@@ -651,7 +695,7 @@ def test_installed_ssh_refusal_releases_requested_port(
     port = _unused_port()
     with (
         pytest.raises(ForwardingError),
-        held_forwards(local_sshd, [_forward(port)], deadline=Deadline.after(5), custody=custody),
+        forwarding_caller.session(local_sshd, [_forward(port)], deadline=Deadline.after(5)),
     ):
         pytest.fail("Refused forwarding unexpectedly started")
     with socket.socket() as released:
@@ -740,45 +784,52 @@ def test_thread_start_interruption_retains_worker_ownership(
     original_start = threading.Thread.start
     original_drain = forwarding.OwnedForwarding._drain
     workers: list[threading.Thread] = []
+    release = threading.Event()
+    entered = threading.Event()
+    reads: list[Any] = []
 
     def delayed_drain(self: forwarding.OwnedForwarding) -> None:
-        time.sleep(0.05)
+        entered.set()
+        assert release.wait(5)
         original_drain(self)
+
+    def forbidden_read(self: forwarding.OwnedForwarding, pipe: Any) -> bytes | None:
+        reads.append(pipe)
+        raise AssertionError("Unadmitted late worker borrowed a pipe")
 
     def interrupt_start(self: threading.Thread) -> None:
         workers.append(self)
         if after_start:
             original_start(self)
+            assert entered.wait(3)
         raise interruption()
 
     monkeypatch.setattr(threading.Thread, "start", interrupt_start)
     monkeypatch.setattr(forwarding.OwnedForwarding, "_drain", delayed_drain)
+    monkeypatch.setattr(forwarding.OwnedForwarding, "_read", forbidden_read)
     try:
-        with pytest.raises(interruption) as caught:
+        with pytest.raises(interruption):
             synthetic.open()
-        assert not any(worker.is_alive() for worker in workers)
+        resource = synthetic.resources[-1]
+        assert resource.close(Deadline.after(0))
+        assert synthetic.custody.settled
         assert len(synthetic.calls) == 1
-        if not after_start:
-            assert caught.value.__notes__
-            resource = synthetic.resources[-1]
-            assert not resource.close(Deadline.after(0))
-            # The injected start never admitted this worker. Model its delayed
-            # tail explicitly: cancellation must keep it inert before cleanup.
-            original_start(resource._thread)
-            assert resource.close(Deadline.after(3))
-            assert not resource._drain_admitted.is_set()
+        assert not resource._drain_admitted.is_set()
+        if after_start:
+            assert resource._thread.is_alive()
         synthetic.assert_closed()
     finally:
+        release.set()
         for worker in workers:
             if worker.ident is not None:
                 worker.join(timeout=2)
+                assert not worker.is_alive()
+    assert reads == []
 
 
 def test_ordinary_thread_start_failure_is_safe_observation(
     synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    original_start = threading.Thread.start
-
     def fail_start(worker: threading.Thread) -> None:
         raise RuntimeError("private-thread-start-canary")
 
@@ -791,9 +842,9 @@ def test_ordinary_thread_start_failure_is_safe_observation(
     assert "private-thread-start-canary" not in repr(caught.value)
     assert len(synthetic.calls) == 1
     resource = synthetic.resources[-1]
-    assert not resource.close(Deadline.after(0))
-    original_start(resource._thread)
-    assert resource.close(Deadline.after(3))
+    assert resource.close(Deadline.after(0))
+    assert synthetic.custody.settled
+    assert resource._thread.ident is None
     assert not resource._drain_admitted.is_set()
     synthetic.assert_closed()
 
@@ -835,7 +886,9 @@ def test_post_admission_interruption_never_admits_pipe_borrowing(
         synthetic.open()
 
     assert reads == 0
-    assert all(not worker.is_alive() for worker in workers)
+    for worker in workers:
+        worker.join(timeout=2)
+        assert not worker.is_alive()
     synthetic.assert_closed()
 
 

@@ -94,13 +94,18 @@ class SSHEnrollmentCustody:
     """
 
     def __init__(self, delivery: LocalDeliveryCustody) -> None:
-        self.delivery = delivery
+        self._delivery = delivery
         self._used = False
         self._closed = False
         self._settled = False
         self._lock: files.BundleLock | None = None
         self._candidate: SSHEnrollmentCandidate | None = None
         self._sync_required = False
+
+    @property
+    def delivery(self) -> LocalDeliveryCustody:
+        """The fixed native storage retained before maintenance begins."""
+        return self._delivery
 
     def _begin(self) -> None:
         if self._used or self._closed:

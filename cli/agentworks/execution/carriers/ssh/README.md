@@ -133,8 +133,9 @@ validation; POSIX permissions do not establish those properties.
 The `enrollment` module supplies explicit creation and strict recovery maintenance. Callers retain
 `SSHEnrollmentCustody` before either operation; it holds both the shared delivery storage and the
 candidate writer lock until explicit bounded cleanup proves native settlement and flushes the final
-bytes. Production creation-flow binding remains transport-owned and unavailable until its provenance
-and publication composition is accepted. Ordinary carrier execution never enrolls.
+bytes. Its read-only `delivery` property always returns the originally retained storage. Production
+creation-flow binding remains transport-owned and unavailable until its provenance and publication
+composition is accepted. Ordinary carrier execution never enrolls.
 
 The enrollment contract requires trusted creation provenance, a managed bundle and a finite
 deadline. One private candidate belongs to the stable creation ID and records the endpoint and base
@@ -210,12 +211,14 @@ health or later forwarding permission. Accounts that prohibit command execution 
 mechanism. Separate IPv4/IPv6 requests must each succeed.
 
 The shared owner is retained before launch. An owned worker starts inert and may drain the client's
-pipes only after shared startup returns, retaining no raw client diagnostics. Closing prevents
-further worker pipe access, settles the shared owner and checks worker termination. The local
-kill/reap allowance is bounded; process construction and total settlement have no proven hard time
-bound. Unproven local cleanup or worker termination returns incomplete cleanup and retains
-ownership. Cleanup kill status is not a natural client exit, and no cleanup claim extends to a
-remote process after connection loss.
+pipes only after shared startup returns, retaining no raw client diagnostics. Closing stops and
+joins admitted pipe borrowers before settling the shared owner. If startup never admitted pipe
+borrowing, cancellation keeps any delayed worker permanently inert; native cleanup can proceed
+without requiring that a thread whose start failed run. The local kill/reap allowance is bounded;
+process construction and total settlement have no proven hard time bound. Unproven local cleanup or
+termination of an admitted borrower returns incomplete cleanup and retains ownership. Cleanup kill
+status is not a natural client exit, and no cleanup claim extends to a remote process after
+connection loss.
 
 The [SSH test guide](../../../../tests/execution/carriers/ssh/README.md) distinguishes local fixture
 coverage from supported-platform integration evidence.

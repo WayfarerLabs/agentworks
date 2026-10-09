@@ -72,7 +72,11 @@ retains the owner before any launch can occur. A forwarding drain worker starts 
 `LocalProcessOwner.start()` performs default-deny process admission, and SSH allows pipe borrowing
 only after `start()` returns successfully. This ordering matters because an interrupted shared
 admission can settle its process internally before returning to SSH. No SSH worker may borrow pipes
-during that internal settlement.
+during that internal settlement. Close requests stop before checking this admission gate. If startup
+never opens the gate, even a delayed worker remains permanently inert and native settlement can
+proceed without joining a thread that might never have started. Once the gate opens, close must
+prove the borrower finished and its thread joined before native cleanup. Caller serialization keeps
+startup from opening the gate after close.
 
 The drain worker observes immutable snapshots and handles pipe readiness, marker validation and
 diagnostic drainage. SSH stops every pipe user before releasing the owner. The owner retains exact

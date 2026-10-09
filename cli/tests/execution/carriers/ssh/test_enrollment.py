@@ -472,12 +472,15 @@ def test_native_pending_and_retryable_cleanup_retain_candidate_exclusion(
     release = threading.Event()
     entered = threading.Event()
     spawn = subprocess.Popen
+    monotonic = time.monotonic
+    offset = [0.0]
     children: list[subprocess.Popen[bytes]] = []
     cleanup = process_core._cleanup
     fail_cleanup = [not pending_constructor]
 
     def child(argv, **kwargs):
         entered.set()
+        offset[0] = 60.0
         if pending_constructor:
             assert release.wait(5)
         process = spawn([sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
@@ -487,19 +490,23 @@ def test_native_pending_and_retryable_cleanup_retain_candidate_exclusion(
     def clean(status: process_core._ProcessStatus) -> bool:
         return False if fail_cleanup[0] else cleanup(status)
 
+    monkeypatch.setattr(time, "monotonic", lambda: monotonic() + offset[0])
     monkeypatch.setattr(subprocess, "Popen", child)
     monkeypatch.setattr(process_core, "_cleanup", clean)
     monkeypatch.setattr(enrollment, "run_process", run_process)
     try:
         with pytest.raises(SSHEnrollmentError) as caught:
             enrollment.enroll_new_target(
-                synthetic.connection, provenance=synthetic.provenance, deadline=Deadline.after(0.05), custody=resource
+                synthetic.connection, provenance=synthetic.provenance, deadline=Deadline.after(30), custody=resource
             )
         assert caught.value.failure is Failure.OBSERVATION
         assert entered.is_set() and not delivery.settled
         owner = delivery._owner
         assert owner is not None
         observation = owner.snapshot().terminal
+        with pytest.raises(AttributeError):
+            object.__setattr__(resource, "delivery", LocalDeliveryCustody())
+        assert resource.delivery is delivery
         assert not resource.close(Deadline.after(0.05))
         with pytest.raises(files.TrustBusyError), files.bundle_lock(synthetic.directory):
             pytest.fail("Recovery entered while earlier native writing remained possible")

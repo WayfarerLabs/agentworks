@@ -23,6 +23,20 @@ class Closable(Protocol):
     def close(self, deadline: Deadline) -> bool: ...
 
 
+class SSHResourceCaller:
+    """One fixture owns coordinators and closes their shared native store last."""
+
+    def __init__(self) -> None:
+        self.delivery = LocalDeliveryCustody()
+        self.resources: list[Closable] = []
+
+    def close(self, deadline: Deadline) -> bool:
+        settled = [resource.close(deadline) for resource in self.resources]
+        if not all(settled):
+            return False
+        return self.delivery.close(deadline)
+
+
 @contextmanager
 def held_resource(resource: Closable) -> Iterator[None]:
     """Preserve an existing control exception if bounded fixture cleanup fails."""
@@ -40,18 +54,29 @@ def held_resource(resource: Closable) -> Iterator[None]:
         assert resource.close(Deadline.after(3))
 
 
-@contextmanager
-def held_forwards(
-    connection: SSHConnection,
-    forwards: Sequence[LocalForward],
-    *,
-    deadline: Deadline,
-    custody: LocalDeliveryCustody,
-) -> Iterator[OwnedForwarding]:
-    resource = OwnedForwarding(connection, forwards)
-    with held_resource(resource):
-        resource.start(deadline=deadline, custody=custody)
-        yield resource
+class ForwardingCaller:
+    """Hold coordinators before startup and settle them before native storage."""
+
+    def __init__(self, delivery: LocalDeliveryCustody) -> None:
+        self.delivery = delivery
+        self.resources: list[OwnedForwarding] = []
+
+    @contextmanager
+    def session(
+        self,
+        connection: SSHConnection,
+        forwards: Sequence[LocalForward],
+        *,
+        deadline: Deadline,
+    ) -> Iterator[OwnedForwarding]:
+        resource = OwnedForwarding(connection, forwards)
+        self.resources.append(resource)
+        with held_resource(resource):
+            resource.start(deadline=deadline, custody=self.delivery)
+            yield resource
+
+    def close(self, deadline: Deadline) -> bool:
+        return all([resource.close(deadline) for resource in self.resources])
 
 
 @contextmanager
@@ -93,4 +118,4 @@ class EnrollmentCaller:
         return self.maintain(connection, provenance=provenance, deadline=deadline, first_contact=False)
 
     def close(self, deadline: Deadline) -> bool:
-        return all(resource.close(deadline) for resource in self.resources)
+        return all([resource.close(deadline) for resource in self.resources])
