@@ -108,17 +108,19 @@ def cloud(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> An
         data["pip"] = PublicIPAddress({"id": PIP_ID, "properties": {"ipAddress": IP}})
         monkeypatch.setattr(
             platform,
-            "_compute_client",
+            "_native_compute_client",
             lambda *a: NS(
                 virtual_machines=NS(get=lambda *a, **kw: read("vm", **kw)),
+                close=lambda: None,
             ),
         )
         monkeypatch.setattr(
             platform,
-            "_network_client",
+            "_native_network_client",
             lambda *a: NS(
                 network_interfaces=NS(get=lambda *a, **kw: read("nic", **kw)),
                 public_ip_addresses=NS(get=lambda *a, **kw: read("pip", **kw)),
+                close=lambda: None,
             ),
         )
     else:
@@ -280,7 +282,7 @@ def test_setup_expiry_precedes_dispatch(cloud: Any, monkeypatch: pytest.MonkeyPa
     if cloud.kind == "aws":
         monkeypatch.setattr(cloud.platform, "_get_session", late(cloud.platform._get_session))
     elif cloud.kind == "azure":
-        monkeypatch.setattr(cloud.platform, "_compute_client", late(cloud.platform._compute_client))
+        monkeypatch.setattr(cloud.platform, "_native_compute_client", late(cloud.platform._native_compute_client))
     else:
         cloud.platform._clients.client = late(cloud.platform._clients.client)
     with pytest.raises(LimitExceededError):
@@ -292,14 +294,14 @@ def test_setup_expiry_precedes_dispatch(cloud: Any, monkeypatch: pytest.MonkeyPa
 def test_azure_network_setup_expiry_precedes_dispatch(cloud: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     now = [100.0]
     monkeypatch.setattr("agentworks.execution.carrier.time.monotonic", lambda: now[0])
-    original = cloud.platform._network_client
+    original = cloud.platform._native_network_client
 
     def late(*args: Any) -> Any:
         result = original(*args)
         now[0] = 111.0
         return result
 
-    monkeypatch.setattr(cloud.platform, "_network_client", late)
+    monkeypatch.setattr(cloud.platform, "_native_network_client", late)
     with pytest.raises(LimitExceededError):
         _resolve(cloud, deadline=Deadline.after(10))
     assert [label for label, _ in cloud.calls] == ["vm"]
@@ -349,8 +351,8 @@ def test_azure_downstream_reads_share_budget(cloud: Any, monkeypatch: pytest.Mon
 def test_azure_linked_reads_use_real_sdk_serialization() -> None:
     from azure.core.credentials import AccessToken
     from azure.core.pipeline.transport import HttpResponse, HttpTransport
-    from azure.mgmt.network import NetworkManagementClient
 
+    from agentworks.plugins.azure._passive_clients import network_read_client
     from agentworks.plugins.azure.network import read_native_public_ipv4
 
     calls: list[tuple[str, dict[str, Any]]] = []
@@ -403,9 +405,14 @@ def test_azure_linked_reads_use_real_sdk_serialization() -> None:
             return Response(request, payload)
 
     credential = NS(get_token=lambda *a, **kw: AccessToken("fixture-token", int(time.time()) + 3600))
-    client = NetworkManagementClient(credential, "sub-A", transport=Transport())
+    client = network_read_client(credential, "sub-A", transport=Transport())
     vm = VirtualMachine({"properties": {"networkProfile": {"networkInterfaces": [{"id": NIC_ID}]}}})
-    endpoint = read_native_public_ipv4(client, vm, subscription_id="sub-A", vm_name="vm", deadline=Deadline.after(10))
+    try:
+        endpoint = read_native_public_ipv4(
+            client, vm, subscription_id="sub-A", vm_name="vm", deadline=Deadline.after(10)
+        )
+    finally:
+        client.close()
     assert endpoint == IP
     assert len(calls) == 2
     assert NIC_ID in calls[0][0] and PIP_ID in calls[1][0]
@@ -469,7 +476,7 @@ if "{provider}" == "azure":
     import agentworks.plugins.azure.platform as mod
     mod._parse_locator_resource_id = lambda *a, **kw: ("rg", "vm", NS(subscription_id="sub-A"))
     p._read_exact_vm = lambda *a, **kw: NS()
-    p._network_client = lambda *a: NS()
+    p._native_network_client = lambda *a: NS(close=lambda: None)
     import agentworks.plugins.azure.network as net
     net.read_native_public_ipv4 = lambda *a, **kw: "{IP}"
 elif "{provider}" == "gcp":

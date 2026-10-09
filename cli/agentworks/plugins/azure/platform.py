@@ -24,7 +24,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
 )
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
-from agentworks.errors import NotFoundError, StateError
+from agentworks.errors import LimitExceededError, NotFoundError, StateError
 from agentworks.plugins.azure.auth import (
     _build_ambient_credential,
     _build_service_principal_credential,
@@ -820,11 +820,15 @@ class AzureVMPlatform(VMPlatform):
         provider_locator_remaining(deadline, vm_name=vm.name)
         current = self._read_exact_vm(vm, ctx, resource_id, identity, deadline=deadline)
         provider_locator_remaining(deadline, vm_name=vm.name)
-        network = self._network_client(identity[2], ctx)
-        provider_locator_remaining(deadline, vm_name=vm.name)
-        endpoint = read_native_public_ipv4(
-            network, current, subscription_id=identity[2].subscription_id, vm_name=vm.name, deadline=deadline
-        )
+        network = self._native_network_client(identity[2], ctx)
+        try:
+            provider_locator_remaining(deadline, vm_name=vm.name)
+            endpoint = read_native_public_ipv4(
+                network, current, subscription_id=identity[2].subscription_id, vm_name=vm.name, deadline=deadline
+            )
+        finally:
+            with contextlib.suppress(Exception):
+                network.close()
         binding = ssh_native_binding(vm, endpoint, settings)
         provider_locator_remaining(deadline, vm_name=vm.name)
         return binding
@@ -889,9 +893,9 @@ class AzureVMPlatform(VMPlatform):
         success against the original deadline and never manually replay reads.
         """
         resource_group, vm_name, config = identity
-        compute = self._compute_client(config, ctx)
-        remaining = provider_locator_remaining(deadline, vm_name=vm.name)
+        compute = self._native_compute_client(config, ctx)
         try:
+            remaining = provider_locator_remaining(deadline, vm_name=vm.name)
             observed = compute.virtual_machines.get(
                 resource_group,
                 vm_name,
@@ -904,6 +908,8 @@ class AzureVMPlatform(VMPlatform):
                 retry_read=0,
                 retry_status=0,
             )
+        except LimitExceededError:
+            raise
         except Exception as exc:
             from azure.core.exceptions import ResourceNotFoundError
 
@@ -914,6 +920,9 @@ class AzureVMPlatform(VMPlatform):
                     entity_name=vm.name,
                 ) from exc
             raise wrap_azure_error(exc) from exc
+        finally:
+            with contextlib.suppress(Exception):
+                compute.close()
         observed_id = getattr(observed, "id", None)
         if not isinstance(observed_id, str) or observed_id != resource_id:
             raise StateError(
@@ -923,6 +932,18 @@ class AzureVMPlatform(VMPlatform):
                 hint="do not target the same-name Azure VM; restore the persisted resource identity before retrying",
             )
         return observed
+
+    def _native_compute_client(self, az: _HasSubscriptionId, ctx: RunContext) -> ComputeManagementClient:
+        """Construct an owned passive client using the site's explicit credential."""
+        from agentworks.plugins.azure._passive_clients import compute_read_client
+
+        return compute_read_client(self._get_credential(ctx), az.subscription_id)
+
+    def _native_network_client(self, az: _HasSubscriptionId, ctx: RunContext) -> NetworkManagementClient:
+        """Construct an owned passive client for linked endpoint reads."""
+        from agentworks.plugins.azure._passive_clients import network_read_client
+
+        return network_read_client(self._get_credential(ctx), az.subscription_id)
 
     def native_transport(
         self,

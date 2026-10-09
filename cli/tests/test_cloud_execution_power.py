@@ -70,9 +70,9 @@ def observer(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) ->
                 },
             }
         )
-        build.return_value = SimpleNamespace(virtual_machines=SimpleNamespace(get=read))
-        monkeypatch.setattr(platform, "_compute_client", build)
-        close = None
+        close = Mock()
+        build.return_value = SimpleNamespace(virtual_machines=SimpleNamespace(get=read), close=close)
+        monkeypatch.setattr(platform, "_native_compute_client", build)
     else:
         platform = GCEPlatform("power-gcp", {"project_id": "project-a", "zone": "us-central1-a"})
         metadata = {"project_id": "project-a", "zone": "us-central1-a", "instance_name": "vm-a", "instance_id": "201"}
@@ -121,6 +121,7 @@ def test_power_uses_one_sdk_read_with_finite_timeouts_and_disabled_service_retri
         assert config.retries == {"total_max_attempts": 1, "mode": "standard"}
         observer.close.assert_called_once_with()
     elif observer.kind == "azure":
+        observer.close.assert_called_once_with()
         assert observer.read.call_args.args == ("rg-a", "vm-a")
         assert observer.build.call_args.args[0].subscription_id == "sub-a"
         assert kwargs["expand"] == "instanceView"
@@ -451,7 +452,8 @@ def test_actual_sdk_exact_request_and_response_contract(
     if observer.kind == "azure":
         from azure.core.credentials import AccessToken
         from azure.core.pipeline.transport import RequestsTransport
-        from azure.mgmt.compute import ComputeManagementClient
+
+        from agentworks.plugins.azure._passive_clients import compute_read_client
 
         response._content = json.dumps(
             {
@@ -461,10 +463,10 @@ def test_actual_sdk_exact_request_and_response_contract(
         ).encode()
         offline_session = Mock(request=delivered)
         credential = SimpleNamespace(get_token=lambda *_args, **_kwargs: AccessToken("offline-power", 9999999999))
-        azure = ComputeManagementClient(
+        azure = compute_read_client(
             credential, "sub-a", transport=RequestsTransport(session=offline_session, session_owner=False)
         )
-        monkeypatch.setattr(observer.platform, "_compute_client", lambda _config, _ctx: azure)
+        monkeypatch.setattr(observer.platform, "_native_compute_client", lambda _config, _ctx: azure)
         try:
             with pytest.raises(LimitExceededError) if late else nullcontext():
                 assert _observe(observer) is VMStatus.RUNNING
@@ -476,6 +478,8 @@ def test_actual_sdk_exact_request_and_response_contract(
         assert _ARM_ID in args[1]
         assert "$expand=instanceView" in args[1] or "%24expand=instanceView" in args[1]
         assert isinstance(kwargs["timeout"], tuple)
+        assert kwargs["verify"] is True
+        assert kwargs["allow_redirects"] is False
         for timeout in kwargs["timeout"]:
             _positive_budget(timeout)
     else:
