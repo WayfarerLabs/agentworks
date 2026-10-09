@@ -53,8 +53,6 @@ def encode_activation_payload(payload: ActivationPayload) -> bytes:
     ):
         raise ValidationError("EC2 activation payload is invalid")
     encoded = json.dumps(asdict(payload), ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("ascii")
-    if len(encoded) > MAX_LIFECYCLE_PAYLOAD_BYTES:
-        raise ValidationError("EC2 activation payload exceeds lifecycle bound")
     return encoded
 
 
@@ -177,17 +175,18 @@ class EC2Activation:
             from botocore.config import Config
 
             remaining = self._remaining(deadline)
-            client = self._session.client(
-                "ec2",
-                region_name=self._payload.region,
-                config=Config(
-                    connect_timeout=remaining,
-                    read_timeout=remaining,
-                    retries={"total_max_attempts": 1, "mode": "standard"},
-                ),
-            )
+            client: Any = None
             control: KeyboardInterrupt | SystemExit | None = None
             try:
+                client = self._session.client(
+                    "ec2",
+                    region_name=self._payload.region,
+                    config=Config(
+                        connect_timeout=remaining,
+                        read_timeout=remaining,
+                        retries={"total_max_attempts": 1, "mode": "standard"},
+                    ),
+                )
                 self._remaining(deadline)
                 self._mark_began = True
                 self._obligation.mark_possible_effect()
@@ -202,12 +201,13 @@ class EC2Activation:
                 raise
             finally:
                 # Ordinary close failures preserve the result; controls still escape.
-                try:
-                    with suppress(Exception):
-                        client.close()
-                except (KeyboardInterrupt, SystemExit):
-                    if control is None:
-                        raise
+                if client is not None:
+                    try:
+                        with suppress(Exception):
+                            client.close()
+                    except (KeyboardInterrupt, SystemExit):
+                        if control is None:
+                            raise
             self._remaining(deadline)
             return request_id
         finally:

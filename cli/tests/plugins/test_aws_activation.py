@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import time
 from contextlib import closing
@@ -165,6 +166,41 @@ def test_provider_exception_is_not_rejection(owned, monkeypatch, stage, exceptio
     assert owned.calls.count("close") == int(stage == "start")
     with pytest.raises(StateError):
         owned.adapter.start(Deadline.after(5))
+
+
+@pytest.mark.parametrize("exception_type", [KeyboardInterrupt, SystemExit])
+def test_interruption_immediately_after_stored_client_closes_without_dispatch(owned, exception_type):
+    primary = exception_type("post-return interruption")
+    start_code = owned.adapter.start.__func__.__code__
+    fired: list[bool] = []
+
+    def interrupt(frame, event, arg):
+        if (
+            event == "line"
+            and frame.f_code is start_code
+            and frame.f_locals.get("client") is owned.client
+            and not fired
+        ):
+            fired.append(True)
+            raise primary
+        return interrupt
+
+    previous_trace = sys.gettrace()
+    sys.settrace(interrupt)
+    try:
+        with pytest.raises(exception_type) as caught:
+            owned.adapter.start(Deadline.after(5))
+        assert caught.value is primary
+    finally:
+        sys.settrace(previous_trace)
+    assert fired == [True]
+    assert owned.calls == ["client", "close"]
+    assert row(owned.adapter).state is LifecycleObligationState.REGISTERED
+    owned.adapter.reconcile(Deadline.after(5))
+    assert row(owned.adapter).state is LifecycleObligationState.RESOLVED
+    with pytest.raises(StateError):
+        owned.adapter.start(Deadline.after(5))
+    assert owned.calls == ["client", "close"] and owned.adapter.payload.request_id is None
 
 
 @pytest.mark.parametrize("exception_type", [OSError, KeyboardInterrupt, SystemExit])
