@@ -12,15 +12,207 @@ from typing import Any
 
 import pytest
 
+from agentworks.db import Database, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _process as core
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import CarrierIO, Deadline, Dispatch, Failure, PreparedInvocation
 from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, _ProxmoxWire, _WireFailure
+from agentworks.operations import OperationOwner
 from tests.execution.test_proxmox import connection
 
 pytestmark = pytest.mark.windows
+
+
+class Cleanup:
+    def __init__(self, owner: core.LocalProcessOwner) -> None:
+        self.owner = owner
+        self.borrowers_ready = True
+        self.process_ready = True
+        self.restore_ready = True
+        self.complete = False
+        self.events: list[str] = []
+        self.deadlines: list[Deadline] = []
+
+    @property
+    def settled(self) -> bool:
+        return self.complete
+
+    def close(self, deadline: Deadline) -> None:
+        self.deadlines.append(deadline)
+        if not self.borrowers_ready:
+            return
+        self.events.append("borrowers-stopped")
+        if not self.process_ready:
+            return
+        terminal = self.owner.close_bounded(core.Deadline(deadline.expires_at))
+        if terminal is None or not terminal.cleaned:
+            return
+        self.events.append("process-cleaned")
+        if self.restore_ready:
+            self.events.append("resources-restored")
+            self.complete = True
+
+
+def test_coordinator_binding_and_observation_have_no_resource_effects() -> None:
+    custody = LocalDeliveryCustody()
+    owner = custody.begin_process()
+    cleanup = Cleanup(owner)
+    custody.retain_cleanup(owner, cleanup)
+    for _ in range(3):
+        assert not custody.settled
+    assert owner.snapshot().terminal is None
+    assert cleanup.events == [] and cleanup.deadlines == []
+    cleanup.complete = True
+    assert not custody.settled  # Coordinator completion alone cannot prove native cleanup.
+    owner.close_bounded(core.Deadline(time.monotonic() + 1))
+    assert custody.settled
+
+
+def test_cleanup_requires_current_exact_owner_without_replacing_existing_coordinator() -> None:
+    custody = LocalDeliveryCustody()
+    foreign = LocalDeliveryCustody().begin_process()
+    cleanup = Cleanup(foreign)
+    with pytest.raises(StateError):
+        custody.retain_cleanup(foreign, cleanup)
+    first = custody.begin_process()
+    with pytest.raises(StateError):
+        custody.retain_cleanup(foreign, cleanup)
+    held = Cleanup(first)
+    custody.retain_cleanup(first, held)
+    assert custody.close(Deadline.after(1))
+    with pytest.raises(StateError):
+        custody.retain_cleanup(first, Cleanup(first))
+    with pytest.raises(StateError):
+        custody.retain_cleanup(first, held)
+    second = custody.begin_process()
+    assert second is not first and not custody.settled
+    with pytest.raises(StateError):
+        custody.retain_cleanup(first, Cleanup(first))
+    following = Cleanup(second)
+    custody.retain_cleanup(second, following)
+    assert custody.close(Deadline.after(1))
+    assert len(held.deadlines) == len(following.deadlines) == 1
+    assert cleanup.events == []
+
+
+def test_coordinator_blocks_native_close_until_borrowers_stop(monkeypatch: pytest.MonkeyPatch) -> None:
+    custody = LocalDeliveryCustody()
+    owner = custody.begin_process()
+    cleanup = Cleanup(owner)
+    cleanup.borrowers_ready = False
+    custody.retain_cleanup(owner, cleanup)
+    original = owner.close_bounded
+    calls: list[core.Deadline] = []
+
+    def native_close(deadline: core.Deadline) -> core.LocalProcessTerminal | None:
+        assert cleanup.events[-1] == "borrowers-stopped"
+        calls.append(deadline)
+        return original(deadline)
+
+    monkeypatch.setattr(owner, "close_bounded", native_close)
+    with pytest.raises(ValidationError):
+        custody.close(Deadline(None))
+    assert cleanup.deadlines == [] and calls == []
+    expired = Deadline.after(0)
+    assert not custody.close(expired)
+    assert cleanup.deadlines == [expired] and cleanup.deadlines[0] is expired
+    assert calls == [] and owner.snapshot().terminal is None
+    cleanup.borrowers_ready = True
+    fresh = Deadline.after(1)
+    assert custody.close(fresh)
+    assert cleanup.deadlines[-1] is fresh and calls[0].expires_at == fresh.expires_at
+    assert cleanup.events == ["borrowers-stopped", "process-cleaned", "resources-restored"]
+
+
+@pytest.mark.parametrize("pending", ("process", "restoration"))
+def test_aggregate_cleanup_blocks_dispatch_and_retries_same_coordinator(pending: str) -> None:
+    custody = LocalDeliveryCustody()
+    owner = custody.begin_process()
+    cleanup = Cleanup(owner)
+    cleanup.process_ready = pending != "process"
+    cleanup.restore_ready = pending != "restoration"
+    custody.retain_cleanup(owner, cleanup)
+    initial = Deadline.after(0)
+    assert not custody.close(initial)
+    terminal = owner.snapshot().terminal
+    assert (terminal is not None and terminal.cleaned) is (pending == "restoration")
+    assert not custody.settled
+    with pytest.raises(StateError):
+        custody.begin_process()
+    cleanup.process_ready = cleanup.restore_ready = True
+    fresh = Deadline.after(1)
+    assert custody.close(fresh)
+    assert cleanup.deadlines == [initial, fresh]
+    assert cleanup.deadlines[0] is initial and cleanup.deadlines[1] is fresh
+    assert custody.begin_process() is not owner
+    assert cleanup.deadlines == [initial, fresh]  # Reset never invokes old resource cleanup.
+    assert custody.close(Deadline.after(1))
+
+
+@pytest.mark.parametrize("error_type", (RuntimeError, KeyboardInterrupt, SystemExit, GeneratorExit))
+@pytest.mark.parametrize("process_cleaned", (False, True))
+def test_cleanup_error_preserves_identity_cause_and_same_coordinator_for_retry(
+    monkeypatch: pytest.MonkeyPatch, error_type: type[BaseException], process_cleaned: bool
+) -> None:
+    custody = LocalDeliveryCustody()
+    owner = custody.begin_process()
+    cleanup = Cleanup(owner)
+    custody.retain_cleanup(owner, cleanup)
+    error = error_type("cleanup interrupted")
+    cause = OSError("original cause")
+    error.__cause__ = cause
+
+    def interrupt(deadline: Deadline) -> None:
+        cleanup.deadlines.append(deadline)
+        if process_cleaned:
+            owner.close_bounded(core.Deadline(deadline.expires_at))
+        raise error
+
+    with monkeypatch.context() as fault:
+        fault.setattr(cleanup, "close", interrupt)
+        with pytest.raises(error_type) as raised:
+            custody.close(Deadline.after(1))
+    assert raised.value is error and error.__cause__ is cause
+    terminal = owner.snapshot().terminal
+    assert (terminal is not None and terminal.cleaned) is process_cleaned
+    assert not custody.settled
+    with pytest.raises(StateError):
+        custody.begin_process()
+    with pytest.raises(StateError):
+        custody.retain_cleanup(owner, Cleanup(owner))
+    fresh = Deadline.after(1)
+    assert custody.close(fresh)
+    assert len(cleanup.deadlines) == 2 and cleanup.deadlines[-1] is fresh
+
+
+def test_coordinator_survives_operation_attempt_handoff(tmp_path) -> None:
+    database = Database(tmp_path / "state.db")
+    try:
+        operation = OperationOwner.acquire(
+            database.operations, OperationScope(OperationResourceKind.VM, "fixture"), "local-cleanup"
+        )
+        borrow = operation.borrow()
+        attempt = borrow.begin_attempt()
+        owner = attempt.local_delivery.begin_process()
+        cleanup = Cleanup(owner)
+        cleanup.restore_ready = False
+        attempt.local_delivery.retain_cleanup(owner, cleanup)
+        assert not attempt.local_delivery.close(Deadline.after(1))
+        with pytest.raises(StateError):
+            attempt.settle()
+        borrow.handoff_unresolved()
+        assert not operation.close_local_delivery(Deadline.after(0))
+        with pytest.raises(StateError):
+            operation.borrow()
+        cleanup.restore_ready = True
+        assert operation.close_local_delivery(Deadline.after(1))
+        assert len(cleanup.deadlines) == 3 and cleanup.complete
+        with pytest.raises(StateError):
+            operation.borrow()  # Local cleanup never clears unresolved operation effects.
+    finally:
+        database.close()
 
 
 def test_empty_custody_is_passive_and_close_is_finite() -> None:
