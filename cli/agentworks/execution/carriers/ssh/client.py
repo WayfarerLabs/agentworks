@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError, ValidationError
@@ -125,7 +126,7 @@ def resolve_client_executable(connection: SSHConnection) -> str:
         raise ValidationError("SSH requires the selected installed executable")
     search_path = os.environ.get("PATH", "")
     candidates = (
-        tuple(os.path.abspath(os.path.join(directory, executable)) for directory in search_path.split(os.pathsep))
+        tuple(str((Path(directory) / executable).absolute()) for directory in search_path.split(os.pathsep))
         if search_path
         else ()
     )
