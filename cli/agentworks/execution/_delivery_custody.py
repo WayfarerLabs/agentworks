@@ -59,8 +59,8 @@ class LocalDeliveryCustody:
         if not self.settled:
             raise StateError("Previous local delivery cleanup remains unsettled")
         owner = LocalProcessOwner()
-        self._owner = owner
         self._cleanup = None
+        self._owner = owner
         return owner
 
     def close(self, deadline: Deadline) -> bool:

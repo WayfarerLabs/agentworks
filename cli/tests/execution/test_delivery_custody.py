@@ -97,6 +97,51 @@ def test_cleanup_requires_current_exact_owner_without_replacing_existing_coordin
     assert cleanup.events == []
 
 
+def test_lost_begin_reply_keeps_new_owner_reachable_without_old_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
+    custody = LocalDeliveryCustody()
+    first = custody.begin_process()
+    cleanup = Cleanup(first)
+    custody.retain_cleanup(first, cleanup)
+    assert custody.close(Deadline.after(1))
+    original_deadlines = tuple(cleanup.deadlines)
+    control = KeyboardInterrupt("owner publication reply lost")
+    cause = OSError("original cause")
+    control.__cause__ = cause
+    published: list[core.LocalProcessOwner] = []
+
+    def publish(self: LocalDeliveryCustody, name: str, value: object) -> None:
+        object.__setattr__(self, name, value)
+        if (
+            self is custody
+            and isinstance(value, core.LocalProcessOwner)
+            and value is not first
+            and self._owner is value  # noqa: SLF001
+            and not published
+        ):
+            published.append(value)
+            raise control
+
+    def forbid_dispatch(*args: Any, **kwargs: Any) -> Any:
+        pytest.fail("inert owner reset must not admit native dispatch")
+
+    with monkeypatch.context() as fault:
+        fault.setattr(LocalDeliveryCustody, "__setattr__", publish)
+        fault.setattr(subprocess, "Popen", forbid_dispatch)
+        with pytest.raises(KeyboardInterrupt) as raised:
+            custody.begin_process()
+        assert raised.value is control and control.__cause__ is cause
+        (held,) = published
+        assert held.snapshot().terminal is None and not custody.settled
+        with pytest.raises(StateError):
+            custody.begin_process()
+        assert custody._owner is held  # noqa: SLF001
+        assert custody.close(Deadline.after(1))
+        terminal = held.snapshot().terminal
+        assert terminal is not None and terminal.cleaned
+        assert tuple(cleanup.deadlines) == original_deadlines
+        assert custody._owner is held  # noqa: SLF001
+
+
 def test_coordinator_blocks_native_close_until_borrowers_stop(monkeypatch: pytest.MonkeyPatch) -> None:
     custody = LocalDeliveryCustody()
     owner = custody.begin_process()
