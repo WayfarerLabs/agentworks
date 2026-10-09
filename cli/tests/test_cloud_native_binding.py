@@ -176,11 +176,13 @@ def _resolve(cloud: Any, *, settings: Any = SETTINGS, deadline: Deadline | None 
     )
 
 
-@pytest.mark.parametrize("settings", [None, NS(identity_file=Path("/legacy"))])
-def test_missing_policy_precedes_sdk_reads(cloud: Any, settings: Any) -> None:
+def test_missing_policy_precedes_sdk_reads(cloud: Any) -> None:
     with pytest.raises(ConfigError) as exc:
-        _resolve(cloud, settings=settings)
+        _resolve(cloud, settings=None)
     assert exc.value.entity_name == cloud.vm.name
+    assert cloud.calls == []
+    with pytest.raises(ConfigError):
+        cloud.platform.resolve_native_execution_binding(cloud.vm, RunContext(), deadline=Deadline.after(10))
     assert cloud.calls == []
 
 
@@ -286,9 +288,8 @@ def test_setup_expiry_precedes_dispatch(cloud: Any, monkeypatch: pytest.MonkeyPa
     assert cloud.calls == []
 
 
+@pytest.mark.parametrize("cloud", ["azure"], indirect=True)
 def test_azure_network_setup_expiry_precedes_dispatch(cloud: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    if cloud.kind != "azure":
-        pytest.skip("Azure network client")
     now = [100.0]
     monkeypatch.setattr("agentworks.execution.carrier.time.monotonic", lambda: now[0])
     original = cloud.platform._network_client
@@ -305,9 +306,8 @@ def test_azure_network_setup_expiry_precedes_dispatch(cloud: Any, monkeypatch: p
 
 
 @pytest.mark.parametrize("fault", ["network", "subnet", "access"])
+@pytest.mark.parametrize("cloud", ["gcp"], indirect=True)
 def test_gcp_persisted_network_policy(cloud: Any, fault: str) -> None:
-    if cloud.kind != "gcp":
-        pytest.skip("GCP network identity")
     if fault == "network":
         cloud.data["vm"].network_interfaces[0].network += "other"
     elif fault == "subnet":
@@ -335,9 +335,8 @@ def test_binding_construction_does_not_admit_files(monkeypatch: pytest.MonkeyPat
     assert binding._new_managed_delivery() is not binding.carrier
 
 
+@pytest.mark.parametrize("cloud", ["azure"], indirect=True)
 def test_azure_downstream_reads_share_budget(cloud: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    if cloud.kind != "azure":
-        pytest.skip("Azure linked resources")
     now = [100.0]
     monkeypatch.setattr("agentworks.execution.carrier.time.monotonic", lambda: now[0])
     cloud.data["advance"] = lambda label: now.__setitem__(0, now[0] + 2)
@@ -415,11 +414,10 @@ def test_azure_linked_reads_use_real_sdk_serialization() -> None:
 
 @pytest.mark.parametrize("resource", ["nic", "pip"])
 @pytest.mark.parametrize("fault", ["returned-id", "subscription", "malformed", "late"])
+@pytest.mark.parametrize("cloud", ["azure"], indirect=True)
 def test_azure_linked_identity_and_deadline(
     cloud: Any, monkeypatch: pytest.MonkeyPatch, resource: str, fault: str
 ) -> None:
-    if cloud.kind != "azure":
-        pytest.skip("Azure linked resources")
     if fault == "returned-id":
         cloud.data[resource].id += "other"
     elif fault in ("subscription", "malformed"):
@@ -436,6 +434,8 @@ def test_azure_linked_identity_and_deadline(
         cloud.data["advance"] = lambda label: now.__setitem__(0, 111.0 if label == resource else 100.0)
     with pytest.raises(LimitExceededError if fault == "late" else StateError):
         _resolve(cloud)
+    if fault in ("subscription", "malformed"):
+        assert [label for label, _ in cloud.calls] == (["vm"] if resource == "nic" else ["vm", "nic"])
 
 
 @pytest.mark.parametrize(
@@ -465,7 +465,6 @@ from agentworks.capabilities.base import RunContext
 p = {platform}.__new__({platform})
 p._locator_metadata = lambda vm: ()
 p._read_exact_instance = lambda *a, **kw: {{"PublicIpAddress": "{IP}"}}
-from agentworks.vms._ssh_native_binding import ssh_native_binding
 if "{provider}" == "azure":
     import agentworks.plugins.azure.platform as mod
     mod._parse_locator_resource_id = lambda *a, **kw: ("rg", "vm", NS(subscription_id="sub-A"))
