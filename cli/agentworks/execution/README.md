@@ -1028,18 +1028,17 @@ carrier dispatch; the helper rereads the protected marker, kernel boot and PID 1
 opening the managed store. A missing, unsafe or changed identity returns fixed refusal without
 publishing stop intent.
 
-`_managed_stop_access.py` privately binds one stop attempt to the exact persisted independent VM run
-and a caller-held VM operation owner. It requires a reconciled launch receipt, installs a
-`managed-stop` obligation containing only the run ID, and arms that obligation after pure carrier
-validation but before dispatch. Settled, validated acceptance resolves temporary stop-delivery
-custody without claiming termination; positively proved no delivery also resolves it. Unknown
-delivery or interrupted arming retains the exact obligation and owner for recovery. This adapter
-does not reconcile the row, release the owner's whole claim, prove a production provider route or
-implement recovery. The shared row preflight checks the supplied guest's derived boot against the
-persisted target, but cannot reconstruct its opaque incarnation fingerprint from those two values
-alone. Callers must compare the observed guest marker with the persisted VM marker, then compose
-that target from the selected provider locator and the same marker. Boot agreement alone is not
-production target proof.
+`ExecutionOperation._stop_managed` dispatches OPERATION and RESOURCE stop through the tracked
+ordinary helper and the operation-lifetime `carrier-dispatch` row. OPERATION stop drains only its
+selected keeper; RESOURCE stop requires the bound resource namespace and a confirmed persisted
+launch without adopting the run or a keeper. Both revalidate the selected route before delivery.
+Settled delivery releases the helper borrow; unknown delivery or interrupted bookkeeping retains
+ordinary operation custody. Accepted stop intent requires a fresh settled observation to establish
+termination. The exact run-ID lifecycle payload belongs to disposal, not ordinary stop. The shared
+row preflight checks the supplied guest's derived boot against the persisted target, but cannot
+reconstruct its opaque incarnation fingerprint from those two values alone. Callers must compare the
+observed guest marker with the persisted VM marker, then compose that target from the selected
+provider locator and the same marker. Boot agreement alone is not production target proof.
 
 `_managed_disposal_exchange.py` supplies a private fixed Linux root disposal attempt. The target
 requires the exact canonical launch, its bound boundary-empty and both stream-end facts. Wait is

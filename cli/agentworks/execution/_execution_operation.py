@@ -76,7 +76,6 @@ from agentworks.execution._managed_runs import (
     ManagedTargetKind,
 )
 from agentworks.execution._managed_start_operation import ManagedStartControlFact, ManagedStartOutcome
-from agentworks.execution._managed_stop_access import ManagedStopOutcome
 from agentworks.execution._managed_stop_exchange import ManagedStopCandidate, ManagedStopState, stop_managed_run
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution._vm_guest_identity_protocol import vm_guest_boot_id
@@ -122,6 +121,17 @@ class OwnedInlineOutcome:
 
     candidate: InlineCandidateResult | None = None
     deadline_exceeded: bool = False
+    pending_remote_effects: bool = False
+    coordination_uncertain: bool = False
+    requires_owner_retention: bool = False
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ManagedStopOutcome:
+    """One stop attempt, proven response, and ordinary helper custody."""
+
+    candidate: ManagedStopCandidate | None = field(default=None, repr=False)
+    state: ManagedStopState | None = None
     pending_remote_effects: bool = False
     coordination_uncertain: bool = False
     requires_owner_retention: bool = False

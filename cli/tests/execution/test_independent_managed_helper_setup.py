@@ -13,7 +13,6 @@ from agentworks.errors import StateError
 from agentworks.execution import _managed_disposal_access as disposal
 from agentworks.execution import _managed_job_access as job
 from agentworks.execution import _managed_observe_access as observe
-from agentworks.execution import _managed_stop_access as stop
 from agentworks.execution._managed_runs import ManagedRunRepository
 from agentworks.execution.models import Script, Shell
 from agentworks.operations import OperationBorrow, OperationOwner
@@ -26,8 +25,6 @@ from .test_managed_result import _confirmed, _reply
 
 SETUPS = (
     (observe, "BorrowedFixedHelperCarrier"),
-    (stop, "BorrowedFixedHelperCarrier"),
-    (stop, "ManagedActionCustody"),
     (disposal, "BorrowedFixedHelperCarrier"),
     (disposal, "ManagedActionCustody"),
     (job, "BorrowedFixedHelperCarrier"),
@@ -39,8 +36,6 @@ def _invoke(
 ) -> None:
     if module is observe:
         observe.observe_bound_managed_run(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
-    elif module is stop:
-        stop.stop_bound_managed_run(repository, RUN, obligation_id="e" * 32, **_options(owner, carrier))  # type: ignore[arg-type]
     elif module is disposal:
         disposal.dispose_bound_managed_run(repository, RUN, obligation_id="e" * 32, **_options(owner, carrier))  # type: ignore[arg-type]
     else:

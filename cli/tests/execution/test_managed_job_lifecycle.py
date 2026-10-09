@@ -14,16 +14,12 @@ from agentworks.execution._managed_observe_access import (
 )
 from agentworks.execution._managed_result import collect_bound_managed_result
 from agentworks.execution._managed_runs import ManagedLaunchState
-from agentworks.execution._managed_stop_access import stop_bound_managed_run
-from agentworks.execution._managed_stop_exchange import ManagedStopState
 
 from .test_managed_disposal import ExchangeCarrier, _disposed
 from .test_managed_disposal_access import _not_ready
 from .test_managed_observation import ScriptedCarrier, _records
 from .test_managed_observe_access import RUN, _options, _output_reply, _reserved
 from .test_managed_result import _reply as _result_reply
-from .test_managed_stop import Carrier as StopCarrier
-from .test_managed_stop_access import _response as _stop_response
 
 
 def test_possible_dispatch_receipt_reconnects_without_relaunch(tmp_path: Path) -> None:
@@ -92,15 +88,6 @@ def test_possible_dispatch_receipt_reconnects_without_relaunch(tmp_path: Path) -
         assert stderr.output == b"ok"
         assert output_carrier.calls == 2
 
-        stop_carrier = StopCarrier(lambda request: _stop_response(request, terminated=False))
-        accepted = stop_bound_managed_run(
-            repository,
-            RUN,
-            **_options(owner, stop_carrier, obligation_id="1" * 32),  # type: ignore[arg-type]
-        )
-        assert accepted.state is ManagedStopState.ACCEPTED
-        assert not accepted.requires_owner_retention
-
         disposal_carrier = ExchangeCarrier(_not_ready)
         not_ready = dispose_bound_managed_run(
             repository,
@@ -110,14 +97,6 @@ def test_possible_dispatch_receipt_reconnects_without_relaunch(tmp_path: Path) -
         assert not_ready.state is DisposalState.NOT_READY
         assert not not_ready.requires_owner_retention
 
-        terminated_carrier = StopCarrier(lambda request: _stop_response(request, terminated=True))
-        terminated = stop_bound_managed_run(
-            repository,
-            RUN,
-            **_options(owner, terminated_carrier, obligation_id="3" * 32),  # type: ignore[arg-type]
-        )
-        assert terminated.state is ManagedStopState.TERMINATED
-
         disposed_carrier = ExchangeCarrier(_disposed)
         disposed = dispose_bound_managed_run(
             repository,
@@ -126,11 +105,6 @@ def test_possible_dispatch_receipt_reconnects_without_relaunch(tmp_path: Path) -
         )
         assert disposed.state is DisposalState.DISPOSED
         assert repository.inspect(RUN) == confirmed
-        assert (observe_carrier.calls, stop_carrier.calls, terminated_carrier.calls, disposal_carrier.calls) == (
-            2,
-            1,
-            1,
-            1,
-        )
+        assert (observe_carrier.calls, disposal_carrier.calls, disposed_carrier.calls) == (2, 1, 1)
     finally:
         database.close()

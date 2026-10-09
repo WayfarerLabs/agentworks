@@ -661,8 +661,9 @@ def test_no_spool_for_non_capture(tmp_path: Path, mode: str) -> None:
     store.close()
 
 
-def test_notify_path_and_abstract(tmp_path: Path) -> None:
-    path = str(tmp_path / "notify")
+def test_notify_path_and_abstract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    path = "notify"
     with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as listener:
         listener.bind(path)
         guest.sd_notify(path)

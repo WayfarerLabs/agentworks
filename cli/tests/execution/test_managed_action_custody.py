@@ -1,4 +1,4 @@
-"""Interrupted obligation and release custody for managed later actions."""
+"""Interrupted obligation and release custody for managed disposal."""
 
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ from agentworks.execution._managed_disposal_access import (
     dispose_bound_managed_run,
 )
 from agentworks.execution._managed_runs import ManagedRunRepository
-from agentworks.execution._managed_stop_access import ManagedStopControlFact, ManagedStopOutcome, stop_bound_managed_run
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution.carrier import Deadline
 from agentworks.operations import LifecycleObligation, OperationBorrow, OperationOwner, _PreRegistrationRefusal
@@ -24,39 +23,17 @@ from agentworks.operations import LifecycleObligation, OperationBorrow, Operatio
 from .test_managed_disposal import ExchangeCarrier, _disposed
 from .test_managed_disposal_access import _confirmed
 from .test_managed_observe_access import GUEST, RESOURCE_OWNER, ROOT_PLAN, RUN, TARGET, _reserved
-from .test_managed_stop import Carrier
-from .test_managed_stop_access import _response
 
 
 def _action(
-    kind: str, repository: ManagedRunRepository, owner: OperationOwner
+    repository: ManagedRunRepository, owner: OperationOwner
 ) -> tuple[
-    Callable[[], ManagedStopOutcome | ManagedDisposalOutcome],
-    Carrier | ExchangeCarrier,
-    type[ManagedStopControlFact] | type[ManagedDisposalControlFact],
+    Callable[[], ManagedDisposalOutcome],
+    ExchangeCarrier,
+    type[ManagedDisposalControlFact],
 ]:
     deadline = Deadline.after(10)
     runtime_selection = RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
-    if kind == "stop":
-        carrier = Carrier(_response)
-
-        def invoke_stop() -> ManagedStopOutcome:
-            return stop_bound_managed_run(
-                repository,
-                RUN,
-                target=TARGET,
-                guest=GUEST,
-                root_plan=ROOT_PLAN,
-                carrier=carrier,
-                runtime_selection=runtime_selection,
-                deadline=deadline,
-                owner=owner,
-                expected_resource_owner=RESOURCE_OWNER,
-                obligation_id="f" * 32,
-            )
-
-        return invoke_stop, carrier, ManagedStopControlFact
-
     disposal_carrier = ExchangeCarrier(_disposed)
 
     def invoke_disposal() -> ManagedDisposalOutcome:
@@ -77,14 +54,13 @@ def _action(
     return invoke_disposal, disposal_carrier, ManagedDisposalControlFact
 
 
-@pytest.mark.parametrize("kind", ["stop", "disposal"])
 @pytest.mark.parametrize("after_commit", [False, True])
 def test_interrupted_registration_preserves_original_and_uncertain_owner(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, after_commit: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, after_commit: bool
 ) -> None:
     database, repository, owner = _reserved(tmp_path)
     _confirmed(repository)
-    invoke, carrier, control_fact = _action(kind, repository, owner)
+    invoke, carrier, control_fact = _action(repository, owner)
     failure = KeyboardInterrupt("registration interrupted")
     owner_repository = owner._repository  # noqa: SLF001
     original_register = owner_repository.register_lifecycle_obligation
@@ -125,13 +101,10 @@ def test_interrupted_registration_preserves_original_and_uncertain_owner(
         database.close()
 
 
-@pytest.mark.parametrize("kind", ["stop", "disposal"])
-def test_interrupted_release_after_reply_is_attempted_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
-) -> None:
+def test_interrupted_release_after_reply_is_attempted_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     database, repository, owner = _reserved(tmp_path)
     _confirmed(repository)
-    invoke, carrier, control_fact = _action(kind, repository, owner)
+    invoke, carrier, control_fact = _action(repository, owner)
     failure = KeyboardInterrupt("release interrupted")
     release_calls = 0
 
@@ -154,13 +127,10 @@ def test_interrupted_release_after_reply_is_attempted_once(
         database.close()
 
 
-@pytest.mark.parametrize("kind", ["stop", "disposal"])
-def test_interrupted_carrier_before_reply_retains_attempt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
-) -> None:
+def test_interrupted_carrier_before_reply_retains_attempt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     database, repository, owner = _reserved(tmp_path)
     _confirmed(repository)
-    invoke, carrier, control_fact = _action(kind, repository, owner)
+    invoke, carrier, control_fact = _action(repository, owner)
     failure = KeyboardInterrupt("carrier interrupted")
 
     def interrupt_carrier(*_args: object, **_kwargs: object) -> None:
@@ -183,13 +153,12 @@ def test_interrupted_carrier_before_reply_retains_attempt(
         database.close()
 
 
-@pytest.mark.parametrize("kind", ["stop", "disposal"])
 def test_pre_registration_closing_refusal_closes_borrow_without_control_fact(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database, repository, owner = _reserved(tmp_path)
     _confirmed(repository)
-    invoke, carrier, _ = _action(kind, repository, owner)
+    invoke, carrier, _ = _action(repository, owner)
     original_install = OperationBorrow.install_dispatch_obligation
 
     def close_then_register(

@@ -475,5 +475,5 @@ from agentworks.execution._execution_operation import ExecutionOperation, OwnedI
 assert ExecutionOperation and OwnedInlineOutcome
 assert not any(loaded == name or loaded.startswith(name + ".") for loaded in sys.modules for name in retired)
 """
-    result = subprocess.run([sys.executable, "-I", "-c", script], capture_output=True, timeout=20)
+    result = subprocess.run([sys.executable, "-I", "-B", "-c", script], capture_output=True, timeout=20)
     assert result.returncode == 0, result.stderr.decode(errors="replace")

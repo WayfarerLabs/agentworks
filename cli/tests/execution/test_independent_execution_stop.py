@@ -24,12 +24,73 @@ from agentworks.execution.carrier import Deadline, Dispatch
 from agentworks.execution.models import Command, JobRef, Lifetime, Output
 from agentworks.execution.profiles import Protection
 from agentworks.execution.result import ExecutionFailure
-from agentworks.operations import OperationOwner
+from agentworks.operations import OperationBorrow, OperationOwner
 
 from . import test_independent_execution_reads as reads
 from .test_managed_job_access import RUN
 
 observer = reads.observer
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("boundary", ("validation", "begin-reply", "release"))
+def test_interrupted_stop_retries_only_local_custody(observer, monkeypatch, boundary):
+    _, repository, operation, access, main, workflow = observer
+    before = repository.inspect(RUN)
+    control = KeyboardInterrupt("stop interrupted")
+    cause = OSError("earlier cause")
+    control.__cause__ = cause
+    calls = []
+    original_begin = OperationBorrow.begin_attempt
+
+    def interrupt(*args, **kwargs):
+        calls.append(boundary)
+        if boundary == "begin-reply":
+            original_begin(*args, **kwargs)
+        raise control
+
+    with monkeypatch.context() as fault:
+        if boundary == "validation":
+            fault.setattr(main, "validate", interrupt)
+        elif boundary == "begin-reply":
+            fault.setattr(OperationBorrow, "begin_attempt", interrupt)
+        else:
+            fault.setattr(execution_module, "release_borrow_after_custody", interrupt)
+        with pytest.raises(KeyboardInterrupt) as raised:
+            access.stop(JobRef(RUN.run_id))
+    assert raised.value is control and calls == [boundary]
+    assert bool(operation.active_inline_calls) is (boundary != "validation")
+    assert (workflow.owner._active_borrow is not None) is (boundary != "validation")
+    retained_cause: BaseException | None = control.__cause__
+    while retained_cause is not None and retained_cause is not cause:
+        retained_cause = retained_cause.__cause__
+    assert retained_cause is cause
+    assert main.stop.calls == int(boundary == "release") and main.observe.calls == 0
+    operation.retry_inline_bookkeeping()
+    assert not operation.active_inline_calls and not operation.unfinished_inline_executions
+    assert workflow.owner._active_borrow is None and repository.inspect(RUN) == before
+    assert main.stop.calls == int(boundary == "release") and main.observe.calls == 0
+    (row,) = workflow.owner.list_pending_lifecycle_obligations()
+    assert row.obligation_kind == "carrier-dispatch" and row.payload == b""
+
+
+@pytest.mark.parametrize("fault", ("helper", "invalid"))
+def test_failed_stop_response_keeps_truthful_ordinary_custody(observer, fault):
+    _, repository, operation, access, main, _ = observer
+    before = repository.inspect(RUN)
+    main.stop.response = lambda request: b"AGWF1" if fault == "helper" else b"invalid transcript"
+    main.stop.code = 1 if fault == "helper" else 0
+    result = access.stop(JobRef(RUN.run_id))
+    assert result.accepted is None and not result.terminated and result.failure is ExecutionFailure.OBSERVATION
+    assert main.stop.calls == 1 and main.observe.calls == 0
+    assert bool(operation.unfinished_inline_executions) is (fault == "helper")
+    if fault == "helper":
+        with pytest.raises(StateError):
+            access.stop(JobRef(RUN.run_id))
+    else:
+        operation.retry_inline_bookkeeping()
+        assert not operation.active_inline_calls
+    assert repository.inspect(RUN) == before and operation.managed_runs == ()
 
 
 @pytest.mark.windows
