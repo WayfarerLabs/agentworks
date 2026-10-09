@@ -38,10 +38,21 @@ stable source snapshots or stops source writers for the copy. Source-file identi
 can reject observed change, but cannot prove consistency against an uncooperative in-place writer.
 Snapshot ownership is explicit; import does not seize control of the operator's original files.
 
-A per-bundle lock that refuses contention serializes writers and operation admission. Copy/adapt the
-existing local `flock`/Windows byte-range lock pattern without importing legacy execution. Keep the
-lock file in place after release so competing processes cannot lock different underlying files.
-Process exit releases the operating-system lock; no stale-lock deletion heuristic is needed.
+A permanent per-bundle lock permits concurrent shared readers and excludes them during maintenance.
+POSIX uses non-blocking `flock` shared/exclusive locks. Windows uses non-blocking `LockFileEx` on
+the same one-byte range with distinct handles; CRT `msvcrt` read-lock constants are also exclusive
+and cannot provide shared admission. Keep the lock file in place after release so competing
+processes cannot lock different underlying files. Process exit releases the operating-system lock;
+no stale-lock deletion heuristic is needed. This small native API boundary preserves publication
+exclusion without serializing independent readers or introducing a lock registry.
+
+`BundleLock` is a passive resource retained before `acquire`; admission's context wrapper uses that
+same primitive. `release` closes the exact captured descriptor, which also releases an acquired
+native file lock even if acquisition was interrupted before confirmation. An interrupted open that
+never delivered a descriptor, or an uncertain close, cannot claim settlement. Keep the resource and
+escalate that uncertainty. Never retry an uncertain close against a potentially reused descriptor
+number. Candidate enrollment retains this resource until its separate delivery and durable-file
+obligations settle.
 
 Refresh requires the expected current generation, refusing a stale concurrent update. Under the lock
 it first durably marks the bundle blocked, then copies the complete replacement policy into a new
@@ -50,11 +61,14 @@ old evidence and leaves later admissions blocked. An explicit maintenance operat
 bundle when superseded policy is known but replacement files are not yet available. Recovery
 supplies complete current policy; it never automatically reactivates an older generation.
 
-Admission briefly holds the same lock, checks the active manifest and generation integrity, and
-selects its immutable files. Missing, blocked, malformed or incomplete policy refuses before SSH
-dispatch. Admission does not wait indefinitely for a writer. Already-admitted operations may
-continue on their selected generation; a policy refresh cannot retroactively revoke an established
-SSH session. Composition must end those operations explicitly if the operator requires that.
+Admission briefly holds a shared lock, checks the active manifest and generation integrity, and
+selects its immutable files. Maintenance retains the exclusive lock through active manifest
+replacement, directory flushing and recording blocked state after failure. Readers cannot admit a
+newly replaced manifest before that publication either completes or is blocked again. Missing,
+blocked, malformed or incomplete policy refuses before SSH dispatch. Admission does not wait
+indefinitely for a writer. Already-admitted operations may continue on their selected generation; a
+policy refresh cannot retroactively revoke an established SSH session. Composition must end those
+operations explicitly if the operator requires that.
 
 Immutable generations avoid holding the lock throughout terminals/forwards and avoid OpenSSH opening
 files across different in-place updates. Keep prior generations during coexistence. There is no
@@ -102,12 +116,12 @@ too. Configuration loading supplies passive values and leaves filesystem/network
 explicit operation.
 
 Required behavioral coverage includes exact multi-file/KRL preservation, no source writes, competing
-writers and stale refreshes, process-death lock release, failure at each publication boundary,
-blocked/corrupt policy refusal, coherent generations across refresh, and strict recovery after
-incomplete enrollment. Installed OpenSSH fixtures exercise CA/alias/port acceptance,
-unknown/mismatch/revocation refusal and actual authentication offers. Windows publication and
-workstation agent behavior need native evidence. Existing buffered PoC results establish none of
-this new maintenance protocol.
+writers and stale refreshes, overlapping readers, process-death lock release, failure at each
+publication boundary (including exclusion between replace and flush), blocked/corrupt policy
+refusal, coherent generations across refresh, and strict recovery after incomplete enrollment.
+Installed OpenSSH fixtures exercise CA/alias/port acceptance, unknown/mismatch/revocation refusal
+and actual authentication offers. Windows publication and workstation agent behavior need native
+evidence. Existing buffered PoC results establish none of this new maintenance protocol.
 
 Source and state rollback stay separate. Restoring old code cannot erase newly learned trust or
 revocations. Keep both legacy and new state usable during additive delivery; if compatibility cannot

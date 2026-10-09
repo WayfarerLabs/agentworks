@@ -42,15 +42,14 @@ custody held; pending or lost ownership continues excluding competing recovery. 
 settlement, flush the final candidate bytes before releasing the lock and surface any flush failure
 without claiming durable evidence. Evidence receipts, reports and exception causes do not carry
 cleanup capabilities. Preserve the one first-contact attempt, strict-only recovery and stable
-candidate identity. The concrete enclosing resource consumer remains unresolved, so threading the
-shared custody argument alone is insufficient to complete enrollment adoption or enable production
-creation.
+candidate identity. The caller-held resource is adopted by the SSH maintenance and native fixture
+callers. Production creation composition remains transport-owned and must preserve this lifetime
+before enabling it.
 
-### Proposed maintenance resource interface
+### Caller-held maintenance resource interface
 
-This interface awaits the operator's ownership decision; none of these resource additions is
-implemented. SSH supplies the candidate-lock mechanics, while the enclosing creation or maintenance
-caller retains the resource before invoking enrollment or recovery:
+SSH supplies the candidate-lock mechanics. The enclosing creation or maintenance caller retains the
+passive resource before invoking enrollment or recovery:
 
 ```text
 SSHEnrollmentCustody(delivery: LocalDeliveryCustody)
@@ -59,17 +58,21 @@ recover_enrollment(..., custody: SSHEnrollmentCustody) -> SSHEnrollmentCandidate
 SSHEnrollmentCustody.close(deadline: Deadline) -> bool
 ```
 
-Construction is passive and holds the supplied shared storage unchanged. One resource admits one
-maintenance operation, including its sequential version and acknowledgment probes. It retains the
-same acquired candidate lock on success, failure or interruption until explicit cleanup completes.
-The caller does not reuse its delivery storage for another workflow while this resource holds it.
-Closing prevents further maintenance dispatch and forwards finite native cleanup to that exact
-storage. Pending or lost native ownership returns incomplete cleanup and retains the lock. After
-settlement, perform the final candidate flush and unlock; flush failure remains explicit and cannot
-produce a successful cleanup claim. A finite deadline bounds cleanup observation, not underlying
-filesystem syscalls or process construction. The existing immutable candidate receipt remains
-evidence only, with no live resource attached. A later strict recovery uses a new resource with the
-same bundle and creation identity after prior cleanup releases the lock.
+Construction is passive and holds the supplied shared storage unchanged. Its public `delivery`
+property is read-only, so settlement always uses the same storage retained before maintenance. One
+resource admits one maintenance operation, including its sequential version and acknowledgment
+probes. It retains the same acquired candidate lock on success, failure or interruption until
+explicit cleanup completes. The caller does not reuse its delivery storage for another workflow
+while this resource holds it. The passive lock object is retained before acquisition starts.
+Interrupted acquisition retains uncertainty; a lock registered only after entering a lexical context
+would lose this ownership. Busy or interrupted acquisition performs no candidate flush before writer
+admission. Closing prevents further maintenance dispatch and forwards finite native cleanup to that
+exact storage. Pending or lost native ownership returns incomplete cleanup and retains the lock.
+After settlement, perform the final candidate flush and unlock; flush failure remains explicit and
+cannot produce a successful cleanup claim. A finite deadline bounds cleanup observation, not
+underlying filesystem syscalls or process construction. The existing immutable candidate receipt
+remains evidence only, with no live resource attached. A later strict recovery uses a new resource
+with the same bundle and creation identity after prior cleanup releases the lock.
 
 The caller attempts explicit close with a fresh finite deadline on both success and failure, and
 retains the resource when close reports incomplete cleanup. If maintenance already raised a control

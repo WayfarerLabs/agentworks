@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import sys
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -11,7 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.errors import ValidationError
+from agentworks.errors import StateError, ValidationError
+from agentworks.execution import _process as process_core
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import CapturedOutput, CarrierIO, Deadline, Failure
 from agentworks.execution.carriers._subprocess import ProcessResult
 from agentworks.execution.carriers.ssh import _trust_files as files
@@ -20,9 +25,8 @@ from agentworks.execution.carriers.ssh._io import run_process
 from agentworks.execution.carriers.ssh.connection import SSHConnection, admit_connection
 from agentworks.execution.carriers.ssh.enrollment import (
     SSHCreationProvenance,
+    SSHEnrollmentCustody,
     SSHEnrollmentError,
-    enroll_new_target,
-    recover_enrollment,
 )
 from agentworks.execution.carriers.ssh.trust import (
     ManagedSSHTrust,
@@ -33,6 +37,7 @@ from agentworks.execution.carriers.ssh.trust import (
     resolve_trust,
     trust_status,
 )
+from tests.execution.carriers.ssh._held_resources import EnrollmentCaller
 from tests.execution.carriers.ssh.enrollment_server import LocalSSH
 
 pytestmark = pytest.mark.windows
@@ -43,9 +48,12 @@ class SyntheticEnrollment:
     connection: SSHConnection
     provenance: SSHCreationProvenance
     calls: list[list[str]]
+    maintenance: EnrollmentCaller
     action: Callable[[list[str]], ProcessResult] | None = None
 
-    def run(self, argv: list[str], *, io: CarrierIO, deadline: Deadline) -> ProcessResult:
+    def run(
+        self, argv: list[str], *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody
+    ) -> ProcessResult:
         self.calls.append(argv)
         if self.action is not None:
             return self.action(argv)
@@ -66,14 +74,16 @@ class SyntheticEnrollment:
         return next(self.bundle.directory.glob("enrollment-*"))
 
     def enroll(self) -> enrollment.SSHEnrollmentCandidate:
-        return enroll_new_target(self.connection, provenance=self.provenance, deadline=Deadline.after(5))
+        return self.maintenance.enroll(self.connection, provenance=self.provenance, deadline=Deadline.after(5))
 
     def recover(self) -> enrollment.SSHEnrollmentCandidate:
-        return recover_enrollment(self.connection, provenance=self.provenance, deadline=Deadline.after(5))
+        return self.maintenance.recover(self.connection, provenance=self.provenance, deadline=Deadline.after(5))
 
 
 @pytest.fixture
-def synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SyntheticEnrollment:
+def synthetic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enrollment_caller: EnrollmentCaller
+) -> SyntheticEnrollment:
     tmp_path = tmp_path.resolve()
     identity = tmp_path / "identity"
     identity.write_bytes(b"synthetic private identity")
@@ -83,9 +93,10 @@ def synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SyntheticEnrol
     revoked.write_bytes(b"revocation fixture bytes")
     bundle = import_trust(tmp_path / "managed", sources=SSHTrustFiles((trust,), revoked), authority="fixture")
     result = SyntheticEnrollment(
-        SSHConnection("fixture.invalid", "fixture", identity, bundle),
+        SSHConnection("fixture.invalid", "fixture", identity, bundle, ssh_executable=sys.executable),
         SSHCreationProvenance("provider/resource-creation-123", "fixture.invalid"),
         [],
+        enrollment_caller,
     )
     monkeypatch.setattr(enrollment, "check_client_version", lambda *args, **kwargs: None)
     monkeypatch.setattr(enrollment, "run_process", result.run)
@@ -93,6 +104,7 @@ def synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SyntheticEnrol
 
 
 def test_success_preserves_complete_policy_and_requires_strict_second_connection(
+    enrollment_caller: EnrollmentCaller,
     synthetic: SyntheticEnrollment,
 ) -> None:
     result = synthetic.enroll()
@@ -114,26 +126,30 @@ def test_success_preserves_complete_policy_and_requires_strict_second_connection
 
 @pytest.mark.parametrize("change", [{"host": "other.invalid"}, {"port": 23}, {"host_key_alias": "alias"}])
 def test_mismatched_provenance_refuses_before_mutation(
-    synthetic: SyntheticEnrollment, change: dict[str, object]
+    enrollment_caller: EnrollmentCaller, synthetic: SyntheticEnrollment, change: dict[str, object]
 ) -> None:
     provenance = replace(synthetic.provenance, **change)  # type: ignore[arg-type]
     with pytest.raises(ValidationError):
-        enroll_new_target(synthetic.connection, provenance=provenance, deadline=Deadline.after(5))
+        enrollment_caller.enroll(synthetic.connection, provenance=provenance, deadline=Deadline.after(5))
     assert not list(synthetic.bundle.directory.glob("enrollment-*"))
     assert not synthetic.calls
 
 
 @pytest.mark.parametrize("seconds", [None, 0])
-def test_deadline_refuses_before_mutation(synthetic: SyntheticEnrollment, seconds: float | None) -> None:
+def test_deadline_refuses_before_mutation(
+    enrollment_caller: EnrollmentCaller, synthetic: SyntheticEnrollment, seconds: float | None
+) -> None:
     with pytest.raises((ValidationError, SSHEnrollmentError)):
-        enroll_new_target(synthetic.connection, provenance=synthetic.provenance, deadline=Deadline.after(seconds))
+        enrollment_caller.enroll(
+            synthetic.connection, provenance=synthetic.provenance, deadline=Deadline.after(seconds)
+        )
     assert not list(synthetic.bundle.directory.glob("enrollment-*"))
     assert not synthetic.calls
 
 
 @pytest.mark.parametrize("error", [KeyboardInterrupt(), SystemExit(17), OSError("sensitive-path")])
 def test_interruption_retains_written_bytes_for_strict_recovery(
-    synthetic: SyntheticEnrollment, error: BaseException
+    enrollment_caller: EnrollmentCaller, synthetic: SyntheticEnrollment, error: BaseException
 ) -> None:
     def interrupted(argv: list[str]) -> ProcessResult:
         (synthetic.directory / "known-hosts").write_bytes(b"retained key bytes\n")
@@ -153,7 +169,7 @@ def test_interruption_retains_written_bytes_for_strict_recovery(
 
 @pytest.mark.parametrize("failure", [Failure.DEADLINE, Failure.OUTPUT, None])
 def test_failed_ack_preserves_candidate_and_never_retries_first_contact(
-    synthetic: SyntheticEnrollment, failure: Failure | None
+    enrollment_caller: EnrollmentCaller, synthetic: SyntheticEnrollment, failure: Failure | None
 ) -> None:
     synthetic.action = lambda argv: ProcessResult(True, 255, 255, CapturedOutput(), CapturedOutput(), failure)
     with pytest.raises(SSHEnrollmentError):
@@ -165,7 +181,7 @@ def test_failed_ack_preserves_candidate_and_never_retries_first_contact(
 
 
 def test_successful_ack_cannot_hide_failed_persistence(
-    synthetic: SyntheticEnrollment, monkeypatch: pytest.MonkeyPatch
+    enrollment_caller: EnrollmentCaller, synthetic: SyntheticEnrollment, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(enrollment, "_sync_candidate", lambda candidate: (_ for _ in ()).throw(OSError("private")))
     with pytest.raises(SSHEnrollmentError):
@@ -174,7 +190,9 @@ def test_successful_ack_cannot_hide_failed_persistence(
 
 
 @pytest.mark.parametrize("operation", ["enroll", "recover"])
-def test_candidate_lock_refuses_concurrent_operations(synthetic: SyntheticEnrollment, operation: str) -> None:
+def test_candidate_lock_refuses_concurrent_operations(
+    enrollment_caller: EnrollmentCaller, synthetic: SyntheticEnrollment, operation: str
+) -> None:
     candidate = synthetic.enroll()
     with files.bundle_lock(candidate.directory), pytest.raises(SSHEnrollmentError):
         getattr(synthetic, operation)()
@@ -183,7 +201,9 @@ def test_candidate_lock_refuses_concurrent_operations(synthetic: SyntheticEnroll
 
 
 @pytest.mark.parametrize("change", ["block", "refresh"])
-def test_recovery_refuses_changed_policy(synthetic: SyntheticEnrollment, change: str) -> None:
+def test_recovery_refuses_changed_policy(
+    enrollment_caller: EnrollmentCaller, synthetic: SyntheticEnrollment, change: str
+) -> None:
     candidate = synthetic.enroll()
     status = trust_status(synthetic.bundle)
     if change == "block":
@@ -199,7 +219,9 @@ def test_recovery_refuses_changed_policy(synthetic: SyntheticEnrollment, change:
 
 
 @pytest.mark.parametrize("damage", ["missing", "partial", "nested", "endpoint", "boolean_port", "primary_missing"])
-def test_recovery_refuses_partial_or_mismatched_metadata(synthetic: SyntheticEnrollment, damage: str) -> None:
+def test_recovery_refuses_partial_or_mismatched_metadata(
+    enrollment_caller: EnrollmentCaller, synthetic: SyntheticEnrollment, damage: str
+) -> None:
     candidate = synthetic.enroll()
     manifest = candidate.directory / "state.json"
     if damage == "missing":
@@ -219,7 +241,9 @@ def test_recovery_refuses_partial_or_mismatched_metadata(synthetic: SyntheticEnr
     assert len(synthetic.calls) == 2
 
 
-def test_policy_refresh_during_first_ack_refuses_strict_connection(synthetic: SyntheticEnrollment) -> None:
+def test_policy_refresh_during_first_ack_refuses_strict_connection(
+    enrollment_caller: EnrollmentCaller, synthetic: SyntheticEnrollment
+) -> None:
     def changing(argv: list[str]) -> ProcessResult:
         status = trust_status(synthetic.bundle)
         refresh_trust(
@@ -234,7 +258,7 @@ def test_policy_refresh_during_first_ack_refuses_strict_connection(synthetic: Sy
 
 
 def test_expired_filesystem_admission_never_dispatches(
-    synthetic: SyntheticEnrollment, monkeypatch: pytest.MonkeyPatch
+    enrollment_caller: EnrollmentCaller, synthetic: SyntheticEnrollment, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     now = [0.0]
     monkeypatch.setattr(time, "monotonic", lambda: now[0])
@@ -254,8 +278,10 @@ def test_expired_filesystem_admission_never_dispatches(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("enrollment_sshd", ["empty", "matching", "ca"], indirect=True)
-def test_installed_ssh_enrollment_and_strict_recovery(enrollment_sshd: LocalSSH) -> None:
-    candidate = enroll_new_target(
+def test_installed_ssh_enrollment_and_strict_recovery(
+    enrollment_caller: EnrollmentCaller, enrollment_sshd: LocalSSH
+) -> None:
+    candidate = enrollment_caller.enroll(
         enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5)
     )
     saved = candidate.known_hosts_file.read_bytes()
@@ -263,37 +289,47 @@ def test_installed_ssh_enrollment_and_strict_recovery(enrollment_sshd: LocalSSH)
         assert enrollment_sshd.host_public_key.split()[1] in saved
     else:
         assert saved == b""
-    recovered = recover_enrollment(
+    recovered = enrollment_caller.recover(
         enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5)
     )
     assert recovered == candidate
     assert candidate.known_hosts_file.read_bytes() == saved
     with pytest.raises(SSHEnrollmentError):
-        enroll_new_target(enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5))
+        enrollment_caller.enroll(
+            enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5)
+        )
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("enrollment_sshd", ["mismatch", "revoked", "revoked_marker", "revoked_ca"], indirect=True)
-def test_installed_ssh_existing_policy_refuses_first_contact(enrollment_sshd: LocalSSH) -> None:
+def test_installed_ssh_existing_policy_refuses_first_contact(
+    enrollment_caller: EnrollmentCaller, enrollment_sshd: LocalSSH
+) -> None:
     with pytest.raises(SSHEnrollmentError):
-        enroll_new_target(enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5))
+        enrollment_caller.enroll(
+            enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5)
+        )
     with pytest.raises(SSHEnrollmentError):
-        recover_enrollment(
+        enrollment_caller.recover(
             enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5)
         )
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("enrollment_sshd", ["auth_failure"], indirect=True)
-def test_installed_ssh_auth_failure_retains_host_key_for_strict_recovery(enrollment_sshd: LocalSSH) -> None:
+def test_installed_ssh_auth_failure_retains_host_key_for_strict_recovery(
+    enrollment_caller: EnrollmentCaller, enrollment_sshd: LocalSSH
+) -> None:
     with pytest.raises(SSHEnrollmentError):
-        enroll_new_target(enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5))
+        enrollment_caller.enroll(
+            enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5)
+        )
     assert isinstance(enrollment_sshd.connection.trust, ManagedSSHTrust)
     primary = next(enrollment_sshd.connection.trust.directory.glob("enrollment-*/known-hosts"))
     saved = primary.read_bytes()
     assert enrollment_sshd.host_public_key.split()[1] in saved
     enrollment_sshd.authorized.write_bytes(enrollment_sshd.connection.identity_file.with_suffix(".pub").read_bytes())
-    candidate = recover_enrollment(
+    candidate = enrollment_caller.recover(
         enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5)
     )
     assert candidate.known_hosts_file.read_bytes() == saved
@@ -302,37 +338,41 @@ def test_installed_ssh_auth_failure_retains_host_key_for_strict_recovery(enrollm
 @pytest.mark.integration
 @pytest.mark.parametrize("enrollment_sshd", ["empty"], indirect=True)
 def test_installed_ssh_positive_ack_without_saved_key_fails_strict_verification(
-    enrollment_sshd: LocalSSH, monkeypatch: pytest.MonkeyPatch
+    enrollment_caller: EnrollmentCaller, enrollment_sshd: LocalSSH, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     original = run_process
     statuses: list[int | None] = []
 
-    def lose_saved_key(argv: list[str], *, io: CarrierIO, deadline: Deadline) -> ProcessResult:
+    def lose_saved_key(
+        argv: list[str], *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody
+    ) -> ProcessResult:
         if "StrictHostKeyChecking=accept-new" in argv:
             # Model a lost append independently of authentication: OpenSSH can
             # authenticate after failing to save a key. The strict attempt must
             # use the real, still-empty candidate and observe missing trust.
             argv = [re.sub(r'^(UserKnownHostsFile=)"[^"]+"', r'\1"/dev/null"', arg) for arg in argv]
-        result = original(argv, io=io, deadline=deadline)
+        result = original(argv, io=io, deadline=deadline, custody=custody)
         statuses.append(result.exit_status)
         return result
 
     monkeypatch.setattr(enrollment, "run_process", lose_saved_key)
     with pytest.raises(SSHEnrollmentError):
-        enroll_new_target(enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5))
+        enrollment_caller.enroll(
+            enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5)
+        )
     assert statuses == [0, 255]
     assert isinstance(enrollment_sshd.connection.trust, ManagedSSHTrust)
     primary = next(enrollment_sshd.connection.trust.directory.glob("enrollment-*/known-hosts"))
     assert primary.read_bytes() == b""
     with pytest.raises(SSHEnrollmentError):
-        recover_enrollment(
+        enrollment_caller.recover(
             enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5)
         )
     assert statuses[-1] == 255
 
 
 def test_partial_creation_never_reopens_first_contact(
-    synthetic: SyntheticEnrollment, monkeypatch: pytest.MonkeyPatch
+    enrollment_caller: EnrollmentCaller, synthetic: SyntheticEnrollment, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with monkeypatch.context() as patch:
         patch.setattr(files, "write_state", lambda *args: (_ for _ in ()).throw(OSError("storage")))
@@ -348,7 +388,7 @@ def test_partial_creation_never_reopens_first_contact(
 
 
 def test_interruption_is_not_masked_by_flush_failure(
-    synthetic: SyntheticEnrollment, monkeypatch: pytest.MonkeyPatch
+    enrollment_caller: EnrollmentCaller, synthetic: SyntheticEnrollment, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def interrupt(argv: list[str]) -> ProcessResult:
         raise KeyboardInterrupt
@@ -361,7 +401,7 @@ def test_interruption_is_not_masked_by_flush_failure(
 
 
 def test_admission_generation_change_refuses_before_creation(
-    synthetic: SyntheticEnrollment, monkeypatch: pytest.MonkeyPatch
+    enrollment_caller: EnrollmentCaller, synthetic: SyntheticEnrollment, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     original = admit_connection
 
@@ -382,9 +422,13 @@ def test_admission_generation_change_refuses_before_creation(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("enrollment_sshd", ["auth_failure"], indirect=True)
-def test_installed_ssh_recovery_retains_mismatching_primary(enrollment_sshd: LocalSSH) -> None:
+def test_installed_ssh_recovery_retains_mismatching_primary(
+    enrollment_caller: EnrollmentCaller, enrollment_sshd: LocalSSH
+) -> None:
     with pytest.raises(SSHEnrollmentError):
-        enroll_new_target(enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5))
+        enrollment_caller.enroll(
+            enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5)
+        )
     assert isinstance(enrollment_sshd.connection.trust, ManagedSSHTrust)
     primary = next(enrollment_sshd.connection.trust.directory.glob("enrollment-*/known-hosts"))
     other = (enrollment_sshd.authorized.parent / "other-key.pub").read_bytes()
@@ -392,7 +436,7 @@ def test_installed_ssh_recovery_retains_mismatching_primary(enrollment_sshd: Loc
     primary.write_bytes(mismatch)
     enrollment_sshd.authorized.write_bytes(enrollment_sshd.connection.identity_file.with_suffix(".pub").read_bytes())
     with pytest.raises(SSHEnrollmentError):
-        recover_enrollment(
+        enrollment_caller.recover(
             enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5)
         )
     assert primary.read_bytes() == mismatch
@@ -400,7 +444,10 @@ def test_installed_ssh_recovery_retains_mismatching_primary(enrollment_sshd: Loc
 
 @pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
 def test_interruption_during_failed_attempt_flush_is_preserved(
-    synthetic: SyntheticEnrollment, monkeypatch: pytest.MonkeyPatch, interruption: type[BaseException]
+    enrollment_caller: EnrollmentCaller,
+    synthetic: SyntheticEnrollment,
+    monkeypatch: pytest.MonkeyPatch,
+    interruption: type[BaseException],
 ) -> None:
     synthetic.action = lambda argv: ProcessResult(True, 255, 255, CapturedOutput(), CapturedOutput(), None)
 
@@ -411,3 +458,176 @@ def test_interruption_during_failed_attempt_flush_is_preserved(
     with pytest.raises(interruption):
         synthetic.enroll()
     assert (synthetic.directory / "known-hosts").exists()
+
+
+@pytest.mark.parametrize("pending_constructor", [True, False])
+def test_native_pending_and_retryable_cleanup_retain_candidate_exclusion(
+    synthetic: SyntheticEnrollment,
+    monkeypatch: pytest.MonkeyPatch,
+    pending_constructor: bool,
+) -> None:
+    delivery = synthetic.maintenance.delivery
+    resource = SSHEnrollmentCustody(delivery)
+    synthetic.maintenance.resources.append(resource)
+    release = threading.Event()
+    entered = threading.Event()
+    spawn = subprocess.Popen
+    monotonic = time.monotonic
+    offset = [0.0]
+    children: list[subprocess.Popen[bytes]] = []
+    cleanup = process_core._cleanup
+    fail_cleanup = [not pending_constructor]
+
+    def child(argv, **kwargs):
+        entered.set()
+        offset[0] = 60.0
+        if pending_constructor:
+            assert release.wait(5)
+        process = spawn([sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
+        children.append(process)
+        return process
+
+    def clean(status: process_core._ProcessStatus) -> bool:
+        return False if fail_cleanup[0] else cleanup(status)
+
+    monkeypatch.setattr(time, "monotonic", lambda: monotonic() + offset[0])
+    monkeypatch.setattr(subprocess, "Popen", child)
+    monkeypatch.setattr(process_core, "_cleanup", clean)
+    monkeypatch.setattr(enrollment, "run_process", run_process)
+    try:
+        with pytest.raises(SSHEnrollmentError) as caught:
+            enrollment.enroll_new_target(
+                synthetic.connection, provenance=synthetic.provenance, deadline=Deadline.after(30), custody=resource
+            )
+        assert caught.value.failure is Failure.OBSERVATION
+        assert entered.is_set() and not delivery.settled
+        owner = delivery._owner
+        assert owner is not None
+        observation = owner.snapshot().terminal
+        with pytest.raises(AttributeError):
+            object.__setattr__(resource, "delivery", LocalDeliveryCustody())
+        assert resource.delivery is delivery
+        assert not resource.close(Deadline.after(0.05))
+        with pytest.raises(files.TrustBusyError), files.bundle_lock(synthetic.directory):
+            pytest.fail("Recovery entered while earlier native writing remained possible")
+        assert resource._lock is not None
+    finally:
+        fail_cleanup[0] = False
+        release.set()
+        assert resource.close(Deadline.after(3))
+    assert delivery._owner is owner
+    if observation is not None:
+        assert not observation.cleaned
+    assert len(children) == 1
+    assert children[0].returncode is not None
+    assert all(pipe is None or pipe.closed for pipe in (children[0].stdin, children[0].stdout, children[0].stderr))
+    with files.bundle_lock(synthetic.directory):
+        pass
+
+
+def test_final_flush_failure_retains_writer_exclusion_until_retry(
+    synthetic: SyntheticEnrollment,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resource = SSHEnrollmentCustody(synthetic.maintenance.delivery)
+    synthetic.maintenance.resources.append(resource)
+    candidate = enrollment.enroll_new_target(
+        synthetic.connection, provenance=synthetic.provenance, deadline=Deadline.after(5), custody=resource
+    )
+    with monkeypatch.context() as patch:
+        patch.setattr(enrollment, "_sync_candidate", lambda candidate: (_ for _ in ()).throw(OSError("private")))
+        with pytest.raises(SSHEnrollmentError):
+            resource.close(Deadline.after(3))
+        with pytest.raises(files.TrustBusyError), files.bundle_lock(candidate.directory):
+            pytest.fail("Failed flush released writer exclusion")
+    assert resource.close(Deadline.after(3))
+    with files.bundle_lock(candidate.directory):
+        pass
+
+
+def test_interrupted_lock_acquisition_retains_exact_lock_without_candidate_flush(
+    synthetic: SyntheticEnrollment,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resource = SSHEnrollmentCustody(synthetic.maintenance.delivery)
+    synthetic.maintenance.resources.append(resource)
+    acquire = files.BundleLock.acquire
+    control = KeyboardInterrupt("lock-acquired")
+    flushes: list[enrollment.SSHEnrollmentCandidate] = []
+
+    def interrupt(lock: files.BundleLock) -> None:
+        acquire(lock)
+        if lock._directory.parent == synthetic.bundle.directory:
+            raise control
+
+    monkeypatch.setattr(files.BundleLock, "acquire", interrupt)
+    monkeypatch.setattr(enrollment, "_sync_candidate", flushes.append)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        enrollment.enroll_new_target(
+            synthetic.connection, provenance=synthetic.provenance, deadline=Deadline.after(5), custody=resource
+        )
+    assert caught.value is control and resource._lock is not None
+    competing = files.BundleLock(synthetic.directory)
+    with pytest.raises(files.TrustBusyError):
+        acquire(competing)
+    assert competing.release()
+    assert resource.close(Deadline.after(3))
+    assert flushes == [] and synthetic.calls == []
+    acquire(competing)
+    assert competing.release()
+
+
+@pytest.mark.parametrize("bug", [ValueError("programmer bug"), TypeError("programmer bug"), RecursionError()])
+def test_workflow_programmer_errors_are_not_schema_refusals(
+    synthetic: SyntheticEnrollment,
+    bug: Exception,
+) -> None:
+    def fail(argv: list[str]) -> ProcessResult:
+        raise bug
+
+    synthetic.action = fail
+    with pytest.raises(type(bug)) as caught:
+        synthetic.enroll()
+    assert caught.value is bug
+
+
+def test_enrollment_pins_probe_and_both_acknowledgments_despite_path_change(
+    synthetic: SyntheticEnrollment, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.execution.carriers.ssh.test_client_selection import selectable_client
+
+    selected = selectable_client(tmp_path / "selected")
+    replacement = selectable_client(tmp_path / "replacement")
+    synthetic.connection = replace(synthetic.connection, ssh_executable="ssh")
+    monkeypatch.setenv("PATH", str(selected.parent))
+    probes: list[str] = []
+
+    def version(executable: str, *, deadline: Deadline, custody: LocalDeliveryCustody) -> None:
+        probes.append(executable)
+        monkeypatch.setenv("PATH", str(replacement.parent))
+
+    monkeypatch.setattr(enrollment, "check_client_version", version)
+    synthetic.enroll()
+    assert probes == [str(selected)]
+    assert [argv[0] for argv in synthetic.calls] == [str(selected), str(selected)]
+    synthetic.recover()
+    assert probes == [str(selected), str(replacement)]
+    assert synthetic.calls[-1][0] == str(replacement)
+
+
+def test_passive_or_refused_enrollment_close_does_not_settle_another_workflow(
+    synthetic: SyntheticEnrollment,
+) -> None:
+    delivery = synthetic.maintenance.delivery
+    owner = delivery.begin_process()
+    resource = SSHEnrollmentCustody(delivery)
+    try:
+        with pytest.raises(StateError):
+            enrollment.enroll_new_target(
+                synthetic.connection, provenance=synthetic.provenance, deadline=Deadline.after(5), custody=resource
+            )
+        assert resource.close(Deadline.after(3))
+        assert owner.snapshot().terminal is None
+        assert not delivery.settled and synthetic.calls == []
+    finally:
+        assert delivery.close(Deadline.after(3))

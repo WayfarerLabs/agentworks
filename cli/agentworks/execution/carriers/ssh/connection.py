@@ -132,20 +132,27 @@ def build_ssh_argv(
     invocation: PreparedInvocation,
     *,
     trust: SSHTrustFiles,
+    executable: str | None = None,
     terminal: bool = False,
     local_forwards: tuple[str, ...] = (),
 ) -> list[str]:
     """Build strict delivery argv using this operation's admitted trust selection."""
     return _build_argv(
-        connection, invocation, trust=trust, host_key_checking="yes", terminal=terminal, local_forwards=local_forwards
+        connection,
+        invocation,
+        trust=trust,
+        executable=executable,
+        host_key_checking="yes",
+        terminal=terminal,
+        local_forwards=local_forwards,
     )
 
 
 def _build_enrollment_argv(
-    connection: SSHConnection, invocation: PreparedInvocation, *, trust: SSHTrustFiles
+    connection: SSHConnection, invocation: PreparedInvocation, *, trust: SSHTrustFiles, executable: str | None = None
 ) -> list[str]:
     """Build first enrollment argv after the caller validates an exclusive candidate."""
-    return _build_argv(connection, invocation, trust=trust, host_key_checking="accept-new")
+    return _build_argv(connection, invocation, trust=trust, executable=executable, host_key_checking="accept-new")
 
 
 def _build_argv(
@@ -154,6 +161,7 @@ def _build_argv(
     *,
     trust: SSHTrustFiles,
     host_key_checking: Literal["yes", "accept-new"],
+    executable: str | None = None,
     terminal: bool = False,
     local_forwards: tuple[str, ...] = (),
 ) -> list[str]:
@@ -161,7 +169,8 @@ def _build_argv(
 
     Account-shell compatibility and startup behavior are delivery preconditions.
     The caller owns stdin (pipe or DEVNULL), deadline and executable version
-    checks. Forward specifications come from the owned forwarding operation's
+    checks, including the same resolved executable for probe and launch.
+    Forward specifications come from the owned forwarding operation's
     validated values; they are -L operands, never arbitrary client options.
     No option here steals input or introduces application shell policy.
     """
@@ -219,7 +228,7 @@ def _build_argv(
         options.append(f'RevokedHostKeys="{trust.revoked_host_keys.as_posix()}"')
     if connection.host_key_alias is not None:
         options.append(f"HostKeyAlias={connection.host_key_alias}")
-    argv = [connection.ssh_executable, "-F", "none", "-tt" if terminal else "-T"]
+    argv = [connection.ssh_executable if executable is None else executable, "-F", "none", "-tt" if terminal else "-T"]
     for option in options:
         argv.extend(("-o", option))
     for forward in local_forwards:

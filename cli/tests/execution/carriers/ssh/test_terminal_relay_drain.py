@@ -1,4 +1,4 @@
-"""Post-exit collection pauses for pending sinks and bounds inherited writers."""
+"""Post-exit collection pauses for stalled sinks and bounds inherited writers."""
 
 from __future__ import annotations
 
@@ -44,6 +44,10 @@ class Source:
     def try_read(self,limit): return b''
 stalls=[]
 blocked_until=0
+monotonic=time.monotonic
+advanced=0.0
+# Charge controlled time to accepted partial writes, independently of real stalls.
+time.monotonic=lambda:monotonic()+advanced
 class Sink:
     def __init__(self,name,byte):
         self.name=name
@@ -51,9 +55,9 @@ class Sink:
         self.count=0
         self.stalled=False
     def try_write(self,data):
-        global blocked_until
+        global blocked_until,advanced
         if not exited.is_set(): return None
-        now=time.monotonic()
+        now=monotonic()
         if now<blocked_until: return None
         if not self.stalled:
             self.stalled=True
@@ -63,6 +67,7 @@ class Sink:
         delivered=min(len(data),1024)
         assert bytes(data[:delivered])==self.byte*delivered
         self.count+=delivered
+        if flood: advanced+=.01
         return delivered
 stdout,stderr=Sink('stdout',b'S'),Sink('stderr',b'E')
 io=CarrierIO(TerminalInput(slave,slave,'fixture',Source()),SinkOutput(stdout,stderr))
@@ -105,11 +110,15 @@ except BrokenPipeError: pass
 os._exit(0)
 '''
 try:
-    started=time.monotonic()
+    started=monotonic()
     result=run_terminal_relay_candidate(
         [sys.executable,'-c',child,str(pidfile),str(os.getpid()),str(flood)],
         io=io,deadline=Deadline.after(2))
-    elapsed=time.monotonic()-started
+    elapsed=monotonic()-started
+    print(json.dumps({'elapsed':elapsed,'counts':[stdout.count,stderr.count],'stalls':stalls,'delivery_clock':advanced,
+        'result':{'started':result.started,'local_status':result.local_status,'exit_status':result.exit_status,
+            'failure':None if result.failure is None else result.failure.value,
+            'complete':[result.stdout.complete,result.stderr.complete]}}),flush=True)
     assert result.started and result.local_status==result.exit_status==0
     assert result.failure is Failure.OUTPUT
     assert not result.stdout.complete and not result.stderr.complete
@@ -117,6 +126,7 @@ try:
     assert sorted(stalls)==['stderr','stdout']
     assert stdout.count>=4096 and stderr.count>=4096
     assert .32<=elapsed<1.5
+    assert advanced<.2
     assert termios.tcgetattr(slave)==mode
     assert len(children)==1
     client=children[0]
@@ -124,7 +134,6 @@ try:
     try: os.waitpid(client.pid,os.WNOHANG)
     except ChildProcessError: pass
     else: raise AssertionError('Client was not reaped')
-    print(json.dumps({'elapsed':elapsed,'counts':[stdout.count,stderr.count],'stalls':stalls}))
 finally:
     for client in children:
         if client.poll() is None: client.kill()
@@ -147,7 +156,12 @@ finally:
         [sys.executable, "-c", code, str(tmp_path / "descendant.pid"), str(flood)],
         capture_output=True,
         timeout=10,
-        check=True,
+        check=False,
+    )
+    assert completed.returncode == 0, (
+        f"Owned drain probe exited {completed.returncode}\n"
+        f"stdout: {completed.stdout[-4096:].decode(errors='replace')}\n"
+        f"stderr: {completed.stderr[-4096:].decode(errors='replace')}"
     )
     proof = json.loads(completed.stdout)
     assert proof["counts"][0] >= 4096 and proof["counts"][1] >= 4096

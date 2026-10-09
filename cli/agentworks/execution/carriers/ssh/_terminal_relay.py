@@ -21,6 +21,7 @@ from agentworks.execution._process import (
     LocalProcessTerminal,
     ResizeNotification,
     SinkWriteError,
+    _retain_control_exception,
     try_write_to_sink,
 )
 from agentworks.execution._process import (
@@ -55,9 +56,11 @@ class _Stream:
     sink: ByteSink = field(repr=False)
     pending: memoryview | None = field(default=None, repr=False)
     eof: bool = False
+    stalled: bool = False
 
     def advance(self, pipe: IO[bytes]) -> bool:
         """Deliver pending bytes before collecting another bounded pipe chunk."""
+        self.stalled = False
         if self.eof:
             return False
         if self.pending is None:
@@ -71,6 +74,7 @@ class _Stream:
             self.pending = memoryview(chunk)
         written = try_write_to_sink(self.sink, self.pending)
         if written is None:
+            self.stalled = True
             return False
         self.pending = self.pending[written:] if written < len(self.pending) else None
         return True
@@ -200,10 +204,11 @@ class _Attempt:
         while True:
             try:
                 with self._condition:
-                    self._interruption = _retain_control(self._interruption, error)
+                    if error is not None:
+                        self._interruption = _retain_control_exception(self._interruption, error)
                     return self._interruption
             except BaseException as later:
-                error = _retain_control(error, later)
+                error = _retain_control_exception(error, later)
 
     def _entry(self) -> None:
         """Publish completion only after every descriptor borrower has stopped."""
@@ -287,6 +292,7 @@ class _Attempt:
                         if not isinstance(release_error, Exception):
                             self._record_control(release_error)
             stdout.pending = stderr.pending = None
+            stdout.stalled = stderr.stalled = False
             self._result = _result(process, stdout.eof, stderr.eof, failure)
 
     def _pump(
@@ -327,7 +333,7 @@ class _Attempt:
                     now = time.monotonic()
                     if drain_at is not None and not drain_paused:
                         drain_remaining -= now - drain_at
-                    drain_at, drain_paused = now, pending
+                    drain_at = now
                     if drain_remaining <= 0:
                         return Failure.OUTPUT
                 progressed = False
@@ -365,7 +371,10 @@ class _Attempt:
                             self._record_control(error)
                         return Failure.OBSERVATION
                 if drain_at is not None:
-                    drain_paused = stdout.pending is not None or stderr.pending is not None
+                    # Accepted partial writes spend the drain budget. Only an
+                    # actual sink stall suspends it, so inherited writers cannot
+                    # keep collection alive by continuously supplying chunks.
+                    drain_paused = stdout.stalled or stderr.stalled
                 if not progressed:
                     self._pause()
         finally:
@@ -394,12 +403,6 @@ class _Attempt:
     def _pause(self) -> None:
         remaining = self._deadline.remaining()
         self._stop.wait(_POLL_SECONDS if remaining is None else min(_POLL_SECONDS, remaining))
-
-
-def _retain_control(first: BaseException | None, later: BaseException | None) -> BaseException | None:
-    if first is None or (isinstance(first, Exception) and later is not None and not isinstance(later, Exception)):
-        return later
-    return first
 
 
 def _result(
