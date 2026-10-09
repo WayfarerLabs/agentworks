@@ -10,19 +10,20 @@ from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution.binding import NativeExecutionBinding, _EarlyGuestFactsRoute
-from agentworks.execution.carriers.ssh import ManagedSSHTrust, SSHCarrier, SSHConnection, SSHSettings
+from agentworks.execution.carriers.ssh import ManagedSSHTrust, SSHCarrier, SSHConnection
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.carriers.ssh import SSHSettings
 
 
 def require_ssh_settings(vm: VMRow, ctx: RunContext, config: Config | None) -> SSHSettings:
     """Require loaded independent operator policy before any provider read."""
     selected = config if config is not None else ctx.config
-    settings = getattr(getattr(selected, "operator", None), "ssh", None)
-    if not isinstance(settings, SSHSettings):
+    settings = selected.operator.ssh if selected is not None else None
+    if settings is None:
         raise ConfigError(
             "Native cloud execution requires explicit operator SSH settings",
             entity_kind="vm",

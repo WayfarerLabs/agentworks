@@ -15,7 +15,6 @@ SDK's behavior; successful late results are rejected without replaying the read.
 
 Trust uses the configured managed directory and endpoint lookup with no host key alias. Identity,
 agent, client and keepalive selections come from `SSHSettings`. The early guest facts probe enters
-as root, directly for a root delivery account or through sudo without prompting for another account,
-and resolves the named delivery account's actual identity. The binding supplies no independent
-availability guarantee. Route activation, delivery custody and native lifecycle ownership belong to
-the caller.
+as root, directly for root delivery, otherwise through passwordless sudo to root, and resolves the
+named delivery account's actual identity. The binding supplies no independent availability
+guarantee. Route activation, delivery custody and native lifecycle ownership belong to the caller.
