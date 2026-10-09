@@ -261,6 +261,16 @@ Use explicit worker completion facts when a caller wait is interrupted. The curr
 interrupts before joining and leaves interrupted-wait settlement unproved. The test helper retains
 its fixtures until worker settlement; an owning test-process/job timeout supplies the hang bound.
 
+The private POSIX relay spends its existing 100 ms post-exit drain budget during accepted partial
+sink writes; only a sink returning `None` pauses that budget. Pending bytes are delivered before
+collecting another chunk, and the operation deadline remains active during stalls. Even finite
+output can exceed this separate drain budget when successful partial delivery is slow. Such a return
+preserves natural client-exit evidence, reports `Failure.OUTPUT` and marks unfinished streams
+incomplete; it does not promise delivery merely because operation time remains. The
+[round 1 correction record](phase2-results.md#round-1-terminal-drain-correction) distinguishes this
+SSH candidate from the unchanged shared pump. Full terminal delivery remains disabled pending
+retained cleanup composition and native acceptance.
+
 ## Windows caller resource and record feasibility
 
 The private `WindowsTerminal` resource borrows explicit input/output descriptors through one
