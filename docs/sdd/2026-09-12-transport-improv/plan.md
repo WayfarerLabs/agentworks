@@ -3692,6 +3692,13 @@ edge follows.
       kill/reap failure, explicit cleanup retry, natural exit, external-reaper uncertainty, all
       temporary Proxmox consumers and aggregate owner-release refusal. Do not silently add bounded
       return to guest source-descriptor or unmigrated terminal consumers.
+- [ ] Retain one ordered local cleanup coordinator alongside the exact existing native process owner
+      for delivery resources such as terminal relay, acquisition and restoration. Require passive
+      settlement of both before another exchange; retry the same retained coordinator under a fresh
+      finite deadline without closing pipes around an unfinished borrower. Keep plain delivery
+      unchanged and reports passive. Prove exact-owner binding, refused replacement, interrupted
+      cleanup and process-cleaned-but-restoration-pending cases; SSH separately supplies its
+      terminal coordinator and native acceptance.
 - [ ] Reconcile #770's historical escape/relaunch proposal against the later exclusion of malicious
       target-user containment. Deliver DIRECT/MANAGED without a CONTAINED profile or
       per-run-user/jail implementation; retain future profile extensibility. Prove trusted

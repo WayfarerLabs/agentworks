@@ -316,6 +316,16 @@ cleanup capabilities through result reducers or exception causes. Local settleme
 completion and dispatch evidence remain independent facts. Neither `not_sent` nor remote exit zero
 alone clears an attempt with unsettled local custody.
 
+Terminal delivery can additionally retain one inert `LocalDeliveryCleanup` coordinator through
+`custody.retain_cleanup(owner, cleanup)`, bound to that same held native owner before descriptor,
+thread or process admission. Its passive `settled` observation and bounded `close(Deadline)` account
+for relay shutdown, pending acquisition and restoration. Custody closes through the coordinator,
+which stops pipe borrowers before native closure and preserves descriptors until pending
+construction can no longer inherit them. Both native cleanup and coordinator settlement must be
+proved before reuse. A failed or interrupted close retains the same coordinator for a fresh finite
+retry. This adds neither another process owner nor a collection of cleanup hooks; plain delivery
+keeps its existing path. SSH owns the actual terminal coordinator and its native proof.
+
 The owning aggregate retains this storage after an ordinary borrow hands back unresolved work. Its
 non-dispatch cleanup path can settle local custody without reopening that borrow, admitting more
 work or resolving unknown remote effects. Provider hooks receive storage held by the enclosing
