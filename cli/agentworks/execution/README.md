@@ -19,6 +19,12 @@ confirmed. Pending construction and failed or lost native ownership retain the s
 remain observations, not cleanup handles. Local cleanup proves neither guest cancellation nor
 provider drain.
 
+Delivery that also owns relay, descriptor or restoration work retains one inert
+`LocalDeliveryCleanup` through `custody.retain_cleanup(owner, cleanup)` before resource admission.
+That coordinator uses the same native owner and performs ordered bounded cleanup. Custody requires
+both process cleanup and coordinator settlement before reuse; a failed close retains the same
+coordinator for a fresh finite retry. Plain delivery does not need a coordinator.
+
 Ordinary and recovery attempts retain this storage before concrete carrier dispatch and refuse
 settlement while it is unclean. Their existing bound helper wrappers supply it internally;
 `BoundHelperCarrier` describes that private, already-owned delivery boundary rather than an
