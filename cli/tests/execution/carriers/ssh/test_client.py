@@ -80,7 +80,9 @@ def synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     known_hosts = tmp_path / "known_hosts"
     key.write_bytes(b"synthetic identity")
     known_hosts.write_bytes(b"synthetic trust")
-    connection = SSHConnection("synthetic.example", "user", key, SSHTrustFiles((known_hosts,)))
+    connection = SSHConnection(
+        "synthetic.example", "user", key, SSHTrustFiles((known_hosts,)), ssh_executable=sys.executable
+    )
     value = SyntheticSSH(SSHCarrier(connection))
     original = subprocess.Popen
 
@@ -110,6 +112,7 @@ def test_validate_does_not_admit_or_probe_connection(synthetic: SyntheticSSH, mo
     monkeypatch.setattr(client, "admit_connection", forbidden)
     monkeypatch.setattr(client, "build_ssh_argv", forbidden)
     monkeypatch.setattr(client, "check_client_version", forbidden)
+    monkeypatch.setattr(client, "resolve_client_executable", forbidden)
     monkeypatch.setattr(client, "run_process", forbidden)
     synthetic.carrier.validate(PreparedInvocation(("/prepared/bootstrap",)), io=CarrierIO())
     assert synthetic.calls == []
@@ -128,6 +131,7 @@ def test_execute_validates_before_connection_or_process_work(
     monkeypatch.setattr(client, "admit_connection", forbidden)
     monkeypatch.setattr(client, "build_ssh_argv", forbidden)
     monkeypatch.setattr(client, "check_client_version", forbidden)
+    monkeypatch.setattr(client, "resolve_client_executable", forbidden)
     monkeypatch.setattr(client, "run_process", forbidden)
     with pytest.raises(ValidationError, match="unsupported static request"):
         synthetic.execute()
@@ -148,6 +152,7 @@ def test_unsupported_input_refuses_before_connection_or_process_work(
     monkeypatch.setattr(client, "admit_connection", forbidden)
     monkeypatch.setattr(client, "build_ssh_argv", forbidden)
     monkeypatch.setattr(client, "check_client_version", forbidden)
+    monkeypatch.setattr(client, "resolve_client_executable", forbidden)
     monkeypatch.setattr(client, "run_process", forbidden)
     with pytest.raises(ValidationError):
         synthetic.carrier.validate(PreparedInvocation(("/prepared/bootstrap",)), io=io)
@@ -758,7 +763,7 @@ def test_each_command_admits_current_managed_policy(synthetic: SyntheticSSH, tmp
     synthetic.assert_closed()
 
 
-@pytest.mark.parametrize("stage", ["admission", "version"])
+@pytest.mark.parametrize("stage", ["admission", "resolution", "version"])
 def test_expiry_during_local_checks_prevents_dispatch(
     synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, stage: str
 ) -> None:
@@ -772,10 +777,19 @@ def test_expiry_during_local_checks_prevents_dispatch(
             clock[0] = 2.0
         return trust
 
-    def version(connection: SSHConnection, *, deadline: Deadline, custody: LocalDeliveryCustody) -> None:
+    resolve = client.resolve_client_executable
+
+    def select(connection: SSHConnection) -> str:
+        executable = resolve(connection)
+        if stage == "resolution":
+            clock[0] = 2.0
+        return executable
+
+    def version(executable: str, *, deadline: Deadline, custody: LocalDeliveryCustody) -> None:
         clock[0] = 2.0
 
     monkeypatch.setattr(client, "admit_connection", admit)
+    monkeypatch.setattr(client, "resolve_client_executable", select)
     monkeypatch.setattr(client, "check_client_version", version)
     report = synthetic.execute(seconds=1)
     assert report.dispatch == Dispatch.NOT_SENT

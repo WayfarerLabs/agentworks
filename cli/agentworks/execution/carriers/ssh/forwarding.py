@@ -22,7 +22,7 @@ from agentworks.execution._process import (
 )
 from agentworks.execution.carrier import Failure, PreparedInvocation
 from agentworks.execution.carriers.ssh._io import _child_environment
-from agentworks.execution.carriers.ssh.client import check_client_version
+from agentworks.execution.carriers.ssh.client import check_client_version, resolve_client_executable
 from agentworks.execution.carriers.ssh.connection import admit_connection, build_ssh_argv
 
 if TYPE_CHECKING:
@@ -342,7 +342,13 @@ def open_local_forwards(
         raise ForwardingError(Failure.DISPATCH) from None
     if deadline.expired:
         raise ForwardingError(Failure.DEADLINE)
-    failure = check_client_version(connection, deadline=deadline, custody=custody)
+    try:
+        executable = resolve_client_executable(connection)
+    except (OSError, ValidationError):
+        raise ForwardingError(Failure.DISPATCH) from None
+    if deadline.expired:
+        raise ForwardingError(Failure.DEADLINE)
+    failure = check_client_version(executable, deadline=deadline, custody=custody)
     if failure is not None:
         raise ForwardingError(failure)
     if deadline.expired:
@@ -350,7 +356,11 @@ def open_local_forwards(
     marker = f"agw-forward-ready-{secrets.token_hex(16)}"
     invocation = PreparedInvocation(("sh", "-c", f"printf '%s\\n' '{marker}'; IFS= read -r _; exit 0"))
     argv = build_ssh_argv(
-        connection, invocation, trust=trust, local_forwards=tuple(forward._operand() for forward in requests)
+        connection,
+        invocation,
+        trust=trust,
+        executable=executable,
+        local_forwards=tuple(forward._operand() for forward in requests),
     )
     if deadline.expired:
         raise ForwardingError(Failure.DEADLINE)

@@ -61,6 +61,14 @@ OpenSSH 8.5 minimum before dispatch. The operation's original deadline is reused
 filesystem calls are synchronous; a stalled filesystem call is not cancellable by this budget.
 Expiry observed during validation prevents subsequent dispatch.
 
+A command name selects an installed executable from the caller's PATH once per operation. The
+version probe and subsequent client launches use the same absolute selection, including native
+Windows executable suffixes. Windows never adds an implicit current-directory search. Relative or
+current-directory entries explicitly present in PATH remain operator selections; use an absolute
+`ssh_executable` to select a particular installed client. The selected executable and its directory
+must remain under operator control for the operation's lifetime. Selection does not download clients
+or alter the process environment.
+
 Every client ignores user/system SSH configuration and disables implicit agents, identities,
 certificates, proxies, multiplexing, inherited forwarding and known-host commands. Only the explicit
 identity may authenticate. An explicit Unix-domain agent socket can sign for that identity; omitting
