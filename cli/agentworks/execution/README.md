@@ -1873,11 +1873,11 @@ expiry after parent resolution and before its first deletion. Neither recovery n
 that an earlier unobserved request can no longer arrive; delayed chunk requests must still validate
 their receipt and cannot recreate a cleaned stage.
 
-The private stage chunk cap is 12 KiB, below the scratch primitive's 24 KiB range cap. The complete
-manifest is limited to 32 KiB, and Proxmox independently enforces its full serialized body limit.
-Local tests exercise the actual request serializer, a fake provider executing the real helper, and
-Windows SSH command-line sizing for explicit fixtures. Those measurements do not establish native
-platform acceptance or fit for every connection/identity prefix.
+The private stage chunk cap is 12 KiB, below the scratch primitive's 24 KiB write-chunk cap. The
+complete manifest is limited to 32 KiB, and Proxmox independently enforces its full serialized body
+limit. Local tests exercise the actual request serializer, a fake provider executing the real
+helper, and Windows SSH command-line sizing for explicit fixtures. Those measurements do not
+establish native platform acceptance or fit for every connection/identity prefix.
 
 These entries are individual exchanges, not FileAccess operations. Private upload composition uses
 them through `_file_upload.py`; downloads use the separate snapshot exchanges below. The caller must
@@ -1898,7 +1898,7 @@ before opening either the source or the fixed scratch parent. It copies the held
 scratch once; later requests read that copy, not a changing source file. Source-read authority does
 not require write access to the source directory.
 
-Requests use sensitive stdin with a 32 KiB manifest bound. Chunk replies carry at most 12 KiB of
+Requests use sensitive stdin with a 32 KiB manifest bound. Chunk replies carry at most 256 KiB of
 binary data in `AGWF1` records, followed by range, length and digest evidence. The host releases
 typed results only after complete nonce-bound framing and delivered streams. A missing source root
 or file is distinct from an empty file; invalid, reflected or incomplete output does not establish
