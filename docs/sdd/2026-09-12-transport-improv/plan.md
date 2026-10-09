@@ -3708,11 +3708,11 @@ edge follows.
       follows.
 - [ ] Implement the private per-call acknowledged-QGA helper delivery/observer and explicit
       non-payload preparation expectations. Retain the actual inline DIRECT call, original attempt
-      and settleable borrow; perform only exact-PID GET observation under a fresh finite cleanup
-      budget before aggregate finish. Preserve the original UNKNOWN application result, no-I/O
-      bookkeeping and separate local/remote custody; do not replay after uncertain status loss.
-      Prove deadline recovery, ACK/terminal-publication interruptions, wrong nonce, changed binding
-      and unsettled local delivery before native acceptance on both QGA majors.
+      and borrow that can still settle it; perform only exact-PID GET observation under a fresh
+      finite cleanup budget before aggregate finish. Preserve the original UNKNOWN application
+      result, no-I/O bookkeeping and separate local/remote custody; do not replay after uncertain
+      status loss. Prove deadline recovery, ACK/terminal-publication interruptions, wrong nonce,
+      changed binding and unsettled local delivery before native acceptance on both QGA majors.
 - [ ] Extend the same retained helper-closure seam to managed read preparation and timed-out
       RESOURCE disposal prerequisites. Cleanup settles the prior observer only; a subsequent
       explicitly requested read must still supply positive terminal proof before disposal. Closure,

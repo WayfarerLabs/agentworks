@@ -1306,11 +1306,11 @@ does not thereby acquire a stronger user-descendant cleanup or native-drain guar
 
 A QGA observation deadline can end while its acknowledged invocation still runs. For this case, the
 selected native binding supplies a passive per-call delivery/observer factory. Core retains the
-resulting object before dispatch, alongside the actual helper call, original attempt and
-still-settleable borrow. This is a private optional native composition seam, not another parameter
-on `Carrier.execute`, a stronger `CarrierReport`, or an SSH requirement. Plain delivery remains
-unchanged. The first implementation slice covers inline DIRECT helpers; managed read preparation
-then uses the same seam without creating a second recovery mechanism.
+resulting object before dispatch, alongside the actual helper call, original attempt and borrow that
+can still settle that attempt. This is a private optional native composition seam, not another
+parameter on `Carrier.execute`, a stronger `CarrierReport`, or an SSH requirement. Plain delivery
+remains unchanged. The first implementation slice covers inline DIRECT helpers; managed read
+preparation then uses the same seam without creating a second recovery mechanism.
 
 Preparation supplies immutable non-payload closure expectations explicitly: original nonce, runtime
 candidates and shim, execution identity and the existing selected guest checkpoint where applicable.
