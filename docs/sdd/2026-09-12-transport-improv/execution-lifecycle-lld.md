@@ -1125,8 +1125,10 @@ pipeline, not arbitrary custom event handlers, credential-provider requests, exa
 acceptance or hard elapsed deadlines. Client setup and credential work remain synchronous and
 best-effort bounded; reject expiry before admission and reject successful late returns. Do not use a
 waiter, automatic retry, background polling, private SDK policy mutation or the legacy start method.
-Close the owned client on every returned success or failure, without allowing a close error to hide
-the original result.
+Close a successfully returned client during setup and dispatch cleanup. Ordinary close errors must
+not replace the earlier outcome. A new close-time `KeyboardInterrupt` or `SystemExit` escapes;
+preserve an already escaping original control. This does not promise atomic resource handoff inside
+the SDK client constructor.
 
 Before invoking `StartInstances` with exactly the selected instance ID, register a fresh
 `aws-ec2-start` lifecycle obligation and durably mark its possible effect. The adapter admits at
