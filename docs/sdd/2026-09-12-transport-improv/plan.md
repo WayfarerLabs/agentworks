@@ -3719,6 +3719,12 @@ edge follows.
       readiness and guest/action proof remain distinct. Lost ACK, consumed status, controller
       restart and other-carrier recovery remain separate open gates, not implicit completion of the
       general recovery work.
+
+The inline source candidate at `1381f4c3` supplies the actual per-call observer, retained original
+attempt, owned provider-route fence and finite native-close observation. Its worker passes 518
+distinct scoped cases with no skips and thirteen-file static checks. Independent integrated review,
+lead gates and both native QGA-major measurements remain pending, so neither leaf above is complete.
+
 - [ ] Reconcile #770's historical escape/relaunch proposal against the later exclusion of malicious
       target-user containment. Deliver DIRECT/MANAGED without a CONTAINED profile or
       per-run-user/jail implementation; retain future profile extensibility. Prove trusted

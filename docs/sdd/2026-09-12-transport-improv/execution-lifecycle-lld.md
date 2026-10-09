@@ -1348,6 +1348,12 @@ controller restart and other carriers still need their separately tracked recove
 deadline-then-closure, interruption after ACK and terminal publication, wrong nonce, changed
 binding, unsettled local custody and unchanged application UNKNOWN before native acceptance.
 
+The private inline source candidate now selects this factory in the Proxmox native binding and calls
+explicit cleanup observation before native workflow finish. Offline tests execute the actual
+prepared helper through fake QGA status delivery, including lost settlement/resolution replies and
+repeated close. They are not measurements of either supported Proxmox major. Managed read
+continuation, lost ACK/status recovery, controller restart and full native acceptance remain open.
+
 ### Fenced lifecycle recovery
 
 Recovery must be fenced from a delayed original controller before it mutates an old obligation. The

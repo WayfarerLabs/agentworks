@@ -249,10 +249,12 @@ activation or preparation. Normal teardown leaves an activated VM running. Alrea
 activation and the new responsiveness wait. Both retain the same exact owner through preparation,
 file, DIRECT execution and private MANAGED OPERATION start, and aggregate cleanup. The same frozen
 native binding supplies a distinct passive WSL2 or Proxmox carrier for each managed keeper. WSL2
-binds its selected-route check as an optional `route_check` callable. Execution invokes it at the
-existing managed reads, stop/disposal, shell observation and armed start checkpoints. Absence binds
-no additional route check beyond shared preparation; it supplies no route-freshness evidence. This
-is not broader provider-route or boot acceptance. Proxmox retains one selected QGA binding and
+binds its selected-route check as an optional `route_check` callable. Proxmox supplies a body-free
+current-config check through its retained provider custody and requires the same
+origin/VM/generation locator. Neither check establishes a fresh guest boot. Execution invokes it at
+the existing managed reads, stop/disposal, shell observation and armed start checkpoints. Absence
+binds no additional route check beyond shared preparation; it supplies no route-freshness evidence.
+This is not broader provider-route or boot acceptance. Proxmox retains one selected QGA binding and
 checks its locator before and after target preparation. The bounded read-only account probe is not
 itself guest-fenced; account facts grant no body authority without the prepared full guest and
 numeric identity checks at each body helper. Per-dispatch provider-route freshness, complete
@@ -278,6 +280,24 @@ and final resolution. Resolved rows are never reopened and the database bounds a
 native workflow finishes execution before availability and whole-ledger cleanup. A clean per-call
 outcome does not imply this lifetime row or the outer operation has already been released. These
 mechanics retain DIRECT's existing helper-evidence limits, not a new descendant-cleanup guarantee.
+
+The private Proxmox binding also selects one passive `ProxmoxHelperDelivery` for each inline DIRECT
+call. It retains the original validated QGA PID and publishes terminal closure facts before output
+callbacks can interrupt delivery. Preparation supplies the original nonce and runtime expectations
+explicitly; retained cleanup drops caller input, collectors and application bytes. An acknowledged
+deadline or interrupted observation retains the actual call, original attempt and still-open borrow.
+
+`observe_inline_cleanup(fresh_finite_deadline)` first settles that attempt's local delivery, fences
+the original database ownership and selected binding, and checks the retained provider route. It can
+then read only that PID's status with a fresh bounded runtime-prefix reader and discard sink.
+Original runtime READY plus normal-zero helper completion permits settlement of the same attempt;
+the returned application result stays UNKNOWN. Native workflow close invokes this observation before
+`finish()`. Bookkeeping retry and `finish()` themselves still perform no provider I/O. A failed
+status exchange is never repeated: lost ACK, missing or consumed status, wrong nonce, nonzero exit,
+changed binding or pending local cleanup retains uncertainty. This is same-controller inline helper
+closure, not command replay, fresh guest readiness, managed terminal/disposal proof, descendant
+cleanup or controller-restart recovery. Managed read continuation and native QGA acceptance remain
+open.
 
 `_execution_result.py` reduces an operation-owned inline outcome into those public facts. The fixed
 inline helper accepts retrospective normal completion only on CPython 3.11 through 3.14, after its
