@@ -1343,6 +1343,8 @@ controller restart and other carriers still need their separately tracked recove
 deadline-then-closure, interruption after ACK and terminal publication, wrong nonce, changed
 binding, unsettled local custody and unchanged application UNKNOWN before native acceptance.
 
+### Fenced lifecycle recovery
+
 Recovery must be fenced from a delayed original controller before it mutates an old obligation. The
 logical operation keeps its stable random operation identifier, while each database owner carries a
 separate random generation identifier. Initial acquisition creates both. A recovery controller
