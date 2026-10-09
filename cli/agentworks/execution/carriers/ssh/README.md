@@ -113,9 +113,12 @@ are retained, including failed publication evidence. There is no automatic clean
 synchronization. Code rollback does not authorize rolling trust back or deleting learned evidence.
 
 Managed storage uses exclusive creation, a permanent operating-system lock, restrictive POSIX modes
-and atomic manifest replacement. It requires an operator-controlled local parent directory. It does
-not defend against hostile code running as the same local user. Windows ACL and crash-durability
-acceptance still requires native validation; POSIX permissions do not establish those properties.
+and atomic manifest replacement. Shared admission locks allow independent readers to overlap.
+Maintenance holds an exclusive lock through manifest replacement, directory flushing and recording
+blocked state after failure; readers refuse contention rather than admit an unconfirmed publication.
+It requires an operator-controlled local parent directory. It does not defend against hostile code
+running as the same local user. Windows ACL and crash-durability acceptance still requires native
+validation; POSIX permissions do not establish those properties.
 
 ## New-resource enrollment
 
