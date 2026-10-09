@@ -1683,3 +1683,38 @@ Both exact owned full-suite fixture directories were independently checked for s
 argv, cwd and file-descriptor use after terminal completion, with no permission gaps, before
 removal. Public #832 remains draft at `642dd8af` with the checkpoint label removed during this fix
 round. No next public iteration or completed-carrier checkbox follows from these private results.
+
+
+## Round 1 terminal drain correction
+
+Code `4ba974a5e` integrates the SSH-only terminal drain correction from worker commit
+`5973e783191bf331f25e46f03fcaa0a3e539b348`. Pending bytes previously paused the post-exit budget even
+when the sink accepted each partial write. Continuous inherited output therefore kept collection
+alive until the operation deadline. Only an actual sink refusal (`None`) now pauses the existing
+100 ms budget; positive partial progress consumes it. The operation deadline, pending-first delivery,
+byte validation and native/terminal cleanup requirements remain unchanged.
+
+The original owned flood probe failed 12 of 32 parallel cases: nine reached the two-second deadline
+and three exceeded the existing 1.5-second completion bound. The same wall-clock probe passes all
+32 corrected cases in 0.4536–0.4907 seconds. The strengthened existing fixture adds controlled elapsed
+time for each accepted 1,024-byte partial write, while keeping two real 160 ms sink stalls and the
+original real-time and byte assertions. Old runtime fails all four negative controls with DEADLINE;
+corrected runtime passes four serial and 32 parallel cases in 0.3449–0.3941 seconds with 4,096–7,168
+bytes per stream and 0.10–0.12 seconds of accepted-delivery time. Fixture failures now expose measured
+results and bounded diagnostic tails rather than hiding the child assertion. Worker validation
+passes 507 SSH tests with six skips, full typing and style, and file quality.
+
+The unchanged shared process implementation, blob `ca5d285937b4c873292984f24b58b35e93945378`, has the
+same pending-byte timer condition. An adapted owned probe uses `EndOfInput`, `SinkOutput`, live stdio
+and caller-held `LocalDeliveryCustody`, without a PTY. All 16 controlled-progress cases exhaust the
+operation deadline after 1.62–1.66 seconds of accepted-delivery time instead of returning bounded
+OUTPUT; actual wall time is 0.344–0.384 seconds. All clients exit 0, native custody settles and the
+exact owned descendants are reaped. A preceding wall-clock-only shared probe passes all 32 cases;
+the controlled measurement proves budget accounting, not a measured native platform incident.
+Shared source is untouched and correction belongs to transport. The runnable probe, source pin and
+results are retained at `/tmp/agw-shared-drain-clock-bpg22okn` for coordination.
+
+These are private local measurements. Final independent reviews and combined gates for this
+correction remain pending; native Windows, hosted managed-start and full terminal/RunContext
+acceptance remain open. Public #832 is still draft at `642dd8af` without a checkpoint label during
+round 1 fixes. This record does not close the round or complete the carrier.
