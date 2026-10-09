@@ -196,7 +196,7 @@ partial-update custody. Production writer coexistence and rollback through both 
 paths still require transport composition and native acceptance.
 
 Current shared implementation dependency: transport #833 at
-`dd10ebbeee677570c95f9b0f30688f32f6891aeb`; the public SSH testing pin is
+`dd10ebbeee677570c95f9b0f30688f32f6891aeb`; the preceding public SSH testing pin is
 `642dd8af415ae9334a2975a12778f3be04c6ff65`. The
 [dependency chronology](phase2-results.md#historical-dependency-chronology) retains each earlier
 integration, measured gate and limitation. It does not change completed plan records or the
@@ -204,12 +204,14 @@ integration, measured gate and limitation. It does not change completed plan rec
 
 The complete current SSH and transport native reports are recorded in the
 [feedback disposition](phase2-results.md#full-native-feedback-and-implementation-round-1).
-Implementation feedback/fix round 1 of the three authorized rounds is in progress, with
-`review-requested` removed before fixes. SSH-owned resource interface choices proceed under the
-existing implementation authorization; they do not await another operator API decision. Terminal
-retention still needs transport coordination, and complete RunContext and supported-platform
-acceptance remain open. A new testing signal follows private review, gates and tester
-considerations.
+Implementation feedback/fix round 1 of the three authorized rounds is prepared for handoff after all
+three independent private reviews and the combined local gates. The exact published head and
+checkpoint edge are recorded on #832 after testing considerations; two public fix rounds remain
+after that handoff. `review-requested` was removed before fixes. SSH-owned resource interface
+choices proceed under the existing implementation authorization; they do not await another operator
+API decision. Terminal retention still needs transport coordination, and complete RunContext and
+supported-platform acceptance remain open. A new testing signal follows private review, gates and
+tester considerations.
 
 ### Complete the carrier and migration
 

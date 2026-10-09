@@ -1727,3 +1727,33 @@ SDD lockfile is introduced. Combined gates for this correction remain pending; n
 hosted managed-start and full terminal/RunContext acceptance remain open. Public #832 is still draft
 at `642dd8af` without a checkpoint label during round 1 fixes. This record does not close the round
 or complete the carrier.
+
+## Round 1 corrected checkpoint validation
+
+The complete combined Linux Python 3.12 non-integration suite at reviewed candidate
+`2cba54735f5d108c18f2eb03d82637d679f5d261` passes **17,023 tests, 51 skips and 29 warnings**, exit 0
+in 298.24 seconds. CLI source tree is `e812a756b91205aa5a719943a9b15739027f990c`; subsequent commits
+change only documentation. This clears the local inherited-output failure without changing its
+bounds. Full Ruff and format pass (1,372 files), mypy passes 1,331 sources, frozen sync checks 70
+packages, and Typer isolation passes. File quality passes all 484 Markdown and 457 spelling inputs;
+locked-SDD and whitespace checks pass. Rulesync policy inputs are unchanged from the earlier green
+check. Website, guide, workflow and dependency inputs are unchanged from `eb0089267`; its measured
+160 Python tests, 103 Node tests, four builds and two deterministic comparisons remain the exact
+unchanged-input validation basis.
+
+An initial local invocation without the explicit CI marker selection was interrupted and is not
+acceptance evidence. The successful complete invocation explicitly selects `not integration` and
+uses a fresh private fixture directory with secret variables excluded. Both the interrupted and
+completed fixture directories are retained: the independent same-user process scan finds no matching
+argv, cwd or descriptor use but has one host inspection permission gap, so it does not justify a
+claim of complete independent cleanup. Exact owned probe children and descendants are separately
+reaped by their owning fixtures. No operator resources are removed.
+
+Documentation follow-up records the three private reviews and the finite-output consequence; project
+review separately clears that documentation delta. All prior completed plan blocks remain unchanged
+and the SDD stays unlocked. The new draft checkpoint publishes these corrections plus explicit
+tester considerations before its `review-requested` edge, closing implementation round 1 of 3 with
+two rounds remaining. No next public fix round starts before full reports from that checkpoint.
+Native Windows and hosted managed-start acceptance remain open; the old hosted failure is not
+cleared by this local green run. Full terminal custody, genuine creation/trust authority, both
+usable RunContext paths and complete supported-platform acceptance still gate merge intent.
