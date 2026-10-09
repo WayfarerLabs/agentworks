@@ -17,6 +17,7 @@ from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.ssh.connection import SSHConnection
 from agentworks.execution.carriers.ssh.trust import SSHTrustFiles
+from tests.execution.carriers.ssh._held_resources import EnrollmentCaller
 from tests.execution.carriers.ssh.enrollment_server import LocalSSH, enrollment_server
 
 
@@ -88,3 +89,11 @@ def custody() -> Iterator[LocalDeliveryCustody]:
     retained = LocalDeliveryCustody()
     yield retained
     assert retained.close(Deadline.after(3))
+
+
+@pytest.fixture
+def enrollment_caller(custody: LocalDeliveryCustody, monkeypatch: pytest.MonkeyPatch) -> Iterator[EnrollmentCaller]:
+    caller = EnrollmentCaller(custody)
+    yield caller
+    monkeypatch.undo()
+    assert caller.close(Deadline.after(3))

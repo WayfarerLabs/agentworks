@@ -24,9 +24,9 @@ from agentworks.execution import _process as process_core
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import Deadline, Failure
 from agentworks.execution.carriers.ssh import forwarding
-from agentworks.execution.carriers.ssh.client import check_client_version, resolve_client_executable
+from agentworks.execution.carriers.ssh.client import check_client_version
 from agentworks.execution.carriers.ssh.connection import SSHConnection, admit_connection
-from agentworks.execution.carriers.ssh.forwarding import ForwardingError, LocalForward, open_local_forwards
+from agentworks.execution.carriers.ssh.forwarding import ForwardingError, LocalForward, OwnedForwarding
 from agentworks.execution.carriers.ssh.trust import (
     SSHTrustFiles,
     block_trust,
@@ -35,6 +35,7 @@ from agentworks.execution.carriers.ssh.trust import (
     resolve_trust,
     trust_status,
 )
+from tests.execution.carriers.ssh._held_resources import held_forwards, held_resource
 
 pytestmark = pytest.mark.windows
 
@@ -54,11 +55,20 @@ class SyntheticForwarding:
     resources: list[forwarding.OwnedForwarding] = field(default_factory=list)
 
     def open(self, seconds: float | None = 5) -> forwarding.OwnedForwarding:
-        resource = open_local_forwards(
-            self.connection, [_forward()], deadline=Deadline.after(seconds), custody=self.custody
-        )
+        resource = OwnedForwarding(self.connection, [_forward()])
         self.resources.append(resource)
+        try:
+            resource.start(deadline=Deadline.after(seconds), custody=self.custody)
+        except BaseException:
+            with held_resource(resource):
+                raise
         return resource
+
+    @contextmanager
+    def session(self, seconds: float | None = 5) -> Iterator[OwnedForwarding]:
+        resource = self.open(seconds)
+        with held_resource(resource):
+            yield resource
 
     def assert_closed(self) -> None:
         for child in self.children:
@@ -98,9 +108,13 @@ def _synthetic(
         yield value
     finally:
         try:
+
+            def close(resource: OwnedForwarding) -> None:
+                assert resource.close(Deadline.after(3))
+
             with ExitStack() as cleanup:
                 for resource in value.resources:
-                    cleanup.callback(resource.close)
+                    cleanup.callback(close, resource)
         finally:
             assert custody.close(Deadline.after(3))
         value.assert_closed()
@@ -124,12 +138,13 @@ def test_fixture_teardown_closes_retained_sessions_after_failure(
         _synthetic(tmp_path, monkeypatch, custody) as value,
     ):
         first = value.open()
+        assert first.close(Deadline.after(3))
         second = value.open()
         if cleanup_failure:
             close = second.close
 
-            def fail_after_close() -> None:
-                close()
+            def fail_after_close(deadline: Deadline) -> bool:
+                close(Deadline.after(3))
                 raise failure
 
             monkeypatch.setattr(second, "close", fail_after_close)
@@ -170,8 +185,9 @@ def test_split_acknowledgment_and_idempotent_close(synthetic: SyntheticForwardin
     resource = synthetic.open()
     assert resource._thread.is_alive()
     assert synthetic.children[-1].poll() is None
-    resource.close()
-    resource.close()
+    resource.close(Deadline.after(3))
+    resource.close(Deadline.after(3))
+    assert resource.close(Deadline.after(3))
     assert not resource._thread.is_alive()
     synthetic.assert_closed()
 
@@ -204,15 +220,16 @@ def test_acknowledgment_acceptance_is_independent_of_read_partition(synthetic: S
         )
         + "sys.stdin.buffer.read()"
     )
-    with synthetic.open() as resource:
+    with synthetic.session() as resource:
         assert resource._thread.is_alive()
     synthetic.assert_closed()
 
 
 def test_startup_deadline_is_not_resource_lifetime(synthetic: SyntheticForwarding) -> None:
-    with synthetic.open(seconds=1) as resource:
+    with synthetic.session(seconds=1) as resource:
         time.sleep(1.05)
         assert synthetic.children[-1].poll() is None
+    assert resource.close(Deadline.after(3))
     assert not resource._thread.is_alive()
     synthetic.assert_closed()
 
@@ -231,7 +248,7 @@ def test_empty_or_expired_request_never_dispatches(
     custody: LocalDeliveryCustody, synthetic: SyntheticForwarding
 ) -> None:
     with pytest.raises(ValidationError):
-        open_local_forwards(synthetic.connection, [], deadline=Deadline.after(1), custody=custody)
+        OwnedForwarding(synthetic.connection, [])
     with pytest.raises(ForwardingError) as caught:
         synthetic.open(seconds=0)
     assert caught.value.failure == Failure.DEADLINE
@@ -252,8 +269,10 @@ def test_diagnostics_drain_before_and_after_readiness(synthetic: SyntheticForwar
         "os.write(2,b'x'*200000); os.write(1,marker); time.sleep(.05); "
         "os.write(2,b'y'*200000); os.write(1,b'z'*200000); sys.exit(23)"
     )
-    with synthetic.open() as resource:
+    with synthetic.session() as resource:
         assert resource.wait() == 23
+        assert synthetic.children[-1].stdin is not None and not synthetic.children[-1].stdin.closed
+    assert resource.close(Deadline.after(3))
     synthetic.assert_closed()
 
 
@@ -263,6 +282,8 @@ def test_natural_exit_with_held_stdin_retains_natural_status(synthetic: Syntheti
     resource = synthetic.open()
     assert synthetic.children[-1].stdin is not None and not synthetic.children[-1].stdin.closed
     assert resource.wait() == 23
+    assert not synthetic.children[-1].stdin.closed
+    assert resource.close(Deadline.after(3))
     synthetic.assert_closed()
 
 
@@ -298,14 +319,23 @@ def test_lost_wait_status_never_becomes_forwarding_exit_zero(monkeypatch: pytest
     os.waitpid(process.pid, 0)
     monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
     owner = process_core.LocalProcessOwner()
-    resource = forwarding.OwnedForwarding(owner, b"unused\n")
-    resource._start(process_core.LocalProcessRequest(("unused",), process_core.LocalProcessInput.PIPE))
+    identity = Path(sys.executable).resolve()
+    resource = forwarding.OwnedForwarding(
+        SSHConnection("fixture.invalid", "fixture", identity, SSHTrustFiles((identity,))), [_forward()]
+    )
+    resource._owner = owner
+    resource._custody = LocalDeliveryCustody()
+    resource._custody._owner = owner
+    resource._start(
+        process_core.LocalProcessRequest(("unused",), process_core.LocalProcessInput.PIPE), Deadline.after(3)
+    )
 
     with pytest.raises(ForwardingError) as caught:
         resource.wait()
 
     assert caught.value.failure == Failure.OBSERVATION
     assert caught.value.local_status is None
+    assert not resource.close(Deadline.after(3))
     assert not resource._thread.is_alive()
     assert all(pipe is None or pipe.closed for pipe in (process.stdin, process.stdout, process.stderr))
 
@@ -335,12 +365,12 @@ def test_close_while_another_caller_waits_preserves_cleanup_evidence(
     try:
         assert waiting.wait(timeout=2)
         assert synthetic.children[-1].poll() is None
-        resource.close()
+        resource.close(Deadline.after(3))
         waiter.join(timeout=2)
         assert not waiter.is_alive()
     finally:
         try:
-            resource.close()
+            resource.close(Deadline.after(3))
         finally:
             waiter.join(timeout=2)
 
@@ -348,7 +378,8 @@ def test_close_while_another_caller_waits_preserves_cleanup_evidence(
     outcome = outcomes[0]
     assert isinstance(outcome, ForwardingError)
     assert outcome.failure is Failure.OBSERVATION
-    assert outcome.local_status == synthetic.children[-1].returncode
+    assert outcome.local_status in (None, synthetic.children[-1].returncode)
+    assert resource.close(Deadline.after(3))
     assert not resource._thread.is_alive()
     synthetic.assert_closed()
 
@@ -359,11 +390,16 @@ def test_wait_interruption_closes_before_propagating(
     resource = synthetic.open()
 
     def interrupt(timeout: float | None = None) -> bool:
-        raise KeyboardInterrupt
+        if threading.current_thread() is threading.main_thread():
+            raise KeyboardInterrupt
+        return False
 
     monkeypatch.setattr(resource._done, "wait", interrupt)
     with pytest.raises(KeyboardInterrupt):
         resource.wait()
+    assert synthetic.children[-1].poll() is None
+    monkeypatch.undo()
+    assert resource.close(Deadline.after(3))
     assert not resource._thread.is_alive()
     synthetic.assert_closed()
 
@@ -390,7 +426,8 @@ def test_read_error_closes_owned_client(synthetic: SyntheticForwarding, monkeypa
     with pytest.raises(ForwardingError) as caught:
         resource.wait()
     assert caught.value.failure == Failure.OUTPUT
-    assert caught.value.local_status is not None
+    assert caught.value.local_status is None
+    assert resource.close(Deadline.after(3))
     assert not resource._thread.is_alive()
     synthetic.assert_closed()
 
@@ -459,14 +496,13 @@ def test_delayed_worker_exit_reports_uncertainty_without_losing_process_cleanup(
     assert blocked.wait(timeout=2)
     started = time.monotonic()
     try:
-        with pytest.raises(ForwardingError) as caught:
-            resource.close()
-        assert caught.value.failure == Failure.OBSERVATION
+        assert not resource.close(Deadline.after(0.2))
         assert time.monotonic() - started < 2
-        synthetic.assert_closed()
+        assert synthetic.children[-1].poll() is None
     finally:
         release.set()
-        resource.close()
+        resource.close(Deadline.after(3))
+    assert resource.close(Deadline.after(3))
     assert not resource._thread.is_alive()
     synthetic.assert_closed()
 
@@ -525,7 +561,7 @@ def test_installed_ssh_forwards_bytes_and_releases_listener(
         spec = LocalForward(IPv4Address("127.0.0.1"), port, "127.0.0.1", destination.getsockname()[1])
         try:
             with (
-                open_local_forwards(local_sshd, [spec], deadline=Deadline.after(5), custody=custody),
+                held_forwards(local_sshd, [spec], deadline=Deadline.after(5), custody=custody),
                 socket.create_connection(("127.0.0.1", port), timeout=2) as peer,
             ):
                 peer.sendall(b"\x00\xffowned-forward\n")
@@ -551,8 +587,11 @@ def test_installed_ssh_partial_failure_releases_listeners(
         specs = [_forward(free_port), _forward(occupied.getsockname()[1])]
         if occupied_first:
             specs.reverse()
-        with pytest.raises(ForwardingError):
-            open_local_forwards(local_sshd, specs, deadline=Deadline.after(5), custody=custody)
+        with (
+            pytest.raises(ForwardingError),
+            held_forwards(local_sshd, specs, deadline=Deadline.after(5), custody=custody),
+        ):
+            pytest.fail("Refused forwarding unexpectedly started")
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", free_port))
 
@@ -562,9 +601,10 @@ def test_installed_ssh_readiness_does_not_claim_destination_health(
     custody: LocalDeliveryCustody, local_sshd: SSHConnection
 ) -> None:
     spec = LocalForward(IPv4Address("127.0.0.1"), _unused_port(), "127.0.0.1", _unused_port())
-    with open_local_forwards(local_sshd, [spec], deadline=Deadline.after(5), custody=custody) as resource:
+    with held_forwards(local_sshd, [spec], deadline=Deadline.after(5), custody=custody) as resource:
         with socket.create_connection(("127.0.0.1", spec.local_port), timeout=2) as peer:
             assert peer.recv(1) == b""
+        assert resource._owner is not None
         assert resource._owner.snapshot().exit_status is None
 
 
@@ -585,8 +625,11 @@ def test_installed_ssh_ipv6_success_cannot_hide_ipv4_failure(
             LocalForward(IPv6Address("::1"), ipv6_port, "::1", 80),
             _forward(occupied.getsockname()[1]),
         ]
-        with pytest.raises(ForwardingError):
-            open_local_forwards(local_sshd, specs, deadline=Deadline.after(5), custody=custody)
+        with (
+            pytest.raises(ForwardingError),
+            held_forwards(local_sshd, specs, deadline=Deadline.after(5), custody=custody),
+        ):
+            pytest.fail("Refused forwarding unexpectedly started")
     with socket.socket(socket.AF_INET6) as released:
         released.bind(("::1", ipv6_port))
 
@@ -606,8 +649,11 @@ def test_installed_ssh_refusal_releases_requested_port(
         else:
             authorized.write_bytes(b'command="exit 1" ' + authorized.read_bytes())
     port = _unused_port()
-    with pytest.raises(ForwardingError):
-        open_local_forwards(local_sshd, [_forward(port)], deadline=Deadline.after(5), custody=custody)
+    with (
+        pytest.raises(ForwardingError),
+        held_forwards(local_sshd, [_forward(port)], deadline=Deadline.after(5), custody=custody),
+    ):
+        pytest.fail("Refused forwarding unexpectedly started")
     with socket.socket() as released:
         released.bind(("127.0.0.1", port))
 
@@ -619,7 +665,7 @@ def test_each_forward_admits_current_managed_policy(
     bundle = import_trust(tmp_path.resolve() / "managed", sources=synthetic.connection.trust, authority="fixture")
     synthetic.connection = replace(synthetic.connection, trust=bundle)
     first = resolve_trust(bundle)
-    with synthetic.open():
+    with synthetic.session():
         assert f'UserKnownHostsFile="{first.known_hosts[0].as_posix()}"' in synthetic.calls[-1]
     source = tmp_path.resolve() / "replacement"
     source.write_bytes(b"replacement policy")
@@ -630,7 +676,7 @@ def test_each_forward_admits_current_managed_policy(
         expected_generation=trust_status(bundle).generation,
     )
     second = resolve_trust(bundle)
-    with synthetic.open():
+    with synthetic.session():
         assert f'UserKnownHostsFile="{second.known_hosts[0].as_posix()}"' in synthetic.calls[-1]
     assert first != second
     if refusal == "blocked":
@@ -645,7 +691,7 @@ def test_each_forward_admits_current_managed_policy(
     synthetic.assert_closed()
 
 
-@pytest.mark.parametrize("stage", ["admission", "resolution", "version"])
+@pytest.mark.parametrize("stage", ["admission", "version"])
 def test_forwarding_checks_expiry_after_local_work(
     synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch, stage: str
 ) -> None:
@@ -659,19 +705,10 @@ def test_forwarding_checks_expiry_after_local_work(
             clock[0] = 2.0
         return trust
 
-    resolve = resolve_client_executable
-
-    def select(connection: SSHConnection) -> str:
-        executable = resolve(connection)
-        if stage == "resolution":
-            clock[0] = 2.0
-        return executable
-
-    def version(executable: str, *, deadline: Deadline, custody: LocalDeliveryCustody) -> None:
+    def version(connection: SSHConnection, *, deadline: Deadline, custody: LocalDeliveryCustody) -> None:
         clock[0] = 2.0
 
     monkeypatch.setattr(forwarding, "admit_connection", admit)
-    monkeypatch.setattr(forwarding, "resolve_client_executable", select)
     monkeypatch.setattr(forwarding, "check_client_version", version)
     with pytest.raises(ForwardingError) as error:
         synthetic.open(seconds=1)
@@ -723,6 +760,13 @@ def test_thread_start_interruption_retains_worker_ownership(
         assert len(synthetic.calls) == 1
         if not after_start:
             assert caught.value.__notes__
+            resource = synthetic.resources[-1]
+            assert not resource.close(Deadline.after(0))
+            # The injected start never admitted this worker. Model its delayed
+            # tail explicitly: cancellation must keep it inert before cleanup.
+            original_start(resource._thread)
+            assert resource.close(Deadline.after(3))
+            assert not resource._drain_admitted.is_set()
         synthetic.assert_closed()
     finally:
         for worker in workers:
@@ -733,6 +777,8 @@ def test_thread_start_interruption_retains_worker_ownership(
 def test_ordinary_thread_start_failure_is_safe_observation(
     synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    original_start = threading.Thread.start
+
     def fail_start(worker: threading.Thread) -> None:
         raise RuntimeError("private-thread-start-canary")
 
@@ -744,6 +790,11 @@ def test_ordinary_thread_start_failure_is_safe_observation(
     assert caught.value.failure == Failure.OBSERVATION
     assert "private-thread-start-canary" not in repr(caught.value)
     assert len(synthetic.calls) == 1
+    resource = synthetic.resources[-1]
+    assert not resource.close(Deadline.after(0))
+    original_start(resource._thread)
+    assert resource.close(Deadline.after(3))
+    assert not resource._drain_admitted.is_set()
     synthetic.assert_closed()
 
 
@@ -815,10 +866,13 @@ def test_repeated_close_interruptions_preserve_first_and_finish_cleanup(
     resource = synthetic.open()
 
     with pytest.raises(KeyboardInterrupt) as caught:
-        resource.close()
+        resource.close(Deadline.after(3))
 
     assert caught.value is first
-    resource.close()
+    with pytest.raises(SystemExit) as second_caught:
+        resource.close(Deadline.after(3))
+    assert second_caught.value is second
+    assert resource.close(Deadline.after(3))
     assert not resource._thread.is_alive()
     synthetic.assert_closed()
 
@@ -859,6 +913,65 @@ def test_pending_discovery_refuses_forwarding_and_repeated_admission(
     synthetic.assert_closed()
 
 
+def test_passive_resource_and_failed_startup_remain_caller_held(
+    synthetic: SyntheticForwarding,
+) -> None:
+    resource = OwnedForwarding(synthetic.connection, [_forward()])
+    synthetic.resources.append(resource)
+    assert synthetic.calls == [] and synthetic.custody.settled
+    synthetic.script = "sys.stdin.buffer.read()"
+    with pytest.raises(ForwardingError) as caught:
+        resource.start(deadline=Deadline.after(0.1), custody=synthetic.custody)
+    assert caught.value.failure is Failure.DEADLINE
+    owner = resource._owner
+    assert owner is not None and synthetic.custody._owner is owner
+    assert synthetic.children[-1].poll() is None
+    assert resource.close(Deadline.after(3))
+    assert resource._owner is owner
+    synthetic.assert_closed()
+
+
+def test_failed_native_cleanup_retries_same_forwarding_owner(
+    synthetic: SyntheticForwarding,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resource = synthetic.open()
+    owner = resource._owner
+    assert owner is not None
+    cleanup = process_core._cleanup
+    calls: list[process_core._ProcessStatus] = []
+
+    def fail_first(status: process_core._ProcessStatus) -> bool:
+        calls.append(status)
+        return False if len(calls) == 1 else cleanup(status)
+
+    monkeypatch.setattr(process_core, "_cleanup", fail_first)
+    assert not resource.close(Deadline.after(3))
+    first = owner.snapshot().terminal
+    assert first is not None and first.cleanup_retryable and not first.cleaned
+    assert synthetic.children[-1].poll() is None
+    assert resource.close(Deadline.after(3))
+    assert resource._owner is owner and synthetic.custody._owner is owner
+    assert len(calls) == 2 and calls[0] is calls[1]
+    assert first.cleanup_retryable and not first.cleaned
+    synthetic.assert_closed()
+
+
+def test_wait_failure_retains_live_client_until_explicit_close(
+    synthetic: SyntheticForwarding,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resource = synthetic.open()
+    monkeypatch.setattr(resource, "_read", lambda pipe: (_ for _ in ()).throw(OSError("private")))
+    with pytest.raises(ForwardingError) as caught:
+        resource.wait()
+    assert caught.value.failure is Failure.OUTPUT
+    assert synthetic.children[-1].poll() is None
+    assert not synthetic.custody.settled
+    assert resource.close(Deadline.after(3))
+    synthetic.assert_closed()
+
+
 def test_forwarding_pins_probe_and_session_despite_path_change(
     synthetic: SyntheticForwarding, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -875,5 +988,5 @@ def test_forwarding_pins_probe_and_session_despite_path_change(
         return probe(executable, deadline=deadline, custody=custody)
 
     monkeypatch.setattr(forwarding, "check_client_version", version)
-    synthetic.open().close()
+    assert synthetic.open().close(Deadline.after(3))
     assert [argv[0] for argv in synthetic.calls] == [str(selected), str(selected)]

@@ -12,13 +12,12 @@ from threading import Event, Lock, Thread
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ConnectivityError, StateError, ValidationError
+from agentworks.execution._process import Deadline as ProcessDeadline
 from agentworks.execution._process import (
     LocalProcessInput,
     LocalProcessOwner,
     LocalProcessPipes,
     LocalProcessRequest,
-    LocalProcessTerminal,
-    _retain_control_exception,
 )
 from agentworks.execution.carrier import Failure, PreparedInvocation
 from agentworks.execution.carriers.ssh._io import _child_environment
@@ -27,8 +26,7 @@ from agentworks.execution.carriers.ssh.connection import admit_connection, build
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from types import TracebackType
-    from typing import IO, Self
+    from typing import IO
 
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.carrier import Deadline
@@ -36,7 +34,6 @@ if TYPE_CHECKING:
 
 _POLL_SECONDS = 0.01
 _CHUNK = 65_536
-_JOIN_SECONDS = 1.0
 _EXIT_DRAIN_SECONDS = 0.1
 
 
@@ -84,17 +81,22 @@ class ForwardingError(ConnectivityError):
 
 
 class OwnedForwarding:
-    """Own listeners, client and drain worker until close or natural client exit.
+    """Caller-held forwarding session, including failed or interrupted startup.
 
-    Readiness proves local setup and an authenticated held session, not destination
-    health or permission for a later forwarded connection. Call close or use a
-    context manager even when wait is never called. Only the drain worker touches
-    process pipes; callers may close while another caller waits.
+    Construction is passive. Start and close are serialized by the caller;
+    another caller may observe wait while close is requested. Close with a fresh
+    finite deadline and retain this resource whenever settlement returns False.
     """
 
-    def __init__(self, owner: LocalProcessOwner, marker: bytes) -> None:
-        self._owner = owner
-        self._marker = marker
+    def __init__(self, connection: SSHConnection, forwards: Sequence[LocalForward]) -> None:
+        requests = tuple(forwards)
+        if not requests or any(not isinstance(forward, LocalForward) for forward in requests):
+            raise ValidationError("SSH forwarding requires at least one explicit local forward")
+        self._connection = connection
+        self._requests = requests
+        self._custody: LocalDeliveryCustody | None = None
+        self._owner: LocalProcessOwner | None = None
+        self._marker = b""
         self._ready = Event()
         self._done = Event()
         self._stop = Event()
@@ -103,120 +105,128 @@ class OwnedForwarding:
         self._borrow_lock = Lock()
         self._close_lock = Lock()
         self._worker_start_attempted = False
+        self._started = False
+        self._closed = False
+        self._settled = False
         self._thread = Thread(target=self._drain, name="ssh-forwarding")
 
-    def __enter__(self) -> Self:
-        return self
+    def start(self, *, deadline: Deadline, custody: LocalDeliveryCustody) -> None:
+        """Establish readiness once; failures leave the same resource caller-held."""
+        if self._started or self._closed:
+            raise StateError("SSH forwarding startup is no longer available")
+        if deadline.expires_at is None:
+            raise ValidationError("SSH forwarding startup requires a finite deadline")
+        if not custody.settled:
+            raise StateError("Local delivery custody is unsettled")
+        self._started = True
+        self._custody = custody
+        if deadline.expired:
+            raise ForwardingError(Failure.DEADLINE)
+        try:
+            trust = admit_connection(self._connection)
+        except (OSError, StateError, ValidationError):
+            raise ForwardingError(Failure.DISPATCH) from None
+        if deadline.expired:
+            raise ForwardingError(Failure.DEADLINE)
+        try:
+            executable = resolve_client_executable(self._connection)
+        except (OSError, ValidationError):
+            raise ForwardingError(Failure.DISPATCH) from None
+        if deadline.expired:
+            raise ForwardingError(Failure.DEADLINE)
+        failure = check_client_version(executable, deadline=deadline, custody=custody)
+        if failure is not None:
+            raise ForwardingError(failure)
+        if not custody.settled:
+            raise ForwardingError(Failure.OBSERVATION)
+        if deadline.expired:
+            raise ForwardingError(Failure.DEADLINE)
+        marker = f"agw-forward-ready-{secrets.token_hex(16)}"
+        self._marker = (marker + "\n").encode("ascii")
+        invocation = PreparedInvocation(("sh", "-c", f"printf '%s\\n' '{marker}'; IFS= read -r _; exit 0"))
+        argv = build_ssh_argv(
+            self._connection,
+            invocation,
+            trust=trust,
+            executable=executable,
+            local_forwards=tuple(forward._operand() for forward in self._requests),
+        )
+        if deadline.expired:
+            raise ForwardingError(Failure.DEADLINE)
+        try:
+            environment = _child_environment()
+            request = LocalProcessRequest(
+                tuple(argv),
+                LocalProcessInput.PIPE,
+                None if environment is None else tuple(environment.items()),
+            )
+        except (OSError, ValueError):
+            raise ForwardingError(Failure.DISPATCH) from None
+        self._owner = custody.begin_process()
+        self._start(request, deadline)
+        self._await_ready(deadline)
 
-    def __exit__(
-        self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None
-    ) -> None:
-        self._close_preserving(exc)
-
-    def close(self) -> None:
-        """Stop pipe use, then settle the shared process owner exactly once."""
-        self._settle(None)
-
-    def _start(self, request: LocalProcessRequest) -> None:
-        """Start the inert drainer, then admit it only after owner startup."""
+    def _start(self, request: LocalProcessRequest, deadline: Deadline) -> None:
+        """Keep the pipe worker inert until shared owner admission returns."""
+        assert self._owner is not None
         self._worker_start_attempted = True
-        self._thread.start()
-        self._owner.start(request)
+        try:
+            self._thread.start()
+        except (OSError, RuntimeError):
+            raise ForwardingError(Failure.OBSERVATION) from None
+        self._owner.start(request, close_deadline=ProcessDeadline(deadline.expires_at))
         self._drain_admitted.set()
 
-    def _close_preserving(self, error: BaseException | None) -> None:
-        if error is None or not isinstance(error, Exception):
-            self._settle(error)
-            return
+    def close(self, deadline: Deadline) -> bool:
+        """Stop and join pipe borrowers before retrying exact native custody."""
+        if deadline.expires_at is None:
+            raise ValidationError("SSH forwarding cleanup requires a finite deadline")
+        self._closed = True
+        if self._settled:
+            return True
+        remaining = deadline.remaining()
+        assert remaining is not None
+        if not self._close_lock.acquire(timeout=remaining):
+            return False
         try:
-            self._settle(None)
-        except ForwardingError:
-            error.add_note("Local SSH forwarding cleanup did not complete within its bound.")
-
-    def _settle(self, interruption: BaseException | None) -> LocalProcessTerminal:
-        while True:
-            try:
-                if self._close_lock.acquire(timeout=_POLL_SECONDS):
-                    break
-            except BaseException as error:
-                interruption = _retain_control_exception(interruption, error)
-        try:
-            worker_stopped, interruption = self._stop_worker(interruption)
-            while True:
-                try:
-                    terminal = self._owner.close()
-                    break
-                except BaseException as error:
-                    interruption = _retain_control_exception(interruption, error)
-                    observed = self._owner.snapshot().terminal
-                    if observed is not None:
-                        terminal = observed
-                        break
+            self._stop.set()
+            if self._worker_start_attempted:
+                remaining = deadline.remaining()
+                assert remaining is not None
+                if not self._done.wait(remaining):
+                    return False
+                remaining = deadline.remaining()
+                assert remaining is not None
+                self._thread.join(timeout=remaining)
+                if self._thread.is_alive():
+                    return False
+            self._settled = self._custody is None or self._custody.close(deadline)
+            return self._settled
         finally:
             self._close_lock.release()
 
-        cleanup_complete = worker_stopped and terminal.cleaned
-        if interruption is not None:
-            if not cleanup_complete:
-                interruption.add_note("Local SSH forwarding cleanup did not complete within its bound.")
-            raise interruption
-        if not cleanup_complete:
-            raise ForwardingError(Failure.OBSERVATION, terminal.local_status)
-        if terminal.observation_failed:
-            raise ForwardingError(Failure.OBSERVATION, terminal.local_status)
-        return terminal
-
-    def _stop_worker(self, interruption: BaseException | None) -> tuple[bool, BaseException | None]:
-        while True:
-            try:
-                with self._borrow_lock:
-                    self._stop.set()
-                break
-            except BaseException as error:
-                interruption = _retain_control_exception(interruption, error)
-
-        if not self._worker_start_attempted:
-            return True, interruption
-
-        wait_until = time.monotonic() + _JOIN_SECONDS
-        while not self._done.is_set():
-            remaining = wait_until - time.monotonic()
-            if remaining <= 0:
-                return False, interruption
-            try:
-                self._done.wait(min(_POLL_SECONDS, remaining))
-            except BaseException as error:
-                interruption = _retain_control_exception(interruption, error)
-        while self._thread.is_alive():
-            remaining = wait_until - time.monotonic()
-            if remaining <= 0:
-                return False, interruption
-            try:
-                self._thread.join(timeout=min(_POLL_SECONDS, remaining))
-            except BaseException as error:
-                interruption = _retain_control_exception(interruption, error)
-        return True, interruption
-
     def wait(self) -> int:
-        """Return the local client's status; interruption closes and propagates."""
-        try:
-            while not self._done.wait(_POLL_SECONDS):
-                pass
-            terminal = self._settle(None)
-            if self._failure is not None:
-                raise ForwardingError(self._failure, terminal.local_status)
-            if terminal.exit_status is None:
-                raise ForwardingError(Failure.OBSERVATION, terminal.local_status)
-            return terminal.exit_status
-        except BaseException as error:
-            self._close_preserving(error)
-            raise
+        """Observe natural exit without cleanup; interruption retains ownership."""
+        if self._owner is None:
+            raise StateError("SSH forwarding has not admitted a session")
+        while not self._done.wait(_POLL_SECONDS):
+            pass
+        snapshot = self._owner.snapshot()
+        terminal = snapshot.terminal
+        status = snapshot.exit_status if terminal is None else terminal.exit_status
+        local_status = snapshot.exit_status if terminal is None else terminal.local_status
+        if self._failure is not None:
+            raise ForwardingError(self._failure, local_status)
+        if snapshot.observation_failed or status is None:
+            raise ForwardingError(Failure.OBSERVATION, local_status)
+        return status
 
     def _await_ready(self, deadline: Deadline) -> None:
         while True:
             if deadline.expired:
                 raise ForwardingError(Failure.DEADLINE)
             if self._done.is_set():
+                assert self._owner is not None
                 snapshot = self._owner.snapshot()
                 local_status = snapshot.terminal.local_status if snapshot.terminal is not None else snapshot.exit_status
                 raise ForwardingError(self._failure or Failure.OBSERVATION, local_status)
@@ -251,6 +261,7 @@ class OwnedForwarding:
             if not configured:
                 return
         while not self._stop.is_set():
+            assert self._owner is not None
             snapshot = self._owner.snapshot()
             if snapshot.observation_failed:
                 self._failure = Failure.OBSERVATION
@@ -296,6 +307,7 @@ class OwnedForwarding:
                 if self._stop.wait(_POLL_SECONDS):
                     return
             while not self._stop.is_set():
+                assert self._owner is not None
                 snapshot = self._owner.snapshot()
                 if snapshot.observation_failed:
                     self._failure = Failure.OBSERVATION
@@ -318,74 +330,3 @@ class OwnedForwarding:
             self._failure = Failure.OBSERVATION
         finally:
             self._done.set()
-
-
-def open_local_forwards(
-    connection: SSHConnection, forwards: Sequence[LocalForward], *, deadline: Deadline, custody: LocalDeliveryCustody
-) -> OwnedForwarding:
-    """Open once and require a POSIX held-session acknowledgment before return.
-
-    The startup deadline covers validation, client checking and authentication.
-    It does not become a lifetime deadline for the returned resource. Accounts
-    that prohibit command execution cannot establish this forwarding resource.
-    """
-    requests = tuple(forwards)
-    if not requests or any(not isinstance(forward, LocalForward) for forward in requests):
-        raise ValidationError("SSH forwarding requires at least one explicit local forward")
-    if not custody.settled:
-        raise StateError("Local delivery custody is unsettled")
-    if deadline.expired:
-        raise ForwardingError(Failure.DEADLINE)
-    try:
-        trust = admit_connection(connection)
-    except (OSError, StateError, ValidationError):
-        raise ForwardingError(Failure.DISPATCH) from None
-    if deadline.expired:
-        raise ForwardingError(Failure.DEADLINE)
-    try:
-        executable = resolve_client_executable(connection)
-    except (OSError, ValidationError):
-        raise ForwardingError(Failure.DISPATCH) from None
-    if deadline.expired:
-        raise ForwardingError(Failure.DEADLINE)
-    failure = check_client_version(executable, deadline=deadline, custody=custody)
-    if failure is not None:
-        raise ForwardingError(failure)
-    if deadline.expired:
-        raise ForwardingError(Failure.DEADLINE)
-    marker = f"agw-forward-ready-{secrets.token_hex(16)}"
-    invocation = PreparedInvocation(("sh", "-c", f"printf '%s\\n' '{marker}'; IFS= read -r _; exit 0"))
-    argv = build_ssh_argv(
-        connection,
-        invocation,
-        trust=trust,
-        executable=executable,
-        local_forwards=tuple(forward._operand() for forward in requests),
-    )
-    if deadline.expired:
-        raise ForwardingError(Failure.DEADLINE)
-    try:
-        environment = _child_environment()
-        request = LocalProcessRequest(
-            tuple(argv),
-            LocalProcessInput.PIPE,
-            None if environment is None else tuple(environment.items()),
-        )
-    except (OSError, ValueError):
-        raise ForwardingError(Failure.DISPATCH) from None
-    owner = LocalProcessOwner()
-    resource = OwnedForwarding(owner, (marker + "\n").encode("ascii"))
-    try:
-        resource._start(request)
-        del request
-        resource._await_ready(deadline)
-        return resource
-    except BaseException as error:
-        resource._close_preserving(error)
-        if isinstance(error, (OSError, RuntimeError)):
-            terminal = owner.snapshot().terminal
-            raise ForwardingError(
-                Failure.OBSERVATION,
-                None if terminal is None else terminal.local_status,
-            ) from None
-        raise

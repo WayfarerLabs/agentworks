@@ -130,16 +130,11 @@ validation; POSIX permissions do not establish those properties.
 
 ## New-resource enrollment
 
-The `enrollment` module declares `SSHCreationProvenance`, `enroll_new_target` and
-`recover_enrollment`, but the maintenance entry points are currently unusable: their probes have not
-adopted mandatory caller-held delivery custody. Production creation-flow binding is also
-unavailable. Ordinary carrier execution never enrolls.
-
-Enrollment adoption requires an enclosing resource lifetime that retains the candidate-file lock
-until the exact native client settles, including pending construction and cleanup. Candidate bytes
-must receive their final flush after native settlement; an earlier flush can be followed by late
-client writes. Retaining process custody alone does not keep that lock held or establish durable
-candidate evidence. Do not use these entry points until that resource lifetime is implemented.
+The `enrollment` module supplies explicit creation and strict recovery maintenance. Callers retain
+`SSHEnrollmentCustody` before either operation; it holds both the shared delivery storage and the
+candidate writer lock until explicit bounded cleanup proves native settlement and flushes the final
+bytes. Production creation-flow binding remains transport-owned and unavailable until its provenance
+and publication composition is accepted. Ordinary carrier execution never enrolls.
 
 The enrollment contract requires trusted creation provenance, a managed bundle and a finite
 deadline. One private candidate belongs to the stable creation ID and records the endpoint and base
@@ -154,6 +149,13 @@ bundle and creation ID; changing them to obtain another first-contact attempt is
 Verified candidate evidence still requires explicit complete-policy import or refresh, including
 applicable CA and revocation sources and the expected generation. Ordinary connections stay on the
 managed trust reference. Candidate publication does not authorize deleting the retained evidence.
+
+Enrollment callers create `SSHEnrollmentCustody(delivery)` before first contact or strict recovery
+and pass it as `custody`. The resource retains the candidate writer lock across every outcome.
+Explicit `close(deadline)` first settles native writing, then flushes the final candidate and
+releases the lock. `False` keeps writer exclusion for a later retry; a flush error stays explicit
+and keeps the lock. Reserve the supplied delivery storage until close succeeds. A later recovery
+uses a fresh resource with the same creation identity and bundle after prior exclusion releases.
 
 ## Delivery and forwarding
 
@@ -185,15 +187,21 @@ failure is reported on its input or output boundary and still performs bounded l
 
 The shared process core owns client construction separately from caller-driven byte I/O. Its
 native-platform gates also apply to this adapter. Buffered/live execution retains its exact owner in
-the supplied delivery store. Forwarding keeps its separately explicit session owner. Local cleanup
-never establishes remote cancellation.
+the supplied delivery store. Forwarding retains its session owner through that same store. Local
+cleanup never establishes remote cancellation.
 
-`open_local_forwards` requires caller-held `LocalDeliveryCustody` for installed-client discovery and
-accepts explicit `LocalForward` values with numeric bind addresses and literal destinations. The
-caller retains discovery custody through failure and bounded cleanup. The returned `OwnedForwarding`
-is a context manager with `wait()` and idempotent `close()`. Its startup deadline covers connection
-and readiness; the returned resource remains owned until close or client exit. Call close even when
-wait is never used.
+Create `OwnedForwarding(connection, forwards)` before calling `start(deadline=..., custody=...)`.
+The constructor validates explicit `LocalForward` values without admitting trust or starting work.
+The same caller-held `LocalDeliveryCustody` covers discovery and the held session. Failed or
+interrupted startup leaves the same resource available to its caller. Reserve that storage to this
+resource until close succeeds. A successful startup deadline does not cap session lifetime.
+
+`wait()` observes natural exit without cleanup, and interruption retains ownership. Call
+`close(deadline)` explicitly with a fresh finite deadline, even after natural exit. It stops and
+joins pipe borrowers before asking the shared storage for bounded native cleanup. `False` retains
+the same resource and storage for retry. There is no implicit context-manager cleanup. Preserve an
+existing control exception if cleanup also fails, and report sanitized cleanup uncertainty
+separately without attaching live resource capabilities to evidence.
 
 Forwarding uses one foreground client and a held POSIX shell session. It requires compatible
 account-shell execution and an available `sh`. A nonce acknowledgment after listener setup proves an
@@ -205,9 +213,9 @@ The shared owner is retained before launch. An owned worker starts inert and may
 pipes only after shared startup returns, retaining no raw client diagnostics. Closing prevents
 further worker pipe access, settles the shared owner and checks worker termination. The local
 kill/reap allowance is bounded; process construction and total settlement have no proven hard time
-bound. Unproven local cleanup or worker termination raises an observation failure. Cleanup kill
-status is not a natural client exit, and no cleanup claim extends to a remote process after
-connection loss.
+bound. Unproven local cleanup or worker termination returns incomplete cleanup and retains
+ownership. Cleanup kill status is not a natural client exit, and no cleanup claim extends to a
+remote process after connection loss.
 
 The [SSH test guide](../../../../tests/execution/carriers/ssh/README.md) distinguishes local fixture
 coverage from supported-platform integration evidence.
