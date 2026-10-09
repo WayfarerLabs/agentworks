@@ -1632,3 +1632,54 @@ platform R1–R5 workflows. Native Windows client/locking fixes need the next ex
 pin. Tester cleanup deleted its VMs, revoked tokens, closed forwards and stopped beds; residual
 operator-owned offline tailnet records do not grant this lane deletion authority. Full merge
 acceptance remains open, and this SDD remains unlocked.
+
+## Round 1 private ownership corrections
+
+Code `eb0089267cbcc746d6b72bd93da1f996be66c9d7`, source tree
+`2641d209eb1033a2a938afc6b90c9e06a0363f0f`, integrates client selection, trust readers and the first
+held-resource implementation. Its complete local Linux Python 3.12 non-integration suite passes
+**17,022 tests, 51 skips and 29 warnings**, exit 0 in 345.54 seconds. Full Ruff/format passes 1,368
+files and mypy passes 1,331 sources, clearing the three earlier enrollment typing errors. Exact CI
+Typer isolation, frozen sync, file quality, locked-SDD, Rulesync and whitespace pass. Website
+validation passes 160 Python and 103 Node tests, four builds and both deterministic site-base
+comparisons. These are local measurements; native Windows and hosted acceptance remain open.
+
+The three independent private lanes at that pin identify four corrections before handoff:
+
+- Ordinary forwarding thread refusal must not retain an inert native owner forever while waiting for
+  a thread that was never admitted. Stop plus the permanent drainer-admission gate proves a late
+  inert worker cannot borrow pipes; admitted workers still require completion and joining.
+- Enrollment must keep the supplied delivery store fixed. A public reassignment probe otherwise
+  closes a fresh store and releases the writer lock while the original native writer is pending.
+- A fixture owner must retain forwarding before startup and settle coordinators before raw native
+  storage. A pre-yield failure plus incomplete cleanup otherwise permits a separate finalizer to
+  close pipes underneath a paused borrower.
+- A 50 ms setup budget does not establish the pending-native boundary. Expiry must follow proved
+  native admission so filesystem scheduling cannot turn the test into a pre-dispatch refusal.
+
+Code `024bd3f82a9d3d0cccf9f29b5d0b99f042e7eead`, source tree
+`ed52fe1bea32dcf87a695bcceb8e17e6e0f96773`, corrects all four. Project and complexity lanes each
+pass 121 focused tests with two native Windows skips; complexity also records 18 integration
+deselections. Correctness passes all 507 SSH non-integration tests with six skips. The replacement-storage and paused-borrower
+probes now preserve exclusion and native pipes until exact settlement; owned children are reaped.
+All three lanes clear the reviewed ownership corrections for a draft checkpoint, without claiming
+complete terminal, native or RunContext acceptance. Removing forwarding's single-user borrow lock
+and redundant close lock retains the documented serialized lifecycle and actual borrower barrier.
+
+The complete combined suite at that corrected pin is **not green**: one failure, 17,022 passes, 51
+skips and 29 warnings, exit 1 in 273.35 seconds. The sole failure is
+`test_terminal_relay_drain.py::test_alternating_sink_stalls_preserve_bounded_inherited_output[True]`,
+previously reported as an intermittent fixture failure. Its child raises a `CalledProcessError`, but
+the initial trace hides the child assertion and stderr. It is being investigated before a new
+handoff; the successful earlier source does not clear it. The corrected source's Ruff/format, mypy,
+frozen sync, file quality, locked-SDD and whitespace checks pass. Website inputs and CI workflow are
+unchanged from the preceding measured validation.
+
+The optional unused `enrollment_custody` helper has no callers and is removed in `0ad902a79` after
+96 affected resource tests and scoped static checks pass. No production API or effect changes in
+that removal. The full failed-suite evidence retains its earlier exact source pin.
+
+Both exact owned full-suite fixture directories were independently checked for same-user process
+argv, cwd and file-descriptor use after terminal completion, with no permission gaps, before
+removal. Public #832 remains draft at `642dd8af` with the checkpoint label removed during this fix
+round. No next public iteration or completed-carrier checkbox follows from these private results.
