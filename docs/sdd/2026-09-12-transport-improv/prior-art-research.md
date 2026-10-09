@@ -49,6 +49,20 @@ Sources:
 The private factual report and scripted proof remain in the scoped SDK review environment; the
 durable finding above records the observed count and limits without depending on that scratch.
 
+AWS additionally documents that mutating requests can return before their asynchronous workflows
+complete and that later API reads are eventually consistent. Its default-idempotency list does not
+include `StartInstances`; the legacy start method's idempotency comment is not a request-recovery
+guarantee. The documented `LaunchTime` changes after stop/start and can supply progress evidence,
+but is neither an immutable instance identity nor a request-specific completion handle. Decision:
+keep the admission producer separate from successful-start settlement; do not infer request drain
+from acknowledgment, one changed timestamp or one running snapshot. The later access design still
+needs a reviewed provider-specific positive settlement rule and native evidence.
+
+Sources:
+[API idempotency](https://docs.aws.amazon.com/ec2/latest/devguide/ec2-api-idempotency.html),
+[eventual consistency](https://docs.aws.amazon.com/ec2/latest/devguide/eventual-consistency.html),
+[most recent launch time](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Stop_Start.html).
+
 ### Destination account discovery
 
 Python 3.11's Unix `pwd.getpwnam` supplies numeric UID and primary GID, with a missing account
