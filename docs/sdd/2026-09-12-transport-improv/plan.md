@@ -1034,6 +1034,21 @@ associated pending acceptance gates are superseded by this ruling.
       duplicate guest-identity fields, a generic task registry or whole-owner closure by adapters.
       Prove fresh import behavior and unchanged legacy hooks; cloud/Lima access and complete
       RunContext/native acceptance remain separate requirements.
+- [ ] Implement and privately review the provider-owned AWS start admission/acknowledgment producer
+      described in the
+      [lifecycle LLD](execution-lifecycle-lld.md#aws-activation-admission-and-acknowledgment). Prove
+      exact VM ownership and locator matching, durable admission before one SDK call, bounded
+      canonical payloads, late acknowledgment retention, interrupted registration/publication and
+      fenced bookkeeping-only reconciliation. Include actual locked-SDK dispatch tests with retries
+      disabled, original-deadline checks and owned client closure. No waiter, replay, legacy client
+      reuse or power-based settlement. Keep this a private developer increment inside #833, not a
+      new partial PR or a claim that stopped AWS access is usable.
+- [ ] Complete owned AWS access with a reviewed successful-start settlement rule, fresh power and
+      exact guest preparation, endpoint trust and selected firewall-route lifetime. Obtain native
+      startup/uncertainty/cleanup evidence before admission through RunContext. Missing start
+      acknowledgment remains unknown; ordinary power observations cannot invent a receipt. Keep
+      whole-workflow release and independent-job availability separate from submission
+      acknowledgment.
 - [x] Implement and privately review passive exact-instance power observations for AWS, Azure and
       GCP using their provider-owned locator reads. Cover stable/transitional/malformed states,
       identity/account mismatch, setup expiry, actual SDK request serialization and successful

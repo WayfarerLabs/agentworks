@@ -1102,6 +1102,61 @@ named body; no UID is guessed. Managed delivery uses fresh carriers with the sam
 connection. Binding alone advertises no independent-job availability: owned activation, firewall
 routes, keep-awake guarantees, complete RunContext composition and native proof remain open.
 
+### AWS activation admission and acknowledgment
+
+Implement AWS startup in its plugin, not in a generic cloud task framework. A private
+`plugins/aws/_activation.py` adapter owns one EC2 start submission under the existing exact VM
+operation owner. Its constructor is passive. The platform factory retains the adapter before its
+`start(deadline)` can perform work; it supplies the selected provider session and the already
+validated account, region and instance ID. Compare that triple with the selected canonical
+`aws-ec2:<account>:<region>:<instance>` locator. Do not copy a locator hash, credentials or the
+legacy EC2 client cache into the adapter.
+
+The first implementation unit is the admission and acknowledgment producer, not complete cloud
+access. It deliberately provides no power-based settlement method. This is a recoverable private
+commit within #833, not a separately mergeable feature or permission to expose stopped AWS access.
+The subsequent access integration must establish and review the limited successful-start settlement
+rule, then prove it natively before advertising that access. Missing acknowledgment cannot be
+reconstructed from a later running-power observation.
+
+Use one fresh EC2 client with public deadline-derived connection/read timeouts and standard retries
+configured for one total attempt. The locked SDK dispatch proof covers the ordinary service
+pipeline, not arbitrary custom event handlers, credential-provider requests, exactly-once server
+acceptance or hard elapsed deadlines. Client setup and credential work remain synchronous and
+best-effort bounded; reject expiry before admission and reject successful late returns. Do not use a
+waiter, automatic retry, background polling, private SDK policy mutation or the legacy start method.
+Close the owned client on every returned success or failure, without allowing a close error to hide
+the original result.
+
+Before invoking `StartInstances` with exactly the selected instance ID, register a fresh
+`aws-ec2-start` lifecycle obligation and durably mark its possible effect. The adapter admits at
+most one call, including after interruption. Its canonical version-1 payload contains only version,
+account, region, instance ID and an optional provider request ID. Bound and validate that persisted
+recovery input under the existing lifecycle payload limit. The request ID is a bounded non-secret
+acknowledgment identifier, not an idempotency token or an operation lookup endpoint.
+
+Validate returned external data before retaining acknowledgment: one state-change entry for the
+selected instance, ordinary successful HTTP metadata, zero SDK retries and a nonempty bounded
+request ID (at most 256 UTF-8 bytes, an internal storage bound). Require supported state names and
+matching low-byte codes within unsigned 16-bit values; ignore documented internal high-byte flags.
+Do not infer startup completion from those state-change fields. Retain the matching acknowledgment
+before payload publication and before testing whether the original deadline expired. A lost database
+reply can then reconcile the exact initial row or the exact acknowledged revision without another
+provider call. Lost, malformed, foreign or exceptional provider responses retain possible effect;
+generic SDK exceptions do not prove rejection.
+
+Reconciliation performs only fenced ledger bookkeeping. An exact registered row may be resolved only
+if this retained adapter never began possible-effect admission. Once that admission began, even a
+local interruption before the SDK call conservatively retains uncertainty. A matching acknowledgment
+may advance the payload once; it cannot resolve the possible effect. Reject foreign kind, version,
+payload, revision, fence or premature resolution. The adapter never closes the whole operation,
+stops the VM or replays the start.
+
+The next integration still owns fresh power observation, guest preparation, changed-endpoint trust,
+firewall-route lifetime and aggregate release. AWS has no public start operation token in this
+response, so those pieces must not inherit Proxmox's UPID settlement algorithm. See the
+[research](prior-art-research.md#aws-start-submission-proof) for the SDK proof and its limits.
+
 ### Proxmox activation evidence boundary
 
 Stopped Proxmox startup needs a new bounded producer, not the retired start waiter. Its first

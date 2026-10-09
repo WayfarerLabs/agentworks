@@ -26,6 +26,30 @@ prove actual provider transmissions before building each new activation producer
 one-shot delivery from one SDK method call. Keep best-effort SDK timeouts distinct from hard total
 deadlines, and retain uncertainty rather than replaying an unknown mutation.
 
+### AWS start submission proof
+
+The 2026-10-09 offline proof uses locked boto3 1.43.92 and botocore 1.43.93 with ordinary query
+serialization, signing, parsing and retry handlers. Scripted final HTTP-send responses cover
+success, service failures, redirects, authorization failures and connection/read exceptions. With
+one total attempt, all twelve cases make one service send; three retry-enabled controls make two.
+All fifteen cases pass without network access, using isolated empty configuration and fake
+credentials. This proves the tested SDK dispatch path, not real credentials, socket delivery, server
+acceptance exactly once, request drain or native activation safety.
+
+The successful response identifies the selected instance's state change and includes a request ID;
+it is not a task-status handle. The public API has no caller-supplied start idempotency token. AWS
+documents pending as preparing to run, and a start can change the public IPv4 endpoint. Decision:
+retain exact acknowledgment without replay, keep startup settlement separate, and resolve the SSH
+endpoint again during later access preparation. A fresh running observation alone cannot settle a
+lost acknowledgment. The initial producer does not offer that inference.
+
+Sources:
+[StartInstances API](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_StartInstances.html),
+[instance state changes](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-lifecycle.html),
+[state code representation](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_InstanceState.html).
+The private factual report and scripted proof remain in the scoped SDK review environment; the
+durable finding above records the observed count and limits without depending on that scratch.
+
 ### Destination account discovery
 
 Python 3.11's Unix `pwd.getpwnam` supplies numeric UID and primary GID, with a missing account
