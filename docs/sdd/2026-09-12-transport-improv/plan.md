@@ -1034,7 +1034,7 @@ associated pending acceptance gates are superseded by this ruling.
       duplicate guest-identity fields, a generic task registry or whole-owner closure by adapters.
       Prove fresh import behavior and unchanged legacy hooks; cloud/Lima access and complete
       RunContext/native acceptance remain separate requirements.
-- [x] Implement and privately review passive exact-instance power observations for AWS, Azure and
+- [ ] Implement and privately review passive exact-instance power observations for AWS, Azure and
       GCP using their provider-owned locator reads. Cover stable/transitional/malformed states,
       identity/account mismatch, setup expiry, actual SDK request serialization and successful
       late-result refusal. SDK timeouts are best-effort: AWS construction can consume configured
@@ -1042,13 +1042,27 @@ associated pending acceptance gates are superseded by this ruling.
       not introduce private SDK timeout mutation or a transport framework to imply hard preemption.
       Keep activation, selected execution routes and whole-workflow native evidence open; these
       observations alone cannot supply usable cloud RunContext targets.
-- [x] Compose independent native SSH bindings for AWS, Azure and GCP from exact provider reads and
+- [ ] Compose independent native SSH bindings for AWS, Azure and GCP from exact provider reads and
       explicit new operator SSH settings. Use current valid public IPv4 endpoints and endpoint-keyed
       admitted trust, preserving provider identity/network checks and the original deadline through
       Azure's additional linked NIC/public-IP reads. Prove no retired execution imports or
       binding-time process/file admission, no enrollment or ambient aliases, explicit root-to-named
       Linux probing and fresh managed delivery. Keep activation, firewall routes, independent-job
       availability, full RunContext and native acceptance separate and unfinished.
+
+- [ ] Remove automatic provider registration from the new Azure compute and network read clients,
+      without changing the legacy clients. Use an explicit public SDK pipeline policy boundary,
+      preserving credential selection, TLS verification, exact identities and deadline-derived
+      request budgets. Prove against both real SDK clients that a registration-required GET cannot
+      issue POST, start polling or resend. Cover authentication, redirects and ordinary decoding;
+      successful local response fixtures alone do not establish read-only delivery.
+
+The 2026-10-09 SDK source audit finds that both Azure SDK default pipelines include automatic
+resource-provider registration: a registration-required GET can trigger POST, polling and replay.
+The new reads currently use those clients. The two preceding completion boxes had not merged and are
+corrected to unfinished until that existing passive-read contract is proved. The earlier reviews and
+test counts below remain accurate, but did not cover this SDK behavior. No live provider mutation
+was performed during the audit.
 
 The bounded cloud-binding increment at `f6e1ed645` clears all three corrected private lanes against
 original base `2d7e32d633`. Project review observes 233 passes, generic review 268 passes and 30
@@ -1058,8 +1072,9 @@ linked-identity cases. The worker's wider selection passes 292 cases. These are 
 and fresh-process import proofs, not live provider evidence. The reviewed increment is integrated at
 `e731a278d`; all 17,211 CI-selected tests pass with 50 skips using short, private fixtures. Ruff,
 file-quality, Rulesync, locked-SDD, CLI-isolation and website gates pass; the three known SSH
-enrollment typing errors remain. Only this binding leaf closes; activation, firewall routes,
-independent-job availability, complete RunContext and native acceptance remain open.
+enrollment typing errors remain. The later Azure SDK finding above prevents closing this binding
+leaf; activation, firewall routes, independent-job availability, complete RunContext and native
+acceptance also remain open.
 
 The bounded owned-native extraction at `df6ab210a` clears all three independent private lanes
 against `c1c1e14c6`, including the corrected stopped-Proxmox tests and all managed route-check

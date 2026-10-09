@@ -1061,6 +1061,15 @@ late evidence as activation authority. These limitations do not weaken the separ
 execution/activation admission rules. Cloud activation and route factories still require their own
 reviewed evidence; passive power observation alone is not full native access.
 
+The 2026-10-09 locked-SDK audit additionally finds automatic resource-provider registration in
+Azure's default compute and network pipelines. Disabling retry middleware does not remove that
+policy: a failed GET can cause registration POST, polling and another GET. The current new reads
+therefore do not yet satisfy this passive contract. Give only the new read clients an explicit
+public pipeline policy list without registration, retaining the legacy clients unchanged. Actual SDK
+transport tests must reject this implicit mutation for both clients before native read acceptance
+closes. Future mutation producers must also prove absence of authentication, redirect and
+provider-registration replay; one SDK method invocation is not that proof.
+
 ### Cloud SSH route composition
 
 The first cloud binding increment selects current public IPv4 endpoints from provider-owned
