@@ -1074,7 +1074,7 @@ passive contract. They now own separate clients with explicit disabled-retry and
 policies, without registration or redirect following; legacy clients are unchanged. The generated
 GET methods decode their own responses, so a separate content-decoding policy is unnecessary. Actual
 SDK transport tests establish refusal of this implicit mutation for both clients, not live native
-acceptance. Finite authentication resends remain read-only and deadline checks remain best effort.
+acceptance. A finite authentication resend remains read-only and deadline checks remain best effort.
 Future mutation producers must separately prove absence of authentication, redirect and
 provider-registration replay; one SDK method invocation is not that proof.
 

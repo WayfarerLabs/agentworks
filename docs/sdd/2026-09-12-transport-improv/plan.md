@@ -1034,7 +1034,7 @@ associated pending acceptance gates are superseded by this ruling.
       duplicate guest-identity fields, a generic task registry or whole-owner closure by adapters.
       Prove fresh import behavior and unchanged legacy hooks; cloud/Lima access and complete
       RunContext/native acceptance remain separate requirements.
-- [ ] Implement and privately review passive exact-instance power observations for AWS, Azure and
+- [x] Implement and privately review passive exact-instance power observations for AWS, Azure and
       GCP using their provider-owned locator reads. Cover stable/transitional/malformed states,
       identity/account mismatch, setup expiry, actual SDK request serialization and successful
       late-result refusal. SDK timeouts are best-effort: AWS construction can consume configured
@@ -1042,7 +1042,7 @@ associated pending acceptance gates are superseded by this ruling.
       not introduce private SDK timeout mutation or a transport framework to imply hard preemption.
       Keep activation, selected execution routes and whole-workflow native evidence open; these
       observations alone cannot supply usable cloud RunContext targets.
-- [ ] Compose independent native SSH bindings for AWS, Azure and GCP from exact provider reads and
+- [x] Compose independent native SSH bindings for AWS, Azure and GCP from exact provider reads and
       explicit new operator SSH settings. Use current valid public IPv4 endpoints and endpoint-keyed
       admitted trust, preserving provider identity/network checks and the original deadline through
       Azure's additional linked NIC/public-IP reads. Prove no retired execution imports or
@@ -1050,7 +1050,7 @@ associated pending acceptance gates are superseded by this ruling.
       Linux probing and fresh managed delivery. Keep activation, firewall routes, independent-job
       availability, full RunContext and native acceptance separate and unfinished.
 
-- [ ] Remove automatic provider registration from the new Azure compute and network read clients,
+- [x] Remove automatic provider registration from the new Azure compute and network read clients,
       without changing the legacy clients. Use an explicit public SDK pipeline policy boundary,
       preserving credential selection, TLS verification, exact identities and deadline-derived
       request budgets. Prove against both real SDK clients that a registration-required GET cannot
@@ -1065,11 +1065,11 @@ clients with explicit disabled-retry and ARM-authentication policies, without re
 redirect following. Three independent private lanes at `696a2095d` each observe 321 adjacent passes,
 with nine additional project probes and 13 generic probes. Complexity review proves that removing
 the unused content-decoding policy preserves all 321 passes; that deletion is incorporated. These
-results establish the bounded correction, not live native acceptance. Final integrated review and
-completion recording remain pending. The earlier reviews and test counts below remain accurate, but
-did not cover this SDK behavior. No live provider mutation was performed during the audit.
+results establish the bounded correction, not live native acceptance. The earlier reviews and test
+counts below remain accurate, but did not cover this SDK behavior. No live provider mutation was
+performed during the audit.
 
-- [ ] Privately review the common core power gate admitting `RUNNING`, `STOPPED` and `DEALLOCATED`.
+- [x] Privately review the common core power gate admitting `RUNNING`, `STOPPED` and `DEALLOCATED`.
       Both inactive states respect operator-stopped intent; an already-running VM remains usable.
       Pass the unchanged observation, original deadline, owner and custody to the retained access.
       Prove no factory, preparation or wake on denial, and reject unknown or non-status
@@ -1082,7 +1082,16 @@ cleanup. Its adjacent native-operation and target-preparation selection passes 1
 skips, with scoped lint, formatting and typing passing. The initial run found an obsolete Proxmox
 test expecting the old common refusal of `DEALLOCATED` without stop intent; only that parameter row
 is removed. Proxmox's native observer does not produce that state and no platform adapter changes.
-Independent integrated review remains pending; this is not provider activation or native acceptance.
+This is not provider activation or native acceptance.
+
+The final combined correction and shared gate at `9e89fe3c3` clear all three independent private
+lanes against `829e4a72f`. Each observes 481 adjacent passes without skips. Project review also
+observes nine independent probes and clean nine-file lint, formatting and typing; generic review
+observes 37 independent probes. Complexity review confirms the decoder deletion and the simple core
+conditions. The lead retains two optional `None` fields in the deliberately halted access stub to
+show the shared protocol shape; no production machinery is added. These results close only the four
+bounded leaves above. Cloud/Lima activation and routes, job-length availability, complete additive
+RunContext, native acceptance and whole-PR merge readiness remain open.
 
 The bounded cloud-binding increment at `f6e1ed645` clears all three corrected private lanes against
 original base `2d7e32d633`. Project review observes 233 passes, generic review 268 passes and 30
@@ -1092,9 +1101,9 @@ linked-identity cases. The worker's wider selection passes 292 cases. These are 
 and fresh-process import proofs, not live provider evidence. The reviewed increment is integrated at
 `e731a278d`; all 17,211 CI-selected tests pass with 50 skips using short, private fixtures. Ruff,
 file-quality, Rulesync, locked-SDD, CLI-isolation and website gates pass; the three known SSH
-enrollment typing errors remain. The later Azure SDK finding above prevents closing this binding
-leaf; activation, firewall routes, independent-job availability, complete RunContext and native
-acceptance also remain open.
+enrollment typing errors remain. The Azure SDK correction and independent proof above supplement
+that earlier evidence; activation, firewall routes, independent-job availability, complete
+RunContext and native acceptance remain open.
 
 The bounded owned-native extraction at `df6ab210a` clears all three independent private lanes
 against `c1c1e14c6`, including the corrected stopped-Proxmox tests and all managed route-check
