@@ -24,6 +24,7 @@ from agentworks.execution import _process as process_core
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import Deadline, Failure
 from agentworks.execution.carriers.ssh import forwarding
+from agentworks.execution.carriers.ssh.client import check_client_version, resolve_client_executable
 from agentworks.execution.carriers.ssh.connection import SSHConnection, admit_connection
 from agentworks.execution.carriers.ssh.forwarding import ForwardingError, LocalForward, open_local_forwards
 from agentworks.execution.carriers.ssh.trust import (
@@ -73,7 +74,10 @@ def _synthetic(
     identity, trust = tmp_path / "identity", tmp_path / "trust"
     identity.write_bytes(b"synthetic")
     trust.write_bytes(b"synthetic")
-    value = SyntheticForwarding(SSHConnection("fixture.invalid", "fixture", identity, SSHTrustFiles((trust,))), custody)
+    value = SyntheticForwarding(
+        SSHConnection("fixture.invalid", "fixture", identity, SSHTrustFiles((trust,)), ssh_executable=sys.executable),
+        custody,
+    )
     original = subprocess.Popen
 
     def spawn(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
@@ -641,7 +645,7 @@ def test_each_forward_admits_current_managed_policy(
     synthetic.assert_closed()
 
 
-@pytest.mark.parametrize("stage", ["admission", "version"])
+@pytest.mark.parametrize("stage", ["admission", "resolution", "version"])
 def test_forwarding_checks_expiry_after_local_work(
     synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch, stage: str
 ) -> None:
@@ -655,10 +659,19 @@ def test_forwarding_checks_expiry_after_local_work(
             clock[0] = 2.0
         return trust
 
-    def version(connection: SSHConnection, *, deadline: Deadline, custody: LocalDeliveryCustody) -> None:
+    resolve = resolve_client_executable
+
+    def select(connection: SSHConnection) -> str:
+        executable = resolve(connection)
+        if stage == "resolution":
+            clock[0] = 2.0
+        return executable
+
+    def version(executable: str, *, deadline: Deadline, custody: LocalDeliveryCustody) -> None:
         clock[0] = 2.0
 
     monkeypatch.setattr(forwarding, "admit_connection", admit)
+    monkeypatch.setattr(forwarding, "resolve_client_executable", select)
     monkeypatch.setattr(forwarding, "check_client_version", version)
     with pytest.raises(ForwardingError) as error:
         synthetic.open(seconds=1)
@@ -844,3 +857,23 @@ def test_pending_discovery_refuses_forwarding_and_repeated_admission(
         assert synthetic.custody.close(Deadline.after(3))
     assert len(synthetic.calls) == 1 and synthetic.calls[0][-1] == "-V"
     synthetic.assert_closed()
+
+
+def test_forwarding_pins_probe_and_session_despite_path_change(
+    synthetic: SyntheticForwarding, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.execution.carriers.ssh.test_client_selection import selectable_client
+
+    selected = selectable_client(tmp_path / "selected")
+    replacement = selectable_client(tmp_path / "replacement")
+    synthetic.connection = replace(synthetic.connection, ssh_executable="ssh")
+    monkeypatch.setenv("PATH", str(selected.parent))
+    probe = check_client_version
+
+    def version(executable: str, *, deadline: Deadline, custody: LocalDeliveryCustody) -> Failure | None:
+        monkeypatch.setenv("PATH", str(replacement.parent))
+        return probe(executable, deadline=deadline, custody=custody)
+
+    monkeypatch.setattr(forwarding, "check_client_version", version)
+    synthetic.open().close()
+    assert [argv[0] for argv in synthetic.calls] == [str(selected), str(selected)]

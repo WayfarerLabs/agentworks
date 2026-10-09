@@ -26,7 +26,7 @@ from agentworks.execution._terminal_handoff import (
 from agentworks.execution.carrier import Deadline, Failure, SinkOutput, TerminalInput
 from agentworks.execution.carriers.ssh._terminal_posix import PosixTerminal
 from agentworks.execution.carriers.ssh._terminal_relay import run_terminal_relay_candidate
-from agentworks.execution.carriers.ssh.client import check_client_version
+from agentworks.execution.carriers.ssh.client import check_client_version, resolve_client_executable
 from agentworks.execution.carriers.ssh.connection import admit_connection, build_ssh_argv
 from tests.execution.carriers.ssh.enrollment_server import enrollment_server
 
@@ -254,7 +254,8 @@ def run_case(root: Path, monkeypatch: pytest.MonkeyPatch, *, refusal: bool) -> N
                 assert not deadline.expired
                 trust = admit_connection(server.connection)
                 try:
-                    assert check_client_version(server.connection, deadline=deadline, custody=custody) is None
+                    executable = resolve_client_executable(server.connection)
+                    assert check_client_version(executable, deadline=deadline, custody=custody) is None
                 finally:
                     assert custody.close(Deadline.after(3))
                 with ExitStack() as endpoints:
@@ -290,7 +291,9 @@ def run_case(root: Path, monkeypatch: pytest.MonkeyPatch, *, refusal: bool) -> N
                     )
                     assert isinstance(io.input, TerminalInput) and isinstance(io.output, SinkOutput)
                     io = replace(io, input=replace(io.input, bootstrap=trace), output=replace(io.output, stdout=trace))
-                    argv = build_ssh_argv(server.connection, prepared.invocation, trust=trust, terminal=True)
+                    argv = build_ssh_argv(
+                        server.connection, prepared.invocation, trust=trust, executable=executable, terminal=True
+                    )
                     assert all(tag.decode() not in arg for tag in (_SOURCE_TAG, _ENV_TAG, _ARG_TAG) for arg in argv)
                     prepared.claim()
                     try:

@@ -17,7 +17,7 @@ from agentworks.errors import StateError, ValidationError
 from agentworks.execution.carrier import Capture, CarrierIO, Deadline, Failure, PreparedInvocation
 from agentworks.execution.carriers.ssh import _trust_files as files
 from agentworks.execution.carriers.ssh._io import run_process
-from agentworks.execution.carriers.ssh.client import check_client_version
+from agentworks.execution.carriers.ssh.client import check_client_version, resolve_client_executable
 from agentworks.execution.carriers.ssh.connection import (
     SSHConnection,
     _build_enrollment_argv,
@@ -155,6 +155,7 @@ def _acknowledge(
     bundle: ManagedSSHTrust,
     candidate: SSHEnrollmentCandidate,
     *,
+    executable: str,
     deadline: Deadline,
     first_contact: bool,
 ) -> None:
@@ -166,7 +167,7 @@ def _acknowledge(
     nonce = "agw-enroll-" + uuid.uuid4().hex
     invocation = PreparedInvocation(("sh", "-c", f"printf '%s\\n' '{nonce}'"))
     builder = _build_enrollment_argv if first_contact else build_ssh_argv
-    argv = builder(connection, invocation, trust=selection)
+    argv = builder(connection, invocation, trust=selection, executable=executable)
     _check_deadline(deadline)
     result = run_process(argv, io=CarrierIO(output=Capture(4096)), deadline=deadline)
     if result.failure is not None:
@@ -201,7 +202,9 @@ def _maintain(
     bundle = _bound_bundle(connection, provenance, deadline)
     try:
         generation, _ = _admit(connection, bundle, deadline)
-        version_failure = check_client_version(connection, deadline=deadline)
+        executable = resolve_client_executable(connection)
+        _check_deadline(deadline)
+        version_failure = check_client_version(executable, deadline=deadline)
         _check_deadline(deadline)
         if version_failure is not None:
             raise SSHEnrollmentError(failure=version_failure)
@@ -219,7 +222,9 @@ def _maintain(
                 files.sync_directory(directory)
                 _check_deadline(deadline)
                 try:
-                    _acknowledge(connection, bundle, candidate, deadline=deadline, first_contact=True)
+                    _acknowledge(
+                        connection, bundle, candidate, executable=executable, deadline=deadline, first_contact=True
+                    )
                 except BaseException as error:
                     try:
                         _sync_candidate(candidate)
@@ -236,7 +241,7 @@ def _maintain(
                 _verify_document(directory, provenance, generation)
             _sync_candidate(candidate)
             _check_deadline(deadline)
-            _acknowledge(connection, bundle, candidate, deadline=deadline, first_contact=False)
+            _acknowledge(connection, bundle, candidate, executable=executable, deadline=deadline, first_contact=False)
             # A refresh after admission cannot silently turn this into evidence
             # about the new policy. The receipt remains tied to its base policy.
             current, _ = _admit(connection, bundle, deadline)

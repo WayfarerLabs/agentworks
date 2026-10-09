@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -83,7 +84,7 @@ def synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SyntheticEnrol
     revoked.write_bytes(b"revocation fixture bytes")
     bundle = import_trust(tmp_path / "managed", sources=SSHTrustFiles((trust,), revoked), authority="fixture")
     result = SyntheticEnrollment(
-        SSHConnection("fixture.invalid", "fixture", identity, bundle),
+        SSHConnection("fixture.invalid", "fixture", identity, bundle, ssh_executable=sys.executable),
         SSHCreationProvenance("provider/resource-creation-123", "fixture.invalid"),
         [],
     )
@@ -411,3 +412,27 @@ def test_interruption_during_failed_attempt_flush_is_preserved(
     with pytest.raises(interruption):
         synthetic.enroll()
     assert (synthetic.directory / "known-hosts").exists()
+
+
+def test_enrollment_pins_probe_and_both_acknowledgments_despite_path_change(
+    synthetic: SyntheticEnrollment, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.execution.carriers.ssh.test_client_selection import selectable_client
+
+    selected = selectable_client(tmp_path / "selected")
+    replacement = selectable_client(tmp_path / "replacement")
+    synthetic.connection = replace(synthetic.connection, ssh_executable="ssh")
+    monkeypatch.setenv("PATH", str(selected.parent))
+    probes: list[str] = []
+
+    def version(executable: str, *, deadline: Deadline) -> None:
+        probes.append(executable)
+        monkeypatch.setenv("PATH", str(replacement.parent))
+
+    monkeypatch.setattr(enrollment, "check_client_version", version)
+    synthetic.enroll()
+    assert probes == [str(selected)]
+    assert [argv[0] for argv in synthetic.calls] == [str(selected), str(selected)]
+    synthetic.recover()
+    assert probes == [str(selected), str(replacement)]
+    assert synthetic.calls[-1][0] == str(replacement)
