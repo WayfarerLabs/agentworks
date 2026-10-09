@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.errors import ValidationError
+from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _process as process_core
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import CapturedOutput, CarrierIO, Deadline, Failure
@@ -606,3 +606,21 @@ def test_enrollment_pins_probe_and_both_acknowledgments_despite_path_change(
     synthetic.recover()
     assert probes == [str(selected), str(replacement)]
     assert synthetic.calls[-1][0] == str(replacement)
+
+
+def test_passive_or_refused_enrollment_close_does_not_settle_another_workflow(
+    synthetic: SyntheticEnrollment,
+) -> None:
+    delivery = synthetic.maintenance.delivery
+    owner = delivery.begin_process()
+    resource = SSHEnrollmentCustody(delivery)
+    try:
+        with pytest.raises(StateError):
+            enrollment.enroll_new_target(
+                synthetic.connection, provenance=synthetic.provenance, deadline=Deadline.after(5), custody=resource
+            )
+        assert resource.close(Deadline.after(3))
+        assert owner.snapshot().terminal is None
+        assert not delivery.settled and synthetic.calls == []
+    finally:
+        assert delivery.close(Deadline.after(3))

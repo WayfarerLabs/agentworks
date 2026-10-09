@@ -126,6 +126,9 @@ class SSHEnrollmentCustody:
         self._closed = True
         if self._settled:
             return True
+        if not self._used:
+            self._settled = True
+            return True
         if not self.delivery.close(deadline):
             return False
         if self._lock is None:
