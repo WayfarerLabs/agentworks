@@ -45,8 +45,7 @@ lost acknowledgment. The initial producer does not offer that inference.
 
 Sources:
 [StartInstances API](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_StartInstances.html),
-[instance state changes](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-lifecycle.html),
-[state code representation](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_InstanceState.html).
+[instance state changes](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-lifecycle.html).
 The private factual report and scripted proof remain in the scoped SDK review environment; the
 durable finding above records the observed count and limits without depending on that scratch.
 

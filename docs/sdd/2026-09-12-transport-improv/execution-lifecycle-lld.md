@@ -1130,20 +1130,20 @@ the original result.
 
 Before invoking `StartInstances` with exactly the selected instance ID, register a fresh
 `aws-ec2-start` lifecycle obligation and durably mark its possible effect. The adapter admits at
-most one call, including after interruption. Its canonical version-1 payload contains only version,
-account, region, instance ID and an optional provider request ID. Bound and validate that persisted
-recovery input under the existing lifecycle payload limit. The request ID is a bounded non-secret
-acknowledgment identifier, not an idempotency token or an operation lookup endpoint.
+most one call, including after interruption. Its canonical payload contains only account, region,
+instance ID and an optional provider request ID, with version 1 carried by the ledger row. Bound and
+validate that persisted recovery input under the existing lifecycle payload limit. The request ID is
+a bounded non-secret acknowledgment identifier, not an idempotency token or an operation lookup
+endpoint.
 
 Validate returned external data before retaining acknowledgment: one state-change entry for the
 selected instance, ordinary successful HTTP metadata, zero SDK retries and a nonempty bounded
-request ID (at most 256 UTF-8 bytes, an internal storage bound). Require supported state names and
-matching low-byte codes within unsigned 16-bit values; ignore documented internal high-byte flags.
-Do not infer startup completion from those state-change fields. Retain the matching acknowledgment
-before payload publication and before testing whether the original deadline expired. A lost database
-reply can then reconcile the exact initial row or the exact acknowledged revision without another
-provider call. Lost, malformed, foreign or exceptional provider responses retain possible effect;
-generic SDK exceptions do not prove rejection.
+request ID (at most 256 UTF-8 bytes, an internal storage bound). State-change fields do not
+establish acknowledgment identity or startup completion, so this producer does not interpret them.
+Retain the matching acknowledgment before payload publication and before testing whether the
+original deadline expired. A lost database reply can then reconcile the exact initial row or the
+exact acknowledged revision without another provider call. Lost, malformed, foreign or exceptional
+provider responses retain possible effect; generic SDK exceptions do not prove rejection.
 
 Reconciliation performs only fenced ledger bookkeeping. An exact registered row may be resolved only
 if this retained adapter never began possible-effect admission. Once that admission began, even a
