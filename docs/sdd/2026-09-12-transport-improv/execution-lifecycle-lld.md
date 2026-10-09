@@ -730,31 +730,24 @@ possible-dispatch run with no launch fact must reconcile first and remains uncer
 truth, while production host coordination later uses the existing operation claim and lifecycle
 obligation.
 
-The host-side stop obligation owns only delivery of the exact stop intent, not the independent job's
-continuing lifetime. It may resolve after a complete, validated `ACCEPTED` response proves the
-target has durably published that intent and the carrier attempt is settled. This never reports
-termination; only the exact `boundary-empty` fact does. A helper failure, incomplete response, lost
-delivery, or interrupted admission after possible effect retains the VM operation claim until
-recovery proves what happened. Positively established `NOT_SENT` with settled coordination also
-resolves the temporary obligation because no stop intent reached the target; ambiguous arming is not
-that proof. Before first stop dispatch, the host requires the exact run's launch receipt to have
-been reconciled; a merely possible-dispatch run is not stop authority. The resource-owned run
-continues to own the workload and target stop request after the temporary dispatch obligation
-resolves. No database stop-state field is introduced.
+OPERATION and RESOURCE stop share the existing tracked ordinary helper and operation-lifetime
+dispatch row. Retire the unused standalone host-bound stop checkpoint and its separate
+`managed-stop` dispatch API; retain the fixed guest stop protocol. A complete validated `ACCEPTED`
+response establishes durable target intent only after the actual helper settles. It neither proves
+termination nor resolves the operation-lifetime row: aggregate finish still accounts for every
+helper. Only the exact `boundary-empty` fact proves termination. A helper failure, incomplete
+response, lost delivery or uncertain admission retains the claim until recovery proves settlement;
+ambiguous arming is not positive `NOT_SENT` evidence.
 
-The private host-bound stop checkpoint implements this one-attempt shape under a caller-held exact
-VM owner. Shared preflight checks the persisted independent resource-owned VM run and matching
-current guest facts; stop additionally requires a reconciled launch receipt. Its `managed-stop`
-obligation persists only the canonical run ID; the borrowed carrier's ordinary `begin_attempt` arms
-it after deterministic validation and before carrier dispatch. Settled `NOT_SENT` or complete,
-validated `ACCEPTED`/`TERMINATED` resolves the temporary obligation. Unknown or failed delivery and
-interrupted arming retain it with the original control exception and custody facts. This is hermetic
-host binding, not proof of provider route freshness, recovery takeover or native SSH/QGA delivery.
-The shared row preflight can compare the guest's derived boot with the persisted target, but cannot
-derive the opaque incarnation fingerprint without the provider locator and persisted marker. Its
-caller must compare the observed guest marker with the persisted VM marker, then supply a target
-composed from the selected locator and that same marker before invoking any later-action adapter. A
-boot-only match is not sufficient production authority.
+Before stop dispatch, the host requires the exact run's reconciled launch receipt and current target
+facts. A merely possible-dispatch run is not stop authority. The observing operation does not adopt
+a RESOURCE run, drain its keeper or take ownership of its continuing workload and durable stop
+request. No database stop-state field is introduced. The shared row preflight can compare the
+guest's derived boot with the persisted target, but cannot derive the opaque incarnation fingerprint
+without the provider locator and persisted marker. Its caller must compare the observed guest marker
+with the persisted VM marker, then supply a target composed from the selected locator and that same
+marker before invoking any later-action adapter. A boot-only match is not sufficient production
+authority.
 
 The first `dispose` mechanism is an explicit authorized release of terminal retained artifacts, not
 a retention timer or a synonym for stop. Before committing release, the fixed helper requires the

@@ -1010,6 +1010,11 @@ associated pending acceptance gates are superseded by this ruling.
       and shared platform-host resources without splitting ownership by transport route or identity.
       Retire superseded local harness coordination during consumer migration, not through a second
       competing new-stack lock.
+- [ ] Remove the unused standalone host-bound stop adapter, its dedicated dispatch constants and
+      codec wrappers. Keep the outcome next to the actual tracked stop consumer and retain useful
+      behavioral coverage through OPERATION and RESOURCE controls. Preserve the fixed guest stop
+      protocol, accepted-intent versus termination distinction, historical records and operator
+      data; this deletion does not settle earlier obligations or complete deadline recovery.
 - [ ] Establish one platform-neutral VM availability boundary around every authorized new-stack VM
       operation that can perform guest work, entered after core admits the operation but before
       activation and retained through route, body and teardown. Prove no-op platforms and stateful
@@ -2644,14 +2649,11 @@ run row or release the caller's owner. Route freshness, job-state reconciliation
 and disposal, recovery, live SSH/QGA proof and public JobAccess remain open. Focused hermetic tests
 pass, not native integration.
 
-The next host-side stop slice will use an adapter-owned `managed-stop` lifecycle obligation under
-the same exact VM claim. It will admit only a reconciled launch receipt, arm the obligation before
-the one carrier attempt, and resolve temporary dispatch custody on positively proved no delivery
-with settled coordination, or a complete, validated `ACCEPTED` or `TERMINATED` response with settled
-delivery. `ACCEPTED` proves durable target intent, not job termination; only `boundary-empty` proves
-the latter. Unknown or interrupted delivery retains the claim and exact-run recovery identity. This
-does not add a mutable database stop state or make an uncertain stop retry safe before old-dispatch
-drain is proved. Host-bound disposal and recovery are separate later gates.
+The standalone host-bound stop direction recorded in the following private checkpoints is superseded
+by the actual OPERATION/RESOURCE tracked helper and operation-lifetime dispatch row. Remove its
+unused adapter and wrapper-only tests while retaining meaningful production stop coverage. The fixed
+guest protocol and historical evidence remain; no operator data is deleted and no earlier obligation
+is implicitly settled.
 
 At private checkpoint `617295760`, the owned stop adapter implements that one-attempt ruling. It
 shares exact independent-VM row preflight with observe/read-output, requires `RECEIPT_CONFIRMED`,
