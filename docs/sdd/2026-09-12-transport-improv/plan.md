@@ -1042,13 +1042,24 @@ associated pending acceptance gates are superseded by this ruling.
       not introduce private SDK timeout mutation or a transport framework to imply hard preemption.
       Keep activation, selected execution routes and whole-workflow native evidence open; these
       observations alone cannot supply usable cloud RunContext targets.
-- [ ] Compose independent native SSH bindings for AWS, Azure and GCP from exact provider reads and
+- [x] Compose independent native SSH bindings for AWS, Azure and GCP from exact provider reads and
       explicit new operator SSH settings. Use current valid public IPv4 endpoints and endpoint-keyed
       admitted trust, preserving provider identity/network checks and the original deadline through
       Azure's additional linked NIC/public-IP reads. Prove no retired execution imports or
       binding-time process/file admission, no enrollment or ambient aliases, explicit root-to-named
       Linux probing and fresh managed delivery. Keep activation, firewall routes, independent-job
       availability, full RunContext and native acceptance separate and unfinished.
+
+The bounded cloud-binding increment at `f6e1ed645` clears all three corrected private lanes against
+original base `2d7e32d633`. Project review observes 233 passes, generic review 268 passes and 30
+independent probes, and complexity review 87 passes, all without skips. Removing only the Azure
+subscription guard causes two expected no-dispatch assertion failures; restoring it passes all eight
+linked-identity cases. The worker's wider selection passes 292 cases. These are local SDK fixtures
+and fresh-process import proofs, not live provider evidence. The reviewed increment is integrated at
+`e731a278d`; all 17,211 CI-selected tests pass with 50 skips using short, private fixtures. Ruff,
+file-quality, Rulesync, locked-SDD, CLI-isolation and website gates pass; the three known SSH
+enrollment typing errors remain. Only this binding leaf closes; activation, firewall routes,
+independent-job availability, complete RunContext and native acceptance remain open.
 
 The bounded owned-native extraction at `df6ab210a` clears all three independent private lanes
 against `c1c1e14c6`, including the corrected stopped-Proxmox tests and all managed route-check
