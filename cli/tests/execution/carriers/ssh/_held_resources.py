@@ -79,13 +79,6 @@ class ForwardingCaller:
         return all([resource.close(deadline) for resource in self.resources])
 
 
-@contextmanager
-def enrollment_custody(delivery: LocalDeliveryCustody) -> Iterator[SSHEnrollmentCustody]:
-    resource = SSHEnrollmentCustody(delivery)
-    with held_resource(resource):
-        yield resource
-
-
 class EnrollmentCaller:
     """Retain every fixture maintenance resource before invoking production code."""
 
