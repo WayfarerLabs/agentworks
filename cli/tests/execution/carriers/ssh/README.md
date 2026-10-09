@@ -17,6 +17,8 @@ installed-client pipe-handle probe is integration-marked and requires a separate
 Enrollment fixture callers hold `SSHEnrollmentCustody` before invoking maintenance and explicitly
 close it after each outcome. Synthetic cases keep candidate writer exclusion across delayed native
 construction, failed cleanup and final-flush failure, and retry through the same storage and lock.
+Forwarding fixtures retain every coordinator before startup and settle coordinators before closing
+native storage. A teardown refusal remains a fixture failure even when startup refusal is expected.
 Forwarding fixtures hold `OwnedForwarding` before `start`; `wait` observes without cleanup. Tests
 prove failed startup remains caller-held and that native cleanup waits for every admitted pipe
 borrower to stop. These local ownership proofs do not replace installed-client or native-platform

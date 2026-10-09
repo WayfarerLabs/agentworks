@@ -8,7 +8,7 @@ import secrets
 import time
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv6Address
-from threading import Event, Lock, Thread
+from threading import Event, Thread
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ConnectivityError, StateError, ValidationError
@@ -102,9 +102,6 @@ class OwnedForwarding:
         self._stop = Event()
         self._drain_admitted = Event()
         self._failure: Failure | None = None
-        self._borrow_lock = Lock()
-        self._close_lock = Lock()
-        self._worker_start_attempted = False
         self._started = False
         self._closed = False
         self._settled = False
@@ -169,7 +166,6 @@ class OwnedForwarding:
     def _start(self, request: LocalProcessRequest, deadline: Deadline) -> None:
         """Keep the pipe worker inert until shared owner admission returns."""
         assert self._owner is not None
-        self._worker_start_attempted = True
         try:
             self._thread.start()
         except (OSError, RuntimeError):
@@ -184,26 +180,22 @@ class OwnedForwarding:
         self._closed = True
         if self._settled:
             return True
-        remaining = deadline.remaining()
-        assert remaining is not None
-        if not self._close_lock.acquire(timeout=remaining):
-            return False
-        try:
-            self._stop.set()
-            if self._worker_start_attempted:
-                remaining = deadline.remaining()
-                assert remaining is not None
-                if not self._done.wait(remaining):
-                    return False
-                remaining = deadline.remaining()
-                assert remaining is not None
-                self._thread.join(timeout=remaining)
-                if self._thread.is_alive():
-                    return False
-            self._settled = self._custody is None or self._custody.close(deadline)
-            return self._settled
-        finally:
-            self._close_lock.release()
+        self._stop.set()
+        # A failed startup can leave a thread starting late, but it cannot pass
+        # the admission gate. Only an admitted borrower needs joining before
+        # native cleanup; the caller serializes startup and close.
+        if self._drain_admitted.is_set():
+            remaining = deadline.remaining()
+            assert remaining is not None
+            if not self._done.wait(remaining):
+                return False
+            remaining = deadline.remaining()
+            assert remaining is not None
+            self._thread.join(timeout=remaining)
+            if self._thread.is_alive():
+                return False
+        self._settled = self._custody is None or self._custody.close(deadline)
+        return self._settled
 
     def wait(self) -> int:
         """Observe natural exit without cleanup; interruption retains ownership."""
@@ -236,17 +228,15 @@ class OwnedForwarding:
             self._done.wait(_POLL_SECONDS if remaining is None else min(_POLL_SECONDS, remaining))
 
     def _configure_pipe(self, pipe: IO[bytes]) -> bool:
-        with self._borrow_lock:
-            if self._stop.is_set():
-                return False
-            os.set_blocking(pipe.fileno(), False)
-            return True
+        if self._stop.is_set():
+            return False
+        os.set_blocking(pipe.fileno(), False)
+        return True
 
     def _read(self, pipe: IO[bytes]) -> bytes | None:
-        with self._borrow_lock:
-            if self._stop.is_set():
-                return None
-            return os.read(pipe.fileno(), _CHUNK)
+        if self._stop.is_set():
+            return None
+        return os.read(pipe.fileno(), _CHUNK)
 
     def _drain_pipes(self, pipes: LocalProcessPipes) -> None:
         received = bytearray()

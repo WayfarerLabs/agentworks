@@ -17,7 +17,7 @@ from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.ssh.connection import SSHConnection
 from agentworks.execution.carriers.ssh.trust import SSHTrustFiles
-from tests.execution.carriers.ssh._held_resources import EnrollmentCaller
+from tests.execution.carriers.ssh._held_resources import EnrollmentCaller, ForwardingCaller, SSHResourceCaller
 from tests.execution.carriers.ssh.enrollment_server import LocalSSH, enrollment_server
 
 
@@ -84,16 +84,29 @@ def enrollment_sshd(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[
 
 
 @pytest.fixture
-def custody() -> Iterator[LocalDeliveryCustody]:
-    """Keep delivery ownership outside every probe through bounded teardown."""
-    retained = LocalDeliveryCustody()
-    yield retained
-    assert retained.close(Deadline.after(3))
-
-
-@pytest.fixture
-def enrollment_caller(custody: LocalDeliveryCustody, monkeypatch: pytest.MonkeyPatch) -> Iterator[EnrollmentCaller]:
-    caller = EnrollmentCaller(custody)
+def resource_caller(monkeypatch: pytest.MonkeyPatch) -> Iterator[SSHResourceCaller]:
+    """Settle every retained coordinator before closing shared native storage."""
+    caller = SSHResourceCaller()
     yield caller
     monkeypatch.undo()
     assert caller.close(Deadline.after(3))
+
+
+@pytest.fixture
+def forwarding_caller(resource_caller: SSHResourceCaller) -> ForwardingCaller:
+    caller = ForwardingCaller(resource_caller.delivery)
+    resource_caller.resources.append(caller)
+    return caller
+
+
+@pytest.fixture
+def custody(resource_caller: SSHResourceCaller) -> LocalDeliveryCustody:
+    """Borrow native storage without a separate pipe-closing finalizer."""
+    return resource_caller.delivery
+
+
+@pytest.fixture
+def enrollment_caller(resource_caller: SSHResourceCaller) -> EnrollmentCaller:
+    caller = EnrollmentCaller(resource_caller.delivery)
+    resource_caller.resources.append(caller)
+    return caller
