@@ -1302,6 +1302,47 @@ establish native/platform or complete RunContext acceptance. Integrated review o
 reply loss and concurrent finalization remains required before publication. DIRECT helper completion
 does not thereby acquire a stronger user-descendant cleanup or native-drain guarantee.
 
+### Later observation of an acknowledged QGA helper
+
+A QGA observation deadline can end while its acknowledged invocation still runs. For this case, the
+selected native binding supplies a passive per-call delivery/observer factory. Core retains the
+resulting object before dispatch, alongside the actual helper call, original attempt and
+still-settleable borrow. This is a private optional native composition seam, not another parameter
+on `Carrier.execute`, a stronger `CarrierReport`, or an SSH requirement. Plain delivery remains
+unchanged. The first implementation slice covers inline DIRECT helpers; managed read preparation
+then uses the same seam without creating a second recovery mechanism.
+
+Preparation supplies immutable non-payload closure expectations explicitly: original nonce, runtime
+candidates and shim, execution identity and the existing selected guest checkpoint where applicable.
+Do not derive these from generated argv or downcast a caller sink. After the original call returns
+or raises, retained cleanup custody detaches finite input, application collectors and sinks. Later
+observation uses a new bounded runtime-prefix reader with a discard destination, not the completed
+reader or caller I/O. It never reconstructs the returned application result.
+
+The concrete observer retains the validated acknowledged PID before another status request. It
+publishes validated terminal closure evidence before optional output callbacks, because a terminal
+QGA status read consumes its record. A fresh finite cleanup budget first settles the original local
+delivery, revalidates exact database ownership and rejects a known changed route/guest binding, then
+permits only a status GET for that held PID. No new POST, fallback, supervisor or guest file is
+introduced. A failed status exchange may already have consumed a terminal response; missing status,
+lost acknowledgment and lost terminal evidence remain unknown, never absence or completion. This
+slice does not retry a failed status exchange or promise signal-atomic acknowledgment publication.
+
+Closure requires an authentic original runtime READY prefix and independent normal-zero completion
+of the exact prepared helper invocation. READY precedes the helper's guest check: it is neither a
+fresh current-boot receipt nor proof that a managed observation succeeded. Closure settles only that
+helper's future effects and original attempt. RESOURCE disposal still requires its separate positive
+terminal observation and action proof. A failed or identity-refused managed read that returns zero
+must not acquire those proofs from helper closure.
+
+Core exposes explicit finite observation cleanup before aggregate execution `finish`; existing
+bookkeeping retry stays no-I/O. It retains the actual call rather than handing off its borrow and
+reducing it to booleans while continuation is possible. Local cleanup, observation and lost database
+replies reconcile the same retained objects. Lost ACK, consumed status, unknown nonzero completion,
+controller restart and other carriers still need their separately tracked recovery paths. Prove
+deadline-then-closure, interruption after ACK and terminal publication, wrong nonce, changed
+binding, unsettled local custody and unchanged application UNKNOWN before native acceptance.
+
 Recovery must be fenced from a delayed original controller before it mutates an old obligation. The
 logical operation keeps its stable random operation identifier, while each database owner carries a
 separate random generation identifier. Initial acquisition creates both. A recovery controller

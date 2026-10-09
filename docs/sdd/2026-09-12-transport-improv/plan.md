@@ -3706,6 +3706,19 @@ edge follows.
       complete output and throughput on both QGA majors and native WSL. Live SSH remains its
       existing single-stream path; no replay, helper-installation cache or weaker file semantics
       follows.
+- [ ] Implement the private per-call acknowledged-QGA helper delivery/observer and explicit
+      non-payload preparation expectations. Retain the actual inline DIRECT call, original attempt
+      and settleable borrow; perform only exact-PID GET observation under a fresh finite cleanup
+      budget before aggregate finish. Preserve the original UNKNOWN application result, no-I/O
+      bookkeeping and separate local/remote custody; do not replay after uncertain status loss.
+      Prove deadline recovery, ACK/terminal-publication interruptions, wrong nonce, changed binding
+      and unsettled local delivery before native acceptance on both QGA majors.
+- [ ] Extend the same retained helper-closure seam to managed read preparation and timed-out
+      RESOURCE disposal prerequisites. Cleanup settles the prior observer only; a subsequent
+      explicitly requested read must still supply positive terminal proof before disposal. Closure,
+      readiness and guest/action proof remain distinct. Lost ACK, consumed status, controller
+      restart and other-carrier recovery remain separate open gates, not implicit completion of the
+      general recovery work.
 - [ ] Reconcile #770's historical escape/relaunch proposal against the later exclusion of malicious
       target-user containment. Deliver DIRECT/MANAGED without a CONTAINED profile or
       per-run-user/jail implementation; retain future profile extensibility. Prove trusted
