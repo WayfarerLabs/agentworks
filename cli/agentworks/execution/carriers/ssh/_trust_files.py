@@ -1,4 +1,4 @@
-"""Owned local trust files, publication, and short admission locks.
+"""Owned local trust files, publication, and shared admission and exclusive maintenance locks.
 
 Parents must be operator-controlled. These checks reject links and unsafe owned
 modes; they do not defend against hostile code running as the same local user.
@@ -28,7 +28,7 @@ MANIFEST_LIMIT = 1024 * 1024
 
 
 class TrustBusyError(StateError):
-    """Another process owns this bundle's publication or admission lock."""
+    """Another process owns this bundle's conflicting maintenance or admission lock."""
 
 
 def check_path(path: Path, *, directory: bool = False, owned: bool = False) -> None:
@@ -166,37 +166,136 @@ def create_bundle(directory: Path) -> None:
     sync_directory(directory.parent)
 
 
-@contextmanager
-def bundle_lock(directory: Path) -> Iterator[None]:
-    """Never unlink the lock: all processes must keep locking the same file."""
-    check_path(directory, directory=True, owned=True)
-    path = directory / "lock"
-    check_path(path, owned=True)
-    descriptor = os.open(path, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
-    try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode) or os.fstat(descriptor).st_size != 1:
+def _windows_lock(descriptor: int, *, shared: bool) -> None:
+    """Lock the permanent one-byte range, with independent handles for each caller."""
+    if sys.platform != "win32":
+        raise OSError("Windows trust locks are unavailable")
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    class Overlapped(ctypes.Structure):
+        _fields_ = [
+            ("internal", ctypes.c_size_t),
+            ("internal_high", ctypes.c_size_t),
+            ("offset", wintypes.DWORD),
+            ("offset_high", wintypes.DWORD),
+            ("event", wintypes.HANDLE),
+        ]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    arguments = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.POINTER(Overlapped),
+    ]
+    kernel.LockFileEx.argtypes = arguments
+    kernel.LockFileEx.restype = wintypes.BOOL
+    handle = msvcrt.get_osfhandle(descriptor)
+    offset = Overlapped()
+    # FAIL_IMMEDIATELY, plus EXCLUSIVE_LOCK only for maintenance. CRT read-lock
+    # constants are exclusive too, so they cannot implement concurrent admission.
+    flags = 1 if shared else 3
+    if not kernel.LockFileEx(handle, flags, 0, 1, 0, ctypes.byref(offset)):
+        error = ctypes.get_last_error()
+        if error == 33:  # ERROR_LOCK_VIOLATION.
+            raise TrustBusyError("Another operation holds a conflicting SSH trust lock")
+        raise ctypes.WinError(error)
+
+
+class BundleLock:
+    """Passive owner assigned before acquisition; uncertain native ownership stays visible."""
+
+    def __init__(self, directory: Path, *, shared: bool = False) -> None:
+        self._directory = directory
+        self._shared = shared
+        self._descriptor: int | None = None
+        self._open_unproven = False
+        self._close_unproven = False
+
+    @property
+    def settled(self) -> bool:
+        """No retained descriptor or uncertain interrupted native acquisition/release."""
+        return self._descriptor is None and not self._open_unproven and not self._close_unproven
+
+    def acquire(self) -> None:
+        """Acquire once; a failed or interrupted attempt must be released by this owner."""
+        if not self.settled:
+            raise StateError("SSH trust lock ownership must settle before another acquisition")
+        check_path(self._directory, directory=True, owned=True)
+        path = self._directory / "lock"
+        check_path(path, owned=True)
+        # Interrupting open before Python captures the descriptor cannot prove
+        # settlement. Once captured, even interrupted lock acquisition can be
+        # settled by closing that exact retained descriptor.
+        self._open_unproven = True
+        try:
+            self._descriptor = os.open(path, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+        except OSError:
+            self._open_unproven = False
+            raise
+        self._open_unproven = False
+        descriptor = self._descriptor
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_size != 1:
             raise StateError("SSH trust lock is not a regular initialized lock file")
-        try:
-            if sys.platform == "win32":
-                import msvcrt
+        if sys.platform == "win32":
+            _windows_lock(descriptor, shared=self._shared)
+        else:
+            import fcntl
 
-                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
+            try:
+                fcntl.flock(descriptor, (fcntl.LOCK_SH if self._shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
+            except OSError as error:
+                if error.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                    raise
+                raise TrustBusyError("Another operation holds a conflicting SSH trust lock") from error
 
-                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as error:
-            if error.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
-                raise
-            raise TrustBusyError(
-                "Another operation is maintaining or admitting SSH trust; retry when it finishes"
-            ) from error
+    def release(self) -> bool:
+        """Close the exact descriptor, releasing even an unconfirmed acquired lock."""
+        if self._close_unproven:
+            # Close may already have succeeded and the number may be reused.
+            # Retrying it would risk closing an unrelated caller's descriptor.
+            return False
+        if self._descriptor is None:
+            return self.settled
+        self._close_unproven = True
         try:
-            yield
-        finally:
-            if sys.platform == "win32":
-                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(self._descriptor)
+        except OSError:
+            return False
+        self._descriptor = None
+        self._open_unproven = False
+        self._close_unproven = False
+        return True
+
+
+@contextmanager
+def bundle_lock(directory: Path, *, shared: bool = False) -> Iterator[None]:
+    """Keep one permanent lock file; readers overlap, publication excludes readers."""
+    owner = BundleLock(directory, shared=shared)
+    failure: BaseException | None = None
+    try:
+        owner.acquire()
+        yield
+    except BaseException as error:
+        failure = error
+        raise
     finally:
-        os.close(descriptor)
+        try:
+            settled = owner.release()
+        except BaseException as release_error:
+            release_error.add_note("SSH trust lock ownership is unproven; quiesce new use and inspect ownership")
+            if failure is None:
+                raise
+            if not isinstance(failure, (KeyboardInterrupt, SystemExit)):
+                raise release_error from failure
+            failure.add_note(f"SSH trust lock release was interrupted: {release_error}")
+        else:
+            if not settled:
+                if failure is None:
+                    raise StateError("SSH trust lock release is unproven; quiesce new use and inspect ownership")
+                failure.add_note("SSH trust lock ownership is unproven; quiesce new use and inspect ownership")

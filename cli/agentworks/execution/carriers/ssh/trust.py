@@ -221,7 +221,7 @@ def import_trust(directory: Path, *, sources: SSHTrustFiles, authority: str) -> 
 def trust_status(bundle: ManagedSSHTrust) -> SSHTrustStatus:
     """Read maintenance state even while blocked, without admitting policy for use."""
     try:
-        with files.bundle_lock(bundle.directory):
+        with files.bundle_lock(bundle.directory, shared=True):
             return _load(bundle.directory).status
     except OSError as error:
         raise TrustBlockedError("SSH trust maintenance state is unavailable") from error
@@ -268,7 +268,7 @@ def resolve_trust(trust: SSHTrustFiles | ManagedSSHTrust) -> SSHTrustFiles:
                 with files.read_file(path):
                     pass
             return trust
-        with files.bundle_lock(trust.directory):
+        with files.bundle_lock(trust.directory, shared=True):
             manifest = _load(trust.directory)
             if manifest.status.blocked or manifest.status.generation is None:
                 raise TrustBlockedError("SSH trust policy is blocked pending complete maintenance")
