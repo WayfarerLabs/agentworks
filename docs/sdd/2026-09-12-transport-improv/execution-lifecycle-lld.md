@@ -1328,6 +1328,11 @@ introduced. A failed status exchange may already have consumed a terminal respon
 lost acknowledgment and lost terminal evidence remain unknown, never absence or completion. This
 slice does not retry a failed status exchange or promise signal-atomic acknowledgment publication.
 
+Proxmox platform access supplies the route check through its existing owned provider custody:
+reobserve the retained origin/VM/generation locator using the body-free current-config GET and
+require equality. Fence database ownership before and after this read. This is provider route
+evidence, not a fresh guest-boot observation; it introduces no guest execution or activation.
+
 Closure requires an authentic original runtime READY prefix and independent normal-zero completion
 of the exact prepared helper invocation. READY precedes the helper's guest check: it is neither a
 fresh current-boot receipt nor proof that a managed observation succeeded. Closure settles only that
