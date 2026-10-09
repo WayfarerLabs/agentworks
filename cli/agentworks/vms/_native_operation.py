@@ -188,9 +188,9 @@ def _prepare(
     power = platform.observe_execution_power(vm, ctx, deadline=workflow.deadline, custody=workflow.local_delivery)
     if workflow.deadline.expired:
         raise StateError("Native VM power observation exceeded its deadline", entity_kind="vm", entity_name=vm_name)
-    if type(power) is not VMStatus or power not in {VMStatus.RUNNING, VMStatus.STOPPED}:
+    if type(power) is not VMStatus or power not in {VMStatus.RUNNING, VMStatus.STOPPED, VMStatus.DEALLOCATED}:
         raise StateError("Native VM power cannot authorize activation", entity_kind="vm", entity_name=vm_name)
-    if power is VMStatus.STOPPED and vm.operator_stopped:
+    if power in {VMStatus.STOPPED, VMStatus.DEALLOCATED} and vm.operator_stopped:
         raise StateError("Operator-stopped VM cannot be started automatically", entity_kind="vm", entity_name=vm_name)
     access = platform.build_native_execution_access(vm, ctx, owner=workflow.owner, custody=workflow.local_delivery)
     workflow.access = access

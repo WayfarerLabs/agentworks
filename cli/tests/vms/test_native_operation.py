@@ -74,6 +74,7 @@ from agentworks.vms.target_preparation import (
 from tests.execution.test_target_identity import SyntheticCarrier
 from tests.execution.test_wsl2_owned_download import GuestThenFileCarrier
 from tests.execution.test_wsl2_platform_hold import BOOT, FakeNative, FakeObserver
+from tests.plugins._fixtures import FixtureVMPlatform
 from tests.vms.test_target_preparation import _MARKER
 
 if TYPE_CHECKING:
@@ -268,45 +269,93 @@ def test_late_power_result_refuses_before_route(
 
 
 @pytest.mark.parametrize(
-    ("power", "stopped", "permits_route"),
+    ("power", "permits_access"),
     [
-        (VMStatus.STOPPED, True, False),
-        (VMStatus.UNKNOWN, False, False),
-        (VMStatus.RUNNING, True, True),
+        (VMStatus.RUNNING, True),
+        (VMStatus.STOPPED, True),
+        (VMStatus.DEALLOCATED, True),
+        (VMStatus.UNKNOWN, False),
+        ("running", False),
+        ("stopped", False),
+        ("deallocated", False),
+        (None, False),
     ],
 )
-def test_fresh_intent_and_power_gate_precedes_route_and_wake(
+@pytest.mark.parametrize("stopped", [False, True])
+def test_fresh_intent_and_power_gate_precedes_access_and_wake(
     database: Database,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    power: VMStatus,
+    power: object,
     stopped: bool,
-    permits_route: bool,
+    permits_access: bool,
 ) -> None:
-    platform = WSL2Platform("wsl2", {})
+    platform = FixtureVMPlatform("wsl2", {})
     database.set_operator_stopped("box", stopped)
     events: list[str] = []
+    original_deadline = Deadline.after(10)
+    observed_claim: OperationOwnership | None = None
+    observed_custody: LocalDeliveryCustody | None = None
+    halt = StateError("test preparation stop")
 
-    def observe(vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody=None) -> VMStatus:
-        assert database.operations.inspect(_scope()) is not None
+    def observe(vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody=None) -> object:
+        nonlocal observed_claim, observed_custody
+        claim = database.operations.inspect(_scope())
+        assert claim is not None
+        observed_claim = claim.ownership
+        observed_custody = custody
+        assert isinstance(custody, LocalDeliveryCustody)
+        assert deadline is original_deadline
         assert vm.operator_stopped is stopped
         events.append("power")
         return power
 
-    def locator(vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody=None) -> ProviderLocator:
-        events.append("route")
-        raise StateError("test route stop")
+    class Access:
+        binding = None
+        preparation = None
+        route_check = None
+
+        def __init__(self, owner: OperationOwner, custody: LocalDeliveryCustody) -> None:
+            self.owner = owner
+            self.custody = custody
+
+        def prepare(self, observed_power: VMStatus, deadline: Deadline) -> None:
+            claim = database.operations.inspect(_scope())
+            assert claim is not None and claim.ownership == self.owner.ownership == observed_claim
+            assert self.custody is observed_custody
+            assert observed_power is power and deadline is original_deadline
+            events.append("prepare")
+            raise halt
+
+        def settle(self, deadline: Deadline) -> bool:
+            claim = database.operations.inspect(_scope())
+            assert claim is not None and claim.ownership == observed_claim
+            assert deadline is original_deadline
+            assert self.custody is observed_custody and self.custody.settled
+            events.append("settle")
+            return True
+
+    def build(vm: VMRow, ctx: RunContext, *, owner: OperationOwner, custody: LocalDeliveryCustody) -> Access:
+        claim = database.operations.inspect(_scope())
+        assert claim is not None and claim.ownership == owner.ownership == observed_claim
+        assert custody is observed_custody
+        assert not owner.list_pending_lifecycle_obligations()
+        events.append("build")
+        return Access(owner, custody)
 
     monkeypatch.setattr(platform, "observe_execution_power", observe)
-    monkeypatch.setattr(platform, "observe_provider_locator", locator)
+    monkeypatch.setattr(platform, "build_native_execution_access", build)
+    monkeypatch.setattr(platform, "start", lambda *args, **kwargs: pytest.fail("core woke VM"))
+    allowed = permits_access and not (stopped and power in {VMStatus.STOPPED, VMStatus.DEALLOCATED})
     with (
-        pytest.raises(StateError),
+        pytest.raises(StateError) as caught,
         native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=_root(tmp_path)
+            database, "box", platform, RunContext(), deadline=original_deadline, trusted_root=_root(tmp_path)
         ),
     ):
-        pass
-    assert events == (["power", "route"] if permits_route else ["power"])
+        pytest.fail("halted preparation admitted body")
+    assert (caught.value is halt) is allowed
+    assert events == (["power", "build", "prepare", "settle"] if allowed else ["power"])
     assert database.operations.inspect(_scope()) is None
 
 

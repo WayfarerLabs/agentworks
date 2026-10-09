@@ -290,7 +290,6 @@ def test_stopped_access_retains_single_activation_without_replay(database, tmp_p
         (VMStatus.STOPPED, True),
         (VMStatus.UNKNOWN, False),
         (VMStatus.UNKNOWN, True),
-        (VMStatus.DEALLOCATED, False),
         (VMStatus.DEALLOCATED, True),
         ("starting", False),
         ("starting", True),
