@@ -102,6 +102,30 @@ def test_real_helper_downloads_verified_content_and_cleans_snapshot(
         database.close()
 
 
+def test_buffered_3mib_download_uses_twelve_verified_chunks(
+    tmp_path: Path, roots: tuple[Path, Path], plan: IdentityPlan
+) -> None:
+    source, scratch = roots
+    content = bytes(range(256)) * (3 * 1024 * 1024 // 256)
+    (source / "source").write_bytes(content)
+    database = Database(tmp_path / "state.db")
+    operation_owner = owner(database)
+    borrow = operation_owner.borrow()
+    carrier = LocalCarrier()
+    sink = BytesSink()
+    try:
+        outcome = download(borrow, source, sink, len(content), plan, carrier=carrier)
+        assert outcome.status is FileDownloadStatus.COMPLETE and outcome.stream_verified
+        assert outcome.accepted_bytes == len(content) and bytes(sink.data) == content
+        assert outcome.source_revision is not None
+        assert outcome.source_revision.digest == hashlib.sha256(content).digest()
+        assert carrier.calls == 14  # One begin, twelve bounded chunks and one exact cleanup.
+        assert not tuple(scratch.iterdir()) and outcome.cleanup_debt is None
+    finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
+        database.close()
+
+
 class _RecordingLiveCarrier(LocalCarrier):
     def __init__(self) -> None:
         super().__init__(live_stdio=True)

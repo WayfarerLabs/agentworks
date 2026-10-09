@@ -178,7 +178,7 @@ def test_real_helper_exchanges_binary_snapshot_recovery_and_exact_cleanup(
         pytest.skip(f"compatibility interpreter is unavailable: {runtime}")
     source_root = tmp_path / "source"
     source_root.mkdir()
-    content = bytes(range(256)) * 113 + b"\x00\xffsnapshot-secret"
+    content = bytes(range(256)) * 1024 + b"\x00\xffsnapshot-secret"
     source = source_root / "payload"
     source.write_bytes(content)
     before = source.stat()
@@ -418,6 +418,23 @@ def test_host_refuses_out_of_range_chunk_before_dispatch(plan: IdentityPlan) -> 
         )
 
     assert carrier.calls == 0
+
+
+def test_host_refuses_over_256kib_before_dispatch(plan: IdentityPlan) -> None:
+    ready = _ready(plan, length=256 * 1024 + 1, digest=hashlib.sha256(b"data").digest())
+    carrier = LocalCarrier()
+    with pytest.raises(ValidationError):
+        snapshot_chunk(
+            carrier,
+            token=_TOKEN,
+            ready=ready,
+            offset=0,
+            length=256 * 1024 + 1,
+            plan=plan,
+            deadline=Deadline.after(15),
+            runtime_selection=runtime_selection(),
+        )
+    assert carrier.calls == 0 and carrier.io is None
 
 
 def test_changed_scratch_is_refused_with_exact_cleanup_debt(
@@ -841,6 +858,86 @@ def test_scratch_failure_cannot_substitute_cleanup_authority_or_phase(
     assert result_observation.error is FileSnapshotObservationError.CONTROL
     assert result_observation.failure is None
     assert result_observation.cleanup_debt is None
+
+
+@pytest.mark.parametrize("capacity", (540_799, 540_800))
+def test_chunk_declares_complete_capture_capacity_before_dispatch(plan: IdentityPlan, capacity: int) -> None:
+    data = bytes(range(256)) * 1024
+    ready = _ready(plan, length=len(data), digest=hashlib.sha256(data).digest())
+
+    class CapacityCarrier(TranscriptCarrier):
+        def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+            assert isinstance(io.output, SinkOutput)
+            required = io.output.required_complete_stdout_bytes
+            assert required is not None
+            if required > capacity:
+                raise ValidationError("capture capacity exceeded")
+
+    carrier = CapacityCarrier(lambda request, _raw: _chunk_records(request, data))
+    if capacity == 540_799:
+        with pytest.raises(ValidationError):
+            snapshot_chunk(
+                carrier,
+                token=_TOKEN,
+                ready=ready,
+                offset=0,
+                length=len(data),
+                plan=plan,
+                deadline=Deadline.after(15),
+                runtime_selection=runtime_selection(),
+            )
+        assert carrier.calls == 0 and carrier.io is None
+    else:
+        result = snapshot_chunk(
+            carrier,
+            token=_TOKEN,
+            ready=ready,
+            offset=0,
+            length=len(data),
+            plan=plan,
+            deadline=Deadline.after(15),
+            runtime_selection=runtime_selection(),
+        )
+        assert result.observation is not None and result.observation.chunk is not None
+        assert result.observation.chunk.data == data
+        assert result.observation.chunk.chunk_digest == hashlib.sha256(data).digest()
+        assert carrier.calls == 1
+
+
+@pytest.mark.parametrize("fault", ("truncated", "incomplete"))
+def test_maximum_chunk_incomplete_transcript_releases_no_verified_bytes(plan: IdentityPlan, fault: str) -> None:
+    data = bytes(range(256)) * 1024
+    ready = _ready(plan, length=len(data), digest=hashlib.sha256(data).digest())
+
+    class IncompleteCarrier(TranscriptCarrier):
+        def execute(
+            self,
+            invocation: PreparedInvocation,
+            *,
+            io: CarrierIO,
+            deadline: Deadline,
+            custody: LocalDeliveryCustody | None = None,
+        ) -> CarrierReport:
+            report = super().execute(invocation, io=io, deadline=deadline, custody=custody)
+            return replace(report, stdout=replace(report.stdout, complete=False)) if fault == "incomplete" else report
+
+    carrier = IncompleteCarrier(
+        lambda request, _raw: (
+            _chunk_records(request, data)[:-1] if fault == "truncated" else _chunk_records(request, data)
+        )
+    )
+    result = snapshot_chunk(
+        carrier,
+        token=_TOKEN,
+        ready=ready,
+        offset=0,
+        length=len(data),
+        plan=plan,
+        deadline=Deadline.after(15),
+        runtime_selection=runtime_selection(),
+    )
+    assert result.observation is not None and result.observation.state is FileSnapshotObservationState.UNCERTAIN
+    assert result.observation.chunk is None
 
 
 def test_tampered_or_truncated_chunk_transcript_releases_no_bytes(plan: IdentityPlan) -> None:

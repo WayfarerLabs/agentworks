@@ -90,6 +90,29 @@ def _scratch_cause(error: BaseException) -> ScratchTransferError:
     return error.__cause__
 
 
+def test_read_range_batches_256kib_without_increasing_write_or_iterator_limit(tmp_path: Path) -> None:
+    content = bytes(range(256)) * 1024 + b"x"
+    parent_fd = _open_parent(tmp_path)
+    reference = begin_scratch(parent_fd, len(content))
+    try:
+        oversized_write = content[: 24 * 1024 + 1]
+        error = _failure(write_scratch_chunk, parent_fd, reference, 0, oversized_write, _digest(oversized_write))
+        assert error.kind is ScratchFailureKind.LIMIT and error.phase is ScratchPhase.WRITE
+        assert (_scratch_directory(tmp_path) / scratch_module._DATA_NAME).stat().st_size == 0
+        for offset in range(0, len(content), 24 * 1024):
+            block = content[offset : offset + 24 * 1024]
+            write_scratch_chunk(parent_fd, reference, offset, block, _digest(block))
+        ready = verify_scratch(parent_fd, reference, _digest(content))
+        assert read_scratch_range(parent_fd, ready, 0, 256 * 1024) == content[: 256 * 1024]
+        error = _failure(read_scratch_range, parent_fd, ready, 0, 256 * 1024 + 1)
+        assert error.kind is ScratchFailureKind.LIMIT and error.phase is ScratchPhase.READ
+        blocks = list(iter_ready_scratch(parent_fd, ready))
+        assert b"".join(blocks) == content and all(len(block) <= 24 * 1024 for block in blocks)
+    finally:
+        cleanup_scratch(parent_fd, reference)
+        os.close(parent_fd)
+
+
 def test_binary_roundtrip_reopens_each_operation_and_accepts_duplicate_retry(tmp_path: Path) -> None:
     content = bytes(range(256)) * 97
     first = content[: scratch_module._MAX_CHUNK_BYTES]

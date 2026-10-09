@@ -37,11 +37,13 @@ from agentworks.execution._file_snapshot_protocol import (
 )
 from agentworks.execution._file_wire import (
     MAX_RECORD_BODY_BYTES,
+    MAX_RECORD_BYTES,
     FileRecord,
     FileRecordKind,
 )
 from agentworks.execution._file_wire_reader import FileRecordReader, FileWireError
 from agentworks.execution._runtime_prerequisite import (
+    MAX_RUNTIME_RECORD_BYTES,
     RuntimePrefixSink,
     RuntimePrerequisiteObservation,
     RuntimePrerequisiteState,
@@ -411,7 +413,17 @@ def _exchange(
     stderr = _DiagnosticSink()
     io = CarrierIO(
         input=FiniteInput(prefix + _request_data(request), sensitive=True),
-        output=SinkOutput(runtime, stderr, require_live=isinstance(request, FileSnapshotStreamRequest)),
+        output=SinkOutput(
+            runtime,
+            stderr,
+            require_live=isinstance(request, FileSnapshotStreamRequest),
+            required_complete_stdout_bytes=(
+                MAX_RUNTIME_RECORD_BYTES
+                + ((request.length + MAX_RECORD_BODY_BYTES - 1) // MAX_RECORD_BODY_BYTES + 2) * MAX_RECORD_BYTES
+                if isinstance(request, FileSnapshotChunkRequest)
+                else None
+            ),
+        ),
         sensitive=True,
     )
     dispatch = Dispatch.UNKNOWN

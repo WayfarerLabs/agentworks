@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
 MAX_REQUEST_BYTES = 32_768
 MAX_PATH_BYTES = 4_096
-MAX_SNAPSHOT_CHUNK_BYTES = 12 * 1_024
+MAX_SNAPSHOT_CHUNK_BYTES = 256 * 1_024
 _MAX_LENGTH = (1 << 63) - 1
 _LOWER_HEX = frozenset("0123456789abcdef")
 _COMMON_FIELDS = frozenset({"identity", "nonce", "operation", "remaining_seconds", "token", "version"})

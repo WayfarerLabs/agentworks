@@ -279,6 +279,16 @@ def test_chunk_accepts_empty_terminal_range_and_enforces_declared_length_and_cap
         )
 
 
+def test_chunk_request_accepts_256kib_and_refuses_larger_wire_range() -> None:
+    request = _chunk(ready=_ready(length=256 * 1024 + 1), length=256 * 1024)
+    encoded = encode_file_snapshot_request(request)
+    assert decode_file_snapshot_request(encoded) == request
+    value = json.loads(encoded)
+    value["length"] += 1
+    with pytest.raises(FileSnapshotRequestError):
+        decode_file_snapshot_request(_json(value))
+
+
 def test_chunk_request_refuses_ready_reference_outside_snapshot_core_binding() -> None:
     wrong_token = ReadyScratchReference(_reference(token=b"z" * 16), _DIGEST, 7, 8)
     wrong_operation = ReadyScratchReference(

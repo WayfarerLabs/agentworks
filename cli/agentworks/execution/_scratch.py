@@ -63,6 +63,7 @@ scratch_name = _scratch_name
 
 # Internal candidate pending whole-request carrier proof.
 _MAX_CHUNK_BYTES = 24 * 1024
+_MAX_READ_RANGE_BYTES = 256 * 1024
 _MAX_OFFSET = (1 << 63) - 1
 _HASH_READ_BYTES = 64 * 1024
 
@@ -804,7 +805,7 @@ def _validate_range(reference: ScratchReference, offset: int, length: int) -> No
         offset < 0
         or offset > _MAX_OFFSET
         or length < 0
-        or length > _MAX_CHUNK_BYTES
+        or length > _MAX_READ_RANGE_BYTES
         or offset > expected_length
         or length > expected_length - offset
     ):
