@@ -1046,7 +1046,7 @@ associated pending acceptance gates are superseded by this ruling.
 
 The admission producer at `b86c48803` clears all three independent private lanes and the lead's
 460-case related selection without skips. Scoped Ruff, formatting and typing and full file quality
-pass. Actual locked-SDK tests cover one-send delivery, not server acceptance or request drain. Review
+pass. Actual locked-SDK tests cover one-send SDK dispatch, not server acceptance or request drain. Review
 corrected stored-client interruption cleanup and removed an unreachable encoder bound. Successful
 startup settlement, complete AWS access, native proof and whole-PR acceptance remain open below.
 
