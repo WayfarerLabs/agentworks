@@ -146,6 +146,12 @@ it does not by itself make an already-running VM unavailable. Preserve that exis
 distinction when converging platform power, and do not treat transitional or unknown provider status
 as definitive stopped evidence.
 
+The shared native-operation gate admits only the typed stable states `RUNNING`, `STOPPED` and
+`DEALLOCATED`. Operator-stopped intent refuses automatic activation for both inactive states, while
+`RUNNING` can proceed regardless of that intent. Core retains passive platform access before effects
+and passes the original observed state unchanged; the adapter owns its concrete activation. This
+gate does not supply a missing platform adapter or prove native availability by itself.
+
 PTY is an I/O choice, not a background state. `attach(ref, terminal=...)` requires an attach grant
 and supported transport, and does not create a new run. A reusable detached terminal needs an owned
 terminal endpoint such as the session's tmux server; ordinary inherited pipes are not durable.
@@ -1061,13 +1067,15 @@ late evidence as activation authority. These limitations do not weaken the separ
 execution/activation admission rules. Cloud activation and route factories still require their own
 reviewed evidence; passive power observation alone is not full native access.
 
-The 2026-10-09 locked-SDK audit additionally finds automatic resource-provider registration in
-Azure's default compute and network pipelines. Disabling retry middleware does not remove that
-policy: a failed GET can cause registration POST, polling and another GET. The current new reads
-therefore do not yet satisfy this passive contract. Give only the new read clients an explicit
-public pipeline policy list without registration, retaining the legacy clients unchanged. Actual SDK
-transport tests must reject this implicit mutation for both clients before native read acceptance
-closes. Future mutation producers must also prove absence of authentication, redirect and
+The 2026-10-09 locked-SDK audit found automatic resource-provider registration in Azure's default
+compute and network pipelines. Disabling retry middleware did not remove that policy: a failed GET
+could cause registration POST, polling and another GET. The audited new reads did not satisfy the
+passive contract. They now own separate clients with explicit disabled-retry and ARM-authentication
+policies, without registration or redirect following; legacy clients are unchanged. The generated
+GET methods decode their own responses, so a separate content-decoding policy is unnecessary. Actual
+SDK transport tests establish refusal of this implicit mutation for both clients, not live native
+acceptance. Finite authentication resends remain read-only and deadline checks remain best effort.
+Future mutation producers must separately prove absence of authentication, redirect and
 provider-registration replay; one SDK method invocation is not that proof.
 
 ### Cloud SSH route composition

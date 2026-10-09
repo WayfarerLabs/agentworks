@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from azure.core.pipeline.policies import ContentDecodePolicy, RetryPolicy
+from azure.core.pipeline.policies import RetryPolicy
 from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.core.policies import ARMChallengeAuthenticationPolicy
 from azure.mgmt.network import NetworkManagementClient
@@ -47,9 +47,8 @@ def network_read_client(
 
 def _read_policies(
     credential: object,
-) -> list[ContentDecodePolicy | RetryPolicy[HttpRequest, HttpResponse] | ARMChallengeAuthenticationPolicy]:
+) -> list[RetryPolicy[HttpRequest, HttpResponse] | ARMChallengeAuthenticationPolicy]:
     return [
-        ContentDecodePolicy(),
         RetryPolicy(retry_total=0, retry_connect=0, retry_read=0, retry_status=0),
         ARMChallengeAuthenticationPolicy(cast("TokenCredential", credential), "https://management.azure.com/.default"),
     ]

@@ -1059,10 +1059,30 @@ associated pending acceptance gates are superseded by this ruling.
 
 The 2026-10-09 SDK source audit finds that both Azure SDK default pipelines include automatic
 resource-provider registration: a registration-required GET can trigger POST, polling and replay.
-The new reads currently use those clients. The two preceding completion boxes had not merged and are
-corrected to unfinished until that existing passive-read contract is proved. The earlier reviews and
-test counts below remain accurate, but did not cover this SDK behavior. No live provider mutation
-was performed during the audit.
+The audited new reads used those clients. The two preceding completion boxes had not merged and were
+corrected to unfinished pending the missing passive-read proof. The new reads now own separate
+clients with explicit disabled-retry and ARM-authentication policies, without registration or
+redirect following. Three independent private lanes at `696a2095d` each observe 321 adjacent passes,
+with nine additional project probes and 13 generic probes. Complexity review proves that removing
+the unused content-decoding policy preserves all 321 passes; that deletion is incorporated. These
+results establish the bounded correction, not live native acceptance. Final integrated review and
+completion recording remain pending. The earlier reviews and test counts below remain accurate, but
+did not cover this SDK behavior. No live provider mutation was performed during the audit.
+
+- [ ] Privately review the common core power gate admitting `RUNNING`, `STOPPED` and `DEALLOCATED`.
+      Both inactive states respect operator-stopped intent; an already-running VM remains usable.
+      Pass the unchanged observation, original deadline, owner and custody to the retained access.
+      Prove no factory, preparation or wake on denial, and reject unknown or non-status
+      observations. This common gate does not implement cloud activation or advertise complete
+      availability.
+
+The bounded gate implementation at `725c6061d` changes only the two shared admission conditions. A
+generic 16-case matrix verifies intent, power, unchanged deadline, owner/custody continuity and
+cleanup. Its adjacent native-operation and target-preparation selection passes 160 cases without
+skips, with scoped lint, formatting and typing passing. The initial run found an obsolete Proxmox
+test expecting the old common refusal of `DEALLOCATED` without stop intent; only that parameter row
+is removed. Proxmox's native observer does not produce that state and no platform adapter changes.
+Independent integrated review remains pending; this is not provider activation or native acceptance.
 
 The bounded cloud-binding increment at `f6e1ed645` clears all three corrected private lanes against
 original base `2d7e32d633`. Project review observes 233 passes, generic review 268 passes and 30
