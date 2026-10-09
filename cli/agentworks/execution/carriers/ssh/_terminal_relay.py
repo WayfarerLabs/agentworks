@@ -21,6 +21,7 @@ from agentworks.execution._process import (
     LocalProcessTerminal,
     ResizeNotification,
     SinkWriteError,
+    _retain_control_exception,
     try_write_to_sink,
 )
 from agentworks.execution._process import (
@@ -200,10 +201,11 @@ class _Attempt:
         while True:
             try:
                 with self._condition:
-                    self._interruption = _retain_control(self._interruption, error)
+                    if error is not None:
+                        self._interruption = _retain_control_exception(self._interruption, error)
                     return self._interruption
             except BaseException as later:
-                error = _retain_control(error, later)
+                error = _retain_control_exception(error, later)
 
     def _entry(self) -> None:
         """Publish completion only after every descriptor borrower has stopped."""
@@ -394,12 +396,6 @@ class _Attempt:
     def _pause(self) -> None:
         remaining = self._deadline.remaining()
         self._stop.wait(_POLL_SECONDS if remaining is None else min(_POLL_SECONDS, remaining))
-
-
-def _retain_control(first: BaseException | None, later: BaseException | None) -> BaseException | None:
-    if first is None or (isinstance(first, Exception) and later is not None and not isinstance(later, Exception)):
-        return later
-    return first
 
 
 def _result(
