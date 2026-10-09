@@ -1329,7 +1329,7 @@ lost acknowledgment and lost terminal evidence remain unknown, never absence or 
 slice does not retry a failed status exchange or promise signal-atomic acknowledgment publication.
 
 Proxmox platform access supplies the route check through its existing owned provider custody:
-reobserve the retained origin/VM/generation locator using the body-free current-config GET and
+observe the retained origin/VM/generation locator again using the body-free current-config GET and
 require equality. Fence database ownership before and after this read. This is provider route
 evidence, not a fresh guest-boot observation; it introduces no guest execution or activation.
 
