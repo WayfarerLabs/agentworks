@@ -1010,11 +1010,16 @@ associated pending acceptance gates are superseded by this ruling.
       and shared platform-host resources without splitting ownership by transport route or identity.
       Retire superseded local harness coordination during consumer migration, not through a second
       competing new-stack lock.
-- [ ] Remove the unused standalone host-bound stop adapter, its dedicated dispatch constants and
+- [x] Remove the unused standalone host-bound stop adapter, its dedicated dispatch constants and
       codec wrappers. Keep the outcome next to the actual tracked stop consumer and retain useful
       behavioral coverage through OPERATION and RESOURCE controls. Preserve the fixed guest stop
       protocol, accepted-intent versus termination distinction, historical records and operator
       data; this deletion does not settle earlier obligations or complete deadline recovery.
+      Private completion at `d23cd792`: project, complexity and generic reviews cleared the bounded
+      unit after correcting helper-settlement wording and removing unused outcome fields. The
+      implementer passed 1,620 related tests; lead and independent checks passed actual stop
+      regressions and scoped Python gates. Lead canonical file-quality checks passed. Native and
+      whole-PR acceptance remain open.
 - [ ] Establish one platform-neutral VM availability boundary around every authorized new-stack VM
       operation that can perform guest work, entered after core admits the operation but before
       activation and retained through route, body and teardown. Prove no-op platforms and stateful
