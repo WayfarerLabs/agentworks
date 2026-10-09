@@ -1034,7 +1034,7 @@ associated pending acceptance gates are superseded by this ruling.
       duplicate guest-identity fields, a generic task registry or whole-owner closure by adapters.
       Prove fresh import behavior and unchanged legacy hooks; cloud/Lima access and complete
       RunContext/native acceptance remain separate requirements.
-- [ ] Implement and privately review the provider-owned AWS start admission/acknowledgment producer
+- [x] Implement and privately review the provider-owned AWS start admission/acknowledgment producer
       described in the
       [lifecycle LLD](execution-lifecycle-lld.md#aws-activation-admission-and-acknowledgment). Prove
       exact VM ownership and locator matching, durable admission before one SDK call, bounded
@@ -1043,6 +1043,13 @@ associated pending acceptance gates are superseded by this ruling.
       disabled, original-deadline checks and owned client closure. No waiter, replay, legacy client
       reuse or power-based settlement. Keep this a private developer increment inside #833, not a
       new partial PR or a claim that stopped AWS access is usable.
+
+The admission producer at `b86c48803` clears all three independent private lanes and the lead's
+460-case related selection without skips. Scoped Ruff, formatting and typing and full file quality
+pass. Actual locked-SDK tests cover one-send delivery, not server acceptance or request drain. Review
+corrected stored-client interruption cleanup and removed an unreachable encoder bound. Successful
+startup settlement, complete AWS access, native proof and whole-PR acceptance remain open below.
+
 - [ ] Complete owned AWS access with a reviewed successful-start settlement rule, fresh power and
       exact guest preparation, endpoint trust and selected firewall-route lifetime. Obtain native
       startup/uncertainty/cleanup evidence before admission through RunContext. Missing start
