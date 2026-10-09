@@ -1708,13 +1708,14 @@ release the JSON operation's ownership between observation and conditional publi
 
 `_file_download.py` creates one private source snapshot and selects its transfer route once from the
 carrier's live-stdio feature. A live route streams the held READY copy in one helper attempt;
-buffered routes use verified bounded chunks. Both clean up the exact snapshot under the same owner.
-Sequenced live DATA records reach only the private sink before final transcript verification;
-length, digest, closed framing and independent normal-zero completion must all agree before the
-stream is verified. There is no chunk fallback or replay after possible stream dispatch. Short
-writes and temporary stalls consume the original deadline; the coordinator never closes its sink.
-The final byte count and digest match the source revision, including for empty files. Confirmed
-absence returns no bytes.
+buffered routes use verified ranges of at most 256 KiB. Each range declares a conservative complete
+stdout requirement before dispatch, including its runtime and terminal framing. Both routes clean up
+the exact snapshot under the same owner. Sequenced live DATA records reach only the private sink
+before final transcript verification; length, digest, closed framing and independent normal-zero
+completion must all agree before the stream is verified. There is no chunk fallback or replay after
+possible stream dispatch. Short writes and temporary stalls consume the original deadline; the
+coordinator never closes its sink. The final byte count and digest match the source revision,
+including for empty files. Confirmed absence returns no bytes.
 
 The outcome separates accepted bytes, whole-stream verification, remote cleanup debt and possible
 future effects. A verified stream is not complete while required cleanup remains unresolved. Sink
@@ -1823,8 +1824,9 @@ search, replay, transfer registry or reboot-durability guarantee is supplied.
 
 Writes use bounded exact offsets and a chunk digest. An exact previously written range may be
 retried after comparing its bytes; gaps, conflicting duplicates and partially overlapping chunks
-refuse. Whole-object length and digest verification precedes bounded reads. The 24 KiB raw chunk
-limit is an internal candidate, not evidence that a complete encoded carrier request fits.
+refuse. Whole-object length and digest verification precedes bounded reads. Writes and internal
+streaming pieces retain the 24 KiB raw limit; exact verified range reads allow up to 256 KiB.
+Neither raw bound alone proves that a complete encoded carrier request or response fits.
 
 Cleanup removes the exact data object before its receipt, then the empty directory, never unknown
 neighboring objects or a recursive prefix match. Errors retain closed facts and unresolved
