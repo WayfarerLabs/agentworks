@@ -5,6 +5,27 @@
 
 ## Findings
 
+### Provider SDK invocation is not a dispatch boundary
+
+The 2026-10-09 locked-source audit finds that Azure compute 38.3.0 and network's default pipelines
+include automatic resource-provider registration. A failed GET can trigger registration POST,
+polling and another GET even with service retries disabled. Azure documents the registration policy
+and supports explicit pipeline policy lists. Decision: give only the new Azure read clients a policy
+boundary without registration and prove both actual SDK clients with scripted transports; leave
+legacy clients unchanged. The earlier local read fixtures did not cover this behavior.
+
+Sources:
+[registration policy](https://learn.microsoft.com/en-us/python/api/azure-mgmt-core/azure.mgmt.core.policies.armautoresourceproviderregistrationpolicy?view=azure-python),
+[explicit pipeline policies](https://learn.microsoft.com/en-us/python/api/azure-core/azure.core.pipelineclient?view=azure-python).
+
+The same audit finds that GCP's generated service-retry override does not disable its HTTP
+authentication refresh/resend or redirects. AWS's one-total-attempt configuration suppresses the
+locked ordinary EC2 retry path, but does not control arbitrary custom event handlers or credential
+provider requests. These are source findings, not observed one-shot mutation guarantees. Decision:
+prove actual provider transmissions before building each new activation producer; do not infer
+one-shot delivery from one SDK method call. Keep best-effort SDK timeouts distinct from hard total
+deadlines, and retain uncertainty rather than replaying an unknown mutation.
+
 ### Destination account discovery
 
 Python 3.11's Unix `pwd.getpwnam` supplies numeric UID and primary GID, with a missing account
