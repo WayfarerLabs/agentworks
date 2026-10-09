@@ -735,9 +735,11 @@ dispatch row. Retire the unused standalone host-bound stop checkpoint and its se
 `managed-stop` dispatch API; retain the fixed guest stop protocol. A complete validated `ACCEPTED`
 response establishes durable target intent only after the actual helper settles. It neither proves
 termination nor resolves the operation-lifetime row: aggregate finish still accounts for every
-helper. Only the exact `boundary-empty` fact proves termination. A helper failure, incomplete
-response, lost delivery or uncertain admission retains the claim until recovery proves settlement;
-ambiguous arming is not positive `NOT_SENT` evidence.
+helper. Only the exact `boundary-empty` fact proves termination. An invalid or incomplete stop
+response does not establish acceptance, but does not retain helper debt when exact helper
+termination and local custody are proved settled. Unknown helper termination, lost delivery or
+uncertain admission retains the claim until recovery proves settlement; ambiguous arming is not
+positive `NOT_SENT` evidence.
 
 Before stop dispatch, the host requires the exact run's reconciled launch receipt and current target
 facts. A merely possible-dispatch run is not stop authority. The observing operation does not adopt

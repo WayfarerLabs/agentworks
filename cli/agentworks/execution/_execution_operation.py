@@ -128,13 +128,10 @@ class OwnedInlineOutcome:
 
 @dataclass(frozen=True, slots=True, repr=False)
 class ManagedStopOutcome:
-    """One stop attempt, proven response, and ordinary helper custody."""
+    """One stop attempt and its proven response after custody accounting."""
 
     candidate: ManagedStopCandidate | None = field(default=None, repr=False)
     state: ManagedStopState | None = None
-    pending_remote_effects: bool = False
-    coordination_uncertain: bool = False
-    requires_owner_retention: bool = False
 
 
 class InlineExecutionControlFact(Exception):
@@ -638,9 +635,6 @@ class ExecutionOperation:
             state
             if not custody.requires_owner_retention and candidate is not None and candidate.dispatch is Dispatch.SENT
             else None,
-            custody.pending_remote_effects,
-            custody.coordination_uncertain,
-            custody.requires_owner_retention,
         )
 
     def dispose_job(self, reference: JobRef, carrier: Carrier, deadline: Deadline) -> JobDisposal:
