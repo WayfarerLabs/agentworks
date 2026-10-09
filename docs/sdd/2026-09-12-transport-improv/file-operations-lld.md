@@ -299,15 +299,15 @@ dispatch. No implicit macOS installation is allowed. This delivery revision rema
 implementation review, all-family regression coverage and native acceptance.
 
 Data staging and snapshot spools still reuse preparation's exact-offset, length/digest-verified
-scratch mechanics. The shared 24 KiB raw chunk is a candidate pending complete SSH/QGA request
-proof, not a file-layer constant. The private stage exchange uses a smaller 12 KiB raw chunk and a
-32 KiB complete-manifest limit. Its fixed bundle and complete provider serialization are measured by
-local fixtures; native acceptance and every supported connection/identity prefix remain separate
-proof obligations. Close removes only recorded objects; uncertain cleanup is owner debt and never
-hides the primary outcome. Shared same-invocation admission must establish interpreter prerequisites
-without installing anything; platform/ABI-dependent operations retain their own feature checks. No
-separate probe, installed helper version or executable-digest handshake is needed when the
-executable source travels with each invocation.
+scratch mechanics. Scratch writes and internal streaming pieces retain the 24 KiB raw bound;
+snapshot range reads have a separate 256 KiB bound. The private stage exchange uses a smaller 12 KiB
+raw chunk and a 32 KiB complete-manifest limit. Its fixed bundle and complete provider serialization
+are measured by local fixtures; native acceptance and every supported connection/identity prefix
+remain separate proof obligations. Close removes only recorded objects; uncertain cleanup is owner
+debt and never hides the primary outcome. Shared same-invocation admission must establish
+interpreter prerequisites without installing anything; platform/ABI-dependent operations retain
+their own feature checks. No separate probe, installed helper version or executable-digest handshake
+is needed when the executable source travels with each invocation.
 
 Upload consumes its declared finite source once. The unverified scratch reference binds exact object
 identity and expected length, not a whole-file digest that a streaming source cannot yet supply.
@@ -457,12 +457,21 @@ initial absence or a ready scratch reference plus the content-bound source revis
 check that the ready length and digest agree with the source revision and requested bound. Source
 absence does not bypass prerequisite or final deadline checks.
 
-`snapshot_chunk` carries that ready reference and one exact offset/length, initially bounded to 12
-KiB. It uses the fixed scratch parent and existing unlocked range checks, never the original source
-path. The complete typed response binds the requested range, byte count and chunk digest; only then
-may its bounded bytes reach the private download composition. The host also checks whole download
-length and digest. Zero-byte snapshots require no nonempty range. Raw carrier output, truncated
-framing or conflicting ready facts cannot become file bytes or a successful download.
+`snapshot_chunk` carries that ready reference and one exact offset/length, bounded to 256 KiB. It
+uses the fixed scratch parent and existing unlocked range checks, never the original source path.
+The complete typed response binds the requested range, byte count and chunk digest; only then may
+its bounded bytes reach the private download composition. The host also checks whole download length
+and digest. Zero-byte snapshots require no nonempty range. Raw carrier output, truncated framing or
+conflicting ready facts cannot become file bytes or a successful download.
+
+Before dispatch, each chunk declares its required complete stdout capacity: one bounded runtime
+record, the maximum number of 4 KiB DATA records for the requested length, and two bounded records
+for RESULT and FINISHED. Using the existing 8 KiB wire-record ceiling gives a conservative 540,800
+byte requirement for a full 256 KiB chunk, below the QGA carrier's 1 MiB declared capacity. This
+reduces a 3 MiB buffered download to twelve chunk invocations plus begin and cleanup, without
+changing upload manifests or adding reusable guest helper installation. A capacity refusal cannot
+trigger a smaller-chunk replay after possible dispatch. Native complete-response and throughput
+measurements remain required; a smaller invocation count is not a measured speedup.
 
 For a carrier advertising live stdio, `snapshot_stream` instead carries the same already-READY
 reference and emits bounded sequenced DATA records, an exact length/digest result and FINISHED over

@@ -3699,6 +3699,13 @@ edge follows.
       unchanged and reports passive. Prove exact-owner binding, refused replacement, interrupted
       cleanup and process-cleaned-but-restoration-pending cases; SSH separately supplies its
       terminal coordinator and native acceptance.
+- [ ] Increase buffered snapshot download batches to 256 KiB with a separate scratch range-read
+      ceiling, leaving upload writes and internal streaming pieces unchanged. Declare conservative
+      complete-response capacity before dispatch; preserve digest, framing, identity, metadata and
+      exact cleanup checks. Prove the boundaries and twelve-chunk 3 MiB shape locally, then measure
+      complete output and throughput on both QGA majors and native WSL. Live SSH remains its
+      existing single-stream path; no replay, helper-installation cache or weaker file semantics
+      follows.
 - [ ] Reconcile #770's historical escape/relaunch proposal against the later exclusion of malicious
       target-user containment. Deliver DIRECT/MANAGED without a CONTAINED profile or
       per-run-user/jail implementation; retain future profile extensibility. Prove trusted
