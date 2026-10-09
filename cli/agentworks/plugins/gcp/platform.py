@@ -91,6 +91,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
+    from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
     from agentworks.transports import Transport
 
@@ -582,6 +583,29 @@ class GCEPlatform(VMPlatform):
     def display_backend_name(self, vm: VMRow) -> str:
         identity = _VMIdentity.from_row(vm)
         return f"{identity.instance_name}@{identity.zone}"
+
+    def resolve_native_execution_binding(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+        config: Config | None = None,
+    ) -> NativeExecutionBinding:
+        """Read the exact owned endpoint and construct passive SSH delivery."""
+        from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_native_binding
+
+        settings = require_ssh_settings(vm, ctx, config)
+        identity = _VMIdentity.from_row(vm)
+        locator = self._locator_metadata(vm)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        current = self._read_exact_instance(vm, ctx, locator, deadline=deadline)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        verify_instance_network(current, network_url=identity.network_url, subnet_url=identity.subnet_url)
+        endpoint = live_external_ipv4(current, access_config_name=identity.access_config_name)
+        binding = ssh_native_binding(vm, endpoint, settings)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        return binding
 
     def observe_provider_locator(
         self,
