@@ -141,3 +141,17 @@ def test_windows_explicit_path_ignores_pathext(
     assert client.resolve_client_executable(replace(connection, ssh_executable=str(extensionless))) == str(
         extensionless
     )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink parent traversal; Windows requires separate native evidence")
+def test_path_parent_keeps_symlink_traversal_semantics(
+    connection: SSHConnection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    selected = selectable_client(tmp_path / "selected")
+    (selected.parent / "child").mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(selected.parent / "child", target_is_directory=True)
+    monkeypatch.setenv("PATH", str(link / ".."))
+    pinned = client.resolve_client_executable(connection)
+    assert os.path.samefile(pinned, selected)
+    assert Path(pinned).is_absolute()
