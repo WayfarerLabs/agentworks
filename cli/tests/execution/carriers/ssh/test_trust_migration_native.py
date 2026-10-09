@@ -20,7 +20,6 @@ import pytest
 from agentworks.errors import StateError
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.ssh.connection import SSHConnection
-from agentworks.execution.carriers.ssh.enrollment import enroll_new_target
 from agentworks.execution.carriers.ssh.trust import (
     ManagedSSHTrust,
     SSHTrustFiles,
@@ -30,6 +29,7 @@ from agentworks.execution.carriers.ssh.trust import (
     resolve_trust,
     trust_status,
 )
+from tests.execution.carriers.ssh._held_resources import EnrollmentCaller
 from tests.execution.carriers.ssh.enrollment_server import LocalSSH
 from tests.execution.carriers.ssh.fixture_worker import fixture_call
 
@@ -317,7 +317,7 @@ def test_explicit_ca_policy_transition_preserves_generations_on_source_rollback(
 @pytest.mark.integration
 @pytest.mark.parametrize("enrollment_sshd", ["workflow_alias"], indirect=True)
 def test_applicable_krl_refresh_blocks_failed_update_and_retains_learned_trust_on_rollback(
-    enrollment_sshd: LocalSSH, tmp_path: Path
+    enrollment_caller: EnrollmentCaller, enrollment_sshd: LocalSSH, tmp_path: Path
 ) -> None:
     connection = enrollment_sshd.connection
     assert isinstance(connection.trust, ManagedSSHTrust)
@@ -348,7 +348,7 @@ def test_applicable_krl_refresh_blocks_failed_update_and_retains_learned_trust_o
     assert initial.generation is not None
     retained = _policy_snapshot(bundle)
     marker = tmp_path.resolve() / "krl-executed"
-    candidate = enroll_new_target(migrated, provenance=enrollment_sshd.provenance, deadline=Deadline.after(10))
+    candidate = enrollment_caller.enroll(migrated, provenance=enrollment_sshd.provenance, deadline=Deadline.after(10))
     learned = candidate.known_hosts_file.read_bytes()
     assert enrollment_sshd.host_public_key.split()[1] in learned
     published = refresh_trust(

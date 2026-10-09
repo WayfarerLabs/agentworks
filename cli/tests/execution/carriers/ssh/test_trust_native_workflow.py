@@ -14,8 +14,8 @@ from agentworks.errors import StateError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import Capture, CarrierIO, Deadline, Dispatch, ExitStatus, PreparedInvocation
 from agentworks.execution.carriers.ssh.client import SSHCarrier
-from agentworks.execution.carriers.ssh.enrollment import enroll_new_target, recover_enrollment
 from agentworks.execution.carriers.ssh.trust import ManagedSSHTrust, resolve_trust, trust_status
+from tests.execution.carriers.ssh._held_resources import EnrollmentCaller
 from tests.execution.carriers.ssh.enrollment_server import LocalSSH
 
 pytestmark = pytest.mark.integration
@@ -60,7 +60,7 @@ def _blocked(carrier: SSHCarrier, invocation: PreparedInvocation, *, custody: Lo
 
 @pytest.mark.parametrize("enrollment_sshd", ["workflow", "workflow_alias"], indirect=True)
 def test_enrollment_publication_block_failed_refresh_repair_and_strict_reconnect(
-    custody: LocalDeliveryCustody, enrollment_sshd: LocalSSH, tmp_path: Path
+    enrollment_caller: EnrollmentCaller, custody: LocalDeliveryCustody, enrollment_sshd: LocalSSH, tmp_path: Path
 ) -> None:
     connection = enrollment_sshd.connection
     assert connection.port != 22
@@ -83,12 +83,13 @@ def test_enrollment_publication_block_failed_refresh_repair_and_strict_reconnect
     assert not marker.exists()
     assert not tuple(bundle.directory.glob("enrollment-*"))
 
-    candidate = enroll_new_target(connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(10))
+    candidate = enrollment_caller.enroll(connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(10))
     learned = candidate.known_hosts_file.read_bytes()
     assert enrollment_sshd.host_public_key.split()[1] in learned
     assert candidate.base_generation == initial.generation
     assert (
-        recover_enrollment(connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(10)) == candidate
+        enrollment_caller.recover(connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(10))
+        == candidate
     )
     assert candidate.known_hosts_file.read_bytes() == learned
     # A creation receipt alone cannot admit an ordinary command.

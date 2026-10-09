@@ -1,23 +1,23 @@
 # Owned SSH Local Forwarding
 
-- Status: Implementation design; retained cleanup adaptation and platform acceptance remain open
+- Status: Implementation design; platform acceptance remains open
 - Requirements: [FRD R2](frd.md#r2-isolated-connection-and-authentication-policy) and
   [R4](frd.md#r4-one-attempt-byte-safe-io-and-truthful-evidence)
 
 ## Current surface and ownership
 
-`open_local_forwards(connection, forwards, deadline=...)` opens explicitly requested local TCP
-forwards using one owned foreground client process. A `LocalForward` contains a numeric local bind
-address, local port, literal destination host and destination port. Non-loopback binding requires
-that explicit address, never an inherited config option. Ports are 1-65535; there is no automatic
-port allocation, SOCKS proxy, remote forwarding or arbitrary option passthrough in this surface.
+`OwnedForwarding(connection, forwards)` passively retains explicitly requested local TCP forwards. A
+`LocalForward` contains a numeric local bind address, local port, literal destination host and
+destination port. Non-loopback binding requires that explicit address, never an inherited config
+option. Ports are 1-65535; there is no automatic port allocation, SOCKS proxy, remote forwarding or
+arbitrary option passthrough in this surface.
 
-The returned `OwnedForwarding` is a context manager with `wait()` and idempotent `close()`.
-Composition owns it separately from execution and closes it within its operation lifetime. Passive
-connection/target access does not create forwards. The startup deadline covers local validation,
-installed-client version checking, authentication and setup acknowledgment; it does not silently
-become a lifetime limit after successful startup. Wait interruption closes owned resources and
-propagates. Later remote workload cancellation remains transport-owned.
+Composition holds the resource before `start(deadline=..., custody=...)` and explicitly closes it
+with a fresh finite deadline in its enclosing cleanup path. `wait()` observes natural exit without
+cleanup. The startup deadline covers local validation, installed-client version checking,
+authentication and setup acknowledgment; it does not become a lifetime limit after successful
+startup. Start or wait interruption propagates while the caller retains the resource. Later remote
+workload cancellation remains transport-owned.
 
 ## Positive setup evidence
 
@@ -34,12 +34,12 @@ POSIX account shell to emit one generated hexadecimal nonce and wait on its owne
 printf '%s\n' 'agw-forward-ready-<nonce>'; IFS= read -r _; exit 0
 ```
 
-Keep the client stdin pipe open. Require exactly the expected line on stdout before returning the
-resource. Bound startup output and drain both pipes fairly; noise, wrong acknowledgment, early
-exit/EOF, source/sink error or deadline expiration fails setup with bounded local cleanup. No
-arbitrary server diagnostic text is parsed. Continue draining/discarding diagnostics during the
-resource lifetime so full output pipes cannot stop the client. Do not retain payload-bearing
-exception text or unbounded logs.
+Keep the client stdin pipe open. Require exactly the expected line on stdout before successful
+startup returns. Bound startup output and drain both pipes fairly; noise, wrong acknowledgment,
+early exit/EOF, source/sink error or deadline expiration fails setup while retaining the resource
+for explicit bounded cleanup. No arbitrary server diagnostic text is parsed. Continue
+draining/discarding diagnostics during the resource lifetime so full output pipes cannot stop the
+client. Do not retain payload-bearing exception text or unbounded logs.
 
 OpenSSH initializes local forwarding and checks listener failures before opening the remote session.
 Its acknowledgment therefore establishes local listener setup and an authenticated remote session,
@@ -78,7 +78,7 @@ The drain worker observes immutable snapshots and handles pipe readiness, marker
 diagnostic drainage. SSH stops every pipe user before releasing the owner. The owner retains exact
 client construction, status observation and cleanup responsibilities. Natural exit is distinct from
 the local status produced by cleanup. Serialized, idempotent forwarding close coordinates with wait;
-interruption must settle ownership before propagating the original control exception.
+interruption propagates while the caller retains the resource for explicit bounded close.
 
 The local kill/reap allowance remains bounded once the process is available. Process construction
 itself has no proven hard time bound, so total startup/settlement time cannot inherit that cleanup
@@ -91,13 +91,13 @@ integration-required shared correction remains a separable contribution. Transpo
 and RunContext ownership. The startup, repeated-interruption, natural-exit, cleanup-uncertainty and
 native-platform proof gates remain open until their measured results are recorded.
 
-## Retained cleanup adoption gap
+## Retained cleanup adoption
 
 Transport's retained cleanup source at `12dcb01b` separates the first immutable cleanup observation
-from an explicitly bounded retry. The current forwarding close path still requests the former;
-repeated public close cannot retry a failed native cleanup. Failed startup also propagates its error
-before returning the forwarding resource. The caller's discovery custody holds only the version
-probe and cannot settle that separate forwarding session.
+from an explicitly bounded retry. The previous forwarding close path requested only the former;
+repeated public close could not retry a failed native cleanup. Failed startup also propagated its
+error before returning the resource. The previous caller's discovery custody held only the version
+probe and could not settle that separate forwarding session.
 
 A focused synthetic proof at SSH `91027e61` reproduces both branches using owned local Python
 children. Discovery custody settles while forwarding cleanup remains retryable; repeated public
@@ -108,13 +108,13 @@ existing production capability or native SSH acceptance.
 The enclosing forwarding lifetime must retain the same native owner before admission, including when
 startup fails before readiness. After stopping pipe use it must support serialized bounded cleanup
 retries, retaining pending or lost ownership. Adding retries only to an already returned resource
-leaves failed startup unresolved. This remains an implementation/design gate; no second native owner
-or cleanup capability inside reports or exceptions is introduced.
+leaves failed startup unresolved. The caller-held interface below addresses that ownership gap;
+native acceptance remains open; no second native owner or cleanup capability inside reports or
+exceptions is introduced.
 
-### Proposed caller-held forwarding interface
+### Caller-held forwarding interface
 
-This API revision awaits the operator's decision and is not implemented. Reuse `OwnedForwarding` as
-the passive resource held before startup, with one explicit start operation:
+`OwnedForwarding` is the passive resource held before startup, with one explicit start operation:
 
 ```text
 OwnedForwarding(connection: SSHConnection, forwards: Sequence[LocalForward])
@@ -124,11 +124,12 @@ OwnedForwarding.close(deadline: Deadline) -> bool
 ```
 
 The constructor validates and retains settings without trust-file admission, client discovery,
-thread startup or listener creation. Startup uses the caller's discovery storage and the resource's
-existing shared native owner; it never allocates a replacement forwarding owner. Successful start
-establishes readiness. Failure or interruption leaves the same resource with its caller, including
-when readiness was never reached. The separate discovery storage also remains caller-held until its
-own settlement.
+thread startup or listener creation. Startup uses the same caller-held delivery storage for
+discovery and the session. After discovery settles, `begin_process` retains the session owner before
+launch. The resource never constructs an adapter-local native owner, and its explicit close retries
+that same store and session owner. Successful start establishes readiness. Failure or interruption
+leaves the same resource with its caller, including when readiness was never reached. The delivery
+storage remains reserved to this resource until settlement; another session needs its own storage.
 
 Closing permanently prevents new startup, bounds drainer shutdown and stops all pipe use before
 asking that owner for bounded cleanup. Incomplete drainer or native settlement returns incomplete
@@ -137,12 +138,12 @@ owner. The startup deadline still does not limit a successfully held session's l
 replaces factory startup before the caller receives ownership without adding a second forwarding
 coordinator or changing the raw carrier contract.
 
-In this revised API, `close(deadline)` is the sole cleanup operation; there is no context-manager
-cleanup. `wait()` observes the local client's natural exit or an observation failure, without
-requesting cleanup or releasing ownership. It returns a known natural exit status or raises safe
-forwarding evidence when that status cannot be established. Waiting has no implicit timeout;
-interruption propagates while the caller retains the same resource. Another caller may explicitly
-close the resource while waiting; a cleanup-produced status is not reported as natural exit.
+In this API, `close(deadline)` is the sole cleanup operation; there is no context-manager cleanup.
+`wait()` observes the local client's natural exit or an observation failure, without requesting
+cleanup or releasing ownership. It returns a known natural exit status or raises safe forwarding
+evidence when that status cannot be established. Waiting has no implicit timeout; interruption
+propagates while the caller retains the same resource. Another caller may explicitly close the
+resource while waiting; a cleanup-produced status is not reported as natural exit.
 
 The caller attempts close in its enclosing cleanup path with a fresh finite deadline and explicitly
 handles `False` by retaining the resource for retry. If startup or wait already raised a control
