@@ -1358,6 +1358,19 @@ engine. Compute/network clients depend on that credential and retire before its 
 Their per-read cleanup and credential-last closure must remain independently observable. SDK
 construction without a returned original remains an explicit handoff limit.
 
+The private `AzureOwnedReadAccess` staging reader snapshots recorded identity without active work.
+Its compute observation precedes linked NIC/public-IP reads; retire the original compute client
+positively before dispatching those dependent reads. Retain each returned client before later checks
+and keep the selected credential until all dependents positively retire. Ordinary close failure may
+preserve the earlier result or error, but refuses subsequent observations; only terminal cleanup may
+retry the same originals, without authentication or request replay.
+
+Detach ordinary SDK failures from secret-bearing message, body, cause and context chains. Report
+only the SDK exception class and core-authored remediation. Apply this to initial authentication and
+later compute/NIC/public-IP work, including challenge-triggered credential refresh. Preserve
+original core domain and escaping control exceptions. Keep this adapter local to the new owned
+reader; it does not change the legacy translator or certify SDK-internal logging/drain.
+
 For newly recorded exact-incarnation access, retain Azure's observed unique VM ID as a canonical
 lowercase hyphenated 128-bit UUID, without imposing UUID version 4. The provider-owned opaque
 locator is `azure-vm:v2:<canonical-uuid>:<complete-ARM-resource-path>`. The final path is the entire
@@ -1372,8 +1385,9 @@ disclosed current baseline awaits operator disposition; its implementation is no
 design proposal. Preserve old path-only activation payloads and cleanup/reconciliation references
 without rewriting their evidence. A later new-incarnation admission seam must remain distinct from
 old-obligation cleanup. Neither the new locator nor a fresh read makes ARM's path-based start
-selector atomic. Exact-incarnation reads, authentication, startup settlement, endpoint/route/guest
-preparation and native acceptance remain unfinished.
+selector atomic. The private reader stages recorded path/VM-ID checks and owned authentication;
+new-VM identity recording, complete access, startup settlement, endpoint/route/guest preparation and
+native acceptance remain unfinished.
 
 ### Azure activation admission and acknowledgment
 
@@ -1431,13 +1445,15 @@ fall back to ambient. Do not clone the SDK's ADC selector merely to suppress pro
 Internally constructed SDK requests, CLI discovery, credential retry/backoff and constructor handoff
 remain explicit best-effort limits, not resources falsely reported as drained.
 
-For the new owned service-read path, use public token-state inspection, synchronous refresh through
-the owned Request when needed, and public header application before one ordinary service-session
-request. Preserve token identity, scopes, quota and requested credential security behavior. Keep the
-real public Request type and session available to SDK credential transports; a plain callable can
-lose supported certificate behavior. Retain attributable responses before SDK consumption and refuse
-later owned calls while their cleanup is uncertain. Public session closure accounts for our
-originals, not every SDK-created adapter or internal process.
+The staged reader uses public token-state inspection, synchronous refresh through the owned Request
+when needed, and public header application before one ordinary service-session request. That stages
+token and transport custody, not complete authentication middleware. Final owned access must use
+public `before_request` with the actual service method and fixed URL to preserve selected credential
+security behavior, token identity, scopes and quota. Keep the real public Request type and session
+available to SDK credential transports; a plain callable can lose supported certificate behavior.
+Retain attributable responses before SDK consumption and refuse later owned calls while their
+cleanup is uncertain. Public session closure accounts for our originals, not every SDK-created
+adapter or internal process.
 
 Preserve the public SDK's token-state distinction after synchronous refresh. `STALE` denotes an
 unexpired token inside the SDK refresh window, not an unusable credential. Accept both `STALE` and
@@ -1463,13 +1479,19 @@ them before credential dependencies. Ordinary failed closure may preserve a usef
 blocks later observations and aggregate release until positive retirement.
 
 Public refresh/apply avoids the service dispatch's SDK background regional-boundary lookup, but is
-not exact authentication-middleware equivalence. Supported Agentworks config does not request that
-lookup; any actually required renewed boundary or incompatible credential security behavior needs an
-explicit acceptance decision, not silent weakening. Prove the real selected credential classes,
-certificate parameters, deadlines and cleanup. The existing activation producer's authentication
-path still needs its separately tracked real-credential reconciliation before full access, without
-changing its completed one-shot acknowledgment history. No native acceptance follows from source
-inspection or static credentials.
+not authentication-middleware equivalence. The locked SDK enables that lookup for ordinary
+default-universe service-account credentials independently of Agentworks configuration. Renewing the
+access token does not renew the boundary; applying an empty or expired boundary cache does not prove
+that no lookup is required. The current reader is isolated staging, not a production authentication
+path. Preserve the public SDK's security behavior before admitting either reads or starts through
+full owned access. Its blocking lookup controls are private, not a supported synchronous shortcut.
+Investigate a small public transport-copy custody seam that preserves normal SDK middleware without
+suppressing its lookup, substituting the principal or implementing another boundary policy. Account
+honestly for copied transports, concurrent SDK work, deadlines and terminal cleanup; do not claim
+unobservable worker or socket drainage. Prove the real selected credential classes and certificate
+parameters. The existing activation producer's separately tracked real-credential reconciliation
+remains open without changing its completed one-shot acknowledgment history. No native acceptance
+follows from source inspection or static credentials.
 
 ### GCP activation admission and acknowledgment
 

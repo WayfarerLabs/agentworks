@@ -261,6 +261,15 @@ public close does not establish physical socket drain, request termination or na
 This staging object supplies no activation settlement, route lifetime, guest preparation,
 independent job availability or RunContext admission.
 
+`plugins/azure/_native_access.py` stages private `AzureOwnedReadAccess` observations. Passive
+construction requires a recorded complete ARM path and unique VM ID; reads compare both, without
+adopting an existing VM or modifying its records. Compute and linked network clients retain their
+original public handles through uncertain close and retire before the selected credential. Ambient
+browser fallback requires positive retirement of the failed default credential first. SDK failures
+expose class-only diagnostics without retaining secret-bearing exception chains; original core and
+control errors remain intact. This is not a native access factory or proof of SDK-internal drain,
+new-VM identity recording, startup settlement, routes, guest preparation or RunContext admission.
+
 `plugins/gcp/_native_access.py` similarly stages private `GCEOwnedRead` power and locator reads. It
 preserves stock ADC selection or the explicitly selected service-account document, with an owned
 public Google-auth Request and synchronous refresh/header application. One streamed Compute GET
@@ -270,6 +279,11 @@ retained through uncertain closure; no new observation can bypass that uncertain
 redirects keep public SDK behavior rather than imposing a new credential policy. This does not
 reconcile the separate start producer's authentication, implement full native access, or prove real
 credential/socket drain or native projection compatibility.
+
+This reader is not a production authentication path. Synchronous token refresh and header
+application do not renew the regional access boundary that the locked SDK enables by default for
+ordinary service-account credentials. Full owned access must preserve the SDK's normal security
+behavior and account for its copied transports before admitting reads or starts.
 
 After synchronous refresh, an unexpired token remains usable even when Google-auth marks it `STALE`
 because its remaining lifetime is inside the SDK's refresh window. Refuse `INVALID` credentials; do

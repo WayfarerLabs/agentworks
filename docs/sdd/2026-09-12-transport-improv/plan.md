@@ -1163,12 +1163,14 @@ drain nor complete cloud access; the next item remains unfinished.
 
 - [ ] Reconcile the GCP producer's real-credential authentication boundary before full access.
       Existing scripted producer evidence does not exercise real service-account background request
-      copies used by the locked SDK's authentication middleware. Evaluate public synchronous
-      credential refresh/apply on owned ordinary sessions, preserving selected security behavior,
-      scopes, quota and auth mode. Keep ADC acquisition, SDK retry/process work and any required
-      regional access boundary behavior explicit; no private toggle, generic credential framework or
-      silently weakened security policy. Add real-class scripted proof without rewriting the
-      completed producer evidence above.
+      copies used by the locked SDK's authentication middleware. Preserve public SDK middleware,
+      selected security behavior, scopes, quota and auth mode. Token refresh/apply alone is not
+      equivalent: ordinary default-universe service accounts enable regional access boundary lookup
+      independently of Agentworks configuration. Investigate the smallest supported transport-copy
+      custody seam and account for concurrent SDK work and cleanup honestly. Keep ADC acquisition
+      and SDK retry/process limits explicit; no private blocking toggle, forced copy failure,
+      generic credential framework or silently weakened security policy. Add real-class scripted
+      proof without rewriting the completed producer evidence above.
 
 The private `GCEOwnedRead` staging implementation supplies passive exact-instance power/locator
 reads and selected owned credentials. Its fixed six-field Compute projection avoids downloading
@@ -1202,6 +1204,19 @@ guest preparation or RunContext admission; keep both GCP items unchecked.
       real SDK closure/fallback boundary and path plus recorded unique VM-ID matching. Existing-VM
       explicit adoption awaits operator disposition; no silent backfill or replacement adoption.
       Keep old activation cleanup references intact and full access/native gates open.
+
+The private `AzureOwnedReadAccess` stages passive recorded path/unique-ID matching, power/locator
+and linked public-endpoint reads with original compute/network and credential custody. A local
+adapter detaches SDK authentication/provider failure diagnostics while preserving original
+core/control errors. Author-checkout verification passes all 92 application/actual-SDK cases without
+skips or deselection and scoped lint/format. Isolated-runner bootstrap and evidence-size failures
+remain preserved; the successful run uses a synthetic SDK user-agent host label, not native host
+metadata proof. Final annotation-only corrections pass the same 92 cases and full strict typing
+across 1,382 sources; no typing setting or assertion is weakened. Independent private review remains
+open. These results cover eight source/test files on the author's earlier base, not
+whole-composition or native acceptance. No historical identity adoption, new-VM recording or
+complete access is implied; keep this item open.
+
 - [ ] Complete owned Azure access with reviewed request-specific startup settlement, fresh endpoint
       trust, selected route lifetime, exact guest preparation and aggregate release. Account
       explicitly for provider incarnation: current metadata and observations verify only the
