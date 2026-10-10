@@ -608,8 +608,8 @@ early EOF and owner teardown share those records through `close_stdin()`. Only n
 confirms retirement; an ordinary error or control interruption leaves sticky uncertainty. Teardown
 still attempts each independent pipe and separately safe process cleanup. It never retries an
 uncertain descriptor close or treats a raw stream's `closed` flag as native confirmation. Only
-remaining safe cleanup is retryable; permanent, nonretryable uncertainty retains the actual records
-on the owner without a continuing worker. Raw streams are internal borrowed I/O, not close
+remaining safe cleanup is retryable; when none remains, permanent uncertainty retains the actual
+records on the owner without a continuing worker. Raw streams are internal borrowed I/O, not close
 authority; this does not interpose foreign closes or Python finalization. Process retirement alone
 does not settle the independent delivery coordinator or remote operation debt.
 
