@@ -1176,6 +1176,41 @@ named body; no UID is guessed. Managed delivery uses fresh carriers with the sam
 connection. Binding alone advertises no independent-job availability: owned activation, firewall
 routes, keep-awake guarantees, complete RunContext composition and native proof remain open.
 
+### AWS provider read custody
+
+The retained concrete AWS access owns one optional original EC2 read client. Construction is
+passive; selected credential-session work begins only after core retains the access. Preserve the
+configured credential mode and no-fallback rule without using the legacy EC2 client cache. Power,
+bound locator and selected public-endpoint observations share one private exact-instance read body,
+using existing pure metadata and response validators. Guest preparation receives the access's bound
+observer, not the ownerless platform read or another route lookup.
+
+Retain a successfully returned original client before dispatch or subsequent deadline checks. Use
+public deadline-derived SDK budgets, one total service attempt, exact persisted account/region/
+immutable-instance validation and late-result refusal. An occupied slot blocks another read or
+active preparation. Cleanup operates on that original and clears the slot only after its public
+close returns normally. Ordinary cleanup failure retains custody without replacing the earlier
+outcome; preserve an already escaping control exception, while a new cleanup control remains
+exceptional. Aggregate teardown retains the access while direct-client cleanup is uncertain. A
+closed access refuses further observations. No separate read obligation, registry, private pool
+walk, guessed descriptor absence or background closer is needed.
+
+Normal public close is the direct client's resource-lifecycle fact, not synchronous closure of all
+underlying sockets, cancellation of credential work or termination of the remote request. Existing
+SDK constructor-handoff, arbitrary-signal and credential work's hard-deadline limits remain
+explicit. SDK-created credential clients are not covered by the EC2 slot. Before full AWS access is
+exposed, characterize the configured explicit role path and select its concrete credential
+responsibility; static-credential tests do not prove all ambient or deferred providers. Keep this
+delivery item open without adding a universal credential-client registry or hard-drain promise.
+
+Prove original retention before dispatch, ordinary/error/control/late outcomes, exact identity, one
+service attempt, normal/failed/interrupted close, occupied-slot and closed-access refusal,
+same-observer/original-deadline forwarding and cleanup without request replay. Exercise the locked
+actual SDK service pipeline with synthetic credentials and scripted transport separately from
+application fakes. A delayed-retention counterfactual must fail cleanup evidence. These proofs do
+not establish physical socket drain, native acceptance or complete AWS access. Read/start clients,
+activation, routes, guest readiness, workloads and aggregate ownership remain separate obligations.
+
 ### AWS activation admission and acknowledgment
 
 Implement AWS startup in its plugin, not in a generic cloud task framework. A private

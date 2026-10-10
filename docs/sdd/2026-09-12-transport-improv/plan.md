@@ -1075,6 +1075,22 @@ resolution, separate cleanup/guest admission and native evidence remain unfinish
       release. Preserve the acknowledged result, original control precedence, one-shot admission and
       unresolved remote possible effect. Add actual-SDK closure fault tests; this correction does
       not alter the earlier completed producer record.
+- [ ] Implement the concrete AWS access's original EC2 read-client slot and shared power/locator/
+      endpoint read body under the
+      [provider read custody design](execution-lifecycle-lld.md#aws-provider-read-custody). Retain
+      the returned original before dispatch, preserve deadline/identity/one-attempt behavior and
+      late refusal, block new reads or active preparation while occupied, and clear only after
+      normal public close. Prove ordinary/control/cleanup failures, exact callback/deadline
+      forwarding, same-original cleanup without request replay and closed-access refusal. Include
+      locked actual-SDK scripted-service evidence and a delayed-retention negative control. This
+      completes only direct-client public-close custody, not SDK-wide socket/credential drain,
+      activation, route settlement, full AWS access or native acceptance.
+- [ ] Characterize the configured explicit AWS role credential path and implement its selected
+      concrete resource responsibility before full access exposure. Preserve configured mode and no
+      ambient fallback; do not reuse legacy client custody or treat static-credential tests as proof
+      of ambient/deferred providers. Record SDK-internal handoff and credential work's hard-deadline
+      limits honestly. Do not add a universal credential-client registry or hard-drain guarantee.
+      This item remains separate from direct EC2 read-client retirement.
 - [ ] Complete owned AWS access with a reviewed successful-start settlement rule, fresh power and
       exact guest preparation, endpoint trust and selected firewall-route lifetime. Obtain native
       startup/uncertainty/cleanup evidence before admission through RunContext. Missing start
