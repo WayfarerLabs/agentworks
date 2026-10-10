@@ -4837,8 +4837,8 @@ the new surface; migration and removal follow in their own PRs. Permissions are 
 removal: do not enforce new recipient grants or the successor core file ceiling, or rely on their
 isolation, in coexistence releases. Operational safety and selected profile guarantees still apply.
 
-The RunContext-accessor checkbox below describes the delivery outcome, not the next construction step.
-Complete target identity, execution/jobs, FileAccess, platform composition and whole-workflow
+The RunContext-accessor checkbox below describes the delivery outcome, not the next construction
+step. Complete target identity, execution/jobs, FileAccess, platform composition and whole-workflow
 validation first through private composition seams. Only then expose the two passive RunContext
 accessors as one complete additive surface. An accessor-only or run-only target is not an acceptable
 intermediate public API.
