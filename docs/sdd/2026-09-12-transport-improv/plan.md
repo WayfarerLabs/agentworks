@@ -1091,6 +1091,25 @@ resolution, separate cleanup/guest admission and native evidence remain unfinish
       of ambient/deferred providers. Record SDK-internal handoff and credential work's hard-deadline
       limits honestly. Do not add a universal credential-client registry or hard-drain guarantee.
       This item remains separate from direct EC2 read-client retirement.
+
+The private read-client staging increment at `8c36a3117` clears all three independent source-review
+lanes. Its author passed 100 local cases: 98 permanent application/scripted-SDK cases and two
+private delayed-retention counterfactual variants. That run predates one test-only annotation; final
+scoped lint/format and full strict typing across 1,372 sources pass on the composed pin, but no
+final-pin 100-case replay or native acceptance is claimed. Permanent documentation identifies the
+unexposed object's limits. The read-client item remains unchecked pending concrete access and
+preparation integration; this increment supplies no factory, activation settlement or RunContext.
+
+The subsequent source-only credential audit selects the
+[configured role custody design](execution-lifecycle-lld.md#configured-aws-role-credential-custody):
+one retained original STS slot, supported creator/refresh callbacks and concrete pre-send checks
+preserving configured deferred-refresh semantics. Its private implementation passes 146 local
+application/actual-SDK cases, including guard and delayed-retention controls. That run predates a
+mechanical import reorder and test-only typing corrections; final scoped lint/format and full strict
+typing across 1,375 sources pass, without a final-pin test replay claim. Independent paired code/doc
+review remains pending. Keep both items open; no ambient-provider cleanup guarantee, credential hard
+deadline, native proof or whole-access completion follows from this increment.
+
 - [ ] Complete owned AWS access with a reviewed successful-start settlement rule, fresh power and
       exact guest preparation, endpoint trust and selected firewall-route lifetime. Obtain native
       startup/uncertainty/cleanup evidence before admission through RunContext. Missing start
@@ -1138,6 +1157,14 @@ nonempty-final-read gaps. Earlier failed diagnostics, warnings and intentional c
 preserved. These results prove neither native receipt compatibility, sockets/credentials, request
 drain nor complete cloud access; the next item remains unfinished.
 
+- [ ] Reconcile the GCP producer's real-credential authentication boundary before full access.
+      Existing scripted producer evidence does not exercise real service-account background request
+      copies used by the locked SDK's authentication middleware. Evaluate public synchronous
+      credential refresh/apply on owned ordinary sessions, preserving selected security behavior,
+      scopes, quota and auth mode. Keep ADC acquisition, SDK retry/process work and any required
+      regional access boundary behavior explicit; no private toggle, generic credential framework or
+      silently weakened security policy. Add real-class scripted proof without rewriting the
+      completed producer evidence above.
 - [ ] Complete owned GCP access with the LLD's observational identity guarantee: a fresh exact
       provider observation refuses known stale-target admission, matching receipt and subsequent
       fresh identity/trust/preparation admit guest work, and changed or unconfirmed identity refuses
@@ -1147,6 +1174,13 @@ drain nor complete cloud access; the next item remains unfinished.
       preparation, fresh endpoint trust, selected firewall-route lifetime and aggregate release. A
       preceding read, database lock, UUID or post-response targetId cannot prevent that external
       race. Preserve required native capabilities and honest operational failures.
+- [ ] Implement private owned Azure credential and exact-incarnation reads following the
+      [owned credential/incarnation design](execution-lifecycle-lld.md#owned-azure-credentials-and-incarnation).
+      Retain credentials before token work, preserve selected ambient fallback only after positive
+      retirement of its default original, and close read dependents before the credential. Prove the
+      real SDK closure/fallback boundary and path plus recorded unique VM-ID matching. Existing-VM
+      explicit adoption awaits operator disposition; no silent backfill or replacement adoption.
+      Keep old activation cleanup references intact and full access/native gates open.
 - [ ] Complete owned Azure access with reviewed request-specific startup settlement, fresh endpoint
       trust, selected route lifetime, exact guest preparation and aggregate release. Account
       explicitly for provider incarnation: current metadata and observations verify only the

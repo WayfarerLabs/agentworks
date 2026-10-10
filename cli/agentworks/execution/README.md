@@ -248,12 +248,18 @@ and leaves `cleanup_incomplete` true. Cleanup retries only that original; a norm
 clears the slot. An occupied slot or closed access refuses further observations. An already escaping
 control exception remains primary if cleanup is interrupted.
 
-This slot covers neither SDK constructor handoff nor credential clients. In particular, the
-configured deferred role path's concrete credential responsibility remains unfinished before full
-AWS access exposure. Scripted actual-SDK service tests use synthetic credentials; normal public
-close does not establish physical socket drain, request termination or native acceptance. This
-staging object supplies no activation settlement, route lifetime, guest preparation, independent job
-availability or RunContext admission.
+`plugins/aws/_owned_auth.py` retains configured-role STS clients separately from the EC2 read
+client. The SDK keeps its deferred refresh, cache and valid-credential advisory behavior. The helper
+binds the access's original deadline before construction/signing and closes each returned STS
+original after refresh. Failed closure retains that original. Post-signing send checks refuse
+expired work and unresolved STS custody even when the SDK suppresses an advisory refresh error.
+Teardown attempts both retained clients without refreshing credentials or replaying a request.
+
+These slots cover returned EC2/configured-role STS originals, not SDK constructor handoff or
+arbitrary ambient credential providers. Scripted actual-SDK tests use synthetic credentials; normal
+public close does not establish physical socket drain, request termination or native acceptance.
+This staging object supplies no activation settlement, route lifetime, guest preparation,
+independent job availability or RunContext admission.
 
 The private cloud start producers in `plugins/aws/_activation.py`, `plugins/azure/_activation.py`
 and `plugins/gcp/_activation.py` admit one selected start under a retained exact VM owner. They keep

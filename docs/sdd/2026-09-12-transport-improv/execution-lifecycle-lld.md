@@ -1211,6 +1211,53 @@ application fakes. A delayed-retention counterfactual must fail cleanup evidence
 not establish physical socket drain, native acceptance or complete AWS access. Read/start clients,
 activation, routes, guest readiness, workloads and aggregate ownership remain separate obligations.
 
+### Configured AWS role credential custody
+
+For the configured explicit access-key path with an optional role ARN, use a small private,
+access-owned credential helper rather than altering the legacy authentication builder. Preserve the
+configured source key, resolved secret, site region, role arguments and SDK deferred refresh/cache
+behavior; rejected explicit credentials never select ambient credentials. The helper is retained
+before session construction and binds the caller's original deadline across construction, endpoint
+resolution and signing. Its callbacks refuse work outside that operation. They do not acquire a
+second operation lock or create an independent lifecycle owner.
+
+Keep one optional original STS client. Supply the SDK fetcher's client-creator callback with fresh
+deadline-derived public timeouts and one total attempt, retaining the returned original before
+subsequent checks or handler registration. Wrap the SDK refresh callback with same-original public
+closure. Ordinary close failure preserves the preceding callback outcome and retains custody; normal
+public close alone clears the slot. Preserve an already escaping control exception if cleanup also
+interrupts, while a new cleanup control remains exceptional. No client proxy, fetcher subclass,
+private pool walk or universal credential-client registry is needed.
+
+The locked SDK can suppress ordinary advisory-refresh callback errors and continue using still-valid
+role credentials. A concrete before-send check on the retained EC2 client must therefore recheck the
+original deadline and unresolved STS custody after endpoint resolution/signing, before service
+dispatch. The owned STS client also checks its bound deadline before sending. A normally closed
+advisory refresh failure may retain the SDK's existing valid-credential behavior; expired admission
+or uncertain credential-client cleanup must not permit an EC2 send. Preserve deliberate typed
+admission failures at the access boundary rather than converting them into generic provider errors.
+These checks are transport lifecycle admission, not a new permission rule or configurable event
+policy framework.
+
+The access's incomplete-cleanup state includes both returned original client slots. Uncertain
+closure of either prevents another observation or active preparation. Teardown attempts both
+originals without allowing an ordinary failure of one to skip the other, and never refreshes
+credentials, reconstructs a session or replays an STS/EC2 request. Constructor handoff, SDK
+credential locks, arbitrary repeated interruption and synchronous network/close work retain their
+existing best-effort deadline limits. Public close does not prove physical socket drain or remote
+request termination. This helper covers the configured explicit role path, not every ambient or
+deferred credential provider; retain the latter limits without silently changing configured auth
+modes.
+
+Prove this through the actual locked SDK refresh/signing/send pipeline with synthetic credentials,
+including first/cached/advisory/mandatory refresh, an instrumented constructor callback, failed or
+interrupted original closes, typed refusal and late results. A missing EC2 check must fail the
+zero-send assertion after real advisory suppression, delayed STS retention must fail original
+custody evidence, and a positive valid case must actually reach one EC2 send. A stubbed SDK
+response, fabricated before-send result or independent fixture refusal cannot supply those proofs.
+Full activation, selected route/guest preparation, RunContext integration and native acceptance
+remain separate unfinished work.
+
 ### AWS activation admission and acknowledgment
 
 Implement AWS startup in its plugin, not in a generic cloud task framework. A private
@@ -1294,6 +1341,40 @@ that exact row. It must not call the admission producer's reconciliation after r
 the producer still rejects premature resolution and never supplies completion. No receipt fields or
 payload version change is needed. Implementation and supported native proof remain open.
 
+### Owned Azure credentials and incarnation
+
+Owned Azure access uses a private credential helper rather than the legacy platform credential
+cache. Retain its returned credential before token probing. Preserve the documented ambient chain
+and browser fallback within ambient mode; explicit principal failure never selects ambient or
+browser credentials. Only the existing authentication-failure trigger permits fallback. The same
+default credential must positively retire before constructing its browser replacement. Uncertain
+close retains that original, refuses replacement and provider reads, and permits only terminal
+cleanup retry; cleanup never resumes authentication. Preserve escaping control exceptions and the
+caller's original finite deadline. Public SDK timeouts are best effort, not browser/process
+cancellation or proof of physical socket drain.
+
+One retained credential and a failed/ready admission state suffice; do not build a resumable auth
+engine. Compute/network clients depend on that credential and retire before its aggregate closure.
+Their per-read cleanup and credential-last closure must remain independently observable. SDK
+construction without a returned original remains an explicit handoff limit.
+
+For newly recorded exact-incarnation access, retain Azure's observed unique VM ID as a canonical
+lowercase hyphenated 128-bit UUID, without imposing UUID version 4. The provider-owned opaque
+locator is `azure-vm:v2:<canonical-uuid>:<complete-ARM-resource-path>`. The final path is the entire
+remainder, not another colon-split field. Keep its exact validated bytes and the existing stricter
+activation path bound; do not normalize or reinterpret it as a provider-selected URL. Core continues
+to hash the opaque locator together with the guest marker. Reads compare both recorded path and
+unique ID; a current path match alone cannot admit a replacement.
+
+Existing records lack historical VM-ID evidence. They must not silently acquire an ID, overwrite a
+mismatch or be presented as historically verified. An explicit adoption operation establishing a
+disclosed current baseline awaits operator disposition; its implementation is not authorized by this
+design proposal. Preserve old path-only activation payloads and cleanup/reconciliation references
+without rewriting their evidence. A later new-incarnation admission seam must remain distinct from
+old-obligation cleanup. Neither the new locator nor a fresh read makes ARM's path-based start
+selector atomic. Exact-incarnation reads, authentication, startup settlement, endpoint/route/guest
+preparation and native acceptance remain unfinished.
+
 ### Azure activation admission and acknowledgment
 
 The next private Azure unit follows the same admission boundary, not a shared cloud task model.
@@ -1339,6 +1420,33 @@ missing acknowledgment remains unknown. The
 [middleware research](prior-art-research.md#azure-and-gcp-mutation-middleware-proof) records the
 completed middleware audit and the producer's separate scripted streamed-path evidence, with their
 remaining limits.
+
+### Owned GCP authentication boundary
+
+Keep stock public Application Default Credentials selection with the cloud-platform scope and the
+caller's retained public Request. Retain its ordinary credential session and strong Request before
+acquisition, and the selected credential immediately after return. Ignore the detected project for
+VM identity and routes. Explicit service-account credentials keep their selected source and never
+fall back to ambient. Do not clone the SDK's ADC selector merely to suppress project discovery.
+Internally constructed SDK requests, CLI discovery, credential retry/backoff and constructor handoff
+remain explicit best-effort limits, not resources falsely reported as drained.
+
+For the new owned service-read path, use public token-state inspection, synchronous refresh through
+the owned Request when needed, and public header application before one ordinary service-session
+request. Preserve token identity, scopes, quota and requested credential security behavior. Keep the
+real public Request type and session available to SDK credential transports; a plain callable can
+lose supported certificate behavior. Retain attributable responses before SDK consumption and refuse
+later owned calls while their cleanup is uncertain. Public session closure accounts for our
+originals, not every SDK-created adapter or internal process.
+
+Public refresh/apply avoids the service dispatch's SDK background regional-boundary lookup, but is
+not exact authentication-middleware equivalence. Supported Agentworks config does not request that
+lookup; any actually required renewed boundary or incompatible credential security behavior needs an
+explicit acceptance decision, not silent weakening. Prove the real selected credential classes,
+certificate parameters, deadlines and cleanup. The existing activation producer's authentication
+path still needs its separately tracked real-credential reconciliation before full access, without
+changing its completed one-shot acknowledgment history. No native acceptance follows from source
+inspection or static credentials.
 
 ### GCP activation admission and acknowledgment
 
