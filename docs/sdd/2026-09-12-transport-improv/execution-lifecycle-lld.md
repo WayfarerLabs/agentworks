@@ -1175,10 +1175,14 @@ pipeline, not arbitrary custom event handlers, credential-provider requests, exa
 acceptance or hard elapsed deadlines. Client setup and credential work remain synchronous and
 best-effort bounded; reject expiry before admission and reject successful late returns. Do not use a
 waiter, automatic retry, background polling, private SDK policy mutation or the legacy start method.
-Close a successfully returned client during setup and dispatch cleanup. Ordinary close errors must
-not replace the earlier outcome. A new close-time `KeyboardInterrupt` or `SystemExit` escapes;
-preserve an already escaping original control. This does not promise atomic resource handoff inside
-the SDK client constructor.
+Retain a successfully returned original client directly in adapter custody before later bookkeeping,
+then attempt closure during setup and dispatch cleanup. Expose `cleanup_incomplete` while that
+original remains retained; only a normally returning close establishes retirement. An ordinary close
+error must not replace the earlier outcome or discard the client. A new cleanup-time
+`KeyboardInterrupt` or `SystemExit` escapes; preserve an already escaping original control,
+including interruption at Python cleanup-entry and bookkeeping boundaries. Reconciliation does not
+retry closure or provider submission. This does not promise atomic resource handoff inside the SDK
+client constructor or safety under arbitrary repeated signals.
 
 Before invoking `StartInstances` with exactly the selected instance ID, register a fresh
 `aws-ec2-start` lifecycle obligation and durably mark its possible effect. The adapter admits at
