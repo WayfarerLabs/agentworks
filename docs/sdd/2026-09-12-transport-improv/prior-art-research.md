@@ -26,6 +26,36 @@ prove actual provider transmissions before building each new activation producer
 one-shot delivery from one SDK method call. Keep best-effort SDK timeouts distinct from hard total
 deadlines, and retain uncertainty rather than replaying an unknown mutation.
 
+### Azure and GCP mutation middleware proof
+
+The 2026-10-10 offline audit exercises locked Azure compute 38.3.0/core 1.38.3 and GCP compute
+1.52.0/auth 2.58.0 at their scripted HTTP transport boundaries. Its final 28 cases pass. GCP's
+generated start with service retries disabled still sends twice after a credential-refresh response
+or a redirect. Its generated transport does not expose the session controls needed to suppress those
+paths. A standalone public authorized session with refresh attempts and redirects disabled sends
+once in the tested cases; adopting that path still needs endpoint construction, bounded decoding and
+operation recovery. Do not patch private SDK session fields.
+
+Azure's ordinary pipeline also repeats sends on authentication challenges and redirects, and can
+submit a separate registration POST. An explicit policy list with zero retries, a public
+authentication challenge hook that declines resending, and no redirect or registration policy
+submits one POST in the tested cases. Disabling automatic polling is separately necessary. These
+counts describe the scripted service pipeline, not credential-provider requests, real socket
+delivery, server acceptance exactly once, request drain or native startup safety.
+
+Decision for the next Azure producer: use the public compute client's streamed request method for
+the documented fixed start endpoint. The generated start method reads the initial response body
+before returning even with polling disabled. The public streamed path lets the adapter validate and
+retain only selected acknowledgment headers without reading a provider body or constructing a
+poller. This new path still needs its own actual-SDK tests; the completed middleware audit is not
+evidence that the producer exists or that its receipt is validated. Startup settlement and native
+proof remain separate.
+
+Sources:
+[public streamed request](https://learn.microsoft.com/en-us/python/api/azure-mgmt-compute/azure.mgmt.compute.computemanagementclient?view=azure-python),
+[authentication challenge hook](https://learn.microsoft.com/en-us/python/api/azure-core/azure.core.pipeline.policies.bearertokencredentialpolicy?view=azure-python),
+[Azure start endpoint](https://learn.microsoft.com/en-us/rest/api/compute/virtual-machines/start?view=rest-compute-2026-04-01).
+
 ### AWS start submission proof
 
 The 2026-10-09 offline proof uses locked boto3 1.43.92 and botocore 1.43.93 with ordinary query

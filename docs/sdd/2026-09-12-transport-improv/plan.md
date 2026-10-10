@@ -1069,6 +1069,15 @@ below.
       acknowledgment remains unknown; ordinary power observations cannot invent a receipt. Keep
       whole-workflow release and independent-job availability separate from submission
       acknowledgment.
+- [ ] Implement and privately review the provider-owned Azure start admission/acknowledgment
+      producer in the
+      [lifecycle LLD](execution-lifecycle-lld.md#azure-activation-admission-and-acknowledgment).
+      Prove exact VM ownership, one admitted streamed POST, no middleware replay, registration,
+      redirect, response-body read or polling, bounded matching acknowledgment, late retention,
+      interrupted ledger replies and actual response/client cleanup. Keep the offline middleware
+      audit distinct from proof of this new submission path. This is a private #833 work unit;
+      successful-start settlement, full Azure access, native proof and RunContext admission remain
+      open, including after the producer's private review.
 - [x] Implement and privately review passive exact-instance power observations for AWS, Azure and
       GCP using their provider-owned locator reads. Cover stable/transitional/malformed states,
       identity/account mismatch, setup expiry, actual SDK request serialization and successful
