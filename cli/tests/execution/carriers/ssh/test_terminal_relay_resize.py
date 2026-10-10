@@ -13,6 +13,7 @@ from typing import Any, cast
 
 import pytest
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._process import Deadline as ProcessDeadline
 from agentworks.execution._process import LocalProcessOwner, LocalProcessTerminal, ResizeNotification
 from agentworks.execution.carrier import CarrierIO, Deadline, Failure, SinkOutput, TerminalInput
@@ -32,7 +33,7 @@ class Endpoint:
 
 
 @pytest.fixture
-def endpoint(monkeypatch: pytest.MonkeyPatch) -> Iterator[Endpoint]:
+def endpoint(monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody) -> Iterator[Endpoint]:
     import termios
 
     master, slave = os.openpty()
@@ -40,15 +41,15 @@ def endpoint(monkeypatch: pytest.MonkeyPatch) -> Iterator[Endpoint]:
     owned: list[int] = []
     native_acquire = PosixTerminal.acquire
 
-    def acquire(input_fd: int, output_fd: int) -> PosixTerminal:
-        terminal = native_acquire(input_fd, output_fd)
+    def acquire(terminal: PosixTerminal) -> None:
+        native_acquire(terminal)
         owned.extend((terminal.master_fd, terminal.slave_fd))
-        return terminal
 
     monkeypatch.setattr(PosixTerminal, "acquire", acquire)
     try:
         yield Endpoint(master, slave, owned)
     finally:
+        assert custody.close(Deadline.after(3))
         try:
             assert termios.tcgetattr(slave) == original_mode
             for fd in owned:
@@ -62,7 +63,7 @@ def endpoint(monkeypatch: pytest.MonkeyPatch) -> Iterator[Endpoint]:
 
 
 @pytest.fixture(autouse=True)
-def children(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def children(monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody) -> Iterator[None]:
     native_launch = subprocess.Popen
     owned: list[subprocess.Popen[bytes]] = []
 
@@ -75,6 +76,7 @@ def children(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     try:
         yield
     finally:
+        assert custody.close(Deadline.after(3))
         for process in owned:
             try:
                 assert process.returncode is not None
@@ -116,7 +118,11 @@ class GeometrySink:
 @pytest.mark.parametrize("blocking", [False, True])
 @pytest.mark.parametrize("inheritable", [False, True])
 def test_repeated_geometry_reaches_actual_child_and_preserves_borrowed_flags(
-    endpoint: Endpoint, monkeypatch: pytest.MonkeyPatch, blocking: bool, inheritable: bool
+    endpoint: Endpoint,
+    monkeypatch: pytest.MonkeyPatch,
+    blocking: bool,
+    inheritable: bool,
+    custody: LocalDeliveryCustody,
 ) -> None:
     import fcntl
     import termios
@@ -164,7 +170,9 @@ until=time.monotonic()+5
 while len(observed)<2 and time.monotonic()<until: time.sleep(.005)
 assert observed==[(42,113),(58,144)]
 """
-    result = relay.run_terminal_relay_candidate([sys.executable, "-c", code], io=io, deadline=Deadline.after(3))
+    result = relay.run_terminal_relay_candidate(
+        [sys.executable, "-c", code], io=io, deadline=Deadline.after(3), custody=custody
+    )
     assert result.started and result.exit_status == 0 and result.failure is None
     assert bytes(output) == b"READY42,113;58,144;"
     assert notifications == [ResizeNotification.REQUESTED, ResizeNotification.REQUESTED]
@@ -179,6 +187,7 @@ def test_notification_expiry_uses_finite_original_bound_and_safe_failure(
     monkeypatch: pytest.MonkeyPatch,
     notification: ResizeNotification,
     seconds: float | None,
+    custody: LocalDeliveryCustody,
 ) -> None:
     # An unbounded operation still grants only a finite local notification wait.
     # A bounded operation's absolute expiry wins over a longer local allowance.
@@ -205,7 +214,7 @@ def test_notification_expiry_uses_finite_original_bound_and_safe_failure(
     io = CarrierIO(TerminalInput(endpoint.slave, endpoint.slave, "fixture", Source()), SinkOutput(sink, Diagnostics()))
     started = time.monotonic()
     result = relay.run_terminal_relay_candidate(
-        [sys.executable, "-c", _READY + "time.sleep(5)"], io=io, deadline=operation
+        [sys.executable, "-c", _READY + "time.sleep(5)"], io=io, deadline=operation, custody=custody
     )
     assert result.started and result.exit_status is None and len(budgets) == 1
     expected = (
@@ -217,7 +226,7 @@ def test_notification_expiry_uses_finite_original_bound_and_safe_failure(
 
 @pytest.mark.parametrize("notification", [ResizeNotification.NOT_SENT, ResizeNotification.UNKNOWN])
 def test_exit_racing_notification_preserves_actual_completion(
-    endpoint: Endpoint, monkeypatch: pytest.MonkeyPatch, notification: ResizeNotification
+    endpoint: Endpoint, monkeypatch: pytest.MonkeyPatch, notification: ResizeNotification, custody: LocalDeliveryCustody
 ) -> None:
     sink = GeometrySink(endpoint)
     native_notify = LocalProcessOwner.notify_resize
@@ -251,7 +260,9 @@ def test_exit_racing_notification_preserves_actual_completion(
         TerminalInput(endpoint.slave, endpoint.slave, "fixture", ExitSource()), SinkOutput(sink, Diagnostics())
     )
     code = _READY + "assert os.read(0,1)==b'x'; os.write(1,b'TAIL'); raise SystemExit(17)"
-    result = relay.run_terminal_relay_candidate([sys.executable, "-c", code], io=io, deadline=Deadline.after(3))
+    result = relay.run_terminal_relay_candidate(
+        [sys.executable, "-c", code], io=io, deadline=Deadline.after(3), custody=custody
+    )
     assert result.started and result.exit_status == result.local_status == 17
     assert outcomes == [notification]
     assert result.failure is (None if notification is ResizeNotification.NOT_SENT else Failure.OBSERVATION)
@@ -261,7 +272,7 @@ def test_exit_racing_notification_preserves_actual_completion(
 
 
 def test_late_requested_notification_does_not_hide_operation_expiry(
-    endpoint: Endpoint, monkeypatch: pytest.MonkeyPatch
+    endpoint: Endpoint, monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
 ) -> None:
     native_notify = LocalProcessOwner.notify_resize
     operation = Deadline.after(0.5)
@@ -281,7 +292,7 @@ def test_late_requested_notification_does_not_hide_operation_expiry(
     sink = GeometrySink(endpoint)
     io = CarrierIO(TerminalInput(endpoint.slave, endpoint.slave, "fixture", Source()), SinkOutput(sink, Diagnostics()))
     result = relay.run_terminal_relay_candidate(
-        [sys.executable, "-c", _READY + "time.sleep(5)"], io=io, deadline=operation
+        [sys.executable, "-c", _READY + "time.sleep(5)"], io=io, deadline=operation, custody=custody
     )
     assert accepted == [ResizeNotification.REQUESTED]
     assert result.started and result.exit_status is None and result.failure is Failure.DEADLINE
@@ -294,6 +305,7 @@ def test_resize_control_retains_worker_and_primary_through_owner_settlement(
     monkeypatch: pytest.MonkeyPatch,
     notification: ResizeNotification,
     cleanup_fails: bool,
+    custody: LocalDeliveryCustody,
 ) -> None:
     import termios
 
@@ -301,7 +313,7 @@ def test_resize_control_retains_worker_and_primary_through_owner_settlement(
     primary = KeyboardInterrupt("resize-control")
     secondary = SystemExit("later-caller-control")
     closing, release_cleanup, settled, restored = Event(), Event(), Event(), Event()
-    native_notify, native_close = LocalProcessOwner.notify_resize, LocalProcessOwner.close
+    native_notify, native_close = LocalProcessOwner.notify_resize, LocalProcessOwner.close_bounded
     native_release = PosixTerminal.release
     outcomes: list[ResizeNotification] = []
 
@@ -314,15 +326,15 @@ def test_resize_control_retains_worker_and_primary_through_owner_settlement(
         outcomes.append(notification)
         return notification
 
-    def close(owner: LocalProcessOwner) -> LocalProcessTerminal:
+    def close(owner: LocalProcessOwner, deadline: ProcessDeadline) -> LocalProcessTerminal:
         closing.set()
         assert release_cleanup.wait(2)
         assert not restored.is_set()
         assert termios.tcgetattr(endpoint.slave) != saved_mode
         for fd in endpoint.owned:
             os.fstat(fd)
-        result = native_close(owner)
-        assert result.cleaned
+        result = native_close(owner, deadline)
+        assert result is not None and result.cleaned
         settled.set()
         if cleanup_fails:
             raise OSError("private-resize-cleanup-canary")
@@ -335,11 +347,11 @@ def test_resize_control_retains_worker_and_primary_through_owner_settlement(
         return result
 
     monkeypatch.setattr(LocalProcessOwner, "notify_resize", notify)
-    monkeypatch.setattr(LocalProcessOwner, "close", close)
+    monkeypatch.setattr(LocalProcessOwner, "close_bounded", close)
     monkeypatch.setattr(PosixTerminal, "release", release)
     sink = GeometrySink(endpoint)
     io = CarrierIO(TerminalInput(endpoint.slave, endpoint.slave, "fixture", Source()), SinkOutput(sink, Diagnostics()))
-    attempt = relay._Attempt([sys.executable, "-c", _READY + "time.sleep(5)"], io, Deadline.after(3))
+    attempt = relay._Attempt([sys.executable, "-c", _READY + "time.sleep(5)"], io, Deadline.after(3), custody=custody)
     native_wait = attempt._done.wait
     calls = 0
 

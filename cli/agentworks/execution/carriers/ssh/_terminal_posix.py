@@ -28,54 +28,59 @@ class PosixTerminal:
 
     _input_fd: int
     _output_fd: int
-    _saved_mode: _TerminalMode
     _owner_thread: Thread
+    _saved_mode: _TerminalMode | None = field(default=None, init=False)
+    _acquire_called: bool = field(default=False, init=False)
     _master_fd: int | None = None
     _slave_fd: int | None = None
     _restore_needed: bool = False
     _release_errors: tuple[BaseException, ...] | None = field(default=None, init=False)
 
-    @classmethod
-    def acquire(cls, input_fd: int, output_fd: int) -> PosixTerminal:
-        """Admit supplied native fds and make input raw without flushing queued bytes.
+    @property
+    def settled(self) -> bool:
+        """A passive resource or proved release is settled; uncertainty is retained."""
+        return not self._acquire_called or self._release_errors == ()
 
-        Preparation owns endpoint pairing and exclusive use. The caller retains
-        this non-main worker through cleanup, so normal main-thread signal delivery
-        cannot interrupt native resource bookkeeping. Asynchronous thread injection
-        and fatal process termination are outside this ownership guarantee.
+    def acquire(self) -> None:
+        """Acquire on the original worker, retaining partial acquisition in this object.
+
+        The caller retains this passive resource before admitting its worker.
+        Preparation owns endpoint pairing and exclusive use. Acquisition does
+        not flush bytes already queued at the supplied input terminal.
         """
-        owner_thread = current_thread()
-        if owner_thread is main_thread():
+        self._require_owner()
+        if current_thread() is main_thread():
             raise RuntimeError("Terminal acquisition requires a retained non-main worker")
-        if os.name != "posix":
-            raise OSError("POSIX terminal resources are unavailable on this host")
-        import fcntl
-        import termios
-        import tty
-
-        if fcntl.fcntl(input_fd, fcntl.F_GETFL) & os.O_ACCMODE == os.O_WRONLY:
-            raise OSError("Terminal input is not readable")
-        saved_mode: _TerminalMode = termios.tcgetattr(input_fd)
-        dimensions = termios.tcgetwinsize(output_fd)
-        terminal = cls(input_fd, output_fd, saved_mode, owner_thread)
+        if self._acquire_called:
+            raise RuntimeError("Terminal acquisition is not available")
+        self._acquire_called = True
         try:
-            terminal._master_fd, terminal._slave_fd = os.openpty()
-            termios.tcsetattr(terminal._slave_fd, termios.TCSANOW, saved_mode)
-            termios.tcsetwinsize(terminal._slave_fd, dimensions)
-            os.set_blocking(terminal._master_fd, False)
-            raw_mode = list(saved_mode)
+            if os.name != "posix":
+                raise OSError("POSIX terminal resources are unavailable on this host")
+            import fcntl
+            import termios
+            import tty
+
+            if fcntl.fcntl(self._input_fd, fcntl.F_GETFL) & os.O_ACCMODE == os.O_WRONLY:
+                raise OSError("Terminal input is not readable")
+            self._saved_mode = termios.tcgetattr(self._input_fd)
+            dimensions = termios.tcgetwinsize(self._output_fd)
+            self._master_fd, self._slave_fd = os.openpty()
+            termios.tcsetattr(self._slave_fd, termios.TCSANOW, self._saved_mode)
+            termios.tcsetwinsize(self._slave_fd, dimensions)
+            os.set_blocking(self._master_fd, False)
+            raw_mode = list(self._saved_mode)
             tty.cfmakeraw(raw_mode)
             # Mark before the syscall: interruption can follow its native effect.
-            terminal._restore_needed = True
-            termios.tcsetattr(input_fd, termios.TCSANOW, raw_mode)
+            self._restore_needed = True
+            termios.tcsetattr(self._input_fd, termios.TCSANOW, raw_mode)
         except BaseException as error:
-            cleanup_errors = terminal.release()
+            cleanup_errors = self.release()
             if cleanup_errors:
                 cleanup = AcquisitionCleanupFailure("Terminal acquisition cleanup failed", cleanup_errors)
                 cleanup.__cause__ = error.__cause__
                 raise error from cleanup
             raise
-        return terminal
 
     @property
     def master_fd(self) -> int:
@@ -119,6 +124,7 @@ class PosixTerminal:
         if self._restore_needed:
             self._restore_needed = False
             try:
+                assert self._saved_mode is not None
                 termios.tcsetattr(self._input_fd, termios.TCSANOW, self._saved_mode)
             except BaseException as error:
                 errors.append(error)

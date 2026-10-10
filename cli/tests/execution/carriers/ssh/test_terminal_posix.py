@@ -9,7 +9,7 @@ import sys
 from collections.abc import Callable, Iterator
 from functools import wraps
 from pathlib import Path
-from threading import Thread
+from threading import Thread, current_thread
 
 import pytest
 
@@ -80,7 +80,8 @@ def test_modes_geometry_flags_and_borrowed_lifetime(
     os.set_blocking(borrowed, not borrowed_nonblocking)
     os.set_inheritable(borrowed, inheritable)
     flags = _flags(borrowed)
-    terminal = PosixTerminal.acquire(borrowed, borrowed)
+    terminal = PosixTerminal(borrowed, borrowed, current_thread())
+    terminal.acquire()
     master, slave = terminal.master_fd, terminal.slave_fd
     try:
         assert termios.tcgetattr(slave) == mode
@@ -118,7 +119,8 @@ def test_acquisition_preserves_queued_input(endpoint: tuple[int, int]) -> None:
     # happened is not reversible; acquisition must not discard the resulting bytes.
     os.write(master, b"early keyboard\n")
     assert select.select([borrowed], [], [], 1)[0] == [borrowed]
-    terminal = PosixTerminal.acquire(borrowed, borrowed)
+    terminal = PosixTerminal(borrowed, borrowed, current_thread())
+    terminal.acquire()
     try:
         assert select.select([borrowed], [], [], 1)[0] == [borrowed]
         assert os.read(borrowed, 100) == b"early keyboard\n"
@@ -168,7 +170,8 @@ def test_bad_fd_refuses_without_changing_terminal(
         input_fd, output_fd = borrowed, input_fd
     try:
         with pytest.raises((OSError, ValueError, termios.error)):
-            PosixTerminal.acquire(input_fd, output_fd)
+            resource = PosixTerminal(input_fd, output_fd, current_thread())
+            resource.acquire()
         assert termios.tcgetattr(borrowed) == mode
         assert _flags(borrowed) == flags
         for fd in opened:
@@ -190,7 +193,8 @@ def test_distinct_read_only_output_supplies_geometry(endpoint: tuple[int, int]) 
         flags = _flags(output_fd)
         termios.tcsetwinsize(borrowed, (31, 97))
         termios.tcsetwinsize(output_slave, (37, 121))
-        terminal = PosixTerminal.acquire(borrowed, output_fd)
+        terminal = PosixTerminal(borrowed, output_fd, current_thread())
+        terminal.acquire()
         try:
             assert termios.tcgetwinsize(terminal.slave_fd) == (37, 121)
             assert _flags(output_fd) == flags
@@ -239,7 +243,8 @@ def test_acquisition_failure_restores_and_closes(
     monkeypatch.setattr(os, "openpty", allocate)
     monkeypatch.setattr(termios, "tcsetattr", change)
     with pytest.raises(type(failure)) as caught:
-        PosixTerminal.acquire(borrowed, borrowed)
+        resource = PosixTerminal(borrowed, borrowed, current_thread())
+        resource.acquire()
     assert caught.value is failure
     assert termios.tcgetattr(borrowed) == mode
     assert _flags(borrowed) == flags
@@ -257,7 +262,8 @@ def test_release_reports_restore_failure_and_still_closes(
 
     _, borrowed = endpoint
     mode = termios.tcgetattr(borrowed)
-    terminal = PosixTerminal.acquire(borrowed, borrowed)
+    terminal = PosixTerminal(borrowed, borrowed, current_thread())
+    terminal.acquire()
     owned = (terminal.master_fd, terminal.slave_fd)
     set_mode = termios.tcsetattr
 
@@ -313,7 +319,8 @@ def test_acquisition_retains_primary_and_cleanup_failures(
     monkeypatch.setattr(termios, "tcsetattr", change)
     try:
         with pytest.raises(KeyboardInterrupt) as caught:
-            PosixTerminal.acquire(borrowed, borrowed)
+            resource = PosixTerminal(borrowed, borrowed, current_thread())
+            resource.acquire()
         assert caught.value is primary
         assert isinstance(caught.value.__cause__, AcquisitionCleanupFailure)
         assert caught.value.__cause__.exceptions == (cleanup,)
@@ -331,7 +338,8 @@ def test_uncertain_close_is_reported_without_retry(
     endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch, failure: BaseException
 ) -> None:
     _, borrowed = endpoint
-    terminal = PosixTerminal.acquire(borrowed, borrowed)
+    terminal = PosixTerminal(borrowed, borrowed, current_thread())
+    terminal.acquire()
     master, slave = terminal.master_fd, terminal.slave_fd
     close = os.close
     calls: list[int] = []
@@ -371,7 +379,8 @@ def test_main_thread_acquisition_refuses_before_native_work(
         patch.setattr(termios, "tcgetwinsize", unexpected_native)
         patch.setattr(os, "openpty", unexpected_native)
         with pytest.raises(RuntimeError):
-            PosixTerminal.acquire(borrowed, borrowed)
+            resource = PosixTerminal(borrowed, borrowed, current_thread())
+            resource.acquire()
     assert termios.tcgetattr(borrowed) == mode
     assert _flags(borrowed) == flags
     os.fstat(borrowed)
@@ -384,7 +393,8 @@ def test_wrong_owner_refuses_resize_and_release_before_effects(endpoint: tuple[i
     _, borrowed = endpoint
     mode = termios.tcgetattr(borrowed)
     termios.tcsetwinsize(borrowed, (31, 97))
-    terminal = PosixTerminal.acquire(borrowed, borrowed)
+    terminal = PosixTerminal(borrowed, borrowed, current_thread())
+    terminal.acquire()
     master, slave = terminal.master_fd, terminal.slave_fd
     raw_mode = termios.tcgetattr(borrowed)
 
@@ -418,7 +428,7 @@ def test_main_sigint_keeps_native_worker_available_for_cleanup() -> None:
 import os
 import signal
 import termios
-from threading import Event, Thread
+from threading import Event, Thread, current_thread
 from agentworks.execution.carriers.ssh._terminal_posix import PosixTerminal
 
 master, borrowed = os.openpty()
@@ -429,7 +439,8 @@ resources, errors, releases = [], [], []
 def native_worker():
     terminal = None
     try:
-        terminal = PosixTerminal.acquire(borrowed, borrowed)
+        terminal = PosixTerminal(borrowed, borrowed, current_thread())
+        terminal.acquire()
         resources.append((terminal, terminal.master_fd, terminal.slave_fd))
         ready.set()
         assert stop.wait(3)

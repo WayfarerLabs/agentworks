@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._process import LocalProcessOwner
 from agentworks.execution.carrier import CarrierIO, Deadline, Failure, SinkOutput, TerminalInput
 from agentworks.execution.carriers.ssh._terminal_posix import AcquisitionCleanupFailure
@@ -90,7 +91,8 @@ def test_acquisition_cleanup_uncertainty_is_disclosed_safely(
         pytest.fail("Failed acquisition dispatched a process")
 
     io = CarrierIO(TerminalInput(borrowed, borrowed, "fixture", Source()), SinkOutput(Sink(), Sink()))
-    attempt = _Attempt([sys.executable, "-c", "pass"], io, Deadline.after(3))
+    custody = LocalDeliveryCustody()
+    attempt = _Attempt([sys.executable, "-c", "pass"], io, Deadline.after(3), custody=custody)
     try:
         with monkeypatch.context() as patch:
             patch.setattr(os, "openpty", openpty)
@@ -116,6 +118,7 @@ def test_acquisition_cleanup_uncertainty_is_disclosed_safely(
                 rendered = "".join(traceback.format_exception(primary))
                 assert "private-native-cleanup-canary" not in rendered
                 assert primary.__cause__ is None
+        assert custody.settled is (cleanup_boundary is None)
         assert not launch_called
         assert attempt._done.is_set() and len(owned) == 2
         if cleanup_boundary == "restore":
@@ -144,7 +147,9 @@ def test_acquisition_cleanup_uncertainty_is_disclosed_safely(
                 os.fstat(fd)
 
 
-def test_pre_effect_acquisition_refusal_remains_dispatch_failure(endpoint: tuple[int, int]) -> None:
+def test_pre_effect_acquisition_refusal_remains_dispatch_failure(
+    endpoint: tuple[int, int],
+) -> None:
     class Source:
         def try_read(self, limit: int) -> bytes | None:
             pytest.fail("Invalid native descriptor used preparation input")
@@ -156,7 +161,8 @@ def test_pre_effect_acquisition_refusal_remains_dispatch_failure(endpoint: tuple
     read_fd, write_fd = os.pipe()
     try:
         io = CarrierIO(TerminalInput(read_fd, endpoint[1], "fixture", Source()), SinkOutput(Sink(), Sink()))
-        result = _Attempt([sys.executable, "-c", "pass"], io, Deadline.after(3)).run()
+        custody = LocalDeliveryCustody()
+        result = _Attempt([sys.executable, "-c", "pass"], io, Deadline.after(3), custody=custody).run()
         assert not result.started and result.failure is Failure.DISPATCH
         os.fstat(read_fd)
     finally:
