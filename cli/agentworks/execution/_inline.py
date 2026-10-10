@@ -255,7 +255,7 @@ def prepare_inline_candidate(
         nonce=nonce,
         output_mode=output_mode,
         closure_expectation=HelperClosureExpectation(
-            nonce, candidates, system_shim, plan.expected, bootstrap.guest if bootstrap is not None else None
+            nonce, candidates, system_shim, bootstrap.guest if bootstrap is not None else None
         ),
         _runtime=runtime,
         _reader=reader,

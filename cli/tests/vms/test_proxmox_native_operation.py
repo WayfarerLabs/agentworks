@@ -33,6 +33,7 @@ from agentworks.errors import ExternalError, StateError, ValidationError
 from agentworks.execution import _target_identity
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._inline_observer import InlineObserver
 from agentworks.execution._proxmox_activation import ProxmoxActivation
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution.binding import NativeExecutionBinding
@@ -197,9 +198,12 @@ def test_running_views_share_owner_bootstrap_and_settle(database, tmp_path, monk
     assert database.operations.inspect(_scope()) is None
 
 
-@pytest.mark.parametrize("route_fault", [None, "changed", "failure", "guest"])
+@pytest.mark.parametrize(
+    ("route_fault", "known_closure"),
+    [(None, False), ("changed", False), ("failure", False), ("guest", False), (None, True)],
+)
 def test_native_direct_selects_closure_factory_and_finite_cleanup_before_finish(
-    database, tmp_path, monkeypatch, route_fault
+    database, tmp_path, monkeypatch, route_fault, known_closure
 ):
     platform, route = _install(database, monkeypatch)
     connection = ProxmoxConnection("https://pve.test", "node", 101, "token", "secret")
@@ -238,12 +242,37 @@ def test_native_direct_selects_closure_factory_and_finite_cleanup_before_finish(
             terminal.update(exited=True, exitcode=0, **{"out-data": stdout.data.decode("ascii")})
             return {"pid": 81}
         assert suffix == "exec-status?pid=81"
-        if len(calls) == 2:
+        if len(calls) == 2 and not known_closure:
             object.__setattr__(deadline, "expires_at", 0.0)
             return {"exited": False}
         return terminal
 
     monkeypatch.setattr(_ProxmoxWire, "request", request)
+    if known_closure:
+        control = KeyboardInterrupt("application output callback")
+
+        def interrupt(*_args):
+            raise control
+
+        with native_vm_operation(
+            database, "box", platform, RunContext(), deadline=deadline, trusted_root=PurePosixPath(tmp_path)
+        ) as views:
+            monkeypatch.setattr(InlineObserver, "accept", interrupt)
+            with pytest.raises(KeyboardInterrupt) as callback_control:
+                views.execution.run(Command(["/bin/echo", "private-output"]), profile=Protection.DIRECT)
+            assert callback_control.value is control
+            (active,) = views.execution_operation.active_inline_calls
+            assert active.closure_delivery is not None and active.closure_delivery.closure_proven
+            attempt = active.operation.outstanding_attempt
+            assert attempt is not None and attempt.local_delivery.settled
+            object.__setattr__(deadline, "expires_at", 0.0)
+            monkeypatch.setattr(
+                platform, "observe_provider_locator", lambda *_args, **_kwargs: pytest.fail("provider unavailable")
+            )
+        assert not active.borrow.has_outstanding_attempt and not views.execution_operation.active_inline_calls
+        assert calls == [("POST", "exec"), ("GET", "exec-status?pid=81")]
+        assert database.operations.inspect(_scope()) is None
+        return
     with (
         pytest.raises(ValidationError) as caught,
         native_vm_operation(
@@ -290,6 +319,35 @@ def test_native_direct_selects_closure_factory_and_finite_cleanup_before_finish(
         assert database.operations.inspect(_scope()) is None
         assert result.application_state is ApplicationState.UNKNOWN
     assert provider_calls == ([] if route_fault == "guest" else ["current-config"] * (2 if route_fault else 1))
+
+
+def test_plain_completed_helper_lost_settle_reply_closes_with_expired_budget(database, tmp_path, monkeypatch):
+    platform, route = _install(database, monkeypatch)
+    deadline = Deadline.after(30)
+    control = KeyboardInterrupt("settlement reply lost")
+    original = OperationAttempt.settle
+
+    def settle_then_interrupt(self):
+        original(self)
+        raise control
+
+    with native_vm_operation(
+        database, "box", platform, RunContext(), deadline=deadline, trusted_root=PurePosixPath(tmp_path)
+    ) as views:
+        monkeypatch.setattr(OperationAttempt, "settle", settle_then_interrupt)
+        with pytest.raises(KeyboardInterrupt) as caught:
+            views.execution.run(Command(["/bin/echo", "ordinary-output"]), profile=Protection.DIRECT)
+        assert caught.value is control
+        (active,) = views.execution_operation.active_inline_calls
+        assert active.closure_delivery is None and not active.borrow.has_outstanding_attempt
+        calls = route.local.calls
+        monkeypatch.setattr(OperationAttempt, "settle", original)
+        object.__setattr__(deadline, "expires_at", 0.0)
+        monkeypatch.setattr(
+            platform, "observe_provider_locator", lambda *_args, **_kwargs: pytest.fail("provider observation")
+        )
+    assert not views.execution_operation.active_inline_calls and route.local.calls == calls
+    assert database.operations.inspect(_scope()) is None
 
 
 @pytest.mark.parametrize("mode", ["success", "lost_ack", "ha", "interrupt"])

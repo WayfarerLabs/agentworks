@@ -154,7 +154,6 @@ class HelperClosureExpectation:
     nonce: str
     candidates: tuple[str, ...]
     system_shim: str | None
-    identity: IdentityExpectation
     guest: VMGuestIdentity | None
 
 

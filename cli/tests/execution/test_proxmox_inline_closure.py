@@ -20,14 +20,19 @@ from agentworks.execution._execution_result import reduce_owned_inline_result
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._inline_observer import InlineObserver
-from agentworks.execution._runtime_prerequisite import HelperClosureExpectation, RuntimeSelection, RuntimeTargetOS
+from agentworks.execution._runtime_prerequisite import (
+    HelperClosureExpectation,
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+    RuntimeTargetOS,
+)
 from agentworks.execution.binding import NativeExecutionBinding
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers._proxmox_helper_delivery import ProxmoxHelperDelivery
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection, _ProxmoxWire
 from agentworks.execution.models import Command
 from agentworks.execution.result import ApplicationState
-from agentworks.operations import OperationAttempt, OperationOwner
+from agentworks.operations import OperationAttempt, OperationBorrow, OperationOwner
 from tests.execution.files._target_support import target_for_owner
 
 if TYPE_CHECKING:
@@ -146,6 +151,133 @@ def _run(scenario: Scenario) -> OwnedInlineOutcome:
         env={"SECRET": "environment-secret"},
         sensitive=True,
     )
+
+
+@pytest.mark.parametrize("committed", [False, True])
+def test_final_handoff_interruption_detaches_payload_and_retires_same_call(
+    scenario, monkeypatch: pytest.MonkeyPatch, committed: bool
+) -> None:
+    _, _, operation, _, _, _, qga, deliveries = scenario
+    qga.running = False
+    control = KeyboardInterrupt("handoff reply lost")
+    cause = ValueError("original cause")
+    control.__cause__ = cause
+    original = OperationBorrow.handoff_retained_effect
+
+    def interrupt(self):
+        if committed:
+            original(self)
+        raise control
+
+    monkeypatch.setattr(OperationBorrow, "handoff_retained_effect", interrupt)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        _run(scenario)
+    assert caught.value is control and control.__cause__ is cause
+    (active,) = operation.active_inline_calls
+    assert active.bookkeeping_retained and deliveries[0].closure_proven
+    assert active.prepared is None and active.candidate is None
+    assert active.outcome is not None and active.outcome.candidate is None
+    assert active.operation.outstanding_attempt is None and not active.borrow.has_outstanding_attempt
+    assert active.borrow._closed is committed
+    calls = list(qga.calls)
+    monkeypatch.setattr(OperationBorrow, "handoff_retained_effect", original)
+    operation.retry_inline_bookkeeping()
+    operation.finish()
+    assert not operation.active_inline_calls and qga.calls == calls
+
+
+@pytest.mark.parametrize("pending_local", [False, True])
+def test_proven_closure_needs_local_cleanup_but_no_new_provider_observation(
+    scenario, monkeypatch: pytest.MonkeyPatch, pending_local: bool
+) -> None:
+    _, _, operation, _, _, _, qga, deliveries = scenario
+    qga.running = False
+    control = KeyboardInterrupt("output interrupted")
+
+    def interrupt(*_args):
+        raise control
+
+    monkeypatch.setattr(InlineObserver, "accept", interrupt)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        _run(scenario)
+    assert caught.value is control
+    (active,) = operation.active_inline_calls
+    attempt = active.operation.outstanding_attempt
+    assert attempt is not None and deliveries[0].closure_proven
+    assert operation._native_binding is not None
+    operation._route_check = lambda _deadline: pytest.fail("provider observation")
+    calls = list(qga.calls)
+    if pending_local:
+        attempt.local_delivery.begin_process()
+        with pytest.raises(ValidationError):
+            operation.observe_inline_cleanup(Deadline.after(0))
+        assert not attempt.local_delivery.settled
+        operation.observe_inline_cleanup(Deadline.after(2))
+    else:
+        operation.observe_inline_cleanup(Deadline.after(0))
+    operation.finish()
+    assert attempt.local_delivery.settled and not operation.active_inline_calls and qga.calls == calls
+
+
+@pytest.mark.parametrize("unusable", [False, True])
+def test_generated_runtime_refusal_closes_only_original_invocation(scenario, tmp_path: Path, unusable: bool) -> None:
+    _, owner, operation, base, plan, _, qga, deliveries = scenario
+    runtime = tmp_path / "runtime"
+    if unusable:
+        runtime.write_bytes(b"not executable")
+        runtime.chmod(0o600)
+    qga.running = False
+    effect = tmp_path / "application-effect"
+    outcome = operation.run_inline(
+        base,
+        Command(("/usr/bin/touch", str(effect))),
+        plan=plan,
+        runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, str(runtime)),
+        deadline=qga.deadline,
+    )
+    assert outcome.candidate is not None
+    assert outcome.candidate.runtime_prerequisite.state is (
+        RuntimePrerequisiteState.UNUSABLE if unusable else RuntimePrerequisiteState.MISSING
+    )
+    result = reduce_owned_inline_result(outcome)
+    assert result.application_state is ApplicationState.NOT_STARTED and not effect.exists()
+    assert deliveries[0].closure_proven and not operation.active_inline_calls
+    calls = list(qga.calls)
+    operation.observe_inline_cleanup(Deadline.after(0))
+    operation.finish()
+    assert not owner.list_pending_lifecycle_obligations() and qga.calls == calls
+    assert result.application_state is ApplicationState.NOT_STARTED
+
+
+@pytest.mark.parametrize(
+    ("state", "token", "shim"),
+    [
+        ("missing", "-", None),
+        ("unusable", "0", None),
+        ("shim", "s", "/usr/bin/python3"),
+        ("unsupported_version", "0", None),
+        ("missing_modules", "0", None),
+    ],
+)
+@pytest.mark.parametrize("fault", [None, "nonce", "malformed", "nonzero", "signal"])
+def test_authenticated_closed_refusals_require_strict_prefix_and_independent_zero(state, token, shim, fault) -> None:
+    nonce = "a" * 32
+    delivery = ProxmoxHelperDelivery(
+        ProxmoxConnection("https://pve.test", "node", 101, "token", "secret"),
+        HelperClosureExpectation(nonce, ("/usr/bin/python3",), shim, None),
+    )
+    received_nonce = "b" * 32 if fault == "nonce" else nonce
+    received_token = "bad" if fault == "malformed" else token
+    status: dict[str, object] = {
+        "exited": True,
+        "exitcode": 1 if fault == "nonzero" else 0,
+        "out-data": f"AGW_RUNTIME_1:{received_nonce}:{state}:{received_token}\n",
+    }
+    if fault == "signal":
+        del status["exitcode"]
+        status["signal"] = 15
+    delivery.record_status(status)
+    assert delivery.closure_proven is (fault is None)
 
 
 def test_deadline_then_fresh_exact_closure_settles_same_attempt_without_replay(scenario) -> None:
@@ -292,9 +424,9 @@ def test_lost_database_resolution_reply_retries_finish_without_native_observatio
     assert qga.calls == calls and reduce_owned_inline_result(outcome).application_state is ApplicationState.UNKNOWN
 
 
-@pytest.mark.parametrize("fence", ["route", "local", "stale", "stale-after-route", "binding", "wire-route"])
+@pytest.mark.parametrize("fence", ["route", "local", "stale", "stale-after-route", "binding"])
 def test_fences_refuse_before_exact_pid_observation(scenario, monkeypatch: pytest.MonkeyPatch, fence: str) -> None:
-    database, owner, operation, _, _, _, qga, deliveries = scenario
+    database, owner, operation, _, _, _, qga, _ = scenario
     _run(scenario)
     (active,) = operation.active_inline_calls
     attempt = active.operation.outstanding_attempt
@@ -311,8 +443,6 @@ def test_fences_refuse_before_exact_pid_observation(scenario, monkeypatch: pytes
         assert operation._native_binding is not None
         connection = ProxmoxConnection("https://other.test", "node", 101, "token", "secret")
         operation._native_binding = replace(operation._native_binding, carrier=ProxmoxCarrier(connection))
-    elif fence == "wire-route":
-        deliveries[0]._wire._connection = ProxmoxConnection("https://changed.test", "node", 101, "token", "secret")
     elif fence == "stale-after-route":
 
         def take_over(_deadline):

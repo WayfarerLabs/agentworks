@@ -38,8 +38,6 @@ class ProxmoxHelperDelivery(ProxmoxCarrier):
     def __init__(self, connection: ProxmoxConnection, expectation: HelperClosureExpectation) -> None:
         super().__init__(connection)
         self._expectation = expectation
-        self._connection = connection
-        self._original_wire = self._wire
         self._pid: int | None = None
         self._status_available = False
         self._closure_proven = False
@@ -69,7 +67,14 @@ class ProxmoxHelperDelivery(ProxmoxCarrier):
         expectation = self._expectation
         reader = RuntimePrefixSink(expectation.nonce, expectation.candidates, _Discard(), expectation.system_shim)
         reader.try_write(memoryview(value[:MAX_RUNTIME_RECORD_BYTES].encode("ascii")))
-        self._closure_proven = reader.observation.state is RuntimePrerequisiteState.READY
+        self._closure_proven = reader.observation.state in (
+            RuntimePrerequisiteState.READY,
+            RuntimePrerequisiteState.MISSING,
+            RuntimePrerequisiteState.UNUSABLE,
+            RuntimePrerequisiteState.SHIM,
+            RuntimePrerequisiteState.UNSUPPORTED_VERSION,
+            RuntimePrerequisiteState.MISSING_MODULES,
+        )
         reader.clear()
 
     def execute(
@@ -78,14 +83,12 @@ class ProxmoxHelperDelivery(ProxmoxCarrier):
         return self._execute(invocation, io=io, deadline=deadline, custody=custody, observer=self)
 
     def observe_closure(self, *, deadline: Deadline, custody: LocalDeliveryCustody) -> bool:
+        if self._closure_proven and custody.settled:
+            return True
         if deadline.expires_at is None or deadline.expired:
             raise ValidationError("Helper closure observation requires a fresh finite deadline")
         if not custody.settled:
             raise StateError("Helper closure retains unsettled local delivery")
-        if self._wire is not self._original_wire or self._wire._connection != self._connection:  # noqa: SLF001
-            raise StateError("Helper closure route changed")
-        if self._closure_proven:
-            return True
         if self._pid is None or not self._status_available:
             return False
         self.before_status()

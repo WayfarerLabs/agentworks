@@ -956,8 +956,6 @@ class ExecutionOperation:
 
     def observe_inline_cleanup(self, deadline: Deadline) -> None:
         """Observe only retained exact helpers, without resuming application output."""
-        if deadline.expires_at is None or deadline.expired:
-            raise ValidationError("Inline cleanup observation requires a fresh finite deadline")
         with self._admission_guard:
             for active in tuple(self._active_inline_calls.values()):
                 delivery = active.closure_delivery
@@ -968,14 +966,20 @@ class ExecutionOperation:
                 attempt = active.operation.outstanding_attempt
                 if attempt is None:
                     continue
+                if delivery.closure_proven and attempt.local_delivery.settled:
+                    continue
+                if deadline.expires_at is None or deadline.expired:
+                    raise ValidationError("Inline cleanup observation requires a fresh finite deadline")
+                self._validate_closure_call(active)
                 if not attempt.local_delivery.close(deadline):
                     raise StateError("Inline helper local delivery remains unsettled")
                 self._validate_closure_call(active)
-                if self._route_check is not None:
-                    self._route_check(deadline)
-                self._validate_closure_call(active)
-                if not delivery.observe_closure(deadline=deadline, custody=attempt.local_delivery):
-                    raise StateError("Inline helper closure remains unknown")
+                if not delivery.closure_proven:
+                    if self._route_check is not None:
+                        self._route_check(deadline)
+                    self._validate_closure_call(active)
+                    if not delivery.observe_closure(deadline=deadline, custody=attempt.local_delivery):
+                        raise StateError("Inline helper closure remains unknown")
                 self._validate_closure_call(active)
                 active.operation.settle_helper_closure()
                 self._capture(active, OwnedInlineOutcome())
@@ -1197,30 +1201,37 @@ class ExecutionOperation:
             active = self._borrow_helper_call(carrier, prepared)
             operation = active.operation
         try:
-            binding = self._native_binding
-            if binding is not None and binding.carrier is carrier and binding._new_helper_delivery is not None:
-                active.closure_expectation = prepared.closure_expectation
-                active.closure_delivery = binding._new_helper_delivery(prepared.closure_expectation)
-                active.operation = BorrowedFixedHelperCarrier(active.closure_delivery, active.borrow)
-                operation = active.operation
-            self._admit(active)
-            candidate = execute_inline_candidate(operation, prepared, deadline=deadline)
-            active.candidate = candidate
-            completion = candidate.carrier_completion
-            if active.closure_delivery is not None and not active.closure_delivery.closure_proven:
-                completion = None
-            operation.settle(candidate.dispatch, completion)
-            outcome = self._outcome(active, operation, deadline, include_candidate=True)
-        except BaseException as control:
-            self._raise_control(control, active, operation, deadline)
-
-        with self._admission_guard:
             try:
-                self._capture(active, outcome)
-            except BaseException:
-                active.bookkeeping_retained = True
-                raise
-        return outcome
+                binding = self._native_binding
+                if binding is not None and binding.carrier is carrier and binding._new_helper_delivery is not None:
+                    active.closure_expectation = prepared.closure_expectation
+                    active.closure_delivery = binding._new_helper_delivery(prepared.closure_expectation)
+                    active.operation = BorrowedFixedHelperCarrier(active.closure_delivery, active.borrow)
+                    operation = active.operation
+                self._admit(active)
+                candidate = execute_inline_candidate(operation, prepared, deadline=deadline)
+                active.candidate = candidate
+                completion = candidate.carrier_completion
+                if active.closure_delivery is not None and not active.closure_delivery.closure_proven:
+                    completion = None
+                operation.settle(candidate.dispatch, completion)
+                outcome = self._outcome(active, operation, deadline, include_candidate=True)
+            except BaseException as control:
+                self._raise_control(control, active, operation, deadline)
+
+            with self._admission_guard:
+                try:
+                    self._capture(active, outcome)
+                except BaseException:
+                    active.bookkeeping_retained = True
+                    raise
+            return outcome
+        finally:
+            if active.closure_delivery is not None:
+                active.prepared = None
+                active.candidate = None
+                if active.outcome is not None:
+                    active.outcome = replace(active.outcome, candidate=None)
 
     def _outcome(
         self,
@@ -1307,10 +1318,6 @@ class ExecutionOperation:
                 fact.__cause__ = control.__cause__
             except BaseException:
                 raise control from control.__cause__
-            if active.closure_delivery is not None:
-                active.prepared = None
-                if isinstance(active.candidate, InlineCandidateResult):
-                    active.candidate = replace(active.candidate, observation=None)
         raise control from fact
 
     def _capture(self, active: _ActiveHelperCall, outcome: OwnedInlineOutcome) -> None:
@@ -1323,10 +1330,6 @@ class ExecutionOperation:
         active.outcome = outcome
         if active.closure_delivery is not None and outcome.requires_owner_retention:
             # The original attempt still needs its OPEN borrow for settlement.
-            # Detach all caller collectors, input and returned application bytes.
-            active.outcome = replace(outcome, candidate=None)
-            active.prepared = None
-            active.candidate = None
             active.bookkeeping_retained = True
             return
         # Both handoffs are local core transitions. A reply can be lost after
