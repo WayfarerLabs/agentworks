@@ -489,7 +489,6 @@ class LocalProcessOwner:
         self._cleanup_retry_requested = False
         self._retained_status: _ProcessStatus | None = None
         self._retained_process: subprocess.Popen[bytes] | None = None
-        self._retained_pipes: LocalProcessPipes | None = None
 
     def _admit(self, request: LocalProcessRequest) -> bool:
         with self._condition:
@@ -819,12 +818,15 @@ class LocalProcessOwner:
                     self._cleanup_retry_requested = False
                     return
             try:
-                # Only a newly observed exit permits unsolicited bookkeeping
-                # cleanup. Failure after a known exit requires explicit retry.
+                # Only newly observed exit or wait loss permits unsolicited
+                # bookkeeping. Already consumed observations need explicit retry.
+                was_lost = status is not None and status.lost
                 exited = status is not None and status.status is None and status.poll() is not None
+                newly_lost = status is not None and not was_lost and status.lost
             except BaseException:
                 exited = False
-            if exited or (status is not None and status.lost):
+                newly_lost = False
+            if exited or newly_lost:
                 # Cleanup of an observed exit only closes pipes and retires
                 # native bookkeeping. Lost ownership never authorizes a signal.
                 with self._condition:
@@ -954,7 +956,6 @@ def _run_local_process_owner(owner: LocalProcessOwner) -> None:
         assert process.stdout is not None and process.stderr is not None
         pipes = LocalProcessPipes(process.stdin, process.stdout, process.stderr)
         status.pipes = pipes
-        owner._retained_pipes = pipes
         pipes._install_close_records()
         request = None
         owner._publish_ready(pipes)
@@ -991,7 +992,6 @@ def _run_local_process_owner(owner: LocalProcessOwner) -> None:
                     cleaned = False
                 local_status = status.status
                 observation_failed |= status.lost
-                owner._retained_pipes = status.pipes
                 cleanup_retryable = not cleaned and _cleanup_retryable(status)
             else:
                 local_status = None
@@ -1000,7 +1000,6 @@ def _run_local_process_owner(owner: LocalProcessOwner) -> None:
             if cleaned:
                 owner._retained_status = None
                 owner._retained_process = None
-                owner._retained_pipes = None
             if not cleanup_retryable:
                 status = None
                 process = None
