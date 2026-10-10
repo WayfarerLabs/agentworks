@@ -1446,15 +1446,14 @@ fall back to ambient. Do not clone the SDK's ADC selector merely to suppress pro
 Internally constructed SDK requests, CLI discovery, credential retry/backoff and constructor handoff
 remain explicit best-effort limits, not resources falsely reported as drained.
 
-The staged reader uses public token-state inspection, synchronous refresh through the owned Request
-when needed, and public header application before one ordinary service-session request. That stages
-token and transport custody, not complete authentication middleware. Final owned access must use
-public `before_request` with the actual service method and fixed URL to preserve selected credential
-security behavior, token identity, scopes and quota. Keep the real public Request type and session
-available to SDK credential transports; a plain callable can lose supported certificate behavior.
-Retain attributable responses before SDK consumption and refuse later owned calls while their
-cleanup is uncertain. Public session closure accounts for our originals, not every SDK-created
-adapter or internal process.
+Use public `before_request` with the actual service method and fixed URL before one ordinary
+service-session request. Earlier token refresh/header application staged custody, but did not
+preserve the complete selected middleware boundary. Keep selected credential security behavior,
+token identity, scopes and quota. Keep the real public Request type and session available to SDK
+credential transports; a plain callable can lose supported certificate behavior. Retain attributable
+responses before SDK consumption and refuse later owned calls while their cleanup is uncertain.
+Public session closure accounts for our originals, not every SDK-created adapter or internal
+process.
 
 Preserve the public SDK's token-state distinction after synchronous refresh. `STALE` denotes an
 unexpired token inside the SDK refresh window, not an unusable credential. Accept both `STALE` and
@@ -1479,20 +1478,36 @@ compatibility gate. Retain original service response/session handles before cons
 them before credential dependencies. Ordinary failed closure may preserve a useful observation, but
 blocks later observations and aggregate release until positive retirement.
 
-Public refresh/apply avoids the service dispatch's SDK background regional-boundary lookup, but is
-not authentication-middleware equivalence. The locked SDK enables that lookup for ordinary
-default-universe service-account credentials independently of Agentworks configuration. Renewing the
-access token does not renew the boundary; applying an empty or expired boundary cache does not prove
-that no lookup is required. The current reader is isolated staging, not a production authentication
-path. Preserve the public SDK's security behavior before admitting either reads or starts through
-full owned access. Its blocking lookup controls are private, not a supported synchronous shortcut.
-Investigate a small public transport-copy custody seam that preserves normal SDK middleware without
-suppressing its lookup, substituting the principal or implementing another boundary policy. Account
-honestly for copied transports, concurrent SDK work, deadlines and terminal cleanup; do not claim
-unobservable worker or socket drainage. Prove the real selected credential classes and certificate
-parameters. The existing activation producer's separately tracked real-credential reconciliation
-remains open without changing its completed one-shot acknowledgment history. No native acceptance
-follows from source inspection or static credentials.
+The locked SDK enables background regional-access-boundary lookup for ordinary default-universe
+service-account credentials independently of Agentworks configuration. Token renewal does not renew
+that boundary. Preserve normal public middleware; do not force copy failure, change private blocking
+controls, substitute the principal or implement another boundary policy.
+
+One retained `_OwnedAuth` supplies the selected credential and concrete public Request originals to
+both reads and the start producer. Serialize borrower authentication with one finite operation lock.
+An independent short entry barrier records each copied Request's actual consumer before Session or
+Response use. Public `deepcopy` retains a copied Session before wrapper initialization; populate
+only the exact installed response-hook identity so copying cannot traverse owner locks. Preserve
+unrelated hooks, session security arguments and public redirect behavior. The concrete 32-copy
+custody bound refuses new middleware admission when occupied; active consumers are dependencies, not
+failed cleanup. A swallowed copy failure still refuses service dispatch rather than silently
+disabling SDK security.
+
+Each copy retains its original finite deadline, unaffected by borrower end or a later operation.
+Terminal close bars new root/copy entry, then releases the barrier before bounded public joins or
+original close calls. Only positively observed finished consumers permit their Response and Session
+retirement; an expired deadline or uncertain join retains custody. A never-entered copy may be
+barred and its original Session closed without claiming that its SDK worker has finished. Later
+explicit operations may retire finished copies; do not add a reaper or drain engine. Preserve
+original control exceptions and independently attempt retained closes. Only the final access owner
+closes the helper; the start producer closes its service originals, not another borrower's
+credential lifetime.
+
+This seam accounts for supplied root/copied originals, not every SDK transport, internal worker or
+socket. Public copy adapters that cannot return an attributable Session remain a named profile
+limit; do not invent private native-adapter cloning. Prove real selected credential classes, default
+boundary work, certificate arguments and interrupted retirement separately from native/full-access
+acceptance.
 
 ### GCP activation admission and acknowledgment
 
@@ -1510,13 +1525,12 @@ deduplication; it neither permits replay nor proves exactly-once acceptance. Rec
 fenced ledger bookkeeping only. No generated poller, retired start method, background task, private
 SDK session mutation or generic cloud task framework belongs in this unit.
 
-Use public `AuthorizedSession` with refresh replay disabled, `trust_env=False`, normal TLS
-verification, default zero adapter retries and redirects disabled. Supply a public Google-auth
-`Request` over a separately owned ordinary Requests session, also with `trust_env=False`. Retain one
-strong adapter reference to that wrapper for the adapter lifetime, including uncertain
-credential-session cleanup: its destructor can otherwise close the supplied session outside local
-accounting. The wrapper is not a fourth closeable resource. Keep SDK authentication/JWT setup; do
-not copy its pipeline or invent a custom authentication implementation.
+Borrow the shared selected `_OwnedAuth`, call its public credential `before_request` with the exact
+POST method and fixed URL, then dispatch through one ordinary Requests service Session. Keep
+`trust_env=False`, normal TLS verification, zero adapter retries and redirects disabled. Do not use
+service authentication replay or recreate the selected credential for this borrower. Credential
+refresh and default boundary work use the retained public Request originals described above; keep
+normal selected credential behavior rather than copying its pipeline or invoking private JWT setup.
 
 Pass `stream=True`, `allow_redirects=False` and `Accept-Encoding: identity`. One public per-request
 response hook first retains the actual original response, then refuses non-200 and Content-Encoding
@@ -1527,10 +1541,11 @@ it at the final scripted transport; the locally attached PreparedRequest is not 
 acknowledgment evidence.
 
 Check the original finite deadline before admission and public request entry. Set finite positive
-service connect/read and credential-refresh timeouts from the then-remaining budget. SDK credential
-work happens inside that public method; do not imply another application check immediately before
-its internal service send. These synchronous budgets are best effort, not hard elapsed preemption.
-Do not use `max_allowed_time` to discard a late response before retaining its acknowledgment.
+service connect/read and credential request timeouts from the then-remaining budget. Public
+credential middleware precedes the service request; recheck the original budget before durable
+possible-effect admission and dispatch. Synchronous SDK work and copied consumers remain best
+effort, not hard elapsed preemption. Do not use `max_allowed_time` to discard a late response before
+retaining its acknowledgment.
 
 Read admitted HTTP 200 through finite positive raw reads without content decoding, at most an
 internal chunk size or remaining capacity plus one overflow byte, whichever is smaller. Cap body
@@ -1551,13 +1566,14 @@ universal provider schema guarantees. If operationType is present require `start
 nor DONE establishes successful startup. Persist only operation name in the optional ACK, not
 diagnostics or a provider-selected follow-up URL. Later lookup constructs a fixed route.
 
-Keep returned original response/service/credential session handles directly in adapter custody
-before later Python bookkeeping, including response capture when the request method raises. Close
-them in that order; only normal closure retires an original. Retain uncertain originals with
-`cleanup_incomplete` true and preserve the Request wrapper while credential cleanup is uncertain.
-Preserve original escaping control through scoped cleanup entry and bookkeeping and release the
-admission lock. Never retry uncertain close or submission. This does not establish atomic
-SDK-internal handoff, arbitrary repeated-signal safety, interruption during final exception
+Keep returned original response/service Session handles directly in producer custody before later
+Python bookkeeping, including response capture when the request method raises. Close them in that
+order; only normal closure retires an original. Retain uncertain originals with `cleanup_incomplete`
+true. The shared helper retains credential Request/Session originals and owns their separate
+terminal cleanup. Preserve original escaping control through scoped cleanup entry and bookkeeping
+and release the admission lock. Observation cleanup does not retry an uncertain close; explicit
+retained-owner cleanup may retry that same original, never submission. This does not establish
+atomic SDK-internal handoff, arbitrary repeated-signal safety, interruption during final exception
 propagation or lock release, or interpreter-shutdown guarantees.
 
 Retain a matching ACK before publication, cleanup or late-success refusal. Validate canonical

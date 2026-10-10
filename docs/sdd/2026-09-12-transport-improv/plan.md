@@ -1184,9 +1184,28 @@ scoped lint/format and full strict typing across 1,379 sources. Earlier guard, s
 test-annotation and initial private-review findings remain recorded. These results cover the final
 four source files on the author's earlier base, not whole-composition typing or native acceptance.
 All three independent private source-review lanes clear the paired correction at `0cb8bcdb`; the
-initial token-state finding and same-unit redundant interior checks are resolved. This reader does
-not reconcile the start producer's authentication or supply startup settlement, endpoints, routes,
-guest preparation or RunContext admission; keep both GCP items unchecked.
+initial token-state finding and same-unit redundant interior checks are resolved. That staged
+refresh/apply boundary is superseded by the shared public-middleware implementation below; the
+earlier proof did not reconcile the start producer's authentication.
+
+The replacement private implementation shares selected credentials and public `before_request`
+between exact-instance GETs and the single start POST. Its concrete Request copy seam retains
+attributable originals and the original finite deadline, preserves public middleware and Session
+security behavior, and separates borrower cleanup from access-owner retirement. It neither disables
+the default regional access boundary nor substitutes a different principal. The source owner's
+earlier-base verification passes 112 reader/copy cases and all 153 producer cases, including the six
+historical strict-JSON/framed-late-acknowledgment cases and meaningful cleanup-entry interruption
+coverage. The initial producer run failed three cases and two teardown checks; the correction
+preserves the assertions, original control and physical producer-lock release, and uses the actual
+public Session class for response-hook fault injection. Failed diagnostics and database fixtures
+remain preserved. Full strict typing initially found 19 test-annotation errors in four files; the
+narrow fixture refinements preserve production code and existing assertions. Final verification
+passes all 265 cases without skips or deselection, full strict typing across 1,380 sources, and
+nine-file lint/format checks on the author's earlier base. Three independent paired source-review
+lanes remain pending. This is not native acceptance, whole-composition typing, SDK-wide drain or
+completed cloud access: startup settlement, endpoints, routes, guest preparation and RunContext
+admission remain unfinished. Keep both GCP items unchecked until their respective acceptance gates
+are met.
 
 - [ ] Complete owned GCP access with the LLD's observational identity guarantee: a fresh exact
       provider observation refuses known stale-target admission, matching receipt and subsequent

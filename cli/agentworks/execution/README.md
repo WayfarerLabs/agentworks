@@ -272,21 +272,28 @@ This is not a native access factory or proof of SDK-internal drain, new-VM ident
 startup settlement, routes, guest preparation or RunContext admission.
 
 `plugins/gcp/_native_access.py` similarly stages private `GCEOwnedRead` power and locator reads. It
-preserves stock ADC selection or the explicitly selected service-account document, with an owned
-public Google-auth Request and synchronous refresh/header application. One streamed Compute GET
+preserves stock ADC selection or the explicitly selected service-account document. The shared
+`plugins/gcp/_owned_auth.py` helper supplies an owned public Google-auth Request to the selected
+credential's public `before_request` for the actual method and fixed URL. One streamed Compute GET
 selects only identity and power fields, bounds raw JSON ingestion, and compares the recorded
 instance ID, name, project and zone. Service originals and attributable credential responses remain
 retained through uncertain closure; no new observation can bypass that uncertainty. Credential
-redirects keep public SDK behavior rather than imposing a new credential policy. This does not
-reconcile the separate start producer's authentication, implement full native access, or prove real
-credential/socket drain or native projection compatibility.
+redirects keep public SDK behavior rather than imposing a new credential policy. The same helper is
+borrowed by the start producer; only its access owner terminally closes the shared auth lifetime.
+This staging implementation supplies no full native access and proves neither real credential/socket
+drain nor native projection compatibility.
 
-This reader is not a production authentication path. Synchronous token refresh and header
-application do not renew the regional access boundary that the locked SDK enables by default for
-ordinary service-account credentials. Full owned access must preserve the SDK's normal security
-behavior and account for its copied transports before admitting reads or starts.
+Public middleware preserves normal scopes, quota, auth mode and regional access boundary lookup,
+which the locked SDK enables by default for ordinary service-account credentials. Its concrete
+Request copy seam retains attributable copied Sessions, preserves unrelated hooks and public Session
+security settings, and binds each copy to its original finite operation deadline. Entry is barred
+before terminal cleanup; entered consumers must positively finish before their originals retire.
+Never-entered copies may be barred and closed without claiming that the SDK's internal worker has
+finished. A finite retained-copy limit refuses additional work rather than disabling middleware or
+replacing the selected principal. SDK-internal acquisition, discovery processes, unsupported adapter
+copies and arbitrary worker drain are not covered by that custody seam.
 
-After synchronous refresh, an unexpired token remains usable even when Google-auth marks it `STALE`
+After public middleware, an unexpired token remains usable even when Google-auth marks it `STALE`
 because its remaining lifetime is inside the SDK's refresh window. Refuse `INVALID` credentials; do
 not impose a new minimum token lifetime or re-enter automatic request replay.
 
@@ -306,9 +313,11 @@ original lacks confirmed closure. An interruption before or between closes retai
 originals; close attempts do not establish local retirement. GCE records a request UUID before one
 streamed POST to the fixed, name-addressed start endpoint. Its original public response hook refuses
 unsupported status or encoding before body consumption; finite raw reads without decoding bound a
-matching Operation acknowledgment. The producer retains the original response, service and
-credential sessions, including the auth Request wrapper, until confirmed local closure. It preserves
-a complete matching late receipt before deadline refusal, without interpreting Operation status or
+matching Operation acknowledgment. The producer retains its original response and service Session
+until confirmed local closure; its borrowed auth helper retains credential Request/Session copies
+for access-owner cleanup. Service cleanup, ending the auth borrow and releasing the producer lock
+preserve the original escaping control even when later cleanup is interrupted. It preserves a
+complete matching late receipt before deadline refusal, without interpreting Operation status or
 errors as startup completion. Recorded-name dispatch does not atomically reserve the selected
 incarnation; full cloud access must separately establish fresh identity and guest admission. This is
 not atomic SDK internal acquisition or arbitrary signal hard preemption. Neither local cleanup nor
