@@ -71,7 +71,7 @@ assert owner.notify_resize(core.Deadline(time.monotonic()+1)) is core.ResizeNoti
 assert owner.close_bounded(core.Deadline(time.monotonic()+1)) is terminal
 assert children[0].returncode is None
 assert all(pipe.closed for pipe in (children[0].stdin,children[0].stdout,children[0].stderr))
-assert owner._retained_status is owner._retained_process is owner._retained_pipes is None
+assert owner._retained_status is owner._retained_process is None
 # Exercise the actual Popen destructor bookkeeping while PID actions are forbidden.
 child = children.pop()
 reference = weakref.ref(child)
@@ -186,7 +186,6 @@ def test_permanent_close_failure_retains_original_objects_without_retry(
         assert attempts == 1
         record = next(record for record in pipes._records if record.pipe is pipe)
         assert record.attempted and not record.confirmed
-        assert owner._retained_pipes is pipes
         assert owner._retained_process is children[0]
         assert owner._retained_status is not None and owner._retained_status.pipes is pipes
         assert owner._retained_status.process is children[0]
@@ -246,7 +245,8 @@ def test_uncertain_pipe_does_not_prevent_retry_of_separately_owned_process(monke
         assert second is not None and not second.cleaned and not second.cleanup_retryable
         assert second.local_status == -9 and second.exit_status is None
         assert closes == 1 and signals == 2
-        assert pipes.stderr.closed and owner._retained_pipes is pipes
+        assert pipes.stderr.closed
+        assert owner._retained_status is not None and owner._retained_status.pipes is pipes
         assert owner.close() is first and first.cleanup_retryable
         assert owner.close_bounded(core.Deadline(time.monotonic() + 1)) is second
         assert closes == 1 and signals == 2
@@ -316,7 +316,7 @@ def test_early_eof_and_teardown_share_sticky_close_and_original_control(
         assert not terminal.cleaned and not terminal.cleanup_retryable
         assert terminal.local_status == -9 and terminal.exit_status is None
         pipes = original_pipes[0]
-        assert owner._retained_pipes is pipes and len(pipes._records) == 3
+        assert len(pipes._records) == 3
         assert pipes.stdout.closed and pipes.stderr.closed
         assert pipes.stdin is not None and pipes.stdin.closed is after_close
         assert owner._retained_status is not None
@@ -361,7 +361,8 @@ def test_construction_failure_keeps_installed_records_and_actual_child_custody(
     owner.start(_request("import time; time.sleep(30)", input_piped=True))
     _wait_snapshot(owner, lambda snapshot: snapshot.observation_failed)
     retained_process = owner._retained_process
-    retained_pipes = owner._retained_pipes
+    retained_status = owner._retained_status
+    retained_pipes = None if retained_status is None else retained_status.pipes
     terminal = owner.close()
     assert terminal.started and terminal.observation_failed and terminal.cleaned
     assert terminal.local_status is not None and terminal.exit_status is None
@@ -391,7 +392,8 @@ def test_unattempted_record_allocation_failure_retries_only_safe_work(monkeypatc
     _wait_snapshot(owner, lambda snapshot: snapshot.observation_failed)
     first = owner.close()
     assert not first.cleaned and first.cleanup_retryable
-    pipes = owner._retained_pipes
+    assert owner._retained_status is not None
+    pipes = owner._retained_status.pipes
     assert pipes is not None and len(pipes._records) == 2
     records = tuple(pipes._records)
     assert all(record.confirmed for record in records)

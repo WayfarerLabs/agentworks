@@ -211,8 +211,9 @@ assert terminal.local_status==terminal.exit_status==7
 assert terminal.cleaned is (sys.argv[1]=='True')
 if sys.argv[1]=='False':
     assert len(closes)==1 and not terminal.cleanup_retryable
-    assert owner._retained_pipes.stdout is owner._retained_process.stdout
-    assert not owner._retained_pipes.stdout.closed
+    assert owner._retained_status is not None and owner._retained_status.pipes is not None
+    assert owner._retained_status.pipes.stdout is owner._retained_process.stdout
+    assert not owner._retained_status.pipes.stdout.closed
 reference=weakref.ref(owner)
 del owner, g, body
 gc.collect()
