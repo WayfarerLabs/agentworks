@@ -40,6 +40,7 @@ from agentworks.execution._file_obligation import (
     FileCallObligation,
     FileCallObligationCodecError,
     FileCallUncertainty,
+    UploadChildAssociation,
     encode_file_call_admission,
     encode_file_call_obligation,
 )
@@ -216,6 +217,25 @@ type _ActiveFileUpload = _ActiveFileCall[FileUploadBinding, _PreparedUpload | _P
 
 
 @dataclass(frozen=True, slots=True, repr=False)
+class _UploadChildPayload:
+    expected_revision: int
+    payload_version: int
+    payload: bytes
+
+
+@dataclass(slots=True, repr=False)
+class _UploadChildBookkeeping:
+    """Exact current child and intended CAS, retained before publication."""
+
+    active: _ActiveFileUpload
+    association: UploadChildAssociation
+    publication: _UploadChildPayload | None = None
+    publication_confirmed: bool = False
+    unfinished_recorded: bool = False
+    capture_ready: bool = False
+
+
+@dataclass(frozen=True, slots=True, repr=False)
 class UnfinishedFileJsonUpdate:
     """Captured custody for one JSON update with unfinished responsibility."""
 
@@ -283,6 +303,7 @@ class FileOperation:
         self._local_download_call: _LocalDownloadCall | None = None
         self._active_uploads: dict[int, _ActiveFileUpload] = {}
         self._unfinished_uploads: list[UnfinishedFileUpload] = []
+        self._upload_child_bookkeeping: dict[int, _UploadChildBookkeeping] = {}
         self._active_package_uploads: dict[int, _ActiveFileUpload] = {}
         self._unfinished_package_uploads: list[UnfinishedPackageUpload] = []
         self._active_json_updates: dict[int, _ActiveFileJsonUpdate] = {}
@@ -591,6 +612,7 @@ class FileOperation:
         runtime_selection: RuntimeSelection,
         effect_gate: FileEffectGateBinding | None = None,
         gate_setup: FileEffectGateSetup | None = None,
+        upload_child: UploadChildAssociation | None = None,
     ) -> FileUploadOutcome:
         """Run and capture one concrete upload under a whole-call borrow."""
         if gate_setup is not None:
@@ -607,6 +629,7 @@ class FileOperation:
                 runtime_selection=runtime_selection,
                 gate_setup=gate_setup,
                 effect_gate=effect_gate,
+                upload_child=upload_child,
             )
         borrow = self._owner.borrow()
         try:
@@ -626,7 +649,9 @@ class FileOperation:
                 effect_gate=effect_gate,
             )
             self._validate_upload_gate(prepared.binding)
-            admission = self._prepare_admission(FileCallFamily.UPLOAD, prepared.binding, token=prepared.state.token)
+            admission = self._prepare_admission(
+                FileCallFamily.UPLOAD, prepared.binding, token=prepared.state.token, upload_child=upload_child
+            )
             active: _ActiveFileUpload = _ActiveFileCall(
                 carrier, prepared.binding, borrow, prepared, admission.obligation_id
             )
@@ -636,10 +661,18 @@ class FileOperation:
 
         try:
             self._active_uploads[id(active)] = active
+            if upload_child is not None:
+                self._upload_child_bookkeeping[id(active)] = _UploadChildBookkeeping(active, upload_child)
         except BaseException:
             borrow.close()
+            self._active_uploads.pop(id(active), None)
             raise
-        self._install(active, admission, self._active_uploads)
+        try:
+            self._install(active, admission, self._active_uploads)
+        except BaseException:
+            if id(active) not in self._active_uploads:
+                self._upload_child_bookkeeping.pop(id(active), None)
+            raise
 
         return self._run_prepared_upload(active, prepared)
 
@@ -658,6 +691,7 @@ class FileOperation:
         runtime_selection: RuntimeSelection,
         gate_setup: FileEffectGateSetup,
         effect_gate: FileEffectGateBinding | None,
+        upload_child: UploadChildAssociation | None,
     ) -> FileUploadOutcome:
         """Register pending setup and promote its row before upload effects."""
         borrow = self._owner.borrow()
@@ -688,7 +722,9 @@ class FileOperation:
                 raise ValidationError("Upload gate setup must match the selected Linux VM and identity")
             token = secrets.token_bytes(16)
             operation = BorrowedFixedHelperCarrier(carrier, borrow)
-            admission = self._prepare_admission(FileCallFamily.UPLOAD, binding, token=token, gate_setup=gate_setup)
+            admission = self._prepare_admission(
+                FileCallFamily.UPLOAD, binding, token=token, gate_setup=gate_setup, upload_child=upload_child
+            )
             pending = _PendingUploadSetup(gate_setup, token, operation, source, canonical_condition, canonical_metadata)
             active: _ActiveFileUpload = _ActiveFileCall(carrier, binding, borrow, pending, admission.obligation_id)
         except BaseException:
@@ -696,10 +732,18 @@ class FileOperation:
             raise
         try:
             self._active_uploads[id(active)] = active
+            if upload_child is not None:
+                self._upload_child_bookkeeping[id(active)] = _UploadChildBookkeeping(active, upload_child)
         except BaseException:
             borrow.close()
+            self._active_uploads.pop(id(active), None)
             raise
-        self._install(active, admission, self._active_uploads)
+        try:
+            self._install(active, admission, self._active_uploads)
+        except BaseException:
+            if id(active) not in self._active_uploads:
+                self._upload_child_bookkeeping.pop(id(active), None)
+            raise
         result = exchange_file_effect_gate(
             operation,
             operation=GateControlOperation.SETUP,
@@ -715,6 +759,7 @@ class FileOperation:
         if result.dispatch is Dispatch.NOT_SENT and not operation.requires_owner_retention:
             borrow.close()
             self._active_uploads.pop(id(active))
+            self._upload_child_bookkeeping.pop(id(active), None)
             raise StateError("File-effect gate setup was not dispatched")
         observed = result.observation
         if (
@@ -726,7 +771,9 @@ class FileOperation:
         ):
             raise GateControlMutationUncertain("file-effect gate setup was not acknowledged")
         bound = replace(binding, effect_gate=observed.binding)
-        self._publish_retained(active, self._obligation(FileCallFamily.UPLOAD, bound, token=token))
+        self._publish_retained(
+            active, self._obligation(FileCallFamily.UPLOAD, bound, token=token, upload_child=upload_child)
+        )
         prepared = _prepare_upload_from_binding(
             operation,
             source=source,
@@ -1416,9 +1463,12 @@ class FileOperation:
         token: bytes | None = None,
         batch_index: int | None = None,
         gate_setup: FileEffectGateSetup | None = None,
+        upload_child: UploadChildAssociation | None = None,
     ) -> _FileCallAdmission:
         try:
-            record = self._obligation(family, binding, token=token, batch_index=batch_index, gate_setup=gate_setup)
+            record = self._obligation(
+                family, binding, token=token, batch_index=batch_index, gate_setup=gate_setup, upload_child=upload_child
+            )
             payload = encode_file_call_admission(record)
         except FileCallObligationCodecError:
             raise ValidationError("File call lifecycle recovery identity is too large or invalid") from None
@@ -1457,6 +1507,8 @@ class FileOperation:
         scratch_cleanup_debt: ScratchCleanupDebt | None = None,
         publication_cleanup_debt: BoundPublicationCleanupDebt | None = None,
         gate_setup: FileEffectGateSetup | None = None,
+        upload_child: UploadChildAssociation | None = None,
+        upload_child_complete: bool = False,
     ) -> FileCallObligation:
         return FileCallObligation(
             family=family,
@@ -1485,6 +1537,8 @@ class FileOperation:
             gate_setup=gate_setup,
             uncertainty=uncertainty,
             bootstrap=binding.bootstrap,
+            upload_child=upload_child,
+            upload_child_complete=upload_child_complete,
         )
 
     @staticmethod
@@ -1599,6 +1653,36 @@ class FileOperation:
 
     def _capture_upload(self, active: _ActiveFileUpload, outcome: FileUploadOutcome) -> None:
         active.outcome = outcome
+        child = self._upload_child_bookkeeping.get(id(active))
+        if child is not None:
+            complete = (
+                outcome.status is FileUploadStatus.COMPLETE
+                and outcome.publication_confirmed
+                and not outcome.deadline_exceeded
+                and outcome.failure is None
+                and not outcome.publication_uncertain
+                and not outcome.requires_owner_retention
+                and not self._upload_uncertainty(outcome)
+            )
+            if complete or outcome.requires_owner_retention:
+                record = self._obligation(
+                    FileCallFamily.UPLOAD,
+                    active.binding,
+                    token=outcome.token,
+                    scratch_reference=outcome.reference,
+                    scratch_cleanup_debt=outcome.scratch_cleanup_debt,
+                    publication_cleanup_debt=outcome.publication_cleanup_debt,
+                    uncertainty=self._upload_uncertainty(outcome),
+                    upload_child=child.association,
+                    upload_child_complete=complete,
+                )
+                obligation = self._require_obligation(active)
+                child.publication = _UploadChildPayload(
+                    obligation.payload_revision, record.payload_version, encode_file_call_obligation(record)
+                )
+            child.capture_ready = True
+            self._settle_upload_child_bookkeeping(child)
+            return
         if outcome.requires_owner_retention:
             uncertainty = self._upload_uncertainty(outcome)
             self._publish_retained(
@@ -1616,6 +1700,61 @@ class FileOperation:
             self._retain_unfinished_upload(UnfinishedFileUpload(active.carrier, active.binding, outcome))
         release_borrow_after_custody(active.borrow, retain_effect=outcome.requires_owner_retention)
         self._active_uploads.pop(id(active))
+
+    def settle_upload_child_bookkeeping(self) -> None:
+        """Retry captured child CAS and borrow closure without any file effects.
+
+        A pending child keeps its original serial borrow. This is usable after
+        admission stops, and never prepares a helper or reads the source again.
+        Children without a captured outcome still require their original work.
+        """
+        for child in tuple(self._upload_child_bookkeeping.values()):
+            if child.active.outcome is not None:
+                self._settle_upload_child_bookkeeping(child)
+
+    def _settle_upload_child_bookkeeping(self, child: _UploadChildBookkeeping) -> None:
+        active = child.active
+        outcome = active.outcome
+        assert outcome is not None
+        if not child.capture_ready:
+            raise StateError("Upload child bookkeeping capture remains incomplete")
+        publication = child.publication
+        if publication is not None and not child.publication_confirmed:
+            obligation = self._require_obligation(active)
+            try:
+                row = obligation.publish_payload(
+                    expected_revision=publication.expected_revision,
+                    payload_version=publication.payload_version,
+                    payload=publication.payload,
+                )
+            except Exception:
+                # One bounded retry reconciles a lost reply with the same CAS.
+                # Control flow leaves the exact intent in custody for teardown.
+                row = obligation.publish_payload(
+                    expected_revision=publication.expected_revision,
+                    payload_version=publication.payload_version,
+                    payload=publication.payload,
+                )
+            if (
+                row.payload_revision != publication.expected_revision + 1
+                or row.payload_version != publication.payload_version
+                or row.payload != publication.payload
+            ):
+                raise StateError("Upload child checkpoint revision is not the intended revision")
+            child.publication_confirmed = True
+        if outcome.requires_owner_retention and not child.unfinished_recorded:
+            self._retain_unfinished_upload(UnfinishedFileUpload(active.carrier, active.binding, outcome))
+            child.unfinished_recorded = True
+        try:
+            if not active.borrow.closed:
+                release_borrow_after_custody(active.borrow, retain_effect=outcome.requires_owner_retention)
+            self._active_uploads.pop(id(active), None)
+            self._upload_child_bookkeeping.pop(id(active), None)
+        except BaseException:
+            # A close can finish before control reaches adapter bookkeeping.
+            # Do not reopen admission when that exact local close is retried.
+            self._owner.stop_admission()
+            raise
 
     def _retain_unfinished_upload(self, upload: UnfinishedFileUpload) -> None:
         self._unfinished_uploads.append(upload)

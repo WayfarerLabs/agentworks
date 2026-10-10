@@ -18,6 +18,7 @@ from agentworks.execution._file_obligation import (
     FileCallObligation,
     FileCallObligationCodecError,
     FileCallUncertainty,
+    UploadChildAssociation,
     decode_file_call_obligation,
     encode_file_call_admission,
     encode_file_call_obligation,
@@ -319,6 +320,84 @@ def test_admission_reserves_the_actual_largest_recovery_payload_for_every_family
 
         assert len(encode_file_call_obligation(recovery)) - len(encode_file_call_obligation(initial)) == growth
         assert encode_file_call_admission(initial) == encode_file_call_obligation(initial)
+
+
+def test_upload_child_format_and_exact_recovery_headroom() -> None:
+    child = UploadChildAssociation.fresh()
+    initial = replace(_obligation(FileCallFamily.UPLOAD), upload_child=child)
+    recovery = replace(_maximum_recovery_obligation(FileCallFamily.UPLOAD), upload_child=child)
+    encoded = encode_file_call_admission(initial)
+    assert initial.payload_version == 3
+    assert decode_file_call_obligation(encoded) == initial
+    assert len(encode_file_call_obligation(recovery)) - len(encoded) == 1150
+    completed = replace(
+        initial, scratch_reference=_maximum_reference(FileCallFamily.UPLOAD), upload_child_complete=True
+    )
+    assert len(encode_file_call_obligation(completed)) < len(encoded) + 1150
+    assert decode_file_call_obligation(encode_file_call_obligation(completed)) == completed
+    value = json.loads(encoded)
+    for version in (1, 2):
+        value["version"] = version
+        with pytest.raises(FileCallObligationCodecError):
+            decode_file_call_obligation(json.dumps(value, separators=(",", ":"), sort_keys=True).encode())
+
+
+def test_upload_child_admission_exact_envelope_boundary() -> None:
+    child = UploadChildAssociation(b"t" * 16, 4095)
+    baseline = replace(_obligation(FileCallFamily.UPLOAD), root="/", relative_path="a", upload_child=child)
+    padding = MAX_LIFECYCLE_PAYLOAD_BYTES - 1150 - len(encode_file_call_obligation(baseline))
+    admitted = replace(baseline, root="/" + "a" * (padding - 4095), relative_path="a" * 4096)
+    recovery = replace(
+        _maximum_recovery_obligation(FileCallFamily.UPLOAD),
+        root=admitted.root,
+        relative_path=admitted.relative_path,
+        upload_child=child,
+    )
+    assert len(encode_file_call_admission(admitted)) == MAX_LIFECYCLE_PAYLOAD_BYTES - 1150
+    assert len(encode_file_call_obligation(recovery)) == MAX_LIFECYCLE_PAYLOAD_BYTES
+    with pytest.raises(FileCallObligationCodecError):
+        encode_file_call_admission(replace(admitted, root=admitted.root + "a"))
+
+
+@pytest.mark.parametrize("ordinal", [-1, 4096, True, 0.5])
+def test_upload_child_rejects_unbounded_member_identity(ordinal) -> None:
+    with pytest.raises(FileCallObligationCodecError):
+        UploadChildAssociation(b"t" * 16, ordinal)
+
+
+def test_upload_child_success_requires_exact_clean_upload_identity() -> None:
+    child = UploadChildAssociation.fresh()
+    upload = replace(_obligation(FileCallFamily.UPLOAD), upload_child=child)
+    for changes in (
+        {"family": FileCallFamily.DOWNLOAD},
+        {"upload_child_complete": True},
+        {"upload_child": None, "upload_child_complete": True},
+        {"upload_child_complete": 1},
+        {
+            "upload_child_complete": True,
+            "scratch_reference": _reference(FileCallFamily.UPLOAD),
+            "uncertainty": frozenset({FileCallUncertainty.COORDINATION_UNCERTAINTY}),
+        },
+    ):
+        with pytest.raises(FileCallObligationCodecError):
+            replace(upload, **changes)
+
+
+def test_numeric_upload_child_uses_separate_version_without_changing_bootstrap() -> None:
+    from tests.execution.test_numeric_file_obligation import _numeric
+
+    ordinary = _numeric(FileCallFamily.UPLOAD)
+    associated = replace(ordinary, upload_child=UploadChildAssociation.fresh())
+    assert ordinary.payload_version == 2 and associated.payload_version == 4
+    decoded = decode_file_call_obligation(encode_file_call_admission(associated))
+    assert decoded == associated and decoded.bootstrap == ordinary.bootstrap
+    recovery = replace(
+        _maximum_recovery_obligation(FileCallFamily.UPLOAD),
+        target=ordinary.target,
+        bootstrap=ordinary.bootstrap,
+        upload_child=associated.upload_child,
+    )
+    assert len(encode_file_call_obligation(recovery)) - len(encode_file_call_admission(associated)) == 1150
 
 
 def _obligation_with_encoded_length(family: FileCallFamily, length: int) -> FileCallObligation:

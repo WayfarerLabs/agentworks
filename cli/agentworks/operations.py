@@ -797,6 +797,15 @@ class OperationBorrow:
         return self._owner.ownership
 
     @property
+    def closed(self) -> bool:
+        """Whether local borrow authority ended, including unresolved handoff.
+
+        This does not prove an effect resolved or any adapter checkpoint.
+        """
+        with self._owner._guard:  # noqa: SLF001
+            return self._closed
+
+    @property
     def has_outstanding_attempt(self) -> bool:
         """Return whether this borrow originated the owner's current attempt."""
         owner = self._owner

@@ -30,6 +30,7 @@ from agentworks.execution._file_gate_setup_recovery import FileGateSetupRecovery
 from agentworks.execution._file_obligation import (
     FileCallFamily,
     FileCallObligationCodecError,
+    UploadChildAssociation,
     decode_file_call_obligation,
 )
 from agentworks.execution._file_operation import FileOperation, PackageUploadMember
@@ -141,7 +142,8 @@ def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         database.close()
 
 
-def test_single_upload_persists_gate_before_dispatch_and_stale_generation_refuses(context) -> None:
+@pytest.mark.parametrize("associated", [False, True])
+def test_single_upload_persists_gate_before_dispatch_and_stale_generation_refuses(context, associated: bool) -> None:
     database, owner, operation, root, plan, gate = context
     carrier = _RowCheckingCarrier(database, owner, gate)
     common = dict(
@@ -153,6 +155,7 @@ def test_single_upload_persists_gate_before_dispatch_and_stale_generation_refuse
         deadline=Deadline.after(30),
         runtime_selection=runtime_selection(sys.executable),
         effect_gate=gate,
+        upload_child=UploadChildAssociation.fresh() if associated else None,
     )
     first = operation.upload(carrier, relative_path="first", source=BytesSource(b"a"), **common)
     assert first.status is FileUploadStatus.COMPLETE
@@ -160,6 +163,7 @@ def test_single_upload_persists_gate_before_dispatch_and_stale_generation_refuse
     assert carrier.seen and all(family is FileCallFamily.UPLOAD for family, _ in carrier.seen)
     (receipt_id,) = carrier.receipt_ids
     row = obligation_receipt(owner, receipt_id)
+    assert decode_file_call_obligation(row.payload).upload_child_complete is associated
     forged = json.loads(row.payload)
     forged["target"]["boot_id"] = target_for_owner(owner).boot_id
     with pytest.raises(FileCallObligationCodecError):
@@ -170,12 +174,16 @@ def test_single_upload_persists_gate_before_dispatch_and_stale_generation_refuse
     assert second.status is FileUploadStatus.FAILED
     assert not (root / "second").exists()
     assert second.binding.effect_gate == gate
+    for receipt_id in carrier.receipt_ids - {row.obligation_id}:
+        assert not decode_file_call_obligation(obligation_receipt(owner, receipt_id).payload).upload_child_complete
 
 
-def test_upload_setup_promotes_one_row_before_source_read(context) -> None:
+@pytest.mark.parametrize("associated", [False, True])
+def test_upload_setup_promotes_one_row_before_source_read(context, associated: bool) -> None:
     database, owner, operation, root, plan, gate = context
     setup = FileEffectGateSetup(gate.path, _GUEST)
     source = BytesSource(b"x")
+    child = UploadChildAssociation.fresh() if associated else None
 
     class CheckingCarrier(LocalCarrier):
         def __init__(self) -> None:
@@ -192,6 +200,8 @@ def test_upload_setup_promotes_one_row_before_source_read(context) -> None:
         ) -> CarrierReport:
             (row,) = database.operations.list_pending_lifecycle_obligations(owner.ownership)
             call = decode_file_call_obligation(row.payload)
+            assert call.upload_child == child and not call.upload_child_complete
+            assert row.payload_version == (3 if associated else 1)
             self.rows.append((row.payload_revision, call.family, call.token or b"", call.gate_setup is not None))
             if self.calls == 0:
                 assert call.gate_setup == setup and call.effect_gate is None
@@ -213,6 +223,7 @@ def test_upload_setup_promotes_one_row_before_source_read(context) -> None:
         deadline=Deadline.after(30),
         runtime_selection=runtime_selection(sys.executable),
         gate_setup=setup,
+        upload_child=child,
     )
     assert result.status is FileUploadStatus.COMPLETE
     assert (root / "target").read_bytes() == b"x"
