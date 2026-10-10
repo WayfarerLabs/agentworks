@@ -1319,6 +1319,11 @@ retained cleanup custody detaches finite input, application collectors and sinks
 uses a new bounded runtime-prefix reader with a discard destination, not the completed reader or
 caller I/O. It never reconstructs the returned application result.
 
+Positive NOT_SENT evidence remains available after payload detachment. An invocation known never
+dispatched needs no runtime prefix or provider observation: interrupted settlement reconciles the
+same original attempt and lifetime row through exact no-I/O bookkeeping. Missing or uncertain
+dispatch evidence does not supply this fact.
+
 The concrete observer retains the validated acknowledged PID before another status request. It
 publishes validated terminal closure evidence before optional output callbacks, because a terminal
 QGA status read consumes its record. A fresh finite cleanup budget first settles the original local

@@ -286,6 +286,8 @@ call. It retains the original validated QGA PID and publishes terminal closure f
 callbacks can interrupt delivery. Preparation supplies the original nonce and runtime expectations
 explicitly; retained cleanup drops caller input, collectors and application bytes. An acknowledged
 deadline or interrupted observation retains the actual call, original attempt and still-open borrow.
+Positive NOT_SENT evidence also survives payload detachment: an interrupted settlement of an
+invocation never dispatched requires only exact no-I/O bookkeeping, not runtime closure proof.
 
 `observe_inline_cleanup(fresh_finite_deadline)` requires a fresh finite budget only when unresolved
 observation or local cleanup remains. Plain calls and already-proved closure with settled local

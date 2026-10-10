@@ -3728,12 +3728,15 @@ The inline source candidate at `1381f4c3`, integrated at `3086c213`, supplies th
 observer, retained original attempt, owned provider-route fence and native-close observation. Worker
 and lead each passed the same 518 distinct scoped cases without skips, and the integrated source
 passed scoped static and canonical file checks. Three independent private lanes found final-handoff
-payload retention, overbroad fresh-observation prerequisites and unreleasable closed runtime
-refusals. The corrective source candidate at `199c7bc3` passes 550 distinct scoped cases with no
-skips and six-file static checks: the 517 retained original cases and 33 new cases, after removing
-one private wire-mutation test with its redundant guard. Integrated re-review and lead gates remain
-pending. Both native QGA-major measurements and managed-read continuation remain pending, so neither
-leaf above is complete.
+payload retention, unnecessary fresh-observation prerequisites and retained closed runtime refusal
+debt. The corrective source candidate at `199c7bc3` passes 550 distinct scoped cases with no skips
+and six-file static checks: the 517 retained original cases and 33 new cases, after removing one
+private wire-mutation test with its redundant guard. Project re-review also found interrupted
+settlement of a definitive NOT_SENT result retaining debt without any provider request. Candidate
+`70a2442a` retains that non-payload fact for exact no-I/O reconciliation; its 26 bounded cases pass
+without skips, including seven new cases, with two-file static checks. Integrated re-review and lead
+gates remain pending. Both native QGA-major measurements and managed-read continuation remain
+pending, so neither leaf above is complete.
 
 - [ ] Reconcile #770's historical escape/relaunch proposal against the later exclusion of malicious
       target-user containment. Deliver DIRECT/MANAGED without a CONTAINED profile or
