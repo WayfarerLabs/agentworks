@@ -1017,11 +1017,12 @@ persisted state fail closed without launching or stopping work.
 
 The coarse operation claim has a wider lifetime than any launch attempt. Core first arms that claim
 before activation or another lifecycle effect, then lends it serially to child dispatches. Each
-child may settle only its own attempt. The claim becomes resolved only when core has aggregated
-typed evidence that activation, holds, routes, workflow and teardown can no longer cause effects.
-Closing an owner with a possible-dispatch claim but no explicit whole-operation resolution refuses;
-it never promotes "no child attempt is currently open" into quiescence. Interrupted admission,
-resolution and release reconcile the same fenced record before any later dispatch or release.
+child may settle only its own attempt. The claim becomes resolved only when core has aggregated each
+obligation's reviewed completion evidence and independently settled delivery, holds, routes,
+workflow and teardown. Closing an owner with a possible-dispatch claim but no explicit
+whole-operation resolution refuses; it never promotes "no child attempt is currently open" into
+quiescence. Interrupted admission, resolution and release reconcile the same fenced record before
+any later dispatch or release.
 
 ### Shared local process retirement
 
@@ -1225,6 +1226,28 @@ The next integration still owns fresh power observation, guest preparation, chan
 firewall-route lifetime and aggregate release. AWS has no public start operation token in this
 response, so those pieces must not inherit Proxmox's UPID settlement algorithm. See the
 [research](prior-art-research.md#aws-start-submission-proof) for the SDK proof and its limits.
+
+The selected full-access completion rule is observational: after a matching successful
+acknowledgment is retained and reconciled, bounded explicit `DescribeInstances` reads verify the
+same account, region and immutable instance ID. A timely exact running result completes only that
+acknowledged start obligation under its current fence. Pending or unchanged stopped states are not
+completion; malformed, unknown, foreign, absent or late observations cannot complete it. No SDK
+waiter, background poller, replay or fabricated RequestId lookup is admitted. Missing acknowledgment
+remains possible effect even if a later observation reports running.
+
+This rule establishes the observed running goal, not request-specific termination, instantaneously
+current state or absence of later provider transitions. Eventual consistency and external lifecycle
+actions limit attribution; additional timestamps, state-change fields or repeated matching samples
+do not remove that limitation. Current endpoint/trust, full guest and account preparation remain
+separate admission gates. A guest-readiness failure does not undo an already observed running goal.
+Original read/start client retirement, routes, workload and aggregate cleanup remain independently
+required.
+
+Recovery with a durable exact acknowledged payload can repeat only identity/state observation and
+fenced bookkeeping, never start. The access owner reconciles its own interrupted resolution against
+that exact row. It must not call the admission producer's reconciliation after resolving the row:
+the producer still rejects premature resolution and never supplies completion. No receipt fields or
+payload version change is needed. Implementation and supported native proof remain open.
 
 ### Azure activation admission and acknowledgment
 
@@ -1435,12 +1458,15 @@ payload version, a bounded opaque non-secret payload, timestamps and one closed 
 
 - `registered`: the obligation exists and no effect is yet admitted;
 - `possible-effect`: admission committed before the remote or local effect;
-- `resolved`: typed adapter evidence settles all effects owned by this obligation.
+- `resolved`: this exact obligation met its reviewed adapter completion condition.
 
 Settlement concerns the admitted operation, not every future effect of an intended persistent
-resource. A reviewed provider-specific successful terminal-request rule can settle that request; the
-VM need not stop and unrelated provider work need not finish. Separate workload, route, hold and
-local-cleanup obligations still require their own evidence. Receipt alone is not completion.
+resource. A provider terminal-request rule is one completion condition; AWS instead uses the
+narrower known-success-acknowledgment plus exact observed-running rule above. Its observational
+completion does not certify request termination or all future provider effects. The VM need not stop
+and unrelated provider work need not finish. Other adapters retain their stronger completion,
+dispatch-drain and fencing rules. Separate workload, route, hold and local-cleanup obligations still
+require their own evidence. Receipt alone is not completion.
 
 Core validates the exact operation fence for every transition but never decodes adapter payloads.
 The registered adapter owns payload validation, target/incarnation comparison, observation and the
@@ -1740,26 +1766,30 @@ Concrete drain evidence and its producer remain adapter-owned. The generic opera
 validates exact ownership and row custody; it does not learn carrier process identities, helper
 tokens or proof mechanisms, and it exposes no generic replay surface or proof-provider registry. A
 proof is bound to the requested generation transition and obligation, but its meaning is broader:
-every outstanding dispatch for that obligation across all earlier generations has drained or been
-remotely fenced. Recovery of recovery cannot forget work admitted by an earlier predecessor. A
-controller exit, an arbitrary list of generation identifiers or a proof covering only the immediate
-predecessor is insufficient. If the adapter cannot reconstruct complete coverage after restart, it
-refuses recovery and retains the claim.
+every outstanding dispatch for that obligation across all earlier generations meets its reviewed
+completion condition or has drained or been remotely fenced where that adapter requires it. Recovery
+of recovery cannot forget work admitted by an earlier predecessor. A controller exit, an arbitrary
+list of generation identifiers or a proof covering only the immediate predecessor is insufficient.
+If the adapter cannot reconstruct complete coverage after restart, it refuses recovery and retains
+the claim.
 
 That database fence prevents further cooperating submissions but does not establish remote
 quiescence. For every obligation already in `possible-effect`, the adapter must then prove that
-every admitted dispatch is positively settled under the adapter's reviewed completion rule, proved
-not to have taken effect, or remotely fenced against outstanding effects, including work already
-active. A fenced late arrival may still occur but must refuse before effects. Acceptable evidence
-includes exact provider-specific successful terminal-request completion, carrier-proved non-dispatch
-paired with exact absence, an operation-specific remote generation fence, or equally strong proof
-from a synchronous local substrate whose controller and dispatch endpoint are both gone. Intended
-persistent resources and unrelated provider work are not themselves unsettled dispatch; separate
-workload, route, hold and local-cleanup obligations still apply. Controller absence by itself is
-insufficient because provider, carrier or guest queues may outlive it. This recovery fence is
-separate from #377's future resource hierarchy. The ledger remains attached to the logical operation
-across that transition so later hierarchy can bind one operation to several resource memberships
-without moving adapter state onto one VM row.
+every admitted dispatch meets the adapter's reviewed completion rule, is proved not to have taken
+effect, or is remotely fenced against outstanding effects, including work already active. A fenced
+late arrival may still occur but must refuse before effects. Acceptable evidence includes exact
+provider-specific successful terminal-request completion, AWS's narrower
+known-acknowledgment/running-goal rule, carrier-proved non-dispatch paired with exact absence, an
+operation-specific remote generation fence, or equally strong proof from a synchronous local
+substrate whose controller and dispatch endpoint are both gone. Intended persistent resources and
+unrelated provider work are not themselves unsettled dispatch; separate workload, route, hold and
+local-cleanup obligations still apply. AWS's observational rule cannot settle an unknown
+acknowledgment or a local delivery/guest dispatch obligation. Stronger concrete drain/fence
+requirements elsewhere are unchanged. Controller absence by itself is insufficient because provider,
+carrier or guest queues may outlive it. This recovery fence is separate from #377's future resource
+hierarchy. The ledger remains attached to the logical operation across that transition so later
+hierarchy can bind one operation to several resource memberships without moving adapter state onto
+one VM row.
 
 Local process-loss evidence must observe the actual dispatch endpoint or helper, not merely join the
 controller process. A controller may die after launching a subprocess that continues independently.

@@ -1747,10 +1747,12 @@ Neither a caller crash nor a missing scratch receipt proves remote mutation has 
 operations. Core can arm the owner before an outer lifecycle effect without retaining a borrow; the
 first child attempt otherwise commits possible dispatch before returning permission to send work.
 Later attempts reuse the durable claim. A settled child attempt proves only that attempt is done.
-Core separately records whole-operation no-further-effects evidence after activation, workflow and
-teardown are quiescent. Explicit close stops admission and releases only a never-armed reservation
-or an explicitly resolved claim; it does not infer remote quiescence from local return or from the
-absence of an open child attempt.
+Core separately records aggregate completion after every owned obligation meets its adapter's
+reviewed completion condition and delivery, workflow and teardown are independently settled.
+Completion means the condition that the concrete adapter actually establishes, not an unconditional
+certificate about all future provider effects. Explicit close stops admission and releases only a
+never-armed reservation or an explicitly resolved claim; it does not infer remote completion from
+local return or from the absence of an open child attempt.
 
 `stop_admission()` publishes a monotonic close signal without waiting for the owner guard or a
 database transition. Already-admitted work can finish its transition afterward; the signal proves

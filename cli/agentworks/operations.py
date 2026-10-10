@@ -90,8 +90,8 @@ class OperationOwner:
         """Take over one exact predecessor without inferring remote quiescence.
 
         Recovery seals ordinary ledger registrations and restores only durable claim
-        facts. The caller still establishes every adapter and whole-operation
-        no-further-effects fact before resolution or release.
+        facts. The caller still establishes every adapter's reviewed completion
+        condition and independently settles delivery and cleanup before release.
         """
         claim = repository.recover_takeover(predecessor, generation_id)
         controller = repository._controller_identity  # noqa: SLF001
@@ -349,11 +349,12 @@ class OperationOwner:
             return borrowed
 
     def record_effects_resolved(self) -> None:
-        """Persist caller-established evidence that effects cannot remain.
+        """Persist caller-established aggregate completion evidence.
 
-        Resolution is whole-operation evidence, not an inference from settled
-        child attempts. Retrying after an interrupted transition first reads
-        the fenced claim to distinguish a committed resolution from a retry.
+        Every obligation must meet its adapter's reviewed completion condition,
+        with delivery and cleanup independently settled. Resolution is not an
+        inference from settled child attempts. Retrying an interrupted transition
+        reads the fenced claim to distinguish committed resolution from a retry.
         """
         with self._guard:
             self._require_no_active_work_locked()
@@ -382,7 +383,7 @@ class OperationOwner:
         A refused close stays closed to new borrowers. The current borrower
         may only record and settle its already-started attempt and relinquish
         the borrow. Later close calls require the caller to record
-        whole-operation no-further-effects evidence before finalization.
+        aggregate completion and independently settled cleanup before finalization.
         """
         self._close_requested.set()
         with self._guard:
@@ -575,7 +576,10 @@ class LifecycleObligation:
         return self._obligation
 
     def resolve(self) -> None:
-        """Persist adapter-established no-further-effects evidence."""
+        """Record this obligation's reviewed adapter completion condition.
+
+        This does not resolve other obligations or the whole operation.
+        """
         owner = self._owner
         with owner._guard:  # noqa: SLF001
             owner._require_no_active_work_locked()  # noqa: SLF001

@@ -1063,6 +1063,11 @@ Review corrected stored-client interruption cleanup and removed an unreachable e
 Successful startup settlement, complete AWS access, native proof and whole-PR acceptance remain open
 below.
 
+The 2026-10-10 response selects the lifecycle LLD's known-acknowledgment/exact-running completion
+rule for full AWS access. It is observational goal completion, not request-specific termination or
+all-backend quiescence. Missing acknowledgment stays unresolved. Implementation, interrupted exact
+resolution, separate cleanup/guest admission and native evidence remain unfinished.
+
 - [x] Correct AWS activation's uncertain-client-close custody before owned access integration. The
       private Azure review found that `EC2Activation.start()` suppresses an ordinary close exception
       while retaining the client only in a local variable. Retain the actual original until closure
@@ -1263,13 +1268,14 @@ acceptance.
       core-owned operation when migrated. Adding a field to RunContext alone is insufficient. The
       [2026-09-21 integration inventory](migration-strategy.md#owned-boundary-integration-inventory-2026-09-21)
       identifies common boundaries, bypassing activation roots and retained teardown paths.
-- [ ] Require typed aggregate no-further-effects evidence before releasing production ownership.
-      Activation, power hold, route/repair, workflow and nested teardown contribute facts to one
-      whole-operation decision; no individual component releases the claim. Ordinary success or an
-      exception from the legacy `start`, `vm_active`, transient-route or Tailscale-repair APIs does
-      not prove quiescence. An uncertain hold exit or cleanup retains the claim. Build this as a
-      parallel new-stack lifecycle contract and keep legacy callers unchanged until their migration
-      batch supplies the required evidence.
+- [ ] Require each obligation's reviewed completion condition and independently settled cleanup
+      before releasing production ownership. Activation, power hold, route/repair, workflow and
+      nested teardown contribute facts to one aggregate decision; AWS's known-acknowledgment/running
+      rule is observational, not a request-terminal certificate. No individual component releases
+      the claim. Ordinary success or an exception from the legacy `start`, `vm_active`,
+      transient-route or Tailscale-repair APIs does not prove quiescence. An uncertain hold exit or
+      cleanup retains the claim. Build this as a parallel new-stack lifecycle contract and keep
+      legacy callers unchanged until their migration batch supplies the required evidence.
 - [x] Implement the bounded durable lifecycle-obligation ledger. Permit several independently
       identified obligations of the same registered kind; commit `possible-effect` before each
       effect; publish bounded, versioned, non-secret adapter-owned recovery identity when observed;
@@ -1277,21 +1283,29 @@ acceptance.
       when every obligation has typed no-further-effects evidence and no in-memory custody remains.
       Keep managed runs specialized and do not add a workflow engine, scheduler, automatic expiry or
       generic payload interpreter.
+
+The reviewed per-obligation completion refinement supersedes only the historical universal
+no-further-effects assurance in the completed ownership/ledger records above. Their fenced mechanics
+remain completed history; AWS's narrower known-acknowledgment/running condition does not relax
+another adapter's dispatch-drain, fencing, workload or cleanup requirements.
+
 - [ ] Complete and prove recovery after takeover before any restarted controller acts on an old
       obligation. The generic database takeover kernel already retains one stable logical operation
       identifier, rotates a separate caller-chosen generation, seals the ledger atomically and
       fences stale predecessors. Its exact retries share one local recovery owner and serial guard;
       handled failures retain uncertain dispatch custody. The takeover neither moves obligation rows
       nor proves that an admitted request is drained or remote work has stopped. For every admitted
-      obligation, prove that earlier dispatches have drained or cannot cause further effects,
-      including work already active, using carrier-proved non-dispatch plus exact absence, an
-      operation-specific remote fence, or equally strong synchronous-substrate evidence. Otherwise
-      retain the obligation and report incomplete recovery. For WSL2, persist a versioned,
-      domain-separated digest of its opaque provider locator, expected VM marker, distribution and
-      account plus exact Windows controller identity before dispatch, publish exact guest
-      boot/init/PID/start-time after `READY`, and give each `vm_active()` lifetime an independent
-      obligation. Replace the legacy hold only after nested lifetimes, delayed delivery, every crash
-      window, controller/locator/marker/boot mismatch and production recovery pass live validation.
+      obligation, establish its reviewed completion condition across all predecessors, including
+      AWS's narrower known-acknowledgment/running rule. Preserve required dispatch-drain/fence
+      evidence for other adapters and work already active, using carrier-proved non-dispatch plus
+      exact absence, an operation-specific remote fence, or equally strong synchronous-substrate
+      evidence. Otherwise retain the obligation and report incomplete recovery. For WSL2, persist a
+      versioned, domain-separated digest of its opaque provider locator, expected VM marker,
+      distribution and account plus exact Windows controller identity before dispatch, publish exact
+      guest boot/init/PID/start-time after `READY`, and give each `vm_active()` lifetime an
+      independent obligation. Replace the legacy hold only after nested lifetimes, delayed delivery,
+      every crash window, controller/locator/marker/boot mismatch and production recovery pass live
+      validation.
 - [ ] Select shared platform-host resource keys before enabling their admission. Canonical VM names
       are available before create dispatch; site names and authored SSH routes are not canonical
       host identities. Do not silently treat different aliases or users as independent hosts.
@@ -1300,11 +1314,13 @@ acceptance.
       retained teardown nodes, and validate new-only workflows there. Keep old boundary calls and
       passive accessor construction unchanged. Consumer migration explicitly adopts the new
       operation boundary; neither first accessor use after activation nor a generic legacy exit
-      substitutes for acquisition or no-further-effects evidence.
+      substitutes for acquisition or aggregate completion evidence.
 - [ ] Prove crash, disconnect and deadline handling retain unresolved ownership. Recovery must
-      establish that prior remote work cannot still mutate before admitting conflicting work, and
-      must not replay uncertain mutation or silently expire a claim. Report incomplete recovery
-      rather than deleting ownership or inventing remote fencing from a database row.
+      establish each prior obligation's reviewed completion condition and independent cleanup before
+      admitting conflicting work; this is not an unconditional certificate of all future provider
+      effects. Preserve concrete dispatch-drain/fence requirements, never replay uncertain mutation
+      or silently expire a claim. Report incomplete recovery rather than deleting ownership or
+      inventing remote fencing from a database row.
 - [ ] Keep VM-host lifecycle platform-owned. Prove actual Lima readiness, stop, rollback and
       disconnected-operation recovery without requiring a generic macOS MANAGED supervisor or an
       administrator-installed file lock. Keep Linux guest MANAGED guarantees unchanged.

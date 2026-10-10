@@ -725,7 +725,7 @@ class OperationRepository:
         ownership: OperationOwnership,
         obligation_id: str,
     ) -> LifecycleObligation:
-        """Record adapter-established no-further-effects evidence for one row."""
+        """Record this row's adapter-established completion condition."""
         _validate_obligation_id(obligation_id)
         now = _utc_now()
         with self._standalone_transaction():
@@ -774,11 +774,12 @@ class OperationRepository:
             return self._require_owned_claim(ownership)
 
     def record_effects_resolved(self, ownership: OperationOwnership) -> OperationClaim:
-        """Record core's evidence that no remote effects can remain.
+        """Record core's aggregate completion and cleanup decision.
 
-        Core must establish completion, rollback, or another operation-specific
-        no-further-effects fact before calling this method. The database only
-        persists that decision; it does not observe or prove remote quiescence.
+        Core must establish each obligation's reviewed completion condition and
+        independently settle delivery and cleanup before calling this method.
+        The database persists that decision; it does not observe provider state
+        or certify remote quiescence.
         """
         with self._standalone_transaction():
             claim = self._require_owned_claim(ownership)

@@ -96,6 +96,20 @@ Sources:
 [eventual consistency](https://docs.aws.amazon.com/ec2/latest/devguide/eventual-consistency.html),
 [most recent launch time](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Stop_Start.html).
 
+The 2026-10-10 access design selects conventional observed-goal completion after a known matching
+successful acknowledgment, not request-specific drain. The official `InstanceRunning` waiter polls
+`DescribeInstances` by instance ID; it supplies resource-state observation, not a RequestId
+completion handle. The owned access uses bounded explicit reads and the exact selected identity,
+without that waiter or mutation replay. Running completes only an acknowledged start obligation;
+missing acknowledgment remains unknown. Eventual consistency and external lifecycle changes mean
+this rule cannot certify request termination or absence of later provider transitions. Guest
+readiness, endpoint trust, client closure, routes and other obligations remain separate. This
+supersedes the earlier deferred response decision, not the factual limits above; implementation and
+native proof remain open.
+
+Source:
+[official running waiter](https://docs.aws.amazon.com/boto3/latest/reference/services/ec2/waiter/InstanceRunning.html).
+
 ### Destination account discovery
 
 Python 3.11's Unix `pwd.getpwnam` supplies numeric UID and primary GID, with a missing account
