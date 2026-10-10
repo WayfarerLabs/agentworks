@@ -953,10 +953,15 @@ completion may settle that attempt while preparation still rejects an invalid ob
 refusal, carrier failure or identity mismatch. The helper neither acquires nor closes the outer
 owner and performs no activation, route selection, adoption or persistence. A second private seam
 accepts the selected VM, its bound platform, an expected locator observed before binding resolution,
-and one caller-owned native binding. It validates owner, marker and deadline before borrowing. Under
-one serial borrow it validates a fresh plugin locator and compares it to that expected value, probes
-the guest through the supplied binding and confirms the locator afterward. It never resolves another
-binding. The resolving caller must use the same deadline, validate and retain the selected route,
+one caller-owned native binding and a required bound `observe_locator(Deadline)` callable. The
+selected platform remains an input for cheap site refusal before any observation or helper borrow.
+The callable replaces context and provider-custody forwarding, with no platform-hook fallback. It
+belongs to the caller-retained selection owner, which holds any actual read clients through cleanup.
+The helper validates owner, marker and deadline before borrowing. Under one serial borrow it calls
+that observer with the original deadline, validates the plugin locator and compares it to the
+expected value, probes the guest through the supplied binding and confirms the locator afterward
+using the same observer and deadline. It never resolves another binding or settles the observer's
+resources. The resolving caller must use the same deadline, validate and retain the selected route,
 and refuse a late resolver result. WSL2's private factory copies the selected distribution and
 executable into separate ordinary-delivery and initial fixed guest-facts carriers. The probe uses
 root entry and named admission to the configured account under the same operation borrow; file
@@ -1096,9 +1101,14 @@ admits activation, a hold, a route or guest preparation. Preparation receives th
 original deadline; settlement receives a finite cleanup deadline and reports whether its own effects
 are settled. The object retains actual partial progress and interrupted-reply evidence, never
 resolves or closes the whole operation, and does not copy a second guest-identity field. Platform
-preparation calls the shared locator/guest helper rather than reimplementing it. WSL2 additionally
-compares the prepared guest with its durable held READY identity before admission. Core performs the
-common numeric account preparation and supplies file/execution views only afterward.
+preparation calls the shared locator/guest helper rather than reimplementing it, supplying its bound
+locator observer at both observation points. WSL2 and Proxmox bind their existing selection, context
+and native custody; a future cloud access owns its concrete SDK read-client slot. Uncertain
+retirement of an earlier read client must prevent another read, including guest preparation's later
+observations. The callable does not establish provider identity or resolve activation, route or
+aggregate debt. WSL2 additionally compares the prepared guest with its durable held READY identity
+before admission. Core performs the common numeric account preparation and supplies file/execution
+views only afterward.
 
 WSL2 and Proxmox delegate the owned power method to their selected platform observer with the same
 retained native delivery custody. There is no ownerless default or old-observer fallback. Cloud
@@ -1705,8 +1715,14 @@ Until concrete adapter evidence supplies that proof, retain the claim without re
 
 The private `RecoveryGuestPreparationBatch` implements that serial boundary on one pinned native
 binding. It composes fresh fixed guest/selected-locator observations before numeric delivery,
-workload and optional elevated account observations. It shares ordinary observation bodies without
-opening ordinary borrowing to recovery. Original escaping control exceptions carry safe retained
+workload and optional elevated account observations. Its required bound locator observer is supplied
+by the selected operation retained in `RecoveryVMSpan`, not constructed by the shared guest kernel.
+The same observer and original deadline surround the fixed guest probe; selected-site, exact-owner,
+account and single-use checks remain at the recovery batch boundary. Remove only obsolete batch
+context and provider-custody forwarding, preserving the span's actual native custody. It shares
+ordinary observation bodies without opening ordinary borrowing to recovery. Marker or deadline
+refusal may still admit and resolve the batch's unused support row; zero provider and guest dispatch
+does not promise zero recovery bookkeeping. Original escaping control exceptions carry safe retained
 preparation facts; unknown or uncertain attempts stop the batch. A retry can reconcile only a
 stopped, settled batch's exact resolution, never repeat a probe. The caller must retain the batch
 before admission and separately own the durable-ready availability span through its last recovery

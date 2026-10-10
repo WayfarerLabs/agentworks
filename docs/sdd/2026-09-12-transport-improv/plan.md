@@ -1211,6 +1211,18 @@ denial still allows no preparation, activation, hold, route or guest work.
       implement cloud SDK read-client slots, provider incarnation/adoption, activation settlement or
       native acceptance.
 
+- [ ] Replace shared guest preparation's direct platform locator reads with one required
+      caller-retained `observe_locator(Deadline)` callable, removing obsolete context and
+      provider-custody forwarding without a default fallback or second entry point. Preserve the
+      selected-platform site refusal before observation or borrow. Adapt ordinary WSL2, Proxmox, the
+      recovery batch and its actual span caller, plus all direct test callers in one increment.
+      Prove same-observer/original-deadline forwarding, zero-read/zero-borrow refusal, malformed,
+      unavailable, changed and late locator classification, post-guest control facts and exact
+      helper-release behavior. Preserve recovery's separate support-row lifecycle and no ordinary
+      borrow. Update permanent helper collateral with the implementation. This replacement does not
+      implement concrete cloud SDK read-client custody, activation or route settlement, provider
+      incarnation/adoption, native acceptance or additive RunContext delivery.
+
 The final combined correction and shared gate at `9e89fe3c3` clear all three independent private
 lanes against `829e4a72f`. Each observes 481 adjacent passes without skips. Project review also
 observes nine independent probes and clean nine-file lint, formatting and typing; generic review
