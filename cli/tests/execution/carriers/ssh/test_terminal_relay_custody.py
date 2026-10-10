@@ -327,6 +327,69 @@ def test_retryable_native_cleanup_keeps_terminal_raw_until_fresh_close(
         os.waitpid(children[0].pid, os.WNOHANG)
 
 
+def test_retryable_cleanup_natural_exit_settles_without_fresh_close(
+    endpoint: tuple[int, int], custody: LocalDeliveryCustody, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import signal
+    import termios
+
+    borrowed = endpoint[1]
+    mode = termios.tcgetattr(borrowed)
+    children: list[subprocess.Popen[bytes]] = []
+    kills: list[int] = []
+    releases: list[Thread] = []
+    held_fds: list[int] = []
+    native_launch, native_kill, native_release = subprocess.Popen, os.kill, PosixTerminal.release
+
+    def launch(*args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
+        child = cast("subprocess.Popen[bytes]", native_launch(*args, **kwargs))
+        children.append(child)
+        return child
+
+    def kill(pid: int, sig: int) -> None:
+        assert children and pid == children[0].pid and sig == signal.SIGKILL
+        kills.append(pid)
+        if len(kills) == 1:
+            raise PermissionError("owned first native cleanup refusal")
+        native_kill(pid, sig)
+
+    def release(terminal: PosixTerminal) -> tuple[BaseException, ...]:
+        held_fds.extend((terminal.master_fd, terminal.slave_fd))
+        releases.append(current_thread())
+        return native_release(terminal)
+
+    monkeypatch.setattr(subprocess, "Popen", launch)
+    monkeypatch.setattr(os, "kill", kill)
+    monkeypatch.setattr(PosixTerminal, "release", release)
+    io = CarrierIO(TerminalInput(borrowed, borrowed, "fixture", Source()), SinkOutput(Sink(), Sink()))
+    attempt = _Attempt([sys.executable, "-c", "import time; time.sleep(0.5)"], io, Deadline.after(0.1), custody)
+    try:
+        result = attempt.run()
+        assert result.started and result.exit_status is None and result.failure is Failure.DEADLINE
+        failed = attempt._owner.snapshot().terminal
+        assert failed is not None and not failed.cleaned and failed.cleanup_retryable
+        assert not custody.settled and termios.tcgetattr(borrowed) != mode
+        requested = attempt._cleanup_requested
+        assert attempt._done.wait(2)
+        assert custody.settled and attempt._cleanup_requested == requested
+        assert kills == [children[0].pid] and releases == [attempt._worker]
+        assert termios.tcgetattr(borrowed) == mode
+        assert result.started and result.exit_status is None and result.failure is Failure.DEADLINE
+        assert children[0].returncode == 0
+        assert children[0].stdout is not None and children[0].stdout.closed
+        assert children[0].stderr is not None and children[0].stderr.closed
+        with pytest.raises(ChildProcessError):
+            os.waitpid(children[0].pid, os.WNOHANG)
+        for fd in held_fds:
+            with pytest.raises(OSError):
+                os.fstat(fd)
+        for fd in endpoint:
+            os.fstat(fd)
+    finally:
+        # A fresh finite rescue also settles the old-runtime negative control.
+        assert custody.close(Deadline.after(3))
+
+
 def test_nonretryable_native_loss_finishes_worker_without_terminal_release() -> None:
     # Confine permanent native loss to an owned probe. A regressed parked worker
     # cannot hold the pytest interpreter at shutdown; its exact child is reaped
