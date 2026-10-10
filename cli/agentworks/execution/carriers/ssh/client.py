@@ -1,10 +1,11 @@
-"""Independent buffered delivery through an explicitly configured OpenSSH client."""
+"""Independent byte delivery through an explicitly configured OpenSSH client."""
 
 from __future__ import annotations
 
 import os
 import re
-from dataclasses import replace
+import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError, ValidationError
@@ -14,16 +15,17 @@ from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
     ChannelFeatures,
-    Discard,
     Dispatch,
     EndOfInput,
     ExitStatus,
     Failure,
     FiniteInput,
+    LiveInput,
     Provenance,
 )
-from agentworks.execution.carriers._subprocess import output_retention, run_process
-from agentworks.execution.carriers.ssh.connection import build_ssh_argv, validate_connection_files
+from agentworks.execution.carriers._subprocess import output_retention
+from agentworks.execution.carriers.ssh._io import run_process
+from agentworks.execution.carriers.ssh.connection import admit_connection, build_ssh_argv
 
 if TYPE_CHECKING:
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
@@ -44,17 +46,16 @@ class SSHCarrier:
 
     def __init__(self, connection: SSHConnection) -> None:
         self._connection = connection
+        self._features = ChannelFeatures(live_stdio=True)
 
     @property
     def features(self) -> ChannelFeatures:
-        return ChannelFeatures()
+        return self._features
 
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
-        """Refuse unsupported shared I/O shapes without connection or process work."""
-        if not isinstance(io.input, EndOfInput | FiniteInput):
-            raise ValidationError("Buffered SSH requires EOF or finite input")
-        if not isinstance(io.output, Capture | Discard):
-            raise ValidationError("Buffered SSH requires captured or discarded output")
+        """Refuse input this adapter cannot deliver before effectful SSH admission."""
+        if not isinstance(io.input, EndOfInput | FiniteInput | LiveInput):
+            raise ValidationError("SSH byte delivery requires EOF, finite or live byte input")
 
     def execute(
         self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody
@@ -66,26 +67,25 @@ class SSHCarrier:
         if deadline.expired:
             return _not_sent(io, Failure.DEADLINE)
         try:
-            validate_connection_files(self._connection)
-            argv = build_ssh_argv(self._connection, invocation)
+            trust = admit_connection(self._connection)
+        except (OSError, StateError, ValidationError):
+            return _not_sent(io, Failure.DISPATCH)
+        if deadline.expired:
+            return _not_sent(io, Failure.DEADLINE)
+        try:
+            executable = resolve_client_executable(self._connection)
         except (OSError, ValidationError):
             return _not_sent(io, Failure.DISPATCH)
-        version = run_process(
-            [self._connection.ssh_executable, "-V"],
-            io=CarrierIO(output=Capture(4096)),
-            deadline=deadline,
-            custody=custody,
-            env=_child_environment(),
-        )
-        if version.failure is not None:
-            return _not_sent(io, version.failure)
-        if not custody.settled:
-            return _not_sent(io, Failure.OBSERVATION)
-        match = _VERSION.match(version.stderr.data)
-        if version.exit_status != 0 or match is None or tuple(map(int, match.groups())) < (8, 5):
-            return _not_sent(io, Failure.DISPATCH)
+        if deadline.expired:
+            return _not_sent(io, Failure.DEADLINE)
+        version_failure = check_client_version(executable, deadline=deadline, custody=custody)
+        if version_failure is not None:
+            return _not_sent(io, version_failure)
 
-        result = run_process(argv, io=io, deadline=deadline, custody=custody, env=_child_environment())
+        if deadline.expired:
+            return _not_sent(io, Failure.DEADLINE)
+        argv = build_ssh_argv(self._connection, invocation, trust=trust, executable=executable)
+        result = run_process(argv, io=io, deadline=deadline, custody=custody)
         completion = (
             ExitStatus(code=result.exit_status)
             if result.exit_status is not None and 0 <= result.exit_status < 255
@@ -95,7 +95,7 @@ class SSHCarrier:
             Dispatch.SENT
             if completion is not None
             else Dispatch.UNKNOWN
-            if result.started or result.failure is Failure.OBSERVATION or not custody.settled
+            if result.started or result.failure is Failure.OBSERVATION
             else Dispatch.NOT_SENT
         )
         failure = result.failure
@@ -105,23 +105,53 @@ class SSHCarrier:
             dispatch,
             completion,
             result.local_status,
-            replace(result.stdout, provenance=Provenance.CARRIER_STDOUT),
-            replace(result.stderr, provenance=Provenance.MIXED_STDERR),
+            result.stdout,
+            result.stderr,
             failure,
         )
 
 
-def _child_environment() -> dict[str, str] | None:
-    if os.name != "nt":
-        return None
-    # These describe OpenSSH's parent's handles, never our new Python pipes.
-    # https://github.com/PowerShell/openssh-portable/blob/v9.5.0.0/contrib/win32/win32compat/w32fd.c#L115-L128
-    # Newer clients also accept OPENSSH_STDIO_MODE to select handle semantics.
-    return {
-        name: value
-        for name, value in os.environ.items()
-        if name.upper() not in ("C28FC6F98A2C44ABBBD89D6A3037D0D9_POSIX_FD_STATE", "OPENSSH_STDIO_MODE")
-    }
+def resolve_client_executable(connection: SSHConnection) -> str:
+    """Pin this operation's installed client without implicit cwd search.
+
+    Each PATH candidate has an absolute directory before shutil.which examines
+    native executable suffixes. Bare-name which and Windows process creation
+    can otherwise prepend cwd even when PATH does not name it. Explicit PATH
+    entries, including relative directories, remain operator selections. Empty
+    Windows components do not select cwd; POSIX retains its PATH semantics.
+    """
+    executable = connection.ssh_executable
+    if os.path.isabs(executable):
+        # PATHEXT must not redirect an explicit path to another client.
+        if os.path.isfile(executable) and os.access(executable, os.F_OK | os.X_OK):
+            return executable
+        raise ValidationError("SSH requires the selected installed executable")
+    search_path = os.environ.get("PATH", "")
+    candidates = (
+        tuple(
+            str((Path(directory) / executable).absolute())
+            for directory in search_path.split(os.pathsep)
+            if directory or os.name != "nt"
+        )
+        if search_path
+        else ()
+    )
+    for candidate in candidates:
+        selected = shutil.which(candidate)
+        if selected is not None:
+            return selected
+    raise ValidationError("SSH requires the selected installed executable")
+
+
+def check_client_version(executable: str, *, deadline: Deadline, custody: LocalDeliveryCustody) -> Failure | None:
+    """Check the selected installed client within the original operation budget."""
+    version = run_process([executable, "-V"], io=CarrierIO(output=Capture(4096)), deadline=deadline, custody=custody)
+    if version.failure is not None:
+        return version.failure
+    match = _VERSION.match(version.stderr.data)
+    if version.exit_status != 0 or match is None or tuple(map(int, match.groups())) < (8, 5):
+        return Failure.DISPATCH
+    return None
 
 
 def _not_sent(io: CarrierIO, failure: Failure) -> CarrierReport:

@@ -24,6 +24,7 @@ from agentworks.execution.carriers import wsl2
 from agentworks.execution.carriers._subprocess import ProcessResult
 from agentworks.execution.carriers.ssh import client
 from agentworks.execution.carriers.ssh.connection import SSHConnection
+from agentworks.execution.carriers.ssh.trust import SSHTrustFiles
 
 
 def _carrier(kind: str, tmp_path: Path) -> wsl2.WSL2Carrier | client.SSHCarrier:
@@ -32,7 +33,7 @@ def _carrier(kind: str, tmp_path: Path) -> wsl2.WSL2Carrier | client.SSHCarrier:
     key, trust = tmp_path / "key", tmp_path / "trust"
     key.write_bytes(b"fixture")
     trust.write_bytes(b"fixture")
-    return client.SSHCarrier(SSHConnection("fixture.invalid", "user", key, trust))
+    return client.SSHCarrier(SSHConnection("fixture.invalid", "user", key, SSHTrustFiles((trust,))))
 
 
 @pytest.mark.parametrize("kind", ["wsl", "ssh"])
