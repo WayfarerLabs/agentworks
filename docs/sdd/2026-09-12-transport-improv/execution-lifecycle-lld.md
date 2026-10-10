@@ -1439,6 +1439,23 @@ lose supported certificate behavior. Retain attributable responses before SDK co
 later owned calls while their cleanup is uncertain. Public session closure accounts for our
 originals, not every SDK-created adapter or internal process.
 
+Credential requests preserve the public SDK's redirect behavior. Retain each returned response
+before SDK consumption, including the stock session's maximum of 30 redirects and final response.
+Retire those originals only after their consumer returns or before the next explicit owned request,
+not inside the response hook. An unexpected extra response is retained before refusal. Uncertain
+closure refuses further work; only terminal cleanup may retry the same originals. This accounting
+does not own Requests' internal redirect handoff or prove physical request drainage.
+
+The private `GCEOwnedRead` stages passive construction and fresh exact-instance power/locator
+observations, not a native access factory. Its one fixed Compute GET requests only
+`id,kind,name,selfLink,status,zone` through the public `fields` parameter. This avoids downloading
+unrelated instance metadata, including startup scripts, to establish identity and power. Keep the
+65,536-byte raw-body ingestion bound, strict UTF-8/JSON checks and exact recorded identity checks;
+do not fall back to an unrestricted instance response. Native support for that projection remains a
+compatibility gate. Retain original service response/session handles before consumption and retire
+them before credential dependencies. Ordinary failed closure may preserve a useful observation, but
+blocks later observations and aggregate release until positive retirement.
+
 Public refresh/apply avoids the service dispatch's SDK background regional-boundary lookup, but is
 not exact authentication-middleware equivalence. Supported Agentworks config does not request that
 lookup; any actually required renewed boundary or incompatible credential security behavior needs an

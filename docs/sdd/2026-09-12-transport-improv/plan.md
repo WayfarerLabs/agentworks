@@ -1169,6 +1169,19 @@ drain nor complete cloud access; the next item remains unfinished.
       regional access boundary behavior explicit; no private toggle, generic credential framework or
       silently weakened security policy. Add real-class scripted proof without rewriting the
       completed producer evidence above.
+
+The private `GCEOwnedRead` staging implementation supplies passive exact-instance power/locator
+reads and selected owned credentials. Its fixed six-field Compute projection avoids downloading
+unrelated startup-script metadata under the raw-body bound. Credential redirect responses retain
+their actual originals until SDK consumption returns; public redirect behavior is preserved rather
+than restricted. Author-checkout verification passes all 98 application/actual-SDK cases without
+skips or deselection, scoped lint/format and full strict typing across 1,379 sources. Earlier guard,
+style and test-annotation failures remain recorded. These results cover the final four source files
+on the author's earlier base, not whole-composition typing or native acceptance. Independent private
+review remains open. This reader does not reconcile the start producer's authentication or supply
+startup settlement, endpoints, routes, guest preparation or RunContext admission; keep both GCP
+items unchecked.
+
 - [ ] Complete owned GCP access with the LLD's observational identity guarantee: a fresh exact
       provider observation refuses known stale-target admission, matching receipt and subsequent
       fresh identity/trust/preparation admit guest work, and changed or unconfirmed identity refuses

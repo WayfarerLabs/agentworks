@@ -261,6 +261,16 @@ public close does not establish physical socket drain, request termination or na
 This staging object supplies no activation settlement, route lifetime, guest preparation,
 independent job availability or RunContext admission.
 
+`plugins/gcp/_native_access.py` similarly stages private `GCEOwnedRead` power and locator reads. It
+preserves stock ADC selection or the explicitly selected service-account document, with an owned
+public Google-auth Request and synchronous refresh/header application. One streamed Compute GET
+selects only identity and power fields, bounds raw JSON ingestion, and compares the recorded
+instance ID, name, project and zone. Service originals and attributable credential responses remain
+retained through uncertain closure; no new observation can bypass that uncertainty. Credential
+redirects keep public SDK behavior rather than imposing a new credential policy. This does not
+reconcile the separate start producer's authentication, implement full native access, or prove real
+credential/socket drain or native projection compatibility.
+
 The private cloud start producers in `plugins/aws/_activation.py`, `plugins/azure/_activation.py`
 and `plugins/gcp/_activation.py` admit one selected start under a retained exact VM owner. They keep
 bounded acknowledgment payloads and reconcile interrupted ledger replies without resubmission. They
