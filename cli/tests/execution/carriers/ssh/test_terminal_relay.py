@@ -23,6 +23,7 @@ from agentworks.execution._process import Deadline as ProcessDeadline
 from agentworks.execution.carrier import CarrierIO, Deadline, Failure, Provenance, Retention, SinkOutput, TerminalInput
 from agentworks.execution.carriers.ssh import _terminal_relay as relay
 from agentworks.execution.carriers.ssh._terminal_posix import PosixTerminal
+from tests.execution.carriers.ssh._terminal_modes import assert_preserved_terminal_mode
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="Requires owned POSIX PTYs")
 
@@ -152,7 +153,7 @@ def test_binary_payload_then_early_keys_partial_writes_and_streams(
         assert not termios.tcgetattr(endpoint[1])[3] & (termios.ICANON | termios.ECHO | termios.ISIG)
         assert isinstance(request.input, BorrowedProcessStdin)
         descriptors.append(request.input.descriptor)
-        assert termios.tcgetattr(request.input.descriptor) == mode
+        assert_preserved_terminal_mode(termios.tcgetattr(request.input.descriptor), mode)
         assert termios.tcgetwinsize(request.input.descriptor) == (31, 97)
         os.write(endpoint[0], keys)
         original_start(owner, request, close_deadline=close_deadline)
@@ -195,7 +196,7 @@ os.write(1,(':'+os.environ['TERM']+':'+str(__import__('termios').tcgetwinsize(0)
     assert result.stdout.complete and result.stderr.complete
     assert result.stdout.data == result.stderr.data == b""
     assert b"payload-canary" not in repr(result).encode()
-    assert termios.tcgetattr(endpoint[1]) == mode
+    assert_preserved_terminal_mode(termios.tcgetattr(endpoint[1]), mode)
     assert (fcntl.fcntl(endpoint[1], fcntl.F_GETFL), os.get_inheritable(endpoint[1])) == flags
     for fd in descriptors:
         with pytest.raises(OSError):
@@ -296,7 +297,7 @@ def test_stalled_sink_still_observes_deadline_and_restores(
         custody=custody,
     )
     assert result.failure is Failure.DEADLINE
-    assert termios.tcgetattr(endpoint[1]) == mode
+    assert_preserved_terminal_mode(termios.tcgetattr(endpoint[1]), mode)
 
 
 def test_expired_deadline_has_no_terminal_or_process_effects(
@@ -387,7 +388,7 @@ def test_launch_control_exception_settles_before_terminal_release(
             _argv("__import__('time').sleep(30)"), io=io, deadline=Deadline.after(3), custody=custody
         )
     assert raised.value is primary and settled
-    assert termios.tcgetattr(endpoint[1]) == mode
+    assert_preserved_terminal_mode(termios.tcgetattr(endpoint[1]), mode)
 
 
 def test_interrupted_wait_uses_completion_fact_and_preserves_first_control(
@@ -425,7 +426,7 @@ def test_interrupted_wait_uses_completion_fact_and_preserves_first_control(
         attempt.run()
     assert raised.value is primary and attempt._done.is_set()
     assert calls >= 3
-    assert termios.tcgetattr(endpoint[1]) == mode
+    assert_preserved_terminal_mode(termios.tcgetattr(endpoint[1]), mode)
 
 
 def test_interrupted_worker_start_cannot_admit_terminal_effects(

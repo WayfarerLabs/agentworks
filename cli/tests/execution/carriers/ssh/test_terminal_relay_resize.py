@@ -19,6 +19,7 @@ from agentworks.execution._process import LocalProcessOwner, LocalProcessTermina
 from agentworks.execution.carrier import CarrierIO, Deadline, Failure, SinkOutput, TerminalInput
 from agentworks.execution.carriers.ssh import _terminal_relay as relay
 from agentworks.execution.carriers.ssh._terminal_posix import PosixTerminal
+from tests.execution.carriers.ssh._terminal_modes import assert_preserved_terminal_mode
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="Requires owned POSIX PTYs and SIGWINCH")
 
@@ -51,7 +52,7 @@ def endpoint(monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody) -> 
     finally:
         assert custody.close(Deadline.after(3))
         try:
-            assert termios.tcgetattr(slave) == original_mode
+            assert_preserved_terminal_mode(termios.tcgetattr(slave), original_mode)
             for fd in owned:
                 with pytest.raises(OSError):
                     os.fstat(fd)
@@ -374,7 +375,7 @@ def test_resize_control_retains_worker_and_primary_through_owner_settlement(
         assert caught.value is primary and attempt._done.is_set()
         assert outcomes == [notification]
         assert settled.is_set() and restored.is_set()
-        assert termios.tcgetattr(endpoint.slave) == saved_mode
+        assert_preserved_terminal_mode(termios.tcgetattr(endpoint.slave), saved_mode)
         assert attempt._result is not None
         assert attempt._result.failure is Failure.OBSERVATION
         assert bool(getattr(primary, "__notes__", []))

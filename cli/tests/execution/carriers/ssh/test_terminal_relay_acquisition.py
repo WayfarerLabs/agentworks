@@ -15,6 +15,7 @@ from agentworks.execution._process import LocalProcessOwner
 from agentworks.execution.carrier import CarrierIO, Deadline, Failure, SinkOutput, TerminalInput
 from agentworks.execution.carriers.ssh._terminal_posix import AcquisitionCleanupFailure
 from agentworks.execution.carriers.ssh._terminal_relay import _Attempt
+from tests.execution.carriers.ssh._terminal_modes import assert_preserved_terminal_mode
 
 if TYPE_CHECKING:
     from agentworks.execution.carriers.ssh._terminal_posix import _TerminalMode
@@ -124,7 +125,7 @@ def test_acquisition_cleanup_uncertainty_is_disclosed_safely(
         if cleanup_boundary == "restore":
             assert termios.tcgetattr(borrowed) != original_mode
         else:
-            assert termios.tcgetattr(borrowed) == original_mode
+            assert_preserved_terminal_mode(termios.tcgetattr(borrowed), original_mode)
         for fd in owned:
             if fd == close_failed:
                 os.fstat(fd)
@@ -141,7 +142,7 @@ def test_acquisition_cleanup_uncertainty_is_disclosed_safely(
             except OSError:
                 continue
             native_close(fd)
-        assert termios.tcgetattr(borrowed) == original_mode
+        assert_preserved_terminal_mode(termios.tcgetattr(borrowed), original_mode)
         for fd in owned:
             with pytest.raises(OSError):
                 os.fstat(fd)
