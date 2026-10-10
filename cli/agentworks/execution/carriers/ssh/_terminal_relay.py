@@ -398,9 +398,9 @@ class _Attempt:
                 self._cleanup_observed = observed
                 self._condition.notify_all()
                 if self._cleanup_requested == observed:
-                    # Pending native construction can settle autonomously. A
-                    # published failure needs an explicit fresh cleanup request.
-                    self._condition.wait(_POLL_SECONDS if process is None else None)
+                    # Construction or a naturally exiting client can settle
+                    # autonomously. Observe without retrying native cleanup.
+                    self._condition.wait(_POLL_SECONDS)
 
     def _observe_result(self, stdout_complete: bool, stderr_complete: bool, failure: Failure | None) -> ProcessResult:
         snapshot = self._owner.snapshot()
