@@ -1097,7 +1097,7 @@ runtime verification. Earlier failed diagnostic and regression runs remain prese
 results do not erase them. SDK-internal acquisition, arbitrary repeated signals, real credential
 delivery/drain, startup settlement, complete cloud access and whole-PR acceptance remain unproved.
 
-- [ ] Implement and privately review the provider-owned GCP start admission/acknowledgment producer
+- [x] Implement and privately review the provider-owned GCP start admission/acknowledgment producer
       in the
       [lifecycle LLD](execution-lifecycle-lld.md#gcp-activation-admission-and-acknowledgment). Prove
       owner/recorded locator matching, persisted UUID before one body-free POST, public pre-body
@@ -1105,6 +1105,18 @@ delivery/drain, startup settlement, complete cloud access and whole-PR acceptanc
       retention, ledger lost replies/fencing, actual session/response/wrapper custody and
       original-control cleanup-entry/lock regressions against the locked public SDK pipeline. Keep
       this a private #833 increment, not complete stopped access or public RunContext delivery.
+
+The GCP producer and its correction at `b359c7f4` clear all three independent private lanes. Lead
+verification passed all 150 cases with warnings as errors, no skips or deselections, full strict
+typing over 1,368 sources, and scoped Python/permanent-documentation gates. The complexity lane
+independently passed 150 cases and proved that a wrong `/start` suffix now fails the three selected
+transport-boundary cases; exact restoration passed those same cases, with 147 explicitly deselected
+in each control. Project and complementary generic re-reviews were source-only. Strict JSON refusal
+and actual fixed-length HTTP framing now cover the reported parser and nonempty-final-read gaps.
+Earlier failed diagnostics, warnings and intentional controls remain preserved. These results prove
+neither native receipt compatibility, sockets/credentials, request drain nor complete cloud access;
+the next item remains unfinished.
+
 - [ ] Complete owned GCP access with the LLD's observational identity guarantee: a fresh exact
       provider observation refuses known stale-target admission, matching receipt and subsequent
       fresh identity/trust/preparation admit guest work, and changed or unconfirmed identity refuses
@@ -1114,6 +1126,22 @@ delivery/drain, startup settlement, complete cloud access and whole-PR acceptanc
       preparation, fresh endpoint trust, selected firewall-route lifetime and aggregate release. A
       preceding read, database lock, UUID or post-response targetId cannot prevent that external
       race. Preserve required native capabilities and honest operational failures.
+- [ ] Complete owned Azure access with reviewed request-specific startup settlement, fresh endpoint
+      trust, selected route lifetime, exact guest preparation and aggregate release. Account
+      explicitly for provider incarnation: current metadata and observations verify only the
+      reusable ARM resource path, not Azure's unique VM ID. Define new-VM recording and existing-VM
+      acquisition/adoption before claiming that check; the existing string metadata map can store it
+      without a schema migration, but cannot supply historical identity proof. A cloned guest marker
+      does not turn the ARM path into an immutable incarnation. Keep the acknowledged producer
+      separate from these unfinished integration and native-proof gates.
+- [ ] Establish explicit custody for provider and linked-endpoint read clients in the owned cloud
+      composition, including preliminary power reads before activation. Existing AWS/Azure reads
+      suppress ordinary close errors without retaining uncertain originals; GCP uses cached
+      generated clients without per-operation retirement accounting. Their completed passive-read
+      and binding tests prove request/observation behavior, not aggregate local cleanup. Preserve
+      actual originals through uncertain closure and refuse aggregate release without positive
+      retirement; choose the small ownership seam before public RunContext wiring, not a generic
+      provider-handle registry or an expansion of native process custody into unrelated SDK state.
 - [x] Implement and privately review passive exact-instance power observations for AWS, Azure and
       GCP using their provider-owned locator reads. Cover stable/transitional/malformed states,
       identity/account mismatch, setup expiry, actual SDK request serialization and successful
