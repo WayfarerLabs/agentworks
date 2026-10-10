@@ -287,15 +287,16 @@ Public middleware preserves normal scopes, quota, auth mode and regional access 
 which the locked SDK enables by default for ordinary service-account credentials. Its concrete
 Request copy seam retains attributable copied Sessions, preserves unrelated hooks and public Session
 security settings, and binds each copy to its original finite operation deadline. Entry is barred
-before any fallible terminal cleanup; entered consumers must positively finish before their
-originals retire. If an owned worker observation or public middleware escape leaves completion
-unconfirmed, retain that copy's originals and refuse new work. Later liveness from the same possibly
-corrupted Thread is not independent completion evidence. Ordinary join timeouts and original-close
-failures remain separately retryable. Never-entered copies may be barred and closed without claiming
-that the SDK's internal worker has finished. A finite retained-copy limit refuses additional work
-rather than disabling middleware or replacing the selected principal. SDK-internal acquisition,
-discovery processes, unsupported adapter copies and arbitrary worker drain are not covered by that
-custody seam.
+before any fallible terminal cleanup, including reader service retirement; entered consumers must
+positively finish before their originals retire. A public middleware escape bars every retained
+copy, including copies that have not entered their Request. If an owned worker observation or public
+middleware escape leaves an entered copy's completion unconfirmed, retain that copy's originals and
+refuse new work. Later liveness from the same possibly corrupted Thread is not independent
+completion evidence. Ordinary join timeouts and original-close failures remain separately retryable.
+Never-entered copies may be barred and closed without claiming that the SDK's internal worker has
+finished. A finite retained-copy limit refuses additional work rather than disabling middleware or
+replacing the selected principal. SDK-internal acquisition, discovery processes, unsupported adapter
+copies and arbitrary worker drain are not covered by that custody seam.
 
 After public middleware, an unexpired token remains usable even when Google-auth marks it `STALE`
 because its remaining lifetime is inside the SDK's refresh window. Refuse `INVALID` credentials; do

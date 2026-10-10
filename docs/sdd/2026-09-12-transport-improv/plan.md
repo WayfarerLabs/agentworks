@@ -1213,10 +1213,23 @@ cases (153 producer and 122 reader/copy, including ten new regressions), full st
 certificate. Resolving each path once per unchanged checkpoint removes redundant work; fresh
 complete runs pass in 88.63 and 68.81 seconds under the unchanged 120-second limit. The failed run
 and all data remain preserved; production assertions and deadlines are unchanged. All three
-corrected paired source re-reviews remain pending; passing tests alone do not clear the findings.
-This is not native acceptance, whole-composition typing, SDK-wide drain or completed cloud access:
-startup settlement, endpoints, routes, guest preparation and RunContext admission remain unfinished.
-Keep both GCP items unchecked until their respective acceptance gates are met.
+corrected paired source re-reviews found two remaining ordering gaps: an SDK worker could suffer an
+interrupted observation before its copied Request first entered, and successful late service
+retirement could exhaust reader-close admission before the auth owner became terminal. The current
+partial source checkpoint bars all copies on middleware escape and shares terminal admission before
+reader service retirement, preserving one terminal fact and the existing cleanup order. It adds four
+focused regression cases, for 126 reader/copy and 153 producer cases enumerated in source, without
+removing earlier cases. Fresh verification and paired source re-reviews remain pending; passing
+earlier tests alone does not clear these findings. Fresh producer verification stopped at the
+private allocation guard after 146 starts, without a completion certificate or a reported assertion
+failure. Independent source review proves that subtracting two overlapping allocation walks can
+misclassify growth inside the test directory as outside growth, but the stopped run did not retain
+its failing numeric samples and its actual cause remains unknown. Retain that evidence and all data;
+do not count the incomplete run as passing or weaken allocation limits. Verification also needs more
+workspace disk headroom before another full run. This is not native acceptance, whole-composition
+typing, SDK-wide drain or completed cloud access: startup settlement, endpoints, routes, guest
+preparation and RunContext admission remain unfinished. Keep both GCP items unchecked until their
+respective acceptance gates are met.
 
 - [ ] Complete owned GCP access with the LLD's observational identity guarantee: a fresh exact
       provider observation refuses known stale-target admission, matching receipt and subsequent

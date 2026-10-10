@@ -1495,21 +1495,26 @@ disabling SDK security.
 
 Each copy retains its original finite deadline, unaffected by borrower end or a later operation.
 Terminal close makes admission terminal under the entry barrier before invoking any fallible copy
-retirement helper. It then releases the barrier before bounded public joins or original close calls.
+retirement helper. Reader close uses the same small admission action before service retirement, so a
+successful late service close cannot exhaust the budget before admission becomes terminal. This one
+terminal fact also exposes retained credential originals as cleanup debt; do not duplicate reader
+state. Release the barrier before bounded public joins or original close calls, and preserve
+service-before-credential retirement with actual credential retirement behind its operation lock.
 Only positively observed finished consumers permit their Response and Session retirement; an expired
 deadline or uncertain join retains custody. If any owned `is_alive` or `join` observation escapes,
 mark that copy's completion unconfirmed and bar further entry. An escaping public `before_request`
-likewise marks already-entered copies without another Thread observation, because the SDK can
-observe those workers internally. On supported CPython, an interrupted observation can corrupt the
-same Thread's later completion state. That later state cannot clear the retained uncertainty; this
-implementation provides no independent completion witness. Keep this sticky uncertainty separate
-from retryable ordinary join timeouts and original-close failures. Responses returned by
-already-admitted consumers remain retained even after new entry is barred. A never-entered copy may
-be barred and its original Session closed without claiming that its SDK worker has finished. Later
-explicit operations may retry eligible timeout or close debt, but cannot clear unconfirmed
-completion; do not add a reaper or drain engine. Preserve original control exceptions and
-independently attempt retained closes. Only the final access owner closes the helper; the start
-producer closes its service originals, not another borrower's credential lifetime.
+bars every retained copy under the same entry barrier and marks already-entered copies without
+another Thread observation, because the SDK can observe its worker before that worker first enters
+the copied Request. A never-entered copy must then refuse its first entry before Session use; its
+original can retire without claiming that the SDK worker finished. On supported CPython, an
+interrupted observation can corrupt the same Thread's later completion state. That later state
+cannot clear the retained uncertainty; this implementation provides no independent completion
+witness. Keep this sticky uncertainty separate from retryable ordinary join timeouts and
+original-close failures. Responses returned by already-admitted consumers remain retained even after
+new entry is barred. Later explicit operations may retry eligible timeout or close debt, but cannot
+clear unconfirmed completion; do not add a reaper or drain engine. Preserve original control
+exceptions and independently attempt retained closes. Only the final access owner closes the helper;
+the start producer closes its service originals, not another borrower's credential lifetime.
 
 This seam accounts for supplied root/copied originals, not every SDK transport, internal worker or
 socket. Public copy adapters that cannot return an attributable Session remain a named profile
