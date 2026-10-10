@@ -1103,12 +1103,16 @@ preparation integration; this increment supplies no factory, activation settleme
 The subsequent source-only credential audit selects the
 [configured role custody design](execution-lifecycle-lld.md#configured-aws-role-credential-custody):
 one retained original STS slot, supported creator/refresh callbacks and concrete pre-send checks
-preserving configured deferred-refresh semantics. Its private implementation passes 146 local
-application/actual-SDK cases, including guard and delayed-retention controls. That run predates a
-mechanical import reorder and test-only typing corrections; final scoped lint/format and full strict
-typing across 1,375 sources pass, without a final-pin test replay claim. Independent paired code/doc
-review remains pending. Keep both items open; no ambient-provider cleanup guarantee, credential hard
-deadline, native proof or whole-access completion follows from this increment.
+preserving configured deferred-refresh semantics. All three independent private source reviews found
+no production custody defect. The project review identified inherited AWS settings in the offline
+fixture; the complexity review identified a forwarding builder, redundant control handling and
+duplicate helper terminal state. The corrected implementation at `5d1aefdc8` passes 147 local
+application/actual-SDK cases, including inherited-setting, guard and delayed-retention controls.
+That run predates only a test's direct import of the same helper class to satisfy strict export
+checking; no final-pin test replay is claimed. Final scoped lint/format and full strict typing
+across 1,375 sources pass. Paired correction re-review remains pending. Keep both items open; no
+ambient-provider cleanup guarantee, credential hard deadline, native proof or whole-access
+completion follows from this increment.
 
 - [ ] Complete owned AWS access with a reviewed successful-start settlement rule, fresh power and
       exact guest preparation, endpoint trust and selected firewall-route lifetime. Obtain native
