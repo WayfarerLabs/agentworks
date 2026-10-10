@@ -1476,6 +1476,23 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       local PTY settings without relaxing pipe parsing or releasing payload before raw-mode
       readiness. All three private lanes accept this terminal slice at `02e8498a`. Carrier terminal
       integration, transport-owned finalization and native proof remain separate acceptance gates.
+- [ ] Prove printable same-terminal preparation before the Windows launch/resize unit: one strict
+      hex-encoded finite frame, printable fixed-width nonce readiness and unchanged runtime framing.
+      Preserve the complete 32,768-byte decoded allowance with a 65,536-byte encoded bound, both
+      handoff gates, source/keyboard separation, literal byte values and same-PTY no-echo/restore
+      behavior. Cover split/coalesced records, partial writes, queued early input, wrong nonce,
+      malformed/truncated frames and phase/order errors. Run all three independent private lanes
+      against the combined implementation and collateral. These local tests do not establish ConPTY
+      preservation, native Windows geometry, separate client diagnostics, SSH delivery or complete
+      terminal capability; keep those native gates open.
+
+The source owner supplies `9a65126b6` from reviewed coordination parent `2a283d37`, integrated as
+`5e0d860a7`. Its five-module local selection passes 124 tests without skips, including the actual
+Bookworm Python 3.11 same-PTY helper; scoped lint, format and typing pass. The finite format keeps
+the complete prior decoded allowance and rejects inserted control bytes rather than normalizing
+them. Lead collateral, combined gates and exact-pin independent reviews remain pending at this
+checkpoint. Native Windows/SSH capability is not established by the printable preparation change.
+
 - [x] Implement private revision-aware publication with explicit Create/Replace/Match conditions,
       bounded streaming from verified scratch, stat-only observations without old-content reads, and
       a content-bound post-publication revision. At `75aaaa5e`, all three private lanes are clean

@@ -1466,14 +1466,22 @@ factory teardown and native macOS/Windows acceptance remain open.
 bootstrap attempt targeting the Linux `_terminal_guest.py`. It requires explicit `RuntimeSelection`
 and observes runtime readiness before accepting the helper's payload-ready marker. Only that second
 gate releases one bounded frame from the host byte source. That frame keeps literal byte argv,
-environment and source off helper argv. The guest reads it with echo and terminal input
-transformations disabled, installs source on a Linux memory descriptor separate from terminal stdin,
-restores the terminal, then emits a distinct nonce-bound interactive-ready marker. Only then does
-the host source end preparation and permit a future carrier adapter to borrow keyboard input. The
-paired host sink suppresses setup and readiness bytes, handles split and coalesced markers, and
-forwards only bytes after interactive readiness to an explicitly selected trusted presentation sink
-with short-write flow control. Before exec, the one-shot guest resets Python-ignored pipe and
-file-size signals to their operating-system defaults without changing unrelated signal dispositions.
+environment and source off helper argv. The host hex-encodes the complete frame as printable ASCII;
+the 32,768-byte decoded limit includes its 11-byte header, and the encoded limit is 65,536 bytes.
+The guest strictly decodes hex without whitespace or terminal-sequence normalization, preserving
+every decoded byte. It reads setup with echo and terminal input transformations disabled, installs
+source on a Linux memory descriptor separate from terminal stdin, restores the terminal, then emits
+a distinct nonce-bound interactive-ready marker. Only then does the host source end preparation and
+permit a future carrier adapter to borrow keyboard input. The paired host sink suppresses setup and
+readiness bytes, handles split and coalesced markers, and forwards only bytes after interactive
+readiness to an explicitly selected trusted presentation sink with short-write flow control. Before
+exec, the one-shot guest resets Python-ignored pipe and file-size signals to their operating-system
+defaults without changing unrelated signal dispositions.
+
+Readiness is printable fixed-width `AGW-TERMINAL/2:<32 uppercase hex nonce>:P` or `:I`, without a
+newline. After matching readiness magic, the collector requires the exact nonce, colon and phase;
+wrong nonce, malformed records and duplicate or out-of-order phases fail closed. Encoding does not
+replace no-echo setup or sensitive-output suppression.
 
 The initial terminal settings can transform the runtime record before the helper enters raw mode.
 The sink accepts only its nonce-bound canonical or entirely uppercase control record, with LF or
@@ -1493,11 +1501,13 @@ descriptors, UTF-8 terminal type and endpoint shape without reading a descriptor
 Terminal input cannot use capture or discard, and its bootstrap and terminal type stay out of
 diagnostic representations. These shared values do not enable terminal delivery: Proxmox, WSL2, the
 inherited buffered SSH path and the ordinary subprocess pump refuse before provider or client
-dispatch. SSH still owns native workstation PTY plumbing, terminal metadata, keyboard borrowing,
-resize, restoration and the joint acceptance proof before enablement. The future transport-owned
-execution wrapper must call the readiness sink's `finish()` when the carrier attempt ends. Neither
-the carrier nor the generic byte-sink protocol performs that finalization today; preparation-only
-tests are not production terminal acceptance.
+dispatch. SSH owns keyboard borrowing, terminal relay and input restoration. Shared transport owns
+native child launch, process custody, cleanup and resize; its existing borrowed-stdin mechanism does
+not provide Windows console launch or resize. Native workstation plumbing and joint acceptance
+remain required before enablement. The future transport-owned execution wrapper must call the
+readiness sink's `finish()` when the carrier attempt ends. Neither the carrier nor the generic
+byte-sink protocol performs that finalization today; preparation-only tests are not production
+terminal acceptance.
 
 ## Private JSON transformation
 

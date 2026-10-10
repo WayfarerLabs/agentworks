@@ -512,6 +512,24 @@ and failure before application launch on malformed/truncated input. Client-side 
 supported workstation coverage and honest application-start evidence remain open; none is
 established by studying this prior art.
 
+### Windows console preparation candidate
+
+The Windows OpenSSH source inspected at `e302fe1e` differs from the portable sizing path above:
+[`w32_ioctl(TIOCGWINSZ)`](https://github.com/PowerShell/openssh-portable/blob/e302fe1ed190e408573cf0139252e5db26eeba2f/contrib/win32/win32compat/misc.c#L484-L506)
+queries the child's standard output console handle. Giving the child console input while redirecting
+stdout to an ordinary pipe does not establish console geometry. Its
+[output worker](https://github.com/PowerShell/openssh-portable/blob/e302fe1ed190e408573cf0139252e5db26eeba2f/contrib/win32/win32compat/termio.c#L194-L220)
+handles console text differently from pipe bytes, so the NUL-containing setup frame is not presumed
+console-safe.
+
+Microsoft's [ConPTY contract](https://learn.microsoft.com/en-us/windows/console/createpseudoconsole)
+provides initial geometry and UTF-8 text with terminal sequences, not a byte-exact pipe. Decision:
+first prove one printable finite setup format and both existing handoff gates locally, then test
+that preparation through an owned native console child. This is an implementation candidate, not
+evidence that ConPTY preserves setup, exposes separate raw SSH diagnostics or delivers remote
+resize. Those observations and bounded process/console cleanup remain required before enabling
+Windows terminal delivery. No native Windows test was run for this source investigation.
+
 ## Early Python investigation, 2026-09-19
 
 At the time of this audit the operator authorized investigation, not installation or a new runtime

@@ -240,13 +240,33 @@ Payload completion is length-delimited, not EOF, and the reader must not consume
 interactive use. Source and application input remain separate. These are experimental acceptance
 conditions, not a production wire format or a claimed implementation.
 
+The next private preparation proof uses one printable ASCII wire format: hex-encode the entire
+bounded frame and use printable, nonce-bound fixed-width payload-ready and interactive-ready
+records. Keep the existing 32,768-byte decoded-frame allowance, including its header; the encoded
+frame is bounded at 65,536 bytes. Decode strictly, without whitespace removal, terminal-sequence
+normalization, optional codecs or an older-format fallback. Keep the shared runtime record and its
+bounded terminal prefix parser unchanged. Encoding is not encryption; both no-echo gates and
+sensitive setup suppression remain required. The Linux guest still restores its PTY and replaces
+itself with the workload, rather than remaining as a remote resize controller.
+
 Shared preparation owns the handshake, framing and transition to application presentation. The SSH
 carrier owns local input-terminal handles, client invocation, resize and input restoration; it must
 not interpret application frames. The experiment must cover the remote bootstrap and the local
 OpenSSH endpoint separately. Replacing OpenSSH stdin with a pipe is not a complete terminal adapter:
-OpenSSH 8.5 reads terminal setup and window dimensions from its input descriptor. An owned local
-PTY/console relay is one candidate, not an accepted dependency. No terminal type is frozen until
-that ownership and supported-platform behavior are proved with the SSH lane.
+portable OpenSSH 8.5 reads terminal setup and window dimensions from its input descriptor. Windows
+OpenSSH instead queries its standard output console handle for geometry; a borrowed stdin console
+with ordinary stdout pipes does not establish that path. An owned local PTY/console relay is one
+candidate, not an accepted dependency. No terminal type is frozen until that ownership and
+supported-platform behavior are proved with the SSH lane.
+
+For the Windows candidate, transport owns native child launch, process/handle custody, status,
+cleanup and resize; SSH owns keyboard acquisition, relay and adoption. ConPTY is a mechanism to
+prove, not an enabled capability. Printable setup removes the requirement to carry NUL-containing
+frames through console presentation, but does not prove that ConPTY preserves the new setup and
+readiness records. Prove initial and changed geometry, console wrapping and VT presentation,
+separate raw client stderr, early keyboard preservation and bounded cleanup with installed native
+OpenSSH. Do not add a speculative terminal emulator, a second SSH channel or a resident guest
+controller to substitute for those observations.
 
 The [prior-art investigation](prior-art-research.md#terminal-bootstrap-prior-art) records the
 relevant implementations and their limitations. A local synthetic PTY proves only that fixture; it
