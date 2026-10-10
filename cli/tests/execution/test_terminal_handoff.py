@@ -35,6 +35,7 @@ from agentworks.execution._runtime_prerequisite import (
 from agentworks.execution._terminal_guest import (
     FRAME_MAGIC,
     INTERACTIVE_READY,
+    MAX_ENCODED_PAYLOAD_BYTES,
     MAX_PAYLOAD_BYTES,
     PAYLOAD_READY,
     READINESS_MAGIC,
@@ -135,7 +136,7 @@ def test_carrier_io_binds_existing_two_gate_endpoints_and_trusted_sinks() -> Non
     marker = _marker(prepared, PAYLOAD_READY)
     assert io.output.stdout.try_write(memoryview(marker)) == len(marker)
     payload = _drain_bootstrap(prepared)
-    assert payload.startswith(FRAME_MAGIC)
+    assert bytes.fromhex(payload.decode("ascii")).startswith(FRAME_MAGIC)
     assert io.input.bootstrap.try_read(4) is None
     marker = _marker(prepared, INTERACTIVE_READY)
     assert io.output.stdout.try_write(memoryview(marker + b"show")) == len(marker) + 2
@@ -336,8 +337,10 @@ def test_two_gates_release_only_the_finite_payload_then_handoff_eof() -> None:
         assert prepared.stdout.try_write(memoryview(bytes((byte,)))) == 1
 
     payload = _drain_bootstrap(prepared)
-    assert payload.startswith(FRAME_MAGIC)
-    assert len(payload) <= MAX_PAYLOAD_BYTES
+    decoded = bytes.fromhex(payload.decode("ascii"))
+    assert decoded.startswith(FRAME_MAGIC)
+    assert len(decoded) <= MAX_PAYLOAD_BYTES
+    assert len(payload) <= MAX_ENCODED_PAYLOAD_BYTES
     assert prepared.bootstrap.try_read(4) is None
 
     second = b"more-setup" + _marker(prepared, INTERACTIVE_READY) + b"abcdef"
@@ -592,17 +595,18 @@ def running_processes() -> Iterator[list[TerminalProcess]]:
 
 
 @pytest.mark.parametrize("output_processing", [False, True], ids=["lf", "crlf"])
+@pytest.mark.parametrize("argument", [b"", b"two words\nnonascii-\xff"], ids=["empty", "literal"])
 def test_actual_pty_keeps_source_environment_and_empty_arg_off_terminal_input(
     tmp_path: Path,
     running_processes: list[TerminalProcess],
     output_processing: bool,
+    argument: bytes,
 ) -> None:
     source = bytes(range(256)) * 4 + b"\r\nsource-canary-913c"
     secret = b"environment\n\xff-secret"
-    empty_argument = b""
     presentation = CollectSink()
     prepared = prepare_terminal_handoff(
-        (b"/usr/bin/python3", b"-I", b"-S", b"-B", b"-c", CHILD_CODE, empty_argument),
+        (b"/usr/bin/python3", b"-I", b"-S", b"-B", b"-c", CHILD_CODE, argument),
         {b"SECRET": secret},
         source,
         presentation,
@@ -632,7 +636,7 @@ def test_actual_pty_keeps_source_environment_and_empty_arg_off_terminal_input(
         (
             hashlib.sha256(source).hexdigest().encode(),
             hashlib.sha256(secret).hexdigest().encode(),
-            empty_argument.hex().encode(),
+            argument.hex().encode(),
         )
     )
     running.read_until_presented(presentation, b"PROOF:" + expected + b"!")
@@ -718,10 +722,10 @@ def test_actual_pty_restores_mode_and_leaves_no_process_on_bad_payload(
             raise AssertionError("payload-ready marker did not arrive")
     assert not termios.tcgetattr(running.slave)[3] & (termios.ECHO | termios.ICANON)
     if truncated:
-        running._write_all(FRAME_MAGIC + struct.pack("!I", 10) + b"short")
+        running._write_all((FRAME_MAGIC + struct.pack("!I", 10) + b"short").hex().encode("ascii"))
         os.kill(running.process.pid, signal.SIGTERM)
     else:
-        running._write_all(FRAME_MAGIC + struct.pack("!I", MAX_PAYLOAD_BYTES))
+        running._write_all((FRAME_MAGIC + struct.pack("!I", MAX_PAYLOAD_BYTES)).hex().encode("ascii"))
 
     assert running.process.wait(timeout=5) != 0
     assert termios.tcgetattr(running.slave) == running.original_mode

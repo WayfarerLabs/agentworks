@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import binascii
 import contextlib
 import os
 import signal
@@ -10,12 +11,13 @@ import sys
 from typing import Any
 
 MAX_PAYLOAD_BYTES = 32_768
+MAX_ENCODED_PAYLOAD_BYTES = 2 * MAX_PAYLOAD_BYTES
 MAX_ITEMS = 128
 SOURCE_FD = 3
-FRAME_MAGIC = b"AGWTH1\0"
-READINESS_MAGIC = b"\0AGW-TERMINAL/1:"
-PAYLOAD_READY = 1
-INTERACTIVE_READY = 2
+FRAME_MAGIC = b"AGWTH2:"
+READINESS_MAGIC = b"AGW-TERMINAL/2:"
+PAYLOAD_READY = ord("P")
+INTERACTIVE_READY = ord("I")
 
 
 class _ProtocolError(Exception):
@@ -84,13 +86,21 @@ def _install_source(source: bytes) -> None:
 
 def _decode_payload(fd: int) -> tuple[tuple[bytes, ...], dict[bytes, bytes], bytes]:
     header_length = len(FRAME_MAGIC) + 4
-    header = _read_exact(fd, header_length)
+    # Hex decoding is case-insensitive but accepts no whitespace or terminal noise.
+    try:
+        header = binascii.unhexlify(_read_exact(fd, 2 * header_length))
+    except binascii.Error:
+        raise _ProtocolError from None
     if header[: len(FRAME_MAGIC)] != FRAME_MAGIC:
         raise _ProtocolError
     body_length = int(struct.unpack("!I", header[len(FRAME_MAGIC) :])[0])
     if body_length > MAX_PAYLOAD_BYTES - header_length:
         raise _ProtocolError
-    reader = _Reader(_read_exact(fd, body_length))
+    try:
+        body = binascii.unhexlify(_read_exact(fd, 2 * body_length))
+    except binascii.Error:
+        raise _ProtocolError from None
+    reader = _Reader(body)
 
     argument_count = reader.unsigned_short()
     if not 0 < argument_count <= MAX_ITEMS:
@@ -116,7 +126,11 @@ def _decode_payload(fd: int) -> tuple[tuple[bytes, ...], dict[bytes, bytes], byt
 
 
 def _readiness(nonce: str, kind: int) -> bytes:
-    if len(nonce) != 32 or any(character not in "0123456789ABCDEF" for character in nonce):
+    if (
+        len(nonce) != 32
+        or any(character not in "0123456789ABCDEF" for character in nonce)
+        or kind not in (PAYLOAD_READY, INTERACTIVE_READY)
+    ):
         raise _ProtocolError
     return READINESS_MAGIC + nonce.encode("ascii") + b":" + bytes((kind,))
 

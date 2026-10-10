@@ -23,6 +23,7 @@ from agentworks.execution._runtime_prerequisite import (
 from agentworks.execution._terminal_guest import (
     FRAME_MAGIC,
     INTERACTIVE_READY,
+    MAX_ENCODED_PAYLOAD_BYTES,
     MAX_ITEMS,
     MAX_PAYLOAD_BYTES,
     PAYLOAD_READY,
@@ -125,10 +126,10 @@ class _ReadinessSink:
         self._runtime_candidate: bytearray | None = None
         self._candidates = candidates
         self._system_shim = system_shim
-        self._prefix = READINESS_MAGIC + nonce.upper().encode("ascii") + b":"
+        self._prefix = READINESS_MAGIC
+        self._readiness: bytearray | None = None
         self._presentation = presentation
         self._matched = 0
-        self._awaiting_kind = False
 
     def _decode_runtime_record(self, record: bytes) -> RuntimePrerequisiteObservation:
         normalized = record[:-2] + b"\n" if record.endswith(b"\r\n") else record
@@ -214,8 +215,14 @@ class _ReadinessSink:
             if self._state.gate is _Gate.PREREQUISITE:
                 self._accept_runtime_byte(byte)
                 continue
-            if self._awaiting_kind:
-                self._awaiting_kind = False
+            if self._readiness is not None:
+                self._readiness.append(byte)
+                if len(self._readiness) < 34:
+                    continue
+                record = bytes(self._readiness)
+                self._readiness = None
+                if record[:33] != self._nonce.upper().encode("ascii") + b":":
+                    self._state.fail(TerminalHandoffFailure.PROTOCOL)
                 handed_off = self._accept_kind(byte)
                 if handed_off:
                     consumed = index + 1
@@ -230,7 +237,7 @@ class _ReadinessSink:
                 self._matched += 1
                 if self._matched == len(self._prefix):
                     self._matched = 0
-                    self._awaiting_kind = True
+                    self._readiness = bytearray()
             else:
                 self._matched = 1 if byte == self._prefix[0] else 0
         return len(data)
@@ -239,7 +246,7 @@ class _ReadinessSink:
         self._runtime_match.clear()
         self._runtime_candidate = None
         self._matched = 0
-        self._awaiting_kind = False
+        self._readiness = None
         if self._state.gate not in {_Gate.HANDED_OFF, _Gate.FAILED}:
             self._state.failure = TerminalHandoffFailure.TRUNCATED
             self._state.gate = _Gate.FAILED
@@ -354,7 +361,9 @@ def _payload(argv: tuple[bytes, ...], env: Mapping[bytes, bytes], source: bytes)
     payload = FRAME_MAGIC + struct.pack("!I", len(body)) + body
     if len(payload) > MAX_PAYLOAD_BYTES:
         raise ValidationError("Terminal handoff payload exceeds the 32768-byte candidate bound")
-    return bytes(payload)
+    encoded = bytes(payload).hex().upper().encode("ascii")
+    assert len(encoded) <= MAX_ENCODED_PAYLOAD_BYTES
+    return encoded
 
 
 def prepare_terminal_handoff(
