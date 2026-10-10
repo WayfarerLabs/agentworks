@@ -3479,13 +3479,25 @@ edge follows.
       launch/interruption gate and preserve exact route/guest fencing.
 - [ ] Implement mandatory caller-held local delivery custody through the carrier and provider-read
       paths. Retain the existing native owner before admission, at most one unsettled worker per
-      attempt; pending or lost ownership refuses further exchanges. Keep reports as observations and
-      original exceptions unchanged. The existing operation attempt, keeper and pre-target workflow
-      retain their own storage. Add bounded close and a non-dispatch settlement path after borrow
-      handoff, with remote effects still independently retained. Prove delayed construction,
-      kill/reap failure, explicit cleanup retry, natural exit, external-reaper uncertainty, all
-      temporary Proxmox consumers and aggregate owner-release refusal. Do not silently add bounded
-      return to guest source-descriptor or unmigrated terminal consumers.
+      attempt; incomplete local retirement refuses further exchanges. Exact status loss remains an
+      unknown execution outcome after independently proved local retirement. Keep reports as
+      observations and original exceptions unchanged. The existing operation attempt, keeper and
+      pre-target workflow retain their own storage. Add bounded close and a non-dispatch settlement
+      path after borrow handoff, with remote effects still independently retained. Prove delayed
+      construction, kill/reap failure, explicit cleanup retry, natural exit, external-reaper
+      uncertainty, all temporary Proxmox consumers and aggregate owner-release refusal. Do not
+      silently add bounded return to guest source-descriptor or unmigrated terminal consumers.
+- [ ] Implement the
+      [shared local retirement](execution-lifecycle-lld.md#shared-local-process-retirement)
+      correction under the existing native owner. Share original one-shot pipe-close evidence
+      between early stdin EOF and teardown; preserve sticky close uncertainty, independent safe
+      process cleanup and immutable first observations. Require externally retained runner ownership
+      and retain the inline guest's one-shot module owner through active runtime. Prove known-exit
+      and exact-loss close failures, ordinary/control early EOF, descriptor reuse refusal,
+      unattempted independent cleanup and aggregate remote-debt separation. Final SSH composition
+      and installed Linux/macOS held, restoration and shutdown probes remain separate required
+      evidence; Windows process/HANDLE guarantees are unchanged. No fake status, global signal reset
+      or cleanup bypass.
 - [ ] Reconcile #770's historical escape/relaunch proposal against the later exclusion of malicious
       target-user containment. Deliver DIRECT/MANAGED without a CONTAINED profile or
       per-run-user/jail implementation; retain future profile extensibility. Prove trusted
