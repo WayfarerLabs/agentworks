@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import weakref
+from threading import Event
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlsplit
@@ -64,6 +65,9 @@ def sdk(monkeypatch):
         credential=FreshCredential(),
         credential_status=200,
         credential_body=b'{"access_token":"offline-refreshed-token","expires_in":3600,"token_type":"Bearer"}',
+        boundary_body=b'{"encodedLocations":"0x1","locations":["us-central1"]}',
+        on_boundary=lambda: None,
+        boundary_entered=Event(),
         credential_redirects=0,
         credential_responses=0,
         sends=[],
@@ -129,7 +133,13 @@ def sdk(monkeypatch):
         assert kwargs["proxies"] == {}
         assert adapter.max_retries.total == 0
         parts = urlsplit(request.url)
-        kind = "service" if parts.hostname == "compute.googleapis.com" else "credential"
+        kind = (
+            "service"
+            if parts.hostname == "compute.googleapis.com"
+            else "boundary"
+            if parts.path.endswith("/allowedLocations")
+            else "credential"
+        )
         p.sends.append((kind, request, kwargs))
         if kind == "service":
             assert kwargs["verify"] is True
@@ -147,7 +157,12 @@ def sdk(monkeypatch):
         else:
             response = requests.Response()
             response.status_code = p.credential_status
-            response.raw = HTTPResponse(body=io.BytesIO(p.credential_body), preload_content=False)
+            data = p.boundary_body if kind == "boundary" else p.credential_body
+            response.raw = HTTPResponse(body=io.BytesIO(data), preload_content=False)
+            if kind == "boundary":
+                assert request.method == "GET" and request.body is None
+                p.boundary_entered.set()
+                p.on_boundary()
             if p.credential_responses < p.credential_redirects:
                 response.status_code = 302
                 response.headers["Location"] = "https://credential.invalid/redirected"
@@ -284,9 +299,10 @@ def test_final_credential_session_failure_is_visible_and_retryable(sdk):
     sdk.failed_close = "credential-session"
     assert not reader.close(Deadline.after(5))
     assert reader.cleanup_incomplete
-    original = reader._auth._session
     retained_request = reader._auth._request
-    assert retained_request is not None and retained_request.session is original
+    assert retained_request is not None
+    original = retained_request.session
+    assert retained_request.session is original
     sdk.failed_close = None
     assert reader.close(Deadline.after(5))
     assert len(sdk.sends) == 1
@@ -342,14 +358,7 @@ def sa_document():
     }
 
 
-def test_real_service_account_refresh_apply_without_dispatch_rab(sdk, monkeypatch, sa_document):
-    from google.auth import credentials
-
-    monkeypatch.setattr(
-        credentials.CredentialsWithRegionalAccessBoundary,
-        "_after_refresh",
-        lambda *args: pytest.fail("service dispatch used before_request/RAB hook"),
-    )
+def test_real_service_account_public_middleware_and_owned_boundary_copy(sdk, sa_document):
     auth = GcpServiceAccountAuth(mode="service-account", secret="sa-json")
     reader, _ = make_reader(auth=auth, secret=lambda name: json.dumps(sa_document))
     assert reader.observe_power(Deadline.after(5)) is VMStatus.RUNNING
@@ -359,12 +368,15 @@ def test_real_service_account_refresh_apply_without_dispatch_rab(sdk, monkeypatc
     assert selected.service_account_email == sa_document["client_email"]
     assert selected.token_state is TokenState.FRESH
     assert selected.token == "offline-refreshed-token" and selected.expiry is not None
-    assert [kind for kind, _, _ in sdk.sends] == ["credential", "service"]
-    assert sdk.sends[-1][1].headers["Authorization"] == "Bearer offline-refreshed-token"
+    service = [request for kind, request, _ in sdk.sends if kind == "service"]
+    assert service[0].headers["Authorization"] == "Bearer offline-refreshed-token"
     assert not sdk.adc_calls
     assert reader.observe_locator(Deadline.after(5)).token.endswith(":123")
-    assert [kind for kind, _, _ in sdk.sends] == ["credential", "service", "service"]
+    assert sdk.boundary_entered.wait(5)
     assert reader.close(Deadline.after(5))
+    assert sorted(kind for kind, _, _ in sdk.sends) == ["boundary", "credential", "service", "service"]
+    assert selected.regional_access_boundary == "0x1"
+    assert not reader._auth._copies
 
 
 def test_stock_adc_real_authorized_user_document_preserves_scope_and_quota(sdk, monkeypatch, tmp_path):
@@ -418,11 +430,14 @@ def test_real_service_account_selected_quota_and_stale_refresh(sdk, sa_document,
     assert selected.token_state is expected_state
     assert selected.token == "offline-refreshed-token"
     assert selected.scopes == ("https://www.googleapis.com/auth/cloud-platform",)
-    assert [kind for kind, _, _ in sdk.sends] == ["credential", "service"]
-    assert sdk.sends[-1][1].headers["x-goog-user-project"] == "selected-quota"
-    assert sdk.sends[-1][1].headers["Authorization"] == "Bearer offline-refreshed-token"
+    service = [request for kind, request, _ in sdk.sends if kind == "service"]
+    assert service[0].headers["x-goog-user-project"] == "selected-quota"
+    assert service[0].headers["Authorization"] == "Bearer offline-refreshed-token"
     assert reader._auth._credential is selected
+    assert sdk.boundary_entered.wait(5)
     assert reader.close(Deadline.after(5))
+    assert sorted(kind for kind, _, _ in sdk.sends) == ["boundary", "credential", "service"]
+    assert selected.regional_access_boundary == "0x1"
 
 
 def test_adc_late_return_retains_selected_credential_before_refusal(sdk, monkeypatch):
@@ -510,11 +525,11 @@ def test_uncertain_credential_response_blocks_next_owned_request_without_overwri
         request = reader._auth._request
         assert isinstance(request, Request)
         assert request("https://credential.invalid/token").status == 200
-        original = reader._auth._responses[0]
+        original = request._responses[0]
         sdk.failed_close = "credential-response"
         with pytest.raises(StateError):
             request("https://credential.invalid/second")
-        assert reader._auth._responses == [original]
+        assert request._responses == [original]
         assert len(sdk.sends) == 2
     finally:
         reader._auth.end()
@@ -536,7 +551,7 @@ def test_real_request_redirect_chain_retains_all_originals_until_sdk_returns(sdk
         assert isinstance(request, Request) and request.session.max_redirects == 30
         result = request("https://credential.invalid/start")
         assert result.status == 200 and result.data
-        originals = tuple(reader._auth._responses)
+        originals = tuple(request._responses)
         assert len(originals) == 3
         assert [response.status_code for response in originals] == [302, 302, 200]
         assert len(sdk.sends) == 4
@@ -552,7 +567,7 @@ def test_real_request_redirect_chain_retains_all_originals_until_sdk_returns(sdk
         else:
             reader._auth.retire_responses()
         if failure is not None:
-            assert tuple(reader._auth._responses) == originals
+            assert tuple(request._responses) == originals
             assert all(any(handle is response for _, handle in sdk.closes) for response in originals)
             with pytest.raises(StateError):
                 request("https://credential.invalid/not-admitted")

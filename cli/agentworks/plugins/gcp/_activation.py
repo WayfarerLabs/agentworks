@@ -6,14 +6,17 @@ import json
 import re
 from dataclasses import asdict, dataclass, replace
 from threading import TIMEOUT_MAX, Lock
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES, LifecycleObligationState, OperationResourceKind
-from agentworks.errors import StateError, ValidationError
+from agentworks.errors import LimitExceededError, StateError, ValidationError
 from agentworks.execution.carrier import Deadline
 from agentworks.operations import LifecycleObligation, OperationOwner
+
+if TYPE_CHECKING:
+    from agentworks.plugins.gcp._owned_auth import _OwnedAuth
 
 OBLIGATION_KIND = "gcp-gce-start"
 PAYLOAD_VERSION = 1
@@ -144,7 +147,7 @@ class GCEActivation:
         self,
         owner: OperationOwner,
         vm_name: str,
-        credential: object,
+        auth: _OwnedAuth,
         project_id: str,
         zone: str,
         instance_name: str,
@@ -163,7 +166,7 @@ class GCEActivation:
         if expected_locator.token != f"gcp-gce:{project_id}:{zone}:{instance_id}":
             raise ValidationError("GCE activation locator does not match selected identity")
         self._owner = owner
-        self._credential = credential
+        self._auth = auth
         self._obligation_id = uuid4().hex
         self._obligation: LifecycleObligation | None = None
         self._attempted = False
@@ -172,9 +175,6 @@ class GCEActivation:
         # These are the actual returned originals, not close proxies or copied handles.
         self._response: Any = None
         self._service_session: Any = None
-        self._credential_session: Any = None
-        # Request.__del__ closes its session. Keep the wrapper for this adapter's lifetime.
-        self._auth_request: Any = None
 
     @property
     def payload(self) -> ActivationPayload:
@@ -191,7 +191,7 @@ class GCEActivation:
     @property
     def cleanup_incomplete(self) -> bool:
         """An original local handle still lacks confirmed normal closure."""
-        return any(handle is not None for handle in (self._response, self._service_session, self._credential_session))
+        return any(handle is not None for handle in (self._response, self._service_session))
 
     @staticmethod
     def _remaining(deadline: Deadline) -> float:
@@ -200,12 +200,12 @@ class GCEActivation:
         remaining = deadline.remaining()
         assert remaining is not None
         if remaining <= 0:
-            raise TimeoutError("GCE activation deadline expired")
+            raise LimitExceededError("GCE activation deadline expired")
         return remaining
 
     def _acquire(self, deadline: Deadline) -> None:
         if not self._lock.acquire(timeout=min(self._remaining(deadline), TIMEOUT_MAX)):
-            raise TimeoutError("GCE activation transition deadline expired")
+            raise LimitExceededError("GCE activation transition deadline expired")
 
     def _retain_response(self, response: Any, **kwargs: Any) -> None:
         """Public hook captures custody before Requests can consume an unwanted body."""
@@ -235,9 +235,9 @@ class GCEActivation:
                 return bytes(body)
 
     def _close_handles(self) -> None:
-        control: KeyboardInterrupt | SystemExit | None = None
+        control: BaseException | None = None
         try:
-            for attribute in ("_response", "_service_session", "_credential_session"):
+            for attribute in ("_response", "_service_session"):
                 handle = getattr(self, attribute)
                 if handle is None:
                     continue
@@ -245,12 +245,12 @@ class GCEActivation:
                     handle.close()
                 except Exception:
                     pass
-                except (KeyboardInterrupt, SystemExit) as error:
+                except BaseException as error:
                     if control is None:
                         control = error
                 else:
                     setattr(self, attribute, None)
-        except (KeyboardInterrupt, SystemExit):
+        except BaseException:
             if control is not None:
                 raise control from None
             raise
@@ -260,7 +260,8 @@ class GCEActivation:
     def start(self, deadline: Deadline) -> str:
         """Admit one POST and retain its matching ACK before publication or cleanup."""
         self._acquire(deadline)
-        control: KeyboardInterrupt | SystemExit | None = None
+        control: BaseException | None = None
+        auth_begun = False
         try:
             self._remaining(deadline)
             if self._attempted:
@@ -273,50 +274,93 @@ class GCEActivation:
                 obligation_id=self._obligation_id,
             )
             import requests  # type: ignore[import-untyped]
-            from google.auth.transport.requests import AuthorizedSession, Request
 
             try:
                 self._remaining(deadline)
-                self._credential_session = requests.Session()
-                self._credential_session.trust_env = False
-                self._auth_request = Request(session=self._credential_session)
-                remaining = self._remaining(deadline)
-                self._service_session = AuthorizedSession(  # type: ignore[no-untyped-call]
-                    self._credential,
-                    max_refresh_attempts=0,
-                    refresh_timeout=remaining,
-                    auth_request=self._auth_request,
-                )
+                self._auth.begin(deadline)
+                auth_begun = True
+                self._auth.acquire()
+                headers = self._auth.apply_headers("POST", start_url(self._payload))
+                self._service_session = requests.Session()
                 self._service_session.trust_env = False
                 self._remaining(deadline)
                 self._mark_began = True
                 self._obligation.mark_possible_effect()
                 remaining = self._remaining(deadline)
+                self._auth.remaining()
                 self._service_session.request(
                     "POST",
                     start_url(self._payload),
                     stream=True,
                     allow_redirects=False,
-                    headers={"Accept-Encoding": "identity"},
+                    headers=headers,
                     timeout=(remaining, remaining),
                     hooks={"response": self._retain_response},
                 )
                 operation_name = decode_acknowledgment(self._read_body(deadline), self._payload)
                 self._payload = replace(self._payload, operation_name=operation_name)
                 self._reconcile_locked()
-            except (KeyboardInterrupt, SystemExit) as error:
-                control = error
+            except BaseException as error:
+                if not isinstance(error, Exception):
+                    control = error
                 raise
             finally:
                 self._close_handles()
             self._remaining(deadline)
             return operation_name
-        except (KeyboardInterrupt, SystemExit):
+        except BaseException as error:
             if control is not None:
                 raise control from None
+            if not isinstance(error, Exception):
+                control = error
             raise
         finally:
-            self._lock.release()
+            try:
+                if auth_begun:
+                    self._auth.retire_responses()
+            except BaseException as error:
+                if control is not None:
+                    raise control from None
+                if not isinstance(error, Exception):
+                    control = error
+                raise
+            finally:
+                try:
+                    if auth_begun:
+                        self._auth.end()
+                except BaseException as error:
+                    if control is not None:
+                        raise control from None
+                    if not isinstance(error, Exception):
+                        control = error
+                    raise
+                finally:
+                    try:
+                        self._lock.release()
+                    except BaseException:
+                        if control is not None:
+                            raise control from None
+                        raise
+
+    def close(self, deadline: Deadline) -> bool:
+        """Retire this borrower's service originals, never the shared auth lifetime."""
+        self._acquire(deadline)
+        control: BaseException | None = None
+        try:
+            self._close_handles()
+            self._remaining(deadline)
+            return not self.cleanup_incomplete
+        except BaseException as error:
+            if not isinstance(error, Exception):
+                control = error
+            raise
+        finally:
+            try:
+                self._lock.release()
+            except BaseException:
+                if control is not None:
+                    raise control from None
+                raise
 
     def reconcile(self, deadline: Deadline) -> None:
         """Retry exact fenced ledger bookkeeping without provider work or close retries."""

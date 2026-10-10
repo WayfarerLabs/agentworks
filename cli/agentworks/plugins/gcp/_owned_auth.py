@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
+from threading import TIMEOUT_MAX, Lock, current_thread
 from typing import TYPE_CHECKING, Any, cast
 
 from google.auth.transport.requests import Request
 
 from agentworks.capabilities.vm_platform.base import provider_locator_remaining
-from agentworks.errors import AgentworksError, ProvisioningError, StateError, ValidationError
+from agentworks.errors import AgentworksError, LimitExceededError, ProvisioningError, StateError, ValidationError
 from agentworks.plugins.gcp.config import GcpAmbientAuth, GcpServiceAccountAuth
 
 if TYPE_CHECKING:
@@ -20,20 +22,65 @@ if TYPE_CHECKING:
 
 _CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 _MAX_CREDENTIAL_RESPONSES = 31
+_MAX_RETAINED_COPIES = 32
 
 
 class _OwnedRequest(Request):
-    """Real public Request with its owner's active original observation budget.
+    """Real public Request with root binding or a copied original deadline.
 
     Keep the public session and certificate arguments available to credentials.
     SDK-created requests, discovery processes and constructor handoff are not
     retroactively owned by this supplied transport.
     """
 
-    def __init__(self, owner: _OwnedAuth, session: Any) -> None:
+    def __init__(self, owner: _OwnedAuth, deadline: Deadline | None = None) -> None:
+        self._owner = owner
+        self._deadline = deadline
+        self.session: Any = None
+        self._response_hook = self._retain_response
+        self._responses: list[Any] = []
+        self._uncertain = False
+        self._barred = False
+        self._worker: Any = None
+        self._active = False
+
+    def attach(self, session: Any) -> None:
+        # Retain the returned original before the public wrapper initializer.
+        self.session = session
         initialize = cast("Callable[..., None]", super().__init__)
         initialize(session=session)
-        self._owner = owner
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> _OwnedRequest:
+        self._owner.remaining()
+        clone = _OwnedRequest(self._owner, self._owner._deadline)
+        with self._owner._entry:
+            if self._owner.closed or len(self._owner._copies) >= _MAX_RETAINED_COPIES:
+                self._owner._failed = True
+                self._owner._copy_failed = True
+                raise self._owner.refusal()
+            self._owner._copies.append(clone)
+        memo[id(self)] = clone
+        # This exact installed bound method must not traverse the owner/locks.
+        memo[id(self._response_hook)] = clone._response_hook
+        try:
+            clone.session = deepcopy(self.session, memo)
+            clone.attach(clone.session)
+        except BaseException:
+            clone._barred = True
+            self._owner._failed = True
+            self._owner._copy_failed = True
+            raise
+        return clone
+
+    def remaining(self) -> float:
+        if self._deadline is None:
+            return self._owner.remaining()
+        return provider_locator_remaining(self._deadline, vm_name=self._owner._vm_name)
+
+    def _retain_response(self, response: Any, **kwargs: Any) -> None:
+        self._responses.append(response)
+        if len(self._responses) > _MAX_CREDENTIAL_RESPONSES:
+            raise self._owner.refusal()
 
     def __call__(
         self,
@@ -44,21 +91,72 @@ class _OwnedRequest(Request):
         timeout: Any = 120,
         **kwargs: Any,
     ) -> Any:
-        self._owner.remaining()
-        self._owner.retire_responses()
-        if self._owner.cleanup_incomplete:
-            raise self._owner.refusal()
-        remaining = self._owner.remaining()
-        if timeout is None:
-            bounded: Any = remaining
-        elif isinstance(timeout, tuple) and len(timeout) == 2:
-            bounded = tuple(self._cap(value, remaining) for value in timeout)
-        else:
-            bounded = self._cap(timeout, remaining)
-        invoke = cast("Callable[..., Any]", super().__call__)
-        response = invoke(url, method=method, body=body, headers=headers, timeout=bounded, **kwargs)
-        self._owner.remaining()
-        return response
+        with self._owner._entry:
+            if self._owner.closed or self._barred or self._active or self._uncertain:
+                raise self._owner.refusal()
+            self.remaining()
+            if self._deadline is None and self._owner._caller is not current_thread():
+                raise self._owner.refusal()
+            if self._deadline is not None:
+                worker = current_thread()
+                if self._worker is not None and self._worker is not worker:
+                    raise self._owner.refusal()
+                # Observe the actual consumer before Session or prior Responses.
+                self._worker = worker
+            self._active = True
+        try:
+            self.retire_responses()
+            if self._uncertain:
+                raise self._owner.refusal()
+            remaining = self.remaining()
+            if timeout is None:
+                bounded: Any = remaining
+            elif isinstance(timeout, tuple) and len(timeout) == 2:
+                bounded = tuple(self._cap(value, remaining) for value in timeout)
+            else:
+                bounded = self._cap(timeout, remaining)
+            invoke = cast("Callable[..., Any]", super().__call__)
+            response = invoke(url, method=method, body=body, headers=headers, timeout=bounded, **kwargs)
+            self.remaining()
+            return response
+        finally:
+            with self._owner._entry:
+                self._active = False
+
+    def retire_responses(self, *, retry: bool = False) -> None:
+        """Close only after this lane's SDK consumer advanced or finished."""
+        if self._uncertain and not retry:
+            return
+        control: BaseException | None = None
+        try:
+            for response in tuple(self._responses):
+                try:
+                    response.close()
+                except Exception:
+                    self._uncertain = True
+                except BaseException as error:
+                    self._uncertain = True
+                    if control is None:
+                        control = error
+                else:
+                    self._responses.remove(response)
+        except BaseException:
+            self._uncertain = True
+            if control is not None:
+                raise control from None
+            raise
+        self._uncertain = bool(self._responses)
+        if control is not None:
+            raise control
+
+    def close_session(self) -> None:
+        if self.session is not None:
+            try:
+                self.session.close()
+            except Exception:
+                self._uncertain = True
+            else:
+                self.session = None
 
     @staticmethod
     def _cap(value: Any, remaining: float) -> float:
@@ -70,29 +168,38 @@ class _OwnedRequest(Request):
 
 
 class _OwnedAuth:
-    """Credential dependency and bounded responses, serialized by the reader.
+    """Shared selected credentials, root/copy custody and terminal admission.
 
-    An active session is a dependency, not failed cleanup. There is no second
-    terminal state: the reader closes admission and supplies final-close context.
+    Active copied consumers are dependencies, not failed cleanup. Borrowers use
+    one operation lock; the retained access owner alone calls terminal close.
     """
 
-    def __init__(self, vm_name: str) -> None:
+    def __init__(self, vm_name: str, auth: GcpAuth, ctx: RunContext, site_name: str) -> None:
         self._vm_name = vm_name
+        self._auth = auth
+        self._ctx = ctx
+        self._site_name = site_name
         self._deadline: Deadline | None = None
         self._credential: Any = None
-        self._session: Any = None
         self._request: _OwnedRequest | None = None
-        self._responses: list[Any] = []
-        self._responses_uncertain = False
+        self._copies: list[_OwnedRequest] = []
+        self._entry = Lock()
+        self._operation = Lock()
+        self._caller: Any = None
+        self.closed = False
         self._failed = False
+        self._copy_failed = False
 
     @property
     def cleanup_incomplete(self) -> bool:
-        return bool(self._responses)
+        lanes = ([self._request] if self._request is not None else []) + self._copies
+        return any(lane._uncertain or (self.closed and (lane.session is not None or lane._responses)) for lane in lanes)
 
     @property
     def session_retained(self) -> bool:
-        return self._session is not None
+        return (self._request is not None and self._request.session is not None) or any(
+            lane.session is not None for lane in self._copies
+        )
 
     def refusal(self) -> StateError:
         return StateError(
@@ -102,27 +209,39 @@ class _OwnedAuth:
         )
 
     def begin(self, deadline: Deadline) -> None:
-        if self._deadline is not None or self._failed or self.cleanup_incomplete:
+        remaining = provider_locator_remaining(deadline, vm_name=self._vm_name)
+        if self._caller is current_thread():
             raise self.refusal()
-        provider_locator_remaining(deadline, vm_name=self._vm_name)
-        self._deadline = deadline
+        if not self._operation.acquire(timeout=min(remaining, TIMEOUT_MAX)):
+            raise LimitExceededError("GCP authentication transition exceeded its deadline")
+        try:
+            if self.closed or self._failed or self.cleanup_incomplete:
+                raise self.refusal()
+            self._deadline = deadline
+            self._caller = current_thread()
+            self.retire_copies(deadline)
+            if self.cleanup_incomplete or len(self._copies) >= _MAX_RETAINED_COPIES:
+                raise self.refusal()
+        except BaseException as error:
+            self._deadline = None
+            self._caller = None
+            try:
+                self._operation.release()
+            except BaseException:
+                raise error from None
+            raise
 
     def end(self) -> None:
         self._deadline = None
+        self._caller = None
+        self._operation.release()
 
     def remaining(self) -> float:
-        if self._deadline is None:
+        if self._deadline is None or self._copy_failed or self.cleanup_incomplete:
             raise self.refusal()
         return provider_locator_remaining(self._deadline, vm_name=self._vm_name)
 
-    def _retain_response(self, response: Any, **kwargs: Any) -> None:
-        # Stock Session permits 30 redirects and their final response. Retain an
-        # unexpected overflow original before refusing; never drop its custody.
-        self._responses.append(response)
-        if len(self._responses) > _MAX_CREDENTIAL_RESPONSES:
-            raise self.refusal()
-
-    def acquire(self, auth: GcpAuth, ctx: RunContext, site_name: str) -> None:
+    def acquire(self) -> None:
         self.remaining()
         if self._credential is not None:
             return
@@ -130,12 +249,13 @@ class _OwnedAuth:
         self._failed = True
         import requests  # type: ignore[import-untyped]
 
-        self._session = requests.Session()
-        self._session.trust_env = False
-        self._session.hooks["response"].append(self._retain_response)
-        self._request = _OwnedRequest(self, self._session)
+        self._request = _OwnedRequest(self)
+        self._request.session = requests.Session()
+        self._request.attach(self._request.session)
+        self._request.session.trust_env = False
+        self._request.session.hooks["response"].append(self._request._response_hook)
         self.remaining()
-        if isinstance(auth, GcpAmbientAuth):
+        if isinstance(self._auth, GcpAmbientAuth):
             import google.auth
 
             failure: ProvisioningError | None = None
@@ -147,9 +267,9 @@ class _OwnedAuth:
                 raise
             except Exception:
                 failure = ProvisioningError(
-                    f"could not construct Application Default Credentials for vm-site '{site_name}'",
+                    f"could not construct Application Default Credentials for vm-site '{self._site_name}'",
                     entity_kind="vm-site",
-                    entity_name=site_name,
+                    entity_name=self._site_name,
                     hint="configure Application Default Credentials or select auth.mode service-account",
                 )
             if failure is not None:
@@ -157,61 +277,118 @@ class _OwnedAuth:
             if self._credential is None:
                 raise self.refusal()
         else:
-            self._credential = _service_account(auth, ctx.secret(auth.secret), site_name)
+            self._credential = _service_account(self._auth, self._ctx.secret(self._auth.secret), self._site_name)
+        if self._copy_failed:
+            raise self.refusal()
         self._failed = False
         self.remaining()
 
-    def apply_headers(self) -> dict[str, str]:
+    def apply_headers(self, method: str, url: str) -> dict[str, str]:
         from google.auth.credentials import TokenState
 
         self.remaining()
-        if self._credential.token_state in (TokenState.STALE, TokenState.INVALID):
-            self._credential.refresh(self._request)
+        headers = {"Accept-Encoding": "identity"}
+        self._credential.before_request(self._request, method, url, headers)
         self.remaining()
         self.retire_responses()
-        if self.cleanup_incomplete:
+        if self._failed or self.cleanup_incomplete:
             raise self.refusal()
         if self._credential.token_state not in (TokenState.STALE, TokenState.FRESH):
             raise self.refusal()
-        headers = {"Accept-Encoding": "identity"}
-        self._credential.apply(headers)
         self.remaining()
         return headers
 
     def retire_responses(self, *, retry: bool = False) -> None:
-        """Retire each actual response only after its SDK consumer returned."""
-        if self._responses_uncertain and not retry:
-            return
+        if self._request is not None:
+            self._request.retire_responses(retry=retry)
+
+    def retire_copies(self, deadline: Deadline, *, final: bool = False) -> None:
+        """Bar entry first; join only positively observed consumers outside the barrier."""
         control: BaseException | None = None
+        with self._entry:
+            if final:
+                self.closed = True
+            candidates = []
+            for lane in self._copies:
+                worker = lane._worker
+                expired = lane._deadline is not None and lane._deadline.remaining() == 0
+                if (
+                    final
+                    or lane._barred
+                    or (worker is not None and not worker.is_alive())
+                    or (expired and worker is None)
+                ):
+                    lane._barred = True
+                    candidates.append(lane)
         try:
-            for response in tuple(self._responses):
+            for lane in candidates:
                 try:
-                    response.close()
+                    if lane._worker is not None:
+                        lane._worker.join(
+                            timeout=min(provider_locator_remaining(deadline, vm_name=self._vm_name), TIMEOUT_MAX)
+                        )
+                        if lane._worker.is_alive():
+                            lane._uncertain = True
+                            continue
                 except Exception:
-                    self._responses_uncertain = True
+                    lane._uncertain = True
+                    continue
                 except BaseException as error:
-                    self._responses_uncertain = True
+                    lane._uncertain = True
                     if control is None:
                         control = error
-                else:
-                    self._responses.remove(response)
+                    continue
+                try:
+                    lane.retire_responses(retry=final)
+                except BaseException as error:
+                    lane._uncertain = True
+                    if control is None:
+                        control = error
+                try:
+                    lane.close_session()
+                except BaseException as error:
+                    lane._uncertain = True
+                    if control is None:
+                        control = error
+                if lane.session is None and not lane._responses:
+                    self._copies.remove(lane)
         except BaseException:
             if control is not None:
                 raise control from None
             raise
-        self._responses_uncertain = bool(self._responses)
         if control is not None:
             raise control
 
-    def close_session(self) -> None:
-        """Retry only the retained original through its public close method."""
-        if self._session is not None:
+    def close(self, deadline: Deadline) -> None:
+        remaining = provider_locator_remaining(deadline, vm_name=self._vm_name)
+        if not self._operation.acquire(timeout=min(remaining, TIMEOUT_MAX)):
+            raise LimitExceededError("GCP authentication close exceeded its deadline")
+        control: BaseException | None = None
+        try:
             try:
-                self._session.close()
-            except Exception:
-                pass
-            else:
-                self._session = None
+                self.retire_copies(deadline, final=True)
+            except BaseException as error:
+                control = error
+            if self._request is not None:
+                try:
+                    self._request.retire_responses(retry=True)
+                except BaseException as error:
+                    if control is None:
+                        control = error
+                try:
+                    self._request.close_session()
+                except BaseException as error:
+                    if control is None:
+                        control = error
+            if control is not None:
+                raise control
+        finally:
+            try:
+                self._operation.release()
+            except BaseException:
+                if control is not None:
+                    raise control from None
+                raise
 
 
 def _service_account(auth: GcpServiceAccountAuth, secret: str, site_name: str) -> Any:

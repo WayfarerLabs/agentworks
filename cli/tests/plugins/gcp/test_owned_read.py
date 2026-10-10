@@ -13,6 +13,7 @@ from agentworks.db import VMStatus
 from agentworks.errors import LimitExceededError, StateError, ValidationError
 from agentworks.execution.carrier import Deadline
 from agentworks.plugins.gcp._native_access import MAX_BODY_BYTES, GCEOwnedRead
+from agentworks.plugins.gcp._owned_auth import _OwnedRequest
 from agentworks.plugins.gcp.config import GcpAmbientAuth
 
 
@@ -198,7 +199,8 @@ def test_explicit_close_retries_only_same_originals(reader):
 
 def test_active_auth_session_is_dependency_until_final_close(reader):
     original = SimpleNamespace(close=lambda: None)
-    reader._auth._session = original
+    reader._auth._request = _OwnedRequest(reader._auth)
+    reader._auth._request.attach(original)
     assert not reader.cleanup_incomplete
     assert reader.close(Deadline.after(5))
     assert not reader.cleanup_incomplete
@@ -216,7 +218,8 @@ def test_cleanup_control_retains_original_and_attempts_independent_close(reader,
     response = SimpleNamespace(close=interrupt)
     reader._response = response
     reader._service_session = SimpleNamespace(close=lambda: calls.append("service"))
-    reader._auth._session = SimpleNamespace(close=lambda: calls.append("credential"))
+    reader._auth._request = _OwnedRequest(reader._auth)
+    reader._auth._request.attach(SimpleNamespace(close=lambda: calls.append("credential")))
     with pytest.raises(control_type) as caught:
         reader.close(Deadline.after(5))
     assert caught.value is control

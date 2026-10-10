@@ -15,7 +15,7 @@ import pytest
 from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.db import Database
 from agentworks.db.operations import LifecycleObligationState, OperationResourceKind, OperationScope
-from agentworks.errors import StateError, ValidationError
+from agentworks.errors import LimitExceededError, StateError, ValidationError
 from agentworks.execution.carrier import Deadline
 from agentworks.operations import LifecycleObligation, OperationOwner
 from agentworks.plugins.gcp._activation import (
@@ -25,6 +25,8 @@ from agentworks.plugins.gcp._activation import (
     decode_activation_payload,
     encode_activation_payload,
 )
+from agentworks.plugins.gcp._owned_auth import _OwnedAuth
+from agentworks.plugins.gcp.config import GcpAmbientAuth
 
 PAYLOAD = ActivationPayload("project", "us-central1-a", "backend", "123", "12345678-1234-4234-8234-123456789abc")
 
@@ -48,8 +50,8 @@ def isolated_config(tmp_path, monkeypatch):
 
 @pytest.fixture
 def owned(tmp_path, monkeypatch):
+    import google.auth
     import requests  # type: ignore[import-untyped]
-    from google.auth.transport import requests as auth
 
     handles: list[Any] = []
     sends: list[str] = []
@@ -59,6 +61,7 @@ def owned(tmp_path, monkeypatch):
         def __init__(self, kind) -> None:
             self.kind = kind
             self.closed = False
+            self.hooks: dict[str, list[Any]] = {"response": []}
             handles.append(self)
 
         def close(self):
@@ -94,8 +97,16 @@ def owned(tmp_path, monkeypatch):
             kwargs["hooks"]["response"](response)
             return response
 
-    monkeypatch.setattr(requests, "Session", lambda: Session("credential"))
-    monkeypatch.setattr(auth, "AuthorizedSession", lambda *args, **kwargs: Service("service"))
+    def session():
+        return Session("credential") if not handles else Service("service")
+
+    credential = SimpleNamespace(token_state=None, before_request=lambda request, method, url, headers: None)
+    from google.auth.credentials import TokenState
+
+    credential.token_state = TokenState.FRESH
+    monkeypatch.setattr(requests, "Session", session)
+    monkeypatch.setattr(google.auth, "default", lambda **kwargs: (credential, "ignored"))
+    shared_auth = _OwnedAuth("database-vm", GcpAmbientAuth(mode="ambient"), SimpleNamespace(), "site")
     with closing(Database(tmp_path / "state.db")) as database:
         owner = OperationOwner.acquire(
             database.operations, OperationScope(OperationResourceKind.VM, "database-vm"), "test"
@@ -103,7 +114,7 @@ def owned(tmp_path, monkeypatch):
         adapter = GCEActivation(
             owner,
             "database-vm",
-            object(),
+            shared_auth,
             "project",
             "us-central1-a",
             "backend",
@@ -132,13 +143,47 @@ def test_passive_one_post_keeps_possible_effect_and_owner(owned):
     assert not p.handles and not p.sends and not p.adapter.cleanup_incomplete
     assert UUID(p.adapter.payload.request_id).int != 0
     assert p.adapter.start(Deadline.after(5)) == "Operation_1"
-    assert p.closes == ["response", "service", "credential"]
+    assert p.closes == ["response", "service"]
     assert row(p).state is LifecycleObligationState.POSSIBLE_EFFECT and row(p).payload_revision == 1
     p.adapter.reconcile(Deadline.after(5))
     with pytest.raises(StateError):
         p.adapter.start(Deadline.after(5))
     assert len(p.sends) == 1 and not p.adapter.cleanup_incomplete
     assert p.database.operations.inspect(p.owner.ownership.scope) is not None
+    assert p.adapter.close(Deadline.after(5))
+    assert not p.adapter._auth.closed and p.adapter._auth.session_retained
+    p.adapter._auth.close(Deadline.after(5))
+    assert p.closes == ["response", "service", "credential"]
+
+
+@pytest.mark.parametrize("control_type", [KeyboardInterrupt, SystemExit])
+def test_explicit_close_preserves_primary_control_when_release_raises(owned, control_type):
+    adapter = owned.adapter
+    primary = control_type("original close")
+    secondary = SystemExit("release") if control_type is KeyboardInterrupt else KeyboardInterrupt("release")
+    original_lock = adapter._lock
+
+    def close():
+        raise primary
+
+    original_response = SimpleNamespace(close=close)
+    adapter._response = original_response
+
+    class Lock:
+        def acquire(self, **kwargs):
+            return original_lock.acquire(**kwargs)
+
+        def release(self):
+            original_lock.release()
+            raise secondary
+
+    adapter._lock = Lock()
+    with pytest.raises(control_type) as caught:
+        adapter.close(Deadline.after(5))
+    assert caught.value is primary
+    assert not original_lock.locked()
+    assert adapter._response is original_response and adapter.cleanup_incomplete
+    assert not adapter._auth.closed and not owned.sends
 
 
 @pytest.mark.parametrize("stage", ["register", "mark", "publish"])
@@ -227,7 +272,7 @@ def test_foreign_or_premature_receipt_refused(owned, monkeypatch, field, value):
 
 def test_bad_deadline_and_stopped_admission_create_no_handles(owned):
     for deadline in [Deadline.after(None), Deadline.after(0)]:
-        with pytest.raises((ValidationError, TimeoutError)):
+        with pytest.raises((ValidationError, LimitExceededError)):
             owned.adapter.start(deadline)
     owned.owner.stop_admission()
     with pytest.raises(StateError):
@@ -257,7 +302,7 @@ def test_concurrent_admission_and_lock_expiry_send_once(owned, monkeypatch):
     thread.start()
     try:
         assert entered.wait(5)
-        with pytest.raises(TimeoutError):
+        with pytest.raises(LimitExceededError):
             p.adapter.start(Deadline.after(0.01))
     finally:
         release.set()

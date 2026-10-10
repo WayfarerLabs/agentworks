@@ -67,23 +67,15 @@ class GCEOwnedRead:
                 entity_kind="vm",
                 entity_name=vm.name,
             )
-        self._auth_config = platform.config.auth
-        self._ctx = ctx
-        self._auth = _OwnedAuth(vm.name)
+        self._auth = _OwnedAuth(vm.name, platform.config.auth, ctx, platform.site_name)
         self._service_session: Any = None
         self._response: Any = None
-        self._closed = False
         self._lock = Lock()
 
     @property
     def cleanup_incomplete(self) -> bool:
         """Active credential dependencies become cleanup debt only on final close."""
-        return (
-            self._response is not None
-            or self._service_session is not None
-            or self._auth.cleanup_incomplete
-            or (self._closed and self._auth.session_retained)
-        )
+        return self._response is not None or self._service_session is not None or self._auth.cleanup_incomplete
 
     def observe_power(self, deadline: Deadline) -> VMStatus:
         _, power = self._read_exact_instance(deadline)
@@ -185,22 +177,25 @@ class GCEOwnedRead:
         self._acquire(deadline)
         control: BaseException | None = None
         admitted = False
+        auth_begun = False
         completed = False
         try:
             self._remaining(deadline)
-            if self._closed or self.cleanup_incomplete:
+            if self._auth.closed or self.cleanup_incomplete:
                 raise StateError("GCE read cannot admit an observation", entity_kind="vm", entity_name=self._vm_name)
             admitted = True
             self._auth.begin(deadline)
+            auth_begun = True
             import requests  # type: ignore[import-untyped]
 
             failure: AgentworksError | None = None
             try:
-                self._auth.acquire(self._auth_config, self._ctx, self._site_name)
-                headers = self._auth.apply_headers()
+                self._auth.acquire()
+                headers = self._auth.apply_headers("GET", self._url())
                 self._service_session = requests.Session()
                 self._service_session.trust_env = False
                 remaining = self._remaining(deadline)
+                self._auth.remaining()
                 self._service_session.request(
                     "GET",
                     self._url(),
@@ -235,7 +230,11 @@ class GCEOwnedRead:
             try:
                 try:
                     if admitted:
-                        self._close_handles(final=False)
+                        try:
+                            self._close_handles()
+                        finally:
+                            if auth_begun:
+                                self._auth.retire_responses()
                     if completed:
                         self._remaining(deadline)
                 except BaseException as error:
@@ -246,7 +245,8 @@ class GCEOwnedRead:
                     raise
             finally:
                 try:
-                    self._auth.end()
+                    if auth_begun:
+                        self._auth.end()
                 except BaseException as error:
                     if control is not None:
                         raise control from None
@@ -261,7 +261,7 @@ class GCEOwnedRead:
                             raise control from None
                         raise
 
-    def _close_handles(self, *, final: bool) -> None:
+    def _close_handles(self) -> None:
         control: BaseException | None = None
         try:
             for attribute in ("_response", "_service_session"):
@@ -277,17 +277,6 @@ class GCEOwnedRead:
                         control = error
                 else:
                     setattr(self, attribute, None)
-            try:
-                self._auth.retire_responses(retry=final)
-            except BaseException as error:
-                if control is None:
-                    control = error
-            if final:
-                try:
-                    self._auth.close_session()
-                except BaseException as error:
-                    if control is None:
-                        control = error
         except BaseException:
             if control is not None:
                 raise control from None
@@ -300,9 +289,19 @@ class GCEOwnedRead:
         self._acquire(deadline)
         control: BaseException | None = None
         try:
-            self._closed = True
             self._remaining(deadline)
-            self._close_handles(final=True)
+            try:
+                self._close_handles()
+            except BaseException as error:
+                control = error
+            try:
+                self._auth.close(deadline)
+            except BaseException:
+                if control is not None:
+                    raise control from None
+                raise
+            if control is not None:
+                raise control
             self._remaining(deadline)
             return not self.cleanup_incomplete
         except BaseException as error:

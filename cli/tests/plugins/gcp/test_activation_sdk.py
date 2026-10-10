@@ -12,22 +12,27 @@ import weakref
 from collections.abc import Callable
 from contextlib import closing
 from textwrap import dedent
+from threading import Event
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
+import google.auth
 import pytest
 import requests  # type: ignore[import-untyped]
 from google.auth.credentials import Credentials
-from google.auth.transport.requests import AuthorizedSession
+from google.oauth2 import service_account
 from urllib3.response import HTTPResponse
 
 from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.db import Database
 from agentworks.db.operations import LifecycleObligationState, OperationResourceKind, OperationScope
-from agentworks.errors import StateError, ValidationError
+from agentworks.errors import LimitExceededError, StateError, ValidationError
 from agentworks.execution.carrier import Deadline
 from agentworks.operations import OperationOwner
 from agentworks.plugins.gcp._activation import MAX_BODY_BYTES, GCEActivation, decode_activation_payload
+from agentworks.plugins.gcp._owned_auth import _OwnedAuth, _OwnedRequest
+from agentworks.plugins.gcp.config import GcpAmbientAuth
+from tests.plugins.gcp.test_owned_read_sdk import sa_document as sa_document
 
 RETAINED_ADAPTERS: list[GCEActivation] = []
 
@@ -91,8 +96,6 @@ def isolated_config(tmp_path, monkeypatch):
 
 @pytest.fixture
 def sdk(tmp_path, monkeypatch):
-    from google.auth.transport import requests as auth
-
     p = SimpleNamespace(
         status=200,
         headers={},
@@ -100,33 +103,28 @@ def sdk(tmp_path, monkeypatch):
         reply=None,
         service_calls=[],
         credential_calls=[],
+        boundary_calls=[],
+        boundary_entered=Event(),
         closes=[],
         sessions=[],
         responses=[],
         before_close=None,
         read_callback=lambda data: None,
     )
-    ordinary, authorized = requests.Session, auth.AuthorizedSession
-    init_authorized: Callable[..., None] = authorized.__init__
+    ordinary = requests.Session
     labels: weakref.WeakKeyDictionary[Any, str] = weakref.WeakKeyDictionary()
     close_session, close_response = requests.Session.close, requests.Response.close
 
     def credential_session():
         session = ordinary()
-        p.sessions.append(("credential", session))
-        labels[session] = "credential"
-        p.credential_session = session
+        kind = "credential" if not p.sessions else "service"
+        p.sessions.append((kind, session))
+        labels[session] = kind
+        if kind == "credential":
+            p.credential_session = session
+        else:
+            p.service_session = session
         return session
-
-    def service_session(session, *args, **kwargs):
-        assert kwargs["max_refresh_attempts"] == 0 and 0 < kwargs["refresh_timeout"] <= 5
-        assert kwargs["auth_request"] is p.adapter._auth_request
-        init_authorized(session, *args, **kwargs)
-        p.sessions.append(("service", session))
-        labels[session] = "service"
-        p.service_session = session
-        assert session.verify is True
-        assert session.get_adapter("https://compute.googleapis.com").max_retries.total == 0
 
     def close(self):
         kind = labels.get(self)
@@ -147,8 +145,19 @@ def sdk(tmp_path, monkeypatch):
 
     def send(self, request, **kwargs):
         assert kwargs["verify"] is True and kwargs["proxies"] == {}
-        assert all(0 < timeout <= 5 for timeout in kwargs["timeout"])
+        timeout = kwargs["timeout"]
+        assert all(0 < value <= 5 for value in (timeout if isinstance(timeout, tuple) else (timeout,)))
+        if request.url.endswith("/allowedLocations"):
+            assert request.method == "GET"
+            p.boundary_calls.append((request.method, request.url))
+            p.boundary_entered.set()
+            response = requests.Response()
+            response.request, response.url, response.status_code = request, request.url, 200
+            response.raw = HTTPResponse(body=io.BytesIO(b'{"encodedLocations":"0x1"}'), preload_content=False)
+            return response
         if request.url == "https://credential.invalid/token":
+            row = p.owner.inspect_lifecycle_obligation(p.adapter.obligation_id)
+            assert row is not None and row.state is LifecycleObligationState.REGISTERED
             p.credential_calls.append((request.method, request.url))
             response = requests.Response()
             response.request, response.url, response.status_code = request, request.url, 200
@@ -158,6 +167,10 @@ def sdk(tmp_path, monkeypatch):
         expected += f"backend/start?requestId={p.adapter.payload.request_id}"
         assert request.method == "POST" and request.url == expected
         assert request.body is None and request.headers["Accept-Encoding"] == "identity"
+        if isinstance(p.credential, service_account.Credentials):
+            assert p.credential.token is not None
+            assert request.headers["Authorization"] == "Bearer " + p.credential.token
+            assert request.headers["x-goog-user-project"] == p.credential.quota_project_id
         assert kwargs["stream"] is True
         assert p.service_session.trust_env is False and p.credential_session.trust_env is False
         row = p.owner.inspect_lifecycle_obligation(p.adapter.obligation_id)
@@ -174,17 +187,18 @@ def sdk(tmp_path, monkeypatch):
         return response
 
     monkeypatch.setattr(requests, "Session", credential_session)
-    monkeypatch.setattr(authorized, "__init__", service_session)
     monkeypatch.setattr(ordinary, "close", close)
     monkeypatch.setattr(Response, "close", close_reply)
     monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", send)
     p.credential = Credential()
+    monkeypatch.setattr(google.auth, "default", lambda **kwargs: (p.credential, "ignored"))
+    p.auth = _OwnedAuth("db-vm", GcpAmbientAuth(mode="ambient"), SimpleNamespace(), "site")
     with closing(Database(tmp_path / "sdk.db")) as database:
         p.owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "db-vm"), "sdk")
         p.adapter = GCEActivation(
             p.owner,
             "db-vm",
-            p.credential,
+            p.auth,
             "project",
             "us-central1-a",
             "backend",
@@ -196,8 +210,11 @@ def sdk(tmp_path, monkeypatch):
         assert all(response.raw.closed or p.adapter._response is response for response in p.responses)
         assert not p.adapter._lock.locked()
         # Teardown does not retry uncertain originals or trigger Request.__del__ on them.
-        if p.adapter.cleanup_incomplete:
+        if p.adapter.cleanup_incomplete or p.auth.cleanup_incomplete:
             RETAINED_ADAPTERS.append(p.adapter)
+        else:
+            p.before_close = None
+            p.auth.close(Deadline.after(5))
         print(
             "dispatch accounting:",
             len(p.service_calls),
@@ -225,7 +242,25 @@ def test_public_success_and_separately_attributed_credential_refresh(sdk, refres
     assert sdk.adapter.start(Deadline.after(5)) == "Operation_1"
     assert_receipt(sdk, True)
     assert len(sdk.credential_calls) == sdk.credential.refreshes == int(refresh)
-    assert sdk.closes == ["response", "service", "credential"] and not sdk.adapter.cleanup_incomplete
+    assert sdk.closes == ["response", "service"] and not sdk.adapter.cleanup_incomplete
+
+
+def test_real_selected_service_account_post_preserves_default_boundary_and_shared_lifetime(sdk, sa_document):
+    factory = cast("Callable[..., Any]", service_account.Credentials.from_service_account_info)
+    selected = factory(sa_document, scopes=("https://www.googleapis.com/auth/cloud-platform",)).with_quota_project(
+        "selected-quota"
+    )
+    selected.token = "selected-service-account-token"
+    sdk.credential = selected
+    assert sdk.adapter.start(Deadline.after(5)) == "Operation_1"
+    assert sdk.boundary_entered.wait(5)
+    assert sdk.adapter.close(Deadline.after(5))
+    assert not sdk.auth.closed and sdk.auth.session_retained
+    sdk.auth.close(Deadline.after(5))
+    assert selected.regional_access_boundary == "0x1"
+    assert sdk.auth._credential is selected
+    assert len(sdk.service_calls) == len(sdk.boundary_calls) == 1 and not sdk.credential_calls
+    assert_receipt(sdk, True)
 
 
 @pytest.mark.parametrize(
@@ -253,7 +288,7 @@ def test_hook_refuses_before_body_read_redirect_or_refresh_replay(sdk, status, h
         sdk.adapter.start(Deadline.after(5))
     assert sdk.responses[0].raw.reads == []
     assert sdk.credential.refreshes == 0 and not sdk.credential_calls
-    assert sdk.closes == ["response", "service", "credential"]
+    assert sdk.closes == ["response", "service"]
     assert_receipt(sdk, False)
 
 
@@ -270,7 +305,7 @@ def test_connection_failure_or_control_does_not_replay(sdk, exception_type):
     sdk.reply = primary
     with pytest.raises(exception_type) as caught:
         sdk.adapter.start(Deadline.after(5))
-    assert caught.value is primary and sdk.closes == ["service", "credential"]
+    assert caught.value is primary and sdk.closes == ["service"]
     assert_receipt(sdk, False)
 
 
@@ -303,7 +338,7 @@ def test_original_deadline_partial_expiry_or_matching_late_ack(sdk, monkeypatch,
 
     monkeypatch.setattr(Deadline, "remaining", remaining)
     sdk.read_callback = read
-    with pytest.raises(TimeoutError):
+    with pytest.raises(LimitExceededError):
         sdk.adapter.start(deadline)
     assert (sdk.adapter.payload.operation_name is not None) is complete
     assert_receipt(sdk, complete)
@@ -325,23 +360,35 @@ def test_uncertain_original_close_retained_once_with_wrapper(sdk, handle, closed
         normally()
 
     sdk.before_close = close
-    if error_type is OSError:
+    if handle == "credential":
         assert sdk.adapter.start(Deadline.after(5)) == "Operation_1"
+    if error_type is OSError:
+        if handle == "credential":
+            sdk.auth.close(Deadline.after(5))
+        else:
+            assert sdk.adapter.start(Deadline.after(5)) == "Operation_1"
     else:
         with pytest.raises(error_type) as caught:
-            sdk.adapter.start(Deadline.after(5))
+            if handle == "credential":
+                sdk.auth.close(Deadline.after(5))
+            else:
+                sdk.adapter.start(Deadline.after(5))
         assert caught.value is primary
     primary.__traceback__ = None
-    field = {"response": "_response", "service": "_service_session", "credential": "_credential_session"}[handle]
+    field = {"response": "_response", "service": "_service_session"}.get(handle)
     original_ref = weakref.ref(selected.pop())
-    wrapper_ref = weakref.ref(sdk.adapter._auth_request)
-    assert getattr(sdk.adapter, field) is original_ref() and sdk.adapter.cleanup_incomplete
-    assert sdk.adapter._auth_request.session is sdk.credential_session
+    wrapper_ref = weakref.ref(sdk.auth._request)
+    if field is None:
+        assert sdk.auth._request.session is original_ref() and sdk.auth.cleanup_incomplete
+        assert not sdk.adapter.cleanup_incomplete
+    else:
+        assert getattr(sdk.adapter, field) is original_ref() and sdk.adapter.cleanup_incomplete
+    assert sdk.auth._request.session is sdk.credential_session
     sdk.sessions.clear()
     sdk.responses.clear()
     sdk.service_session = sdk.credential_session = None
     gc.collect()
-    assert original_ref() is not None and wrapper_ref() is sdk.adapter._auth_request
+    assert original_ref() is not None and wrapper_ref() is sdk.auth._request
     before = list(sdk.closes)
     assert_receipt(sdk, True)
     assert sdk.closes == before and sdk.closes.count(handle) == 1
@@ -408,17 +455,17 @@ def test_cleanup_boundaries_keep_primary_custody_and_release_lock(sdk, monkeypat
 
 
 def test_hook_captures_original_when_public_method_raises_after_hook(sdk, monkeypatch):
-    request: Callable[..., Any] = AuthorizedSession.request
+    request: Callable[..., Any] = requests.sessions.Session.request
     primary = KeyboardInterrupt("after hook")
 
     def interrupted(self, *args, **kwargs):
         request(self, *args, **kwargs)
         raise primary
 
-    monkeypatch.setattr(AuthorizedSession, "request", interrupted)
+    monkeypatch.setattr(requests.sessions.Session, "request", interrupted)
     with pytest.raises(KeyboardInterrupt) as caught:
         sdk.adapter.start(Deadline.after(5))
-    assert caught.value is primary and sdk.closes == ["response", "service", "credential"]
+    assert caught.value is primary and sdk.closes == ["response", "service"]
     assert_receipt(sdk, False)
 
 
@@ -440,10 +487,10 @@ def test_original_control_wins_over_all_close_failures(sdk, monkeypatch, primary
     sdk.before_close = fail
     with pytest.raises(primary_type) as caught:
         sdk.adapter.start(Deadline.after(5))
-    assert caught.value is primary and sdk.closes == ["response", "service", "credential"]
+    assert caught.value is primary and sdk.closes == ["response", "service"]
     assert sdk.adapter._response is sdk.responses[0]
     assert sdk.adapter._service_session is sdk.service_session
-    assert sdk.adapter._credential_session is sdk.credential_session
+    assert sdk.auth._request.session is sdk.credential_session
     monkeypatch.setattr(OperationOwner, "inspect_lifecycle_obligation", original)
     primary.__traceback__ = None
     before = list(sdk.closes)
@@ -462,9 +509,9 @@ def test_interrupt_after_retained_original_has_matched_control(sdk, handle, inje
             adapter = sdk.adapter
             eligible = (
                 handle == "credential"
-                and frame.f_code is GCEActivation.start.__code__
-                and adapter._credential_session is not None
-                and adapter._auth_request is None
+                and frame.f_code is _OwnedRequest.attach.__code__
+                and frame.f_locals.get("self") is adapter._auth._request
+                and adapter._auth._request.session is not None
                 or handle == "service"
                 and frame.f_code is GCEActivation.start.__code__
                 and adapter._service_session is not None
@@ -492,9 +539,9 @@ def test_interrupt_after_retained_original_has_matched_control(sdk, handle, inje
     assert bool(fired) is inject and not sdk.adapter.cleanup_incomplete
     assert len(sdk.service_calls) == int(not inject or handle == "response")
     assert sdk.closes == (
-        ["credential"]
+        []
         if inject and handle == "credential"
-        else ["service", "credential"]
+        else ["service"]
         if inject and handle == "service"
-        else ["response", "service", "credential"]
+        else ["response", "service"]
     )
