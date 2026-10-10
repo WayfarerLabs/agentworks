@@ -104,12 +104,16 @@ def start_url(payload: ActivationPayload) -> str:
     )
 
 
+def _reject_constant(value: str) -> None:
+    raise ValueError("non-JSON numeric constant")
+
+
 def decode_acknowledgment(body: bytes, payload: ActivationPayload) -> str:
     """Select matching provider Operation identity without interpreting startup."""
     try:
         if type(body) is not bytes or len(body) > MAX_BODY_BYTES:
             raise ValueError("oversized body")
-        value = json.loads(body.decode("utf-8"), object_pairs_hook=_unique_object)
+        value = json.loads(body.decode("utf-8"), object_pairs_hook=_unique_object, parse_constant=_reject_constant)
         path = f"/compute/v1/projects/{payload.project_id}/zones/{payload.zone}/instances/{payload.instance_name}"
         if (
             type(value) is not dict

@@ -27,7 +27,7 @@ from agentworks.db.operations import LifecycleObligationState, OperationResource
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution.carrier import Deadline
 from agentworks.operations import OperationOwner
-from agentworks.plugins.gcp._activation import MAX_BODY_BYTES, GCEActivation, decode_activation_payload, start_url
+from agentworks.plugins.gcp._activation import MAX_BODY_BYTES, GCEActivation, decode_activation_payload
 
 RETAINED_ADAPTERS: list[GCEActivation] = []
 
@@ -48,7 +48,8 @@ class Credential(Credentials):
 
 class Raw(HTTPResponse):
     def __init__(self, body, callback) -> None:
-        super().__init__(body=io.BytesIO(body), preload_content=False)
+        stream = io.BytesIO(body) if isinstance(body, bytes) else body
+        super().__init__(body=stream, preload_content=False)
         self.reads: list[int] = []
         self.callback = callback
 
@@ -153,7 +154,9 @@ def sdk(tmp_path, monkeypatch):
             response.request, response.url, response.status_code = request, request.url, 200
             response.raw = HTTPResponse(body=io.BytesIO(b"{}"), preload_content=False)
             return response
-        assert request.method == "POST" and request.url == start_url(p.adapter.payload)
+        expected = "https://compute.googleapis.com/compute/v1/projects/project/zones/us-central1-a/instances/"
+        expected += f"backend/start?requestId={p.adapter.payload.request_id}"
+        assert request.method == "POST" and request.url == expected
         assert request.body is None and request.headers["Accept-Encoding"] == "identity"
         assert kwargs["stream"] is True
         assert p.service_session.trust_env is False and p.credential_session.trust_env is False

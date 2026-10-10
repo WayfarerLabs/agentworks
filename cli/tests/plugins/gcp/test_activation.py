@@ -24,7 +24,6 @@ from agentworks.plugins.gcp._activation import (
     decode_acknowledgment,
     decode_activation_payload,
     encode_activation_payload,
-    start_url,
 )
 
 PAYLOAD = ActivationPayload("project", "us-central1-a", "backend", "123", "12345678-1234-4234-8234-123456789abc")
@@ -80,7 +79,9 @@ def owned(tmp_path, monkeypatch):
 
     class Service(Session):
         def request(self, method, url, **kwargs):
-            assert method == "POST" and url == start_url(adapter.payload)
+            expected = "https://compute.googleapis.com/compute/v1/projects/project/zones/us-central1-a/instances/"
+            expected += f"backend/start?requestId={adapter.payload.request_id}"
+            assert method == "POST" and url == expected
             assert kwargs["allow_redirects"] is False and kwargs["stream"] is True
             row = owner.inspect_lifecycle_obligation(adapter.obligation_id)
             assert row is not None
