@@ -16,6 +16,9 @@ from agentworks.execution._file_download import (
     _PreparedDownload,
 )
 from agentworks.execution._file_download import (
+    _validate_binding as _validate_download_binding,
+)
+from agentworks.execution._file_download import (
     _validate_inputs as _validate_download_inputs,
 )
 from agentworks.execution._file_effect_gate_exchange import (
@@ -36,6 +39,7 @@ from agentworks.execution._file_json import (
 from agentworks.execution._file_metadata_protocol import FileMetadataOperation
 from agentworks.execution._file_obligation import (
     MAX_PACKAGE_UPLOAD_MEMBERS,
+    DownloadChildAssociation,
     FileCallFamily,
     FileCallObligation,
     FileCallObligationCodecError,
@@ -83,6 +87,7 @@ if TYPE_CHECKING:
 
     from agentworks.execution._file_effect_gate import FileEffectGateBinding
     from agentworks.execution._file_inventory_exchange import FileInventoryCandidateResult
+    from agentworks.execution._file_local_download import FileLocalDownloadOutcome
     from agentworks.execution._file_metadata_exchange import FileMetadataCandidateResult
     from agentworks.execution._file_object_exchange import FileObjectCandidateResult
     from agentworks.execution._file_objects import FileKind
@@ -156,6 +161,26 @@ class _LocalDownloadCall:
 
     borrow: OperationBorrow
     remote_requires_owner_retention: bool = False
+    association: DownloadChildAssociation | None = None
+    active: _ActiveFileDownload | None = None
+    dispatched: bool = False
+    remote_capture_ready: bool = False
+    stage: LocalDownloadStage | None = None
+    local_outcome: FileLocalDownloadOutcome | None = None
+    local_failed: bool = False
+    local_cleanup_failed: bool = False
+    local_deadline_exceeded: bool = False
+    reduction_complete: bool = False
+    reduction_succeeded: bool = False
+    publication: _DownloadChildPayload | None = None
+    publication_confirmed: bool = False
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class _DownloadChildPayload:
+    expected_revision: int
+    payload_version: int
+    payload: bytes
 
 
 type _ActiveFileDownload = _ActiveFileCall[
@@ -332,13 +357,13 @@ class FileOperation:
         """Whether whole-call finalization custody is still retained."""
         return self._local_download_call is not None
 
-    def begin_local_download(self) -> _LocalDownloadCall:
+    def begin_local_download(self, *, download_child: DownloadChildAssociation | None = None) -> _LocalDownloadCall:
         """Acquire whole-call serial admission before workstation effects."""
         borrow = self._owner.borrow()
         try:
             if self._local_download_call is not None:
                 raise StateError("A local download call still holds core custody")
-            call = _LocalDownloadCall(borrow)
+            call = _LocalDownloadCall(borrow, association=download_child)
         except BaseException:
             borrow.close()
             raise
@@ -351,8 +376,87 @@ class FileOperation:
             raise StateError("Local download call is not active")
         if any(active.borrow is call.borrow for active in self._active_downloads.values()):
             raise StateError("Local download remote custody is still active")
-        release_borrow_after_custody(call.borrow, retain_effect=call.remote_requires_owner_retention)
-        self._local_download_call = None
+        if call.active is not None:
+            if call.local_outcome is None or not call.reduction_complete:
+                raise StateError("Download child local capture remains incomplete")
+            if call.association is not None and call.reduction_succeeded and call.publication is None:
+                outcome = call.active.outcome
+                local = call.local_outcome
+                # The actual positive reducer already proves verified COMPLETE,
+                # publication and settled local custody without failure/deadline.
+                # Here only the original captured child's identity remains to bind.
+                if not call.remote_capture_ready or outcome is None or local.download is not outcome:
+                    raise StateError("Download child lacks positive settled local completion")
+                record = self._obligation(
+                    FileCallFamily.DOWNLOAD,
+                    call.active.binding,
+                    token=outcome.token,
+                    download_child=call.association,
+                    download_child_complete=True,
+                )
+                obligation = self._require_obligation(call.active)
+                call.publication = _DownloadChildPayload(
+                    obligation.payload_revision, record.payload_version, encode_file_call_obligation(record)
+                )
+        self._settle_download_call(call)
+
+    def capture_local_download(
+        self, call: _LocalDownloadCall, outcome: FileLocalDownloadOutcome, *, failed: bool
+    ) -> None:
+        """Retain actual publication facts before exception-fact allocation or reduction."""
+        call.local_outcome = outcome
+        call.local_failed = call.local_failed or failed
+        active = call.active
+        if active is not None and not call.dispatched:
+            # Constructor refusal has no remote effect. Its original false row
+            # can close while real workstation stage debt remains separately held.
+            self._active_downloads.pop(id(active), None)
+
+    def capture_download_reduction(self, call: _LocalDownloadCall, *, succeeded: bool) -> None:
+        """Record the actual reducer disposition, never deducing it from publication."""
+        call.reduction_succeeded = succeeded and not call.local_failed
+        call.reduction_complete = True
+
+    def settle_download_child_bookkeeping(self) -> None:
+        """Settle captured CAS/closure only, with no helper or workstation replay."""
+        call = self._local_download_call
+        if call is None:
+            return
+        if call.active is None or call.local_outcome is None or not call.reduction_complete:
+            raise StateError("Download child bookkeeping capture remains incomplete")
+        self.finish_local_download(call)
+
+    def _settle_download_call(self, call: _LocalDownloadCall) -> None:
+        publication = call.publication
+        if publication is not None and not call.publication_confirmed:
+            assert call.active is not None
+            obligation = self._require_obligation(call.active)
+            try:
+                row = obligation.publish_payload(
+                    expected_revision=publication.expected_revision,
+                    payload_version=publication.payload_version,
+                    payload=publication.payload,
+                )
+            except Exception:
+                row = obligation.publish_payload(
+                    expected_revision=publication.expected_revision,
+                    payload_version=publication.payload_version,
+                    payload=publication.payload,
+                )
+            if (
+                row.payload_revision != publication.expected_revision + 1
+                or row.payload_version != publication.payload_version
+                or row.payload != publication.payload
+            ):
+                raise StateError("Download child checkpoint revision is not the intended revision")
+            call.publication_confirmed = True
+        try:
+            if not call.borrow.closed:
+                release_borrow_after_custody(call.borrow, retain_effect=call.remote_requires_owner_retention)
+            self._local_download_call = None
+        except BaseException:
+            self._owner.stop_admission()
+            raise
 
     def retain_local_download_stage(self, stage: LocalDownloadStage) -> None:
         """Keep local cleanup custody separate from persisted remote obligations."""
@@ -420,6 +524,57 @@ class FileOperation:
     def unfinished_owned_files(self) -> tuple[UnfinishedOwnedFile, ...]:
         return tuple(self._unfinished_owned_files)
 
+    def prepare_local_download(
+        self,
+        carrier: Carrier,
+        *,
+        trusted_root_path: str,
+        relative_path: str,
+        max_bytes: int,
+        plan: IdentityPlan,
+        deadline: Deadline,
+        runtime_selection: RuntimeSelection,
+        local_call: _LocalDownloadCall,
+    ) -> None:
+        """Admit the original remote child before constructing its workstation stage."""
+        if self._local_download_call is not local_call or local_call.active is not None:
+            raise StateError("Local download requires its unused active serial borrow")
+        binding = _validate_download_binding(
+            trusted_root_path,
+            relative_path,
+            max_bytes,
+            plan,
+            deadline,
+            runtime_selection,
+            local_call.borrow,
+            None,
+            bootstrap=self._bootstrap,
+        )
+        token = secrets.token_bytes(16)
+        operation = BorrowedFixedHelperCarrier(carrier, local_call.borrow)
+        prepared = _prepare_download_from_binding(binding, None, deadline, token, operation)
+        admission = self._prepare_admission(
+            FileCallFamily.DOWNLOAD,
+            binding,
+            token=token,
+            download_child=local_call.association,
+        )
+        active: _ActiveFileDownload = _ActiveFileCall(
+            carrier,
+            binding,
+            local_call.borrow,
+            prepared,
+            admission.obligation_id,
+        )
+        self._active_downloads[id(active)] = active
+        local_call.active = active
+        try:
+            self._install(active, admission, self._active_downloads, close_borrow_on_refusal=False)
+        except BaseException as control:
+            if _is_pre_registration_refusal(control):
+                local_call.active = None
+            raise
+
     def download(
         self,
         carrier: Carrier,
@@ -438,6 +593,15 @@ class FileOperation:
         """Run and capture one concrete download under a whole-call borrow."""
         if local_call is not None and (self._local_download_call is not local_call or gate_setup is not None):
             raise StateError("Local download requires its active serial borrow")
+        if local_call is not None and local_call.active is not None:
+            active = local_call.active
+            prepared = active.prepared
+            assert isinstance(prepared, _PreparedDownload)
+            if local_call.dispatched:
+                raise StateError("Local download child was already dispatched")
+            prepared.attach_sink(sink)
+            local_call.dispatched = True
+            return self._run_prepared_download(active, prepared, local_call=local_call)
         if gate_setup is not None:
             return self._download_with_gate_setup(
                 carrier,
@@ -470,10 +634,13 @@ class FileOperation:
                 bootstrap=self._bootstrap,
                 effect_gate=effect_gate,
             )
-            admission = self._prepare_admission(FileCallFamily.DOWNLOAD, prepared.binding, token=prepared.state.token)
-            active: _ActiveFileDownload = _ActiveFileCall(
-                carrier, prepared.binding, borrow, prepared, admission.obligation_id
+            admission = self._prepare_admission(
+                FileCallFamily.DOWNLOAD,
+                prepared.binding,
+                token=prepared.state.token,
+                download_child=local_call.association if local_call is not None else None,
             )
+            active = _ActiveFileCall(carrier, prepared.binding, borrow, prepared, admission.obligation_id)
         except BaseException:
             if local_call is None:
                 borrow.close()
@@ -486,7 +653,9 @@ class FileOperation:
                 borrow.close()
             raise
         self._install(active, admission, self._active_downloads, close_borrow_on_refusal=local_call is None)
-
+        if local_call is not None:
+            local_call.active = active
+            local_call.dispatched = True
         return self._run_prepared_download(active, prepared, local_call=local_call)
 
     def _download_with_gate_setup(
@@ -589,11 +758,13 @@ class FileOperation:
         except BaseException as control:
             fact = control.__cause__
             if isinstance(fact, FileDownloadControlFact):
+                active.outcome = fact.outcome
                 try:
                     self._capture(active, fact.outcome, local_call=local_call)
                 except BaseException:
                     raise control from fact
             raise
+        active.outcome = outcome
         self._capture(active, outcome, local_call=local_call)
         return outcome
 
@@ -1464,10 +1635,17 @@ class FileOperation:
         batch_index: int | None = None,
         gate_setup: FileEffectGateSetup | None = None,
         upload_child: UploadChildAssociation | None = None,
+        download_child: DownloadChildAssociation | None = None,
     ) -> _FileCallAdmission:
         try:
             record = self._obligation(
-                family, binding, token=token, batch_index=batch_index, gate_setup=gate_setup, upload_child=upload_child
+                family,
+                binding,
+                token=token,
+                batch_index=batch_index,
+                gate_setup=gate_setup,
+                upload_child=upload_child,
+                download_child=download_child,
             )
             payload = encode_file_call_admission(record)
         except FileCallObligationCodecError:
@@ -1509,6 +1687,8 @@ class FileOperation:
         gate_setup: FileEffectGateSetup | None = None,
         upload_child: UploadChildAssociation | None = None,
         upload_child_complete: bool = False,
+        download_child: DownloadChildAssociation | None = None,
+        download_child_complete: bool = False,
     ) -> FileCallObligation:
         return FileCallObligation(
             family=family,
@@ -1539,6 +1719,8 @@ class FileOperation:
             bootstrap=binding.bootstrap,
             upload_child=upload_child,
             upload_child_complete=upload_child_complete,
+            download_child=download_child,
+            download_child_complete=download_child_complete,
         )
 
     @staticmethod
@@ -1620,6 +1802,9 @@ class FileOperation:
         self, active: _ActiveFileDownload, outcome: FileDownloadOutcome, *, local_call: _LocalDownloadCall | None = None
     ) -> None:
         active.outcome = outcome
+        if local_call is not None:
+            local_call.active = active
+            local_call.remote_requires_owner_retention = outcome.requires_owner_retention
         prepared = active.prepared
         assert isinstance(prepared, _PreparedDownload)
         prepared.release_sink()
@@ -1639,13 +1824,14 @@ class FileOperation:
                     scratch_reference=outcome.ready._reference if outcome.ready is not None else None,
                     scratch_cleanup_debt=outcome.cleanup_debt,
                     uncertainty=uncertainty,
+                    download_child=local_call.association if local_call is not None else None,
                 ),
             )
             self._retain_unfinished(UnfinishedFileDownload(active.carrier, active.binding, outcome))
         if local_call is None:
             release_borrow_after_custody(active.borrow, retain_effect=outcome.requires_owner_retention)
         else:
-            local_call.remote_requires_owner_retention = outcome.requires_owner_retention
+            local_call.remote_capture_ready = True
         self._active_downloads.pop(id(active))
 
     def _retain_unfinished(self, download: UnfinishedFileDownload) -> None:

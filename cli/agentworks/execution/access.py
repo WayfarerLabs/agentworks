@@ -709,11 +709,21 @@ class FileAccess:
                     result = reduce_file_local_download(
                         outcome, entity_kind=self._entity_kind, entity_name=self._entity_name
                     )
+            if deadline.expired:
+                _raise_reason(
+                    FileOperationPhase.PUBLICATION,
+                    FileFailureReason.DEADLINE,
+                    entity_kind=self._entity_kind,
+                    entity_name=self._entity_name,
+                    effect=Change.CHANGED if outcome is not None and outcome.published else None,
+                )
         except BaseException:
             # Core keeps the call and its borrow on failed finalization.
+            self._operation.capture_download_reduction(call, succeeded=False)
             with suppress(BaseException):
                 self._operation.finish_local_download(call)
             raise
+        self._operation.capture_download_reduction(call, succeeded=True)
         try:
             self._operation.finish_local_download(call)
         except Exception:

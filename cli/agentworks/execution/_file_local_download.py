@@ -93,7 +93,20 @@ def download_to_local_file(
     construction_cleanup_uncertain = False
     construction_cleanup_failed = False
     try:
+        if local_call is not None:
+            operation.prepare_local_download(
+                carrier,
+                trusted_root_path=trusted_root_path,
+                relative_path=relative_path,
+                max_bytes=max_bytes,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=runtime_selection,
+                local_call=local_call,
+            )
         writer = _publisher_for_host(destination, condition)
+        if local_call is not None:
+            local_call.stage = writer
         if not deadline.expired:
             download = operation.download(
                 carrier,
@@ -117,12 +130,16 @@ def download_to_local_file(
                 )
     except BaseException as exc:
         control = exc
+        if local_call is not None:
+            local_call.local_failed = True
         if isinstance(exc.__cause__, FileDownloadControlFact):
             download = exc.__cause__.outcome
         if writer is None:
             construction_cleanup_uncertain = bool(getattr(exc, "cleanup_uncertain", False))
             if isinstance(exc, LocalDownloadCleanupError) and exc.unfinished_stage is not None:
                 writer = exc.unfinished_stage
+                if local_call is not None:
+                    local_call.stage = writer
                 construction_cleanup_failed = True
                 cleanup_failed = True
     finally:
@@ -131,20 +148,30 @@ def download_to_local_file(
                 writer.abort()
             except BaseException as exc:
                 cleanup_failed = True
+                if local_call is not None:
+                    local_call.local_failed = True
                 if control is None:
                     control = exc
         if cleanup_failed and writer is not None:
             operation.retain_local_download_stage(writer)
 
+    local_deadline_exceeded = deadline.expired or (download.deadline_exceeded if download is not None else False)
+    if local_call is not None:
+        # Keep non-stage facts before outcome allocation. The original stage
+        # carries its actual publication/handle state if that allocation stops.
+        local_call.local_cleanup_failed = cleanup_failed
+        local_call.local_deadline_exceeded = local_deadline_exceeded
     outcome = FileLocalDownloadOutcome(
         download,
         published=writer.published if writer is not None else False,
         publication_uncertain=writer.publication_uncertain if writer is not None else False,
         cleanup_uncertain=writer.cleanup_uncertain if writer is not None else construction_cleanup_uncertain,
         cleanup_failed=cleanup_failed,
-        deadline_exceeded=deadline.expired or (download.deadline_exceeded if download is not None else False),
+        deadline_exceeded=local_deadline_exceeded,
         unfinished_stage=writer if cleanup_failed else None,
     )
+    if local_call is not None:
+        operation.capture_local_download(local_call, outcome, failed=control is not None)
     if control is not None:
         fact = FileLocalDownloadControlFact(outcome)
         fact.__cause__ = control.__cause__

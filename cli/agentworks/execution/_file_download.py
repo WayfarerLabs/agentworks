@@ -278,7 +278,7 @@ def _prepare_download(
 
 def _prepare_download_from_binding(
     binding: FileDownloadBinding,
-    sink: ByteSink,
+    sink: ByteSink | None,
     deadline: Deadline,
     token: bytes,
     operation: BorrowedFixedHelperCarrier,
@@ -296,6 +296,11 @@ class _PreparedDownload:
     binding: FileDownloadBinding
     state: _WorkingState
     workflow: _DownloadWorkflow
+
+    def attach_sink(self, sink: ByteSink) -> None:
+        """Attach the actual local stage after its row has been admitted."""
+        _validate_sink(sink)
+        self.workflow.attach_sink(sink)
 
     def run(self) -> FileDownloadOutcome:
         try:
@@ -326,7 +331,7 @@ class _DownloadWorkflow:
     def __init__(
         self,
         carrier: BorrowedFixedHelperCarrier,
-        sink: ByteSink,
+        sink: ByteSink | None,
         deadline: Deadline,
         state: _WorkingState,
     ) -> None:
@@ -336,6 +341,8 @@ class _DownloadWorkflow:
         self._state = state
 
     def run(self) -> FileDownloadOutcome:
+        if self._sink is None:
+            raise ValidationError("Download requires its actual sink before dispatch")
         if self._expired():
             return self._state.finish()
         if not self._begin():
@@ -360,6 +367,10 @@ class _DownloadWorkflow:
 
     def release_sink(self) -> None:
         self._sink = None
+
+    def attach_sink(self, sink: ByteSink) -> None:
+        assert self._sink is None
+        self._sink = sink
 
     def _begin(self) -> bool:
         result = snapshot_begin(
@@ -753,6 +764,34 @@ def _validate_inputs(
     *,
     bootstrap: _NumericGuestBootstrap | None = None,
 ) -> FileDownloadBinding:
+    binding = _validate_binding(
+        trusted_root_path,
+        relative_path,
+        max_bytes,
+        plan,
+        deadline,
+        runtime_selection,
+        borrow,
+        effect_gate,
+        bootstrap=bootstrap,
+    )
+    _validate_sink(sink)
+    return binding
+
+
+def _validate_binding(
+    trusted_root_path: object,
+    relative_path: object,
+    max_bytes: object,
+    plan: object,
+    deadline: object,
+    runtime_selection: object,
+    borrow: object,
+    effect_gate: object,
+    *,
+    bootstrap: _NumericGuestBootstrap | None = None,
+) -> FileDownloadBinding:
+    """Validate remote request identity independently of workstation construction."""
     if type(trusted_root_path) is not str or not normalized_root(trusted_root_path):
         raise ValidationError("Download requires a normalized absolute trusted root")
     if type(relative_path) is not str or not normalized_relative_path(relative_path):
@@ -785,6 +824,13 @@ def _validate_inputs(
             raise ValidationError("Download requires an exact file-effect gate binding")
         if effect_gate.proposed_generation is not None:
             raise ValidationError("Download effect-gate advance must finish before dispatch")
+    return FileDownloadBinding(
+        trusted_root_path, relative_path, max_bytes, plan, runtime_selection, effect_gate, bootstrap
+    )
+
+
+def _validate_sink(sink: object) -> None:
+    """Validate a caller-provided sink at the nonblocking byte boundary."""
     getter_failed = False
     writer = None
     try:
@@ -793,6 +839,3 @@ def _validate_inputs(
         getter_failed = True
     if getter_failed or not callable(writer):
         raise ValidationError("Download requires a nonblocking byte sink")
-    return FileDownloadBinding(
-        trusted_root_path, relative_path, max_bytes, plan, runtime_selection, effect_gate, bootstrap
-    )

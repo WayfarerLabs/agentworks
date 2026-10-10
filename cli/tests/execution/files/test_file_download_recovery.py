@@ -36,6 +36,7 @@ from agentworks.execution._file_gate_control import advance_file_effect_gate, se
 from agentworks.execution._file_gate_setup import FileEffectGateSetup, file_effect_gate_path
 from agentworks.execution._file_obligation import (
     FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+    DownloadChildAssociation,
     FileCallFamily,
     FileCallObligation,
     FileCallUncertainty,
@@ -683,12 +684,14 @@ def _possible_download(
     root: Path,
     target: ManagedTargetIdentity,
     plan: IdentityPlan,
+    *,
+    child: DownloadChildAssociation | None = None,
 ) -> tuple[OperationOwner, FileCallObligation, LifecycleObligation]:
     owner = _owner(database)
-    call = _call(root, target, plan, b"t" * 16)
+    call = replace(_call(root, target, plan, b"t" * 16), download_child=child)
     obligation = owner.register_lifecycle_obligation(
         "file-call",
-        payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+        payload_version=call.payload_version,
         payload=encode_file_call_obligation(call),
         obligation_id="a" * 32,
     )
@@ -696,10 +699,12 @@ def _possible_download(
     return owner, call, database.operations.list_pending_lifecycle_obligations(owner.ownership)[0]
 
 
+@pytest.mark.parametrize("associated", [False, True])
 def test_recovery_reconciles_then_persists_exact_debt_before_cleanup(
     hold_operation_owner,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    associated: bool,
 ) -> None:
     root = tmp_path / "source-root"
     root.mkdir()
@@ -711,7 +716,8 @@ def test_recovery_reconciles_then_persists_exact_debt_before_cleanup(
     database = Database(tmp_path / "state.db")
     target = _target()
     plan = _plan()
-    owner, call, persisted = _possible_download(database, root, target, plan)
+    child = DownloadChildAssociation.fresh() if associated else None
+    owner, call, persisted = _possible_download(database, root, target, plan, child=child)
     try:
         started = snapshot_begin(
             LocalCarrier(),
@@ -741,6 +747,8 @@ def test_recovery_reconciles_then_persists_exact_debt_before_cleanup(
         row = database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0]
         retained = decode_file_call_obligation(row.payload)
         assert retained.scratch_cleanup_debt is not None
+        assert retained.download_child == child and not retained.download_child_complete
+        assert row.payload_version == (5 if associated else 1)
         recovered_again = hold_operation_owner(
             OperationOwner.recover(database.operations, recovered.ownership, "c" * 32)
         )
@@ -761,6 +769,7 @@ def test_recovery_reconciles_then_persists_exact_debt_before_cleanup(
         assert database.operations.list_pending_lifecycle_obligations(recovered_again.ownership)[0].state is (
             LifecycleObligationState.POSSIBLE_EFFECT
         )
+        assert not decode_file_call_obligation(same_debt.payload).download_child_complete
     finally:
         database.close()
 
