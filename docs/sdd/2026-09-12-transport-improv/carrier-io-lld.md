@@ -285,7 +285,9 @@ presentation to be exactly the interactive-ready record and its line ending. An 
 substring is not suppression evidence. Hold subsequent presentation behind one probe-only release
 byte; preserve raw, no-echo input through that read. Unexpected presentation or terminal sequences
 refuse this strict observation rather than being normalized. This release is local test machinery,
-not a third production handoff gate. Resize and ordinary wrapping follow that measured window;
+not a third production handoff gate. The same observer checks currently queued setup chunks within
+its original byte/time bounds before sending it. A currently unavailable read is not EOF or proof
+that future bytes cannot arrive. Resize and ordinary wrapping follow that measured window;
 narrow-geometry control records and resizing during setup remain separate native acceptance gates.
 
 The idle case must observe a live child before teardown. A pending or unclean worker remains
