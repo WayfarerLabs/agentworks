@@ -1218,7 +1218,8 @@ compute must positively close before network construction. They also identify a 
 question about the SDK's host user-agent probe. Correction `fc360d59` retains one sequential client,
 preserves lock/cleanup proof through a real failed-close observation and uses a fixture-local
 deterministic public host label. It passes all 92 cases and full strict typing over 1,382 sources,
-plus scoped lint/format. Independent correction re-review remains open. These results cover eight
+plus scoped lint/format. All three independent correction source-review lanes clear paired pin
+`274986ad`; none replays the recorded gates or claims native/full access. These results cover eight
 source/test files on the author's earlier base, not whole-composition or native acceptance. No
 historical identity adoption, new-VM recording or complete access is implied; keep this item open.
 
