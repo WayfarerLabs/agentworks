@@ -7,12 +7,14 @@ import time
 from collections.abc import Generator
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _managed_operation_keeper as keeper_module
+from agentworks.execution import carrier as carrier_module
 from agentworks.execution._managed_job_protocol import encode_managed_job_fact
 from agentworks.execution._managed_lease_protocol import LeaseRequest
 from agentworks.execution._managed_operation_keeper import ManagedOperationKeeper
@@ -155,6 +157,8 @@ def test_initial_binding_refuses_before_registration(bound, fault: str) -> None:
 def test_change_between_clock_and_fence_prevents_initial_authority(bound, fault, monkeypatch) -> None:
     database, owner, receipt = bound
     now = time.monotonic()
+    # Exercise framed fence changes independently of host registration latency.
+    monkeypatch.setattr(carrier_module, "time", SimpleNamespace(monotonic=lambda: now))
     deadline = Deadline(now + 1)
 
     def response(request: LeaseRequest) -> bytes:
@@ -167,7 +171,7 @@ def test_change_between_clock_and_fence_prevents_initial_authority(bound, fault,
                 "UPDATE lifecycle_obligations SET payload = ? WHERE obligation_id = ?", (b"wrong", "b" * 32)
             )
         else:
-            monkeypatch.setattr(time, "monotonic", lambda: now + 2)
+            monkeypatch.setattr(carrier_module, "time", SimpleNamespace(monotonic=lambda: now + 2))
         return _success(request)
 
     carrier = ScriptedCarrier(response)
