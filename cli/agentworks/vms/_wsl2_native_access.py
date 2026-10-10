@@ -51,6 +51,9 @@ class WSL2OwnedNativePlatformAccess:
     def route_check(self) -> Callable[[Deadline], None] | None:
         return self.selected.require_selected_route if self.selected is not None else None
 
+    def observe_power(self, deadline: Deadline) -> VMStatus:
+        return self.platform.observe_execution_power(self.vm, self.ctx, deadline=deadline, custody=self.custody)
+
     def prepare(self, power: VMStatus, deadline: Deadline) -> None:
         if self._used:
             raise StateError("Owned WSL native access preparation is single use")

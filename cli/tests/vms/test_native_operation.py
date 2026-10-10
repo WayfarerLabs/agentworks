@@ -144,6 +144,7 @@ def test_owned_access_factory_is_passive(database: Database, monkeypatch: pytest
     assert access.owner is owner and access.custody is custody
     assert access.selected is None and access.binding is None and access.preparation is None
     assert access.route_check is None and not owner.list_pending_lifecycle_obligations()
+    assert access.settle(Deadline.after(10)) and custody.settled
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
@@ -166,6 +167,12 @@ def test_root_retains_access_before_effects_and_independently_checks_ledger(
         preparation = None
         route_check = None
         settled = False
+
+        def observe_power(self, deadline: Deadline) -> VMStatus:
+            events.append("power")
+            return platform.observe_execution_power(
+                database.get_vm("box"), RunContext(), deadline=deadline, custody=self.custody
+            )
 
         def prepare(self, power: VMStatus, deadline: Deadline) -> None:
             nonlocal debt
@@ -206,7 +213,7 @@ def test_root_retains_access_before_effects_and_independently_checks_ledger(
     fact = control.__cause__
     assert isinstance(fact, NativeVMOperationControlFact)
     assert fact._workflow.access is access
-    assert events == ["build", "prepare", "settle"]
+    assert events == ["build", "power", "prepare", "settle"]
     access.settled = True
     if foreign_debt:
         with pytest.raises(StateError):
@@ -247,9 +254,26 @@ def test_late_power_result_refuses_before_route(
     platform = WSL2Platform("wsl2", {})
     deadline = Deadline.after(10)
     routed = False
+    original_factory = platform.build_native_execution_access
+    retained: list[WSL2OwnedNativePlatformAccess] = []
+    settled: list[WSL2OwnedNativePlatformAccess] = []
+    original_settle = WSL2OwnedNativePlatformAccess.settle
+
+    def build(vm, ctx, *, owner, custody):
+        access = original_factory(vm, ctx, owner=owner, custody=custody)
+        assert isinstance(access, WSL2OwnedNativePlatformAccess)
+        retained.append(access)
+        return access
+
+    def settle(access, cleanup_deadline):
+        assert cleanup_deadline is deadline
+        assert access.selected is None and access.custody.settled
+        settled.append(access)
+        return original_settle(access, cleanup_deadline)
 
     def observe(vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody=None) -> VMStatus:
         assert database.operations.inspect(_scope()) is not None
+        assert len(retained) == 1 and retained[0].custody is custody
         object.__setattr__(deadline, "expires_at", 0.0)
         return VMStatus.RUNNING
 
@@ -260,12 +284,15 @@ def test_late_power_result_refuses_before_route(
 
     monkeypatch.setattr(platform, "observe_execution_power", observe)
     monkeypatch.setattr(platform, "observe_provider_locator", locator)
+    monkeypatch.setattr(platform, "build_native_execution_access", build)
+    monkeypatch.setattr(WSL2OwnedNativePlatformAccess, "settle", settle)
     with (
         pytest.raises(StateError),
         native_vm_operation(database, "box", platform, RunContext(), deadline=deadline, trusted_root=_root(tmp_path)),
     ):
         pass
     assert not routed
+    assert settled == retained and len(settled) == 1
     assert database.operations.inspect(_scope()) is None
 
 
@@ -283,7 +310,7 @@ def test_late_power_result_refuses_before_route(
     ],
 )
 @pytest.mark.parametrize("stopped", [False, True])
-def test_fresh_intent_and_power_gate_precedes_access_and_wake(
+def test_fresh_intent_and_power_gate_precedes_preparation_and_wake(
     database: Database,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -320,6 +347,9 @@ def test_fresh_intent_and_power_gate_precedes_access_and_wake(
             self.owner = owner
             self.custody = custody
 
+        def observe_power(self, deadline: Deadline) -> VMStatus:
+            return cast("VMStatus", observe(selected_vm, selected_ctx, deadline=deadline, custody=self.custody))
+
         def prepare(self, observed_power: VMStatus, deadline: Deadline) -> None:
             claim = database.operations.inspect(_scope())
             assert claim is not None and claim.ownership == self.owner.ownership == observed_claim
@@ -336,11 +366,17 @@ def test_fresh_intent_and_power_gate_precedes_access_and_wake(
             events.append("settle")
             return True
 
+    selected_vm: VMRow
+    selected_ctx: RunContext
+
     def build(vm: VMRow, ctx: RunContext, *, owner: OperationOwner, custody: LocalDeliveryCustody) -> Access:
+        nonlocal selected_vm, selected_ctx
         claim = database.operations.inspect(_scope())
-        assert claim is not None and claim.ownership == owner.ownership == observed_claim
-        assert custody is observed_custody
+        assert claim is not None and claim.ownership == owner.ownership
+        assert observed_claim is None and observed_custody is None
+        assert isinstance(custody, LocalDeliveryCustody) and custody.settled
         assert not owner.list_pending_lifecycle_obligations()
+        selected_vm, selected_ctx = vm, ctx
         events.append("build")
         return Access(owner, custody)
 
@@ -356,7 +392,7 @@ def test_fresh_intent_and_power_gate_precedes_access_and_wake(
     ):
         pytest.fail("halted preparation admitted body")
     assert (caught.value is halt) is allowed
-    assert events == (["power", "build", "prepare", "settle"] if allowed else ["power"])
+    assert events == (["build", "power", "prepare", "settle"] if allowed else ["build", "power", "settle"])
     assert database.operations.inspect(_scope()) is None
 
 

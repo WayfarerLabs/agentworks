@@ -191,15 +191,15 @@ def _prepare(
         encode_account_request(AccountRequest("0" * 32, vm.admin_username))
     except AccountRequestError as error:
         raise ValidationError("Native VM operation requires a valid administrative account") from error
-    power = platform.observe_execution_power(vm, ctx, deadline=workflow.deadline, custody=workflow.local_delivery)
+    access = platform.build_native_execution_access(vm, ctx, owner=workflow.owner, custody=workflow.local_delivery)
+    workflow.access = access
+    power = access.observe_power(workflow.deadline)
     if workflow.deadline.expired:
         raise StateError("Native VM power observation exceeded its deadline", entity_kind="vm", entity_name=vm_name)
     if type(power) is not VMStatus or power not in {VMStatus.RUNNING, VMStatus.STOPPED, VMStatus.DEALLOCATED}:
         raise StateError("Native VM power cannot authorize activation", entity_kind="vm", entity_name=vm_name)
     if power in {VMStatus.STOPPED, VMStatus.DEALLOCATED} and vm.operator_stopped:
         raise StateError("Operator-stopped VM cannot be started automatically", entity_kind="vm", entity_name=vm_name)
-    access = platform.build_native_execution_access(vm, ctx, owner=workflow.owner, custody=workflow.local_delivery)
-    workflow.access = access
     access.prepare(power, workflow.deadline)
     preparation = access.preparation
     binding = access.binding
