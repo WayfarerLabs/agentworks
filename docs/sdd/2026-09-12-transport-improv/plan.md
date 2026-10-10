@@ -1496,6 +1496,24 @@ The local same-PTY helper uses Bookworm Python 3.11. The finite format rejects i
 bytes rather than normalizing them, and the LLD separates SSH relay/resize forwarding from shared
 native process/resize mechanisms. Native Windows/SSH capability remains unproved.
 
+- [ ] Prove the private Windows pseudoconsole topology with a local native child: explicit initial
+      and changed dimensions, usable child console handles, separate raw stderr, exact printable
+      readiness and finite setup input, narrow-console wrapping observations and finite/idle
+      teardown. Retain the passive capability cell before acquisition and every confirmed partial
+      acquisition through failure. Failed-call output garbage is never closed; unobserved native
+      acquisition is not clean. Portable fake tests establish only bookkeeping. Do not enable
+      terminal delivery or publish an accepted SSH API pin from that evidence alone.
+- [ ] Integrate the proved native cell into the existing local process owner, including no-child
+      partial-acquisition cleanup, exact retained retry custody, explicit initial/resize dimensions
+      and separate exit/closure evidence. Keep native lifetime effects serialized on the owner's
+      existing worker and stop all pipe borrowers before closing console output and releasing the
+      pseudoconsole. No second production owner or teardown-drainer framework. Review the complete
+      combined seam privately before giving SSH an adoption pin.
+- [ ] Prove the adopted mechanism with installed Windows OpenSSH, including remote initial and
+      changed geometry, strict setup records, raw client diagnostics, physical keyboard handoff,
+      console presentation and bounded retained cleanup. Consume the complete native report and
+      resolve material findings before enabling the terminal capability.
+
 - [x] Implement private revision-aware publication with explicit Create/Replace/Match conditions,
       bounded streaming from verified scratch, stat-only observations without old-content reads, and
       a content-bound post-publication revision. At `75aaaa5e`, all three private lanes are clean

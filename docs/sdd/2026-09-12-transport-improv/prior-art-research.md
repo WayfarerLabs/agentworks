@@ -530,6 +530,24 @@ evidence that ConPTY preserves setup, exposes separate raw SSH diagnostics or de
 resize. Those observations and bounded process/console cleanup remain required before enabling
 Windows terminal delivery. No native Windows test was run for this source investigation.
 
+The current
+[pseudoconsole closure contract](https://learn.microsoft.com/en-us/windows/console/closepseudoconsole)
+allows closing the output pipe before releasing the pseudoconsole. Earlier Windows versions can wait
+indefinitely if that pipe is neither closed nor drained; starting with Windows 11 24H2, release
+returns immediately without proving that all clients disconnected. Decision: stop borrowers and
+close the output pipe before release, retain exact child observation separately, and prove native
+cleanup rather than introduce a separate teardown reader. This is a cleanup-order selection, not
+native acceptance or a descendant-containment claim.
+
+The
+[anonymous-pipe contract](https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-createpipe)
+leaves output parameters indeterminate on failure. Decision: record only confirmed acquisitions,
+never close a failed call's guessed handles, and retain previously acquired capabilities in one
+passive cell before attempting the next call. If a native acquisition returns no observed outcome,
+cleanup cannot report clean merely because no child was published. A local-child topology proof
+precedes integration of that cell into the existing process owner; fake API tests prove only the
+bookkeeping and failure boundaries.
+
 ## Early Python investigation, 2026-09-19
 
 At the time of this audit the operator authorized investigation, not installation or a new runtime

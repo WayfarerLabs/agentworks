@@ -270,6 +270,20 @@ separate raw client stderr, early keyboard preservation and bounded cleanup with
 OpenSSH. Do not add a speculative terminal emulator, a second SSH channel or a resident guest
 controller to substitute for those observations.
 
+Prove the native topology with a local child before integrating it into the existing process owner.
+That proof is not a second production owner: the candidate is a passive capability cell retained
+before acquisition, with borrowed pipe endpoints and serialized launch, status, resize and cleanup
+on one non-main worker. Hold confirmed partial acquisitions even when no child was created. Failed
+calls do not authorize closing indeterminate output handles; an acquisition whose return was not
+observed remains uncertain rather than clean. Production adoption must keep those facts in the
+existing owner's custody and cleanup-retry path, not infer resource closure from child exit alone.
+Initial and changed dimensions are explicit rows and columns.
+
+After all borrowers stop, close the console output pipe before releasing the pseudoconsole.
+Pseudoconsole release is not evidence that every client has disconnected. Prove exact child exit and
+confirmed resource closure separately; do not add another drainer solely to work around a cleanup
+order that the native API already supports.
+
 The [prior-art investigation](prior-art-research.md#terminal-bootstrap-prior-art) records the
 relevant implementations and their limitations. A local synthetic PTY proves only that fixture; it
 does not establish actual SSH delivery, native Windows/macOS behavior or application-start evidence.
