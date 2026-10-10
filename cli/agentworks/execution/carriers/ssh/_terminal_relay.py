@@ -195,7 +195,7 @@ class _Attempt:
         self._cleanup_deadline: Deadline | None = None
         self._cleanup_requested = 0
         self._cleanup_observed = 0
-        self._worker = Thread(target=self._entry, name="ssh-terminal")
+        self._worker = Thread(target=self._entry, name="ssh-terminal", daemon=False)
         self._terminal = PosixTerminal(self._spec.input_fd, self._spec.output_fd, self._worker)
         custody.retain_cleanup(self._owner, self)
 
