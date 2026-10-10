@@ -1107,15 +1107,15 @@ delivery/drain, startup settlement, complete cloud access and whole-PR acceptanc
       this a private #833 increment, not complete stopped access or public RunContext delivery.
 
 The GCP producer and its correction at `b359c7f4` clear all three independent private lanes. Lead
-verification passed all 150 cases with warnings as errors, no skips or deselections, full strict
-typing over 1,368 sources, and scoped Python/permanent-documentation gates. The complexity lane
-independently passed 150 cases and proved that a wrong `/start` suffix now fails the three selected
-transport-boundary cases; exact restoration passed those same cases, with 147 explicitly deselected
-in each control. Project and complementary generic re-reviews were source-only. Strict JSON refusal
-and actual fixed-length HTTP framing now cover the reported parser and nonempty-final-read gaps.
-Earlier failed diagnostics, warnings and intentional controls remain preserved. These results prove
-neither native receipt compatibility, sockets/credentials, request drain nor complete cloud access;
-the next item remains unfinished.
+verification passed all 150 cases with warnings as errors, no skipped or deselected cases, full
+strict typing over 1,368 sources, and scoped Python/permanent-documentation gates. The complexity
+lane independently passed 150 cases and proved that a wrong `/start` suffix now fails the three
+selected transport-boundary cases; exact restoration passed those same cases, with 147 explicitly
+deselected in each control. Project and complementary generic re-reviews were source-only. Strict
+JSON refusal and actual fixed-length HTTP framing now cover the reported parser and
+nonempty-final-read gaps. Earlier failed diagnostics, warnings and intentional controls remain
+preserved. These results prove neither native receipt compatibility, sockets/credentials, request
+drain nor complete cloud access; the next item remains unfinished.
 
 - [ ] Complete owned GCP access with the LLD's observational identity guarantee: a fresh exact
       provider observation refuses known stale-target admission, matching receipt and subsequent
