@@ -14,6 +14,7 @@ from agentworks.execution._process import Deadline as ProcessDeadline
 from agentworks.execution._process import LocalProcessOwner, LocalProcessSnapshot, LocalProcessTerminal
 from agentworks.execution.carrier import CarrierIO, Deadline, Failure, SinkOutput, TerminalInput
 from agentworks.execution.carriers.ssh._terminal_relay import _Attempt, run_terminal_relay_candidate
+from tests.execution.carriers.ssh._terminal_modes import assert_preserved_terminal_mode
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="Requires owned POSIX PTYs")
 
@@ -152,6 +153,6 @@ def test_worker_control_precedes_caller_interruption_during_cleanup(
         with pytest.raises(KeyboardInterrupt) as raised:
             attempt.run()
         assert raised.value is primary and attempt._done.is_set()
-        assert termios.tcgetattr(endpoint[1]) == mode
+        assert_preserved_terminal_mode(termios.tcgetattr(endpoint[1]), mode)
     finally:
         release_cleanup.set()

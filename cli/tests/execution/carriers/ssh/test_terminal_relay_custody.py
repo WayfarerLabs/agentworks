@@ -19,6 +19,7 @@ from agentworks.execution._process import LocalProcessOwner, LocalProcessTermina
 from agentworks.execution.carrier import CarrierIO, Deadline, Failure, SinkOutput, TerminalInput
 from agentworks.execution.carriers.ssh._terminal_posix import PosixTerminal
 from agentworks.execution.carriers.ssh._terminal_relay import _Attempt
+from tests.execution.carriers.ssh._terminal_modes import assert_preserved_terminal_mode, with_terminal_mode_assertion
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="Requires owned POSIX PTYs")
 
@@ -161,7 +162,7 @@ def test_pending_worker_retains_borrowed_terminal_until_fresh_retry(
     assert custody.settled and attempt._done.is_set()
     assert releasers == [(resource, attempt._worker)]
     assert closers and all(thread is attempt._worker for thread in closers)
-    assert termios.tcgetattr(borrowed) == mode
+    assert_preserved_terminal_mode(termios.tcgetattr(borrowed), mode)
     assert (fcntl.fcntl(borrowed, fcntl.F_GETFL), os.get_inheritable(borrowed)) == flags
     assert len(children) == (0 if boundary == "acquisition" else 1)
     for child in children:
@@ -242,7 +243,7 @@ def test_daemon_caller_retains_non_daemon_terminal_worker_until_fresh_retry(
         assert custody.close(Deadline.after(3))
     assert custody.settled and attempt._done.is_set()
     assert releasers == [(attempt._terminal, attempt._worker)]
-    assert termios.tcgetattr(borrowed) == mode
+    assert_preserved_terminal_mode(termios.tcgetattr(borrowed), mode)
     for fd in held_fds:
         with pytest.raises(OSError):
             os.fstat(fd)
@@ -319,7 +320,7 @@ def test_retryable_native_cleanup_keeps_terminal_raw_until_fresh_close(
     finally:
         assert custody.close(Deadline.after(3))
     assert releases == [attempt._worker]
-    assert termios.tcgetattr(borrowed) == mode
+    assert_preserved_terminal_mode(termios.tcgetattr(borrowed), mode)
     assert children[0].returncode == -signal.SIGKILL
     assert children[0].stdout is not None and children[0].stdout.closed
     assert children[0].stderr is not None and children[0].stderr.closed
@@ -373,7 +374,7 @@ def test_retryable_cleanup_natural_exit_settles_without_fresh_close(
         assert attempt._done.wait(2)
         assert custody.settled and attempt._cleanup_requested == requested
         assert kills == [children[0].pid] and releases == [attempt._worker]
-        assert termios.tcgetattr(borrowed) == mode
+        assert_preserved_terminal_mode(termios.tcgetattr(borrowed), mode)
         assert result.started and result.exit_status is None and result.failure is Failure.DEADLINE
         assert children[0].returncode == 0
         assert children[0].stdout is not None and children[0].stdout.closed
@@ -479,12 +480,13 @@ with pytest.MonkeyPatch.context() as monkeypatch:
         for fd in owned_fds:
             os.close(fd)
     assert not custody.settled
-    assert termios.tcgetattr(borrowed)==mode
+    assert_preserved_terminal_mode(termios.tcgetattr(borrowed), mode)
     os.close(slave)
     os.close(master)
     print(json.dumps({'worker_done':attempt._done.is_set(),'settled':custody.settled,
         'releases':0,'native_reaped':True,'fixture_repaired':True}),flush=True)
 """
+    code = with_terminal_mode_assertion(code)
     completed = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=8, check=False)
     assert completed.returncode == 0, (completed.stdout[-4096:], completed.stderr[-4096:])
     import json

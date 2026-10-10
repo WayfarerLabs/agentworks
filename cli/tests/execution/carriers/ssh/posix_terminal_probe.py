@@ -28,6 +28,7 @@ from agentworks.execution.carriers.ssh._terminal_posix import PosixTerminal
 from agentworks.execution.carriers.ssh._terminal_relay import run_terminal_relay_candidate
 from agentworks.execution.carriers.ssh.client import check_client_version, resolve_client_executable
 from agentworks.execution.carriers.ssh.connection import admit_connection, build_ssh_argv
+from tests.execution.carriers.ssh._terminal_modes import assert_preserved_terminal_mode
 from tests.execution.carriers.ssh.enrollment_server import enrollment_server
 
 if TYPE_CHECKING:
@@ -341,11 +342,8 @@ def run_case(root: Path, monkeypatch: pytest.MonkeyPatch, *, refusal: bool) -> N
                             pass
                         else:
                             raise AssertionError("Relay-owned PTY descriptor remains open")
-                    assert (
-                        termios.tcgetattr(slave),
-                        fcntl.fcntl(slave, fcntl.F_GETFL),
-                        os.get_inheritable(slave),
-                    ) == before
+                    assert_preserved_terminal_mode(termios.tcgetattr(slave), before[0])
+                    assert (fcntl.fcntl(slave, fcntl.F_GETFL), os.get_inheritable(slave)) == before[1:]
         assert len(servers) == 1 and servers[0].returncode is not None
         assert len(server_logs) == 1 and server_logs[0].closed
         try:

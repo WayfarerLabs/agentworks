@@ -9,6 +9,8 @@ import sys
 
 import pytest
 
+from tests.execution.carriers.ssh._terminal_modes import with_terminal_mode_assertion
+
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="Requires POSIX terminal descriptors and signals")
 
 
@@ -121,7 +123,7 @@ try:
 except KeyboardInterrupt as error:
     assert len(errors)>=2 and error is errors[0]
     assert attempt._done.is_set() and released.is_set()
-    assert termios.tcgetattr(slave)==mode
+    assert_preserved_terminal_mode(termios.tcgetattr(slave), mode)
     assert (fcntl.fcntl(slave,fcntl.F_GETFL),os.get_inheritable(slave))==flags
     for fd in owned:
         try: os.fstat(fd)
@@ -141,6 +143,7 @@ finally:
     os.close(slave)
     os.close(master)
 """
+    code = with_terminal_mode_assertion(code)
     completed = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=15, check=False)
     assert completed.returncode == 0, (completed.stdout[-4096:], completed.stderr[-4096:])
     proof = json.loads(completed.stdout)

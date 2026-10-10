@@ -14,6 +14,7 @@ from threading import Thread, current_thread
 import pytest
 
 from agentworks.execution.carriers.ssh._terminal_posix import AcquisitionCleanupFailure, PosixTerminal
+from tests.execution.carriers.ssh._terminal_modes import assert_preserved_terminal_mode, with_terminal_mode_assertion
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="Requires POSIX terminal descriptors")
 
@@ -84,7 +85,7 @@ def test_modes_geometry_flags_and_borrowed_lifetime(
     terminal.acquire()
     master, slave = terminal.master_fd, terminal.slave_fd
     try:
-        assert termios.tcgetattr(slave) == mode
+        assert_preserved_terminal_mode(termios.tcgetattr(slave), mode)
         assert termios.tcgetwinsize(slave) == (31, 97)
         raw = termios.tcgetattr(borrowed)
         assert not raw[3] & (termios.ICANON | termios.ECHO | termios.ISIG)
@@ -97,7 +98,7 @@ def test_modes_geometry_flags_and_borrowed_lifetime(
         assert termios.tcgetwinsize(slave) == (42, 113)
     finally:
         assert terminal.release() == ()
-    assert termios.tcgetattr(borrowed) == mode
+    assert_preserved_terminal_mode(termios.tcgetattr(borrowed), mode)
     assert _flags(borrowed) == flags
     os.fstat(borrowed)
     _assert_closed(master)
@@ -131,7 +132,7 @@ def test_acquisition_preserves_queued_input(endpoint: tuple[int, int]) -> None:
         assert select.select([borrowed], [], [], 1)[0] == [borrowed]
     finally:
         assert terminal.release() == ()
-    assert termios.tcgetattr(borrowed) == mode
+    assert_preserved_terminal_mode(termios.tcgetattr(borrowed), mode)
     assert select.select([borrowed], [], [], 1)[0] == [borrowed]
     assert os.read(borrowed, 100) == b"after restore\n"
 
@@ -246,7 +247,7 @@ def test_acquisition_failure_restores_and_closes(
         resource = PosixTerminal(borrowed, borrowed, current_thread())
         resource.acquire()
     assert caught.value is failure
-    assert termios.tcgetattr(borrowed) == mode
+    assert_preserved_terminal_mode(termios.tcgetattr(borrowed), mode)
     assert _flags(borrowed) == flags
     os.fstat(borrowed)
     for fd in owned:
@@ -416,7 +417,7 @@ def test_wrong_owner_refuses_resize_and_release_before_effects(endpoint: tuple[i
         assert termios.tcgetwinsize(slave) == (42, 113)
     finally:
         assert terminal.release() == ()
-    assert termios.tcgetattr(borrowed) == mode
+    assert_preserved_terminal_mode(termios.tcgetattr(borrowed), mode)
     _assert_closed(master)
     _assert_closed(slave)
 
@@ -477,7 +478,7 @@ try:
     assert not worker.is_alive()
     assert not errors
     assert releases == [()]
-    assert termios.tcgetattr(borrowed) == mode
+    assert_preserved_terminal_mode(termios.tcgetattr(borrowed), mode)
     os.fstat(borrowed)
     for fd in (owned_master, owned_slave):
         try:
@@ -492,5 +493,6 @@ finally:
     os.close(borrowed)
     os.close(master)
 """
+    code = with_terminal_mode_assertion(code)
     result = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, timeout=10, check=False)
     assert result.returncode == 0, result.stderr.decode(errors="replace")

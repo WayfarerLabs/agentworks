@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
+from tests.execution.carriers.ssh._terminal_modes import assert_preserved_terminal_mode, with_terminal_mode_assertion
+
 if TYPE_CHECKING:
     from typing import IO
 
@@ -178,7 +180,7 @@ try:
             assert delivered==prefix+probe_bytes
     assert advanced<=2.01
     if result.failure is Failure.DEADLINE: assert elapsed+advanced>=2
-    assert termios.tcgetattr(slave)==mode
+    assert_preserved_terminal_mode(termios.tcgetattr(slave), mode)
     assert len(children)==1
     client=children[0]
     assert client.returncode==0 and client.stdout.closed and client.stderr.closed
@@ -200,10 +202,11 @@ finally:
         try: os.waitpid(descendant,os.WNOHANG)
         except ChildProcessError: pass
         else: raise AssertionError('Inherited writer was not reaped')
-    assert termios.tcgetattr(slave)==mode
+    assert_preserved_terminal_mode(termios.tcgetattr(slave), mode)
     os.close(slave)
     os.close(master)
 """
+    code = with_terminal_mode_assertion(code)
     completed = subprocess.run(
         [sys.executable, "-c", code, str(tmp_path / "descendant.pid"), str(flood)],
         capture_output=True,
@@ -344,7 +347,7 @@ try:
         'frozen':list(frozen.values()),'complete':True}),flush=True)
 finally:
     assert custody.close(Deadline.after(3))
-    assert termios.tcgetattr(slave)==mode
+    assert_preserved_terminal_mode(termios.tcgetattr(slave), mode)
     for child in children:
         assert child.returncode==0 and child.stdout.closed and child.stderr.closed
         try: os.waitpid(child.pid,os.WNOHANG)
@@ -353,6 +356,7 @@ finally:
     os.close(slave)
     os.close(master)
 """
+    code = with_terminal_mode_assertion(code)
     completed = subprocess.run(
         [sys.executable, "-c", code, str(size), str(capacity), str(seconds)],
         capture_output=True,
@@ -446,7 +450,7 @@ def test_frozen_prefix_respects_original_deadline_and_control(boundary: str, mon
         assert time.monotonic() - started < 0.8
     finally:
         assert custody.close(Deadline.after(3))
-        assert termios.tcgetattr(slave) == mode
+        assert_preserved_terminal_mode(termios.tcgetattr(slave), mode)
         for child in children:
             assert child.returncode == 0
             assert child.stdout is not None and child.stdout.closed
