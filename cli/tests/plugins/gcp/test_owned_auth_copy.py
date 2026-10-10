@@ -249,3 +249,136 @@ def test_actual_default_service_account_worker_join_and_original_close(sdk, sa_d
     assert sorted(kind for kind, _, _ in sdk.sends) == ["boundary", "service"]
     assert reader._auth._credential is selected
     assert not reader._auth._copies
+
+
+@pytest.mark.parametrize("boundary", ["candidate-is-alive", "join", "post-join-is-alive"])
+@pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt])
+def test_poisoned_owned_thread_observation_retains_copy_on_later_retry(sdk, monkeypatch, boundary, error_type):
+    reader, _ = observe(sdk)
+    clone = copied(reader)
+    consuming, release = Event(), Event()
+
+    def after_return() -> None:
+        consuming.set()
+        assert release.wait(5)
+
+    worker, outcomes = run_copy(clone, after=after_return)
+    original_join, original_alive = worker.join, worker.is_alive
+    primary = error_type("unconfirmed consumer observation")
+    observations: list[str] = []
+
+    def poisoned_alive():
+        observations.append("is_alive")
+        if observations == ["is_alive"]:
+            raise primary
+        return False
+
+    def poisoned_join(timeout=None):
+        observations.append("join")
+        if observations == ["join"]:
+            raise primary
+
+    def nonblocking_join(timeout=None):
+        original_join(0)
+
+    try:
+        assert consuming.wait(5) and original_alive()
+        original_session = clone.session
+        originals = tuple(clone._responses)
+        assert original_session is not None and len(originals) == 1
+        if boundary == "join":
+            monkeypatch.setattr(worker, "join", poisoned_join)
+        else:
+            monkeypatch.setattr(worker, "is_alive", poisoned_alive)
+            if boundary == "post-join-is-alive":
+                monkeypatch.setattr(worker, "join", nonblocking_join)
+        if boundary == "candidate-is-alive":
+            with pytest.raises(error_type) as caught:
+                reader._auth.begin(Deadline.after(5))
+            assert caught.value is primary
+        elif error_type is KeyboardInterrupt:
+            with pytest.raises(KeyboardInterrupt) as caught:
+                reader.close(Deadline.after(5))
+            assert caught.value is primary
+        else:
+            assert not reader.close(Deadline.after(5))
+        assert clone._completion_unconfirmed and reader.cleanup_incomplete
+        before = tuple(observations)
+        assert not reader.close(Deadline.after(5))
+        assert tuple(observations) == before and original_alive()
+        assert clone._worker is worker and clone.session is original_session
+        assert tuple(clone._responses) == originals and clone in reader._auth._copies
+        assert not any(handle is original_session or handle in originals for _, handle in sdk.closes)
+        with pytest.raises(StateError):
+            reader.observe_power(Deadline.after(5))
+        assert len(sdk.sends) == 2
+    finally:
+        monkeypatch.setattr(worker, "join", original_join)
+        monkeypatch.setattr(worker, "is_alive", original_alive)
+        release.set()
+        original_join(5)
+    assert not original_alive() and outcomes == [sdk.credential_body]
+    assert not reader.close(Deadline.after(5))
+    assert clone.session is original_session and tuple(clone._responses) == originals
+    assert clone._worker is worker and clone in reader._auth._copies
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt])
+def test_poisoned_sdk_observation_keeps_late_arriving_original_response(sdk, monkeypatch, sa_document, error_type):
+    factory = cast("Callable[..., Any]", service_account.Credentials.from_service_account_info)
+    selected = factory(sa_document, scopes=("https://www.googleapis.com/auth/cloud-platform",))
+    selected.token = "already-fresh-selected-token"
+    sdk.credential = selected
+    entered, release = Event(), Event()
+
+    def boundary() -> None:
+        entered.set()
+        assert release.wait(5)
+
+    sdk.on_boundary = boundary
+    reader, power = observe(sdk)
+    assert power is VMStatus.RUNNING and entered.wait(5)
+    clone = reader._auth._copies[0]
+    worker = clone._worker
+    assert worker is not None
+    original_join, original_alive = worker.join, worker.is_alive
+    primary = error_type("SDK observation uncertainty")
+    observations: list[bool] = []
+
+    def poisoned_alive():
+        observations.append(True)
+        if len(observations) == 1:
+            raise primary
+        return False
+
+    try:
+        assert entered.wait(5) and original_alive()
+        original_session = clone.session
+        assert original_session is not None and not clone._responses
+        reader._auth.begin(Deadline.after(5))
+        try:
+            monkeypatch.setattr(worker, "is_alive", poisoned_alive)
+            with pytest.raises(error_type) as caught:
+                reader._auth.apply_headers("GET", reader._url())
+            assert caught.value is primary
+        finally:
+            reader._auth.end()
+        assert clone._completion_unconfirmed and reader.cleanup_incomplete
+        assert not reader.close(Deadline.after(5))
+        assert observations == [True] and original_alive()
+        assert clone._worker is worker and clone.session is original_session and not clone._responses
+        assert not any(handle is original_session for _, handle in sdk.closes)
+    finally:
+        monkeypatch.setattr(worker, "is_alive", original_alive)
+        release.set()
+        original_join(5)
+    assert not original_alive() and selected.regional_access_boundary == "0x1"
+    originals = tuple(clone._responses)
+    assert len(originals) == 1
+    assert not reader.close(Deadline.after(5))
+    assert clone.session is original_session and tuple(clone._responses) == originals
+    assert clone._worker is worker and clone in reader._auth._copies
+    assert not any(handle is original_session or handle in originals for _, handle in sdk.closes)
+    with pytest.raises(StateError):
+        reader.observe_power(Deadline.after(5))
+    assert sorted(kind for kind, _, _ in sdk.sends) == ["boundary", "service"]

@@ -59,7 +59,6 @@ class GCEOwnedRead:
 
     def __init__(self, vm: VMRow, platform: GCEPlatform, ctx: RunContext) -> None:
         self._vm_name = vm.name
-        self._site_name = platform.site_name
         self._identity = platform._locator_metadata(vm)
         if not _uint64(self._identity[3]):
             raise StateError(

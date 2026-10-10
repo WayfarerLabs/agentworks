@@ -296,16 +296,41 @@ def test_useful_read_retains_uncertain_original_and_refuses_next_read(sdk, kind)
 
 def test_final_credential_session_failure_is_visible_and_retryable(sdk):
     reader, _ = observe(sdk)
-    sdk.failed_close = "credential-session"
-    assert not reader.close(Deadline.after(5))
-    assert reader.cleanup_incomplete
     retained_request = reader._auth._request
     assert retained_request is not None
     original = retained_request.session
+    sdk.failed_close = "credential-session"
+    assert not reader.close(Deadline.after(5))
+    assert reader.cleanup_incomplete
+    assert reader._auth._request is retained_request
     assert retained_request.session is original
     sdk.failed_close = None
     assert reader.close(Deadline.after(5))
     assert len(sdk.sends) == 1
+
+
+@pytest.mark.parametrize("control_type", [KeyboardInterrupt, SystemExit])
+def test_terminal_auth_cleanup_entry_closes_admission_before_interrupt(sdk, monkeypatch, control_type):
+    reader, _ = observe(sdk)
+    auth = reader._auth
+    original_retire = auth.retire_copies
+    primary = control_type("final copy retirement entry")
+
+    def interrupted(deadline, *, final=False):
+        if final:
+            raise primary
+        return original_retire(deadline, final=final)
+
+    monkeypatch.setattr(auth, "retire_copies", interrupted)
+    with pytest.raises(control_type) as caught:
+        reader.close(Deadline.after(5))
+    assert caught.value is primary and auth.closed
+    assert not auth._operation.locked() and not reader._lock.locked()
+    with pytest.raises(StateError):
+        reader.observe_power(Deadline.after(5))
+    assert len(sdk.sends) == 1 and len(sdk.adc_calls) == 1
+    monkeypatch.setattr(auth, "retire_copies", original_retire)
+    assert reader.close(Deadline.after(5))
 
 
 @pytest.mark.parametrize("control_type", [KeyboardInterrupt, SystemExit])

@@ -29,7 +29,9 @@ def test_non_json_constant_in_discarded_field_cannot_publish_ack(sdk, constant):
     assert sdk.adapter.payload.operation_name is None
     assert_receipt(sdk, False)
     assert sdk.closes == ["response", "service"] and not sdk.adapter.cleanup_incomplete
-    assert not sdk.adapter._auth.closed and sdk.adapter._auth.session_retained
+    retained_request = sdk.adapter._auth._request
+    assert not sdk.adapter._auth.closed and retained_request is not None
+    assert retained_request.session is sdk.credential_session
     sdk.adapter._auth.close(Deadline.after(5))
     assert sdk.closes == ["response", "service", "credential"]
 
@@ -84,6 +86,8 @@ def test_nonempty_final_framed_read_retains_matching_late_ack(sdk, monkeypatch, 
     assert sdk.responses[0].raw.isclosed() and sdk.adapter.payload.operation_name == "Operation_1"
     assert_receipt(sdk, True)
     assert sdk.closes == ["response", "service"] and not sdk.adapter.cleanup_incomplete
-    assert not sdk.adapter._auth.closed and sdk.adapter._auth.session_retained
+    retained_request = sdk.adapter._auth._request
+    assert not sdk.adapter._auth.closed and retained_request is not None
+    assert retained_request.session is sdk.credential_session
     sdk.adapter._auth.close(Deadline.after(5))
     assert sdk.closes == ["response", "service", "credential"]

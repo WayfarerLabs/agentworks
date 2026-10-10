@@ -255,7 +255,9 @@ def test_real_selected_service_account_post_preserves_default_boundary_and_share
     assert sdk.adapter.start(Deadline.after(5)) == "Operation_1"
     assert sdk.boundary_entered.wait(5)
     assert sdk.adapter.close(Deadline.after(5))
-    assert not sdk.auth.closed and sdk.auth.session_retained
+    retained_request = sdk.auth._request
+    assert not sdk.auth.closed and retained_request is not None
+    assert retained_request.session is sdk.credential_session
     sdk.auth.close(Deadline.after(5))
     assert selected.regional_access_boundary == "0x1"
     assert sdk.auth._credential is selected

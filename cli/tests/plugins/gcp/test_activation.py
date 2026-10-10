@@ -151,7 +151,9 @@ def test_passive_one_post_keeps_possible_effect_and_owner(owned):
     assert len(p.sends) == 1 and not p.adapter.cleanup_incomplete
     assert p.database.operations.inspect(p.owner.ownership.scope) is not None
     assert p.adapter.close(Deadline.after(5))
-    assert not p.adapter._auth.closed and p.adapter._auth.session_retained
+    retained_request = p.adapter._auth._request
+    assert not p.adapter._auth.closed and retained_request is not None
+    assert retained_request.session is p.handles[0]
     p.adapter._auth.close(Deadline.after(5))
     assert p.closes == ["response", "service", "credential"]
 

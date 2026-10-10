@@ -40,6 +40,7 @@ class _OwnedRequest(Request):
         self._response_hook = self._retain_response
         self._responses: list[Any] = []
         self._uncertain = False
+        self._completion_unconfirmed = False
         self._barred = False
         self._worker: Any = None
         self._active = False
@@ -92,7 +93,7 @@ class _OwnedRequest(Request):
         **kwargs: Any,
     ) -> Any:
         with self._owner._entry:
-            if self._owner.closed or self._barred or self._active or self._uncertain:
+            if self._owner.closed or self._barred or self._active or self._uncertain or self._completion_unconfirmed:
                 raise self._owner.refusal()
             self.remaining()
             if self._deadline is None and self._owner._caller is not current_thread():
@@ -125,7 +126,7 @@ class _OwnedRequest(Request):
 
     def retire_responses(self, *, retry: bool = False) -> None:
         """Close only after this lane's SDK consumer advanced or finished."""
-        if self._uncertain and not retry:
+        if self._completion_unconfirmed or (self._uncertain and not retry):
             return
         control: BaseException | None = None
         try:
@@ -150,7 +151,7 @@ class _OwnedRequest(Request):
             raise control
 
     def close_session(self) -> None:
-        if self.session is not None:
+        if not self._completion_unconfirmed and self.session is not None:
             try:
                 self.session.close()
             except Exception:
@@ -193,12 +194,11 @@ class _OwnedAuth:
     @property
     def cleanup_incomplete(self) -> bool:
         lanes = ([self._request] if self._request is not None else []) + self._copies
-        return any(lane._uncertain or (self.closed and (lane.session is not None or lane._responses)) for lane in lanes)
-
-    @property
-    def session_retained(self) -> bool:
-        return (self._request is not None and self._request.session is not None) or any(
-            lane.session is not None for lane in self._copies
+        return any(
+            lane._completion_unconfirmed
+            or lane._uncertain
+            or (self.closed and (lane.session is not None or lane._responses))
+            for lane in lanes
         )
 
     def refusal(self) -> StateError:
@@ -288,7 +288,17 @@ class _OwnedAuth:
 
         self.remaining()
         headers = {"Accept-Encoding": "identity"}
-        self._credential.before_request(self._request, method, url, headers)
+        try:
+            self._credential.before_request(self._request, method, url, headers)
+        except BaseException:
+            # SDK middleware also observes its public worker. An escaping error
+            # may poison that witness; do not inspect the same Thread again.
+            with self._entry:
+                for lane in self._copies:
+                    if lane._worker is not None:
+                        lane._completion_unconfirmed = True
+                        lane._barred = True
+            raise
         self.remaining()
         self.retire_responses()
         if self._failed or self.cleanup_incomplete:
@@ -306,28 +316,38 @@ class _OwnedAuth:
         """Bar entry first; join only positively observed consumers outside the barrier."""
         control: BaseException | None = None
         with self._entry:
-            if final:
-                self.closed = True
             candidates = []
             for lane in self._copies:
+                if lane._completion_unconfirmed:
+                    lane._barred = True
+                    continue
                 worker = lane._worker
                 expired = lane._deadline is not None and lane._deadline.remaining() == 0
-                if (
-                    final
-                    or lane._barred
-                    or (worker is not None and not worker.is_alive())
-                    or (expired and worker is None)
-                ):
+                retire = final or lane._barred or (expired and worker is None)
+                if not retire and worker is not None:
+                    try:
+                        retire = not worker.is_alive()
+                    except BaseException as error:
+                        lane._completion_unconfirmed = True
+                        lane._barred = True
+                        if control is None:
+                            control = error
+                        continue
+                if retire:
                     lane._barred = True
                     candidates.append(lane)
         try:
             for lane in candidates:
                 try:
                     if lane._worker is not None:
-                        lane._worker.join(
-                            timeout=min(provider_locator_remaining(deadline, vm_name=self._vm_name), TIMEOUT_MAX)
-                        )
-                        if lane._worker.is_alive():
+                        timeout = min(provider_locator_remaining(deadline, vm_name=self._vm_name), TIMEOUT_MAX)
+                        try:
+                            lane._worker.join(timeout=timeout)
+                            alive = lane._worker.is_alive()
+                        except BaseException:
+                            lane._completion_unconfirmed = True
+                            raise
+                        if alive:
                             lane._uncertain = True
                             continue
                 except Exception:
@@ -365,6 +385,8 @@ class _OwnedAuth:
             raise LimitExceededError("GCP authentication close exceeded its deadline")
         control: BaseException | None = None
         try:
+            with self._entry:
+                self.closed = True
             try:
                 self.retire_copies(deadline, final=True)
             except BaseException as error:
