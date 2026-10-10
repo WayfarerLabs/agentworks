@@ -250,14 +250,16 @@ sensitive setup suppression remain required. The Linux guest still restores its 
 itself with the workload, rather than remaining as a remote resize controller.
 
 Shared preparation owns the handshake, framing and transition to application presentation. The SSH
-carrier owns local input-terminal handles, client invocation, resize and input restoration; it must
-not interpret application frames. The experiment must cover the remote bootstrap and the local
-OpenSSH endpoint separately. Replacing OpenSSH stdin with a pipe is not a complete terminal adapter:
-portable OpenSSH 8.5 reads terminal setup and window dimensions from its input descriptor. Windows
-OpenSSH instead queries its standard output console handle for geometry; a borrowed stdin console
-with ordinary stdout pipes does not establish that path. An owned local PTY/console relay is one
-candidate, not an accepted dependency. No terminal type is frozen until that ownership and
-supported-platform behavior are proved with the SSH lane.
+carrier owns client selection and arguments, local input-terminal handles, keyboard acquisition,
+relay, resize forwarding and input restoration; it must not interpret application frames. Shared
+transport owns the native child launch, process/handle custody, status, cleanup and resize
+mechanism. The experiment must cover the remote bootstrap and the local OpenSSH endpoint separately.
+Replacing OpenSSH stdin with a pipe is not a complete terminal adapter: portable OpenSSH 8.5 reads
+terminal setup and window dimensions from its input descriptor. Windows OpenSSH instead queries its
+standard output console handle for geometry; a borrowed stdin console with ordinary stdout pipes
+does not establish that path. An owned local PTY/console relay is one candidate, not an accepted
+dependency. No terminal type is frozen until that ownership and supported-platform behavior are
+proved with the SSH lane.
 
 For the Windows candidate, transport owns native child launch, process/handle custody, status,
 cleanup and resize; SSH owns keyboard acquisition, relay and adoption. ConPTY is a mechanism to
