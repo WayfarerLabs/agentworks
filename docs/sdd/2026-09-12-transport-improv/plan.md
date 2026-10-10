@@ -4150,6 +4150,15 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       exact-operation path confinement and safe target/phase diagnostics. Complete production
       ownership, local download publication, directory transfer and native acceptance remain
       required; these private building blocks do not close those gates.
+- [ ] Implement the private upload-child core checkpoint selected in the
+      [directory composition boundary](file-operations-lld.md#generic-directory-transfer-child-checkpoints).
+      Admit bounded transfer association with the exact ordinary file-call child before effects;
+      persist positive settled success before immutable receipt closure. Preserve failure and
+      uncertainty without a success claim, retain interrupted checkpoint/closure custody, and settle
+      only that bookkeeping during aggregate teardown without replay. Prove exact lost-reply
+      reconciliation and next-child refusal against actual SQLite and helper calls. This is not a
+      directory facade, download-side checkpoint, application artifact ownership, native acceptance
+      or complete public FileAccess delivery.
 - [ ] Resolve lifecycle-ledger capacity before migrating high-volume artifact publication. Apply the
       selected core 128-unfinished-obligation bound and preserve commit-without-reply evidence and
       immutable completed receipts, rather than pruning, reusing IDs or increasing the limit.

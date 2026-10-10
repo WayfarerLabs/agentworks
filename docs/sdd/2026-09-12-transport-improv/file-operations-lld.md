@@ -994,6 +994,45 @@ support must supply its core progress checkpoint explicitly; it cannot reuse tha
 with a no-op or in-memory acknowledgment. Directory transfer and its checkpoint implementation are
 still open, not delivered by this clarification.
 
+### Generic directory-transfer child checkpoints
+
+Generic directory copying composes ordinary owned file calls, with an explicit core checkpoint in
+the file adapter. The 128 limit applies to unfinished obligations, not their completed history, so
+generic copying does not need another batch family, rotating row or parent coordinator merely to fit
+a supported transfer. The serial-package candidate above retains its separate application ownership
+contract; its callback is not the generic copy checkpoint.
+
+The existing aggregate owns the surrounding operation's resource claim and availability. Each child
+holds the ordinary serial borrow. Directory copying is non-atomic and does not promise exclusive
+borrowing for the entire tree: other calls belonging to that same operation may run between settled
+children. A directory invocation selects one original finite deadline and does not refresh it for
+each child. This is neither a directory snapshot nor a transaction against other writers.
+
+Before an effect, the file adapter admits the exact child with a bounded, non-sensitive transfer
+identifier and member ordinal. Its normal recovery payload still carries that child's actual target,
+identity, path and cleanup responsibility. After positive successful completion and all required
+remote and local custody settlement, the adapter publishes the explicit core success checkpoint in
+that same unresolved row, then closes the borrow and makes its receipt immutable. A resolved
+ordinary receipt alone proves no remaining responsibility, not successful copying; clean failures
+and refusals must not gain the success marker. Download success requires verified transfer,
+successful requested local publication and settled local custody, never remote snapshot completion
+alone.
+
+Persist and confirm the exact intended payload and expected revision before advancing. A lost reply
+is reconciled only against that same child and revision. Interrupted confirmation or borrow closure
+retains the actual child, outcome and bookkeeping custody, preventing the next admission. Aggregate
+teardown may settle that bookkeeping without replaying a helper or reading the source again. A
+completed child checkpoint is not application artifact ownership, full-directory completion or a
+resumable plan. Recovery handles only exact retained obligations; a crash between settled children
+does not authorize reconstructing or continuing the remaining transfer. Workstation paths and the
+remaining manifest are not persisted, and no post-crash local repair is promised.
+
+The first private increment is limited to upload-child admission, success checkpointing and
+bookkeeping settlement; its implementation remains open. Directory facade options, traversal and
+extraction, aggregate partial-result semantics, download-side checkpointing and native proof remain
+required work before complete R7 or public RunContext acceptance. The package callback and
+domain-specific artifact ownership must not be weakened while those pieces are built.
+
 ### DOWNLOAD recovery dispatch
 
 The first process-loss recovery vertical is deliberately narrower than ordinary file execution. A
