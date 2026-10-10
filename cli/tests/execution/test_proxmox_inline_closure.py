@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import Database, OperationResourceKind, OperationScope
+from agentworks.db.operations import LifecycleObligationState
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._execution_operation import ExecutionOperation, InlineExecutionControlFact, OwnedInlineOutcome
 from agentworks.execution._execution_result import reduce_owned_inline_result
@@ -27,7 +28,7 @@ from agentworks.execution._runtime_prerequisite import (
     RuntimeTargetOS,
 )
 from agentworks.execution.binding import NativeExecutionBinding
-from agentworks.execution.carrier import Deadline
+from agentworks.execution.carrier import Deadline, Dispatch
 from agentworks.execution.carriers._proxmox_helper_delivery import ProxmoxHelperDelivery
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection, _ProxmoxWire
 from agentworks.execution.models import Command
@@ -151,6 +152,145 @@ def _run(scenario: Scenario) -> OwnedInlineOutcome:
         env={"SECRET": "environment-secret"},
         sensitive=True,
     )
+
+
+@pytest.mark.parametrize("tracked", [False, True])
+@pytest.mark.parametrize("committed", [False, True])
+def test_actual_nondispatch_lost_settle_reply_reconciles_without_runtime_or_budget(
+    scenario: Scenario, monkeypatch: pytest.MonkeyPatch, tracked: bool, committed: bool
+) -> None:
+    _, owner, operation, _, _, _, qga, deliveries = scenario
+    assert operation._native_binding is not None
+    if not tracked:
+        operation._native_binding = replace(operation._native_binding, _new_helper_delivery=None)
+    execute = ProxmoxCarrier._execute
+    settle = OperationAttempt.settle
+    attempts: list[OperationAttempt] = []
+    cause = ValueError("original cause")
+    control = KeyboardInterrupt("settlement interrupted")
+    control.__cause__ = cause
+
+    def expire_then_execute(self, *args, **kwargs):
+        assert qga.deadline.expires_at is not None
+        qga.clock[0] = qga.deadline.expires_at + 1
+        report = execute(self, *args, **kwargs)
+        assert report.dispatch is Dispatch.NOT_SENT
+        return report
+
+    def interrupt_settlement(self):
+        attempts.append(self)
+        if committed:
+            settle(self)
+        raise control
+
+    monkeypatch.setattr(ProxmoxCarrier, "_execute", expire_then_execute)
+    monkeypatch.setattr(OperationAttempt, "settle", interrupt_settlement)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        _run(scenario)
+    assert caught.value is control and isinstance(control.__cause__, InlineExecutionControlFact)
+    assert control.__cause__.__cause__ is cause
+    (active,) = operation.active_inline_calls
+    (attempt,) = attempts
+    (obligation,) = owner.list_pending_lifecycle_obligations()
+    assert obligation.obligation_id == operation._dispatch_id
+    assert obligation.state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert active.operation.outstanding_attempt is attempt
+    assert owner._outstanding_attempt is (None if committed else attempt)
+    assert not active.borrow._closed and active.borrow.has_outstanding_attempt is (not committed)
+    assert attempt.local_delivery.settled and not qga.calls
+    if tracked:
+        assert active.not_sent and not deliveries[0].closure_proven
+        assert active.prepared is None and active.candidate is None
+        assert active.outcome is not None and active.outcome.candidate is None
+    assert reduce_owned_inline_result(control.__cause__.outcome).application_state is ApplicationState.UNKNOWN
+    monkeypatch.setattr(OperationAttempt, "settle", settle)
+    operation._route_check = lambda _deadline: pytest.fail("provider observation")
+    operation.observe_inline_cleanup(Deadline.after(0))
+    operation.retry_inline_bookkeeping()
+    operation.finish()
+    assert not operation.active_inline_calls and not owner.list_pending_lifecycle_obligations() and not qga.calls
+
+
+def test_actual_nondispatch_preserves_returned_unknown_without_runtime_proof(
+    scenario: Scenario, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, _, operation, _, _, _, qga, deliveries = scenario
+    execute = ProxmoxCarrier._execute
+
+    def expire_then_execute(self, *args, **kwargs):
+        assert qga.deadline.expires_at is not None
+        qga.clock[0] = qga.deadline.expires_at + 1
+        return execute(self, *args, **kwargs)
+
+    monkeypatch.setattr(ProxmoxCarrier, "_execute", expire_then_execute)
+    outcome = _run(scenario)
+    result = reduce_owned_inline_result(outcome)
+    assert result.dispatch is Dispatch.NOT_SENT and result.application_state is ApplicationState.UNKNOWN
+    assert not deliveries[0].closure_proven and not operation.active_inline_calls
+    operation.observe_inline_cleanup(Deadline.after(0))
+    operation.finish()
+    assert result.application_state is ApplicationState.UNKNOWN and not qga.calls
+
+
+def test_nondispatch_pending_local_cleanup_requires_only_finite_local_budget(
+    scenario: Scenario, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, _, operation, _, _, _, qga, deliveries = scenario
+    execute = ProxmoxCarrier._execute
+    settle = OperationAttempt.settle
+    control = KeyboardInterrupt("before settlement")
+
+    def expire_then_execute(self, *args, **kwargs):
+        assert qga.deadline.expires_at is not None
+        qga.clock[0] = qga.deadline.expires_at + 1
+        return execute(self, *args, **kwargs)
+
+    def interrupt(_self):
+        raise control
+
+    monkeypatch.setattr(ProxmoxCarrier, "_execute", expire_then_execute)
+    monkeypatch.setattr(OperationAttempt, "settle", interrupt)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        _run(scenario)
+    assert caught.value is control
+    (active,) = operation.active_inline_calls
+    attempt = active.operation.outstanding_attempt
+    assert attempt is not None and active.not_sent and not deliveries[0].closure_proven
+    attempt.local_delivery.begin_process()
+    operation._route_check = lambda _deadline: pytest.fail("provider observation")
+    monkeypatch.setattr(OperationAttempt, "settle", settle)
+    with pytest.raises(ValidationError):
+        operation.observe_inline_cleanup(Deadline.after(0))
+    assert active.operation.outstanding_attempt is attempt and not attempt.local_delivery.settled
+    operation.observe_inline_cleanup(Deadline.after(2))
+    operation.finish()
+    assert attempt.local_delivery.settled and not operation.active_inline_calls and not qga.calls
+
+
+def test_lost_begin_reply_before_carrier_entry_keeps_original_nondelivery_reconciliation(
+    scenario: Scenario, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, owner, operation, _, _, _, qga, _ = scenario
+    begin = OperationBorrow.begin_attempt
+    attempts: list[OperationAttempt] = []
+    control = KeyboardInterrupt("begin reply lost")
+
+    def begin_then_interrupt(self):
+        attempts.append(begin(self))
+        raise control
+
+    monkeypatch.setattr(OperationBorrow, "begin_attempt", begin_then_interrupt)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        _run(scenario)
+    assert caught.value is control
+    (active,) = operation.active_inline_calls
+    (attempt,) = attempts
+    assert owner._outstanding_attempt is attempt and active.operation.outstanding_attempt is None
+    assert not active.not_sent and active.prepared is None and active.candidate is None
+    operation.observe_inline_cleanup(Deadline.after(0))
+    operation.retry_inline_bookkeeping()
+    operation.finish()
+    assert not owner.list_pending_lifecycle_obligations() and not operation.active_inline_calls and not qga.calls
 
 
 @pytest.mark.parametrize("committed", [False, True])

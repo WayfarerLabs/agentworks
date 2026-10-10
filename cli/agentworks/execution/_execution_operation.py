@@ -163,6 +163,7 @@ class _ActiveHelperCall:
     operation: BorrowedFixedHelperCarrier
     closure_delivery: HelperClosureDelivery | None = None
     closure_expectation: HelperClosureExpectation | None = None
+    not_sent: bool = False
     installed: bool = False
     armed: bool = False
     bookkeeping_retained: bool = False
@@ -966,7 +967,7 @@ class ExecutionOperation:
                 attempt = active.operation.outstanding_attempt
                 if attempt is None:
                     continue
-                if delivery.closure_proven and attempt.local_delivery.settled:
+                if (active.not_sent or delivery.closure_proven) and attempt.local_delivery.settled:
                     continue
                 if deadline.expires_at is None or deadline.expired:
                     raise ValidationError("Inline cleanup observation requires a fresh finite deadline")
@@ -974,13 +975,13 @@ class ExecutionOperation:
                 if not attempt.local_delivery.close(deadline):
                     raise StateError("Inline helper local delivery remains unsettled")
                 self._validate_closure_call(active)
-                if not delivery.closure_proven:
+                if not active.not_sent and not delivery.closure_proven:
                     if self._route_check is not None:
                         self._route_check(deadline)
                     self._validate_closure_call(active)
                     if not delivery.observe_closure(deadline=deadline, custody=attempt.local_delivery):
                         raise StateError("Inline helper closure remains unknown")
-                self._validate_closure_call(active)
+                    self._validate_closure_call(active)
                 active.operation.settle_helper_closure()
                 self._capture(active, OwnedInlineOutcome())
 
@@ -1047,7 +1048,7 @@ class ExecutionOperation:
         operation = active.operation
         candidate = active.candidate
         if active.closure_delivery is not None and operation.outstanding_attempt is not None:
-            if not active.closure_delivery.closure_proven:
+            if not active.not_sent and not active.closure_delivery.closure_proven:
                 raise StateError("Inline execution retains unknown helper closure")
             self._validate_closure_call(active)
             operation.settle_helper_closure()
@@ -1228,6 +1229,8 @@ class ExecutionOperation:
             return outcome
         finally:
             if active.closure_delivery is not None:
+                # Positive nondispatch survives; caller observations and input do not.
+                active.not_sent = active.candidate is not None and active.candidate.dispatch is Dispatch.NOT_SENT
                 active.prepared = None
                 active.candidate = None
                 if active.outcome is not None:
