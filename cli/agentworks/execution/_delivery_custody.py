@@ -26,7 +26,7 @@ class LocalDeliveryCleanup(Protocol):
 
 
 class LocalDeliveryCustody:
-    """Retain the exact owner until its latest cleanup is proved complete.
+    """Retain the exact owner until its local capabilities are positively retired.
 
     Construction and observation are passive. The caller serializes dispatch
     and close. Without a coordinator, it stops pipe borrowing before closure;
@@ -64,7 +64,7 @@ class LocalDeliveryCustody:
         return owner
 
     def close(self, deadline: Deadline) -> bool:
-        """Explicitly request bounded cleanup, retaining pending or lost custody."""
+        """Request bounded local retirement independently of execution status."""
         if deadline.expires_at is None:
             raise ValidationError("Local delivery cleanup requires a finite deadline")
         if self._owner is None:

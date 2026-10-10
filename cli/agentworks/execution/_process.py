@@ -214,8 +214,10 @@ class _Input:
     def complete(self) -> bool:
         return self.eof and (self.pending is None or not self.pending)
 
-    def advance(self, pipe: IO[bytes]) -> tuple[bool, bool]:
-        """Advance one bounded source read and one bounded pipe write."""
+    def advance(self, pipes: LocalProcessPipes) -> tuple[bool, bool]:
+        """Advance bounded input I/O and request EOF through the original records."""
+        pipe = pipes.stdin
+        assert pipe is not None
         progressed = False
         if self.pending is None and not self.eof:
             assert self.source is not None
@@ -246,10 +248,10 @@ class _Input:
                 self.pending = None
             else:
                 self.pending = self.pending[written:]
-        if self.complete and not pipe.closed:
+        if self.complete:
             try:
-                pipe.close()
-            except OSError:
+                pipes.close_stdin()
+            except Exception:
                 return progressed, True
             progressed = True
         return progressed, False
@@ -278,6 +280,8 @@ class _ProcessStatus:
     process: subprocess.Popen[bytes]
     status: int | None = None
     lost: bool = False
+    pipes: LocalProcessPipes | None = None
+    process_retired: bool = False
 
     def poll(self) -> int | None:
         if self.status is not None or self.lost:
@@ -291,9 +295,9 @@ class _ProcessStatus:
             return None
         except ChildProcessError:
             self.lost = True
-            # Popen has no "reaped with unknown status" state. Retire only
-            # its destructor bookkeeping; ProcessResult never reads this.
-            self.process.returncode = 0
+            # CPython 3.11-3.14 gates Popen destructor polling on this flag.
+            # Retire that bookkeeping without fabricating a returncode.
+            self.process._child_created = False  # type: ignore[attr-defined]
             return None
         if pid == 0:
             return None
@@ -368,18 +372,76 @@ class LocalProcessRequest:
 
 @dataclass(frozen=True)
 class LocalProcessPipes:
-    """Borrowed child pipe endpoints published after dispatch."""
+    """Raw borrowed I/O endpoints with their original managed-close evidence.
+
+    Borrowers use the streams for I/O and request stdin EOF through
+    ``close_stdin``. They have no authority to close the raw streams.
+    """
 
     stdin: IO[bytes] | None = field(repr=False)
     stdout: IO[bytes] = field(repr=False)
     stderr: IO[bytes] = field(repr=False)
+    _records: list[_PipeClose] = field(default_factory=list, init=False, repr=False, compare=False)
+
+    def _record(self, pipe: IO[bytes]) -> _PipeClose:
+        for record in self._records:
+            if record.pipe is pipe:
+                return record
+        record = _PipeClose(pipe)
+        self._records.append(record)
+        return record
+
+    def _install_close_records(self) -> None:
+        for pipe in (self.stdin, self.stdout, self.stderr):
+            if pipe is not None:
+                self._record(pipe)
+
+    def close_stdin(self) -> None:
+        """Request EOF once, retaining uncertainty if native close raises."""
+        if self.stdin is not None:
+            self._record(self.stdin).close()
+
+    @property
+    def _stdin_close_attempted(self) -> bool:
+        return any(record.pipe is self.stdin and record.attempted for record in self._records)
+
+    @property
+    def _retired(self) -> bool:
+        return all(
+            any(record.pipe is pipe and record.confirmed for record in self._records)
+            for pipe in (self.stdin, self.stdout, self.stderr)
+            if pipe is not None
+        )
+
+    @property
+    def _retryable(self) -> bool:
+        return any(
+            not any(record.pipe is pipe and record.attempted for record in self._records)
+            for pipe in (self.stdin, self.stdout, self.stderr)
+            if pipe is not None
+        )
+
+
+@dataclass
+class _PipeClose:
+    pipe: IO[bytes] = field(repr=False)
+    attempted: bool = False
+    confirmed: bool = False
+
+    def close(self) -> None:
+        if self.attempted:
+            return
+        self.attempted = True
+        self.pipe.close()
+        self.confirmed = True
 
 
 @dataclass(frozen=True)
 class LocalProcessTerminal:
     """Immutable facts from one cleanup attempt or denied admission.
 
-    Retryable cleanup failure leaves exact process custody with the owner.
+    ``cleaned`` proves local capability retirement, independently of status.
+    Uncertain close evidence and actual native objects stay with the owner.
     Later attempts publish new facts without changing this observation.
     """
 
@@ -425,6 +487,9 @@ class LocalProcessOwner:
         self._closed = False
         self._resize_request: _ResizeRequest | None = None
         self._cleanup_retry_requested = False
+        self._retained_status: _ProcessStatus | None = None
+        self._retained_process: subprocess.Popen[bytes] | None = None
+        self._retained_pipes: LocalProcessPipes | None = None
 
     def _admit(self, request: LocalProcessRequest) -> bool:
         with self._condition:
@@ -678,8 +743,8 @@ class LocalProcessOwner:
     def close_bounded(self, deadline: Deadline) -> LocalProcessTerminal | None:
         """Request cleanup, returning None if its observation deadline expires.
 
-        The caller must cease pipe use first and retain this owner on pending or
-        retryable failure. A pending constructor still needs caller-owned stdin
+        The caller must cease pipe use first and retain this owner until positive
+        retirement, including permanent close uncertainty. A pending constructor needs caller-owned stdin
         and pass_fds descriptors; pending return does not permit closing or
         reusing them or restoring terminal modes.
         Native construction and syscalls are not made interruptible. Calling
@@ -746,7 +811,7 @@ class LocalProcessOwner:
             self._publish_terminal(terminal)
         return terminal, interruption
 
-    def _wait_cleanup_retry_or_exit(self, status: _ProcessStatus) -> None:
+    def _wait_cleanup_retry_or_exit(self, status: _ProcessStatus | None) -> None:
         """Keep exact custody while observing exit, without unsolicited signals."""
         while True:
             with self._condition:
@@ -756,10 +821,10 @@ class LocalProcessOwner:
             try:
                 # Only a newly observed exit permits unsolicited bookkeeping
                 # cleanup. Failure after a known exit requires explicit retry.
-                exited = status.status is None and status.poll() is not None
+                exited = status is not None and status.status is None and status.poll() is not None
             except BaseException:
                 exited = False
-            if exited or status.lost:
+            if exited or (status is not None and status.lost):
                 # Cleanup of an observed exit only closes pipes and retires
                 # native bookkeeping. Lost ownership never authorizes a signal.
                 with self._condition:
@@ -771,14 +836,41 @@ class LocalProcessOwner:
 
 
 def _cleanup(status: _ProcessStatus) -> bool:
-    """Close owned pipes and bound local kill and reap, even on interruption."""
+    """Attempt independent original closes and safe process retirement."""
     process = status.process
-    for pipe in (process.stdin, process.stdout, process.stderr):
-        if pipe is not None:
-            with suppress(OSError):
-                pipe.close()
+    if status.pipes is None:
+        try:
+            assert process.stdout is not None and process.stderr is not None
+            status.pipes = LocalProcessPipes(process.stdin, process.stdout, process.stderr)
+        except BaseException:
+            # Record allocation failure cannot prevent independent process cleanup.
+            pass
+    pipes = status.pipes
+    if pipes is not None:
+        for pipe in (pipes.stdin, pipes.stdout, pipes.stderr):
+            if pipe is not None:
+                # A marked attempt is permanently uncertain. Other endpoints
+                # and separately held process authority remain independent.
+                with suppress(BaseException):
+                    pipes._record(pipe).close()
+    status.process_retired = _cleanup_process(status)
+    return status.process_retired and pipes is not None and pipes._retired
+
+
+def _cleanup_retryable(status: _ProcessStatus) -> bool:
+    pipes = status.pipes
+    return (
+        pipes is None
+        or pipes._retryable
+        or (not status.lost and not status.process_retired and (os.name == "nt" or status.status is None))
+    )
+
+
+def _cleanup_process(status: _ProcessStatus) -> bool:
+    """Bound local kill/reap; exact POSIX wait loss retires numeric PID authority."""
+    process = status.process
     if status.lost:
-        return False
+        return True
     if os.name == "nt":
         try:
             if status.poll() is None:
@@ -793,7 +885,7 @@ def _cleanup(status: _ProcessStatus) -> bool:
     except OSError:
         running = True
     if status.lost:
-        return False
+        return True
     if running:
         try:
             os.kill(process.pid, signal.SIGKILL)
@@ -809,7 +901,9 @@ def _cleanup(status: _ProcessStatus) -> bool:
         except OSError:
             pass
         remaining = cleanup_deadline - time.monotonic()
-        if status.lost or remaining <= 0:
+        if status.lost:
+            return True
+        if remaining <= 0:
             return False
         time.sleep(min(_POLL_SECONDS, remaining))
 
@@ -854,9 +948,14 @@ def _run_local_process_owner(owner: LocalProcessOwner) -> None:
             dispatch_failed = True
             return
         started = True
+        owner._retained_process = process
         status = _ProcessStatus(process)
+        owner._retained_status = status
         assert process.stdout is not None and process.stderr is not None
         pipes = LocalProcessPipes(process.stdin, process.stdout, process.stderr)
+        status.pipes = pipes
+        owner._retained_pipes = pipes
+        pipes._install_close_records()
         request = None
         owner._publish_ready(pipes)
         observation_failed, exit_status = owner._wait_for_borrowers(status)
@@ -869,7 +968,9 @@ def _run_local_process_owner(owner: LocalProcessOwner) -> None:
             owner._publish_observation_failure()
             if status is None:
                 assert process is not None
-                status = _ProcessStatus(process)
+                with suppress(BaseException):
+                    status = _ProcessStatus(process)
+                    owner._retained_status = status
             while True:
                 try:
                     owner._wait_until_borrowers_stopped()
@@ -879,6 +980,10 @@ def _run_local_process_owner(owner: LocalProcessOwner) -> None:
     finally:
         request = None
         while True:
+            if status is None and process is not None:
+                with suppress(BaseException):
+                    status = _ProcessStatus(process)
+                    owner._retained_status = status
             if status is not None:
                 try:
                     cleaned = _cleanup(status)
@@ -886,10 +991,16 @@ def _run_local_process_owner(owner: LocalProcessOwner) -> None:
                     cleaned = False
                 local_status = status.status
                 observation_failed |= status.lost
-                cleanup_retryable = not cleaned and not status.lost
+                owner._retained_pipes = status.pipes
+                cleanup_retryable = not cleaned and _cleanup_retryable(status)
             else:
                 local_status = None
-                cleanup_retryable = False
+                cleaned = process is None
+                cleanup_retryable = process is not None
+            if cleaned:
+                owner._retained_status = None
+                owner._retained_process = None
+                owner._retained_pipes = None
             if not cleanup_retryable:
                 status = None
                 process = None
@@ -908,7 +1019,6 @@ def _run_local_process_owner(owner: LocalProcessOwner) -> None:
             )
             if not cleanup_retryable:
                 break
-            assert status is not None
             owner._wait_cleanup_retry_or_exit(status)
 
 
@@ -993,11 +1103,11 @@ def _pump_owned_pipes(
                 break
         if failure is not None:
             break
-        if pipes.stdin is not None and not pipes.stdin.closed:
+        if pipes.stdin is not None and not pipes._stdin_close_attempted:
             if exit_status is not None and not input_state.complete:
                 failure = ProcessFailure.INPUT
                 break
-            input_progressed, input_failed = input_state.advance(pipes.stdin)
+            input_progressed, input_failed = input_state.advance(pipes)
             progressed = input_progressed or progressed
             if input_failed:
                 failure = ProcessFailure.INPUT
@@ -1025,24 +1135,23 @@ def run_owned_process(
     input: ProcessInput,
     output: ProcessOutput,
     deadline: Deadline,
+    owner: LocalProcessOwner,
     env: Mapping[str, str] | None = None,
     cwd: str | None = None,
     pass_fds: tuple[int, ...] = (),
     start_new_session: bool = False,
-    owner: LocalProcessOwner | None = None,
     cleanup_allowance: float | None = None,
 ) -> ProcessResult:
     """Fairly pump bounded input and output without retaining borrowed endpoints.
 
     Passed descriptors remain caller-owned; only child inheritance is configured.
     POSIX session creation is a launch control, not descendant containment.
-    Bounded closure requires an explicitly retained owner. Pending construction
+    The caller retains the owner, including permanent close uncertainty.
+    A finite cleanup allowance selects bounded observation. Pending construction
     still requires the caller to retain any passed descriptors until settlement.
     """
-    if (owner is None) != (cleanup_allowance is None) or (
-        cleanup_allowance is not None and (not math.isfinite(cleanup_allowance) or cleanup_allowance < 0)
-    ):
-        raise ValueError("bounded process closure requires a retained owner and finite allowance")
+    if cleanup_allowance is not None and (not math.isfinite(cleanup_allowance) or cleanup_allowance < 0):
+        raise ValueError("bounded process closure requires a finite allowance")
 
     def close_budget() -> Deadline | None:
         return None if cleanup_allowance is None else Deadline(time.monotonic() + cleanup_allowance)
@@ -1050,9 +1159,8 @@ def run_owned_process(
     stdout = _Output(output.capture_limit, output.stdout_sink)
     stderr = _Output(output.capture_limit, output.stderr_sink)
     if deadline.expired:
-        if owner is not None:
-            budget = close_budget()
-            owner.close_bounded(budget) if budget is not None else owner.close()
+        budget = close_budget()
+        owner.close_bounded(budget) if budget is not None else owner.close()
         return ProcessResult(False, None, None, stdout.report(), stderr.report(), ProcessFailure.DEADLINE)
 
     try:
@@ -1065,12 +1173,10 @@ def run_owned_process(
             start_new_session,
         )
     except (OSError, ValueError):
-        if owner is not None:
-            budget = close_budget()
-            owner.close_bounded(budget) if budget is not None else owner.close()
+        budget = close_budget()
+        owner.close_bounded(budget) if budget is not None else owner.close()
         return ProcessResult(False, None, None, stdout.report(), stderr.report(), ProcessFailure.DISPATCH)
 
-    owner = owner if owner is not None else LocalProcessOwner()
     failure: ProcessFailure | None = None
     exit_status: int | None = None
     interruption: BaseException | None = None

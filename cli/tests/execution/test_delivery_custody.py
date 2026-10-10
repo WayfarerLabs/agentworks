@@ -232,7 +232,10 @@ def test_cleanup_error_preserves_identity_cause_and_same_coordinator_for_retry(
     assert len(cleanup.deadlines) == 2 and cleanup.deadlines[-1] is fresh
 
 
-def test_coordinator_survives_operation_attempt_handoff(tmp_path) -> None:
+@pytest.mark.parametrize("lost_status", [False, True])
+def test_coordinator_survives_operation_attempt_handoff(tmp_path, monkeypatch, lost_status: bool) -> None:
+    if lost_status and os.name != "posix":
+        pytest.skip("exact wait loss is POSIX-only")
     database = Database(tmp_path / "state.db")
     try:
         operation = OperationOwner.acquire(
@@ -244,7 +247,21 @@ def test_coordinator_survives_operation_attempt_handoff(tmp_path) -> None:
         cleanup = Cleanup(owner)
         cleanup.restore_ready = False
         attempt.local_delivery.retain_cleanup(owner, cleanup)
+        if lost_status:
+            spawn = subprocess.Popen
+
+            def externally_reap(*args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
+                child = spawn(*args, **kwargs)
+                os.waitpid(child.pid, 0)
+                return child
+
+            monkeypatch.setattr(subprocess, "Popen", externally_reap)
+            owner.start(core.LocalProcessRequest((sys.executable, "-c", "pass"), core.LocalProcessInput.EOF))
         assert not attempt.local_delivery.close(Deadline.after(1))
+        terminal = owner.snapshot().terminal
+        assert terminal is not None and terminal.cleaned
+        if lost_status:
+            assert terminal.observation_failed and terminal.local_status is terminal.exit_status is None
         with pytest.raises(StateError):
             attempt.settle()
         borrow.handoff_unresolved()
@@ -389,7 +406,7 @@ def test_failed_cleanup_retains_exact_status_for_explicit_retry_or_natural_exit(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="exclusive waitpid loss is POSIX-specific")
-def test_lost_native_ownership_cannot_be_replaced_or_signaled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_lost_status_remains_unknown_after_local_retirement_and_custody_reuse(monkeypatch: pytest.MonkeyPatch) -> None:
     original = subprocess.Popen
     signals: list[tuple[int, int]] = []
 
@@ -403,11 +420,12 @@ def test_lost_native_ownership_cannot_be_replaced_or_signaled(monkeypatch: pytes
     custody = LocalDeliveryCustody()
     result = run_process([sys.executable, "-c", "pass"], io=CarrierIO(), deadline=Deadline.after(3), custody=custody)
     assert result.failure == Failure.OBSERVATION
-    assert not custody.settled
-    assert not custody.close(Deadline.after(1))
-    assert not custody.close(Deadline.after(1))
-    with pytest.raises(StateError):
-        custody.begin_process()
+    assert result.local_status is result.exit_status is None
+    assert custody.settled
+    assert custody.close(Deadline.after(1))
+    assert custody.close(Deadline.after(1))
+    replacement = custody.begin_process()
+    assert replacement.close().cleaned
     assert signals == []
 
 
@@ -531,16 +549,14 @@ def test_delayed_admission_interruption_retains_owner_and_original_control(
         assert custody.close(Deadline.after(3))
 
 
-@pytest.mark.parametrize("owner_provided", [False, True])
-def test_host_cleanup_parameters_are_explicitly_paired(owner_provided: bool) -> None:
-    with pytest.raises(ValueError):
-        core.run_owned_process(
+def test_runner_requires_an_external_owner() -> None:
+    with pytest.raises(TypeError):
+        core.run_owned_process(  # type: ignore[call-arg]
             [sys.executable, "-c", "pass"],
             input=core.ProcessInput(),
             output=core.ProcessOutput(),
             deadline=core.Deadline(None),
-            owner=core.LocalProcessOwner() if owner_provided else None,
-            cleanup_allowance=None if owner_provided else 0.5,
+            cleanup_allowance=0.5,
         )
 
 
