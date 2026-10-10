@@ -1322,7 +1322,8 @@ them in that order; only normal closure retires an original. Retain uncertain or
 `cleanup_incomplete` true and preserve the Request wrapper while credential cleanup is uncertain.
 Preserve original escaping control through scoped cleanup entry and bookkeeping and release the
 admission lock. Never retry uncertain close or submission. This does not establish atomic
-SDK-internal handoff, arbitrary repeated-signal safety or interpreter-shutdown guarantees.
+SDK-internal handoff, arbitrary repeated-signal safety, interruption during final exception
+propagation or lock release, or interpreter-shutdown guarantees.
 
 Retain a matching ACK before publication, cleanup or late-success refusal. Validate canonical
 bounded recovery payloads, then reconcile registration and at most one ACK revision under the same
@@ -1333,10 +1334,17 @@ The documented start API addresses an instance name with no documented immutable
 incarnation precondition. A preceding exact read and database lock cannot prevent external
 delete/recreate. Matching targetId after submission detects a wrong-incarnation response, not the
 already-submitted effect. Do not invent conditional headers, numeric-ID fallback or UUID-based
-protection. Complete stopped access must separately review this limitation against activation
-guarantees before exposure; this private producer selects no requirements waiver or unsupported
-critical operation. Startup settlement, operation retention/recovery, guest preparation, endpoint
-trust, firewall-route lifetime, aggregate release and native delivery proof remain open.
+protection. Complete access uses an observational identity guarantee: before the admitted start,
+perform a fresh supported exact-instance observation and refuse a known mismatch or prohibited
+stopped intent. Construct only the selected recorded-name request and never adopt a replacement. An
+external replacement can still receive that start before mismatch is detected; report the possible
+effect honestly. Require matching receipt, separately proved startup settlement and fresh selected
+identity, power, route/trust and guest preparation before guest work. Changed or unconfirmed
+identity refuses guest admission and retains relevant uncertainty. These checks are not an atomic
+provider reservation. This lead-owned response selects neither a requirements waiver nor an
+unsupported critical operation. Native proof of this supported behavior, startup settlement,
+operation retention/recovery, guest preparation, endpoint trust, firewall-route lifetime and
+aggregate release remain open.
 
 Actual locked public-pipeline tests must cover one POST/no service GET or replay, unread redirect
 and non-200/encoded bodies, finite identity reads and overflow, partial expiry and matching late
@@ -1414,7 +1422,12 @@ payload version, a bounded opaque non-secret payload, timestamps and one closed 
 
 - `registered`: the obligation exists and no effect is yet admitted;
 - `possible-effect`: admission committed before the remote or local effect;
-- `resolved`: typed adapter evidence proves this obligation can cause no further effects.
+- `resolved`: typed adapter evidence settles all effects owned by this obligation.
+
+Settlement concerns the admitted operation, not every future effect of an intended persistent
+resource. A reviewed provider-specific successful terminal-request rule can settle that request; the
+VM need not stop and unrelated provider work need not finish. Separate workload, route, hold and
+local-cleanup obligations still require their own evidence. Receipt alone is not completion.
 
 Core validates the exact operation fence for every transition but never decodes adapter payloads.
 The registered adapter owns payload validation, target/incarnation comparison, observation and the
@@ -1722,15 +1735,18 @@ refuses recovery and retains the claim.
 
 That database fence prevents further cooperating submissions but does not establish remote
 quiescence. For every obligation already in `possible-effect`, the adapter must then prove that
-every admitted dispatch has drained or is remotely fenced against further effects, including work
-already active. A fenced late arrival may still occur but must refuse before effects. Acceptable
-evidence includes carrier-proved non-dispatch paired with exact absence, an operation-specific
-remote generation fence, or equally strong proof from a synchronous local substrate whose controller
-and dispatch endpoint are both gone. Controller absence by itself is insufficient because provider,
-carrier or guest queues may outlive it. This recovery fence is separate from #377's future resource
-hierarchy. The ledger remains attached to the logical operation across that transition so later
-hierarchy can bind one operation to several resource memberships without moving adapter state onto
-one VM row.
+every admitted dispatch is positively settled under the adapter's reviewed completion rule, proved
+not to have taken effect, or remotely fenced against outstanding effects, including work already
+active. A fenced late arrival may still occur but must refuse before effects. Acceptable evidence
+includes exact provider-specific successful terminal-request completion, carrier-proved non-dispatch
+paired with exact absence, an operation-specific remote generation fence, or equally strong proof
+from a synchronous local substrate whose controller and dispatch endpoint are both gone. Intended
+persistent resources and unrelated provider work are not themselves unsettled dispatch; separate
+workload, route, hold and local-cleanup obligations still apply. Controller absence by itself is
+insufficient because provider, carrier or guest queues may outlive it. This recovery fence is
+separate from #377's future resource hierarchy. The ledger remains attached to the logical operation
+across that transition so later hierarchy can bind one operation to several resource memberships
+without moving adapter state onto one VM row.
 
 Local process-loss evidence must observe the actual dispatch endpoint or helper, not merely join the
 controller process. A controller may die after launching a subprocess that continues independently.

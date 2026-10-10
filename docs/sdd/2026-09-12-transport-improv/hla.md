@@ -77,20 +77,23 @@ valid-owner absence. That read fence supplies a linearization point, not continu
 Activation, platform holds, routes, nested teardown and other effect owners register independent
 obligations; several obligations of the same kind may coexist. Only the registered adapter
 interprets its payload. Core seals the ledger after the workflow can create no more obligations and
-releases the operation claim only after every obligation has typed no-further-effects evidence. A
-context exit, local client exit, settled child attempt or ordinary workflow success is not that
-evidence.
+releases the operation claim only after every obligation has typed evidence settling its owned
+effects. Provider-specific successful terminal-request completion may settle that request, not the
+VM's whole lifetime or unrelated provider work. Separate workload, route, hold and local-cleanup
+obligations still require their own evidence. A context exit, local client exit, settled child
+attempt or ordinary workflow success is not whole-operation evidence.
 
 The ledger attaches to the operation identity, not to one resource level. This leaves the same
 mechanism usable when #377 extends one operation across hierarchical or multi-resource claims. A
 recovery controller obtains a fresh database fence that makes the predecessor stale, then proves for
-every admitted obligation that earlier dispatches are drained or remotely fenced against further
+every admitted obligation that earlier dispatches are positively settled under the adapter's
+reviewed completion rule, proved not to have taken effect, or remotely fenced against outstanding
 effects, including work already active. A fenced late arrival must refuse before effects; controller
 absence stops future cooperating submissions but does not drain a provider, carrier or guest queue.
-Resolution therefore also needs carrier-proved non-dispatch plus exact absence, an
-operation-specific remote fence, or equally strong adapter evidence for a synchronous local
-substrate. The ledger is not a workflow engine, scheduler, permission system or lease, and claims
-never expire automatically.
+Resolution therefore also needs exact successful terminal-request completion, carrier-proved
+non-dispatch plus exact absence, an operation-specific remote fence, or equally strong adapter
+evidence for a synchronous local substrate. The ledger is not a workflow engine, scheduler,
+permission system or lease, and claims never expire automatically.
 
 The initial implementation uses coarse VM and shared platform-host resource keys. Its repository
 currently conflicts only on an exact kind/name pair. This is not hierarchical locking and does not
