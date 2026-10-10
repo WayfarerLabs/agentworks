@@ -633,6 +633,28 @@ obtained exact-PID ordinary wait statuses for exits 0, 42, and 255; a second wai
 `ChildProcessError`. Missing wait evidence must remain unknown. This candidate requires a fixed,
 single-reaper helper and proof on supported interpreter builds before changing the preparation gate.
 
+A separate 2026-10-10 source audit concerns local retirement after exact POSIX wait loss, not
+application completion. CPython's `Popen.__del__` can call its cached native wait function and
+retain the object for later polling while `returncode` is unknown. Its `_child_created` bookkeeping
+flag gates both actions in the audited
+[Bookworm 3.11.2 source](https://github.com/python/cpython/blob/v3.11.2/Lib/subprocess.py#L1017-L1030),
+[3.12.13](https://github.com/python/cpython/blob/v3.12.13/Lib/subprocess.py#L1019-L1032),
+[3.13.15](https://github.com/python/cpython/blob/v3.13.15/Lib/subprocess.py#L1030-L1043) and
+[3.14.7](https://github.com/python/cpython/blob/v3.14.7/Lib/subprocess.py#L1030-L1043). The selected
+retirement response clears only that flag after the existing owner observes exact child-wait loss.
+Both real status fields remain unknown; the Windows handle path is unchanged. This is a private
+CPython dependency, not a public subprocess guarantee or proof that descendants stopped. Runtime
+tests must deny `_internal_poll` directly and release the actual object; spying on `os.waitpid`
+alone misses its cached callable. Native restoration and shutdown proof remain required.
+
+Likewise, a raw stream's `closed` property is not confirmation that native close returned normally.
+CPython's FileIO implementation clears its descriptor field before calling native close in both
+[3.11.2](https://github.com/python/cpython/blob/v3.11.2/Modules/_io/fileio.c#L97-L118) and
+[3.12.13](https://github.com/python/cpython/blob/v3.12.13/Modules/_io/fileio.c#L97-L119). The
+selected shared pipe records therefore retain the original close attempt and require normal return
+for confirmation. An uncertain close is never retried against a potentially reused descriptor. This
+source audit does not interpose foreign raw closes or interpreter finalization.
+
 A further local probe on Debian's CPython 3.11.2 recovered all 256 normal exit values through an
 exact-child native wait. Missing executable, missing working directory and non-executable object
 raised before returning a process. Adversarial fixtures demonstrated the exclusions: pre-exec

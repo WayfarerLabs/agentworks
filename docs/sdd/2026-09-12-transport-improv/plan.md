@@ -3750,6 +3750,16 @@ edge follows.
       and installed Linux/macOS held, restoration and shutdown probes remain separate required
       evidence; Windows process/HANDLE guarantees are unchanged. No fake status, global signal reset
       or cleanup bypass.
+
+      The private implementation at `5e640631`, composed at `f28bbf20`, supplies the shared original
+      close records, independent process retirement, mandatory runner ownership and fixed module
+      lifetime. Developer and lead each passed 585 selected cases with one Windows-only skip on
+      Linux, plus full typing over 1356 files. Exact-loss probes also exercised distribution Python
+      3.11.2; the CPython destructor dependency is recorded in prior art. These local results do not
+      close this leaf: independent implementation review, final SSH composition and native held,
+      restoration and shutdown evidence remain owed. Unknown execution and remote effects stay
+      independent of local retirement.
+
 - [ ] Increase buffered snapshot download batches to 256 KiB with a separate scratch range-read
       ceiling, leaving upload writes and internal streaming pieces unchanged. Declare conservative
       complete-response capacity before dispatch; preserve digest, framing, identity, metadata and

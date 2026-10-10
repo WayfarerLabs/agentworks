@@ -15,7 +15,7 @@ Raw `Carrier.execute(..., custody=LocalDeliveryCustody)` requires storage retain
 before dispatch. `begin_process()` stores an inert native owner before returning it for admission;
 another exchange refuses until the latest cleanup observation proves it clean. `settled` is passive
 and `close(Deadline)` explicitly retries bounded cleanup, returning whether local settlement is
-confirmed. Pending construction and failed or lost native ownership retain the same storage. Reports
+confirmed. Pending construction and unproved local retirement retain the same storage. Reports
 remain observations, not cleanup handles. Local cleanup proves neither guest cancellation nor
 provider drain.
 
@@ -568,9 +568,12 @@ them in SSH. No terminal support is enabled by these types.
 
 On POSIX, the shared pump records terminal status from exact-child `waitpid` observations. A lost
 wait owner produces unknown status and observation failure, never a guessed zero exit. Once that
-loss is observed, cleanup does not signal or wait on the numeric PID. An external concurrent reaper
-can still create an exit/reuse race before loss is observed; this change does not establish
-exclusive process ownership. Windows retains handle-backed `Popen` waiting.
+loss is observed, cleanup does not signal or wait on the numeric PID. CPython's private
+`_child_created` bookkeeping flag is cleared for that exact loss so releasing `Popen` cannot resume
+destructor polling; its `returncode` remains unknown. A generic poll error does not authorize this
+retirement. An external concurrent reaper can still create an exit/reuse race before loss is
+observed; this change does not establish exclusive process ownership. Windows retains handle-backed
+`Popen` waiting.
 
 The private pump now uses a default-deny launch owner. A native thread starts with only an admission
 cell; an interrupted, unacknowledged start cancels that cell without releasing command data or
@@ -579,9 +582,10 @@ the caller pumps its borrowed byte endpoints. A caller-side guard covers startup
 pumping, but does not make asynchronous interruption atomic. On handled cleanup paths, control-flow
 exceptions propagate after admitted ownership is settled or incomplete cleanup is reported. The
 owner relinquishes command data and published pipe capabilities before its first cleanup
-observation. An unclean observation can leave the exact native process held by that same owner
-thread. An inert bootstrap or final native-thread return tail may finish later, but cannot use
-borrowed endpoints or launch work.
+observation. An unclean observation retains the actual process and any created status and original
+pipe records privately on the caller-held owner, even after its worker returns. An inert bootstrap
+or final native-thread return tail may finish later, but cannot use borrowed endpoints or launch
+work.
 
 `LocalProcessOwner` exposes that same private ownership mechanism independently of byte pumping.
 Construct it before dispatch, call `start(LocalProcessRequest(...))` once, and observe immutable
@@ -591,12 +595,23 @@ returns the immutable first cleanup observation. `close_bounded(Deadline)` inste
 for cleanup evidence and can return pending; it does not interrupt native construction or cleanup
 syscalls. After a retryable cleanup failure, another bounded close requests one serialized retry
 through the same owner. Signal-free natural-exit observation can settle cleanup later without
-changing the first observation. Lost native ownership remains unclean and cannot authorize another
-numeric-PID signal. A terminal with `admitted=False` records canceled admission without waiting for
+changing the first observation. Exact POSIX wait loss can establish local retirement once every
+owned pipe close is confirmed; execution status remains unknown and no numeric-PID operation is
+permitted afterward. A terminal with `admitted=False` records canceled admission without waiting for
 an inert bootstrap. Natural exit remains observable with stdin held open; closing stdin alone is
 EOF, not owner close. Status first learned during cleanup is never natural-exit evidence. The
 ordinary pump uses this interface. SSH forwarding adoption remains with its owning lane, which must
 stop and join its pipe users before closing the common owner.
+
+`LocalProcessPipes` retains one original close record for each owned raw stream. The input pump's
+early EOF and owner teardown share those records through `close_stdin()`. Only normal close return
+confirms retirement; an ordinary error or control interruption leaves sticky uncertainty. Teardown
+still attempts each independent pipe and separately safe process cleanup. It never retries an
+uncertain descriptor close or treats a raw stream's `closed` flag as native confirmation. Only
+remaining safe cleanup is retryable; permanent, nonretryable uncertainty retains the actual records
+on the owner without a continuing worker. Raw streams are internal borrowed I/O, not close
+authority; this does not interpose foreign closes or Python finalization. Process retirement alone
+does not settle the independent delivery coordinator or remote operation debt.
 
 `LocalProcessRequest.input` chooses `LocalProcessInput.EOF`, `LocalProcessInput.PIPE`, or one
 `BorrowedProcessStdin(descriptor)`. The borrowed descriptor can supply an adapter-owned PTY slave
@@ -624,9 +639,13 @@ macOS/Windows acceptance.
 The host adapter allows 0.5 seconds of fresh cleanup observation after pumping stops, including when
 execution has no deadline. It does not retry automatically or interrupt native syscalls. Pending
 construction can therefore return without published pipes or a known local status; an unsettled
-store prevents interpreting that absence as proved non-dispatch. The guest runner's default waiting
-settlement remains unchanged because its source descriptors do not have a host-side retention
-consumer.
+store prevents interpreting that absence as proved non-dispatch. The guest runner's waiting
+settlement keeps its source descriptors valid until construction settles. `run_owned_process`
+requires an externally retained owner; omitting a finite cleanup allowance selects waiting closure,
+not an ownerless fallback. The inline guest retains one inert, one-shot owner in its fixed module
+through active execution and ordinary body return until interpreter finalization. Both fixed helper
+entry paths retain that module in `sys.modules`. This lifetime is not kernel-exit proof or a
+guarantee beyond finalization; FINISHED does not repair close uncertainty or establish quiescence.
 
 An unobserved command startup with an observation failure remains unknown dispatch even if local
 cleanup finishes before the carrier reduces that report. Later cleanup cannot prove that an already

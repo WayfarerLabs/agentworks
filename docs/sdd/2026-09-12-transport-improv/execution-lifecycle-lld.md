@@ -1032,6 +1032,12 @@ numeric PID; both status fields remain unknown and observation failure remains a
 poll error does not establish this loss. Windows retains its handle-backed child wait and cleanup
 requirements. Neither case establishes guest completion, descendant cleanup or remote effect drain.
 
+On exact POSIX wait loss only, retire CPython `Popen` destructor polling through its private
+`_child_created` bookkeeping flag, leaving `returncode` unknown. The supported-runtime source audit
+is recorded in [prior art](prior-art-research.md); runtime tests must also cover actual object
+release without another native poll or deferred subprocess-list admission. A generic poll error does
+not authorize this retirement, and Windows handle ownership is unaffected.
+
 The existing `LocalProcessPipes` retains one close record for each actual owned endpoint. Mark an
 attempt before native close; only normal return confirms it. Error or exceptional control leaves
 sticky uncertainty, including interruption after the descriptor closed but before confirmation. The
