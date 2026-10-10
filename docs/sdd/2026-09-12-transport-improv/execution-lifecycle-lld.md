@@ -1239,8 +1239,8 @@ fragment, and only an optional API-version query. Store it as evidence; this inc
 follow it. Validate the retained acknowledgment headers, not discarded response metadata. Refuse
 malformed, conflicting, oversized or foreign acknowledgment data without rendering or storing the
 provider body. Separate actual-SDK scripted tests now exercise transmission and returned-handle
-cleanup for this path. Private review and interruption cleanup remain open; this bounded evidence
-does not establish native startup or complete Azure access.
+cleanup for this path. Private producer review and the scoped cleanup-entry/control correction are
+complete. This bounded evidence does not establish native startup or complete Azure access.
 
 Retain a valid matching acknowledgment before publication, cleanup or late-success rejection. Keep
 actual returned response and client handles in adapter custody before cleanup starts, removing only

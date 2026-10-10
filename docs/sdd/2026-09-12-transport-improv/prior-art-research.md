@@ -49,8 +49,10 @@ returning even with polling disabled. The public streamed path lets the adapter 
 only selected acknowledgment headers without reading a provider body or constructing a poller. The
 private producer now includes separate actual-SDK scripted transport tests for this path, covering
 one POST, zero GET and no response-body read, plus matching acknowledgment and returned-handle
-cleanup. The middleware audit alone did not establish those properties. Private review and
-interruption cleanup remain in progress; startup settlement and native proof remain separate.
+cleanup. The middleware audit alone did not establish those properties. Private producer review and
+scoped cleanup-entry/control regressions are complete; startup settlement and native proof remain
+separate. Scripted Python interruption cases do not establish atomic SDK-internal handoff or safety
+under arbitrary repeated signals.
 
 Sources:
 [public streamed request](https://learn.microsoft.com/en-us/python/api/azure-mgmt-compute/azure.mgmt.compute.computemanagementclient?view=azure-python),

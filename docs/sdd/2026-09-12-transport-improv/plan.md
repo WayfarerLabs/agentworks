@@ -1063,7 +1063,7 @@ Review corrected stored-client interruption cleanup and removed an unreachable e
 Successful startup settlement, complete AWS access, native proof and whole-PR acceptance remain open
 below.
 
-- [ ] Correct AWS activation's uncertain-client-close custody before owned access integration. The
+- [x] Correct AWS activation's uncertain-client-close custody before owned access integration. The
       private Azure review found that `EC2Activation.start()` suppresses an ordinary close exception
       while retaining the client only in a local variable. Retain the actual original until closure
       is confirmed, including interrupted cleanup, and expose incomplete local cleanup to aggregate
@@ -1076,7 +1076,7 @@ below.
       acknowledgment remains unknown; ordinary power observations cannot invent a receipt. Keep
       whole-workflow release and independent-job availability separate from submission
       acknowledgment.
-- [ ] Implement and privately review the provider-owned Azure start admission/acknowledgment
+- [x] Implement and privately review the provider-owned Azure start admission/acknowledgment
       producer in the
       [lifecycle LLD](execution-lifecycle-lld.md#azure-activation-admission-and-acknowledgment).
       Prove exact VM ownership, one admitted streamed POST, no middleware replay, registration,
@@ -1085,6 +1085,18 @@ below.
       audit distinct from proof of this new submission path. This is a private #833 work unit;
       successful-start settlement, full Azure access, native proof and RunContext admission remain
       open, including after the producer's private review.
+
+The composed admission corrections at `80de3c47` clear all three independent private lanes. AWS
+retains the actual original client through uncertain closure; Azure retains actual response and
+client originals and preserves primary control plus lock release through the tested cleanup-entry
+boundary. Lead guarded actual-SDK selections passed 138 AWS cases (one unchanged subprocess proof
+deselected, no skips) and 167 Azure cases (no deselection or skips); full strict typing passed 1,364
+sources. The final Azure complexity selection passed 36 cases with 47 explicitly deselected and no
+failures or skips. Final project and complementary generic reviews were source-only, not additional
+runtime verification. Earlier failed diagnostic and regression runs remain preserved; these final
+results do not erase them. SDK-internal acquisition, arbitrary repeated signals, real credential
+delivery/drain, startup settlement, complete cloud access and whole-PR acceptance remain unproved.
+
 - [x] Implement and privately review passive exact-instance power observations for AWS, Azure and
       GCP using their provider-owned locator reads. Cover stable/transitional/malformed states,
       identity/account mismatch, setup expiry, actual SDK request serialization and successful
