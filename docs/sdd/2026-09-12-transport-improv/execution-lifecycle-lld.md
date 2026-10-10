@@ -1439,6 +1439,12 @@ lose supported certificate behavior. Retain attributable responses before SDK co
 later owned calls while their cleanup is uncertain. Public session closure accounts for our
 originals, not every SDK-created adapter or internal process.
 
+Preserve the public SDK's token-state distinction after synchronous refresh. `STALE` denotes an
+unexpired token inside the SDK refresh window, not an unusable credential. Accept both `STALE` and
+`FRESH` after that refresh, and refuse `INVALID`; do not add a minimum lifetime that the selected
+SDK does not require. Keep this decision separate from regional access boundary compatibility and
+service-request replay.
+
 Credential requests preserve the public SDK's redirect behavior. Retain each returned response
 before SDK consumption, including the stock session's maximum of 30 redirects and final response.
 Retire those originals only after their consumer returns or before the next explicit owned request,

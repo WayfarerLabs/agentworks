@@ -271,6 +271,10 @@ redirects keep public SDK behavior rather than imposing a new credential policy.
 reconcile the separate start producer's authentication, implement full native access, or prove real
 credential/socket drain or native projection compatibility.
 
+After synchronous refresh, an unexpired token remains usable even when Google-auth marks it `STALE`
+because its remaining lifetime is inside the SDK's refresh window. Refuse `INVALID` credentials; do
+not impose a new minimum token lifetime or re-enter automatic request replay.
+
 The private cloud start producers in `plugins/aws/_activation.py`, `plugins/azure/_activation.py`
 and `plugins/gcp/_activation.py` admit one selected start under a retained exact VM owner. They keep
 bounded acknowledgment payloads and reconcile interrupted ledger replies without resubmission. They

@@ -1174,13 +1174,16 @@ The private `GCEOwnedRead` staging implementation supplies passive exact-instanc
 reads and selected owned credentials. Its fixed six-field Compute projection avoids downloading
 unrelated startup-script metadata under the raw-body bound. Credential redirect responses retain
 their actual originals until SDK consumption returns; public redirect behavior is preserved rather
-than restricted. Author-checkout verification passes all 98 application/actual-SDK cases without
-skips or deselection, scoped lint/format and full strict typing across 1,379 sources. Earlier guard,
-style and test-annotation failures remain recorded. These results cover the final four source files
-on the author's earlier base, not whole-composition typing or native acceptance. Independent private
-review remains open. This reader does not reconcile the start producer's authentication or supply
-startup settlement, endpoints, routes, guest preparation or RunContext admission; keep both GCP
-items unchecked.
+than restricted. Initial private review found that a successfully refreshed short-lived token can
+remain usable while the SDK marks it `STALE`; the corrected reader preserves that public behavior
+and still refuses `INVALID`. Author-checkout verification now passes all 99 application/actual-SDK
+cases without skips or deselection, including a real service-account short-lifetime regression,
+scoped lint/format and full strict typing across 1,379 sources. Earlier guard, style,
+test-annotation and initial private-review findings remain recorded. These results cover the final
+four source files on the author's earlier base, not whole-composition typing or native acceptance.
+Independent private re-review remains open. This reader does not reconcile the start producer's
+authentication or supply startup settlement, endpoints, routes, guest preparation or RunContext
+admission; keep both GCP items unchecked.
 
 - [ ] Complete owned GCP access with the LLD's observational identity guarantee: a fresh exact
       provider observation refuses known stale-target admission, matching receipt and subsequent
