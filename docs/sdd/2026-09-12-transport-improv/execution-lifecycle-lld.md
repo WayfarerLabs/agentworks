@@ -1312,6 +1312,14 @@ parameter on `Carrier.execute`, a stronger `CarrierReport`, or an SSH requiremen
 remains unchanged. The first implementation slice covers inline DIRECT helpers; managed read
 preparation then uses the same seam without creating a second recovery mechanism.
 
+The managed-read extension separates preparation from execution before admission, publishing the
+same explicit expectations for OBSERVE and READ_OUTPUT. A prepared read permits one dispatch and
+clears its request and collectors after that call. The retained call's origin is independent of its
+detachable payload or optional delivery wrapper: escaping managed reads continue to carry
+`ManagedObserveControlFact`, including interrupted final handoff. Retained cleanup stores neither
+managed observation facts nor output. Standalone reads without an actual retained core call do not
+gain this continuation merely by sharing preparation.
+
 Preparation supplies immutable non-payload closure expectations explicitly: original nonce, runtime
 candidates and shim, and the existing selected guest checkpoint where applicable. Do not derive
 these from generated argv or downcast a caller sink. After the original call returns or raises,
@@ -1348,6 +1356,11 @@ settles only the invocation's future effects and original attempt, without chang
 NOT_STARTED or UNKNOWN application result. RESOURCE disposal still requires its separate positive
 terminal observation and action proof. A failed or identity-refused managed read that returns zero
 must not acquire those proofs from helper closure.
+
+After settling a timed-out RESOURCE prerequisite read, cleanup performs no disposal action. A later
+explicit disposal request obtains a new positive managed terminal observation through the existing
+terminal-proof gate before admitting its action. The prior helper's closure does not populate the
+disposal binding, resume old collectors or replace the original caller's unknown observation.
 
 Core exposes explicit observation cleanup before aggregate execution `finish`. Fresh finite budgets
 are required only for unresolved observation or local cleanup; a provider route read is needed only

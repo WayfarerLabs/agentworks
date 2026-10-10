@@ -3720,9 +3720,13 @@ edge follows.
 - [ ] Extend the same retained helper-closure seam to managed read preparation and timed-out
       RESOURCE disposal prerequisites. Cleanup settles the prior observer only; a subsequent
       explicitly requested read must still supply positive terminal proof before disposal. Closure,
-      readiness and guest/action proof remain distinct. Lost ACK, consumed status, controller
-      restart and other-carrier recovery remain separate open gates, not implicit completion of the
-      general recovery work.
+      readiness and guest/action proof remain distinct. Prepare explicit non-payload expectations
+      before admission, keep each prepared read single-dispatch, preserve managed control facts
+      after payload detachment and retain no application observation/output in cleanup state. Prove
+      OBSERVE/READ_OUTPUT deadline continuation, interruption and exact original-attempt settlement,
+      plus prerequisite cleanup causing no disposal action before a separately requested positive
+      terminal read. Lost ACK, consumed status, controller restart and other-carrier recovery remain
+      separate open gates, not implicit completion of the general recovery work.
 
 The inline source candidate at `1381f4c3`, integrated at `3086c213`, supplies the actual per-call
 observer, retained original attempt, owned provider-route fence and native-close observation. Worker
@@ -3734,9 +3738,13 @@ and six-file static checks: the 517 retained original cases and 33 new cases, af
 private wire-mutation test with its redundant guard. Project re-review also found interrupted
 settlement of a definitive NOT_SENT result retaining debt without any provider request. Candidate
 `70a2442a` retains that non-payload fact for exact no-I/O reconciliation; its 26 bounded cases pass
-without skips, including seven new cases, with two-file static checks. Integrated re-review and lead
-gates remain pending. Both native QGA-major measurements and managed-read continuation remain
-pending, so neither leaf above is complete.
+without skips, including seven new cases, with two-file static checks. At the integrated final pin
+`ed03dabf`, all three independent private re-review lanes cleared the bounded inline unit. Lead
+reran the same seven modules: 557 cases passed, zero skips, with thirteen-file Ruff/format/mypy and
+canonical file quality passing. Overlapping runs are not summed as distinct coverage. Both native
+QGA-major measurements and managed-read continuation remain pending, so neither leaf above is
+complete. The next separately delegated unit extends managed-read preparation and the existing
+retained call; it does not introduce another recovery mechanism or broaden disposal proof.
 
 - [ ] Reconcile #770's historical escape/relaunch proposal against the later exclusion of malicious
       target-user containment. Deliver DIRECT/MANAGED without a CONTAINED profile or
