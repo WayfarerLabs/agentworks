@@ -103,7 +103,6 @@ def test_runner_preserves_close_interruption_while_latest_cleanup_observation_is
             raise control
         return wait_terminal(owner, deadline, first=first)
 
-    monkeypatch.setattr(process_core, "LocalProcessOwner", lambda: owner)
     monkeypatch.setattr(process_core, "_cleanup", hold_natural_exit_cleanup)
     monkeypatch.setattr(owner, "_wait_terminal", interrupt_wait_once)
     if os.name == "posix":
@@ -121,6 +120,7 @@ def test_runner_preserves_close_interruption_while_latest_cleanup_observation_is
                 input=ProcessInput(),
                 output=ProcessOutput(capture_limit=4096),
                 deadline=Deadline(time.monotonic() + 0.05),
+                owner=owner,
             )
         assert caught.value is control
         assert owner.snapshot().terminal is None
@@ -146,6 +146,7 @@ def test_process_cwd_does_not_change_parent_directory(tmp_path: Path) -> None:
         output=ProcessOutput(capture_limit=4096),
         deadline=Deadline(time.monotonic() + 10),
         cwd=str(tmp_path),
+        owner=process_core.LocalProcessOwner(),
     )
 
     assert result.failure is None
@@ -164,6 +165,7 @@ def test_invalid_process_cwd_refuses_before_child_start(tmp_path: Path) -> None:
         output=ProcessOutput(capture_limit=4096),
         deadline=Deadline(time.monotonic() + 10),
         cwd=str(tmp_path / "missing"),
+        owner=process_core.LocalProcessOwner(),
     )
 
     assert not result.started
@@ -187,6 +189,7 @@ def test_process_can_start_as_new_session_leader() -> None:
         output=ProcessOutput(capture_limit=4096),
         deadline=Deadline(time.monotonic() + 10),
         start_new_session=True,
+        owner=process_core.LocalProcessOwner(),
     )
 
     assert result.failure is None
@@ -239,6 +242,7 @@ def test_memfd_script_keeps_binary_stdin_separate_and_parent_fd_owned(shell: str
             output=ProcessOutput(capture_limit=4096),
             deadline=Deadline(time.monotonic() + 20),
             pass_fds=(fd,),
+            owner=process_core.LocalProcessOwner(),
         )
 
         assert result.failure is None
@@ -287,6 +291,7 @@ result = core.run_owned_process(
     cwd=None,
     pass_fds=(),
     start_new_session=False,
+    owner=core.LocalProcessOwner(),
 )
 print(json.dumps({
     "agentworks_loaded": "agentworks" in sys.modules,

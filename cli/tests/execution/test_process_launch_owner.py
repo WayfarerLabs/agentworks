@@ -51,6 +51,7 @@ def _run_sleeping_child() -> process_core.ProcessResult:
         input=ProcessInput(),
         output=ProcessOutput(capture_limit=4096),
         deadline=Deadline(time.monotonic() + 10),
+        owner=process_core.LocalProcessOwner(),
     )
 
 
@@ -233,7 +234,7 @@ def test_stdin_eof_does_not_request_owner_cleanup() -> None:
     )
     ready = _wait_snapshot(owner, lambda snapshot: snapshot.pipes is not None)
     assert ready.pipes is not None and ready.pipes.stdin is not None
-    ready.pipes.stdin.close()
+    ready.pipes.close_stdin()
 
     exited = _wait_snapshot(owner, lambda snapshot: snapshot.exit_status == 7)
     assert exited.terminal is None
@@ -259,7 +260,7 @@ def test_exact_wait_loss_never_signals_a_numeric_pid(monkeypatch: pytest.MonkeyP
     terminal = owner.close()
 
     assert snapshot.exit_status is None
-    assert terminal.observation_failed and not terminal.cleaned
+    assert terminal.observation_failed and terminal.cleaned
     assert terminal.local_status is terminal.exit_status is None
     assert signals == []
 
@@ -298,7 +299,8 @@ def test_incomplete_reap_is_reported_honestly(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
     monkeypatch.setattr(process_core._ProcessStatus, "poll", poll)
-    monkeypatch.setattr(process_core, "_cleanup", lambda status: False)
+    cleanup = process_core._cleanup
+    monkeypatch.setattr(process_core, "_cleanup", lambda status: cleanup(status) if status.lost else False)
 
     owner.start(_request("pass"))
     _wait_snapshot(owner, lambda snapshot: snapshot.pipes is not None)
@@ -578,6 +580,7 @@ def test_repeated_sigint_during_cleanup_preserves_interruption_and_exact_reap(
             input=ProcessInput(source=InterruptingSource()),
             output=ProcessOutput(capture_limit=4096),
             deadline=Deadline(time.monotonic() + 10),
+            owner=process_core.LocalProcessOwner(),
         )
 
     _assert_exact_cleanup(children)

@@ -36,6 +36,7 @@ from ._inline_request import (
 )
 from ._process import (
     Deadline,
+    LocalProcessOwner,
     ProcessFailure,
     ProcessInput,
     ProcessOutput,
@@ -51,6 +52,9 @@ _SHELL_ALIASES = {
     "/usr/bin/sh": ScriptShell.SH,
 }
 _EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
+# Both fixed loaders retain this module through sys.modules. This one-shot
+# owner holds uncertain native objects through body return until finalization.
+_PROCESS_OWNER = LocalProcessOwner()
 
 
 class _SafeFailure(Exception):
@@ -241,6 +245,7 @@ def main(nonce: str) -> int:
                 else ProcessOutput()
             ),
             deadline=Deadline(None),
+            owner=_PROCESS_OWNER,
             env=dict(manifest.env),
             cwd=manifest.cwd,
             pass_fds=() if launch.source_fd is None else (launch.source_fd,),

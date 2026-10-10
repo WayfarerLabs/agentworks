@@ -247,9 +247,9 @@ def test_known_wait_loss_never_uses_reused_numeric_pid(monkeypatch: pytest.Monke
     monkeypatch.setattr(Popen, "poll", forbidden)
     monkeypatch.setattr(Popen, "wait", forbidden)
     monkeypatch.setattr(Popen, "kill", forbidden)
-    assert not process_core._cleanup(status)
+    assert process_core._cleanup(status)
     assert status.status is None
-    assert process.returncode == 0  # Internal destructor bookkeeping only.
+    assert process.returncode is None
     assert process.stdout is not None and process.stdout.closed
     assert process.stderr is not None and process.stderr.closed
 

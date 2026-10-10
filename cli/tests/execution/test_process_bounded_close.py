@@ -384,7 +384,9 @@ def test_failed_cleanup_after_natural_exit_waits_for_explicit_retry(
 
 
 @pytest.mark.skipif(os.name != "posix", reason="exact wait loss and numeric signals are POSIX-only")
-def test_lost_exclusive_ownership_stops_retention_and_denies_every_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_lost_exclusive_ownership_retires_local_capabilities_and_denies_pid_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     process = _fake_process()
     owner = core.LocalProcessOwner()
     cleanup = core._cleanup
@@ -416,7 +418,7 @@ def test_lost_exclusive_ownership_stops_retention_and_denies_every_retry(monkeyp
             owner, lambda snapshot: snapshot.terminal is not None and not snapshot.terminal.cleanup_retryable
         )
         terminal = snapshot.terminal
-        assert terminal is not None and not terminal.cleaned
+        assert terminal is not None and terminal.cleaned
         assert terminal.observation_failed
         assert owner.close_bounded(_deadline()) is terminal
         assert owner.close_bounded(_deadline()) is terminal
