@@ -3753,12 +3753,17 @@ edge follows.
 
       The private implementation at `5e640631`, composed at `f28bbf20`, supplies the shared original
       close records, independent process retirement, mandatory runner ownership and fixed module
-      lifetime. Developer and lead each passed 585 selected cases with one Windows-only skip on
-      Linux, plus full typing over 1356 files. Exact-loss probes also exercised distribution Python
-      3.11.2; the CPython destructor dependency is recorded in prior art. These local results do not
-      close this leaf: independent implementation review, final SSH composition and native held,
-      restoration and shutdown evidence remain owed. Unknown execution and remote effects stay
-      independent of local retirement.
+      lifetime. Independent project review found that already-consumed wait loss could repeatedly
+      retry missing close-record allocation without an explicit request. The correction at
+      `6b7db610`, composed at `c1dab268`, permits one bookkeeping pass for newly observed loss and
+      otherwise waits for an explicit retry. It also removes redundant retained-pipe storage while
+      preserving the original objects through the retained status. Both new real-child regressions
+      fail with the old wait behavior. Developer and lead each passed 587 selected cases with one
+      Windows-only skip on Linux, plus full typing over 1357 files. Exact-loss probes also exercised
+      distribution Python 3.11.2; the CPython destructor dependency is recorded in prior art. These
+      local results do not close this leaf: independent correction review, final SSH composition and
+      native held, restoration and shutdown evidence remain owed. Unknown execution and remote
+      effects stay independent of local retirement.
 
 - [ ] Increase buffered snapshot download batches to 256 KiB with a separate scratch range-read
       ceiling, leaving upload writes and internal streaming pieces unchanged. Declare conservative
