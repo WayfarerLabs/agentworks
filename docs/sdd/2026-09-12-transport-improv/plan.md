@@ -1201,7 +1201,7 @@ The owned preliminary-observation correction below supersedes only the preceding
 no-factory-on-denial ordering proof. Retaining an inert factory before the read establishes custody;
 denial still allows no preparation, activation, hold, route or guest work.
 
-- [ ] Retain the passive owned native access before its initial power observation. Add required
+- [x] Retain the passive owned native access before its initial power observation. Add required
       `observe_power(deadline)` to the private access protocol and both actual WSL2/Proxmox
       adapters, preserving the original deadline, owner and native custody. Keep the common
       supported-state and operator-stopped-intent gate before preparation. Prove same-access cleanup
@@ -1210,6 +1210,16 @@ denial still allows no preparation, activation, hold, route or guest work.
       denial. Update permanent contract collateral alongside code. This correction does not
       implement cloud SDK read-client slots, provider incarnation/adoption, activation settlement or
       native acceptance.
+
+The bounded ownership correction at `875e434b3` clears all three independent private lanes. Project
+review is source-only; generic review passes 78 focused cases in its assigned worktree. Complexity
+review passes 31 baseline cases, observes nine expected missing-cleanup failures after moving access
+retention past the read, then passes those nine after restoration. Lead verification passes 78 cases
+and full strict typing across 1,369 sources, with scoped lint, formatting and documentation gates.
+An earlier generic run misplaced its scratch namespace; those preserved results are excluded from
+lane completion, and the conforming rerun supplies the independent proof. These are local inert
+custody and provider fixtures, not native startup or SDK-client retirement evidence. Full cloud
+access, guest-preparation observer replacement and whole-PR readiness remain open.
 
 - [ ] Replace shared guest preparation's direct platform locator reads with one required
       caller-retained `observe_locator(Deadline)` callable, removing obsolete context and
