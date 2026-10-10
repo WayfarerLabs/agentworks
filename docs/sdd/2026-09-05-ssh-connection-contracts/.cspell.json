@@ -1,5 +1,5 @@
 {
   "version": "0.2",
   "import": ["../../../.cspell.json"],
-  "words": ["PATHEXT", "nonblocking", "pseudoconsole"]
+  "words": ["FIONREAD", "PATHEXT", "PENDIN", "SIGCHLD", "ctypes", "lflag", "nonblocking", "pseudoconsole"]
 }

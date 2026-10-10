@@ -37,20 +37,23 @@ refuted by this single-PR scope. Its
 the reports and removal of `review-requested` before implementation. Record each later handoff and
 budget disposition on #832. Contract changes or unexpected scope return to the operator.
 
-Implementation round 1 is closed. Its complete native and complexity feedback exposed Windows
-fixture/empty-PATH defects and finite terminal-backlog loss; round 2 of the authorized three started
-after the full reports and one-hour collection window, with `review-requested` removed before fixes.
-Round 2 remains open and the PR remains draft. Its
-[current record](phase2-results.md#round-2-collected-feedback-and-dependency-adoption) carries the
-frozen batch, reviewed cleanup dependency, ownership and unproved acceptance. No full implementation
-checkbox or merge intent is asserted by these corrections.
+Implementation rounds 1 and 2 are closed. Round 2's exact `057621b5` checkpoint received complete
+native and complexity reports, followed by the minimum one-hour collection interval. Round 3 of the
+authorized three is now open, with `review-requested` removed before fixes. Its
+[current record](phase2-results.md#round-3-collected-feedback-and-corrections) carries the frozen
+batch, reviewed CI dependencies, shared lost-status finding and unproved acceptance. No additional
+public fix round remains after this batch. The PR remains draft; these corrections assert neither a
+completed full implementation checkbox nor merge intent.
 
 The retained POSIX consumer now uses that reviewed cleanup seam and preserves pending bytes plus the
 frozen native output prefix. Owned Linux fixtures verify finite/enlarged-pipe preservation, pending
 custody, retryable cleanup and permanent loss. Normal interpreter exit can still wait for pending
 construction or retryable cleanup; production caller-lifetime proof and native platform acceptance
-remain open. The current record also carries the shared Windows managed-foreground CI failure routed
-to transport. These findings do not complete the broader terminal or RunContext work.
+remain open. The latest native report also exposes permanent lost-status custody under ignored
+SIGCHLD and the resulting raw-terminal retention. Transport owns the shared cleanup distinction; SSH
+owns its consumer and macOS assertion corrections. The separately reviewed shared Windows CI test
+corrections are adopted locally, with hosted validation still required. These findings do not
+complete the broader terminal or RunContext work.
 
 Transport solely owns the carrier contract, common types, acceptance criteria, shared preparation,
 public outcomes and proof harness. SSH owns its independent carrier, connection/trust migration,

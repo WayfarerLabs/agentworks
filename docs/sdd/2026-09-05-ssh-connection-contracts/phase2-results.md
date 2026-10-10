@@ -3,7 +3,7 @@
 - Updated: 2026-10-10
 - PR: [#832](https://github.com/WayfarerLabs/agentworks/pull/832), draft
 - Main/contract base: `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (#830)
-- State: implementation feedback/fix round 2 is open; full terminal and production acceptance remain
+- State: implementation feedback/fix round 3 is open; full terminal and production acceptance remain
   open
 
 Earlier checkpoint evidence and dependency history live in separate files. The headings below retain
@@ -528,3 +528,96 @@ All earlier evidence and chronology are preserved in
 [earlier implementation checkpoints](phase2-initial-results.md) and
 [dependency history](phase2-history.md). Existing section anchors above preserve completed plan
 links. Historical claims keep their original scope; this section supplies their current disposition.
+
+## Round 2 handoff and native validation
+
+The [round 2 handoff](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6092179600)
+evaluates exact SSH `057621b5db6c49c93240a836e64ef0e7afeea888` on public transport `dd10ebbe` plus
+the separately adopted retained-cleanup seam. All three final independent private reviews clear that
+correction: project passes 528 cases with ten skips and an independent natural-settlement probe;
+complexity and generic correctness each pass 564 cases with ten skips and owned negative controls.
+The local complete non-integration suite passes 17,059 cases with 55 skips in 316.49 seconds. Full
+Ruff/format, mypy (1,332 sources), file quality, typer isolation and locked-SDD checks pass. Hosted
+Linux, static, Rulesync and website checks pass; local website validation has the separately
+recorded unchanged-input pin. Neither those reviews nor those gates prove full standup.
+
+Hosted [run 38012115902](https://github.com/WayfarerLabs/agentworks/actions/runs/38012115902) is not
+green: Windows reports two failures, 1,713 passes and 70 skips. Both failures are unchanged shared
+keeper clock/fence cases, close and binding, with zero scripted carrier calls rather than one. Their
+selected one-second budget begins before real registration and arming. No actual Windows stage
+causing expiration is diagnosed. The prior foreground failure does not recur. The operator
+explicitly requested a checkpoint testing signal despite this shared CI failure; the scoped tester
+comment precedes `review-requested` at 2026-10-10 01:28:01 UTC. It is not a green or ready claim.
+
+The complete
+[native report](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6092448138)
+measures that exact head, tree `755f0e70c31deb8df5aeb246917e338ea4726ba8`, using Linux OpenSSH
+9.2p1, macOS 10.2p1 and Windows 9.5p2/10.0p2 against a fresh Debian 13 guest. All four preceding SSH
+findings are corrected in their measured scope: Windows empty-PATH selection, finite output
+preservation, installed-client spy and independent complete-policy maintenance after an empty
+candidate. The Linux installed suite passes 40 cases with three skips. Linux/macOS output preserves
+64 KiB, 256 KiB and 1 MiB backlogs, both streams and deliberate sink stalls; inherited writers still
+yield truthful incomplete output. Native macOS FIONREAD observes the queued prefix correctly.
+Original control exceptions, reaping and custody settlement pass the measured interruption cells;
+the fast cleanup did not place a second signal inside pending cleanup.
+
+Two new native findings remain material or should-fix. Ignored SIGCHLD, including inherited ignore
+across exec, and a foreign reaper make shared wait publish lost status, non-retryable unclean
+custody and a permanently raw borrowed terminal in the SSH relay. Transport owns that status/cleanup
+correction; SSH owns its restoration consumer. Unknown status must not become fabricated exit zero,
+unsafe numeric-PID signaling or unconditional release of uncertain native custody. Separately, macOS
+canonical restoration sets PENDIN in lflag even using plain kernel calls. Exact fixture snapshot
+assertions produce 39 failures and 15 errors. A scratch masking experiment passes 511 cases with one
+remaining isolated-child failure; that last cause is not proved by the experiment. Production
+restoration itself is not shown defective by these mode comparisons.
+
+The [complexity report](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6092359725)
+finds no material issue in its selected delta and performs no tests. Optional guards, chunk traces
+and shared custody-fixture suggestions do not establish regressions. Shared pause-aware draining
+remains transport-owned; the report's slow-sink/flood hypothesis is unverified. This native report
+does not exercise physical Windows input, adopted terminal launch/resize, clean-console operation,
+interrupted raw acquisition, delayed construction, permanent live cleanup refusal, ordinary
+shutdown, production creation/publication, writer coexistence/rollback, both new RunContext paths or
+complete supported-platform R1-R5 acceptance. Its host-context failures and older-pin results are
+not acceptance for those gates.
+
+## Round 3 collected feedback and corrections
+
+The full reports, subsequent feature-composition finding and all outstanding items were read before
+this batch. The
+[critical reading](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6092647076)
+records agreement, limits and ownership. The minimum collection interval ended at 2026-10-10
+02:28:01 UTC. The
+[round start](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6092755208) records
+removal of `review-requested` before tracked corrections. Round 3 of the authorized three is open;
+no additional public fix round remains after it. The head is private working state, not a new
+handoff, and the goal remains active.
+
+Transport's separately reviewed CI commits `6e033123ef39bf9e4f30d41da3bbadb18039e3bd` and
+`121f7b7733dfdd5315ba13b17f7ce09e05a3bd88` are adopted as `fcc9e3eca` and `2bb931b7b`. They isolate
+only the relevant carrier deadline-clock aliases after fixture setup, preserving real registration,
+fencing, deliberate late rejection and global clocks. They are composition fixtures, not wall-clock
+timing proof. The root's four-file affected selection passes 151 cases at exact
+`2bb931b7bc205b3f3d442274d98f49278f422828`. Hosted Windows validation is still required; serial
+passes of the old fixtures do not prove either the failure's cause or these corrections natively.
+
+The bounded SSH corrections in progress bind the existing immutable feature description once per
+carrier and permit only the measured Darwin kernel-added PENDIN effect at canonical restoration
+assertions. Embedded isolated probes require the same comparison boundary; raw/pending ownership and
+every other mode, control-character, speed and descriptor fact remain checked. Shared lost-status
+cleanup stays open pending transport's independently reviewed evidence distinction and exact
+consumer validation. No global signal reset or new native owner is introduced.
+
+The fully read Windows mechanism candidate `7c1794602d36dff09e8014b731be23d0f9cbbb4a` is not
+adopted. A separate source audit confirms its new ctypes cell has only tests and a local Python
+child probe as callers, with current SSH, process, custody and preparation APIs unchanged. It has no
+native result or integrated SSH adoption seam. Its fixed nonce and release byte are test machinery;
+local acceptance alone does not prove wrapping or installed-client behavior. Native measurement,
+integration into the existing shared owner and complete seam reviews must precede SSH adoption.
+Printable preparation `4bb25ba78` likewise has not been adopted; its paired host/guest change still
+needs installed SSH encoded-canary non-reflection proof.
+
+All final standup and retirement gates retain their scope. This batch must complete its required
+private reviews and applicable gates, describe exact tester considerations before the next signal,
+and escalate any required contract change or work exceeding the authorized loop. No full-carrier
+checkbox, merge intent, SDD lock or platform acceptance follows from these corrections.

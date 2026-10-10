@@ -1,7 +1,7 @@
 # Independent SSH Carrier: Functional Requirements
 
 - Status: SSH PoC #796 merged and accepted; full implementation #832 in progress
-- Updated: 2026-09-24
+- Updated: 2026-10-10
 - Architecture: [hla.md](hla.md)
 - Coordination: [transport design](../2026-09-12-transport-improv/hla.md)
 
@@ -21,11 +21,12 @@ a preliminary migration of legacy callers.
 
 Initial SSH implementation spans two PRs: #796 carried the entire SSH portion of the accepted joint
 PoC with these artifacts; #832 carries the full independent SSH implementation and its integration
-evidence. There is no separate SSH design PR to merge. #832 is still a draft integration checkpoint,
-without a review or ready signal. Final deletion of old SSH follows a later operator request after
-transport completes migration and its own deletion. Transport is the sole owner of the carrier
-contract and acceptance criteria; SSH contributes implementation and feasibility input. The
-[plan](plan.md) defines phase gates without maintaining a second shared contract.
+evidence. There is no separate SSH design PR to merge. The [plan](plan.md) and implementation
+evidence record #832's current checkpoint and readiness gates. Final deletion of old SSH follows a
+later operator request after transport completes migration and its own deletion. Transport is the
+sole owner of the carrier contract and acceptance criteria; SSH contributes implementation and
+feasibility input. The [plan](plan.md) defines phase gates without maintaining a second shared
+contract.
 
 ## Operator ruling, 2026-09-19
 
