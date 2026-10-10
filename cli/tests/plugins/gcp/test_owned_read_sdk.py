@@ -397,7 +397,8 @@ def test_stock_adc_real_authorized_user_document_preserves_scope_and_quota(sdk, 
     assert reader.close(Deadline.after(5))
 
 
-def test_real_service_account_selected_quota_and_stale_refresh(sdk, sa_document):
+@pytest.mark.parametrize("expires_in,expected_state", [(30, TokenState.STALE), (3600, TokenState.FRESH)])
+def test_real_service_account_selected_quota_and_stale_refresh(sdk, sa_document, expires_in, expected_state):
     from datetime import UTC, datetime, timedelta
 
     factory = cast("Callable[..., Any]", service_account.Credentials.from_service_account_info)
@@ -409,11 +410,17 @@ def test_real_service_account_selected_quota_and_stale_refresh(sdk, sa_document)
     initial_state = selected.token_state
     assert initial_state is TokenState.STALE
     sdk.credential = selected
+    response_document = json.loads(sdk.credential_body)
+    response_document["expires_in"] = expires_in
+    sdk.credential_body = json.dumps(response_document).encode()
     reader, power = observe(sdk)
     assert power is VMStatus.RUNNING
-    assert selected.token_state is TokenState.FRESH
+    assert selected.token_state is expected_state
+    assert selected.token == "offline-refreshed-token"
+    assert selected.scopes == ("https://www.googleapis.com/auth/cloud-platform",)
     assert [kind for kind, _, _ in sdk.sends] == ["credential", "service"]
     assert sdk.sends[-1][1].headers["x-goog-user-project"] == "selected-quota"
+    assert sdk.sends[-1][1].headers["Authorization"] == "Bearer offline-refreshed-token"
     assert reader._auth._credential is selected
     assert reader.close(Deadline.after(5))
 

@@ -124,8 +124,6 @@ class _OwnedAuth:
 
     def acquire(self, auth: GcpAuth, ctx: RunContext, site_name: str) -> None:
         self.remaining()
-        if self._failed:
-            raise self.refusal()
         if self._credential is not None:
             return
         # A failed partial acquisition cannot silently construct a second original.
@@ -167,15 +165,13 @@ class _OwnedAuth:
         from google.auth.credentials import TokenState
 
         self.remaining()
-        if self._credential is None or self._failed:
-            raise self.refusal()
         if self._credential.token_state in (TokenState.STALE, TokenState.INVALID):
             self._credential.refresh(self._request)
         self.remaining()
         self.retire_responses()
         if self.cleanup_incomplete:
             raise self.refusal()
-        if self._credential.token_state != TokenState.FRESH:
+        if self._credential.token_state not in (TokenState.STALE, TokenState.FRESH):
             raise self.refusal()
         headers = {"Accept-Encoding": "identity"}
         self._credential.apply(headers)
