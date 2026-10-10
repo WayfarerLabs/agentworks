@@ -1235,9 +1235,10 @@ and full strict typing across 1,369 sources, with scoped lint, formatting and do
 An earlier generic run misplaced its scratch namespace; those preserved results are excluded from
 lane completion, and the conforming rerun supplies the independent proof. These are local inert
 custody and provider fixtures, not native startup or SDK-client retirement evidence. Full cloud
-access, guest-preparation observer replacement and whole-PR readiness remain open.
+access, guest-preparation observer replacement and whole-PR readiness remained open at that
+checkpoint.
 
-- [ ] Replace shared guest preparation's direct platform locator reads with one required
+- [x] Replace shared guest preparation's direct platform locator reads with one required
       caller-retained `observe_locator(Deadline)` callable, removing obsolete context and
       provider-custody forwarding without a default fallback or second entry point. Preserve the
       selected-platform site refusal before observation or borrow. Adapt ordinary WSL2, Proxmox, the
@@ -1248,6 +1249,16 @@ access, guest-preparation observer replacement and whole-PR readiness remain ope
       borrow. Update permanent helper collateral with the implementation. This replacement does not
       implement concrete cloud SDK read-client custody, activation or route settlement, provider
       incarnation/adoption, native acceptance or additive RunContext delivery.
+
+The required-observer increment at `132d73521` clears all three independent private code lanes.
+Their original implementation and final test-only correction reviews are source-only, with no
+independent execution claim. The author passes all 75 selected locator/recovery cases. Lead
+verification passes the one revised ordering/borrow case after removing an unreachable mock, plus
+full strict typing across 1,369 sources and scoped Python/documentation gates. Other runtime source
+is unchanged by that correction; this is not a claim of a final full-suite rerun. Earlier failed and
+partial fixtures remain preserved. These results close only the required-observer leaf. Concrete
+cloud read-client custody, activation and route settlement, provider incarnation/adoption, native
+acceptance and complete additive RunContext remain open.
 
 The final combined correction and shared gate at `9e89fe3c3` clear all three independent private
 lanes against `829e4a72f`. Each observes 481 adjacent passes without skips. Project review also
