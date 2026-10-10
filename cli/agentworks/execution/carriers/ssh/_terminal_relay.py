@@ -59,12 +59,11 @@ class _Stream:
     pending: memoryview | None = field(default=None, repr=False)
     eof: bool = False
     quota: int | None = None
-    probed: bool = False
-    observation_failed: bool = False
+    collection_done: bool = False
 
     @property
     def finished(self) -> bool:
-        return self.eof or ((self.probed or self.observation_failed) and self.pending is None and self.quota == 0)
+        return self.eof or (self.collection_done and self.pending is None and self.quota == 0)
 
     def freeze(self, pipe: IO[bytes]) -> None:
         """Fix the unread FIFO prefix once; pending bytes have already been collected."""
@@ -87,7 +86,7 @@ class _Stream:
         if self.pending is None:
             probe = self.quota == 0
             if probe:
-                self.probed = True
+                self.collection_done = True
             limit = 1 if probe else _CHUNK if self.quota is None else min(_CHUNK, self.quota)
             try:
                 chunk = os.read(pipe.fileno(), limit)
@@ -460,7 +459,7 @@ class _Attempt:
                             except (OSError, AttributeError):
                                 # Preserve collected pending bytes, but an unknown
                                 # queued prefix admits no new collection or EOF probe.
-                                stream.observation_failed = True
+                                stream.collection_done = True
                                 stream.quota = 0
                         frozen = True
                 progressed = False

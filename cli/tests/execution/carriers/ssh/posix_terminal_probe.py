@@ -204,15 +204,6 @@ def _guest_absent(trace: Trace) -> None:
         time.sleep(0.01)
 
 
-def _settle_clients(clients: list[subprocess.Popen[bytes]]) -> None:
-    # The synchronous relay settles its owner before returning or propagating
-    # control. This fallback cleans up only actual fixture client objects.
-    for process in clients:
-        if process.poll() is None:
-            process.kill()
-        process.wait(timeout=2)
-
-
 def run_case(root: Path, monkeypatch: pytest.MonkeyPatch, *, refusal: bool) -> None:
     """Run only within the retained fixture guard under a separate native charter."""
     import fcntl
