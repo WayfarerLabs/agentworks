@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import time
+from types import SimpleNamespace
 
 import pytest
 
 from agentworks.db import LifecycleObligationState
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import access as access_module
+from agentworks.execution import carrier as carrier_module
 from agentworks.execution._execution_operation import ExecutionOperation, ManagedExecutionControlFact
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
@@ -63,6 +65,9 @@ def _status(monkeypatch: pytest.MonkeyPatch, code: int) -> None:
 @pytest.mark.parametrize("checked", [False, True])
 def test_foreground_managed_zero_is_one_launch_and_wait(view, monkeypatch, checked):
     database, workflow, access, main, keeper = view
+    epoch = time.monotonic()
+    # This checks composition, not wall-clock performance of host coordination.
+    monkeypatch.setattr(carrier_module, "time", SimpleNamespace(monotonic=lambda: epoch))
     _status(monkeypatch, 0)
     result = access.run(Command(["/bin/true"]), profile=Protection.MANAGED, output=Output.discard(), check=checked)
     assert result.ok and result.status == ExitCode(0) and result.job is not None
