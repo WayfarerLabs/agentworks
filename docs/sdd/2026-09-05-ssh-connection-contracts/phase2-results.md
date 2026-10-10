@@ -601,12 +601,17 @@ timing proof. The root's four-file affected selection passes 151 cases at exact
 `2bb931b7bc205b3f3d442274d98f49278f422828`. Hosted Windows validation is still required; serial
 passes of the old fixtures do not prove either the failure's cause or these corrections natively.
 
-The bounded SSH corrections in progress bind the existing immutable feature description once per
-carrier and permit only the measured Darwin kernel-added PENDIN effect at canonical restoration
-assertions. Embedded isolated probes require the same comparison boundary; raw/pending ownership and
-every other mode, control-character, speed and descriptor fact remain checked. Shared lost-status
-cleanup stays open pending transport's independently reviewed evidence distinction and exact
-consumer validation. No global signal reset or new native owner is introduced.
+Worker `4eb59bd286c44802b111320d812073fedb7538bf` is integrated as `5cca7ea7b` and `7b1682c28`. The
+carrier now binds its existing immutable feature description once. Positive canonical mode
+assertions allow only Darwin's added PENDIN; saved-bit removal and every other mode field still
+fail. Embedded probes receive that same assertion function source, including the isolated SIGINT
+child. Raw/pending ownership, control characters, speeds and descriptor facts remain checked. Worker
+validation passes 540 SSH cases with ten skips, including 12 new comparison controls, plus scoped
+style/type and full file quality. Deliberately fresh feature descriptions and broader PENDIN masking
+fail their intended controls. These are Linux developer measurements; combined independent reviews,
+final gates and native macOS retesting remain required. Shared lost-status cleanup stays open
+pending transport's reviewed evidence distinction and exact consumer validation. No global signal
+reset or new native owner is introduced.
 
 The fully read Windows mechanism candidate `7c1794602d36dff09e8014b731be23d0f9cbbb4a` is not
 adopted. A separate source audit confirms its new ctypes cell has only tests and a local Python
