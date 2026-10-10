@@ -1511,8 +1511,9 @@ native process/resize mechanisms. Native Windows/SSH capability remains unproved
       combined seam privately before giving SSH an adoption pin.
 - [ ] Prove the adopted mechanism with installed Windows OpenSSH, including remote initial and
       changed geometry, strict setup records, raw client diagnostics, physical keyboard handoff,
-      console presentation and bounded retained cleanup. Consume the complete native report and
-      resolve material findings before enabling the terminal capability.
+      narrow-geometry control records and resize during setup, console presentation and bounded
+      retained cleanup. Consume the complete native report and resolve material findings before
+      enabling the terminal capability.
 
 - [x] Implement private revision-aware publication with explicit Create/Replace/Match conditions,
       bounded streaming from verified scratch, stat-only observations without old-content reads, and

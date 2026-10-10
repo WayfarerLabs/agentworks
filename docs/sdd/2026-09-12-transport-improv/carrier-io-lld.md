@@ -279,6 +279,19 @@ observed remains uncertain rather than clean. Production adoption must keep thos
 existing owner's custody and cleanup-retry path, not infer resource closure from child exit alone.
 Initial and changed dimensions are explicit rows and columns.
 
+The local proof separates sensitive setup observation from resize and wrapping. Observe the complete
+payload-ready record and its line ending before sending the frame, then require the entire new
+presentation to be exactly the interactive-ready record and its line ending. An absent frame
+substring is not suppression evidence. Hold subsequent presentation behind one probe-only release
+byte; preserve raw, no-echo input through that read. Unexpected presentation or terminal sequences
+refuse this strict observation rather than being normalized. This release is local test machinery,
+not a third production handoff gate. Resize and ordinary wrapping follow that measured window;
+narrow-geometry control records and resizing during setup remain separate native acceptance gates.
+
+The idle case must observe a live child before teardown. A pending or unclean worker remains
+non-daemon; the standalone probe flushes its report and awaits its explicitly required outer
+supervisor. Returning a pending report does not authorize interpreter shutdown to discard custody.
+
 After all borrowers stop, close the console output pipe before releasing the pseudoconsole.
 Pseudoconsole release is not evidence that every client has disconnected. Prove exact child exit and
 confirmed resource closure separately; do not add another drainer solely to work around a cleanup
