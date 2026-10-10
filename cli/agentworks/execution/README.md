@@ -395,6 +395,14 @@ receipt immutable. This core checkpoint is not application ownership or a comple
 Failed or refused calls can resolve their rows without success; retained effects keep their exact
 cleanup facts without success.
 
+An ordinary private download can similarly carry a `DownloadChildAssociation`. Admission precedes
+creation of new workstation staging. The existing local call retains the actual child and remote and
+local outcomes through publication and cleanup. Its success checkpoint follows verified remote
+completion, successful requested local publication and positive result reduction with settled
+custody. A failed cleanup remains unsuccessful even if subsequent cleanup settles its debt. Missing
+completion capture retains custody rather than inferring success from a resolved receipt. Cleanup of
+a previously retained stage remains separate from admission of the new child.
+
 Interrupted checkpoint publication retains the actual child, outcome and exact intended payload and
 revision. Bookkeeping settlement retries only that same publication and borrow closure, without
 reading the source or dispatching another helper. Confirmation checks the payload and the exact next
@@ -411,12 +419,13 @@ not claim production orchestration, recovery takeover, RunContext adoption, perm
 or the future #377 lock hierarchy.
 
 The private file-call codec preserves version-one and version-two records byte-for-byte when no
-upload-child association is supplied. Associated uploads use version three without numeric bootstrap
-and version four with it. Both include an explicit success marker from admission. Bootstrap-bound
-records retain root-entry identity and the full guest separately from the body identity. The codec
-validates Linux system-Python selection, target boot and any gate's full guest before encoding or
-accepting persisted bytes. Each typed record exposes its actual payload version; installation and
-updates use that version rather than a global latest-version assumption. `FileOperation` accepts one
+child association is supplied. Associated uploads use version three without numeric bootstrap and
+version four with it; associated downloads use versions five and six, respectively. Each associated
+version includes an explicit success marker from admission. Bootstrap-bound records retain
+root-entry identity and the full guest separately from the body identity. The codec validates Linux
+system-Python selection, target boot and any gate's full guest before encoding or accepting
+persisted bytes. Each typed record exposes its actual payload version; installation and updates use
+that version rather than a global latest-version assumption. `FileOperation` accepts one
 constructor-bound context, checks its selected VM boot, and gives each prepared binding that same
 context before registration or dispatch. Gate setup and bound promotion preserve it. JSON and
 package child publication, exact package retry and retained updates use the encoded record's

@@ -4159,15 +4159,16 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       reconciliation and next-child refusal against actual SQLite and helper calls. This is not a
       directory facade, download-side checkpoint, application artifact ownership, native acceptance
       or complete public FileAccess delivery.
-- [ ] Implement the corresponding private download-child checkpoint under the existing whole-call
+- [x] Implement the corresponding private download-child checkpoint under the existing whole-call
       local download borrow. Admit the exact ordinary child before new workstation staging, retain
       remote and local completion evidence through successful publication, cleanup and reduction,
-      and publish success before immutable closure. Preserve false completion for all failures and
-      controls, including later-settled cleanup debt; prove exact bookkeeping-only CAS and closure
-      retry without repeating transfer or local publication. Preserve versions one through four and
-      prove the new DOWNLOAD-only versions five and six, their recovery envelope, original-row
-      retention and aggregate teardown. This does not deliver a directory facade, post-crash local
-      repair, native acceptance or complete public FileAccess.
+      and publish success before immutable closure. Preserve false completion for failures and
+      controls before positive completion capture, including later-settled cleanup debt; retain the
+      exact positive checkpoint intent across subsequent publication or closure interruption. Prove
+      exact bookkeeping-only CAS and closure retry without repeating transfer or local publication.
+      Preserve versions one through four and prove the new DOWNLOAD-only versions five and six,
+      their recovery envelope, original-row retention and aggregate teardown. This does not deliver
+      a directory facade, post-crash local repair, native acceptance or complete public FileAccess.
 - [ ] Resolve lifecycle-ledger capacity before migrating high-volume artifact publication. Apply the
       selected core 128-unfinished-obligation bound and preserve commit-without-reply evidence and
       immutable completed receipts, rather than pruning, reusing IDs or increasing the limit.

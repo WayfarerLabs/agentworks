@@ -1054,16 +1054,20 @@ inferring success from flags, remote recovery, receipt resolution or borrow clos
 
 Download associations use separate DOWNLOAD-only fields and payload versions five and six, with six
 carrying the numeric bootstrap. Versions one through four retain their existing byte and semantic
-contracts. The new versions need their own exact download recovery-headroom and envelope proofs; the
-upload proof is not sufficient. The original download row carries no workstation path, manifest,
+contracts. Local codec tests prove the new versions' exact download recovery headroom and envelope
+separately from the upload proof. The original download row carries no workstation path, manifest,
 contents or reconstructed local result. Aggregate teardown retries captured download CAS and closure
 bookkeeping only, never stage publication, helper execution or source reads.
 
-These download decisions describe the next implementation, not a delivered checkpoint. Directory
-facade options, traversal and extraction, aggregate partial-result semantics, download-side
-checkpoints and native proof remain required work before complete R7 or public RunContext
-acceptance. The package callback and domain-specific artifact ownership must not be weakened while
-those pieces are built.
+The private download-child kernel implements these decisions under the existing local-call borrow.
+Tests cover admission before staging, verified completion and publication, failed cleanup, positive
+reduction, interrupted capture and exact bookkeeping-only CAS and closure retry. Earlier failure or
+control prevents success capture; an interruption after positive capture retains its exact intended
+success checkpoint rather than downgrading it. This is local fixture evidence, not native proof.
+Directory facade options, traversal and extraction, aggregate partial-result semantics, production
+download checkpoint composition and native proof remain required work before complete R7 or public
+RunContext acceptance. The package callback and domain-specific artifact ownership must not be
+weakened while those pieces are built.
 
 ### DOWNLOAD recovery dispatch
 
