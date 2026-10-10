@@ -18,6 +18,24 @@ channel. Raw stdout/stderr go to distinct borrowed sinks. The worker uses explic
 through caller interruption, and reports endpoint or restoration uncertainty without retaining raw
 payload diagnostics. TERM comes from the supplied terminal input.
 
+The exact native owner, passive terminal and cleanup coordinator enter `LocalDeliveryCustody` before
+worker admission or native effects. Finite caller waits observe cleanup for an initial 0.5-second
+allowance and can return with custody unsettled. Keep supplied terminal descriptors valid and retain
+that custody; a fresh finite `close()` retries cleanup on the original worker. Pending acquisition
+or construction can still use the terminal after the caller returns. The worker stops relay
+borrowing before native cleanup and restores modes only after native settlement. Permanent native
+loss finishes the worker without restoring the terminal; custody stays unsettled and refuses reuse.
+The worker is non-daemon, so pending construction or retryable cleanup can hold ordinary interpreter
+shutdown open.
+
+After observed natural client exit, output collection continues for a fixed 100 ms. Each unfinished
+pipe's unread byte count is then observed once. Already-collected bytes and that frozen prefix drain
+under the original operation deadline. Quota exhaustion permits one one-byte EOF probe without
+blocking; a returned byte is delivered before reporting incomplete output. Failed count observation
+preserves known pending bytes, suppresses further reads on that pipe and reports incomplete output.
+The other pipe can still deliver its known prefix. Separate pipe observations are not an atomic
+snapshot.
+
 Failed native acquisition preserves its primary exception and typed cleanup cause. The relay reduces
 that cleanup fact to observation uncertainty, including a safe note on a propagated control
 exception. It suppresses native cause chains at its public boundary so cleanup diagnostics cannot

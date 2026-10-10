@@ -261,6 +261,22 @@ Use explicit worker completion facts when a caller wait is interrupted. The curr
 interrupts before joining and leaves interrupted-wait settlement unproved. The test helper retains
 its fixtures until worker settlement; an owning test-process/job timeout supplies the hang bound.
 
+The retained POSIX consumer binds the exact shared process owner, passive terminal and cleanup
+coordinator before thread admission. Its original worker acquires, pumps, requests bounded native
+cleanup and restores modes. Finite caller return preserves pending native and terminal resources in
+the same shared custody; later finite close requests reach that worker. Cancellation and possible
+native admission share a guard, so a possible late native effect cannot follow a NOT_SENT result.
+Borrowed terminal descriptors remain valid through settlement, including pending acquisition or
+construction after caller return. Pump borrowing stops before native cleanup. A permanent native
+loss finishes the worker without terminal restoration, retaining unsettled custody and refusing
+reuse or unsafe cleanup retries.
+
+Preserve a non-daemon terminal worker. Owned subprocess measurements show finite construction and
+retryable-cleanup returns can still hold ordinary interpreter shutdown open until the retained work
+settles. The finite API contract does not establish bounded interpreter shutdown. Production
+composition must prove its caller's retained-custody lifecycle and interrupted exit behavior before
+activation; this correction adds no global exit handler or daemon abandonment policy.
+
 The round 1 private relay's progress/stall drain accounting regresses finite output: an exited
 client's already-written backlog can be discarded while a responsive sink accepts partial writes.
 The [round 2 finding](phase2-results.md#round-2-collected-feedback-and-dependency-adoption)
@@ -274,9 +290,12 @@ once and retain that finite prefix separately from already-collected pending byt
 and the frozen prefix under the original operation deadline; never renew the quota or infer pipe
 capacity. Quota exhaustion does not prove EOF. One final nonblocking one-byte probe may establish
 EOF; a returned byte is retained and delivered before reporting incomplete output, and no further
-collection occurs. An unavailable native count is explicit output/observation failure. Separate
-stream observations do not imply an atomic pair. Linux models establish these cases only for the
-modeled mechanism; implemented Linux and native macOS proof remain required.
+collection occurs. An unavailable native count preserves already-collected pending bytes under the
+original deadline, disables further reads on that pipe and reports incomplete output. The other
+stream can still drain its known prefix. Separate stream observations do not imply an atomic pair.
+Owned Linux implementation fixtures now establish finite and enlarged-pipe preservation, inherited
+writers, query failure and deadline/control behavior. Native macOS counting and installed-client
+acceptance remain required.
 
 ## Windows caller resource and record feasibility
 

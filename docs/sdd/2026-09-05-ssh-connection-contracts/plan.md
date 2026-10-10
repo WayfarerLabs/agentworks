@@ -45,6 +45,13 @@ Round 2 remains open and the PR remains draft. Its
 frozen batch, reviewed cleanup dependency, ownership and unproved acceptance. No full implementation
 checkbox or merge intent is asserted by these corrections.
 
+The retained POSIX consumer now uses that reviewed cleanup seam and preserves pending bytes plus the
+frozen native output prefix. Owned Linux fixtures verify finite/enlarged-pipe preservation, pending
+custody, retryable cleanup and permanent loss. Normal interpreter exit can still wait for pending
+construction or retryable cleanup; production caller-lifetime proof and native platform acceptance
+remain open. The current record also carries the shared Windows managed-foreground CI failure routed
+to transport. These findings do not complete the broader terminal or RunContext work.
+
 Transport solely owns the carrier contract, common types, acceptance criteria, shared preparation,
 public outcomes and proof harness. SSH owns its independent carrier, connection/trust migration,
 fixtures and implementation evidence. SSH raises feasibility concerns to transport rather than

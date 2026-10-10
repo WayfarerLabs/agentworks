@@ -414,15 +414,77 @@ implementation is delegated from that exact base. It must preserve the original 
 endpoints and restoration obligations through finite caller return or interruption. No new carrier
 schema or second owner is introduced.
 
+The consumer is integrated as `0dccd8b96b165ede277e7abb39a35fed6a56108c` from worker
+`2dfb6ff1fe496efabe7156ce25f2fddd46b00203`. Shared custody retains the exact native owner, passive
+terminal and cleanup coordinator before admission. One original worker owns acquisition, relay,
+bounded native cleanup and restoration; finite caller return retains pending resources. Fresh finite
+close requests retry cleanup on that worker. A permanent native loss finishes the worker without
+restoring the terminal or falsely settling custody. Restoration or descriptor-close uncertainty also
+prevents reuse. Fixture cleanup settles this custody before PTY closure, readiness finalization,
+mode repair or fallback child rescue.
+
+The integrated drain fixes collection at 100 ms after first observed natural exit and freezes each
+unfinished pipe's native unread-byte count once. Pending bytes and fixed quotas drain under the
+original operation deadline, followed by at most one one-byte EOF probe. Failed queue observation
+preserves pending bytes, forbids new reads on that pipe and leaves the other stream's known prefix
+deliverable. Deadline or control can still win. Worker tests preserve finite 64 KiB, 256 KiB and 1
+MiB output and an enlarged 256 KiB pipe whose frozen prefix exceeds one 65,536-byte read.
+
+At exact worker `2dfb6ff1`, the non-integration SSH selection passes 524 cases with six skips in
+10.34 seconds; full mypy covers 1,332 files, Ruff/format 1,373, canonical file-quality checks and
+diff checks all exit zero. Sixteen owned inherited-writer probes at concurrency four have zero
+failures: eight silent writers report OUTPUT and eight controlled floods consume the original
+deadline. Freeze occurs 104.21-109.76 ms after observed exit; physical elapsed is 353.77-370.49 ms.
+Captured counts condition the fixed-quota, byte-conservation, descendant-reaping and terminal-mode
+assertions. These are Linux owned-process fixtures, not installed SSH or native macOS acceptance.
+Combined-head private reviews and final gates remain required.
+
+Follow-up worker `b48f018b43f96f24304243b3eef683ef295f7c02`, integrated as `0635be840`, makes
+`daemon=False` explicit. The private caller boundary also accepts daemon threads; inheriting their
+daemon flag would abandon the selected lifetime at normal shutdown. Its new regression holds raw
+terminal acquisition past the caller deadline, denies reuse, then restores on the original
+non-daemon worker after a fresh finite close. It fails against the preceding runtime and passes the
+correction. The complete worker SSH selection then passes 525 cases with six skips; full mypy and
+style/file checks exit zero.
+
+Ordinary interpreter shutdown remains a measured limitation. At the same worker commit, pending
+construction returns DEADLINE/unsettled in 0.601524 seconds and retryable cleanup in 0.111075
+seconds. Both reach normal Python shutdown but remain held by the non-daemon terminal worker after
+another 250 ms. Opening the owned rescue boundary permits original-worker restoration, child
+reaping, pipe closure and caller PTY closure; exit follows in 43.01 and 40.70 ms. This proves the
+tested resources, not settlement of indefinitely unresolved resources. The lead preserves the
+non-daemon lifetime rather than adding a global exit policy or abandoning custody. Production
+retained-custody and interrupted-exit proof remain gates before terminal activation.
+
+Hosted [run 38008962459](https://github.com/WayfarerLabs/agentworks/actions/runs/38008962459)
+evaluates preceding SSH `8f79863c` on public transport `dd10ebbe`; it does not include this retained
+terminal correction. All Linux versions and static/file/website checks pass. Windows Python 3.13.15
+on Server 2025 reports 1,714 passes, 70 skips and one shared managed-foreground failure: the checked
+zero-status case returns UNKNOWN/DEADLINE under its five-second fixture budget. The five earlier SSH
+path assertions no longer fail. The
+[dependency report](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6091779665)
+routes investigation to transport without claiming a diagnosed cause or changing its shared tests.
+
+Transport's subsequent
+[reviewed private checkpoint](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6091773515)
+is `2a283d3769a75f413a3730822a013c93813dba05`. A separate read-only dependency audit finds its
+cleanup seam byte-identical to this adopted seam, with native process, carrier I/O and terminal
+handoff interfaces unchanged. Its broader QGA/cloud changes do not require adapting this consumer or
+close production enrollment and additive RunContext acceptance. That larger checkpoint remains for
+later full standup composition; this correction does not claim it was adopted or tested here.
+
 The
 [Windows launch/resize dependency](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6091405773)
-remains open with transport. Current shared launch uses ordinary pipes and has no Windows
-pseudoconsole attachment or resize operation. SSH still owns keyboard reading/encoding and its
-consumer. Binary preparation and NUL-bearing readiness through any selected child-terminal channel
-require joint native proof. Physical Windows input, full terminal activation, production creation
-provenance and publication, writer coexistence/rollback, both usable RunContext paths and remaining
-R1-R5/platform acceptance remain unproved. These normal implementation/dependency waits do not mark
-the goal blocked or complete this SDD.
+remains open with transport. Its
+[acknowledgment](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6091564522)
+accepts the ownership split but supplies no reviewed Windows launch or resize implementation pin.
+Current shared launch uses ordinary pipes and has no Windows pseudoconsole attachment or resize
+operation. SSH still owns keyboard reading/encoding and its consumer. Binary preparation and
+NUL-bearing readiness through any selected child-terminal channel require joint native proof.
+Physical Windows input, full terminal activation, production creation provenance and publication,
+writer coexistence/rollback, both usable RunContext paths and remaining R1-R5/platform acceptance
+remain unproved. These normal implementation/dependency waits do not mark the goal blocked or
+complete this SDD.
 
 All earlier evidence and chronology are preserved in
 [earlier implementation checkpoints](phase2-initial-results.md) and
