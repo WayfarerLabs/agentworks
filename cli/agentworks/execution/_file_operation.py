@@ -164,12 +164,9 @@ class _LocalDownloadCall:
     association: DownloadChildAssociation | None = None
     active: _ActiveFileDownload | None = None
     dispatched: bool = False
-    remote_capture_ready: bool = False
     stage: LocalDownloadStage | None = None
     local_outcome: FileLocalDownloadOutcome | None = None
     local_failed: bool = False
-    local_cleanup_failed: bool = False
-    local_deadline_exceeded: bool = False
     reduction_complete: bool = False
     reduction_succeeded: bool = False
     publication: _DownloadChildPayload | None = None
@@ -385,7 +382,7 @@ class FileOperation:
                 # The actual positive reducer already proves verified COMPLETE,
                 # publication and settled local custody without failure/deadline.
                 # Here only the original captured child's identity remains to bind.
-                if not call.remote_capture_ready or outcome is None or local.download is not outcome:
+                if outcome is None or local.download is not outcome:
                     raise StateError("Download child lacks positive settled local completion")
                 record = self._obligation(
                     FileCallFamily.DOWNLOAD,
@@ -407,9 +404,9 @@ class FileOperation:
         call.local_outcome = outcome
         call.local_failed = call.local_failed or failed
         active = call.active
-        if active is not None and not call.dispatched:
-            # Constructor refusal has no remote effect. Its original false row
-            # can close while real workstation stage debt remains separately held.
+        if active is not None and active.obligation is not None and not call.dispatched:
+            # Confirmed admission followed by constructor refusal has no remote
+            # effect. Uncertain registration retains its original active custody.
             self._active_downloads.pop(id(active), None)
 
     def capture_download_reduction(self, call: _LocalDownloadCall, *, succeeded: bool) -> None:
@@ -1830,8 +1827,6 @@ class FileOperation:
             self._retain_unfinished(UnfinishedFileDownload(active.carrier, active.binding, outcome))
         if local_call is None:
             release_borrow_after_custody(active.borrow, retain_effect=outcome.requires_owner_retention)
-        else:
-            local_call.remote_capture_ready = True
         self._active_downloads.pop(id(active))
 
     def _retain_unfinished(self, download: UnfinishedFileDownload) -> None:

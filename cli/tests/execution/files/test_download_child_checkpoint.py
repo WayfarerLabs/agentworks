@@ -13,7 +13,8 @@ from agentworks.db import LifecycleObligationState
 from agentworks.errors import ExternalError, StateError
 from agentworks.execution import _file_local_download as local
 from agentworks.execution import access as access_module
-from agentworks.execution._file_download import FileDownloadStatus
+from agentworks.execution._file_download import FileDownloadStatus, _PreparedDownload
+from agentworks.execution._file_local_download import FileLocalDownloadControlFact
 from agentworks.execution._file_obligation import (
     DownloadChildAssociation,
     FileCallObligation,
@@ -24,7 +25,7 @@ from agentworks.execution._file_result_transfer import reduce_file_local_downloa
 from agentworks.execution._local_download_publication import LocalDownloadPublication
 from agentworks.execution.access import FileAccess
 from agentworks.execution.files import Change, Create, Replace
-from agentworks.operations import LifecycleObligation, OperationBorrow, OperationOwner
+from agentworks.operations import LifecycleObligation, OperationBorrow, OperationOwner, _is_pre_registration_refusal
 from tests.execution._bound_carrier_support import obligation_receipt
 from tests.execution.files._file_access_support import bound_access as bound_access
 from tests.execution.files._file_access_support import plan as plan
@@ -44,6 +45,115 @@ def pending(owner: OperationOwner) -> tuple[PersistedLifecycleObligation, FileCa
     rows = owner.list_pending_lifecycle_obligations()
     assert len(rows) == 1
     return rows[0], decode_file_call_obligation(rows[0].payload)
+
+
+@pytest.mark.parametrize(
+    "fault", ["committed-error", "committed-control", "unreadable", "inspection-control", "absent"]
+)
+def test_registration_failure_preserves_original_custody_unless_absence_is_proved(bound_access, monkeypatch, fault):
+    from agentworks.execution._execution_operation import ExecutionOperation
+    from agentworks.execution.carrier import Deadline
+    from agentworks.vms._native_operation import NativeVMOperation, _Workflow
+    from tests.execution.files._target_support import target_for_owner
+
+    access, root, owner, db = bound_access
+    child = associate(access, monkeypatch)
+    source = root / "source"
+    source.write_bytes(b"verified")
+    destination = root.parent / "destination"
+    carrier = LocalCarrier()
+    monkeypatch.setattr(access, "_carrier", carrier)
+    register = type(db.operations).register_lifecycle_obligation
+    primary = KeyboardInterrupt() if fault == "committed-control" else OSError()
+    prior_cause = RuntimeError()
+    primary.__cause__ = prior_cause
+    inspection_control = KeyboardInterrupt()
+    admissions = []
+    constructors = []
+    failures = []
+
+    def interrupted(repository, ownership, kind, version, payload, *, obligation_id=None):
+        call = access._operation._local_download_call
+        admissions.append((call, call.active, obligation_id, version, payload))
+        if fault.startswith("committed"):
+            register(repository, ownership, kind, version, payload, obligation_id=obligation_id)
+        raise primary
+
+    def inspect_failure(*args, **kwargs):
+        if fault == "inspection-control":
+            raise inspection_control
+        raise OSError()
+
+    def construct(*args, **kwargs):
+        constructors.append(True)
+        raise AssertionError("registration failure reached stage construction")
+
+    def reduce(outcome, *, failure=None, **kwargs):
+        failures.append(failure)
+        return reduce_file_local_download(outcome, failure=failure, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(type(db.operations), "register_lifecycle_obligation", interrupted)
+        if fault in {"unreadable", "inspection-control"}:
+            patch.setattr(type(db.operations), "inspect_lifecycle_obligation", inspect_failure)
+        patch.setattr(local, "_publisher_for_host", construct)
+        patch.setattr(access_module, "reduce_file_local_download", reduce)
+        with pytest.raises(KeyboardInterrupt if "control" in fault else ExternalError) as raised:
+            access.download(PurePosixPath(source), destination)
+
+    escaped = inspection_control if fault == "inspection-control" else primary
+    fact = escaped.__cause__
+    assert isinstance(fact, FileLocalDownloadControlFact)
+    if "control" in fault:
+        assert raised.value is escaped and failures == []
+    else:
+        assert failures == [primary]
+    if fault == "inspection-control":
+        assert inspection_control.__context__ is primary and primary.__cause__ is prior_cause
+    elif fault == "absent":
+        assert fact.__cause__ is not None
+        assert _is_pre_registration_refusal(fact) and fact.__cause__.__cause__ is prior_cause
+    else:
+        assert fact.__cause__ is prior_cause
+    assert constructors == [] and carrier.calls == 0 and not destination.exists()
+    original_call, active, identifier, version, payload = admissions[0]
+    record = decode_file_call_obligation(payload)
+    assert record.download_child == child and not record.download_child_complete
+    assert isinstance(active.prepared, _PreparedDownload) and active.prepared.state.token == record.token
+    assert active.obligation_id == identifier and active.borrow is original_call.borrow
+    assert active.obligation is None and original_call.borrow._dispatch_obligation is None
+    rows = owner.list_pending_lifecycle_obligations()
+    if fault.startswith("committed"):
+        assert len(rows) == 1 and rows[0].obligation_id == identifier
+        assert rows[0].state is LifecycleObligationState.REGISTERED
+        assert rows[0].payload_version == version and rows[0].payload == payload
+    else:
+        assert rows == ()
+    if fault == "absent":
+        assert original_call.active is None and original_call.borrow.closed
+        assert access._operation.active_downloads == () and access._operation._local_download_call is None
+        assert access.download(PurePosixPath(source), destination).size == 8
+        return
+    assert access._operation._local_download_call is original_call and original_call.active is active
+    assert access._operation.active_downloads == (active,) and not original_call.borrow.closed
+    assert original_call.stage is None and not original_call.dispatched
+    assert original_call.local_outcome is fact.outcome and fact.outcome.download is None
+    assert original_call.local_failed and original_call.reduction_complete and not original_call.reduction_succeeded
+    with pytest.raises(StateError):
+        access.download(PurePosixPath(source), root.parent / "next")
+    with pytest.raises(StateError):
+        access._operation.settle_download_child_bookkeeping()
+    workflow = _Workflow(owner, Deadline.after(20))
+    workflow.views = NativeVMOperation(
+        owner, None, None, access._operation, ExecutionOperation(owner, target_for_owner(owner)), None
+    )
+    with pytest.raises(StateError):
+        workflow.close()
+    assert access._operation._local_download_call is original_call
+    assert access._operation.active_downloads == (active,) and not original_call.borrow.closed
+    assert owner.list_pending_lifecycle_obligations() == rows
+    assert db.operations.inspect(owner.ownership.scope) is not None
+    assert constructors == [] and carrier.calls == 0 and not destination.exists()
 
 
 @pytest.mark.parametrize("condition", [Create(), Replace()])

@@ -156,11 +156,6 @@ def download_to_local_file(
             operation.retain_local_download_stage(writer)
 
     local_deadline_exceeded = deadline.expired or (download.deadline_exceeded if download is not None else False)
-    if local_call is not None:
-        # Keep non-stage facts before outcome allocation. The original stage
-        # carries its actual publication/handle state if that allocation stops.
-        local_call.local_cleanup_failed = cleanup_failed
-        local_call.local_deadline_exceeded = local_deadline_exceeded
     outcome = FileLocalDownloadOutcome(
         download,
         published=writer.published if writer is not None else False,
