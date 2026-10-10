@@ -46,10 +46,11 @@ class SSHCarrier:
 
     def __init__(self, connection: SSHConnection) -> None:
         self._connection = connection
+        self._features = ChannelFeatures(live_stdio=True)
 
     @property
     def features(self) -> ChannelFeatures:
-        return ChannelFeatures(live_stdio=True)
+        return self._features
 
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         """Refuse input this adapter cannot deliver before effectful SSH admission."""
