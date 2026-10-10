@@ -23,6 +23,8 @@ from agentworks.execution._windows_pseudoconsole import WindowsPseudoConsole
 NONCE = "0123456789ABCDEF0123456789ABCDEF"
 PAYLOAD_READY = b"AGW-TERMINAL/2:" + NONCE.encode() + b":P"
 INTERACTIVE_READY = b"AGW-TERMINAL/2:" + NONCE.encode() + b":I"
+RELEASE = b"!"
+WRAP_FIXTURE = b"WRAP-FIXTURE:" + b"X" * 80
 
 
 class _Rect(ctypes.Structure):
@@ -127,7 +129,9 @@ def _child(idle: bool) -> int:
         return 2  # Honest topology refusal, no CONIN$/CONOUT$ fallback.
     io.check(io.kernel.SetConsoleMode(handles[0], modes[0] & ~7))
     try:
-        io.write(handles[1], PAYLOAD_READY)
+        setup_mode = ctypes.c_uint32()
+        io.check(io.kernel.GetConsoleMode(handles[0], ctypes.byref(setup_mode)))
+        io.write(handles[1], PAYLOAD_READY + b"\r\n")
         wire = bytearray()
         while len(wire) < 65536:
             chunk = io.read(handles[0], min(4096, 65536 - len(wire)))
@@ -136,16 +140,19 @@ def _child(idle: bool) -> int:
             wire.extend(chunk)
         decoded = binascii.unhexlify(wire)
         expected = binascii.unhexlify(_frame())
+        io.write(handles[1], INTERACTIVE_READY + b"\r\n")
+        if io.read(handles[0], 1) != RELEASE:
+            return 5  # Probe-only release, not an additional production gate.
         result = {
             "received": len(wire),
             "decoded": len(decoded),
             "fidelity": decoded == expected,
             "sha256": hashlib.sha256(decoded).hexdigest(),
             "changed": io.dimensions(handles[1]),
+            "setup_mode": setup_mode.value,
         }
         io.write(handles[2], json.dumps(result).encode() + b"\n")
-        io.write(handles[1], INTERACTIVE_READY)
-        io.write(handles[1], b"WRAP-FIXTURE:" + b"X" * 80)
+        io.write(handles[1], WRAP_FIXTURE)
         return 0 if result["fidelity"] else 4
     finally:
         io.check(io.kernel.SetConsoleMode(handles[0], modes[0]))
@@ -159,8 +166,12 @@ def _measure(cell: WindowsPseudoConsole, idle: bool) -> dict[str, Any]:
         cell.create()
         pipes = cell.pipes
         report["stage"] = "observe"
-        end, offset, resized = time.monotonic() + 15, 0, False
+        end, offset = time.monotonic() + 15, 0
+        prefix_end: int | None = None
+        setup_end: int | None = None
+        idle_live = False
         frame = _frame()
+        payload_record, interactive_record = PAYLOAD_READY + b"\r\n", INTERACTIVE_READY + b"\r\n"
         while time.monotonic() < end:
             for handle, buffer in ((pipes.presentation, output), (pipes.stderr, stderr)):
                 chunk = io.available(handle)
@@ -169,21 +180,32 @@ def _measure(cell: WindowsPseudoConsole, idle: bool) -> dict[str, Any]:
                 if len(buffer) > 131072:
                     raise OSError("Probe output bound exceeded")
             if idle and b"\n" in stderr and len(stderr.split(b"\n", 1)[1]) >= 256:
+                idle_live = cell.poll() is None
                 break
-            if not idle and PAYLOAD_READY in output:
-                if not resized:
-                    cell.resize(9, 17)
-                    resized = True
-                if offset < len(frame):
-                    offset += io.write(pipes.input, frame[offset : offset + 256])
-            if cell.poll() is not None:
-                # Final finite drain still uses only the borrowed endpoints.
-                for handle, buffer in ((pipes.presentation, output), (pipes.stderr, stderr)):
-                    while chunk := io.available(handle):
-                        buffer.extend(chunk)
-                        if len(buffer) > 131072:
-                            raise OSError("Probe output bound exceeded")
-                break
+            if not idle:
+                if prefix_end is None and payload_record in output:
+                    prefix_end = output.index(payload_record) + len(payload_record)
+                if prefix_end is not None and setup_end is None:
+                    new_presentation = bytes(output[prefix_end:])
+                    if new_presentation and (
+                        offset != len(frame) or not interactive_record.startswith(new_presentation)
+                    ):
+                        raise OSError("Probe strict setup presentation refused")
+                    if offset < len(frame):
+                        offset += io.write(pipes.input, frame[offset : offset + 256])
+                    elif new_presentation == interactive_record:
+                        setup_end = len(output)
+                        cell.resize(9, 17)
+                        if io.write(pipes.input, RELEASE) != 1:
+                            raise OSError("Probe release failed")
+                # Process exit is NOT asynchronous ConPTY presentation completion.
+                if (
+                    setup_end is not None
+                    and len(stderr.partition(b"\n")[2]) > 256
+                    and WRAP_FIXTURE in output[setup_end:]
+                    and cell.poll() is not None
+                ):
+                    break
             time.sleep(0.001)
         first, separator, rest = stderr.partition(b"\n")
         metadata = json.loads(first) if separator else {}
@@ -196,10 +218,11 @@ def _measure(cell: WindowsPseudoConsole, idle: bool) -> dict[str, Any]:
             sent=offset,
             presentation_bytes=len(output),
             presentation_sha256=hashlib.sha256(output).hexdigest(),
-            payload_marker_exact=PAYLOAD_READY in output,
-            interactive_marker_exact=INTERACTIVE_READY in output,
-            payload_not_echoed=frame[:64] not in output,
-            wrap_fixture_exact=b"WRAP-FIXTURE:" + b"X" * 80 in output,
+            setup_prefix_bytes=prefix_end,
+            setup_prefix_sha256=hashlib.sha256(output[:prefix_end]).hexdigest() if prefix_end is not None else None,
+            strict_setup=setup_end is not None,
+            idle_live=idle_live,
+            wrap_fixture_exact=setup_end is not None and WRAP_FIXTURE in output[setup_end:],
             status=cell.poll(),
         )
         topology = metadata.get("kinds") == [2, 2, 3] and metadata.get("initial") == [24, 80]
@@ -207,15 +230,15 @@ def _measure(cell: WindowsPseudoConsole, idle: bool) -> dict[str, Any]:
             topology
             and diagnostic_fidelity
             and (
-                idle
+                (idle and idle_live and report["status"] is None)
                 or (
                     result.get("fidelity") is True
                     and result.get("received") == 65536
                     and result.get("decoded") == 32768
                     and result.get("changed") == [9, 17]
-                    and report["payload_marker_exact"]
-                    and report["interactive_marker_exact"]
-                    and report["payload_not_echoed"]
+                    and report["strict_setup"]
+                    and type(result.get("setup_mode")) is int
+                    and result["setup_mode"] & 7 == 0
                     and report["status"] == 0
                 )
             )
@@ -252,7 +275,7 @@ def run_probe() -> dict[str, Any]:
                 # No guessed close/replay: outer tester supervision owns disposition.
                 Event().wait()
 
-        worker = Thread(target=work, daemon=True)
+        worker = Thread(target=work)
         worker.start()
         worker.join(30)
         if worker.is_alive():
@@ -268,5 +291,5 @@ if __name__ == "__main__":
     if len(sys.argv) == 2 and sys.argv[1] in ("--child", "--child-idle"):
         raise SystemExit(_child(sys.argv[1] == "--child-idle"))
     result = run_probe()
-    print(json.dumps(result, sort_keys=True))
+    print(json.dumps(result, sort_keys=True), flush=True)
     raise SystemExit(0 if result["accepted"] else 1)

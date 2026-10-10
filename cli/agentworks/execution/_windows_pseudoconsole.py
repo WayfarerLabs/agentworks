@@ -163,6 +163,8 @@ class _Api:
         if result or ctypes.get_last_error() != 122 or not size.value:  # type: ignore[attr-defined]
             raise OSError("InitializeProcThreadAttributeList sizing")
         cell._attributes = ctypes.create_string_buffer(size.value)
+        cell._inherited = (ctypes.c_void_p * 1)(cell._handles["stderr_write"])
+        cell._attributes_initialized = None
         result = None
         try:
             result = self.kernel.InitializeProcThreadAttributeList(cell._attributes, 2, 0, ctypes.byref(size))
@@ -172,7 +174,6 @@ class _Api:
             else:
                 cell._attributes_initialized = bool(result)
         self.check(result, "InitializeProcThreadAttributeList")
-        cell._inherited = (ctypes.c_void_p * 1)(cell._handles["stderr_write"])
         # PSEUDOCONSOLE takes HPCON itself, unlike HANDLE_LIST's pointer to an array.
         for key, value, length in (
             (0x00020016, cell._hpcon, ctypes.sizeof(ctypes.c_void_p)),
@@ -224,7 +225,7 @@ class WindowsPseudoConsole:
     _hpcon: int = field(default=0, init=False, repr=False)
     _attributes: Any = field(default=None, init=False, repr=False)
     _inherited: Any = field(default=None, init=False, repr=False)
-    _attributes_initialized: bool = field(default=False, init=False, repr=False)
+    _attributes_initialized: bool | None = field(default=False, init=False, repr=False)
     _api: _Api | None = field(default=None, init=False, repr=False)
     _worker: Thread | None = field(default=None, init=False, repr=False)
     _attempted: bool = field(default=False, init=False, repr=False)
@@ -245,7 +246,7 @@ class WindowsPseudoConsole:
         _dimensions(self.rows, self.columns)
 
     def _check_worker(self) -> None:
-        if current_thread() is main_thread() or self._worker is not current_thread():
+        if self._worker is not current_thread():
             raise RuntimeError("Pseudoconsole effects require the retained caller worker")
 
     @property
@@ -362,13 +363,13 @@ class WindowsPseudoConsole:
                 self._hpcon = 0
             except OSError:
                 failures = True
-        if self._attributes_initialized:
+        if self._attributes_initialized is True:
             try:
                 self._api.kernel.DeleteProcThreadAttributeList(self._attributes)
                 self._attributes_initialized = False
             except OSError:
                 failures = True
-        if not self._attributes_initialized:
+        if self._attributes_initialized is False:
             self._attributes = self._inherited = None
         if self._exit_status is not None:
             try:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import subprocess
 import sys
 from collections.abc import Callable
@@ -297,6 +298,35 @@ def test_native_acquisition_escape_is_uncertain_and_never_guessed_closed(cell):
     _worker(work)
 
 
+def test_unknown_attribute_initialization_retains_exact_storage_without_delete_or_replay(cell):
+    candidate, kernel = cell
+    initialize = kernel.InitializeProcThreadAttributeList
+
+    def escaped(buffer, *args):
+        result = initialize(buffer, *args)
+        if buffer is not None:
+            raise KeyboardInterrupt
+        return result
+
+    kernel.InitializeProcThreadAttributeList = escaped
+
+    def work():
+        with pytest.raises(KeyboardInterrupt):
+            candidate.create()
+        buffer, inherited = candidate._attributes, candidate._inherited
+        assert buffer is not None and inherited is not None
+        assert candidate._attributes_initialized is None
+        assert not candidate.close() and not kernel.live
+        calls = list(kernel.calls)
+        assert candidate._attributes is buffer and candidate._inherited is inherited
+        assert candidate._hpcon == 0 and candidate.has_capabilities
+        assert "delete-attributes" not in calls
+        assert not candidate.close() and kernel.calls == calls
+        assert candidate._attributes is buffer and candidate._inherited is inherited
+
+    _worker(work)
+
+
 def test_output_close_failure_retains_console_until_explicit_retry(cell):
     candidate, kernel = cell
 
@@ -394,6 +424,202 @@ def test_effects_refuse_different_worker(cell):
     stop.set()
     owner.join(5)
     assert not owner.is_alive() and not candidate.has_capabilities
+
+
+@pytest.fixture
+def probe_boundary(monkeypatch):
+    from types import SimpleNamespace
+
+    from . import windows_pseudoconsole_probe as probe
+
+    class Cell:
+        def __init__(self, status: int | None = None) -> None:
+            self.status = status
+            self.has_capabilities = False
+            self._acquisition_uncertain = False
+            self._exit_status: int | None = None
+            self.pipes = native.BorrowedPipes(1, 2, 3)
+            self.resizes: list[tuple[int, int]] = []
+
+        def create(self):
+            self.has_capabilities = True
+
+        def poll(self):
+            return self.status
+
+        def resize(self, rows, columns):
+            self.resizes.append((rows, columns))
+
+        def close(self):
+            self._exit_status = 1 if self.status is None else self.status
+            self.has_capabilities = False
+            return True
+
+    class IO:
+        def __init__(
+            self,
+            cell: Cell,
+            reflection: bytes = b"",
+            delay: bool = False,
+            wrap: bool = True,
+            record: bytes | None = None,
+        ) -> None:
+            self.cell = cell
+            self.frame = probe._frame()
+            self.sent = bytearray()
+            self.released = False
+            self.prefix = [b"\x1b[?25l" + probe.PAYLOAD_READY + b"\r", None, b"\n"]
+            self.prefix_complete = False
+            self.reflection, self.delay, self.wrap = reflection, delay, wrap
+            self.record = probe.INTERACTIVE_READY + b"\r\n" if record is None else record
+            self.phase_chunks: list[bytes | None] = []
+            self.phase_queued = False
+            self.late_output = [None, None, probe.WRAP_FIXTURE] if wrap else [None]
+            metadata = {"kinds": [2, 2, 3], "modes": [7, 3, None], "initial": [24, 80]}
+            self.stderr: list[bytes | None] = [json.dumps(metadata).encode() + b"\n" + bytes(range(256))]
+            self.now = 0.0
+
+        def available(self, handle):
+            if handle == 3:
+                return self.stderr.pop(0) if self.stderr else None
+            self.now += 0.02
+            if self.prefix:
+                chunk = self.prefix.pop(0)
+                self.prefix_complete = not self.prefix
+                return chunk
+            if len(self.sent) == 65536 and not self.phase_queued:
+                record = self.record
+                self.phase_chunks = [self.reflection + record[:7], None, record[7:]]
+                self.phase_queued = True
+            if self.phase_chunks:
+                return self.phase_chunks.pop(0)
+            if self.released and self.late_output:
+                return self.late_output.pop(0)
+            return None
+
+        def write(self, handle, data):
+            assert handle == 1 and self.prefix_complete
+            if len(self.sent) < 65536:
+                assert self.cell.resizes == []
+                self.sent.extend(data)
+                assert self.frame.startswith(self.sent)
+            else:
+                assert data == probe.RELEASE and self.cell.resizes == [(9, 17)]
+                assert not self.phase_chunks
+                self.released = True
+                result = {"received": 65536, "decoded": 32768, "fidelity": True, "changed": [9, 17], "setup_mode": 0}
+                self.stderr += (
+                    [None, json.dumps(result).encode() + b"\n"] if self.delay else [json.dumps(result).encode() + b"\n"]
+                )
+                self.cell.status = 0
+            return len(data)
+
+    def measure(*, idle=False, status=None, reflection=b"", delay=False, wrap=True, record=None):
+        cell = Cell(status)
+        io = IO(cell, reflection, delay, wrap, record)
+        monkeypatch.setattr(probe, "_IO", lambda: io)
+        monkeypatch.setattr(probe, "time", SimpleNamespace(monotonic=lambda: io.now, sleep=lambda _seconds: None))
+        return probe._measure(cell, idle), cell, io
+
+    return measure
+
+
+@pytest.mark.parametrize("reflection", ["wrapped", "partial", "vt", "extra"])
+def test_strict_setup_rejects_full_wrapped_and_partial_reflection_and_noise(probe_boundary, reflection):
+    from . import windows_pseudoconsole_probe as probe
+
+    wire = probe._frame()
+    if reflection == "wrapped":
+        noise = b"\r\n".join(wire[index : index + 17] for index in range(0, len(wire), 17))
+    elif reflection == "partial":
+        noise = wire[8192:8292]
+    else:
+        noise = b"\x1b[2J" if reflection == "vt" else b"unexpected"
+    report, cell, io = probe_boundary(reflection=noise)
+    assert not report["accepted"] and report["stage"] == "refused"
+    assert len(io.sent) == 65536 and not io.released and cell.resizes == []
+    assert report["closed"] and not cell.has_capabilities
+
+
+def test_strict_setup_gates_complete_prefix_and_record_before_resize_release(probe_boundary):
+    report, cell, io = probe_boundary(delay=True)
+    assert report["accepted"] and report["strict_setup"]
+    assert io.released and cell.resizes == [(9, 17)]
+    assert report["setup_prefix_bytes"] == 57
+    assert report["wrap_fixture_exact"] and report["status"] == 0
+
+
+def test_missing_delayed_wrap_is_separately_unproved_not_inferred_from_exit(probe_boundary):
+    report, _, _ = probe_boundary(wrap=False)
+    assert report["strict_setup"] and report["status"] == 0
+    assert report["wrap_fixture_exact"] is False
+
+
+@pytest.mark.parametrize("fault", ["truncated", "wrong-phase", "wrong-nonce", "wrapped", "suffix"])
+def test_entire_setup_window_must_be_exact_record_not_partial_or_containment(probe_boundary, fault):
+    from . import windows_pseudoconsole_probe as probe
+
+    record = probe.INTERACTIVE_READY + b"\r\n"
+    if fault == "truncated":
+        record = record[:-1]
+    elif fault == "wrong-phase":
+        record = probe.PAYLOAD_READY + b"\r\n"
+    elif fault == "wrong-nonce":
+        record = record.replace(b"01234567", b"87654321")
+    elif fault == "wrapped":
+        record = record[:17] + b"\r\n" + record[17:]
+    else:
+        record += b"extra after record"
+    report, cell, io = probe_boundary(record=record)
+    assert not report["accepted"] and not io.released and cell.resizes == []
+
+
+@pytest.mark.parametrize("status", [None, 0, 7])
+def test_idle_requires_exact_live_child_before_teardown(probe_boundary, status):
+    report, _, io = probe_boundary(idle=True, status=status)
+    assert report["accepted"] == (status is None)
+    assert report["idle_live"] == (status is None)
+    assert report["status"] == status and not io.sent
+    assert report["cleanup_status"] == (1 if status is None else status)
+
+
+def test_standalone_pending_cell_survives_normal_exit_until_outer_supervision():
+    script = r"""
+import ctypes, runpy, sys, threading
+import agentworks.execution._terminal_handoff
+import agentworks.execution._windows_pseudoconsole as native
+class Cell:
+    def __init__(self, *args):
+        self.has_capabilities = True
+        self._acquisition_uncertain = True
+        self._exit_status = None
+    def close(self):
+        return False
+native.WindowsPseudoConsole = Cell
+def unavailable(*args, **kwargs):
+    raise OSError('synthetic native boundary')
+ctypes.WinDLL = unavailable
+RealThread = threading.Thread
+class QuickJoin(RealThread):
+    def join(self, timeout=None):
+        return super().join(0.01)
+threading.Thread = QuickJoin
+sys.platform = 'win32'
+runpy.run_module('tests.execution.windows_pseudoconsole_probe', run_name='__main__')
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-I", "-B", "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    try:
+        with pytest.raises(subprocess.TimeoutExpired) as caught:
+            process.communicate(timeout=10)
+        report = json.loads(caught.value.output)
+        assert report["stage"] == "retained_worker_pending" and not report["accepted"]
+        assert process.poll() is None
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=10)
 
 
 @pytest.mark.integration
