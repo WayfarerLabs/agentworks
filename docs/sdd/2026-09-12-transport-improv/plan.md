@@ -3724,13 +3724,14 @@ edge follows.
       launch/interruption gate and preserve exact route/guest fencing.
 - [ ] Implement mandatory caller-held local delivery custody through the carrier and provider-read
       paths. Retain the existing native owner before admission, at most one unsettled worker per
-      attempt; pending or lost ownership refuses further exchanges. Keep reports as observations and
-      original exceptions unchanged. The existing operation attempt, keeper and pre-target workflow
-      retain their own storage. Add bounded close and a non-dispatch settlement path after borrow
-      handoff, with remote effects still independently retained. Prove delayed construction,
-      kill/reap failure, explicit cleanup retry, natural exit, external-reaper uncertainty, all
-      temporary Proxmox consumers and aggregate owner-release refusal. Do not silently add bounded
-      return to guest source-descriptor or unmigrated terminal consumers.
+      attempt; incomplete local retirement refuses further exchanges. Exact status loss remains an
+      unknown execution outcome after independently proved local retirement. Keep reports as
+      observations and original exceptions unchanged. The existing operation attempt, keeper and
+      pre-target workflow retain their own storage. Add bounded close and a non-dispatch settlement
+      path after borrow handoff, with remote effects still independently retained. Prove delayed
+      construction, kill/reap failure, explicit cleanup retry, natural exit, external-reaper
+      uncertainty, all temporary Proxmox consumers and aggregate owner-release refusal. Do not
+      silently add bounded return to guest source-descriptor or unmigrated terminal consumers.
 - [ ] Retain one ordered local cleanup coordinator alongside the exact existing native process owner
       for delivery resources such as terminal relay, acquisition and restoration. Require passive
       settlement of both before another exchange; retry the same retained coordinator under a fresh
@@ -3738,6 +3739,17 @@ edge follows.
       unchanged and reports passive. Prove exact-owner binding, refused replacement, interrupted
       cleanup and process-cleaned-but-restoration-pending cases; SSH separately supplies its
       terminal coordinator and native acceptance.
+- [ ] Implement the
+      [shared local retirement](execution-lifecycle-lld.md#shared-local-process-retirement)
+      correction under the existing native owner. Share original one-shot pipe-close evidence
+      between early stdin EOF and teardown; preserve sticky close uncertainty, independent safe
+      process cleanup and immutable first observations. Require externally retained runner ownership
+      and retain the inline guest's one-shot module owner through active runtime. Prove known-exit
+      and exact-loss close failures, ordinary/control early EOF, descriptor reuse refusal,
+      unattempted independent cleanup and aggregate remote-debt separation. Final SSH composition
+      and installed Linux/macOS held, restoration and shutdown probes remain separate required
+      evidence; Windows process/HANDLE guarantees are unchanged. No fake status, global signal reset
+      or cleanup bypass.
 - [ ] Increase buffered snapshot download batches to 256 KiB with a separate scratch range-read
       ceiling, leaving upload writes and internal streaming pieces unchanged. Declare conservative
       complete-response capacity before dispatch; preserve digest, framing, identity, metadata and

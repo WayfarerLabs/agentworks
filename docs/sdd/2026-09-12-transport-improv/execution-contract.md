@@ -305,14 +305,16 @@ cancellation handle. The existing operation attempt holds it during ordinary del
 and pre-target platform workflow hold theirs for their own lifetimes. Passing it is mandatory at
 actual delivery, including fixed provider reads that construct local workers. At most one unsettled
 local worker occupies it; sequential polling may replace a worker only after confirmed cleanup.
-Pending or lost-ownership cleanup prevents another exchange through that custody.
+Incomplete local retirement prevents another exchange through that custody. Exact status loss alone
+does not prevent reuse after all local capabilities have been positively retired; execution remains
+unknown and any independently retained coordinator must still settle.
 
 The carrier stores its existing inert native process owner there before starting it. Bounded close
 may return while construction or cleanup remains pending, without dropping the exact owner. A later
 explicit serialized cleanup attempt or observed natural exit may establish local settlement; lost
-exclusive ownership remains uncertainty and never authorizes signaling a reused numeric PID. Reports
-remain immutable observations and exceptions remain control flow, rather than transporting live
-cleanup capabilities through result reducers or exception causes. Local settlement, remote
+exclusive ownership leaves execution unknown and never authorizes signaling a reused numeric PID.
+Reports remain immutable observations and exceptions remain control flow, rather than transporting
+live cleanup capabilities through result reducers or exception causes. Local settlement, remote
 completion and dispatch evidence remain independent facts. Neither `not_sent` nor remote exit zero
 alone clears an attempt with unsettled local custody.
 
