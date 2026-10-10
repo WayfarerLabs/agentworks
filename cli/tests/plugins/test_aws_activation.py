@@ -87,7 +87,9 @@ def row(adapter: EC2Activation) -> LifecycleObligation:
 def test_passive_constructor_one_start_and_no_settlement(owned):
     adapter = owned.adapter
     assert owned.calls == [] and adapter.obligation is None
+    assert not adapter.cleanup_incomplete
     assert adapter.start(Deadline.after(5)) == REQUEST
+    assert not adapter.cleanup_incomplete
     persisted = row(adapter)
     assert persisted.obligation_kind == OBLIGATION_KIND and persisted.payload_version == 1
     assert persisted.payload_revision == 1
@@ -236,6 +238,13 @@ def test_client_close_preserves_results_and_escaping_controls(owned, monkeypatch
             owned.adapter.start(Deadline.after(5))
     assert owned.calls == ["client", "start", "close"]
     assert row(owned.adapter).state is LifecycleObligationState.POSSIBLE_EFFECT
+    close_error.__traceback__ = None
+    if failed:
+        primary.__traceback__ = None
+    assert owned.adapter.cleanup_incomplete
+    assert owned.adapter._client is owned.client
+    owned.adapter.reconcile(Deadline.after(5))
+    assert owned.calls == ["client", "start", "close"]
 
 
 @pytest.mark.parametrize(

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-from contextlib import suppress
 from dataclasses import asdict, dataclass, replace
 from threading import TIMEOUT_MAX, Lock
 from typing import Any
@@ -131,6 +130,12 @@ class EC2Activation:
         self._obligation: LifecycleObligation | None = None
         self._attempted = False
         self._mark_began = False
+        self._client: Any = None
+
+    @property
+    def cleanup_incomplete(self) -> bool:
+        """Whether the original client still lacks confirmed local closure."""
+        return self._client is not None
 
     @property
     def payload(self) -> ActivationPayload:
@@ -161,6 +166,7 @@ class EC2Activation:
     def start(self, deadline: Deadline) -> str:
         """Submit once and return acknowledgment identity, never completion evidence."""
         self._acquire(deadline)
+        control: KeyboardInterrupt | SystemExit | None = None
         try:
             self._remaining(deadline)
             if self._attempted:
@@ -175,10 +181,8 @@ class EC2Activation:
             from botocore.config import Config
 
             remaining = self._remaining(deadline)
-            client: Any = None
-            control: KeyboardInterrupt | SystemExit | None = None
             try:
-                client = self._session.client(
+                self._client = self._session.client(
                     "ec2",
                     region_name=self._payload.region,
                     config=Config(
@@ -187,6 +191,7 @@ class EC2Activation:
                         retries={"total_max_attempts": 1, "mode": "standard"},
                     ),
                 )
+                client = self._client
                 self._remaining(deadline)
                 self._mark_began = True
                 self._obligation.mark_possible_effect()
@@ -200,16 +205,21 @@ class EC2Activation:
                 control = error
                 raise
             finally:
-                # Ordinary close failures preserve the result; controls still escape.
-                if client is not None:
+                # Keep the original until close returns normally, including interruption.
+                if self._client is not None:
                     try:
-                        with suppress(Exception):
-                            client.close()
-                    except (KeyboardInterrupt, SystemExit):
-                        if control is None:
-                            raise
+                        self._client.close()
+                    except Exception:
+                        pass
+                    else:
+                        self._client = None
             self._remaining(deadline)
             return request_id
+        except (KeyboardInterrupt, SystemExit):
+            # Also covers controls raised at Python boundaries around cleanup.
+            if control is not None:
+                raise control from None
+            raise
         finally:
             self._lock.release()
 

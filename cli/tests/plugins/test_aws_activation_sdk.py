@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import ast
+import inspect
 import os
 import socket
 import subprocess
 import sys
+import textwrap
+import weakref
 from collections.abc import Iterator
 from contextlib import closing
 from types import SimpleNamespace
@@ -17,6 +21,7 @@ import pytest
 from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.db import Database
 from agentworks.db.operations import LifecycleObligationState, OperationResourceKind, OperationScope
+from agentworks.errors import StateError
 from agentworks.execution.carrier import Deadline
 from agentworks.operations import OperationOwner
 from agentworks.plugins.aws._activation import EC2Activation, decode_activation_payload
@@ -66,7 +71,7 @@ def sdk_owned(tmp_path, monkeypatch):
         calls.append(data["Action"])
         assert replies
         reply = replies.pop(0)
-        if isinstance(reply, Exception):
+        if isinstance(reply, BaseException):
             raise reply
         status, body, headers = reply
         return AWSResponse(request.url, status, {"content-type": "text/xml", **headers}, Raw(body))
@@ -148,9 +153,104 @@ def test_stock_sdk_success_is_one_acknowledgment(sdk_owned):
     probe.adapter.reconcile(Deadline.after(5))
     assert probe.calls == [["StartInstances"]] and probe.sleeps == [] and probe.replies == []
     assert probe.closes == ["close"] and len(probe.clients) == 1
+    assert not probe.adapter.cleanup_incomplete
     row = probe.owner.inspect_lifecycle_obligation(probe.adapter.obligation_id)
     assert row is not None and row.state is LifecycleObligationState.POSSIBLE_EFFECT
     assert row.payload_revision == 1 and decode_activation_payload(row.payload).request_id == REQUEST
+
+
+@pytest.mark.parametrize("after_effect", [False, True])
+@pytest.mark.parametrize("close_type", [OSError, KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("original_type", [None, KeyboardInterrupt, SystemExit])
+def test_stock_sdk_uncertain_close_keeps_original_client(
+    sdk_owned, monkeypatch, after_effect, close_type, original_type
+):
+    probe = sdk_owned
+    original = original_type("original send interruption") if original_type else None
+    close_error = close_type("client close interruption")
+    probe.replies.append(original if original else (200, SUCCESS, {}))
+    from botocore.httpsession import URLLib3Session
+
+    close = URLLib3Session.close
+    closed = []
+
+    def fail(http_session):
+        if after_effect:
+            close(http_session)
+            closed.append(True)
+        raise close_error
+
+    monkeypatch.setattr(URLLib3Session, "close", fail)
+    expected = original or (close_error if close_type is not OSError else None)
+    if expected is None:
+        assert probe.adapter.start(Deadline.after(5)) == REQUEST
+    else:
+        with pytest.raises(type(expected)) as caught:
+            probe.adapter.start(Deadline.after(5))
+        assert caught.value is expected
+        del caught
+    close_error.__traceback__ = None
+    if original:
+        original.__traceback__ = None
+    identity = weakref.ref(probe.clients.pop())
+    assert identity() is not None and probe.adapter._client is identity()
+    assert probe.adapter.cleanup_incomplete and closed == ([True] if after_effect else [])
+    probe.adapter.reconcile(Deadline.after(5))
+    with pytest.raises(StateError):
+        probe.adapter.start(Deadline.after(5))
+    row = probe.owner.inspect_lifecycle_obligation(probe.adapter.obligation_id)
+    assert row is not None and row.state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert row.payload_revision == int(original is None)
+    assert probe.adapter.payload.request_id == (REQUEST if original is None else None)
+    assert probe.calls == [["StartInstances"]] and probe.sleeps == [] and probe.replies == []
+    assert probe.closes == ["close"]
+
+
+@pytest.mark.parametrize("boundary", ["entry", "bookkeeping"])
+@pytest.mark.parametrize("original_type", [None, KeyboardInterrupt, SystemExit])
+def test_stock_sdk_cleanup_python_boundary_keeps_custody_and_original_control(sdk_owned, boundary, original_type):
+    probe = sdk_owned
+    original = original_type("original send interruption") if original_type else None
+    injected = SystemExit("cleanup boundary interruption")
+    probe.replies.append(original if original else (200, SUCCESS, {}))
+    method = probe.adapter.start.__func__
+    lines, offset = inspect.getsourcelines(method)
+    syntax = ast.parse(textwrap.dedent("".join(lines)))
+    cleanup = next(
+        node
+        for node in ast.walk(syntax)
+        if isinstance(node, ast.Try) and node.finalbody and isinstance(node.finalbody[0], ast.If)
+    )
+    entry = offset + cleanup.finalbody[0].lineno - 1
+    fired: list[bool] = []
+
+    def interrupt(frame, event, arg):
+        if event == "line" and frame.f_code is method.__code__ and not fired:
+            ready = frame.f_lineno == entry if boundary == "entry" else probe.closes == ["close"]
+            if ready:
+                fired.append(True)
+                raise injected
+        return interrupt
+
+    prior = sys.gettrace()
+    sys.settrace(interrupt)
+    try:
+        with pytest.raises(type(original or injected)) as caught:
+            probe.adapter.start(Deadline.after(5))
+        assert caught.value is (original or injected)
+        del caught
+    finally:
+        sys.settrace(prior)
+    injected.__traceback__ = None
+    if original:
+        original.__traceback__ = None
+    identity = weakref.ref(probe.clients.pop())
+    assert fired == [True] and probe.adapter._client is identity() and identity() is not None
+    assert probe.adapter.cleanup_incomplete
+    probe.adapter.reconcile(Deadline.after(5))
+    assert probe.calls == [["StartInstances"]] and probe.sleeps == []
+    assert probe.closes == ([] if boundary == "entry" else ["close"])
+    assert probe.adapter.payload.request_id == (REQUEST if original is None else None)
 
 
 @pytest.mark.parametrize(
