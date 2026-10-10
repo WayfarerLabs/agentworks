@@ -16,7 +16,7 @@ def compute_start_client(
     credential: object, subscription_id: str, *, transport: HttpTransport[HttpRequest, HttpResponse] | None = None
 ) -> ComputeManagementClient:
     """Construct fresh policies without challenge replay, redirects or registration."""
-    from azure.core.pipeline.policies import BearerTokenCredentialPolicy, RetryPolicy
+    from azure.core.pipeline.policies import BearerTokenCredentialPolicy
     from azure.mgmt.compute import ComputeManagementClient
 
     class RefuseChallenge(BearerTokenCredentialPolicy["HttpRequest", "HttpResponse"]):
@@ -29,7 +29,6 @@ def compute_start_client(
         cast("TokenCredential", credential),
         subscription_id,
         policies=[
-            RetryPolicy(retry_total=0, retry_connect=0, retry_read=0, retry_status=0),
             RefuseChallenge(cast("TokenCredential", credential), "https://management.azure.com/.default"),
         ],
         transport=transport,

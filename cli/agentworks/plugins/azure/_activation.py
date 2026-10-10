@@ -164,21 +164,15 @@ def decode_acknowledgment(response: Any, resource_id: str) -> StartAcknowledgmen
     ):
         raise ValidationError("Azure activation acknowledgment is invalid")
     retained: dict[str, str] = {}
-    seen: set[str] = set()
     for key, value in headers.items():
-        if (
-            type(key) is not str
-            or re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", key) is None
-            or type(value) is not str
-            or any(ord(char) < 32 and char != "\t" or ord(char) == 127 for char in value)
-        ):
+        if type(key) is not str or key.lower() not in {"x-ms-request-id", "location", "azure-asyncoperation"}:
+            continue
+        if type(value) is not str:
             raise ValidationError("Azure activation acknowledgment headers are invalid")
         key = key.lower()
-        if key in seen:
+        if key in retained:
             raise ValidationError("Azure activation acknowledgment headers conflict")
-        seen.add(key)
-        if key in {"x-ms-request-id", "location", "azure-asyncoperation"}:
-            retained[key] = value
+        retained[key] = value
     ack = StartAcknowledgment(
         status,
         retained.get("x-ms-request-id"),
@@ -239,24 +233,30 @@ class AzureVMActivation:
 
     @property
     def cleanup_incomplete(self) -> bool:
-        """A close that did not return normally leaves its original handle in custody."""
+        """Original handles remain in custody until close returns normally."""
         return bool(self._unclosed_handles)
 
-    def _close_handles(
-        self, response: Any, client: Any, original_control: KeyboardInterrupt | SystemExit | None
-    ) -> None:
-        control = original_control
-        for handle in (response, client):
-            if handle is not None:
+    def _close_handles(self) -> None:
+        control: KeyboardInterrupt | SystemExit | None = None
+        try:
+            for handle in self._unclosed_handles:
                 try:
                     handle.close()
                 except Exception:
-                    self._unclosed_handles += (handle,)
+                    pass
                 except (KeyboardInterrupt, SystemExit) as error:
-                    self._unclosed_handles += (handle,)
                     if control is None:
                         control = error
-        if original_control is None and control is not None:
+                else:
+                    # Interrupted bookkeeping may retain a closed original, never lose an uncertain one.
+                    self._unclosed_handles = tuple(
+                        original for original in self._unclosed_handles if original is not handle
+                    )
+        except (KeyboardInterrupt, SystemExit):
+            if control is not None:
+                raise control from None
+            raise
+        if control is not None:
             raise control
 
     @staticmethod
@@ -291,20 +291,23 @@ class AzureVMActivation:
 
             from agentworks.plugins.azure._activation_client import compute_start_client
 
-            client: Any = None
-            response: Any = None
             control: KeyboardInterrupt | SystemExit | None = None
             try:
                 self._remaining(deadline)
-                client = compute_start_client(self._credential, _subscription(self._payload.resource_id))
+                self._unclosed_handles = (
+                    compute_start_client(self._credential, _subscription(self._payload.resource_id)),
+                )
+                client = self._unclosed_handles[0]
                 self._remaining(deadline)
                 request = HttpRequest("POST", start_url(self._payload.resource_id))
                 self._mark_began = True
                 self._obligation.mark_possible_effect()
                 remaining = self._remaining(deadline)
-                response = client.send_request(
-                    request, stream=True, connection_timeout=remaining, read_timeout=remaining
+                self._unclosed_handles = (
+                    client.send_request(request, stream=True, connection_timeout=remaining, read_timeout=remaining),
+                    client,
                 )
+                response = self._unclosed_handles[0]
                 acknowledgment = decode_acknowledgment(response, self._payload.resource_id)
                 self._payload = replace(self._payload, acknowledgment=acknowledgment)
                 self._reconcile_locked()
@@ -312,7 +315,11 @@ class AzureVMActivation:
                 control = error
                 raise
             finally:
-                self._close_handles(response, client, control)
+                try:
+                    self._close_handles()
+                except (KeyboardInterrupt, SystemExit):
+                    if control is None:
+                        raise
             self._remaining(deadline)
             return acknowledgment
         finally:

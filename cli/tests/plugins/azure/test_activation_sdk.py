@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+import sys
 from contextlib import closing
 from types import SimpleNamespace
 from typing import Any
@@ -151,6 +152,9 @@ def sdk_owned(tmp_path, monkeypatch):
         (202, {"Location": OPERATION}),
         (202, {"aZuRe-AsYnCoPeRaTiOn": OPERATION, "X-MS-Request-ID": "offline-request"}),
         (202, {"Location": OPERATION, "Azure-AsyncOperation": OPERATION}),
+        (200, {"other": "first", "Other": "second"}),
+        (200, {"bad header": "value"}),
+        (202, {"Location": OPERATION, "unrelated": None, 123: "\r\nforeign"}),
     ],
 )
 def test_public_streaming_success_is_one_ack(sdk_owned, status, headers):
@@ -193,10 +197,9 @@ def test_public_streaming_success_is_one_ack(sdk_owned, status, headers):
         (200, {"x-ms-request-id": "\r\nforeign"}, False),
         (200, {"x-ms-request-id": "first", "X-MS-Request-ID": "second"}, False),
         (202, {"Location": OPERATION, "location": OPERATION}, False),
+        (202, {"Azure-AsyncOperation": OPERATION, "azure-asyncoperation": OPERATION}, False),
         (202, {"Azure-AsyncOperation": 123}, False),
         (200, {"x-ms-request-id": "first,second"}, False),
-        (200, {"other": "first", "Other": "second"}, False),
-        (200, {"bad header": "value"}, False),
         (202, {"Location": OPERATION.replace("/operations/", "/../operations/")}, False),
         (202, {"Location": OPERATION.replace("/operations/", "/%2e%2e/operations/")}, False),
         (202, {"Location": OPERATION.replace("/operations/", "/%GG/operations/")}, False),
@@ -226,3 +229,184 @@ def test_transport_failure_or_control_no_replay(sdk_owned, exception_type):
     row = probe.owner.inspect_lifecycle_obligation(probe.adapter.obligation_id)
     assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
     assert len(probe.transport.calls) == probe.credential.calls == 1
+
+
+@pytest.mark.parametrize("header", ["x-ms-request-id", "Location", "Azure-AsyncOperation"])
+@pytest.mark.parametrize("value", [None, 123])
+def test_selected_header_nonstring_is_not_absence(sdk_owned, header, value):
+    probe = sdk_owned
+    probe.transport.replies.append((200, {header: value}, False))
+    with pytest.raises(ValidationError):
+        probe.adapter.start(Deadline.after(5))
+    assert probe.adapter.payload.acknowledgment is None
+    probe.adapter.reconcile(Deadline.after(5))
+    row = probe.owner.inspect_lifecycle_obligation(probe.adapter.obligation_id)
+    assert row.state is LifecycleObligationState.POSSIBLE_EFFECT and row.payload_revision == 0
+    assert len(probe.transport.calls) == probe.credential.calls == 1
+
+
+@pytest.fixture
+def sdk_custody(tmp_path, monkeypatch):
+    """Actual originals for deliberate cleanup uncertainty, without live resources."""
+    transport, credential = ScriptedTransport(), Credential()
+    clients = []
+    original = _activation_client.compute_start_client
+
+    def construct(selected, subscription):
+        assert selected is credential and subscription == SUBSCRIPTION
+        client = original(selected, subscription, transport=transport)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(_activation_client, "compute_start_client", construct)
+    with closing(Database(tmp_path / "custody.db")) as database:
+        owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm"), "proof")
+        adapter = AzureVMActivation(owner, "vm", credential, RESOURCE, ProviderLocator(f"azure-vm:{RESOURCE}"))
+        yield SimpleNamespace(adapter=adapter, owner=owner, transport=transport, credential=credential, clients=clients)
+    # Retained originals are inert scripted fixtures, never cleanup-retried by teardown.
+    assert transport.closed or any(handle is clients[0] for handle in adapter._unclosed_handles)
+    assert all(
+        response.closed or any(handle is response for handle in adapter._unclosed_handles)
+        for response in transport.responses
+    )
+
+
+def assert_ack_custody(probe: Any, expected: tuple[Any, ...]) -> None:
+    adapter = probe.adapter
+    assert len(adapter._unclosed_handles) == len(expected)
+    assert all(actual is original for actual, original in zip(adapter._unclosed_handles, expected, strict=True))
+    assert adapter.cleanup_incomplete is bool(expected)
+    assert adapter.payload.acknowledgment.status_code == 202
+    adapter.reconcile(Deadline.after(5))
+    row = probe.owner.inspect_lifecycle_obligation(adapter.obligation_id)
+    assert row.state is LifecycleObligationState.POSSIBLE_EFFECT and row.payload_revision == 1
+    assert decode_activation_payload(row.payload).acknowledgment == adapter.payload.acknowledgment
+    with pytest.raises(StateError):
+        adapter.start(Deadline.after(5))
+    assert len(probe.transport.calls) == probe.credential.calls == 1
+    assert all(actual is original for actual, original in zip(adapter._unclosed_handles, expected, strict=True))
+
+
+@pytest.mark.parametrize("boundary", ["before-first", "between", "bookkeeping", "control"])
+@pytest.mark.parametrize("original_control", [False, True])
+def test_actual_sdk_cleanup_boundary_interrupt_retains_originals(sdk_custody, monkeypatch, boundary, original_control):
+    probe = sdk_custody
+    probe.transport.replies.append((202, {"Location": OPERATION}, False))
+    primary = KeyboardInterrupt("original publication control")
+    cleanup_control = SystemExit("cleanup boundary control")
+    if original_control:
+        original_publish = OperationOwner.inspect_lifecycle_obligation
+        calls: list[bool] = []
+
+        def interrupt_publication(owner, obligation_id):
+            result = original_publish(owner, obligation_id)
+            if not calls:
+                calls.append(True)
+                raise primary
+            return result
+
+        monkeypatch.setattr(OperationOwner, "inspect_lifecycle_obligation", interrupt_publication)
+    fired: list[bool] = []
+    code = AzureVMActivation._close_handles.__code__
+
+    def interrupt(frame, event, arg):
+        if event == "line" and frame.f_code is code and not fired and boundary != "control":
+            handle = frame.f_locals.get("handle")
+            response = probe.transport.responses[0]
+            eligible = (
+                boundary == "before-first"
+                and handle is response
+                and not response.closed
+                or boundary == "between"
+                and handle is probe.clients[0]
+                and not probe.transport.closed
+                or boundary == "bookkeeping"
+                and handle is response
+                and response.closed
+            )
+            if eligible:
+                fired.append(True)
+                raise cleanup_control
+        return interrupt
+
+    previous = sys.gettrace()
+    sys.settrace(interrupt)
+    try:
+        if original_control or boundary != "control":
+            with pytest.raises(KeyboardInterrupt if original_control else SystemExit) as caught:
+                probe.adapter.start(Deadline.after(5))
+            assert caught.value is (primary if original_control else cleanup_control)
+        else:
+            assert probe.adapter.start(Deadline.after(5)).status_code == 202
+    finally:
+        sys.settrace(previous)
+    assert bool(fired) is (boundary != "control")
+    response, client = probe.transport.responses[0], probe.clients[0]
+    expected = () if boundary == "control" else (client,) if boundary == "between" else (response, client)
+    assert response.closed is (boundary != "before-first")
+    assert probe.transport.closed is (boundary == "control")
+    assert_ack_custody(probe, expected)
+
+
+@pytest.mark.parametrize("handle", ["response", "client"])
+@pytest.mark.parametrize("closed_first", [False, True])
+@pytest.mark.parametrize("exception_type", [OSError, KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("original_control", [False, True])
+def test_actual_sdk_close_uncertainty_retains_identity(
+    sdk_custody, monkeypatch, handle, closed_first, exception_type, original_control
+):
+    probe = sdk_custody
+    probe.transport.replies.append((202, {"Location": OPERATION}, False))
+    primary = exception_type("close uncertainty")
+    publication_control = KeyboardInterrupt("original publication interruption")
+    if original_control:
+        original = OperationOwner.inspect_lifecycle_obligation
+        interrupted: list[bool] = []
+
+        def interrupt_publication(owner, obligation_id):
+            result = original(owner, obligation_id)
+            if not interrupted:
+                interrupted.append(True)
+                raise publication_control
+            return result
+
+        monkeypatch.setattr(OperationOwner, "inspect_lifecycle_obligation", interrupt_publication)
+    close_calls = []
+
+    def make_uncertain(target: Any) -> None:
+        original = target.close
+
+        def fail():
+            close_calls.append(target)
+            if closed_first:
+                original()
+            raise primary
+
+        monkeypatch.setattr(target, "close", fail)
+
+    if handle == "client":
+        make_uncertain(probe.transport)
+    else:
+        original_send = probe.transport.send
+
+        def send(*args, **kwargs):
+            response = original_send(*args, **kwargs)
+            make_uncertain(response)
+            return response
+
+        monkeypatch.setattr(probe.transport, "send", send)
+    if original_control:
+        with pytest.raises(KeyboardInterrupt) as caught:
+            probe.adapter.start(Deadline.after(5))
+        assert caught.value is publication_control
+    elif exception_type is OSError:
+        assert probe.adapter.start(Deadline.after(5)).status_code == 202
+    else:
+        with pytest.raises(exception_type) as caught:
+            probe.adapter.start(Deadline.after(5))
+        assert caught.value is primary
+    response, client = probe.transport.responses[0], probe.clients[0]
+    assert_ack_custody(probe, (response if handle == "response" else client,))
+    assert len(close_calls) == 1
+    assert response.closed is (closed_first if handle == "response" else True)
+    assert probe.transport.closed is (closed_first if handle == "client" else True)
