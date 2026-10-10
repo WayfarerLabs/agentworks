@@ -61,6 +61,7 @@ from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
 from agentworks.execution.result import CheckedExecutionError
+from agentworks.execution.target import ExecutionTarget
 from agentworks.operations import OperationOwner
 from agentworks.vms import _native_operation
 from agentworks.vms._native_operation import NativeVMOperationControlFact, native_vm_operation
@@ -538,6 +539,21 @@ def test_prepared_views_share_claim_and_clean_teardown(
         database, "box", platform, RunContext(), deadline=body_deadline, trusted_root=PurePosixPath(root)
     ) as selected:
         views = selected
+        target = selected.target
+        assert target.execution() is selected.execution
+        assert target.files() is selected.files
+        features = selected.execution._carrier.features
+        assert target.features is features is selected.files._carrier.features
+        before = (len(route.routes), list(native.events), list(observer.events), route.accounts.calls.copy())
+        obligations = selected.owner.list_pending_lifecycle_obligations()
+        for execution in (None, selected.execution):
+            for files in (None, selected.files):
+                passive = ExecutionTarget(execution, files, features)
+                assert passive.execution() is execution
+                assert passive.files() is files
+                assert passive.features is features
+        assert before == (len(route.routes), native.events, observer.events, route.accounts.calls)
+        assert selected.owner.list_pending_lifecycle_obligations() == obligations
         claim = database.operations.inspect(_scope())
         assert claim is not None and claim.ownership == selected.owner.ownership
         assert selected.file_operation._owner is selected.owner
@@ -553,13 +569,16 @@ def test_prepared_views_share_claim_and_clean_teardown(
         assert selected.files._ordinary_plan is selected.execution._ordinary_plan
         assert bootstrap.root_entry.mode is IdentityMode.SUDO_ROOT
         assert bootstrap.root_entry.expected == IdentityExpectation(0, 0, (0,))
-        assert selected.files.stat(PurePosixPath(root / "source")) is not None
-        read = selected.files.read_file(PurePosixPath(root / "source"), max_bytes=64)
+        file_access = target.files()
+        execution_access = target.execution()
+        assert file_access is not None and execution_access is not None
+        assert file_access.stat(PurePosixPath(root / "source")) is not None
+        read = file_access.read_file(PurePosixPath(root / "source"), max_bytes=64)
         assert read is not None and read.data == b"native-file"
         code = (
             "import json,os;print(json.dumps([os.geteuid(),os.getegid(),sorted(set(os.getgroups())|{os.getegid()})]))"
         )
-        result = selected.execution.run(
+        result = execution_access.run(
             Command(["/usr/bin/python3", "-I", "-S", "-B", "-c", code]),
             profile=Protection.DIRECT,
             deadline=Deadline(None),
@@ -591,11 +610,15 @@ def test_prepared_views_share_claim_and_clean_teardown(
     assert all(connection == WSL2Connection("Ubuntu", "admin", "wsl.exe") for connection in route.routes[1:])
     assert observer.events == ["observe"]
     assert database.operations.inspect(_scope()) is None
+    calls_after_close = route.local.calls
     with pytest.raises(StateError):
-        views.execution.run(Command(["/bin/true"]), profile=Protection.DIRECT)
+        execution_access.run(Command(["/bin/true"]), profile=Protection.DIRECT)
     destination = tmp_path / "not-staged"
     with pytest.raises(StateError):
-        views.files.download(PurePosixPath(root / "source"), destination, max_bytes=64)
+        file_access.download(PurePosixPath(root / "source"), destination, max_bytes=64)
+    assert target.execution() is execution_access and target.files() is file_access
+    assert target.features is features
+    assert route.local.calls == calls_after_close
     assert not destination.exists()
     assert route.local.calls >= 3
     assert not list(scratch.iterdir())

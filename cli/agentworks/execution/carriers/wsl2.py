@@ -56,6 +56,7 @@ class WSL2Carrier:
 
     def __init__(self, connection: WSL2Connection) -> None:
         self._connection = connection
+        self._channel_features = ChannelFeatures()
 
     @property
     def connection(self) -> WSL2Connection:
@@ -64,7 +65,7 @@ class WSL2Carrier:
 
     @property
     def features(self) -> ChannelFeatures:
-        return ChannelFeatures()
+        return self._channel_features
 
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         """Reject unsupported input and live output without starting WSL."""

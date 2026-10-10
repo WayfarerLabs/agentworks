@@ -256,10 +256,11 @@ class ProxmoxCarrier:
 
     def __init__(self, connection: ProxmoxConnection) -> None:
         self._wire = _ProxmoxWire(connection)
+        self._channel_features = ChannelFeatures()
 
     @property
     def features(self) -> ChannelFeatures:
-        return ChannelFeatures()
+        return self._channel_features
 
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         """Check the exact ASCII request envelope before any provider access."""

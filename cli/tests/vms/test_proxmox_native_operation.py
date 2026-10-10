@@ -186,6 +186,9 @@ def test_running_views_share_owner_bootstrap_and_settle(database, tmp_path, monk
         assert views.file_operation._owner is views.execution_operation._owner is views.owner
         assert views.file_operation._bootstrap is views.execution_operation._bootstrap
         assert views.files._carrier is views.execution._carrier
+        assert views.target.execution() is views.execution
+        assert views.target.files() is views.files
+        assert views.target.features is views.execution._carrier.features
         metadata = views.files.stat(PurePosixPath(source))
         assert metadata is not None
         views.files.remove(PurePosixPath(source), expected_kind=metadata.kind, expected=metadata.revision)

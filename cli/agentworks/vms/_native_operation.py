@@ -26,6 +26,7 @@ from agentworks.execution._target_identity import (
 )
 from agentworks.execution.access import ExecutionAccess, FileAccess
 from agentworks.execution.carrier import Deadline
+from agentworks.execution.target import ExecutionTarget
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
 from agentworks.operations import OperationOwner
 from agentworks.vms.identity import validate_vm_instance_marker
@@ -42,13 +43,14 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class NativeVMOperation:
-    """Two private bound views sharing one exact VM claim and deadline."""
+    """Private operation custody and target sharing one exact claim and deadline."""
 
     owner: OperationOwner
     files: FileAccess
     execution: ExecutionAccess
     file_operation: FileOperation
     execution_operation: ExecutionOperation
+    target: ExecutionTarget
 
 
 class NativeVMOperationControlFact(Exception):
@@ -271,7 +273,8 @@ def _prepare(
         entity_name=vm_name,
         deadline=selected_deadline,
     )
-    views = NativeVMOperation(workflow.owner, files, execution, file_operation, execution_operation)
+    execution_target = ExecutionTarget(execution, files, binding.carrier.features)
+    views = NativeVMOperation(workflow.owner, files, execution, file_operation, execution_operation, execution_target)
     workflow.views = views
     return views
 
