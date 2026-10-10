@@ -900,27 +900,30 @@ lease, output retention, application observation, cleanup, stop, disposal, produ
 wiring, public job reference or RunContext surface.
 
 `vms/target_preparation.py` also has a private selected-platform entry point. Given an existing
-exact-VM owner, bound platform, run context, finite deadline, locator observed before route
-resolution and caller-owned native binding, it refuses static prerequisites before platform I/O. One
-operation borrow covers a fresh locator observation, the guest attempt through that binding and
-post-probe locator confirmation; it never resolves another route. An unequal pre-probe locator
-refuses before guest dispatch, and an unequal post-probe locator suppresses the target. Unavailable
-or invalid confirmation is unconfirmed, not evidence of a changed locator. Release failure retains a
-target-suppressed custody fact. The resolving caller validates and retains the selected binding
-under the same deadline. WSL2 and Proxmox now supply positive private observation hooks when their
-required facts are available; SSH-backed cloud and Lima bindings remain future work. This seam has
-hermetic coverage only. A later use still needs a locator-bound platform hold and binding; malicious
-or engineered A-B-A host behavior is outside this checkpoint's threat scope. Production activation,
-hold, route and teardown, live WSL/SSH/QGA proof, recovery drain, adoption and public RunContext
-composition remain open.
+exact-VM owner, bound platform, finite deadline, locator observed before route resolution,
+caller-owned native binding and required retained-owner observation callback, it refuses static
+prerequisites before observation or guest I/O. One operation borrow covers that callback's fresh
+locator observation, the guest attempt through the binding and post-probe confirmation under the
+same original deadline; it never resolves another route or owns observation cleanup. An unequal
+pre-probe locator refuses before guest dispatch, and an unequal post-probe locator suppresses the
+target. Unavailable or invalid confirmation is unconfirmed, not evidence of a changed locator.
+Release failure retains a target-suppressed custody fact. The resolving caller validates and retains
+the selected binding under the same deadline. WSL2 and Proxmox pass their retained native owner's
+bound observer when their required facts are available; SSH-backed cloud and Lima bindings remain
+future work. This seam has hermetic coverage only. A later use still needs a locator-bound platform
+hold and binding; malicious or engineered A-B-A host behavior is outside this checkpoint's threat
+scope. Production activation, hold, route and teardown, live WSL/SSH/QGA proof, recovery drain,
+adoption and public RunContext composition remain open.
 
 `vms/_recovery_vm_span.py` supplies private caller-retained availability under an existing sealed
 recovery owner, without acquiring another VM claim. Its first factory explicitly supports only
 administrative WSL2 recovery. Construct and retain the span before opening; it checks fresh VM/site,
 marker, administrative account, intent, bounded power and copied native route before support
 admission. Its own hold must have exact durable READY before a separate serial guest/account
-preparation batch runs. Prepared full guest, target, numeric plans and runtime stay bound to that
-span and its pinned carrier. This does not provide predecessor drain evidence.
+preparation batch runs with the selected native owner's same bound locator observer. This sealed
+recovery path uses its existing support row rather than an ordinary-operation borrow. Prepared full
+guest, target, numeric plans and runtime stay bound to that span and its pinned carrier. This does
+not provide predecessor drain evidence.
 
 One finite action scope serializes with close and returns a guarded carrier bound to that action's
 thread and deadline; escaped carriers are inert after the action ends. Admission and execution
