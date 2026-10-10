@@ -1027,9 +1027,9 @@ resumable plan. Recovery handles only exact retained obligations; a crash betwee
 does not authorize reconstructing or continuing the remaining transfer. Workstation paths and the
 remaining manifest are not persisted, and no post-crash local repair is promised.
 
-The first private increment is limited to upload-child admission, success checkpointing and
+The first private increment is limited to upload-child admission, success checkpoint publication and
 bookkeeping settlement; its implementation remains open. Directory facade options, traversal and
-extraction, aggregate partial-result semantics, download-side checkpointing and native proof remain
+extraction, aggregate partial-result semantics, download-side checkpoints and native proof remain
 required work before complete R7 or public RunContext acceptance. The package callback and
 domain-specific artifact ownership must not be weakened while those pieces are built.
 
