@@ -294,6 +294,43 @@ def test_useful_read_retains_uncertain_original_and_refuses_next_read(sdk, kind)
     assert len(sdk.sends) == 1
 
 
+@pytest.mark.parametrize("kind", ["service-response", "service-session"])
+def test_late_successful_original_close_keeps_terminal_admission_and_auth_custody(sdk, monkeypatch, kind):
+    sdk.failed_close = kind
+    reader, power = observe(sdk)
+    assert power is VMStatus.RUNNING and reader.cleanup_incomplete
+    original = reader._response if kind == "service-response" else reader._service_session
+    retained_request = reader._auth._request
+    assert original is not None and retained_request is not None
+    credential_session = retained_request.session
+    assert credential_session is not None
+    original_close = type(original).close
+
+    def late_close(handle):
+        original_close(handle)
+        if handle is original:
+            sdk.now = 99
+
+    sdk.failed_close = None
+    monkeypatch.setattr(type(original), "close", late_close)
+    with pytest.raises(LimitExceededError):
+        reader.close(Deadline.after(5))
+    assert reader._auth.closed and reader.cleanup_incomplete
+    assert reader._response is None and reader._service_session is None
+    assert reader._auth._request is retained_request and retained_request.session is credential_session
+    assert not reader._lock.locked() and not reader._auth._operation.locked()
+    assert not any(handle is credential_session for _, handle in sdk.closes)
+    with pytest.raises(StateError):
+        reader.observe_power(Deadline.after(5))
+    assert len(sdk.sends) == 1 and len(sdk.adc_calls) == 1
+    monkeypatch.setattr(type(original), "close", original_close)
+    assert reader.close(Deadline.after(5))
+    assert not reader.cleanup_incomplete and retained_request.session is None
+    assert [handle for label, handle in sdk.closes if label == kind] == [original, original]
+    assert [handle for _, handle in sdk.closes if handle is credential_session] == [credential_session]
+    assert len(sdk.sends) == 1
+
+
 def test_final_credential_session_failure_is_visible_and_retryable(sdk):
     reader, _ = observe(sdk)
     retained_request = reader._auth._request

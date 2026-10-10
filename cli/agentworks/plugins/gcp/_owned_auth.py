@@ -295,9 +295,9 @@ class _OwnedAuth:
             # may poison that witness; do not inspect the same Thread again.
             with self._entry:
                 for lane in self._copies:
+                    lane._barred = True
                     if lane._worker is not None:
                         lane._completion_unconfirmed = True
-                        lane._barred = True
             raise
         self.remaining()
         self.retire_responses()
@@ -379,14 +379,17 @@ class _OwnedAuth:
         if control is not None:
             raise control
 
+    def bar_entry(self) -> None:
+        with self._entry:
+            self.closed = True
+
     def close(self, deadline: Deadline) -> None:
         remaining = provider_locator_remaining(deadline, vm_name=self._vm_name)
         if not self._operation.acquire(timeout=min(remaining, TIMEOUT_MAX)):
             raise LimitExceededError("GCP authentication close exceeded its deadline")
         control: BaseException | None = None
         try:
-            with self._entry:
-                self.closed = True
+            self.bar_entry()
             try:
                 self.retire_copies(deadline, final=True)
             except BaseException as error:

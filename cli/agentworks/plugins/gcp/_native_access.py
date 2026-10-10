@@ -288,6 +288,7 @@ class GCEOwnedRead:
         self._acquire(deadline)
         control: BaseException | None = None
         try:
+            self._auth.bar_entry()
             self._remaining(deadline)
             try:
                 self._close_handles()

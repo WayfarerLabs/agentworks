@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from threading import Event, Thread
+from threading import Event, Thread, current_thread
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -249,6 +249,87 @@ def test_actual_default_service_account_worker_join_and_original_close(sdk, sa_d
     assert sorted(kind for kind, _, _ in sdk.sends) == ["boundary", "service"]
     assert reader._auth._credential is selected
     assert not reader._auth._copies
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt])
+def test_sdk_observation_escape_bars_real_preentry_copy(sdk, monkeypatch, sa_document, error_type):
+    from agentworks.plugins.gcp import _owned_auth
+
+    factory = cast("Callable[..., Any]", service_account.Credentials.from_service_account_info)
+    selected = factory(sa_document, scopes=("https://www.googleapis.com/auth/cloud-platform",))
+    selected.token = "already-fresh-selected-token"
+    sdk.credential = selected
+    entered, release = Event(), Event()
+    workers: list[Thread] = []
+    copies: list[_OwnedRequest] = []
+    outcomes: list[BaseException] = []
+    original_call = _owned_auth._OwnedRequest.__call__
+
+    def before_entry(lane: _OwnedRequest, *args: Any, **kwargs: Any) -> Any:
+        if lane._deadline is not None:
+            copies.append(lane)
+            workers.append(current_thread())
+            entered.set()
+            assert release.wait(5)
+        try:
+            return original_call(lane, *args, **kwargs)
+        except BaseException as error:
+            outcomes.append(error)
+            raise
+
+    monkeypatch.setattr(_owned_auth._OwnedRequest, "__call__", before_entry)
+    reader, power = observe(sdk)
+    assert power is VMStatus.RUNNING and entered.wait(5)
+    worker, clone = workers[0], copies[0]
+    original_join, original_alive = worker.join, worker.is_alive
+    primary = error_type("SDK pre-entry observation uncertainty")
+    observations: list[bool] = []
+
+    def poisoned_alive():
+        observations.append(True)
+        if len(observations) == 1:
+            raise primary
+        return False
+
+    try:
+        original_session = clone.session
+        assert original_session is not None and original_alive()
+        assert clone._worker is None and not clone._responses
+        closed: list[Any] = []
+        original_close = original_session.close
+
+        def close_copy() -> None:
+            closed.append(original_session)
+            original_close()
+
+        monkeypatch.setattr(original_session, "close", close_copy)
+        reader._auth.begin(Deadline.after(5))
+        try:
+            monkeypatch.setattr(worker, "is_alive", poisoned_alive)
+            with pytest.raises(error_type) as caught:
+                reader._auth.apply_headers("GET", reader._url())
+            assert caught.value is primary
+        finally:
+            reader._auth.end()
+        assert not reader._auth.closed and clone._barred and not clone._completion_unconfirmed
+        assert clone._worker is None and clone.session is original_session and not clone._responses
+        assert observations == [True] and original_alive()
+        assert not closed and len(sdk.sends) == 1
+    finally:
+        monkeypatch.setattr(worker, "is_alive", original_alive)
+        release.set()
+        original_join(5)
+    assert not original_alive() and len(outcomes) == 1 and isinstance(outcomes[0], StateError)
+    assert not reader._auth.closed and len(sdk.sends) == 1
+    assert clone._worker is None and not clone._responses and clone.session is original_session
+    assert not closed and clone in reader._auth._copies
+    assert reader.close(Deadline.after(5))
+    assert clone.session is None and clone not in reader._auth._copies and not reader.cleanup_incomplete
+    assert closed == [original_session] and len(sdk.sends) == 1
+    with pytest.raises(StateError):
+        reader.observe_power(Deadline.after(5))
+    assert len(sdk.sends) == 1
+    assert reader._auth._credential is selected
 
 
 @pytest.mark.parametrize("boundary", ["candidate-is-alive", "join", "post-join-is-alive"])
