@@ -1313,11 +1313,11 @@ remains unchanged. The first implementation slice covers inline DIRECT helpers; 
 preparation then uses the same seam without creating a second recovery mechanism.
 
 Preparation supplies immutable non-payload closure expectations explicitly: original nonce, runtime
-candidates and shim, execution identity and the existing selected guest checkpoint where applicable.
-Do not derive these from generated argv or downcast a caller sink. After the original call returns
-or raises, retained cleanup custody detaches finite input, application collectors and sinks. Later
-observation uses a new bounded runtime-prefix reader with a discard destination, not the completed
-reader or caller I/O. It never reconstructs the returned application result.
+candidates and shim, and the existing selected guest checkpoint where applicable. Do not derive
+these from generated argv or downcast a caller sink. After the original call returns or raises,
+retained cleanup custody detaches finite input, application collectors and sinks. Later observation
+uses a new bounded runtime-prefix reader with a discard destination, not the completed reader or
+caller I/O. It never reconstructs the returned application result.
 
 The concrete observer retains the validated acknowledged PID before another status request. It
 publishes validated terminal closure evidence before optional output callbacks, because a terminal
@@ -1333,20 +1333,28 @@ observe the retained origin/VM/generation locator again using the body-free curr
 require equality. Fence database ownership before and after this read. This is provider route
 evidence, not a fresh guest-boot observation; it introduces no guest execution or activation.
 
-Closure requires an authentic original runtime READY prefix and independent normal-zero completion
-of the exact prepared helper invocation. READY precedes the helper's guest check: it is neither a
-fresh current-boot receipt nor proof that a managed observation succeeded. Closure settles only that
-helper's future effects and original attempt. RESOURCE disposal still requires its separate positive
+Closure requires an authentic original runtime prefix and independent normal-zero completion of the
+exact prepared invocation. READY qualifies, as do closed prerequisite refusals for missing,
+unusable, shim, unsupported-version or missing-module runtimes: the fixed bootstrap exits before
+helper entry on those paths. Invalid or unknown runtime evidence, nonzero exit and signal
+termination do not qualify. READY precedes the helper's guest check; neither READY nor a closed
+refusal supplies a fresh current-boot receipt or proof that a managed observation succeeded. Closure
+settles only the invocation's future effects and original attempt, without changing its returned
+NOT_STARTED or UNKNOWN application result. RESOURCE disposal still requires its separate positive
 terminal observation and action proof. A failed or identity-refused managed read that returns zero
 must not acquire those proofs from helper closure.
 
-Core exposes explicit finite observation cleanup before aggregate execution `finish`; existing
-bookkeeping retry stays no-I/O. It retains the actual call rather than handing off its borrow and
-reducing it to booleans while continuation is possible. Local cleanup, observation and lost database
-replies reconcile the same retained objects. Lost ACK, consumed status, unknown nonzero completion,
-controller restart and other carriers still need their separately tracked recovery paths. Prove
-deadline-then-closure, interruption after ACK and terminal publication, wrong nonce, changed
-binding, unsettled local custody and unchanged application UNKNOWN before native acceptance.
+Core exposes explicit observation cleanup before aggregate execution `finish`. Fresh finite budgets
+are required only for unresolved observation or local cleanup; a provider route read is needed only
+before a fresh remote status observation, not after closure is already proved. Ordinary retained
+bookkeeping and already-proved closure with settled local custody require neither. Exact ownership
+and binding checks still apply, and bookkeeping retry stays no-I/O. Core retains the actual call
+rather than handing off its borrow and reducing it to booleans while continuation is possible. Local
+cleanup, observation and lost database replies reconcile the same retained objects. Lost ACK,
+consumed status, unknown nonzero completion, controller restart and other carriers still need their
+separately tracked recovery paths. Prove deadline-then-closure, interruption after ACK and terminal
+publication, wrong nonce, changed binding, unsettled local custody and unchanged application UNKNOWN
+before native acceptance.
 
 The private inline source candidate now selects this factory in the Proxmox native binding and calls
 explicit cleanup observation before native workflow finish. Offline tests execute the actual

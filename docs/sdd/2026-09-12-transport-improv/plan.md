@@ -3709,10 +3709,14 @@ edge follows.
 - [ ] Implement the private per-call acknowledged-QGA helper delivery/observer and explicit
       non-payload preparation expectations. Retain the actual inline DIRECT call, original attempt
       and borrow that can still settle it; perform only exact-PID GET observation under a fresh
-      finite cleanup budget before aggregate finish. Preserve the original UNKNOWN application
-      result, no-I/O bookkeeping and separate local/remote custody; do not replay after uncertain
-      status loss. Prove deadline recovery, ACK/terminal-publication interruptions, wrong nonce,
-      changed binding and unsettled local delivery before native acceptance on both QGA majors.
+      finite cleanup budget before aggregate finish. Fresh budgets gate unresolved observation or
+      local cleanup, not already-sufficient no-I/O bookkeeping; provider reads gate new status
+      observation, not reconciliation of stored positive closure. Preserve original UNKNOWN or
+      NOT_STARTED application results and separate local/remote custody; do not replay after
+      uncertain status loss. Prove authentic closed runtime refusals with normal zero, deadline
+      recovery, ACK/terminal-publication and final-handoff interruptions, detached caller payload,
+      wrong nonce, changed binding and unsettled local delivery before native acceptance on both QGA
+      majors.
 - [ ] Extend the same retained helper-closure seam to managed read preparation and timed-out
       RESOURCE disposal prerequisites. Cleanup settles the prior observer only; a subsequent
       explicitly requested read must still supply positive terminal proof before disposal. Closure,
@@ -3720,10 +3724,16 @@ edge follows.
       restart and other-carrier recovery remain separate open gates, not implicit completion of the
       general recovery work.
 
-The inline source candidate at `1381f4c3` supplies the actual per-call observer, retained original
-attempt, owned provider-route fence and finite native-close observation. Its worker passes 518
-distinct scoped cases with no skips and thirteen-file static checks. Independent integrated review,
-lead gates and both native QGA-major measurements remain pending, so neither leaf above is complete.
+The inline source candidate at `1381f4c3`, integrated at `3086c213`, supplies the actual per-call
+observer, retained original attempt, owned provider-route fence and native-close observation. Worker
+and lead each passed the same 518 distinct scoped cases without skips, and the integrated source
+passed scoped static and canonical file checks. Three independent private lanes found final-handoff
+payload retention, overbroad fresh-observation prerequisites and unreleasable closed runtime
+refusals. The corrective source candidate at `199c7bc3` passes 550 distinct scoped cases with no
+skips and six-file static checks: the 517 retained original cases and 33 new cases, after removing
+one private wire-mutation test with its redundant guard. Integrated re-review and lead gates remain
+pending. Both native QGA-major measurements and managed-read continuation remain pending, so neither
+leaf above is complete.
 
 - [ ] Reconcile #770's historical escape/relaunch proposal against the later exclusion of malicious
       target-user containment. Deliver DIRECT/MANAGED without a CONTAINED profile or

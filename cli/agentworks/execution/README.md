@@ -287,17 +287,20 @@ callbacks can interrupt delivery. Preparation supplies the original nonce and ru
 explicitly; retained cleanup drops caller input, collectors and application bytes. An acknowledged
 deadline or interrupted observation retains the actual call, original attempt and still-open borrow.
 
-`observe_inline_cleanup(fresh_finite_deadline)` first settles that attempt's local delivery, fences
-the original database ownership and selected binding, and checks the retained provider route. It can
-then read only that PID's status with a fresh bounded runtime-prefix reader and discard sink.
-Original runtime READY plus normal-zero helper completion permits settlement of the same attempt;
-the returned application result stays UNKNOWN. Native workflow close invokes this observation before
-`finish()`. Bookkeeping retry and `finish()` themselves still perform no provider I/O. A failed
-status exchange is never repeated: lost ACK, missing or consumed status, wrong nonce, nonzero exit,
-changed binding or pending local cleanup retains uncertainty. This is same-controller inline helper
-closure, not command replay, fresh guest readiness, managed terminal/disposal proof, descendant
-cleanup or controller-restart recovery. Managed read continuation and native QGA acceptance remain
-open.
+`observe_inline_cleanup(fresh_finite_deadline)` requires a fresh finite budget only when unresolved
+observation or local cleanup remains. Plain calls and already-proved closure with settled local
+delivery can finish exact bookkeeping without a provider read or renewed observation budget. For
+unresolved closure, core settles that attempt's local delivery, fences original database ownership
+and selected binding, checks the retained provider route, then reads only the held PID's status with
+a bounded runtime-prefix reader and discard sink. An authentic original runtime READY or closed
+prerequisite refusal, paired with normal-zero completion, permits settlement of the same invocation.
+That does not change the returned application result, including UNKNOWN or NOT_STARTED. Native
+workflow close invokes this observation before `finish()`; bookkeeping retry and `finish()` remain
+no-I/O. A failed status exchange is never repeated: lost ACK, missing or consumed status, wrong
+nonce, nonzero exit, changed binding or pending local cleanup retains uncertainty. This is
+same-controller inline helper closure, not command replay, fresh guest readiness, managed
+terminal/disposal proof, descendant cleanup or controller-restart recovery. Managed read
+continuation and native QGA acceptance remain open.
 
 `_execution_result.py` reduces an operation-owned inline outcome into those public facts. The fixed
 inline helper accepts retrospective normal completion only on CPython 3.11 through 3.14, after its
