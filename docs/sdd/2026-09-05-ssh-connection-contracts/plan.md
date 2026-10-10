@@ -1,6 +1,6 @@
 # Independent SSH Carrier: Staged Delivery Plan
 
-- Updated: 2026-10-09
+- Updated: 2026-10-10
 - Requirements: [frd.md](frd.md)
 - Architecture: [hla.md](hla.md)
 - Shared contract:
@@ -36,6 +36,14 @@ refuted by this single-PR scope. Its
 [disposition](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-5744746307) records
 the reports and removal of `review-requested` before implementation. Record each later handoff and
 budget disposition on #832. Contract changes or unexpected scope return to the operator.
+
+Implementation round 1 is closed. Its complete native and complexity feedback exposed Windows
+fixture/empty-PATH defects and finite terminal-backlog loss; round 2 of the authorized three started
+after the full reports and one-hour collection window, with `review-requested` removed before fixes.
+Round 2 remains open and the PR remains draft. Its
+[current record](phase2-results.md#round-2-collected-feedback-and-dependency-adoption) carries the
+frozen batch, reviewed cleanup dependency, ownership and unproved acceptance. No full implementation
+checkbox or merge intent is asserted by these corrections.
 
 Transport solely owns the carrier contract, common types, acceptance criteria, shared preparation,
 public outcomes and proof harness. SSH owns its independent carrier, connection/trust migration,

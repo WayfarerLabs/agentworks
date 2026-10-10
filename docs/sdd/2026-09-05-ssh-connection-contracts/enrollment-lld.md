@@ -30,6 +30,11 @@ Unrelated targets can continue using its active policy.
 
 ## Caller-held delivery custody adoption
 
+The production maintenance owner must settle the retained enrollment custody before publishing
+candidate bytes and keep every complete-policy source stable throughout import or refresh. The
+destination bundle lock does not exclude the candidate's OpenSSH writer. Generic trust maintenance
+does not infer source custody from a filename or acquire another candidate-lock registry.
+
 Transport's shared `LocalDeliveryCustody` retains the native process owner across bounded return or
 interruption. Enrollment must also retain the same acquired candidate lock until that custody
 settles. Flushing candidate bytes does not prove that an admitted constructor or client has stopped
@@ -108,6 +113,14 @@ and performs only strict verification. It cannot clear the candidate, re-enable 
 silently use an earlier policy generation. Changed or blocked policy requires explicit maintenance
 to reconcile retained evidence with complete current policy. An empty candidate can succeed only if
 existing applicable policy already permits the target; otherwise strict verification refuses.
+
+If an attempt ends before learning a key, authorized maintenance can independently confirm complete
+replacement policy and refresh the bundle after the retained custody settles and its sources become
+stable. Preserve the empty candidate, manifest and creation identity. Ordinary strict delivery can
+then use the new policy, but the old candidate cannot recover against a superseded generation and
+maintenance does not manufacture a verified enrollment receipt. Production creation composition
+decides whether to retain the resource for maintenance or abort creation; this primitive does not
+repeat first contact or delete evidence.
 
 ## Publication and ordinary use
 

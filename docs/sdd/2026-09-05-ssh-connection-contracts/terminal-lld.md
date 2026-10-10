@@ -261,15 +261,22 @@ Use explicit worker completion facts when a caller wait is interrupted. The curr
 interrupts before joining and leaves interrupted-wait settlement unproved. The test helper retains
 its fixtures until worker settlement; an owning test-process/job timeout supplies the hang bound.
 
-The private POSIX relay spends its existing 100 ms post-exit drain budget during accepted partial
-sink writes; only a sink returning `None` pauses that budget. Pending bytes are delivered before
-collecting another chunk, and the operation deadline remains active during stalls. Even finite
-output can exceed this separate drain budget when successful partial delivery is slow. Such a return
-preserves natural client-exit evidence, reports `Failure.OUTPUT` and marks unfinished streams
-incomplete; it does not promise delivery merely because operation time remains. The
-[round 1 correction record](phase2-results.md#round-1-terminal-drain-correction) distinguishes this
-SSH candidate from the unchanged shared pump. Full terminal delivery remains disabled pending
-retained cleanup composition and native acceptance.
+The round 1 private relay's progress/stall drain accounting regresses finite output: an exited
+client's already-written backlog can be discarded while a responsive sink accepts partial writes.
+The [round 2 finding](phase2-results.md#round-2-collected-feedback-and-dependency-adoption)
+supersedes the prior acceptance of that consequence. Truthful incomplete reporting does not satisfy
+finite backlog preservation. Full terminal delivery remains disabled pending retained cleanup
+composition and native acceptance.
+
+The selected correction fixes collection at 100 ms after the first observed natural client exit,
+independently of sink progress. At that cutoff, observe each unfinished pipe's queued byte count
+once and retain that finite prefix separately from already-collected pending bytes. Deliver pending
+and the frozen prefix under the original operation deadline; never renew the quota or infer pipe
+capacity. Quota exhaustion does not prove EOF. One final nonblocking one-byte probe may establish
+EOF; a returned byte is retained and delivered before reporting incomplete output, and no further
+collection occurs. An unavailable native count is explicit output/observation failure. Separate
+stream observations do not imply an atomic pair. Linux models establish these cases only for the
+modeled mechanism; implemented Linux and native macOS proof remain required.
 
 ## Windows caller resource and record feasibility
 

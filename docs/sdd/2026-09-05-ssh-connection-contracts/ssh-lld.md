@@ -57,12 +57,15 @@ forms on stderr; unknown, failed or older probes refuse before command dispatch.
 command spend the same original monotonic deadline. After passive validation, trust admission and
 expiry checks, an executable name resolves once against the caller's PATH. Directory-qualified
 absolute candidates preserve native executable suffix handling without Windows' implicit cwd search.
-Explicit PATH entries that name cwd remain operator policy. Probe and command, including forwarding
-and both enrollment acknowledgments, use the same absolute selection even if PATH subsequently
-changes. An explicit native executable path bypasses PATH selection. The operator controls that
-executable and its directory throughout use; pinning a path does not protect against replacement by
-a writer to that directory. No executable is fetched or installed, and no process environment is
-mutated. Native Windows decoy and probe/launch acceptance remains required.
+Empty Windows PATH components are ignored; explicit `.` and relative directories remain operator
+policy. POSIX retains empty-component search semantics. Probe and command, including forwarding and
+both enrollment acknowledgments, use the same absolute selection even if PATH subsequently changes.
+An explicit native executable path bypasses PATH selection. The operator controls that executable
+and its directory throughout use; pinning a path does not protect against replacement by a writer to
+that directory. No executable is fetched or installed, and no process environment is mutated. Strict
+and enrollment argv builders require the executable keyword and never substitute a bare name when it
+is omitted. They remain passive serializers. Native Windows decoy and probe/launch acceptance
+remains required.
 
 Prepared argv is serialized into one remote command string, quoting every argument, including empty
 arguments, command-position assignments and reserved words. Local spawning never uses a shell. A
