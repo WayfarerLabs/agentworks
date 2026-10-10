@@ -16,32 +16,17 @@ from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES, LifecycleOblig
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution.carrier import Deadline
 from agentworks.operations import LifecycleObligation, OperationOwner
+from agentworks.plugins.azure._identity import MAX_RESOURCE_ID_BYTES as MAX_RESOURCE_ID_BYTES
+from agentworks.plugins.azure._identity import parse_resource_id
 
 OBLIGATION_KIND = "azure-vm-start"
 PAYLOAD_VERSION = 1
-MAX_RESOURCE_ID_BYTES = 2048
 MAX_REQUEST_ID_BYTES = 256
 MAX_OPERATION_URL_BYTES = 8192
-_RESOURCE_ID = re.compile(
-    r"/subscriptions/([^/\x00-\x1f\x7f]+)/resourceGroups/([^/\x00-\x1f\x7f]+)/"
-    r"providers/Microsoft\.Compute/virtualMachines/([^/\x00-\x1f\x7f]+)"
-)
 
 
 def _subscription(resource_id: object) -> str:
-    if type(resource_id) is not str:
-        raise ValidationError("Azure activation resource identity is invalid")
-    try:
-        match = _RESOURCE_ID.fullmatch(resource_id)
-        if (
-            match is not None
-            and len(resource_id.encode("utf-8")) <= MAX_RESOURCE_ID_BYTES
-            and all(component not in {".", ".."} for component in match.groups())
-        ):
-            return match[1]
-    except UnicodeEncodeError:
-        pass
-    raise ValidationError("Azure activation resource identity is invalid")
+    return parse_resource_id(resource_id)[0]
 
 
 def start_url(resource_id: str) -> str:
