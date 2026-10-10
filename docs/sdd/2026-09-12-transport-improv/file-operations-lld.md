@@ -1036,10 +1036,34 @@ bookkeeping, not helper effects. Local borrow closure or handoff is not proof of
 resolved effects or cleanup; after settled retained-effect handoff, unresolved rows alone do not
 universally forbid other body borrows. Teardown separately stops admission first.
 
-Directory facade options, traversal and extraction, aggregate partial-result semantics,
-download-side checkpoints and native proof remain required work before complete R7 or public
-RunContext acceptance. The package callback and domain-specific artifact ownership must not be
-weakened while those pieces are built.
+The download-side implementation uses the same ordinary child and existing whole-call local download
+custody. Preparation and admission precede construction of a new workstation stage; the prepared
+workflow receives the actual sink before remote dispatch. A constructor refusal settles the child's
+false receipt before dispatch, retaining any actual local cleanup responsibility separately. Cleanup
+of a previously retained stage remains a different responsibility under the existing whole-call
+borrow, not completion of a newly admitted child. This split must not introduce a second download
+engine, coordinator or parent obligation.
+
+The local call retains the exact original active child, remote outcome and local completion
+disposition until checkpoint publication and borrow closure settle. Positive local disposition
+follows verified remote completion, successful requested publication, settled local cleanup and
+successful result reduction without an accompanying failure or exceptional control. A cleanup
+failure is unsuccessful even if a later exact cleanup retry succeeds; it must not retroactively
+upgrade the original call. Missing or interrupted completion capture retains custody instead of
+inferring success from flags, remote recovery, receipt resolution or borrow closure.
+
+Download associations use separate DOWNLOAD-only fields and payload versions five and six, with six
+carrying the numeric bootstrap. Versions one through four retain their existing byte and semantic
+contracts. The new versions need their own exact download recovery-headroom and envelope proofs; the
+upload proof is not sufficient. The original download row carries no workstation path, manifest,
+contents or reconstructed local result. Aggregate teardown retries captured download CAS and closure
+bookkeeping only, never stage publication, helper execution or source reads.
+
+These download decisions describe the next implementation, not a delivered checkpoint. Directory
+facade options, traversal and extraction, aggregate partial-result semantics, download-side
+checkpoints and native proof remain required work before complete R7 or public RunContext
+acceptance. The package callback and domain-specific artifact ownership must not be weakened while
+those pieces are built.
 
 ### DOWNLOAD recovery dispatch
 
