@@ -398,9 +398,6 @@ class ExecutionOperation:
                     coordination_uncertain=operation.coordination_uncertain,
                     requires_owner_retention=operation.requires_owner_retention,
                 )
-            except BaseException as control:
-                self._raise_control(control, active, operation, deadline)
-            try:
                 with self._admission_guard:
                     self._capture(active, custody)
             except BaseException as control:
