@@ -398,6 +398,8 @@ def test_windows_ssh_command_contains_only_fixed_bootstrap() -> None:
     )[0]
     trust = SSHTrustFiles((Path("/keys/known-hosts"),))
     connection = SSHConnection("host.example", "agent", Path("/keys/identity"), trust)
-    windows_command = subprocess.list2cmdline(build_ssh_argv(connection, PreparedInvocation(argv), trust=trust))
+    windows_command = subprocess.list2cmdline(
+        build_ssh_argv(connection, PreparedInvocation(argv), trust=trust, executable=connection.ssh_executable)
+    )
     assert len(windows_command) < 32_767
     assert FIXED_BUNDLE.prefix.decode("ascii") not in windows_command

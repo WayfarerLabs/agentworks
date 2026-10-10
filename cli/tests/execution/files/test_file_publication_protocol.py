@@ -667,7 +667,9 @@ def test_complete_requests_fit_real_windows_ssh_and_qga_bounds(plan: IdentityPla
     native_root = Path(Path.cwd().anchor)
     trust = SSHTrustFiles((native_root / "keys" / "known-hosts",))
     connection = SSHConnection("host.example", "agent", native_root / "keys" / "identity", trust)
-    windows_command = subprocess.list2cmdline(build_ssh_argv(connection, invocation, trust=trust))
+    windows_command = subprocess.list2cmdline(
+        build_ssh_argv(connection, invocation, trust=trust, executable=connection.ssh_executable)
+    )
     qga_body = json.dumps(
         {"command": invocation.argv, "input-data": (FIXED_BUNDLE.prefix + manifest).decode("ascii")}
     ).encode("ascii")

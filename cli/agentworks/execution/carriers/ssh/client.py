@@ -116,7 +116,8 @@ def resolve_client_executable(connection: SSHConnection) -> str:
     Each PATH candidate has an absolute directory before shutil.which examines
     native executable suffixes. Bare-name which and Windows process creation
     can otherwise prepend cwd even when PATH does not name it. Explicit PATH
-    entries, including relative directories, remain operator selections.
+    entries, including relative directories, remain operator selections. Empty
+    Windows components do not select cwd; POSIX retains its PATH semantics.
     """
     executable = connection.ssh_executable
     if os.path.isabs(executable):
@@ -126,7 +127,11 @@ def resolve_client_executable(connection: SSHConnection) -> str:
         raise ValidationError("SSH requires the selected installed executable")
     search_path = os.environ.get("PATH", "")
     candidates = (
-        tuple(str((Path(directory) / executable).absolute()) for directory in search_path.split(os.pathsep))
+        tuple(
+            str((Path(directory) / executable).absolute())
+            for directory in search_path.split(os.pathsep)
+            if directory or os.name != "nt"
+        )
         if search_path
         else ()
     )

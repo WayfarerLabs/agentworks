@@ -35,7 +35,7 @@ def test_construction_and_serialization_are_passive(connection: SSHConnection, m
     monkeypatch.setattr(Path, "stat", fail)
     monkeypatch.setattr(Path, "open", fail)
     copy = replace(connection)
-    build_ssh_argv(copy, PreparedInvocation(("true",)), trust=copy.trust)
+    build_ssh_argv(copy, PreparedInvocation(("true",)), trust=copy.trust, executable=copy.ssh_executable)
     with pytest.raises(FrozenInstanceError):
         copy.port = 23  # type: ignore[misc]
 
@@ -98,7 +98,10 @@ def test_nonliteral_paths_are_refused(connection: SSHConnection, name: str, fiel
 
 def test_ipv6_and_explicit_nondefault_port_are_preserved(connection: SSHConnection) -> None:
     argv = build_ssh_argv(
-        replace(connection, host="::1", port=2200), PreparedInvocation(("true",)), trust=connection.trust
+        replace(connection, host="::1", port=2200),
+        PreparedInvocation(("true",)),
+        trust=connection.trust,
+        executable=connection.ssh_executable,
     )
     assert argv[-7:-1] == ["-p", "2200", "-l", "account", "--", "::1"]
 
@@ -177,7 +180,7 @@ def test_truncated_public_identity_cannot_fall_back_to_sibling(connection: SSHCo
 def test_remote_arguments_round_trip_through_real_shell(connection: SSHConnection) -> None:
     args = ("", "simple", "two words", "quote'and\"double", "a\nb", "$(exit 99)", "; exit 98", "*", "\\", "café")
     invocation = PreparedInvocation(("printf", "%s\\0", *args))
-    command = build_ssh_argv(connection, invocation, trust=connection.trust)[-1]
+    command = build_ssh_argv(connection, invocation, trust=connection.trust, executable=connection.ssh_executable)[-1]
     observed = subprocess.run(["/bin/sh", "-c", command], capture_output=True, check=True)
     assert observed.stdout == b"".join(arg.encode() + b"\0" for arg in args)
     assert observed.stderr == b""
@@ -189,14 +192,18 @@ def test_command_position_is_literal(connection: SSHConnection, tmp_path: Path, 
     executable = tmp_path / name
     executable.write_text("#!/bin/sh\nexit 17\n")
     executable.chmod(0o700)
-    command = build_ssh_argv(connection, PreparedInvocation((name,)), trust=connection.trust)[-1]
+    command = build_ssh_argv(
+        connection, PreparedInvocation((name,)), trust=connection.trust, executable=connection.ssh_executable
+    )[-1]
     observed = subprocess.run(["/bin/sh", "-c", command], env={"PATH": str(tmp_path)}, capture_output=True)
     assert observed.returncode == 17
 
 
 @pytest.mark.windows
 def test_argv_explicitly_enforces_isolation_policy(connection: SSHConnection) -> None:
-    argv = build_ssh_argv(connection, PreparedInvocation(("true",)), trust=connection.trust)
+    argv = build_ssh_argv(
+        connection, PreparedInvocation(("true",)), trust=connection.trust, executable=connection.ssh_executable
+    )
     assert argv[argv.index("-F") + 1] == "none"
     assert "-T" in argv
     assert "-n" not in argv
@@ -253,7 +260,9 @@ def test_installed_openssh_parses_isolated_policy(connection: SSHConnection, tmp
         keepalive_count_max=3,
     )
     assert isinstance(selected.trust, SSHTrustFiles)
-    argv = build_ssh_argv(selected, PreparedInvocation(("true",)), trust=selected.trust)
+    argv = build_ssh_argv(
+        selected, PreparedInvocation(("true",)), trust=selected.trust, executable=selected.ssh_executable
+    )
     # -G exits after configuration processing; it never establishes a connection.
     observed = subprocess.run([argv[0], "-G", *argv[1:]], capture_output=True, text=True, timeout=10, check=True)
     settings = dict(line.split(" ", 1) for line in observed.stdout.splitlines())

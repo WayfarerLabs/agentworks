@@ -135,7 +135,7 @@ def _check_literal_environment_delivery(connection: SSHConnection, custody: Loca
         runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
     )
     assert isinstance(connection.trust, SSHTrustFiles)
-    argv = build_ssh_argv(connection, prepared.invocation, trust=connection.trust)
+    argv = build_ssh_argv(connection, prepared.invocation, trust=connection.trust, executable=connection.ssh_executable)
     assert not any(argument.startswith("SetEnv=") for argument in argv)
     assert all(value not in argument for value in environment.values() if value for argument in argv)
     assert "fixture%40project" not in subprocess.list2cmdline(argv)

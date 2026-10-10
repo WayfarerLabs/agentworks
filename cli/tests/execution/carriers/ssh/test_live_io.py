@@ -157,12 +157,13 @@ def test_installed_ssh_live_duplex_preserves_sensitive_binary_delivery(
     stderr = ShortSink(3079, stall_every=3)
     clients: list[tuple[list[str], subprocess.Popen[bytes]]] = []
     original = subprocess.Popen
+    selected = client.resolve_client_executable(local_sshd)
 
     def spawn(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
-        if argv[0] == local_sshd.ssh_executable and argv[-1] != "-V":
+        if argv[0] == selected and argv[-1] != "-V":
             assert all(process.returncode is not None for unused, process in clients)
         process = original(argv, **kwargs)
-        if argv[0] == local_sshd.ssh_executable:
+        if argv[0] == selected:
             clients.append((argv, process))
         return process
 
