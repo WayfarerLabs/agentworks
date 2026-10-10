@@ -276,6 +276,7 @@ class AzureVMActivation:
     def start(self, deadline: Deadline) -> StartAcknowledgment:
         """Submit at most once, retaining matching ACK before publication or cleanup."""
         self._acquire(deadline)
+        control: KeyboardInterrupt | SystemExit | None = None
         try:
             self._remaining(deadline)
             if self._attempted:
@@ -291,7 +292,6 @@ class AzureVMActivation:
 
             from agentworks.plugins.azure._activation_client import compute_start_client
 
-            control: KeyboardInterrupt | SystemExit | None = None
             try:
                 self._remaining(deadline)
                 self._unclosed_handles = (
@@ -315,13 +315,13 @@ class AzureVMActivation:
                 control = error
                 raise
             finally:
-                try:
-                    self._close_handles()
-                except (KeyboardInterrupt, SystemExit):
-                    if control is None:
-                        raise
+                self._close_handles()
             self._remaining(deadline)
             return acknowledgment
+        except (KeyboardInterrupt, SystemExit):
+            if control is not None:
+                raise control from None
+            raise
         finally:
             self._lock.release()
 

@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import ast
+import gc
+import inspect
 import socket
 import sys
+import weakref
 from contextlib import closing
+from textwrap import dedent
 from types import SimpleNamespace
 from typing import Any
 
@@ -410,3 +415,86 @@ def test_actual_sdk_close_uncertainty_retains_identity(
     assert len(close_calls) == 1
     assert response.closed is (closed_first if handle == "response" else True)
     assert probe.transport.closed is (closed_first if handle == "client" else True)
+
+
+@pytest.mark.parametrize("primary_type", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("inject", [True, False])
+def test_cleanup_entry_keeps_primary_and_custody(tmp_path, monkeypatch, primary_type, inject):
+    transport, credential = ScriptedTransport(), Credential()
+    transport.replies.append((202, {"Location": OPERATION}, False))
+    client_refs = []
+    factory = _activation_client.compute_start_client
+
+    def construct(selected, subscription):
+        client = factory(selected, subscription, transport=transport)
+        client_refs.append(weakref.ref(client))
+        return client
+
+    monkeypatch.setattr(_activation_client, "compute_start_client", construct)
+    primary, injected = primary_type("publication control"), SystemExit("cleanup entry control")
+    original_inspect = OperationOwner.inspect_lifecycle_obligation
+    published: list[bool] = []
+
+    def interrupted_inspect(owner, obligation_id):
+        result = original_inspect(owner, obligation_id)
+        if not published:
+            published.append(True)
+            raise primary
+        return result
+
+    monkeypatch.setattr(OperationOwner, "inspect_lifecycle_obligation", interrupted_inspect)
+    source, first_line = inspect.getsourcelines(AzureVMActivation.start)
+    # Select the first cleanup-finally statement, including any wrapper entry before the call.
+    entry = next(
+        node.finalbody[0].lineno
+        for node in ast.walk(ast.parse(dedent("".join(source))))
+        if isinstance(node, ast.Try)
+        and any(
+            isinstance(child, ast.Attribute) and child.attr == "_close_handles"
+            for statement in node.finalbody
+            for child in ast.walk(statement)
+        )
+    )
+    entry += first_line - 1
+    code = AzureVMActivation.start.__code__
+    fired: list[bool] = []
+
+    def interrupt(frame, event, arg):
+        if inject and event == "line" and frame.f_code is code and frame.f_lineno == entry and not fired:
+            assert frame.f_locals["control"] is primary
+            fired.append(True)
+            raise injected
+        return interrupt
+
+    with closing(Database(tmp_path / "entry.db")) as db:
+        owner = OperationOwner.acquire(db.operations, OperationScope(OperationResourceKind.VM, "vm"), "proof")
+        adapter = AzureVMActivation(owner, "vm", credential, RESOURCE, ProviderLocator(f"azure-vm:{RESOURCE}"))
+        previous, observed = sys.gettrace(), None
+        sys.settrace(interrupt)
+        try:
+            adapter.start(Deadline.after(5))
+        except BaseException as error:
+            observed = error
+        finally:
+            sys.settrace(previous)
+        response_ref = weakref.ref(transport.responses.pop())
+        for exception in (primary, injected, observed):
+            if exception is not None:
+                exception.__traceback__ = None
+        gc.collect()
+        assert bool(fired) is inject and observed is primary
+        assert not adapter._lock.locked()
+        assert transport.closed is (not inject) and adapter.cleanup_incomplete is inject
+        if inject:
+            assert response_ref() is not None and client_refs[0]() is not None
+            assert adapter._unclosed_handles[0] is response_ref() and adapter._unclosed_handles[1] is client_refs[0]()
+            assert adapter._unclosed_handles[0] is not None
+            assert len(adapter._unclosed_handles) == 2 and not adapter._unclosed_handles[0].closed
+        else:
+            assert adapter._unclosed_handles == () and response_ref() is None and client_refs[0]() is None
+        row = owner.inspect_lifecycle_obligation(adapter.obligation_id)
+        assert row is not None and row.state is LifecycleObligationState.POSSIBLE_EFFECT and row.payload_revision == 0
+        assert_ack_custody(
+            SimpleNamespace(adapter=adapter, owner=owner, transport=transport, credential=credential),
+            adapter._unclosed_handles,
+        )
