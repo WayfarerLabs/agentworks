@@ -223,7 +223,14 @@ finally:
 
 @pytest.mark.parametrize(
     "size,capacity,seconds",
-    [(65_536, None, 5), (262_144, None, 5), (1_048_576, None, 5), (262_144, 262_144, 5), (65_536, None, None)],
+    [
+        (65_536, None, 5),
+        (262_144, None, 5),
+        (1_048_576, None, 5),
+        (262_144, 4096, 5),
+        (262_144, 262_144, 5),
+        (65_536, None, None),
+    ],
 )
 def test_finite_slow_output_preserves_native_frozen_prefix(
     size: int, capacity: int | None, seconds: float | None
@@ -242,6 +249,9 @@ mode=termios.tcgetattr(slave)
 custody=LocalDeliveryCustody()
 children=[]
 ready=threading.Event()
+frozen_stdout=threading.Event()
+held_drain=capacity is not None and capacity>=size
+pipe_capacity=None
 native_launch=subprocess.Popen
 native_freeze=_Stream.freeze
 native_read=os.read
@@ -261,6 +271,9 @@ class Sink:
             assert bytes(data)==b'READY'
             ready.set()
             return len(data)
+        # The enlarged pipe holds the entire finite payload. Retain pending
+        # output until its actual native snapshot, independent of scheduling.
+        if held_drain and not frozen_stdout.is_set(): return None
         time.sleep(.002)
         count=min(1024,len(data))
         self.data.extend(data[:count])
@@ -269,10 +282,12 @@ class Diagnostics:
     def try_write(self,data): raise AssertionError('Unexpected child diagnostics')
 sink=Sink()
 def launch(*args,**kwargs):
+    global pipe_capacity
     child=native_launch(*args,**kwargs)
     children.append(child)
     if capacity is not None:
         assert fcntl.fcntl(child.stdout.fileno(),fcntl.F_SETPIPE_SZ,capacity)>=capacity
+    pipe_capacity=fcntl.fcntl(child.stdout.fileno(),fcntl.F_GETPIPE_SZ)
     return child
 def freeze(stream,pipe):
     if stream.eof: return native_freeze(stream,pipe)
@@ -280,7 +295,10 @@ def freeze(stream,pipe):
     assert fd not in frozen
     pending=0 if stream.pending is None else len(stream.pending)
     native_freeze(stream,pipe)
-    frozen[fd]={'before':len(sink.data),'pending':pending,'quota':stream.quota,'reads':[]}
+    is_stdout=stream.sink is sink
+    frozen[fd]={'name':'stdout' if is_stdout else 'stderr',
+        'before':len(sink.data) if is_stdout else 0,'pending':pending,'quota':stream.quota,'reads':[]}
+    if is_stdout: frozen_stdout.set()
 def read(fd,limit):
     chunk=native_read(fd,limit)
     if fd in frozen: frozen[fd]['reads'].append([limit,len(chunk)])
@@ -303,21 +321,27 @@ try:
     assert result.started and result.exit_status==result.local_status==0 and result.failure is None
     assert result.stdout.complete and result.stderr.complete
     assert sink.data==bytes(range(256))*(size//256)
-    assert len(frozen)==1
-    state=next(iter(frozen.values()))
-    assert state['before']+state['pending']+state['quota']==size
-    quota=state['quota']
-    probes=0
-    for limit,count in state['reads']:
-        if quota:
-            assert 0<limit<=min(quota,65536) and 0<count<=limit
-            quota-=count
-        else:
-            probes+=1
-            assert probes==1 and limit==1 and count==0
-    assert quota==0 and probes==1
-    if capacity is not None: assert state['quota']>65536
-    print(json.dumps({'bytes':len(sink.data),'frozen':state,'complete':True}),flush=True)
+    # Finite output can reach both EOFs before the cutoff. Any actual frozen
+    # stream still owes its entire snapshot plus exactly one EOF probe.
+    for state in frozen.values():
+        expected=size if state['name']=='stdout' else 0
+        assert state['before']+state['pending']+state['quota']==expected
+        quota=state['quota']
+        probes=0
+        for limit,count in state['reads']:
+            if quota:
+                assert 0<limit<=min(quota,65536) and 0<count<=limit
+                quota-=count
+            else:
+                probes+=1
+                assert probes==1 and limit==1 and count==0
+        assert quota==0 and probes==1
+    if held_drain:
+        assert frozen_stdout.is_set()
+        state=next(state for state in frozen.values() if state['name']=='stdout')
+        assert state['quota']>65536
+    print(json.dumps({'bytes':len(sink.data),'pipe_capacity':pipe_capacity,
+        'frozen':list(frozen.values()),'complete':True}),flush=True)
 finally:
     assert custody.close(Deadline.after(3))
     assert termios.tcgetattr(slave)==mode
