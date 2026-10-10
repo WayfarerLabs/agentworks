@@ -463,6 +463,8 @@ def probe_boundary(monkeypatch):
             delay: bool = False,
             wrap: bool = True,
             record: bytes | None = None,
+            suffix: bytes = b"",
+            result_tail: bool | None = None,
         ) -> None:
             self.cell = cell
             self.frame = probe._frame()
@@ -472,6 +474,7 @@ def probe_boundary(monkeypatch):
             self.prefix_complete = False
             self.reflection, self.delay, self.wrap = reflection, delay, wrap
             self.record = probe.INTERACTIVE_READY + b"\r\n" if record is None else record
+            self.suffix, self.result_tail = suffix, result_tail
             self.phase_chunks: list[bytes | None] = []
             self.phase_queued = False
             self.late_output = [None, None, probe.WRAP_FIXTURE] if wrap else [None]
@@ -490,6 +493,8 @@ def probe_boundary(monkeypatch):
             if len(self.sent) == 65536 and not self.phase_queued:
                 record = self.record
                 self.phase_chunks = [self.reflection + record[:7], None, record[7:]]
+                if self.suffix:
+                    self.phase_chunks.append(self.suffix)
                 self.phase_queued = True
             if self.phase_chunks:
                 return self.phase_chunks.pop(0)
@@ -505,18 +510,23 @@ def probe_boundary(monkeypatch):
                 assert self.frame.startswith(self.sent)
             else:
                 assert data == probe.RELEASE and self.cell.resizes == [(9, 17)]
-                assert not self.phase_chunks
                 self.released = True
                 result = {"received": 65536, "decoded": 32768, "fidelity": True, "changed": [9, 17], "setup_mode": 0}
-                self.stderr += (
-                    [None, json.dumps(result).encode() + b"\n"] if self.delay else [json.dumps(result).encode() + b"\n"]
-                )
+                result_line = json.dumps(result).encode() + b"\n"
+                if self.result_tail is None:
+                    self.stderr += [None, result_line] if self.delay else [result_line]
+                else:
+                    self.stderr += [result_line[:7], *([None] * 6)]
+                    if self.result_tail:
+                        self.stderr.append(result_line[7:])
                 self.cell.status = 0
             return len(data)
 
-    def measure(*, idle=False, status=None, reflection=b"", delay=False, wrap=True, record=None):
+    def measure(
+        *, idle=False, status=None, reflection=b"", delay=False, wrap=True, record=None, suffix=b"", result_tail=None
+    ):
         cell = Cell(status)
-        io = IO(cell, reflection, delay, wrap, record)
+        io = IO(cell, reflection, delay, wrap, record, suffix, result_tail)
         monkeypatch.setattr(probe, "_IO", lambda: io)
         monkeypatch.setattr(probe, "time", SimpleNamespace(monotonic=lambda: io.now, sleep=lambda _seconds: None))
         return probe._measure(cell, idle), cell, io
@@ -547,6 +557,27 @@ def test_strict_setup_gates_complete_prefix_and_record_before_resize_release(pro
     assert io.released and cell.resizes == [(9, 17)]
     assert report["setup_prefix_bytes"] == 57
     assert report["wrap_fixture_exact"] and report["status"] == 0
+
+
+@pytest.mark.parametrize("split", [False, True])
+def test_queued_setup_suffix_refuses_before_resize_release_regardless_of_chunking(probe_boundary, split):
+    from . import windows_pseudoconsole_probe as probe
+
+    suffix = b"unexpected before release"
+    record = probe.INTERACTIVE_READY + b"\r\n"
+    report, cell, io = probe_boundary(record=record if split else record + suffix, suffix=suffix if split else b"")
+    assert not report["accepted"] and report["stage"] == "refused"
+    assert not io.released and cell.resizes == []
+
+
+@pytest.mark.parametrize("tail", [False, True])
+def test_fragmented_result_waits_for_complete_line_within_original_window(probe_boundary, tail):
+    report, _, io = probe_boundary(result_tail=tail)
+    assert io.released and not io.stderr and report["accepted"] == tail
+    if tail:
+        assert report["status"] == 0 and report["wrap_fixture_exact"] and io.now < 15
+    else:
+        assert report["stage"] == "refused" and report["error"] == "JSONDecodeError" and io.now >= 15
 
 
 def test_missing_delayed_wrap_is_separately_unproved_not_inferred_from_exit(probe_boundary):

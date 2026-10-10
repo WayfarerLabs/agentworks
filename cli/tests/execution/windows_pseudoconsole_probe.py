@@ -173,8 +173,11 @@ def _measure(cell: WindowsPseudoConsole, idle: bool) -> dict[str, Any]:
         frame = _frame()
         payload_record, interactive_record = PAYLOAD_READY + b"\r\n", INTERACTIVE_READY + b"\r\n"
         while time.monotonic() < end:
+            presentation_chunk: bytes | None = None
             for handle, buffer in ((pipes.presentation, output), (pipes.stderr, stderr)):
                 chunk = io.available(handle)
+                if handle == pipes.presentation:
+                    presentation_chunk = chunk
                 if chunk:
                     buffer.extend(chunk)
                 if len(buffer) > 131072:
@@ -193,7 +196,7 @@ def _measure(cell: WindowsPseudoConsole, idle: bool) -> dict[str, Any]:
                         raise OSError("Probe strict setup presentation refused")
                     if offset < len(frame):
                         offset += io.write(pipes.input, frame[offset : offset + 256])
-                    elif new_presentation == interactive_record:
+                    elif new_presentation == interactive_record and presentation_chunk is None:
                         setup_end = len(output)
                         cell.resize(9, 17)
                         if io.write(pipes.input, RELEASE) != 1:
@@ -201,7 +204,7 @@ def _measure(cell: WindowsPseudoConsole, idle: bool) -> dict[str, Any]:
                 # Process exit is NOT asynchronous ConPTY presentation completion.
                 if (
                     setup_end is not None
-                    and len(stderr.partition(b"\n")[2]) > 256
+                    and b"\n" in stderr.partition(b"\n")[2][256:]
                     and WRAP_FIXTURE in output[setup_end:]
                     and cell.poll() is not None
                 ):
