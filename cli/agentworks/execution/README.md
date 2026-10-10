@@ -148,7 +148,7 @@ binding. Both preserve finite input, capture/discard/sensitivity policy and boun
 elevation choices. DIRECT independent lifetime, non-Linux runtime, unsupported shell startup,
 unavailable elevation, invalid values and initially expired deadlines refuse before workload launch.
 DIRECT performs one preparation and dispatch attempt, then uses the contextual result reducer. It is
-not exported from the package root, placed in an `ExecutionTarget`, or supplied through RunContext.
+not exported from the package root or supplied through RunContext.
 Its private `start(...)` accepts explicit MANAGED protection and either admitted lifetime for finite
 commands or scripts with SH, BASH or USER_DEFAULT selection, including optional elevation.
 USER_DEFAULT freezes and validates the finite body before observing the selected workload account's
