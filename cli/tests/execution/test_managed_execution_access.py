@@ -62,6 +62,7 @@ from agentworks.execution.jobs import JobStream
 from agentworks.execution.models import Command, Input, JobRef, Lifetime, Output, Script, Shell
 from agentworks.execution.profiles import Protection
 from agentworks.execution.result import ApplicationState, ExecutionFailure
+from agentworks.execution.target import ExecutionTarget
 from agentworks.operations import OperationBorrow
 from agentworks.vms._native_operation import NativeVMOperation, _Workflow
 
@@ -205,8 +206,9 @@ def view(bound):
         entity_name="vm-one",
         deadline=lambda: Deadline.after(5),
     )
+    target = ExecutionTarget(access, file_access, main.features)
     workflow = _Workflow(
-        owner, Deadline.after(5), views=NativeVMOperation(owner, file_access, access, files, operation)
+        owner, Deadline.after(5), views=NativeVMOperation(owner, file_access, access, files, operation, target)
     )
     try:
         yield database, workflow, access, main, keeper
