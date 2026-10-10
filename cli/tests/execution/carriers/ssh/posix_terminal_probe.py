@@ -238,10 +238,9 @@ def run_case(root: Path, monkeypatch: pytest.MonkeyPatch, *, refusal: bool) -> N
             server_logs.append(kwargs["stderr"])
         return process
 
-    def acquire(input_fd: int, output_fd: int) -> PosixTerminal:
-        terminal = native_acquire(input_fd, output_fd)
+    def acquire(terminal: PosixTerminal) -> None:
+        native_acquire(terminal)
         owned_fds.extend((terminal.master_fd, terminal.slave_fd))
-        return terminal
 
     primary: BaseException | None = None
     try:
@@ -260,11 +259,17 @@ def run_case(root: Path, monkeypatch: pytest.MonkeyPatch, *, refusal: bool) -> N
                     assert custody.close(Deadline.after(3))
                 with ExitStack() as endpoints:
                     master, slave = os.openpty()
-                    endpoints.callback(os.close, master)
-                    endpoints.callback(os.close, slave)
                     before = termios.tcgetattr(slave), fcntl.fcntl(slave, fcntl.F_GETFL), os.get_inheritable(slave)
-                    endpoints.callback(termios.tcsetattr, slave, termios.TCSANOW, before[0])
-                    endpoints.callback(_settle_clients, clients)
+
+                    def close_endpoint() -> None:
+                        # One aggregate finalizer cannot close a borrowed terminal
+                        # while the retained worker still owns acquisition or cleanup.
+                        assert custody.close(Deadline.after(3))
+                        termios.tcsetattr(slave, termios.TCSANOW, before[0])
+                        os.close(slave)
+                        os.close(master)
+
+                    endpoints.callback(close_endpoint)
                     os.set_blocking(master, False)
                     termios.tcsetwinsize(slave, (31, 97))
                     trace = Trace(master, slave)
@@ -297,8 +302,9 @@ def run_case(root: Path, monkeypatch: pytest.MonkeyPatch, *, refusal: bool) -> N
                     assert all(tag.decode() not in arg for tag in (_SOURCE_TAG, _ENV_TAG, _ARG_TAG) for arg in argv)
                     prepared.claim()
                     try:
-                        result = run_terminal_relay_candidate(argv, io=io, deadline=deadline)
+                        result = run_terminal_relay_candidate(argv, io=io, deadline=deadline, custody=custody)
                     finally:
+                        assert custody.close(Deadline.after(3))
                         # This is readiness finalization, never emulator sanitation.
                         prepared.stdout.finish()
                     trace.no_reflection()

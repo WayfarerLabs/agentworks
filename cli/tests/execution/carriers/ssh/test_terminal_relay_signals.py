@@ -19,6 +19,7 @@ from agentworks.execution.carrier import CarrierIO,Deadline,SinkOutput,TerminalI
 from agentworks.execution.carriers.ssh import _terminal_relay as relay
 from agentworks.execution.carriers.ssh._terminal_posix import PosixTerminal
 from agentworks.execution._process import LocalProcessOwner
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 master,slave=os.openpty()
 mode=termios.tcgetattr(slave)
 flags=fcntl.fcntl(slave,fcntl.F_GETFL),os.get_inheritable(slave)
@@ -54,9 +55,11 @@ tty.setraw(0)
 os.write(1,b'READY')
 time.sleep(30)
 '''
-attempt=relay._Attempt([sys.executable,'-c',child],io,Deadline.after(5))
-original_wait=attempt._done.wait
-original_close=LocalProcessOwner.close
+custody=LocalDeliveryCustody()
+attempt=relay._Attempt([sys.executable,'-c',child],io,Deadline.after(5),custody)
+original_wait=attempt._operation_done.wait
+original_cleanup_wait=attempt._done.wait
+original_close=LocalProcessOwner.close_bounded
 original_acquire=PosixTerminal.acquire
 original_release=PosixTerminal.release
 
@@ -67,17 +70,16 @@ def wait(timeout=None):
         errors.append(error)
         raise
 
-def close(owner):
+def close(owner,deadline):
     closing.set()
     release_cleanup.wait()
-    terminal=original_close(owner)
+    terminal=original_close(owner,deadline)
     settled.append(terminal.cleaned)
     return terminal
 
-def acquire(input_fd,output_fd):
-    terminal=original_acquire(input_fd,output_fd)
+def acquire(terminal):
+    original_acquire(terminal)
     owned.extend((terminal.master_fd,terminal.slave_fd))
-    return terminal
 
 def release(terminal):
     assert settled==[True]
@@ -88,10 +90,16 @@ def release(terminal):
 def forbidden(*args,**kwargs):
     raise AssertionError('Thread status is not the completion fact')
 
-attempt._done.wait=wait
+def cleanup_wait(timeout=None):
+    try: return original_cleanup_wait(timeout)
+    except BaseException as error:
+        errors.append(error)
+        raise
+attempt._operation_done.wait=wait
+attempt._done.wait=cleanup_wait
 attempt._worker.join=forbidden
 attempt._worker.is_alive=forbidden
-LocalProcessOwner.close=close
+LocalProcessOwner.close_bounded=close
 PosixTerminal.acquire=acquire
 PosixTerminal.release=release
 
@@ -128,11 +136,13 @@ except KeyboardInterrupt as error:
     print(json.dumps({'interruptions':len(errors),'restored':True,'settled':settled,'closed':len(owned)}))
 finally:
     release_cleanup.set()
-    interruptor.join()
+    interruptor.join(3)
+    assert custody.close(Deadline.after(3))
     os.close(slave)
     os.close(master)
 """
-    completed = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=15, check=True)
+    completed = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=15, check=False)
+    assert completed.returncode == 0, (completed.stdout[-4096:], completed.stderr[-4096:])
     proof = json.loads(completed.stdout)
     assert proof["interruptions"] >= 2
     assert proof["restored"] is True

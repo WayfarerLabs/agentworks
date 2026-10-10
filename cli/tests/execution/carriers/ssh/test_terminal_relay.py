@@ -12,12 +12,14 @@ from typing import Any, cast
 
 import pytest
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._process import (
     BorrowedProcessStdin,
     LocalProcessOwner,
     LocalProcessRequest,
     LocalProcessTerminal,
 )
+from agentworks.execution._process import Deadline as ProcessDeadline
 from agentworks.execution.carrier import CarrierIO, Deadline, Failure, Provenance, Retention, SinkOutput, TerminalInput
 from agentworks.execution.carriers.ssh import _terminal_relay as relay
 from agentworks.execution.carriers.ssh._terminal_posix import PosixTerminal
@@ -61,7 +63,7 @@ class Sink:
 
 
 @pytest.fixture(autouse=True)
-def owned_children(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def owned_children(monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody) -> Iterator[None]:
     """Independently check each synthetic child was reaped before fixture release."""
     original = subprocess.Popen
     children: list[subprocess.Popen[bytes]] = []
@@ -75,6 +77,7 @@ def owned_children(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     try:
         yield
     finally:
+        assert custody.close(Deadline.after(3))
         for child in children:
             try:
                 assert child.returncode is not None
@@ -88,11 +91,12 @@ def owned_children(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 @pytest.fixture
-def endpoint() -> Iterator[tuple[int, int]]:
+def endpoint(custody: LocalDeliveryCustody) -> Iterator[tuple[int, int]]:
     master, slave = os.openpty()
     try:
         yield master, slave
     finally:
+        assert custody.close(Deadline.after(3))
         os.close(slave)
         os.close(master)
 
@@ -120,7 +124,7 @@ _RAW_READY = "import os,tty; tty.setraw(0); os.write(1,b'READY'); "
 
 @pytest.mark.parametrize("nonblocking", [False, True])
 def test_binary_payload_then_early_keys_partial_writes_and_streams(
-    endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch, nonblocking: bool
+    endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch, nonblocking: bool, custody: LocalDeliveryCustody
 ) -> None:
     import fcntl
     import termios
@@ -142,14 +146,16 @@ def test_binary_payload_then_early_keys_partial_writes_and_streams(
     writes = 0
     descriptors: list[int] = []
 
-    def start(owner: LocalProcessOwner, request: LocalProcessRequest) -> None:
+    def start(
+        owner: LocalProcessOwner, request: LocalProcessRequest, *, close_deadline: ProcessDeadline | None = None
+    ) -> None:
         assert not termios.tcgetattr(endpoint[1])[3] & (termios.ICANON | termios.ECHO | termios.ISIG)
         assert isinstance(request.input, BorrowedProcessStdin)
         descriptors.append(request.input.descriptor)
         assert termios.tcgetattr(request.input.descriptor) == mode
         assert termios.tcgetwinsize(request.input.descriptor) == (31, 97)
         os.write(endpoint[0], keys)
-        original_start(owner, request)
+        original_start(owner, request, close_deadline=close_deadline)
 
     def write(fd: int, data: bytes | memoryview) -> int:
         nonlocal writes
@@ -179,7 +185,7 @@ os.write(2,b'RAW-STDERR')
 os.write(1,(':'+os.environ['TERM']+':'+str(__import__('termios').tcgetwinsize(0))).encode())
 """
     )
-    result = relay.run_terminal_relay_candidate(_argv(code), io=io, deadline=Deadline.after(5))
+    result = relay.run_terminal_relay_candidate(_argv(code), io=io, deadline=Deadline.after(5), custody=custody)
     assert result.failure is None and result.exit_status == 0
     assert bytes(stdout.data) == b"READY:fixture-terminal:(31, 97)"
     assert bytes(stderr.data) == b"RAW-STDERR"
@@ -197,7 +203,7 @@ os.write(1,(':'+os.environ['TERM']+':'+str(__import__('termios').tcgetwinsize(0)
 
 
 def test_withholding_source_does_not_consume_keyboard(
-    endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch
+    endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
 ) -> None:
     io, source, _, _ = _io(endpoint, [None] * 100)
     original_read = os.read
@@ -211,7 +217,7 @@ def test_withholding_source_does_not_consume_keyboard(
 
     monkeypatch.setattr(os, "read", read)
     result = relay.run_terminal_relay_candidate(
-        _argv(_RAW_READY + "__import__('time').sleep(30)"), io=io, deadline=Deadline.after(0.2)
+        _argv(_RAW_READY + "__import__('time').sleep(30)"), io=io, deadline=Deadline.after(0.2), custody=custody
     )
     assert result.started and result.failure is Failure.DEADLINE
     assert source.calls and not source.handed_off and borrowed_reads == 0
@@ -219,7 +225,7 @@ def test_withholding_source_does_not_consume_keyboard(
 
 
 def test_pending_payload_drains_before_source_repoll(
-    endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch
+    endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
 ) -> None:
     io, source, _, _ = _io(endpoint, [b"abcdef", b""])
     original_write = os.write
@@ -234,13 +240,16 @@ def test_pending_payload_drains_before_source_repoll(
         _argv(_RAW_READY + "data=b''\nwhile len(data)<6: data+=os.read(0,6-len(data))\n__import__('time').sleep(.03)"),
         io=io,
         deadline=Deadline.after(3),
+        custody=custody,
     )
     assert result.failure is None
     assert len(observed_calls) == 6 and len(set(observed_calls)) == 1
 
 
 @pytest.mark.parametrize("bad", [b"x" * (relay._CHUNK + 1), 3, "secret-canary"])
-def test_invalid_source_is_input_failure_without_raw_diagnostics(endpoint: tuple[int, int], bad: object) -> None:
+def test_invalid_source_is_input_failure_without_raw_diagnostics(
+    endpoint: tuple[int, int], bad: object, custody: LocalDeliveryCustody
+) -> None:
     io, source, _, _ = _io(endpoint, [])
 
     class BadSource:
@@ -249,14 +258,16 @@ def test_invalid_source_is_input_failure_without_raw_diagnostics(endpoint: tuple
 
     io = CarrierIO(TerminalInput(endpoint[1], endpoint[1], "fixture", BadSource()), io.output)
     result = relay.run_terminal_relay_candidate(
-        _argv(_RAW_READY + "__import__('time').sleep(30)"), io=io, deadline=Deadline.after(3)
+        _argv(_RAW_READY + "__import__('time').sleep(30)"), io=io, deadline=Deadline.after(3), custody=custody
     )
     assert result.failure is Failure.INPUT
     assert "secret-canary" not in repr(result)
 
 
 @pytest.mark.parametrize("bad", [0, -1, 1000000, True, "secret-canary"])
-def test_invalid_sink_is_output_failure_without_raw_diagnostics(endpoint: tuple[int, int], bad: object) -> None:
+def test_invalid_sink_is_output_failure_without_raw_diagnostics(
+    endpoint: tuple[int, int], bad: object, custody: LocalDeliveryCustody
+) -> None:
     class BadSink:
         def try_write(self, data: memoryview) -> int | None:
             return bad  # type: ignore[return-value]
@@ -264,13 +275,15 @@ def test_invalid_sink_is_output_failure_without_raw_diagnostics(endpoint: tuple[
     io, _, _, stderr = _io(endpoint, [b""])
     io = CarrierIO(io.input, SinkOutput(BadSink(), stderr))
     result = relay.run_terminal_relay_candidate(
-        _argv(_RAW_READY + "__import__('time').sleep(30)"), io=io, deadline=Deadline.after(3)
+        _argv(_RAW_READY + "__import__('time').sleep(30)"), io=io, deadline=Deadline.after(3), custody=custody
     )
     assert result.failure is Failure.OUTPUT
     assert "secret-canary" not in repr(result)
 
 
-def test_stalled_sink_still_observes_deadline_and_restores(endpoint: tuple[int, int]) -> None:
+def test_stalled_sink_still_observes_deadline_and_restores(
+    endpoint: tuple[int, int], custody: LocalDeliveryCustody
+) -> None:
     import termios
 
     mode = termios.tcgetattr(endpoint[1])
@@ -280,13 +293,14 @@ def test_stalled_sink_still_observes_deadline_and_restores(endpoint: tuple[int, 
         _argv(_RAW_READY + "os.write(2,b'other-stream'); __import__('time').sleep(30)"),
         io=io,
         deadline=Deadline.after(0.2),
+        custody=custody,
     )
     assert result.failure is Failure.DEADLINE
     assert termios.tcgetattr(endpoint[1]) == mode
 
 
 def test_expired_deadline_has_no_terminal_or_process_effects(
-    endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch
+    endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
 ) -> None:
     io, _, _, _ = _io(endpoint, [b""])
 
@@ -295,12 +309,14 @@ def test_expired_deadline_has_no_terminal_or_process_effects(
 
     monkeypatch.setattr(PosixTerminal, "acquire", forbidden)
     monkeypatch.setattr(LocalProcessOwner, "start", forbidden)
-    result = relay.run_terminal_relay_candidate(_argv("pass"), io=io, deadline=Deadline.after(0))
+    result = relay.run_terminal_relay_candidate(_argv("pass"), io=io, deadline=Deadline.after(0), custody=custody)
     assert not result.started and result.failure is Failure.DEADLINE
 
 
 @pytest.mark.parametrize("boundary", ["source", "stdout", "stderr"])
-def test_endpoint_exception_is_categorized(endpoint: tuple[int, int], boundary: str) -> None:
+def test_endpoint_exception_is_categorized(
+    endpoint: tuple[int, int], boundary: str, custody: LocalDeliveryCustody
+) -> None:
     class BrokenEndpoint:
         def try_read(self, limit: int) -> bytes | None:
             raise RuntimeError("sensitive-source-canary")
@@ -320,7 +336,10 @@ def test_endpoint_exception_is_categorized(endpoint: tuple[int, int], boundary: 
             ),
         )
     result = relay.run_terminal_relay_candidate(
-        _argv(_RAW_READY + "os.write(2,b'error'); __import__('time').sleep(30)"), io=io, deadline=Deadline.after(3)
+        _argv(_RAW_READY + "os.write(2,b'error'); __import__('time').sleep(30)"),
+        io=io,
+        deadline=Deadline.after(3),
+        custody=custody,
     )
     assert result.failure is (Failure.INPUT if boundary == "source" else Failure.OUTPUT)
     assert "canary" not in repr(result)
@@ -328,26 +347,32 @@ def test_endpoint_exception_is_categorized(endpoint: tuple[int, int], boundary: 
 
 @pytest.mark.parametrize("control", [KeyboardInterrupt, SystemExit])
 def test_launch_control_exception_settles_before_terminal_release(
-    endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch, control: type[BaseException]
+    endpoint: tuple[int, int],
+    monkeypatch: pytest.MonkeyPatch,
+    control: type[BaseException],
+    custody: LocalDeliveryCustody,
 ) -> None:
     import termios
 
     mode = termios.tcgetattr(endpoint[1])
     io, _, _, _ = _io(endpoint, [b""])
     original_start = LocalProcessOwner.start
-    original_close = LocalProcessOwner.close
+    original_close = LocalProcessOwner.close_bounded
     original_release = PosixTerminal.release
     settled = False
     primary = control("first-control")
 
-    def start(owner: LocalProcessOwner, request: LocalProcessRequest) -> None:
-        original_start(owner, request)
+    def start(
+        owner: LocalProcessOwner, request: LocalProcessRequest, *, close_deadline: ProcessDeadline | None = None
+    ) -> None:
+        original_start(owner, request, close_deadline=close_deadline)
         raise primary
 
-    def close(owner: LocalProcessOwner) -> LocalProcessTerminal:
+    def close(owner: LocalProcessOwner, deadline: ProcessDeadline) -> LocalProcessTerminal:
         nonlocal settled
-        result = original_close(owner)
+        result = original_close(owner, deadline)
         settled = True
+        assert result is not None
         return result
 
     def release(terminal: PosixTerminal) -> tuple[BaseException, ...]:
@@ -355,23 +380,25 @@ def test_launch_control_exception_settles_before_terminal_release(
         return original_release(terminal)
 
     monkeypatch.setattr(LocalProcessOwner, "start", start)
-    monkeypatch.setattr(LocalProcessOwner, "close", close)
+    monkeypatch.setattr(LocalProcessOwner, "close_bounded", close)
     monkeypatch.setattr(PosixTerminal, "release", release)
     with pytest.raises(control) as raised:
-        relay.run_terminal_relay_candidate(_argv("__import__('time').sleep(30)"), io=io, deadline=Deadline.after(3))
+        relay.run_terminal_relay_candidate(
+            _argv("__import__('time').sleep(30)"), io=io, deadline=Deadline.after(3), custody=custody
+        )
     assert raised.value is primary and settled
     assert termios.tcgetattr(endpoint[1]) == mode
 
 
 def test_interrupted_wait_uses_completion_fact_and_preserves_first_control(
-    endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch
+    endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
 ) -> None:
     import termios
 
     mode = termios.tcgetattr(endpoint[1])
     io, source, _, _ = _io(endpoint, [None] * 100)
-    attempt = relay._Attempt(_argv(_RAW_READY + "__import__('time').sleep(30)"), io, Deadline.after(3))
-    original_wait = attempt._done.wait
+    attempt = relay._Attempt(_argv(_RAW_READY + "__import__('time').sleep(30)"), io, Deadline.after(3), custody=custody)
+    original_wait = attempt._operation_done.wait
     primary = KeyboardInterrupt("first-control")
     calls = 0
     thread = current_thread()
@@ -390,6 +417,7 @@ def test_interrupted_wait_uses_completion_fact_and_preserves_first_control(
     def forbidden_join(*args: object, **kwargs: object) -> None:
         pytest.fail("Thread status cannot establish native worker completion")
 
+    monkeypatch.setattr(attempt._operation_done, "wait", wait)
     monkeypatch.setattr(attempt._done, "wait", wait)
     monkeypatch.setattr(attempt._worker, "join", forbidden_join)
     monkeypatch.setattr(attempt._worker, "is_alive", forbidden_join)
@@ -401,10 +429,10 @@ def test_interrupted_wait_uses_completion_fact_and_preserves_first_control(
 
 
 def test_interrupted_worker_start_cannot_admit_terminal_effects(
-    endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch
+    endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
 ) -> None:
     io, _, _, _ = _io(endpoint, [b""])
-    attempt = relay._Attempt(_argv("pass"), io, Deadline.after(3))
+    attempt = relay._Attempt(_argv("pass"), io, Deadline.after(3), custody=custody)
     original_start = attempt._worker.start
     primary = KeyboardInterrupt("start-control")
 
@@ -426,10 +454,14 @@ def test_interrupted_worker_start_cannot_admit_terminal_effects(
 
 @pytest.mark.parametrize("control", [None, KeyboardInterrupt, SystemExit])
 def test_restoration_uncertainty_is_observable(
-    endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch, control: type[BaseException] | None
+    endpoint: tuple[int, int],
+    monkeypatch: pytest.MonkeyPatch,
+    control: type[BaseException] | None,
+    custody: LocalDeliveryCustody,
 ) -> None:
     import termios
 
+    custody = LocalDeliveryCustody()
     io, source, _, _ = _io(endpoint, [b""])
     original_setattr = termios.tcsetattr
     primary = control("restore-control") if control else OSError("restore-canary")
@@ -443,19 +475,26 @@ def test_restoration_uncertainty_is_observable(
     if control:
         with pytest.raises(control) as raised:
             relay.run_terminal_relay_candidate(
-                _argv(_RAW_READY + "__import__('time').sleep(.05)"), io=io, deadline=Deadline.after(3)
+                _argv(_RAW_READY + "__import__('time').sleep(.05)"), io=io, deadline=Deadline.after(3), custody=custody
             )
         assert raised.value is primary
         assert raised.value.__notes__
     else:
         result = relay.run_terminal_relay_candidate(
-            _argv(_RAW_READY + "__import__('time').sleep(.05)"), io=io, deadline=Deadline.after(3)
+            _argv(_RAW_READY + "__import__('time').sleep(.05)"), io=io, deadline=Deadline.after(3), custody=custody
         )
         assert result.failure is Failure.OBSERVATION
         assert "restore-canary" not in repr(result)
 
+    assert not custody.settled
+    assert not custody.close(Deadline.after(0.1))
+    from agentworks.errors import StateError
 
-def test_fair_large_duplex_delivery(endpoint: tuple[int, int]) -> None:
+    with pytest.raises(StateError):
+        custody.begin_process()
+
+
+def test_fair_large_duplex_delivery(endpoint: tuple[int, int], custody: LocalDeliveryCustody) -> None:
     payload = bytes(range(256)) * 256
     io, _, stdout, stderr = _io(endpoint, [payload, payload, b""])
     stdout.limit = stderr.limit = 2048
@@ -471,7 +510,7 @@ assert data==bytes(range(256))*512
 __import__('time').sleep(.03)
 """
     )
-    result = relay.run_terminal_relay_candidate(_argv(code), io=io, deadline=Deadline.after(5))
+    result = relay.run_terminal_relay_candidate(_argv(code), io=io, deadline=Deadline.after(5), custody=custody)
     assert result.failure is None and result.exit_status == 0
     assert bytes(stdout.data) == b"READY" + b"o" * 131072
     assert bytes(stderr.data) == b"o" * 131072
