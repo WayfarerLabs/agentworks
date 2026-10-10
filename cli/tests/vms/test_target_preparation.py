@@ -211,10 +211,9 @@ def _compose(
     ctx: object = None,
     expected_locator: ProviderLocator = _DEFAULT_LOCATOR,
     binding: NativeExecutionBinding | None = None,
-    custody=None,
     observe_locator=None,
 ):
-    local_delivery = custody or LocalDeliveryCustody()
+    local_delivery = LocalDeliveryCustody()
     selected_vm = vm or _vm()
 
     def observe(selected_deadline: Deadline):
@@ -770,7 +769,7 @@ def test_selected_platform_must_be_bound_to_vm_site(
     owner.close()
 
 
-def test_selected_observer_surrounds_one_probe_without_settling_its_custody(
+def test_selected_observer_surrounds_one_probe_under_one_borrow(
     owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, owner = owned
@@ -778,7 +777,6 @@ def test_selected_observer_surrounds_one_probe_without_settling_its_custody(
     platform = _platform(carrier)
     deadline = Deadline.after(10)
     events = []
-    retained_custody = Mock(spec=LocalDeliveryCustody)
     borrows, releases = _watch_custody(monkeypatch)
 
     def observe(selected_deadline):
@@ -788,7 +786,7 @@ def test_selected_observer_surrounds_one_probe_without_settling_its_custody(
         return _DEFAULT_LOCATOR
 
     observer = Mock(side_effect=observe)
-    result = _compose(owner, platform, deadline=deadline, custody=retained_custody, observe_locator=observer)
+    result = _compose(owner, platform, deadline=deadline, observe_locator=observer)
 
     assert result.status is VMTargetPreparationStatus.PREPARED
     assert events == [0, 1]
@@ -796,7 +794,6 @@ def test_selected_observer_surrounds_one_probe_without_settling_its_custody(
     assert carrier.deadlines == [deadline]
     assert len(borrows) == 1 and releases == borrows
     platform.observe_provider_locator.assert_not_called()
-    retained_custody.close.assert_not_called()
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
