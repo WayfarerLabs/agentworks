@@ -263,12 +263,13 @@ independent job availability or RunContext admission.
 
 `plugins/azure/_native_access.py` stages private `AzureOwnedReadAccess` observations. Passive
 construction requires a recorded complete ARM path and unique VM ID; reads compare both, without
-adopting an existing VM or modifying its records. Compute and linked network clients retain their
-original public handles through uncertain close and retire before the selected credential. Ambient
-browser fallback requires positive retirement of the failed default credential first. SDK failures
-expose class-only diagnostics without retaining secret-bearing exception chains; original core and
-control errors remain intact. This is not a native access factory or proof of SDK-internal drain,
-new-VM identity recording, startup settlement, routes, guest preparation or RunContext admission.
+adopting an existing VM or modifying its records. One read-client slot retains the original public
+handle through uncertain close. Compute must positively retire before linked network reads begin;
+the read client retires before the selected credential. Ambient browser fallback requires positive
+retirement of the failed default credential first. SDK failures expose class-only diagnostics
+without retaining secret-bearing exception chains; original core and control errors remain intact.
+This is not a native access factory or proof of SDK-internal drain, new-VM identity recording,
+startup settlement, routes, guest preparation or RunContext admission.
 
 `plugins/gcp/_native_access.py` similarly stages private `GCEOwnedRead` power and locator reads. It
 preserves stock ADC selection or the explicitly selected service-account document, with an owned

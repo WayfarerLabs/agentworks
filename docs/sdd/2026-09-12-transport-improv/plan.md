@@ -1212,10 +1212,15 @@ core/control errors. Author-checkout verification passes all 92 application/actu
 skips or deselection and scoped lint/format. Isolated-runner bootstrap and evidence-size failures
 remain preserved; the successful run uses a synthetic SDK user-agent host label, not native host
 metadata proof. Final annotation-only corrections pass the same 92 cases and full strict typing
-across 1,382 sources; no typing setting or assertion is weakened. Independent private review remains
-open. These results cover eight source/test files on the author's earlier base, not
-whole-composition or native acceptance. No historical identity adoption, new-VM recording or
-complete access is implied; keep this item open.
+across 1,382 sources; no typing setting or assertion is weakened. Three independent private source
+reviews of the paired increment identify one simplification: retain a single read client, since
+compute must positively close before network construction. They also identify a test-isolation
+question about the SDK's host user-agent probe. Correction `fc360d59` retains one sequential client,
+preserves lock/cleanup proof through a real failed-close observation and uses a fixture-local
+deterministic public host label. It passes all 92 cases and full strict typing over 1,382 sources,
+plus scoped lint/format. Independent correction re-review remains open. These results cover eight
+source/test files on the author's earlier base, not whole-composition or native acceptance. No
+historical identity adoption, new-VM recording or complete access is implied; keep this item open.
 
 - [ ] Complete owned Azure access with reviewed request-specific startup settlement, fresh endpoint
       trust, selected route lifetime, exact guest preparation and aggregate release. Account

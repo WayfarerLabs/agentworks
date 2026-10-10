@@ -1359,11 +1359,12 @@ Their per-read cleanup and credential-last closure must remain independently obs
 construction without a returned original remains an explicit handoff limit.
 
 The private `AzureOwnedReadAccess` staging reader snapshots recorded identity without active work.
-Its compute observation precedes linked NIC/public-IP reads; retire the original compute client
-positively before dispatching those dependent reads. Retain each returned client before later checks
-and keep the selected credential until all dependents positively retire. Ordinary close failure may
-preserve the earlier result or error, but refuses subsequent observations; only terminal cleanup may
-retry the same originals, without authentication or request replay.
+One retained read-client slot suffices: its compute observation precedes linked NIC/public-IP reads,
+and the original compute client must positively retire before network client construction. Retain
+each returned client before later checks and keep the selected credential until the dependent
+original positively retires. Ordinary close failure may preserve the earlier result or error, but
+refuses subsequent observations; only terminal cleanup may retry the same originals, without
+authentication or request replay.
 
 Detach ordinary SDK failures from secret-bearing message, body, cause and context chains. Report
 only the SDK exception class and core-authored remediation. Apply this to initial authentication and
