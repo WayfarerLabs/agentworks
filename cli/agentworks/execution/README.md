@@ -234,6 +234,21 @@ core closes child work and local delivery, checks the complete ledger, seals obl
 releases the aggregate owner. WSL2 and Proxmox supply these private adapters. Other platforms and
 the public RunContext surface remain pending.
 
+The private cloud start producers in `plugins/aws/_activation.py` and `plugins/azure/_activation.py`
+admit one selected start under a retained exact VM owner. They keep bounded acknowledgment payloads
+and reconcile interrupted ledger replies without resubmission. They are not owned native access
+factories and do not settle startup from power observations. EC2 uses one fresh client with retries
+limited to one total attempt. Azure uses one fresh explicit-policy client and a body-free streamed
+POST to its fixed public ARM start endpoint, without response-body reads, authentication replay,
+redirects, provider registration or polling. Azure checks the exact submitted request, HTTP 200/202
+and bounded selected acknowledgment headers before retention; 202 requires an admitted operation
+URL, which this producer does not follow. A valid late acknowledgment is retained before deadline
+rejection. Azure retains original response/client objects when close does not return normally and
+exposes `cleanup_incomplete`; close attempts do not establish local retirement. Neither local
+cleanup nor acknowledgment resolves remote possible effect. Actual-SDK scripted tests cover these
+service-dispatch paths, not socket delivery, real credentials, request drain or native startup
+acceptance. Complete cloud access and RunContext wiring remain pending.
+
 `target.py` supplies a private passive `ExecutionTarget` over already-bound execution and file
 interfaces. Accessors return those exact interfaces, or `None` when composition supplied none. The
 native aggregate supplies this view while retaining sole ownership of preparation and teardown;
