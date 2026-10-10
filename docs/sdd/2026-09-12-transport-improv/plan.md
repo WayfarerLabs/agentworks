@@ -1097,6 +1097,20 @@ runtime verification. Earlier failed diagnostic and regression runs remain prese
 results do not erase them. SDK-internal acquisition, arbitrary repeated signals, real credential
 delivery/drain, startup settlement, complete cloud access and whole-PR acceptance remain unproved.
 
+- [ ] Implement and privately review the provider-owned GCP start admission/acknowledgment producer
+      in the
+      [lifecycle LLD](execution-lifecycle-lld.md#gcp-activation-admission-and-acknowledgment). Prove
+      owner/recorded locator matching, persisted UUID before one body-free POST, public pre-body
+      response refusal, identity-only bounded raw reads, matching minimal Operation ACK, late
+      retention, ledger lost replies/fencing, actual session/response/wrapper custody and
+      original-control cleanup-entry/lock regressions against the locked public SDK pipeline. Keep
+      this a private #833 increment, not complete stopped access or public RunContext delivery.
+- [ ] Complete owned GCP access only after explicitly reviewing the documented name-addressed start
+      limitation against activation guarantees. Prove supported native receipt compatibility,
+      startup settlement and operation retention/recovery, exact guest preparation, fresh endpoint
+      trust, selected firewall-route lifetime and aggregate release. A preceding read, database
+      lock, UUID or post-response targetId cannot prevent external same-name replacement; do not
+      silently waive requirements or make critical native operations unsupported.
 - [x] Implement and privately review passive exact-instance power observations for AWS, Azure and
       GCP using their provider-owned locator reads. Cover stable/transitional/malformed states,
       identity/account mismatch, setup expiry, actual SDK request serialization and successful

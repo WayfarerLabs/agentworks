@@ -1259,6 +1259,92 @@ missing acknowledgment remains unknown. The
 completed middleware audit and the producer's separate scripted streamed-path evidence, with their
 remaining limits.
 
+### GCP activation admission and acknowledgment
+
+Implement one private provider-owned `GCEActivation` under the acquired exact VM operation owner,
+retained before effects. Composition supplies the selected credential, recorded project, zone,
+backend instance name and canonical positive decimal uint64 incarnation, with the matching
+`gcp-gce:<project>:<zone>:<instance_id>` locator. The database VM name is not the backend name.
+Validate persisted components with the existing safe alphabet and bound uint64 here, without
+changing the legacy normalizer. Generate one nonzero UUID and persist it with the four selected
+identity values in the initial bounded canonical versioned lifecycle payload.
+
+Register `gcp-gce-start`, durably mark possible effect and admit at most one body-free POST to the
+fixed public Compute v1 start route, with that UUID as `requestId`. The UUID assists correlation and
+deduplication; it neither permits replay nor proves exactly-once acceptance. Reconciliation is
+fenced ledger bookkeeping only. No generated poller, retired start method, background task, private
+SDK session mutation or generic cloud task framework belongs in this unit.
+
+Use public `AuthorizedSession` with refresh replay disabled, `trust_env=False`, normal TLS
+verification, default zero adapter retries and redirects disabled. Supply a public Google-auth
+`Request` over a separately owned ordinary Requests session, also with `trust_env=False`. Retain one
+strong adapter reference to that wrapper for the adapter lifetime, including uncertain
+credential-session cleanup: its destructor can otherwise close the supplied session outside local
+accounting. The wrapper is not a fourth closeable resource. Keep SDK authentication/JWT setup; do
+not copy its pipeline or invent a custom authentication implementation.
+
+Pass `stream=True`, `allow_redirects=False` and `Accept-Encoding: identity`. One public per-request
+response hook first retains the actual original response, then refuses non-200 and Content-Encoding
+other than absent or a single identity value, including ambiguous or combined encodings. Refuse
+before returning to Requests: even with redirects disabled its Response.next preparation can read a
+redirect body. Do not duplicate this gate after return. Construct the sole POST locally and assert
+it at the final scripted transport; the locally attached PreparedRequest is not additional provider
+acknowledgment evidence.
+
+Check the original finite deadline before admission and public request entry. Set finite positive
+service connect/read and credential-refresh timeouts from the then-remaining budget. SDK credential
+work happens inside that public method; do not imply another application check immediately before
+its internal service send. These synchronous budgets are best effort, not hard elapsed preemption.
+Do not use `max_allowed_time` to discard a late response before retaining its acknowledgment.
+
+Read admitted HTTP 200 through finite positive raw reads without content decoding, at most an
+internal chunk size or remaining capacity plus one overflow byte, whichever is smaller. Cap body
+ingestion at 65,536 bytes without trusting Content-Length or implementing decompression. Check the
+original deadline before each further read. Incomplete-body expiry leaves ACK unknown; after
+receiving the entire bounded body, retain a valid matching ACK before refusing late success. Reject
+invalid UTF-8/JSON, duplicate keys and oversize, then discard raw bytes after selection. This bounds
+service-body ingestion, not all SDK/header/TLS allocations or credential responses.
+
+Require kind `compute#operation`, a nonempty operation name matching `[A-Za-z0-9_-]{1,512}`,
+clientOperationId equal to the retained UUID, targetId equal to the selected canonical uint64
+incarnation, and targetLink equal to either complete constructed HTTPS URL on
+`compute.googleapis.com` or `www.googleapis.com` with path
+`/compute/v1/projects/{project}/zones/{zone}/instances/{name}`. Exact equality rejects credentials,
+ports, queries, fragments, escapes and dot segments without URL normalization. Required fields,
+spellings and bounds are conservative local acceptance rules needing native compatibility proof, not
+universal provider schema guarantees. If operationType is present require `start`; neither status
+nor DONE establishes successful startup. Persist only operation name in the optional ACK, not
+diagnostics or a provider-selected follow-up URL. Later lookup constructs a fixed route.
+
+Keep returned original response/service/credential session handles directly in adapter custody
+before later Python bookkeeping, including response capture when the request method raises. Close
+them in that order; only normal closure retires an original. Retain uncertain originals with
+`cleanup_incomplete` true and preserve the Request wrapper while credential cleanup is uncertain.
+Preserve original escaping control through scoped cleanup entry and bookkeeping and release the
+admission lock. Never retry uncertain close or submission. This does not establish atomic
+SDK-internal handoff, arbitrary repeated-signal safety or interpreter-shutdown guarantees.
+
+Retain a matching ACK before publication, cleanup or late-success refusal. Validate canonical
+bounded recovery payloads, then reconcile registration and at most one ACK revision under the same
+owner/fence. Missing or malformed ACK retains possible effect. Receipt, local close, power and
+deadline cannot settle startup, request drain or the whole owner.
+
+The documented start API addresses an instance name with no documented immutable-ID alias or
+incarnation precondition. A preceding exact read and database lock cannot prevent external
+delete/recreate. Matching targetId after submission detects a wrong-incarnation response, not the
+already-submitted effect. Do not invent conditional headers, numeric-ID fallback or UUID-based
+protection. Complete stopped access must separately review this limitation against activation
+guarantees before exposure; this private producer selects no requirements waiver or unsupported
+critical operation. Startup settlement, operation retention/recovery, guest preparation, endpoint
+trust, firewall-route lifetime, aggregate release and native delivery proof remain open.
+
+Actual locked public-pipeline tests must cover one POST/no service GET or replay, unread redirect
+and non-200/encoded bodies, finite identity reads and overflow, partial expiry and matching late
+ACK, ledger interruption/lost replies, fencing/concurrency, bounded identity/recovery parsing,
+original handle and wrapper custody, primary control and cleanup-entry/lock regressions.
+Credential-provider requests remain a separately attributed limit. Earlier middleware audits do not
+prove this new producer, native compatibility, complete owned access or RunContext acceptance.
+
 ### Proxmox activation evidence boundary
 
 Stopped Proxmox startup needs a new bounded producer, not the retired start waiter. Its first
