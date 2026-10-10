@@ -211,22 +211,23 @@ partial-update custody. Production writer coexistence and rollback through both 
 paths still require transport composition and native acceptance.
 
 Current shared implementation dependency: transport #833 at
-`dd10ebbeee677570c95f9b0f30688f32f6891aeb`; the preceding public SSH testing pin is
-`642dd8af415ae9334a2975a12778f3be04c6ff65`. The
+`dd10ebbeee677570c95f9b0f30688f32f6891aeb`, with its reviewed retained cleanup seam from `a58517c2`
+and `f6ff0511` adopted separately. The preceding full native SSH testing pin is
+`ba18a087802341088ce0daeb114d83b4c9dcd5b6`. The
 [dependency chronology](phase2-results.md#historical-dependency-chronology) retains each earlier
 integration, measured gate and limitation. It does not change completed plan records or the
 [coordinated final stack](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6032839010).
 
 The complete current SSH and transport native reports are recorded in the
-[feedback disposition](phase2-results.md#full-native-feedback-and-implementation-round-1).
-Implementation feedback/fix round 1 of the three authorized rounds is prepared for handoff after all
-three independent private reviews and the combined local gates. The exact published head and
-checkpoint edge are recorded on #832 after testing considerations; two public fix rounds remain
-after that handoff. `review-requested` was removed before fixes. SSH-owned resource interface
-choices proceed under the existing implementation authorization; they do not await another operator
-API decision. Terminal retention still needs transport coordination, and complete RunContext and
-supported-platform acceptance remain open. A new testing signal follows private review, gates and
-tester considerations.
+[round 2 disposition](phase2-results.md#round-2-collected-feedback-and-dependency-adoption).
+Implementation feedback/fix round 1 is closed; round 2 of the three authorized rounds remains open.
+The retained POSIX consumer now adopts transport's reviewed cleanup seam. All three independent
+private reviews and combined gates must finish before its next checkpoint edge, with testing
+considerations posted first. One public fix round will remain after that handoff. `review-requested`
+was removed before fixes. SSH-owned resource interface choices proceed under the existing
+implementation authorization. Windows launch/resize, complete RunContext and supported-platform
+acceptance remain open. Production retained-custody and interrupted-exit proof also remain required
+before terminal activation.
 
 ### Complete the carrier and migration
 

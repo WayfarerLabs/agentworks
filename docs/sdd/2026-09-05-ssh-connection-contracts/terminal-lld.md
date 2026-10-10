@@ -269,7 +269,10 @@ native admission share a guard, so a possible late native effect cannot follow a
 Borrowed terminal descriptors remain valid through settlement, including pending acquisition or
 construction after caller return. Pump borrowing stops before native cleanup. A permanent native
 loss finishes the worker without terminal restoration, retaining unsettled custody and refusing
-reuse or unsafe cleanup retries.
+reuse or unsafe cleanup retries. Pending construction and retryable cleanup are observed at the
+existing bounded poll interval. A fresh caller request authorizes another cleanup attempt; observed
+natural native settlement also permits restoration without another close or signal. Keep the
+caller's original result unchanged.
 
 Preserve a non-daemon terminal worker. Owned subprocess measurements show finite construction and
 retryable-cleanup returns can still hold ordinary interpreter shutdown open until the retained work

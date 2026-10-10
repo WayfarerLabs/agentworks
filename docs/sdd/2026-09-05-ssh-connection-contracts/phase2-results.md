@@ -456,6 +456,44 @@ tested resources, not settlement of indefinitely unresolved resources. The lead 
 non-daemon lifetime rather than adding a global exit policy or abandoning custody. Production
 retained-custody and interrupted-exit proof remain gates before terminal activation.
 
+All three independent private reviews at `5d6552dd` agree on a further observation defect: after
+cleanup refusal, the shared native owner can settle autonomously on natural exit, but the SSH worker
+waits indefinitely on a separate condition and misses that fact. Owned reproductions prove native
+cleanup complete while the terminal remains raw and aggregate custody unsettled. Worker
+`cb0c314e1a10ad14180a1e4a3cf0cb32e61a6eaa`, integrated as `ae812aa54`, observes pending and
+retryable native snapshots at the existing bounded poll interval. It restores after positive natural
+settlement without another caller close or signal; new cleanup attempts still require fresh caller
+requests. Permanent loss behavior is unchanged. The owned regression fails the preceding runtime,
+rescues safely, and passes the correction with one refused signal, natural exit zero,
+original-worker restoration and the original DEADLINE result unchanged. Worker SSH tests pass 526
+cases with six skips; typing and affected style checks exit zero. The shutdown limitation now
+describes genuinely pending native work, not a missed settled observation.
+
+The project review also finds stale mutable Phase 2 plan prose. Its corrected round/dependency
+narrative preserves all 25 exact completed checkbox blocks. Two optional complexity simplifications
+are taken: remove the uncalled installed-probe child cleanup helper and use one `collection_done`
+flag for stopped collection. EOF, pending bytes and the frozen quota remain separate facts. Each
+private lane must re-review the final corrected pin before the checkpoint signal.
+
+The full local non-integration suite at source `5d6552dd` passes 17,057 cases with 55 skips in
+314.43 seconds. Full Ruff/format, mypy (1,332 files), typer isolation, file quality, rulesync,
+locked-SDD checks, 160 Python and 103 Node website tests and both deterministic site-base builds
+exit zero. Final correction checks remain required. Hosted
+[run 38011039854](https://github.com/WayfarerLabs/agentworks/actions/runs/38011039854) on that
+source reports a Linux Python 3.13 finite-output fixture failure after complete bytes and EOF were
+already asserted: the fixture requires exactly one frozen observation. A controlled native 4096-byte
+pipe reproduces the old fixture's zero-freeze trace after full conservation; this explains a valid
+alternate path without claiming the unreported hosted frozen count. Worker
+`faeb8d9112d9681bf535199b9387e0ecd0878d47`, integrated as `01b392838`, accepts complete output
+before freezing and checks every stream actually frozen. The enlarged-pipe case now holds sink
+admission until its actual native snapshot, preserving a deterministic quota greater than 65,536
+bytes. Twelve owned probes at concurrency four pass: six small pipes conserve 262,144 bytes with
+zero freezes; six enlarged pipes freeze 196,608 bytes and consume three quota reads plus one empty
+EOF probe. A defective single-read model still fails the original byte/status/EOF gate and settles
+the fixture's owned resources. No runtime deadline, output or cleanup assertion is weakened. Worker
+SSH tests pass 527 cases with six skips; final combined private review and hosted CI remain
+required.
+
 Hosted [run 38008962459](https://github.com/WayfarerLabs/agentworks/actions/runs/38008962459)
 evaluates preceding SSH `8f79863c` on public transport `dd10ebbe`; it does not include this retained
 terminal correction. All Linux versions and static/file/website checks pass. Windows Python 3.13.15
