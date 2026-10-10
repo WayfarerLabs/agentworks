@@ -387,25 +387,45 @@ application-checkpoint reconciliation remain necessary before package recovery c
 one-row package path provides serial checkpoint custody, not a workaround for completed-call
 history.
 
+An ordinary private upload can carry an `UploadChildAssociation`: a fresh 16-byte transfer identity
+and a member ordinal from 0 through 4,095. Its original row records that association and a false
+success marker before dispatch. Only a positively complete upload with settled custody and no
+failure, deadline expiry or uncertainty publishes the true marker, before borrow closure makes the
+receipt immutable. This core checkpoint is not application ownership or a complete directory result.
+Failed or refused calls can resolve their rows without success; retained effects keep their exact
+cleanup facts without success.
+
+Interrupted checkpoint publication retains the actual child, outcome and exact intended payload and
+revision. Bookkeeping settlement retries only that same publication and borrow closure, without
+reading the source or dispatching another helper. Confirmation checks the payload and the exact next
+revision. Native aggregate teardown invokes this settlement before checking its components. Pending
+bookkeeping holds the serial borrow; settled retained-effect handoff can leave remote debt without
+universally blocking other body calls. Aggregate teardown explicitly stops admission first.
+`OperationBorrow.closed` reports local terminal authority after closure or handoff, not successful
+copying, resolved effects or completed cleanup.
+
 Retained recovery facts and cleanup debt are published before the borrow is handed off; a clean,
 quiescent row resolves. Payloads carry lifecycle evidence only. They exclude file or JSON content,
 credentials, commands, routes and connection objects. This is private, additive groundwork. It does
 not claim production orchestration, recovery takeover, RunContext adoption, permission enforcement
 or the future #377 lock hierarchy.
 
-The private file-call codec preserves version-one records byte-for-byte. Bootstrap-bound records use
-version two, retaining root-entry identity and the full guest separately from the body identity. It
+The private file-call codec preserves version-one and version-two records byte-for-byte when no
+upload-child association is supplied. Associated uploads use version three without numeric bootstrap
+and version four with it. Both include an explicit success marker from admission. Bootstrap-bound
+records retain root-entry identity and the full guest separately from the body identity. The codec
 validates Linux system-Python selection, target boot and any gate's full guest before encoding or
 accepting persisted bytes. Each typed record exposes its actual payload version; installation and
 updates use that version rather than a global latest-version assumption. `FileOperation` accepts one
 constructor-bound context, checks its selected VM boot, and gives each prepared binding that same
 context before registration or dispatch. Gate setup and bound promotion preserve it. JSON and
 package child publication, exact package retry and retained updates use the encoded record's
-version. Context-free private calls retain version-one semantics; bootstrap-bound calls use version
-two. Immutable bootstrap facts do not change the reserved recovery growth, and all records remain
-within the existing 8,192-byte envelope. Fresh recovery preparation and production VM composition
-are not yet connected. Existing private recovery adapters are not an accepted recovery path for
-bootstrap-bound records, and no old record is upgraded or granted execution authority.
+version. Unassociated context-free private calls retain version-one semantics; unassociated
+bootstrap-bound calls use version two. Immutable bootstrap and child association facts do not change
+the reserved recovery growth, and all records remain within the existing 8,192-byte envelope. Fresh
+recovery preparation and production VM composition are not yet connected. Existing private recovery
+adapters are not an accepted recovery path for bootstrap-bound records, and no old record is
+upgraded or granted execution authority.
 
 Core recovery can use `OperationOwner.admit_recovery_support_obligation` to retain a bounded new
 support effect under the exact sealed, unresolved recovery generation. It atomically creates a

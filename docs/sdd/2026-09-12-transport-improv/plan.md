@@ -4150,7 +4150,7 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       exact-operation path confinement and safe target/phase diagnostics. Complete production
       ownership, local download publication, directory transfer and native acceptance remain
       required; these private building blocks do not close those gates.
-- [ ] Implement the private upload-child core checkpoint selected in the
+- [x] Implement the private upload-child core checkpoint selected in the
       [directory composition boundary](file-operations-lld.md#generic-directory-transfer-child-checkpoints).
       Admit bounded transfer association with the exact ordinary file-call child before effects;
       persist positive settled success before immutable receipt closure. Preserve failure and

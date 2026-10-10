@@ -1027,11 +1027,19 @@ resumable plan. Recovery handles only exact retained obligations; a crash betwee
 does not authorize reconstructing or continuing the remaining transfer. Workstation paths and the
 remaining manifest are not persisted, and no post-crash local repair is promised.
 
-The first private increment is limited to upload-child admission, success checkpoint publication and
-bookkeeping settlement; its implementation remains open. Directory facade options, traversal and
-extraction, aggregate partial-result semantics, download-side checkpoints and native proof remain
-required work before complete R7 or public RunContext acceptance. The package callback and
-domain-specific artifact ownership must not be weakened while those pieces are built.
+The private upload-child kernel implements admission, success checkpoint publication and bookkeeping
+settlement in ordinary `FileOperation.upload`. Associated records use payload versions three and
+four, preserving unassociated versions one and two without a database migration. The false marker is
+present at admission; only positively complete, settled success changes it to true. Exact revision
+and payload confirmation precede immutable closure. Native aggregate teardown retries only retained
+bookkeeping, not helper effects. Local borrow closure or handoff is not proof of a checkpoint,
+resolved effects or cleanup; after settled retained-effect handoff, unresolved rows alone do not
+universally forbid other body borrows. Teardown separately stops admission first.
+
+Directory facade options, traversal and extraction, aggregate partial-result semantics,
+download-side checkpoints and native proof remain required work before complete R7 or public
+RunContext acceptance. The package callback and domain-specific artifact ownership must not be
+weakened while those pieces are built.
 
 ### DOWNLOAD recovery dispatch
 
