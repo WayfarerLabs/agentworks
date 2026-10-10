@@ -35,9 +35,11 @@ from agentworks.execution._managed_job_access import (
 from agentworks.execution._managed_job_protocol import encode_managed_job_fact
 from agentworks.execution._managed_observation_exchange import (
     ManagedObservationCandidate,
-    observe_managed_run,
-    read_managed_output,
+    PreparedManagedRead,
+    execute_managed_read,
+    prepare_managed_read,
 )
+from agentworks.execution._managed_observation_protocol import ManagedOperation
 from agentworks.execution._managed_observe_access import (
     ManagedObserveControlFact,
     ManagedObserveOutcome,
@@ -159,8 +161,9 @@ class ManagedExecutionControlFact(Exception):
 class _ActiveHelperCall:
     carrier: Carrier
     borrow: OperationBorrow
-    prepared: PreparedInlineCandidate | None
+    prepared: PreparedInlineCandidate | PreparedManagedRead | None
     operation: BorrowedFixedHelperCarrier
+    inline: bool = False
     closure_delivery: HelperClosureDelivery | None = None
     closure_expectation: HelperClosureExpectation | None = None
     not_sent: bool = False
@@ -356,58 +359,63 @@ class ExecutionOperation:
         stream: Stream | None,
     ) -> tuple[ManagedObservationCandidate, ManagedObserveOutcome]:
         """Run one fixed read using the same lifetime row as inline execution."""
-        with self._admission_guard:
-            if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
-                raise StateError("Execution operation cannot admit a managed read")
-            binding = self._native_binding
-            if binding is None or carrier is not binding.carrier:
-                raise ValidationError("Managed read requires its selected native carrier")
-            active = self._borrow_helper_call(carrier, None)
-            operation = active.operation
-        try:
-            self._admit(active)
-            if self._route_check is not None:
-                self._route_check(deadline)
-            if stream is None:
-                candidate = observe_managed_run(
-                    operation,
-                    expected_launch=expected_launch,
-                    plan=root_plan,
-                    deadline=deadline,
-                    runtime_selection=runtime_selection,
-                    guest=guest,
-                )
-            else:
-                candidate = read_managed_output(
-                    operation,
-                    expected_launch=expected_launch,
-                    stream=stream,
-                    plan=root_plan,
-                    deadline=deadline,
-                    runtime_selection=runtime_selection,
-                    guest=guest,
-                )
-            active.candidate = _without_output(candidate)
-            operation.settle(candidate.dispatch, candidate.carrier_completion)
-            custody = OwnedInlineOutcome(
-                pending_remote_effects=operation.pending_remote_effects,
-                coordination_uncertain=operation.coordination_uncertain,
-                requires_owner_retention=operation.requires_owner_retention,
-            )
-        except BaseException as control:
-            self._raise_control(control, active, operation, deadline)
-        with self._admission_guard:
-            try:
-                self._capture(active, custody)
-            except BaseException:
-                active.bookkeeping_retained = True
-                raise
-        return candidate, ManagedObserveOutcome(
-            _without_output(candidate),
-            custody.pending_remote_effects,
-            custody.coordination_uncertain,
-            custody.requires_owner_retention,
+        prepared = prepare_managed_read(
+            operation=ManagedOperation.OBSERVE if stream is None else ManagedOperation.READ_OUTPUT,
+            expected_launch=expected_launch,
+            stream=stream,
+            plan=root_plan,
+            deadline=deadline,
+            runtime_selection=runtime_selection,
+            guest=guest,
         )
+        active = None
+        try:
+            with self._admission_guard:
+                if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
+                    raise StateError("Execution operation cannot admit a managed read")
+                binding = self._native_binding
+                if binding is None or carrier is not binding.carrier:
+                    raise ValidationError("Managed read requires its selected native carrier")
+                active = self._borrow_helper_call(carrier, prepared)
+                operation = active.operation
+            try:
+                if binding._new_helper_delivery is not None and prepared.closure_expectation is not None:
+                    active.closure_expectation = prepared.closure_expectation
+                    active.closure_delivery = binding._new_helper_delivery(prepared.closure_expectation)
+                    active.operation = BorrowedFixedHelperCarrier(active.closure_delivery, active.borrow)
+                    operation = active.operation
+                self._admit(active)
+                if self._route_check is not None:
+                    self._route_check(deadline)
+                candidate = execute_managed_read(operation, prepared, deadline=deadline)
+                active.candidate = _without_output(candidate)
+                completion = candidate.carrier_completion
+                if active.closure_delivery is not None and not active.closure_delivery.closure_proven:
+                    completion = None
+                operation.settle(candidate.dispatch, completion)
+                custody = OwnedInlineOutcome(
+                    pending_remote_effects=operation.pending_remote_effects,
+                    coordination_uncertain=operation.coordination_uncertain,
+                    requires_owner_retention=operation.requires_owner_retention,
+                )
+            except BaseException as control:
+                self._raise_control(control, active, operation, deadline)
+            try:
+                with self._admission_guard:
+                    self._capture(active, custody)
+            except BaseException as control:
+                self._raise_control(control, active, operation, deadline)
+            return candidate, ManagedObserveOutcome(
+                _without_output(candidate),
+                custody.pending_remote_effects,
+                custody.coordination_uncertain,
+                custody.requires_owner_retention,
+            )
+        finally:
+            prepared.clear()
+            if active is not None:
+                self._detach_helper_payload(active)
+                active.prepared = None
 
     def observe_job(self, reference: JobRef, carrier: Carrier, deadline: Deadline) -> ManagedObserveOutcome:
         """Observe a retained OP job or an exact constructor-bound RESOURCE job."""
@@ -1139,8 +1147,9 @@ class ExecutionOperation:
     def _borrow_helper_call(
         self,
         carrier: Carrier,
-        prepared: PreparedInlineCandidate | None,
+        prepared: PreparedInlineCandidate | PreparedManagedRead | None,
         *,
+        inline: bool = False,
         disposal: ManagedDisposalBinding | None = None,
         start: ManagedResourceStartBinding | None = None,
         replacing: _ActiveHelperCall | None = None,
@@ -1150,7 +1159,15 @@ class ExecutionOperation:
         active = None
         try:
             operation = BorrowedFixedHelperCarrier(carrier, borrow)
-            active = _ActiveHelperCall(carrier, borrow, prepared, operation, disposal=disposal, start=start)
+            active = _ActiveHelperCall(
+                carrier,
+                borrow,
+                prepared,
+                operation,
+                inline=inline,
+                disposal=disposal,
+                start=start,
+            )
             if replacing is not None:
                 active.tracking_key = replacing.tracking_key
             if disposal is None and start is None and self._dispatch_id is None:
@@ -1199,7 +1216,7 @@ class ExecutionOperation:
         with self._admission_guard:
             if self._finishing or self._active_inline_calls or self._unfinished_inline_executions:
                 raise StateError("Inline execution cannot admit new work")
-            active = self._borrow_helper_call(carrier, prepared)
+            active = self._borrow_helper_call(carrier, prepared, inline=True)
             operation = active.operation
         try:
             try:
@@ -1228,13 +1245,22 @@ class ExecutionOperation:
                     raise
             return outcome
         finally:
-            if active.closure_delivery is not None:
-                # Positive nondispatch survives; caller observations and input do not.
-                active.not_sent = active.candidate is not None and active.candidate.dispatch is Dispatch.NOT_SENT
-                active.prepared = None
-                active.candidate = None
-                if active.outcome is not None:
-                    active.outcome = replace(active.outcome, candidate=None)
+            self._detach_helper_payload(active)
+
+    @staticmethod
+    def _detach_helper_payload(active: _ActiveHelperCall) -> None:
+        if isinstance(active.prepared, PreparedManagedRead) and isinstance(
+            active.candidate, ManagedObservationCandidate
+        ):
+            # Plain carriers still need their original termination evidence.
+            active.candidate = replace(active.candidate, observation=None)
+        if active.closure_delivery is not None:
+            # Positive nondispatch survives; caller observations and input do not.
+            active.not_sent = active.candidate is not None and active.candidate.dispatch is Dispatch.NOT_SENT
+            active.prepared = None
+            active.candidate = None
+            if active.outcome is not None:
+                active.outcome = replace(active.outcome, candidate=None)
 
     def _outcome(
         self,
@@ -1315,7 +1341,7 @@ class ExecutionOperation:
                             requires_owner_retention=outcome.requires_owner_retention,
                         )
                     )
-                    if active.prepared is None and active.closure_delivery is None
+                    if not active.inline
                     else InlineExecutionControlFact(outcome)
                 )
                 fact.__cause__ = control.__cause__
