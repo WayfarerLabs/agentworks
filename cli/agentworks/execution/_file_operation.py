@@ -1657,12 +1657,8 @@ class FileOperation:
         if child is not None:
             complete = (
                 outcome.status is FileUploadStatus.COMPLETE
-                and outcome.publication_confirmed
                 and not outcome.deadline_exceeded
-                and outcome.failure is None
                 and not outcome.publication_uncertain
-                and not outcome.requires_owner_retention
-                and not self._upload_uncertainty(outcome)
             )
             if complete or outcome.requires_owner_retention:
                 record = self._obligation(
