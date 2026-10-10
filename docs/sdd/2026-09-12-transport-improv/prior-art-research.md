@@ -43,13 +43,14 @@ submits one POST in the tested cases. Disabling automatic polling is separately 
 counts describe the scripted service pipeline, not credential-provider requests, real socket
 delivery, server acceptance exactly once, request drain or native startup safety.
 
-Decision for the next Azure producer: use the public compute client's streamed request method for
-the documented fixed start endpoint. The generated start method reads the initial response body
-before returning even with polling disabled. The public streamed path lets the adapter validate and
-retain only selected acknowledgment headers without reading a provider body or constructing a
-poller. This new path still needs its own actual-SDK tests; the completed middleware audit is not
-evidence that the producer exists or that its receipt is validated. Startup settlement and native
-proof remain separate.
+Decision for the Azure producer: use the public compute client's streamed request method for the
+documented fixed start endpoint. The generated start method reads the initial response body before
+returning even with polling disabled. The public streamed path lets the adapter validate and retain
+only selected acknowledgment headers without reading a provider body or constructing a poller. The
+private producer now includes separate actual-SDK scripted transport tests for this path, covering
+one POST, zero GET and no response-body read, plus matching acknowledgment and returned-handle
+cleanup. The middleware audit alone did not establish those properties. Private review and
+interruption cleanup remain in progress; startup settlement and native proof remain separate.
 
 Sources:
 [public streamed request](https://learn.microsoft.com/en-us/python/api/azure-mgmt-compute/azure.mgmt.compute.computemanagementclient?view=azure-python),

@@ -1218,37 +1218,42 @@ obligation, and mark possible effect durably before one start submission. Interr
 marking or response publication never permits another submission. Reconciliation is fenced ledger
 bookkeeping, not a start retry or startup settlement.
 
-Use a fresh compute client with explicit public policies: all retry counts zero, bearer-token
-authentication whose public challenge hook refuses resending, and no redirect or resource-provider
-registration policy. Submit a body-free POST using the public streamed request method to the fixed
-public ARM start endpoint with API version `2026-04-01`. Encode selected path components rather than
-interpreting a stored resource ID as URL syntax. Do not use the legacy client cache, a generated
-start poller, private SDK fields, a response body or background polling. Credential work and socket
-timeouts remain synchronous and best effort, with checks against the original finite deadline.
+Use a fresh compute client with an explicit public policy list containing only bearer-token
+authentication whose public challenge hook refuses resending. Omit retry, redirect and
+resource-provider registration middleware rather than configuring forbidden retries. Submit a
+body-free POST using the public streamed request method to the fixed public ARM start endpoint with
+API version `2026-04-01`. Encode selected path components rather than interpreting a stored resource
+ID as URL syntax. Do not use the legacy client cache, a generated start poller, private SDK fields,
+a response body or background polling. Credential work and socket timeouts remain synchronous and
+best effort, with checks against the original finite deadline.
 
 Bind the response's request identity to that exact POST and accept only HTTP 200 or 202 as an
 acknowledgment. Retain a bounded, canonical non-secret record of status, optional request ID and
 optional operation headers. HTTP 202 needs at least one operation header. A retained operation URL
 must use HTTPS on the fixed public ARM origin, the selected subscription, no credentials, port or
 fragment, and only an optional API-version query. Store it as evidence; this increment does not
-follow it. Refuse malformed, conflicting, oversized or foreign acknowledgment data without rendering
-or storing the provider body. The actual streamed SDK path needs independent transmission and
-resource-cleanup tests before this producer is treated as implemented.
+follow it. Validate the retained acknowledgment headers, not discarded response metadata. Refuse
+malformed, conflicting, oversized or foreign acknowledgment data without rendering or storing the
+provider body. Separate actual-SDK scripted tests now exercise transmission and returned-handle
+cleanup for this path. Private review and interruption cleanup remain open; this bounded evidence
+does not establish native startup or complete Azure access.
 
-Retain a valid matching acknowledgment before publication, cleanup or late-success rejection. Close
-actual returned response and client handles; an attempted close is not confirmed retirement. Retain
-uncertain original handles rather than discarding them after a cleanup exception. Ordinary cleanup
-failures do not replace the earlier outcome, a new control exception escapes, and an already
-escaping original control takes precedence. Local cleanup and remote possible effect stay separate.
-Neither HTTP 200, HTTP 202, local closure nor a later running-power snapshot resolves this
-producer's possible-effect obligation.
+Retain a valid matching acknowledgment before publication, cleanup or late-success rejection. Keep
+actual returned response and client handles in adapter custody before cleanup starts, removing only
+positively confirmed closures. An interruption between originals must retain the remaining handles;
+an attempted close is not confirmed retirement. Retain uncertain original handles rather than
+discarding them after a cleanup exception. Ordinary cleanup failures do not replace the earlier
+outcome, a new control exception escapes, and an already escaping original control takes precedence.
+Local cleanup and remote possible effect stay separate. Neither HTTP 200, HTTP 202, local closure
+nor a later running-power snapshot resolves this producer's possible-effect obligation.
 
 This is private implementation within #833, not separately mergeable native access. Later owned
 access must define and review provider-specific startup settlement, route lifetime, endpoint trust,
 guest preparation and aggregate release, then prove them natively before RunContext admission. A
 missing acknowledgment remains unknown. The
 [middleware research](prior-art-research.md#azure-and-gcp-mutation-middleware-proof) records the
-completed offline evidence and the still-unproved public streamed path.
+completed middleware audit and the producer's separate scripted streamed-path evidence, with their
+remaining limits.
 
 ### Proxmox activation evidence boundary
 

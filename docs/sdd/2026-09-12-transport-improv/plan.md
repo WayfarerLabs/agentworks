@@ -1063,6 +1063,13 @@ Review corrected stored-client interruption cleanup and removed an unreachable e
 Successful startup settlement, complete AWS access, native proof and whole-PR acceptance remain open
 below.
 
+- [ ] Correct AWS activation's uncertain-client-close custody before owned access integration. The
+      private Azure review found that `EC2Activation.start()` suppresses an ordinary close exception
+      while retaining the client only in a local variable. Retain the actual original until closure
+      is confirmed, including interrupted cleanup, and expose incomplete local cleanup to aggregate
+      release. Preserve the acknowledged result, original control precedence, one-shot admission and
+      unresolved remote possible effect. Add actual-SDK closure fault tests; this correction does
+      not alter the earlier completed producer record.
 - [ ] Complete owned AWS access with a reviewed successful-start settlement rule, fresh power and
       exact guest preparation, endpoint trust and selected firewall-route lifetime. Obtain native
       startup/uncertainty/cleanup evidence before admission through RunContext. Missing start
