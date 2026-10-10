@@ -227,12 +227,16 @@ command hold; a physical recoverable job-length availability hold remains future
 stop/reboot and host loss are outside that no-idle-stop fact. These private increments do not
 establish all-platform duration availability, session namespaces or a public RunContext surface.
 
-The private native composition acquires the exact VM owner, then retains the passive
-`VMPlatform.build_native_execution_access()` result before preparation effects. Its
-`OwnedNativePlatformAccess` keeps platform activation, hold and partial preparation evidence; only
-core closes child work and local delivery, checks the complete ledger, seals obligations and
-releases the aggregate owner. WSL2 and Proxmox supply these private adapters. Other platforms and
-the public RunContext surface remain pending.
+The private native composition acquires the exact VM owner and validates the selection, then retains
+the passive `VMPlatform.build_native_execution_access()` result before its first
+`OwnedNativePlatformAccess.observe_power(deadline)` read. The same access, owner, local custody and
+original deadline cover that read and subsequent preparation. Unsupported state, expired observation
+or operator-stopped intent refuses preparation without activation, holds, routes or guest work.
+Initial read failures retain the same access for cleanup and, when retirement is uncertain, cleanup
+retry. The access also keeps platform activation, hold and partial preparation evidence; only core
+closes child work and local delivery, checks the complete ledger, seals obligations and releases the
+aggregate owner. WSL2 and Proxmox supply these private adapters. Owned cloud SDK read clients, other
+platforms and the public RunContext surface remain pending.
 
 The private cloud start producers in `plugins/aws/_activation.py`, `plugins/azure/_activation.py`
 and `plugins/gcp/_activation.py` admit one selected start under a retained exact VM owner. They keep
