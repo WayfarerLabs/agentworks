@@ -82,8 +82,8 @@ def test_deadline_and_operation_admission(role):
     role.owner.end()
     with pytest.raises(StateError):
         role.owner.guard_ec2_send()
-    role.owner.stop()
     role.clock[0] = 100.0
+    role.owner.begin(Deadline.after(5))
     with pytest.raises(StateError):
         role.owner.begin(Deadline.after(5))
     assert role.closes == []

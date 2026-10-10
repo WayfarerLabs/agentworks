@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import parse_qs
@@ -33,6 +34,10 @@ def sdk_role(monkeypatch, tmp_path):
     from botocore.client import BaseClient
     from botocore.httpsession import URLLib3Session
 
+    # Discard inherited SDK configuration before selecting this offline setup.
+    for variable in tuple(os.environ):
+        if variable.startswith("AWS_"):
+            monkeypatch.delenv(variable)
     assert version("boto3") == "1.43.92" and version("botocore") == "1.43.93"
     clock = [100.0]
     wall = [datetime(2030, 1, 1, tzinfo=UTC)]
@@ -183,6 +188,20 @@ def observe(probe: SimpleNamespace) -> VMStatus:
 def advisory(probe: SimpleNamespace) -> None:
     assert observe(probe) is VMStatus.RUNNING
     probe.wall[0] += timedelta(minutes=50)
+
+
+def test_inherited_profiles_and_endpoints_cannot_change_offline_sdk_setup(monkeypatch, request):
+    for variable in (
+        "AWS_PROFILE",
+        "AWS_DEFAULT_PROFILE",
+        "AWS_ENDPOINT_URL",
+        "AWS_ENDPOINT_URL_EC2",
+        "AWS_ENDPOINT_URL_STS",
+    ):
+        monkeypatch.setenv(variable, "poison-inherited-setting")
+    probe = request.getfixturevalue("sdk_role")
+    assert observe(probe) is VMStatus.RUNNING
+    assert probe.calls == ["sts", "ec2"] and all(probe.signed)
 
 
 def test_real_sdk_initial_cached_and_rotating_credentials(sdk_role):

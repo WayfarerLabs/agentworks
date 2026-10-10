@@ -11,7 +11,7 @@ from agentworks.capabilities.vm_platform.base import (
 )
 from agentworks.db import VMStatus
 from agentworks.errors import AgentworksError, NotFoundError, StateError
-from agentworks.plugins.aws._owned_auth import _build_access_key_session, _OwnedRoleSession
+from agentworks.plugins.aws._owned_auth import _OwnedRoleSession
 from agentworks.plugins.aws.auth import _build_ambient_session
 from agentworks.plugins.aws.config import AwsAmbientAuth
 from agentworks.plugins.aws.network import error_code, wrap_ec2_error
@@ -100,64 +100,57 @@ class EC2OwnedAccess:
                     self._session = _build_ambient_session(session_region)
                 else:
                     assert self._role_auth is not None
-                    self._session = _build_access_key_session(
+                    self._session = self._role_auth.build_session(
                         auth,
                         self._ctx.secret(auth.access_key_secret),
                         self._platform.site_name,
                         session_region,
-                        owner=self._role_auth,
                     )
             from botocore.config import Config
 
             remaining = provider_locator_remaining(deadline, vm_name=self._vm.name)
             try:
-                try:
-                    self._read_client = self._session.client(
-                        "ec2",
-                        region_name=region,
-                        config=Config(
-                            connect_timeout=remaining,
-                            read_timeout=remaining,
-                            retries={"total_max_attempts": 1, "mode": "standard"},
-                        ),
+                self._read_client = self._session.client(
+                    "ec2",
+                    region_name=region,
+                    config=Config(
+                        connect_timeout=remaining,
+                        read_timeout=remaining,
+                        retries={"total_max_attempts": 1, "mode": "standard"},
+                    ),
+                )
+                if self._role_auth is not None:
+                    self._read_client.meta.events.register(
+                        "before-send.ec2.DescribeInstances", self._role_auth.guard_ec2_send
                     )
-                    if self._role_auth is not None:
-                        self._read_client.meta.events.register(
-                            "before-send.ec2.DescribeInstances", self._role_auth.guard_ec2_send
-                        )
-                except AgentworksError:
-                    raise
-                except Exception as exc:
-                    raise wrap_ec2_error(exc) from exc
-                client = self._read_client
-                provider_locator_remaining(deadline, vm_name=self._vm.name)
-                try:
-                    result = client.describe_instances(InstanceIds=[instance_id])
-                except AgentworksError:
-                    raise
-                except Exception as exc:
-                    if error_code(exc) == "InvalidInstanceID.NotFound":
-                        raise NotFoundError(
-                            f"EC2 instance '{instance_id}' no longer exists",
-                            entity_kind="vm",
-                            entity_name=self._vm.name,
-                        ) from exc
-                    raise wrap_ec2_error(exc) from exc
-                owner_id = self._platform._locator_owner_id(result, instance_id, self._vm)
-                if owner_id != account_id:
-                    raise StateError(
-                        f"EC2 instance '{instance_id}' belongs to a different AWS account",
+            except AgentworksError:
+                raise
+            except Exception as exc:
+                raise wrap_ec2_error(exc) from exc
+            client = self._read_client
+            provider_locator_remaining(deadline, vm_name=self._vm.name)
+            try:
+                result = client.describe_instances(InstanceIds=[instance_id])
+            except AgentworksError:
+                raise
+            except Exception as exc:
+                if error_code(exc) == "InvalidInstanceID.NotFound":
+                    raise NotFoundError(
+                        f"EC2 instance '{instance_id}' no longer exists",
                         entity_kind="vm",
                         entity_name=self._vm.name,
-                        hint="restore the original persisted AWS account identity before retrying",
-                    )
-                instance: dict[str, Any] = result["Reservations"][0]["Instances"][0]
-                locator = ProviderLocator(f"aws-ec2:{account_id}:{region}:{instance_id}")
-                provider_locator_remaining(deadline, vm_name=self._vm.name)
-            except BaseException as error:
-                if not isinstance(error, Exception):
-                    control = error
-                raise
+                    ) from exc
+                raise wrap_ec2_error(exc) from exc
+            owner_id = self._platform._locator_owner_id(result, instance_id, self._vm)
+            if owner_id != account_id:
+                raise StateError(
+                    f"EC2 instance '{instance_id}' belongs to a different AWS account",
+                    entity_kind="vm",
+                    entity_name=self._vm.name,
+                    hint="restore the original persisted AWS account identity before retrying",
+                )
+            instance: dict[str, Any] = result["Reservations"][0]["Instances"][0]
+            locator = ProviderLocator(f"aws-ec2:{account_id}:{region}:{instance_id}")
             provider_locator_remaining(deadline, vm_name=self._vm.name)
             completed = True
             return locator, instance
@@ -224,7 +217,7 @@ class EC2OwnedAccess:
         try:
             self._closed = True
             if self._role_auth is not None:
-                self._role_auth.stop()
+                self._role_auth.end()
             provider_locator_remaining(deadline, vm_name=self._vm.name)
             self._close_clients()
             provider_locator_remaining(deadline, vm_name=self._vm.name)

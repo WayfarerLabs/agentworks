@@ -24,6 +24,7 @@ from agentworks.errors import (
 from agentworks.execution.carrier import Deadline
 from agentworks.plugins.aws import _native_access
 from agentworks.plugins.aws._native_access import EC2OwnedAccess
+from agentworks.plugins.aws._owned_auth import _OwnedRoleSession
 from agentworks.plugins.aws.network import EC2Error
 from agentworks.plugins.aws.platform import EC2Platform
 
@@ -126,7 +127,7 @@ def owned_read(monkeypatch):
         pytest.fail("unexpected legacy or alternate credential path")
 
     monkeypatch.setattr(_native_access, "_build_ambient_session", ambient)
-    monkeypatch.setattr(_native_access, "_build_access_key_session", deny)
+    monkeypatch.setattr(_OwnedRoleSession, "build_session", deny)
     for name in ("_get_session", "_client", "_read_exact_instance"):
         monkeypatch.setattr(platform, name, deny)
     probe.session = session
@@ -138,7 +139,7 @@ def test_constructor_is_passive(owned_read, monkeypatch):
         pytest.fail("constructor reached selected credentials")
 
     monkeypatch.setattr(_native_access, "_build_ambient_session", deny)
-    monkeypatch.setattr(_native_access, "_build_access_key_session", deny)
+    monkeypatch.setattr(_OwnedRoleSession, "build_session", deny)
     access = EC2OwnedAccess(owned_read.vm, owned_read.platform, RunContext())
     assert not access.cleanup_incomplete and owned_read.events == []
     assert access.close(Deadline.after(5))
@@ -183,14 +184,14 @@ def test_explicit_credential_mode_delivers_selected_secret_without_fallback(owne
     )
     calls = []
 
-    def explicit(auth, secret, site, region, **kwargs):
+    def explicit(owner, auth, secret, site, region):
         calls.append((auth.assume_role_arn, secret, site, region))
         return owned_read.session
 
     def deny(*args, **kwargs):
         pytest.fail("unexpected ambient fallback")
 
-    monkeypatch.setattr(_native_access, "_build_access_key_session", explicit)
+    monkeypatch.setattr(_OwnedRoleSession, "build_session", explicit)
     monkeypatch.setattr(_native_access, "_build_ambient_session", deny)
     access = EC2OwnedAccess(owned_read.vm, platform, RunContext(secrets=Secrets()))
 
@@ -239,7 +240,7 @@ def test_configured_credential_failure_has_no_ambient_fallback(owned_read, monke
     def deny(*args):
         pytest.fail("unexpected ambient fallback")
 
-    monkeypatch.setattr(_native_access, "_build_access_key_session", explicit)
+    monkeypatch.setattr(_OwnedRoleSession, "build_session", explicit)
     monkeypatch.setattr(_native_access, "_build_ambient_session", deny)
     access = EC2OwnedAccess(owned_read.vm, platform, RunContext(secrets=Secrets()))
     with pytest.raises(type(failure)) as caught:
@@ -264,7 +265,7 @@ def test_missing_context_secret_refuses_before_session_construction(owned_read, 
     def deny(*args):
         pytest.fail("unresolved secret reached a credential builder")
 
-    monkeypatch.setattr(_native_access, "_build_access_key_session", deny)
+    monkeypatch.setattr(_OwnedRoleSession, "build_session", deny)
     monkeypatch.setattr(_native_access, "_build_ambient_session", deny)
     access = EC2OwnedAccess(owned_read.vm, platform, RunContext())
     with pytest.raises(ConfigError):

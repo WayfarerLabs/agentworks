@@ -25,7 +25,6 @@ class _OwnedRoleSession:
         self._vm_name = vm_name
         self._deadline: Deadline | None = None
         self._client: Any = None
-        self._closed = False
         self._base: Any = None
         self._fetcher: Any = None
 
@@ -34,7 +33,7 @@ class _OwnedRoleSession:
         return self._client is not None
 
     def begin(self, deadline: Deadline) -> None:
-        if self._deadline is not None or self._closed or self.cleanup_incomplete:
+        if self._deadline is not None or self.cleanup_incomplete:
             raise self._refusal()
         provider_locator_remaining(deadline, vm_name=self._vm_name)
         self._deadline = deadline
@@ -50,7 +49,7 @@ class _OwnedRoleSession:
         )
 
     def _remaining(self) -> float:
-        if self._closed or self._deadline is None:
+        if self._deadline is None:
             raise self._refusal()
         return provider_locator_remaining(self._deadline, vm_name=self._vm_name)
 
@@ -113,9 +112,6 @@ class _OwnedRoleSession:
             else:
                 self._client = None
 
-    def stop(self) -> None:
-        self._closed = True
-
     def build_session(self, auth: AwsAccessKeyAuth, secret: str, site: str, region: str) -> Any:
         import boto3
         import botocore.session
@@ -129,7 +125,10 @@ class _OwnedRoleSession:
                 detail="the framework resolved the configured secret to an empty string",
                 entity_kind="vm-site",
                 entity_name=site,
-                hint=f"check the value of the '{auth.access_key_secret}' secret",
+                hint=(
+                    f"check the value of the '{auth.access_key_secret}' secret (its default env-var backend key is "
+                    "AW_SECRET_AWS_SECRET_ACCESS_KEY)"
+                ),
             )
         base = boto3.session.Session(
             aws_access_key_id=auth.access_key_id,
@@ -149,10 +148,3 @@ class _OwnedRoleSession:
         assumed._credentials = DeferredRefreshableCredentials(method="assume-role", refresh_using=self._refresh)
         assumed.set_config_variable("region", region)
         return boto3.session.Session(botocore_session=assumed)
-
-
-def _build_access_key_session(
-    auth: AwsAccessKeyAuth, secret: str, site: str, region: str, *, owner: _OwnedRoleSession
-) -> Any:
-    """Keep the owned builder distinct from legacy session/client caches."""
-    return owner.build_session(auth, secret, site, region)
