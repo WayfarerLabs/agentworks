@@ -238,6 +238,23 @@ closes child work and local delivery, checks the complete ledger, seals obligati
 aggregate owner. WSL2 and Proxmox supply these private adapters. Owned cloud SDK read clients, other
 platforms and the public RunContext surface remain pending.
 
+`plugins/aws/_native_access.py` separately stages a private, passive `EC2OwnedAccess` for exact
+power, locator and public-endpoint observations. It is not an owned native access factory. The
+caller retains it before observing; configured credential selection remains explicit, without the
+legacy EC2 client cache or fallback to another mode. One original returned EC2 read client is
+retained before dispatch, with exact stored account/region/instance validation, deadline-derived SDK
+budgets and one total service attempt. Ordinary close failure preserves the earlier result or error
+and leaves `cleanup_incomplete` true. Cleanup retries only that original; a normal public close
+clears the slot. An occupied slot or closed access refuses further observations. An already escaping
+control exception remains primary if cleanup is interrupted.
+
+This slot covers neither SDK constructor handoff nor credential clients. In particular, the
+configured deferred role path's concrete credential responsibility remains unfinished before full
+AWS access exposure. Scripted actual-SDK service tests use synthetic credentials; normal public
+close does not establish physical socket drain, request termination or native acceptance. This
+staging object supplies no activation settlement, route lifetime, guest preparation, independent job
+availability or RunContext admission.
+
 The private cloud start producers in `plugins/aws/_activation.py`, `plugins/azure/_activation.py`
 and `plugins/gcp/_activation.py` admit one selected start under a retained exact VM owner. They keep
 bounded acknowledgment payloads and reconcile interrupted ledger replies without resubmission. They
