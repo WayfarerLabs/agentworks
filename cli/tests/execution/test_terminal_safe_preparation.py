@@ -57,10 +57,10 @@ def test_hex_preserves_all_literal_octets_and_does_not_consume_keyboard(monkeypa
 def test_encoded_and_decoded_maximum_preserves_existing_acceptance(monkeypatch):
     argv = (b"/bin/true",)
     decoded_overhead = len(_payload(argv, {}, b"")) // 2
-    source = b"\xff" * (guest.MAX_PAYLOAD_BYTES - decoded_overhead)
+    source = b"\xff" * (32768 - decoded_overhead)
     wire = _payload(argv, {}, source)
-    assert len(wire) == guest.MAX_ENCODED_PAYLOAD_BYTES == 2 * guest.MAX_PAYLOAD_BYTES
-    assert len(bytes.fromhex(wire.decode("ascii"))) == guest.MAX_PAYLOAD_BYTES
+    assert len(wire) == 65536
+    assert len(bytes.fromhex(wire.decode("ascii"))) == 32768
     decoded, consumed = _decode(monkeypatch, wire, limit=997)
     assert decoded == (argv, {}, source) and consumed == len(wire)
     with pytest.raises(ValidationError):

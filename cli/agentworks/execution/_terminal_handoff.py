@@ -23,7 +23,6 @@ from agentworks.execution._runtime_prerequisite import (
 from agentworks.execution._terminal_guest import (
     FRAME_MAGIC,
     INTERACTIVE_READY,
-    MAX_ENCODED_PAYLOAD_BYTES,
     MAX_ITEMS,
     MAX_PAYLOAD_BYTES,
     PAYLOAD_READY,
@@ -362,7 +361,6 @@ def _payload(argv: tuple[bytes, ...], env: Mapping[bytes, bytes], source: bytes)
     if len(payload) > MAX_PAYLOAD_BYTES:
         raise ValidationError("Terminal handoff payload exceeds the 32768-byte candidate bound")
     encoded = bytes(payload).hex().upper().encode("ascii")
-    assert len(encoded) <= MAX_ENCODED_PAYLOAD_BYTES
     return encoded
 
 

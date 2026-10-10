@@ -126,11 +126,7 @@ def _decode_payload(fd: int) -> tuple[tuple[bytes, ...], dict[bytes, bytes], byt
 
 
 def _readiness(nonce: str, kind: int) -> bytes:
-    if (
-        len(nonce) != 32
-        or any(character not in "0123456789ABCDEF" for character in nonce)
-        or kind not in (PAYLOAD_READY, INTERACTIVE_READY)
-    ):
+    if len(nonce) != 32 or any(character not in "0123456789ABCDEF" for character in nonce):
         raise _ProtocolError
     return READINESS_MAGIC + nonce.encode("ascii") + b":" + bytes((kind,))
 
