@@ -63,11 +63,11 @@ Expiry observed during validation prevents subsequent dispatch.
 
 A command name selects an installed executable from the caller's PATH once per operation. The
 version probe and subsequent client launches use the same absolute selection, including native
-Windows executable suffixes. Windows never adds an implicit current-directory search. Relative or
-current-directory entries explicitly present in PATH remain operator selections; use an absolute
-`ssh_executable` to select a particular installed client. The selected executable and its directory
-must remain under operator control for the operation's lifetime. Selection does not download clients
-or alter the process environment.
+Windows executable suffixes. Windows ignores empty PATH components and never adds an implicit
+current-directory search. Explicit `.` and relative directory entries remain operator selections;
+POSIX keeps empty-component PATH semantics. Use an absolute `ssh_executable` to select a particular
+installed client. The selected executable and its directory must remain under operator control for
+the operation's lifetime. Selection does not download clients or alter the process environment.
 
 Every client ignores user/system SSH configuration and disables implicit agents, identities,
 certificates, proxies, multiplexing, inherited forwarding and known-host commands. Only the explicit
@@ -115,6 +115,10 @@ refresh preserves evidence and keeps new admissions blocked. If storage cannot d
 blocking, quiesce new use and repair storage before continuing. Retrying never silently reactivates
 old policy.
 
+Before publishing an enrollment candidate, its caller must successfully close the retained
+`SSHEnrollmentCustody`, then keep the source bytes stable during import or refresh. The bundle lock
+serializes destination policy; it does not stop an enrollment client from writing its candidate.
+
 An admitted operation keeps its selected generation for its lifetime. Refresh cannot revoke an
 already established session; its owner must end that session when policy requires it. Generations
 are retained, including failed publication evidence. There is no automatic cleanup or background
@@ -150,6 +154,12 @@ bundle and creation ID; changing them to obtain another first-contact attempt is
 Verified candidate evidence still requires explicit complete-policy import or refresh, including
 applicable CA and revocation sources and the expected generation. Ordinary connections stay on the
 managed trust reference. Candidate publication does not authorize deleting the retained evidence.
+
+An interruption before learning a key can leave an empty candidate that strict recovery cannot
+verify. After custody settles, an authorized maintainer can use `agw config refresh-ssh-trust` with
+independently confirmed complete replacement policy and the expected generation. Keep the failed
+candidate and creation identity. Ordinary strict use then admits the new policy; the old enrollment
+receipt is not regenerated, and recovery against its superseded generation still refuses.
 
 Enrollment callers create `SSHEnrollmentCustody(delivery)` before first contact or strict recovery
 and pass it as `custody`. The resource retains the candidate writer lock across every outcome.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -17,11 +18,12 @@ import pytest
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _process as process_core
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
-from agentworks.execution.carrier import CapturedOutput, CarrierIO, Deadline, Failure
+from agentworks.execution.carrier import CapturedOutput, CarrierIO, Deadline, Failure, PreparedInvocation
 from agentworks.execution.carriers._subprocess import ProcessResult
 from agentworks.execution.carriers.ssh import _trust_files as files
 from agentworks.execution.carriers.ssh import enrollment
 from agentworks.execution.carriers.ssh._io import run_process
+from agentworks.execution.carriers.ssh.client import SSHCarrier
 from agentworks.execution.carriers.ssh.connection import SSHConnection, admit_connection
 from agentworks.execution.carriers.ssh.enrollment import (
     SSHCreationProvenance,
@@ -337,6 +339,63 @@ def test_installed_ssh_auth_failure_retains_host_key_for_strict_recovery(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("enrollment_sshd", ["empty"], indirect=True)
+def test_installed_ssh_empty_candidate_allows_independent_policy_maintenance(
+    enrollment_caller: EnrollmentCaller,
+    enrollment_sshd: LocalSSH,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection, provenance = enrollment_sshd.connection, enrollment_sshd.provenance
+    bundle = connection.trust
+    assert isinstance(bundle, ManagedSSHTrust)
+    original = trust_status(bundle)
+    interruption = KeyboardInterrupt()
+
+    def interrupted_before_contact(*args: object, **kwargs: object) -> ProcessResult:
+        raise interruption
+
+    with monkeypatch.context() as patched:
+        patched.setattr(enrollment, "run_process", interrupted_before_contact)
+        with pytest.raises(KeyboardInterrupt) as caught:
+            enrollment_caller.enroll(connection, provenance=provenance, deadline=Deadline.after(5))
+        assert caught.value is interruption
+    assert enrollment_caller.delivery.settled
+    directory = next(bundle.directory.glob("enrollment-*"))
+    primary, manifest = directory / "known-hosts", directory / "state.json"
+    saved_manifest = manifest.read_bytes()
+    assert primary.read_bytes() == b""
+    with pytest.raises(SSHEnrollmentError):
+        enrollment_caller.recover(connection, provenance=provenance, deadline=Deadline.after(5))
+    with pytest.raises(SSHEnrollmentError):
+        enrollment_caller.enroll(connection, provenance=provenance, deadline=Deadline.after(5))
+
+    # The owned server's independently read key supplies complete maintenance
+    # policy. It does not turn the failed candidate into an enrollment receipt.
+    confirmed = tmp_path.resolve() / "independently-confirmed-policy"
+    confirmed.write_bytes(f"[{connection.host}]:{connection.port} ".encode() + enrollment_sshd.host_public_key)
+    replacement = refresh_trust(
+        bundle,
+        sources=SSHTrustFiles((*original.sources.known_hosts, confirmed), original.sources.revoked_host_keys),
+        authority="fixture independent maintenance",
+        expected_generation=original.generation,
+    )
+    assert replacement.generation != original.generation
+    report = SSHCarrier(connection).execute(
+        PreparedInvocation(("true",)),
+        io=CarrierIO(),
+        deadline=Deadline.after(5),
+        custody=enrollment_caller.delivery,
+    )
+    assert report.completion is not None and report.completion.code == 0
+    assert report.failure is None and enrollment_caller.delivery.settled
+    with pytest.raises(SSHEnrollmentError):
+        enrollment_caller.recover(connection, provenance=provenance, deadline=Deadline.after(5))
+    assert primary.read_bytes() == b"" and manifest.read_bytes() == saved_manifest
+    assert next(bundle.directory.glob("enrollment-*")) == directory
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("enrollment_sshd", ["empty"], indirect=True)
 def test_installed_ssh_positive_ack_without_saved_key_fails_strict_verification(
     enrollment_caller: EnrollmentCaller, enrollment_sshd: LocalSSH, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -608,11 +667,13 @@ def test_enrollment_pins_probe_and_both_acknowledgments_despite_path_change(
 
     monkeypatch.setattr(enrollment, "check_client_version", version)
     synthetic.enroll()
-    assert probes == [str(selected)]
-    assert [argv[0] for argv in synthetic.calls] == [str(selected), str(selected)]
+    assert len(probes) == 1 and os.path.samefile(probes[0], selected)
+    assert Path(probes[0]).is_absolute()
+    assert [argv[0] for argv in synthetic.calls] == [probes[0], probes[0]]
     synthetic.recover()
-    assert probes == [str(selected), str(replacement)]
-    assert synthetic.calls[-1][0] == str(replacement)
+    assert len(probes) == 2 and os.path.samefile(probes[1], replacement)
+    assert Path(probes[1]).is_absolute()
+    assert synthetic.calls[-1][0] == probes[1]
 
 
 def test_passive_or_refused_enrollment_close_does_not_settle_another_workflow(

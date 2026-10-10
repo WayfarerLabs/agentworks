@@ -90,7 +90,8 @@ class SSHEnrollmentCustody:
 
     One maintenance operation may use this resource. Keep it after any outcome
     until explicit close proves native settlement, flushes the final bytes and
-    releases the same writer lock. Do not reuse the supplied delivery storage.
+    releases the same writer lock. Reserve the supplied delivery storage until
+    this resource settles; another operation may reuse it after settlement.
     """
 
     def __init__(self, delivery: LocalDeliveryCustody) -> None:

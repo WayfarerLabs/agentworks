@@ -347,7 +347,7 @@ def test_windows_ssh_command_contains_only_short_fixed_bootstrap(
     native_root = Path(Path.cwd().anchor)
     trust = SSHTrustFiles((native_root / "keys" / "known-hosts",))
     connection = SSHConnection("host.example", "agent", native_root / "keys" / "identity", trust)
-    argv = build_ssh_argv(connection, _invocation(bundle, plan), trust=trust)
+    argv = build_ssh_argv(connection, _invocation(bundle, plan), trust=trust, executable=connection.ssh_executable)
     windows_command = subprocess.list2cmdline(argv)
 
     assert len(windows_command) < 32_767, family

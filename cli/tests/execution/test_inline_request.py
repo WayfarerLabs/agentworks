@@ -116,7 +116,7 @@ def test_complete_inline_helper_fits_qga_and_windows_command_bounds(plan: Identi
         Path("/keys/identity"),
         trust,
     )
-    ssh_argv = build_ssh_argv(connection, prepared.invocation, trust=trust)
+    ssh_argv = build_ssh_argv(connection, prepared.invocation, trust=trust, executable=connection.ssh_executable)
     windows_command = subprocess.list2cmdline(ssh_argv)
 
     assert FIXED_SOURCE.isascii() and input_data.isascii() and qga_body.isascii()

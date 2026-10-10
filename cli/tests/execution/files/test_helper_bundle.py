@@ -227,7 +227,7 @@ def test_snapshot_helper_retains_windows_and_qga_delivery_headroom() -> None:
         native_root / "keys" / "identity",
         trust,
     )
-    ssh_argv = build_ssh_argv(connection, invocation, trust=trust)
+    ssh_argv = build_ssh_argv(connection, invocation, trust=trust, executable=connection.ssh_executable)
     windows_command = subprocess.list2cmdline(ssh_argv)
     qga_body = json.dumps(
         {"command": invocation.argv, "input-data": (FIXED_BUNDLE.prefix + request).decode("ascii")}

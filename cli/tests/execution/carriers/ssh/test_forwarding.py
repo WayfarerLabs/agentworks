@@ -1042,4 +1042,7 @@ def test_forwarding_pins_probe_and_session_despite_path_change(
 
     monkeypatch.setattr(forwarding, "check_client_version", version)
     assert synthetic.open().close(Deadline.after(3))
-    assert [argv[0] for argv in synthetic.calls] == [str(selected), str(selected)]
+    assert len(synthetic.calls) == 2
+    assert os.path.samefile(synthetic.calls[0][0], selected)
+    assert Path(synthetic.calls[0][0]).is_absolute()
+    assert synthetic.calls[0][0] == synthetic.calls[1][0]

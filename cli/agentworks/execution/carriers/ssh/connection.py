@@ -132,7 +132,7 @@ def build_ssh_argv(
     invocation: PreparedInvocation,
     *,
     trust: SSHTrustFiles,
-    executable: str | None = None,
+    executable: str,
     terminal: bool = False,
     local_forwards: tuple[str, ...] = (),
 ) -> list[str]:
@@ -149,7 +149,7 @@ def build_ssh_argv(
 
 
 def _build_enrollment_argv(
-    connection: SSHConnection, invocation: PreparedInvocation, *, trust: SSHTrustFiles, executable: str | None = None
+    connection: SSHConnection, invocation: PreparedInvocation, *, trust: SSHTrustFiles, executable: str
 ) -> list[str]:
     """Build first enrollment argv after the caller validates an exclusive candidate."""
     return _build_argv(connection, invocation, trust=trust, executable=executable, host_key_checking="accept-new")
@@ -161,7 +161,7 @@ def _build_argv(
     *,
     trust: SSHTrustFiles,
     host_key_checking: Literal["yes", "accept-new"],
-    executable: str | None = None,
+    executable: str,
     terminal: bool = False,
     local_forwards: tuple[str, ...] = (),
 ) -> list[str]:
@@ -228,7 +228,7 @@ def _build_argv(
         options.append(f'RevokedHostKeys="{trust.revoked_host_keys.as_posix()}"')
     if connection.host_key_alias is not None:
         options.append(f"HostKeyAlias={connection.host_key_alias}")
-    argv = [connection.ssh_executable if executable is None else executable, "-F", "none", "-tt" if terminal else "-T"]
+    argv = [executable, "-F", "none", "-tt" if terminal else "-T"]
     for option in options:
         argv.extend(("-o", option))
     for forward in local_forwards:
