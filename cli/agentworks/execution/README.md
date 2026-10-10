@@ -233,6 +233,14 @@ core closes child work and local delivery, checks the complete ledger, seals obl
 releases the aggregate owner. WSL2 and Proxmox supply these private adapters. Other platforms and
 the public RunContext surface remain pending.
 
+`target.py` supplies a private passive `ExecutionTarget` over already-bound execution and file
+interfaces. Accessors return those exact interfaces, or `None` when composition supplied none. The
+native aggregate supplies this view while retaining sole ownership of preparation and teardown;
+retaining the view does not keep the operation open. Its immutable feature description is the same
+object supplied by the selected carrier. Features describe channel support, not readiness,
+authorization or implemented consumer live/terminal methods. No public RunContext accessor or
+permission enforcement is supplied by this wrapper.
+
 `ExecutionOperation` requires an explicit managed target matching its owner's scope. An optional
 numeric bootstrap must match that VM's derived boot identity; platform-host targets cannot select
 it. The operation forwards its immutable context before preparation and borrowing, while each call

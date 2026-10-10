@@ -4843,6 +4843,15 @@ validation first through private composition seams. Only then expose the two pas
 accessors as one complete additive surface. An accessor-only or run-only target is not an acceptable
 intermediate public API.
 
+- [x] Introduce the private passive `ExecutionTarget` over already-prepared execution and file
+      views, without acquiring ownership or adding forwarding, cleanup or authorization behavior.
+      The native aggregate retains its custody and supplies this target over its exact existing
+      views. WSL2 and Proxmox carriers bind one immutable channel description, shared by repeated
+      feature reads and the target. Focused composition tests exercise file and command operations
+      through these same views and prove that retaining the target does not extend the closed
+      operation's lifetime. Package exports, new RunContext accessors, derived environment views,
+      remaining file/I/O methods, broader platform composition and native acceptance are not
+      completed by this private increment; the complete additive-surface gate remains open.
 - [ ] Add `admin_execution_target()` and `agent_execution_target()` to the existing RunContext,
       returning the new target without changing legacy accessors or callers. Use permanent names, no
       union target type, stack selector or forwarding adapter. Prove passive construction/access and

@@ -70,6 +70,21 @@ custody, and replace platform-specific legacy ownership only where the new mecha
 lifetime have been proved. Public target and RunContext delivery follows those gates as one complete
 additive surface, not as an accessor-only or run-only intermediate API.
 
+### Private target composition checkpoint, 2026-10-10
+
+The earlier checkpoints above record their inspected states, not today's complete source inventory.
+The native administrative aggregate now prepares existing execution and file views under one VM
+owner acquired before activation. `ExecutionTarget` passively references those exact views and the
+selected channel's immutable feature description. WSL2 and Proxmox bind that description once; the
+target neither acquires ownership nor forwards operations or closes resources. Retaining it does not
+extend the underlying operation's lifetime. Its features describe the channel, not permission,
+readiness or completion of the consumer-facing live/terminal API.
+
+This remains private composition, with no execution-package export, new RunContext accessor,
+production consumer or activated permission enforcement. Complete required file and execution/job
+operations, optional I/O, account/platform composition and whole-workflow native validation remain
+the additive delivery gate. The small target wrapper does not substitute for that gate.
+
 ### Owned-boundary integration inventory, 2026-09-21
 
 The read-only audit at `faf99365` locates admission before effects without moving legacy commands
