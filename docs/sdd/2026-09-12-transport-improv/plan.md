@@ -1202,10 +1202,21 @@ remain preserved. Full strict typing initially found 19 test-annotation errors i
 narrow fixture refinements preserve production code and existing assertions. Final verification
 passes all 265 cases without skips or deselection, full strict typing across 1,380 sources, and
 nine-file lint/format checks on the author's earlier base. Three independent paired source-review
-lanes remain pending. This is not native acceptance, whole-composition typing, SDK-wide drain or
-completed cloud access: startup settlement, endpoints, routes, guest preparation and RunContext
-admission remain unfinished. Keep both GCP items unchecked until their respective acceptance gates
-are met.
+lanes found two material cleanup gaps: terminal admission could remain open after retirement-helper
+entry was interrupted, and interrupted worker observation could corrupt the same Thread's later
+completion evidence. The correction makes admission terminal before fallible cleanup and retains
+copies whose completion witness became unconfirmed, including observations inside public middleware.
+Ordinary timeout and original-close retries remain distinct. Corrected verification passes all 275
+cases (153 producer and 122 reader/copy, including ten new regressions), full strict typing over
+1,380 sources and scoped lint/format on the author's earlier base. One producer run timed out after
+151 cases in the private runner's repeated import-path resolution, without a final completion
+certificate. Resolving each path once per unchanged checkpoint removes redundant work; fresh
+complete runs pass in 88.63 and 68.81 seconds under the unchanged 120-second limit. The failed run
+and all data remain preserved; production assertions and deadlines are unchanged. All three
+corrected paired source re-reviews remain pending; passing tests alone do not clear the findings.
+This is not native acceptance, whole-composition typing, SDK-wide drain or completed cloud access:
+startup settlement, endpoints, routes, guest preparation and RunContext admission remain unfinished.
+Keep both GCP items unchecked until their respective acceptance gates are met.
 
 - [ ] Complete owned GCP access with the LLD's observational identity guarantee: a fresh exact
       provider observation refuses known stale-target admission, matching receipt and subsequent
