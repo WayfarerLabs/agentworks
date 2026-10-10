@@ -282,12 +282,13 @@ outcome does not imply this lifetime row or the outer operation has already been
 mechanics retain DIRECT's existing helper-evidence limits, not a new descendant-cleanup guarantee.
 
 The private Proxmox binding also selects one passive `ProxmoxHelperDelivery` for each inline DIRECT
-call. It retains the original validated QGA PID and publishes terminal closure facts before output
-callbacks can interrupt delivery. Preparation supplies the original nonce and runtime expectations
-explicitly; retained cleanup drops caller input, collectors and application bytes. An acknowledged
-deadline or interrupted observation retains the actual call, original attempt and still-open borrow.
-Positive NOT_SENT evidence also survives payload detachment: an interrupted settlement of an
-invocation never dispatched requires only exact no-I/O bookkeeping, not runtime closure proof.
+call or retained managed OBSERVE/READ_OUTPUT helper. It retains the original validated QGA PID and
+publishes terminal closure facts before output callbacks can interrupt delivery. Preparation
+supplies the original nonce and runtime expectations explicitly; retained cleanup drops caller
+input, collectors and application bytes. An acknowledged deadline or interrupted observation retains
+the actual call, original attempt and still-open borrow. Positive NOT_SENT evidence also survives
+payload detachment: an interrupted settlement of an invocation never dispatched requires only exact
+no-I/O bookkeeping, not runtime closure proof.
 
 `observe_inline_cleanup(fresh_finite_deadline)` requires a fresh finite budget only when unresolved
 observation or local cleanup remains. Plain calls and already-proved closure with settled local
@@ -300,9 +301,16 @@ That does not change the returned application result, including UNKNOWN or NOT_S
 workflow close invokes this observation before `finish()`; bookkeeping retry and `finish()` remain
 no-I/O. A failed status exchange is never repeated: lost ACK, missing or consumed status, wrong
 nonce, nonzero exit, changed binding or pending local cleanup retains uncertainty. This is
-same-controller inline helper closure, not command replay, fresh guest readiness, managed
-terminal/disposal proof, descendant cleanup or controller-restart recovery. Managed read
-continuation and native QGA acceptance remain open.
+same-controller helper closure, not command replay, fresh guest readiness, managed terminal/disposal
+proof, descendant cleanup or controller-restart recovery. Native QGA acceptance remains open.
+
+Managed reads prepare their one-shot invocation and explicit closure expectations before admission.
+Escaping control flow retains `ManagedObserveControlFact` independently of payload detachment. Their
+cleanup state drops input, collectors and managed observations, including facts and output; plain
+delivery retains only the original non-payload candidate metadata needed for interrupted settlement.
+The caller's original result remains unchanged. Settling a timed-out RESOURCE disposal prerequisite
+read performs no disposal action. A subsequent explicit disposal request must obtain a fresh
+positive managed terminal observation before admitting its action.
 
 `_execution_result.py` reduces an operation-owned inline outcome into those public facts. The fixed
 inline helper accepts retrospective normal completion only on CPython 3.11 through 3.14, after its

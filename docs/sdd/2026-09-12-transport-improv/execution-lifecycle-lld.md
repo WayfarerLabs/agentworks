@@ -1378,7 +1378,10 @@ The private inline source candidate now selects this factory in the Proxmox nati
 explicit cleanup observation before native workflow finish. Offline tests execute the actual
 prepared helper through fake QGA status delivery, including lost settlement/resolution replies and
 repeated close. They are not measurements of either supported Proxmox major. Managed read
-continuation, lost ACK/status recovery, controller restart and full native acceptance remain open.
+preparation now uses this same optional per-call seam in the private source candidate, with explicit
+call origin and detached observation payloads. Offline cases cover OBSERVE/READ_OUTPUT and disposal
+prerequisite continuation; integrated review and native proof remain separate. Lost ACK/status
+recovery, controller restart and full native acceptance remain open.
 
 ### Fenced lifecycle recovery
 

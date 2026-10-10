@@ -3746,6 +3746,15 @@ QGA-major measurements and managed-read continuation remain pending, so neither 
 complete. The next separately delegated unit extends managed-read preparation and the existing
 retained call; it does not introduce another recovery mechanism or broaden disposal proof.
 
+Managed-read source candidate `1443777e` supplies single-dispatch preparation before admission,
+explicit call origin, the existing per-call closure factory and detached managed observations. Its
+57 new offline cases passed before a broader 370-case run exposed two inline-origin classification
+failures. The corrected explicit-origin boundary passes a 73-case selection containing both failed
+cases and managed deadline/control paths, plus three-file static gates. A full combined rerun and
+the three independent private reviews remain required; overlapping runs are not summed. RESOURCE
+tests distinguish cleanup of the prior observer from a fresh positive read authorizing disposal.
+This is not native QGA, complete managed recovery or whole-PR acceptance, and both leaves stay open.
+
 - [ ] Reconcile #770's historical escape/relaunch proposal against the later exclusion of malicious
       target-user containment. Deliver DIRECT/MANAGED without a CONTAINED profile or
       per-run-user/jail implementation; retain future profile extensibility. Prove trusted
