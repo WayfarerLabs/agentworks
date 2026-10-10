@@ -1082,18 +1082,31 @@ design.
 
 The planned remaining-platform composition keeps one core operation owner and one aggregate
 teardown, but moves concrete activation and keep-awake evidence out of that orchestrator. A passive
-platform factory builds a private owned access object under the already-acquired VM owner. Core
-retains that object before preparation can perform effects. The passive native binding remains a
-route description, not an activation method or a lifecycle owner.
+platform factory builds a private owned access object under the already-acquired VM owner. After
+validating the selected VM, marker, context and account, core retains that object before its first
+power observation, not merely before preparation can perform effects. The passive native binding
+remains a route description, not an activation method or a lifecycle owner.
 
 The small access contract exposes its selected binding, existing target-preparation result, and
-optional bound route-check callable. Preparation receives the observed power and original deadline;
-settlement receives a finite cleanup deadline and reports whether its own effects are settled. The
-object retains actual partial progress and interrupted-reply evidence, never resolves or closes the
-whole operation, and does not copy a second guest-identity field. Platform preparation calls the
-shared locator/guest helper rather than reimplementing it. WSL2 additionally compares the prepared
-guest with its durable held READY identity before admission. Core performs the common numeric
-account preparation and supplies file/execution views only afterward.
+optional bound route-check callable. Its required `observe_power(deadline)` returns `VMStatus` using
+the original deadline. Core applies the common supported-state, deadline and operator-stopped-intent
+checks before calling `prepare(power, deadline)`. Neither factory construction nor power observation
+admits activation, a hold, a route or guest preparation. Preparation receives the observed power and
+original deadline; settlement receives a finite cleanup deadline and reports whether its own effects
+are settled. The object retains actual partial progress and interrupted-reply evidence, never
+resolves or closes the whole operation, and does not copy a second guest-identity field. Platform
+preparation calls the shared locator/guest helper rather than reimplementing it. WSL2 additionally
+compares the prepared guest with its durable held READY identity before admission. Core performs the
+common numeric account preparation and supplies file/execution views only afterward.
+
+WSL2 and Proxmox delegate the owned power method to their selected platform observer with the same
+retained native delivery custody. There is no ownerless default or old-observer fallback. Cloud
+access must retain actual SDK read clients for the initial observation and later identity/linked
+endpoint reads; constructing access after a failed read cannot recover a lost client. Native process
+custody does not become a generic SDK-handle registry. The access remains available for aggregate
+teardown after initial observation failure or interruption. Empty passive access can settle without
+waking a VM; uncertain retirement cannot report positive cleanup. Earlier local cleanup failure can
+defer access settlement while retaining the same workflow for retry.
 
 Keep the existing WSL2 route checks at managed read, shell lookup, stop, disposal and launch
 admission by binding its route-check callable. An absent callable does not assert fresh route

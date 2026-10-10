@@ -1192,6 +1192,20 @@ test expecting the old common refusal of `DEALLOCATED` without stop intent; only
 is removed. Proxmox's native observer does not produce that state and no platform adapter changes.
 This is not provider activation or native acceptance.
 
+The owned preliminary-observation correction below supersedes only the preceding historical
+no-factory-on-denial ordering proof. Retaining an inert factory before the read establishes custody;
+denial still allows no preparation, activation, hold, route or guest work.
+
+- [ ] Retain the passive owned native access before its initial power observation. Add required
+      `observe_power(deadline)` to the private access protocol and both actual WSL2/Proxmox
+      adapters, preserving the original deadline, owner and native custody. Keep the common
+      supported-state and operator-stopped-intent gate before preparation. Prove same-access cleanup
+      after ordinary and control-exception read failures, settled and uncertain retirement, cleanup
+      refusal/retry, late observations and all state/intent combinations without active work on
+      denial. Update permanent contract collateral alongside code. This correction does not
+      implement cloud SDK read-client slots, provider incarnation/adoption, activation settlement or
+      native acceptance.
+
 The final combined correction and shared gate at `9e89fe3c3` clear all three independent private
 lanes against `829e4a72f`. Each observes 481 adjacent passes without skips. Project review also
 observes nine independent probes and clean nine-file lint, formatting and typing; generic review
