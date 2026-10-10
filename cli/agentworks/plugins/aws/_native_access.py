@@ -10,11 +10,9 @@ from agentworks.capabilities.vm_platform.base import (
     provider_locator_remaining,
 )
 from agentworks.db import VMStatus
-from agentworks.errors import NotFoundError, StateError
-from agentworks.plugins.aws.auth import (
-    _build_access_key_session,
-    _build_ambient_session,
-)
+from agentworks.errors import AgentworksError, NotFoundError, StateError
+from agentworks.plugins.aws._owned_auth import _build_access_key_session, _OwnedRoleSession
+from agentworks.plugins.aws.auth import _build_ambient_session
 from agentworks.plugins.aws.config import AwsAmbientAuth
 from agentworks.plugins.aws.network import error_code, wrap_ec2_error
 
@@ -29,9 +27,9 @@ class EC2OwnedAccess:
     """Caller-retained exact reads, without activation or native preparation.
 
     Construction is passive. Retain this object before observing it. The slot
-    covers only a returned original EC2 client, not SDK credential clients or
-    the constructor handoff before it returns. Public close returning normally
-    is the direct-client lifecycle fact, not synchronous closure of all sockets.
+    covers returned EC2 and configured-role STS originals, not arbitrary ambient
+    credential clients or SDK constructor handoff. Normal public close is a
+    client lifecycle fact, not synchronous closure of all sockets.
     """
 
     def __init__(self, vm: VMRow, platform: EC2Platform, ctx: RunContext) -> None:
@@ -40,13 +38,14 @@ class EC2OwnedAccess:
         self._ctx = ctx
         self._session: Any = None
         self._read_client: Any = None
+        self._role_auth: _OwnedRoleSession | None = None
         self._closed = False
         self._lock = Lock()
 
     @property
     def cleanup_incomplete(self) -> bool:
-        """Whether the original EC2 client lacks a normal public-close return."""
-        return self._read_client is not None
+        """Whether either concrete original lacks a normal public-close return."""
+        return self._read_client is not None or (self._role_auth is not None and self._role_auth.cleanup_incomplete)
 
     def observe_power(self, deadline: Deadline) -> VMStatus:
         _, instance = self._read_exact_instance(deadline)
@@ -78,26 +77,35 @@ class EC2OwnedAccess:
     def _read_exact_instance(self, deadline: Deadline) -> tuple[ProviderLocator, dict[str, Any]]:
         self._acquire(deadline)
         control: BaseException | None = None
+        admitted = False
+        completed = False
         try:
             provider_locator_remaining(deadline, vm_name=self._vm.name)
-            if self._closed or self._read_client is not None:
+            if self._closed or self.cleanup_incomplete:
                 raise StateError(
                     "EC2 access cannot admit an observation",
                     entity_kind="vm",
                     entity_name=self._vm.name,
                 )
             instance_id, region, account_id = self._platform._locator_metadata(self._vm)
+            admitted = True
+            auth = self._platform.config.auth
+            if not isinstance(auth, AwsAmbientAuth):
+                if self._role_auth is None:
+                    self._role_auth = _OwnedRoleSession(self._vm.name)
+                self._role_auth.begin(deadline)
             if self._session is None:
-                auth = self._platform.config.auth
                 session_region = self._platform.config.region
                 if isinstance(auth, AwsAmbientAuth):
                     self._session = _build_ambient_session(session_region)
                 else:
+                    assert self._role_auth is not None
                     self._session = _build_access_key_session(
                         auth,
                         self._ctx.secret(auth.access_key_secret),
                         self._platform.site_name,
                         session_region,
+                        owner=self._role_auth,
                     )
             from botocore.config import Config
 
@@ -113,12 +121,20 @@ class EC2OwnedAccess:
                             retries={"total_max_attempts": 1, "mode": "standard"},
                         ),
                     )
+                    if self._role_auth is not None:
+                        self._read_client.meta.events.register(
+                            "before-send.ec2.DescribeInstances", self._role_auth.guard_ec2_send
+                        )
+                except AgentworksError:
+                    raise
                 except Exception as exc:
                     raise wrap_ec2_error(exc) from exc
                 client = self._read_client
                 provider_locator_remaining(deadline, vm_name=self._vm.name)
                 try:
                     result = client.describe_instances(InstanceIds=[instance_id])
+                except AgentworksError:
+                    raise
                 except Exception as exc:
                     if error_code(exc) == "InvalidInstanceID.NotFound":
                         raise NotFoundError(
@@ -142,18 +158,56 @@ class EC2OwnedAccess:
                 if not isinstance(error, Exception):
                     control = error
                 raise
-            finally:
-                self._close_read_client()
             provider_locator_remaining(deadline, vm_name=self._vm.name)
+            completed = True
             return locator, instance
-        except BaseException:
+        except BaseException as error:
             # Preserve a dispatch control even if cleanup is interrupted at a
             # Python boundary, including after the public close returned.
             if control is not None:
                 raise control from None
+            if not isinstance(error, Exception):
+                control = error
             raise
         finally:
-            self._lock.release()
+            try:
+                try:
+                    if admitted:
+                        self._close_clients()
+                    if completed:
+                        provider_locator_remaining(deadline, vm_name=self._vm.name)
+                except BaseException as error:
+                    if control is not None:
+                        raise control from None
+                    if not isinstance(error, Exception):
+                        control = error
+                    raise
+            finally:
+                try:
+                    if self._role_auth is not None:
+                        self._role_auth.end()
+                except BaseException:
+                    if control is not None:
+                        raise control from None
+                    raise
+                finally:
+                    self._lock.release()
+
+    def _close_clients(self) -> None:
+        control: BaseException | None = None
+        try:
+            try:
+                self._close_read_client()
+            except BaseException as error:
+                control = error
+                raise
+            finally:
+                if self._role_auth is not None:
+                    self._role_auth.close_client()
+        except BaseException:
+            if control is not None:
+                raise control from None
+            raise
 
     def _close_read_client(self) -> None:
         if self._read_client is not None:
@@ -165,12 +219,14 @@ class EC2OwnedAccess:
                 self._read_client = None
 
     def close(self, deadline: Deadline) -> bool:
-        """Stop observation admission and retry only the retained EC2 close."""
+        """Stop admission and retry only retained EC2 and configured STS closes."""
         self._acquire(deadline)
         try:
             self._closed = True
+            if self._role_auth is not None:
+                self._role_auth.stop()
             provider_locator_remaining(deadline, vm_name=self._vm.name)
-            self._close_read_client()
+            self._close_clients()
             provider_locator_remaining(deadline, vm_name=self._vm.name)
             return not self.cleanup_incomplete
         finally:

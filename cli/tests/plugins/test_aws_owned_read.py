@@ -83,6 +83,8 @@ def owned_read(monkeypatch):
     )
 
     class Client:
+        meta = SimpleNamespace(events=SimpleNamespace(register=lambda *args: None))
+
         def describe_instances(self, **kwargs):
             assert access._read_client is self
             assert kwargs == {"InstanceIds": [INSTANCE]}
@@ -181,7 +183,7 @@ def test_explicit_credential_mode_delivers_selected_secret_without_fallback(owne
     )
     calls = []
 
-    def explicit(auth, secret, site, region):
+    def explicit(auth, secret, site, region, **kwargs):
         calls.append((auth.assume_role_arn, secret, site, region))
         return owned_read.session
 
@@ -200,6 +202,7 @@ def test_explicit_credential_mode_delivers_selected_secret_without_fallback(owne
         return SimpleNamespace(
             describe_instances=read,
             close=lambda: None,
+            meta=SimpleNamespace(events=SimpleNamespace(register=lambda *args: None)),
         )
 
     monkeypatch.setattr(owned_read.session, "client", client)
@@ -229,7 +232,7 @@ def test_configured_credential_failure_has_no_ambient_fallback(owned_read, monke
     )
     calls = []
 
-    def explicit(*args):
+    def explicit(*args, **kwargs):
         calls.append("explicit")
         raise failure
 
