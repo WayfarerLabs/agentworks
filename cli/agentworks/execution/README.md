@@ -403,6 +403,11 @@ custody. A failed cleanup remains unsuccessful even if subsequent cleanup settle
 completion capture retains custody rather than inferring success from a resolved receipt. Cleanup of
 a previously retained stage remains separate from admission of the new child.
 
+Uncertain registration retains the original local call, prepared child and borrow even when no stage
+or helper was dispatched. Bookkeeping and aggregate closure refuse that unresolved admission; they
+do not reconstruct it or replay the call. Only confirmed admission or a proved-absent refusal allows
+the undispatched active entry to be released.
+
 Interrupted checkpoint publication retains the actual child, outcome and exact intended payload and
 revision. Bookkeeping settlement retries only that same publication and borrow closure, without
 reading the source or dispatching another helper. Confirmation checks the payload and the exact next

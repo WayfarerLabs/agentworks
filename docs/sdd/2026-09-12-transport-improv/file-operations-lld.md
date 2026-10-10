@@ -1064,10 +1064,15 @@ Tests cover admission before staging, verified completion and publication, faile
 reduction, interrupted capture and exact bookkeeping-only CAS and closure retry. Earlier failure or
 control prevents success capture; an interruption after positive capture retains its exact intended
 success checkpoint rather than downgrading it. This is local fixture evidence, not native proof.
-Directory facade options, traversal and extraction, aggregate partial-result semantics, production
-download checkpoint composition and native proof remain required work before complete R7 or public
-RunContext acceptance. The package callback and domain-specific artifact ownership must not be
-weakened while those pieces are built.
+Uncertain registration retains its original local call, active child and borrow, including committed
+registration with a lost reply or failed absence inspection. Bookkeeping and aggregate teardown
+refuse incomplete admission without discarding those objects or replaying effects. The existing
+typed proved-absent refusal remains the only absence classification. Reconciliation of unresolved
+admission is not supplied by this checkpoint kernel and remains broader recovery work. Directory
+facade options, traversal and extraction, aggregate partial-result semantics, production download
+checkpoint composition and native proof remain required work before complete R7 or public RunContext
+acceptance. The package callback and domain-specific artifact ownership must not be weakened while
+those pieces are built.
 
 ### DOWNLOAD recovery dispatch
 
