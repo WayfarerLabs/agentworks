@@ -1181,9 +1181,10 @@ cases without skips or deselection, including a real service-account short-lifet
 scoped lint/format and full strict typing across 1,379 sources. Earlier guard, style,
 test-annotation and initial private-review findings remain recorded. These results cover the final
 four source files on the author's earlier base, not whole-composition typing or native acceptance.
-Independent private re-review remains open. This reader does not reconcile the start producer's
-authentication or supply startup settlement, endpoints, routes, guest preparation or RunContext
-admission; keep both GCP items unchecked.
+All three independent private source-review lanes clear the paired correction at `0cb8bcdb`; the
+initial token-state finding and same-unit redundant interior checks are resolved. This reader does
+not reconcile the start producer's authentication or supply startup settlement, endpoints, routes,
+guest preparation or RunContext admission; keep both GCP items unchecked.
 
 - [ ] Complete owned GCP access with the LLD's observational identity guarantee: a fresh exact
       provider observation refuses known stale-target admission, matching receipt and subsequent
