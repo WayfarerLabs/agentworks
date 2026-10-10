@@ -1,4 +1,4 @@
-"""Concrete retained read slots, identity admission and terminal cleanup."""
+"""Concrete retained read slot, identity admission and terminal cleanup."""
 
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ def owned(monkeypatch):
     new()
 
     def get(group, name, **options):
-        assert result.access._compute is result.compute
+        assert result.access._read_client is result.compute
         assert (group, name) == ("group:literal", "vm")
         assert (
             options["retry_total"] == options["retry_connect"] == options["retry_read"] == options["retry_status"] == 0
@@ -76,8 +76,7 @@ def owned(monkeypatch):
     result.compute = SimpleNamespace(virtual_machines=SimpleNamespace(get=get), close=close_compute)
 
     def linked_get(kind: str, group: str, name: str, **options: object) -> SimpleNamespace:
-        assert result.access._network is result.network
-        assert result.access._compute is None
+        assert result.access._read_client is result.network
         calls.append(kind + "-get")
         if kind == "nic":
             return SimpleNamespace(
@@ -103,7 +102,7 @@ def owned(monkeypatch):
 
     def construct_network(credential, subscription):
         assert credential is result.credential and subscription == "sub"
-        assert result.access._compute is None
+        assert result.access._read_client is None
         calls.append("network")
         return result.network
 
@@ -176,7 +175,7 @@ def test_original_deadline_refuses_setup_dispatch_or_cleanup_late_success(owned,
     with pytest.raises(LimitExceededError):
         owned.access.observe_power(Deadline.after(10))
     assert owned.calls.count("vm-get") == int(stage != "construct")
-    assert owned.calls[-1] == "compute-close" and owned.access._compute is None
+    assert owned.calls[-1] == "compute-close" and owned.access._read_client is None
     assert owned.access.close(Deadline.after(10))
 
 
@@ -184,7 +183,7 @@ def test_original_deadline_refuses_setup_dispatch_or_cleanup_late_success(owned,
 def test_either_uncertain_slot_blocks_every_next_observation(owned, method):
     owned.compute_close_error = RuntimeError("offline compute close failure")
     assert owned.access.observe_power(Deadline.after(10)) is VMStatus.RUNNING
-    assert owned.access.cleanup_incomplete and owned.access._compute is owned.compute
+    assert owned.access.cleanup_incomplete and owned.access._read_client is owned.compute
     before = list(owned.calls)
     with pytest.raises(StateError):
         getattr(owned.access, method)(Deadline.after(10))
@@ -198,13 +197,13 @@ def test_either_uncertain_slot_blocks_every_next_observation(owned, method):
         with pytest.raises(StateError):
             owned.access.observe_public_endpoint(Deadline.after(10))
         assert owned.calls[before_count:] == ["probe", "compute", "vm-get", "compute-close"]
-        assert owned.access._compute is owned.compute
+        assert owned.access._read_client is owned.compute
         owned.compute_close_error = None
         assert owned.access.close(Deadline.after(10))
     owned.new()
     owned.network_close_error = RuntimeError("offline network close failure")
     assert owned.access.observe_public_endpoint(Deadline.after(10)) == "198.51.100.2"
-    assert owned.access._network is owned.network and owned.access.cleanup_incomplete
+    assert owned.access._read_client is owned.network and owned.access.cleanup_incomplete
     before = list(owned.calls)
     with pytest.raises(StateError):
         getattr(owned.access, method)(Deadline.after(10))
@@ -223,17 +222,17 @@ def test_original_control_survives_cleanup_and_bookkeeping_controls(owned, monke
     owned.compute_error, owned.compute_close_error = primary, secondary
     with pytest.raises(exception_type) as caught:
         owned.access.observe_power(Deadline.after(10))
-    assert caught.value is primary and owned.access._compute is owned.compute
+    assert caught.value is primary and owned.access._read_client is owned.compute
     owned.compute_error = owned.compute_close_error = None
     assert owned.access.close(Deadline.after(10))
     owned.new()
-    original_close = owned.access._close_compute
+    original_close = owned.access._close_read_client
 
     def interrupted_bookkeeping():
         original_close()
         raise primary
 
-    monkeypatch.setattr(owned.access, "_close_compute", interrupted_bookkeeping)
+    monkeypatch.setattr(owned.access, "_close_read_client", interrupted_bookkeeping)
     original_lock = owned.access._lock
 
     class ReleaseControl:
@@ -248,12 +247,12 @@ def test_original_control_survives_cleanup_and_bookkeeping_controls(owned, monke
     with pytest.raises(exception_type) as caught:
         owned.access.observe_power(Deadline.after(10))
     assert caught.value is primary
-    monkeypatch.setattr(owned.access, "_close_compute", original_close)
+    monkeypatch.setattr(owned.access, "_close_read_client", original_close)
     monkeypatch.setattr(owned.access, "_lock", original_lock)
     assert owned.access.close(Deadline.after(10))
 
 
-def test_finite_lock_and_independent_terminal_closure(owned):
+def test_finite_lock_and_terminal_closure(owned):
     owned.access._lock.acquire()
     try:
         with pytest.raises(StateError):
@@ -261,14 +260,13 @@ def test_finite_lock_and_independent_terminal_closure(owned):
     finally:
         owned.access._lock.release()
     assert owned.calls == []
-    assert owned.access.observe_power(Deadline.after(10)) is VMStatus.RUNNING
-    # Seed both returned originals to exercise independent terminal retirement.
-    owned.access._compute, owned.access._network = owned.compute, owned.network
     owned.compute_close_error = RuntimeError("offline close failure")
+    assert owned.access.observe_power(Deadline.after(10)) is VMStatus.RUNNING
+    assert owned.access._read_client is owned.compute
     before_count = len(owned.calls)
     assert not owned.access.close(Deadline.after(10))
-    assert owned.calls[before_count:] == ["compute-close", "network-close"]
-    assert owned.access._compute is owned.compute and owned.access._network is None
+    assert owned.calls[before_count:] == ["compute-close"]
+    assert owned.access._read_client is owned.compute
     owned.compute_close_error = None
     assert owned.access.close(Deadline.after(10))
     assert owned.calls[-2:] == ["compute-close", "credential-close"]
@@ -305,9 +303,9 @@ def test_read_domain_and_control_identity_survive_linked_translation_and_close_f
     assert primary.__cause__ is None and primary.__context__ is None
     assert owned.access.cleanup_incomplete and owned.access._auth._credential is owned.credential
     if stage == "compute":
-        assert owned.access._compute is owned.compute
+        assert owned.access._read_client is owned.compute
     else:
-        assert owned.access._compute is None and owned.access._network is owned.network
+        assert owned.access._read_client is owned.network
     before = list(owned.calls)
     with pytest.raises(StateError):
         owned.access.observe_power(Deadline.after(10))
@@ -333,6 +331,6 @@ def test_read_constructor_failure_is_detached_without_an_unreturned_original(own
     assert caught.value.detail == "ValueError"
     assert caught.value.__cause__ is None and caught.value.__context__ is None
     assert canary not in "".join(traceback.format_exception(caught.value))
-    assert owned.access._compute is None and owned.access._network is None
+    assert owned.access._read_client is None
     assert owned.access._auth._credential is owned.credential
     assert owned.access.close(Deadline.after(10)) and owned.calls[-1] == "credential-close"

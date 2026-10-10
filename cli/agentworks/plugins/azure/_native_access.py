@@ -52,16 +52,14 @@ class AzureOwnedReadAccess:
         assert isinstance(resource_id, str)
         self._resource_id = resource_id
         self._auth = _OwnedAzureCredential(platform.config.auth, ctx, platform.site_name, vm.name)
-        self._compute: ComputeManagementClient | None = None
-        self._network: NetworkManagementClient | None = None
+        self._read_client: ComputeManagementClient | NetworkManagementClient | None = None
         self._closed = False
         self._lock = Lock()
 
     @property
     def cleanup_incomplete(self) -> bool:
         return (
-            self._compute is not None
-            or self._network is not None
+            self._read_client is not None
             or self._auth.cleanup_incomplete
             or (self._closed and self._auth.has_credential)
         )
@@ -92,7 +90,7 @@ class AzureOwnedReadAccess:
         control: BaseException | None = None
         admitted = False
         completed = False
-        compute_cleanup_started = False
+        read_close_attempted = False
         try:
             try:
                 provider_locator_remaining(deadline, vm_name=self._vm_name)
@@ -107,11 +105,13 @@ class AzureOwnedReadAccess:
                     result = ProviderLocator(f"azure-vm:v2:{self._vm_id}:{self._resource_id}")
                 else:
                     # Never continue to linked reads after uncertain compute closure.
-                    compute_cleanup_started = True
-                    self._close_compute()
+                    read_close_attempted = True
+                    self._close_read_client()
                     provider_locator_remaining(deadline, vm_name=self._vm_name)
-                    if self._compute is not None:
+                    if self._read_client is not None:
                         raise self._refusal()
+                    # Positive compute retirement admits the network phase's close.
+                    read_close_attempted = False
                     result = self._read_endpoint(credential, observed, deadline)
                 provider_locator_remaining(deadline, vm_name=self._vm_name)
                 completed = True
@@ -121,8 +121,8 @@ class AzureOwnedReadAccess:
                     control = error
                 raise
             finally:
-                if admitted:
-                    self._close_read_clients(close_compute=not compute_cleanup_started)
+                if admitted and not read_close_attempted:
+                    self._close_read_client()
                 if completed:
                     provider_locator_remaining(deadline, vm_name=self._vm_name)
         except BaseException as error:
@@ -148,9 +148,10 @@ class AzureOwnedReadAccess:
         missing = False
         failure_kind: str | None = None
         try:
-            self._compute = compute_read_client(credential, self._subscription)
+            client = compute_read_client(credential, self._subscription)
+            self._read_client = client
             remaining = provider_locator_remaining(deadline, vm_name=self._vm_name)
-            observed = self._compute.virtual_machines.get(
+            observed = client.virtual_machines.get(
                 self._group, self._name, expand=expand, **_native_read_options(remaining)
             )
         except AgentworksError:
@@ -182,10 +183,11 @@ class AzureOwnedReadAccess:
         failure_kind: str | None = None
         domain_error: AgentworksError | None = None
         try:
-            self._network = network_read_client(credential, self._subscription)
+            client = network_read_client(credential, self._subscription)
+            self._read_client = client
             provider_locator_remaining(deadline, vm_name=self._vm_name)
             result = read_native_public_ipv4(
-                self._network,
+                client,
                 observed,
                 subscription_id=self._subscription,
                 vm_name=self._vm_name,
@@ -247,44 +249,15 @@ class AzureOwnedReadAccess:
             "PowerState/deallocated": VMStatus.DEALLOCATED,
         }.get(power_codes[0], VMStatus.UNKNOWN)
 
-    def _close_compute(self) -> None:
-        if self._compute is not None:
+    def _close_read_client(self) -> None:
+        client = self._read_client
+        if client is not None:
             try:
-                self._compute.close()
+                client.close()
             except Exception:
                 pass
             else:
-                self._compute = None
-
-    def _close_network(self) -> None:
-        if self._network is not None:
-            try:
-                self._network.close()
-            except Exception:
-                pass
-            else:
-                self._network = None
-
-    def _close_read_clients(self, *, close_compute: bool = True, deadline: Deadline | None = None) -> None:
-        control: BaseException | None = None
-        try:
-            try:
-                if close_compute:
-                    if deadline is not None:
-                        provider_locator_remaining(deadline, vm_name=self._vm_name)
-                    self._close_compute()
-            except BaseException as error:
-                if not isinstance(error, Exception):
-                    control = error
-                raise
-            finally:
-                if deadline is not None:
-                    provider_locator_remaining(deadline, vm_name=self._vm_name)
-                self._close_network()
-        except BaseException:
-            if control is not None:
-                raise control from None
-            raise
+                self._read_client = None
 
     def close(self, deadline: Deadline) -> bool:
         """Stop reads; retry concrete originals and close their credential last."""
@@ -292,9 +265,10 @@ class AzureOwnedReadAccess:
         control: BaseException | None = None
         try:
             self._closed = True
-            self._close_read_clients(deadline=deadline)
             provider_locator_remaining(deadline, vm_name=self._vm_name)
-            if self._compute is None and self._network is None:
+            self._close_read_client()
+            provider_locator_remaining(deadline, vm_name=self._vm_name)
+            if self._read_client is None:
                 self._auth.close()
             provider_locator_remaining(deadline, vm_name=self._vm_name)
             return not self.cleanup_incomplete

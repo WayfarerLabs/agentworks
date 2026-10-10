@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import platform as host_platform
 import socket
 import subprocess
 import traceback
@@ -50,6 +51,7 @@ def deny(*args, **kwargs):
 
 @pytest.fixture(autouse=True)
 def offline_native_guard(monkeypatch):
+    monkeypatch.setattr(host_platform, "platform", lambda: "Linux-offline-test")
     monkeypatch.setattr(socket, "socket", deny)
     monkeypatch.setattr(subprocess, "Popen", deny)
     monkeypatch.setattr(webbrowser, "open", deny)
@@ -244,14 +246,14 @@ def test_real_read_client_public_close_keeps_originals_and_dependency_order(monk
             assert observe(Deadline.after(10)) == ("198.51.100.2" if endpoint else VMStatus.RUNNING)
         assert access.cleanup_incomplete == (failure is not None)
         if failure is not None:
-            assert (access._network if endpoint else access._compute) is originals[-1]
+            assert access._read_client is originals[-1]
             before = len(compute.calls) + len(network.calls)
             with pytest.raises(StateError):
                 access.observe_locator(Deadline.after(10))
             assert len(compute.calls) + len(network.calls) == before and credential.closed == 0
         retiring.close_error = None
         assert access.close(Deadline.after(10)) and credential.closed == 1
-        assert access._compute is None and access._network is None
+        assert access._read_client is None
 
 
 @pytest.mark.parametrize("selected", ["default", "principal", "browser"])
@@ -417,13 +419,13 @@ def test_real_service_failures_detach_secret_diagnostics_and_keep_original_custo
     assert cast(object, access._auth._credential) is credential and credential.closed == 0
     assert compute.closed == 1
     if stage != "compute":
-        assert access._compute is None and network.closed == 1
+        assert network.closed == 1
     assert access.cleanup_incomplete is close_incomplete
     if close_incomplete:
         if stage == "compute":
-            assert access._compute is originals[0]
+            assert access._read_client is originals[0]
         else:
-            assert access._network is originals[1]
+            assert access._read_client is originals[1]
         before = len(compute.calls), len(network.calls), len(credential.calls)
         with pytest.raises(StateError):
             access.observe_power(Deadline.after(10))

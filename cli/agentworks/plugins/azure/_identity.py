@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from uuid import UUID
 
 from agentworks.errors import ValidationError
 
@@ -43,4 +42,4 @@ def canonical_vm_id(vm_id: object) -> str:
     """
     if type(vm_id) is not str or _VM_ID.fullmatch(vm_id) is None:
         raise ValidationError("Azure VM unique identity is invalid")
-    return str(UUID(vm_id))
+    return vm_id.lower()
