@@ -176,6 +176,80 @@ def test_pending_worker_retains_borrowed_terminal_until_fresh_retry(
     os.fstat(borrowed)
 
 
+def test_daemon_caller_retains_non_daemon_terminal_worker_until_fresh_retry(
+    endpoint: tuple[int, int], custody: LocalDeliveryCustody, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import termios
+
+    borrowed = endpoint[1]
+    mode = termios.tcgetattr(borrowed)
+    acquired, resume, caller_done = Event(), Event(), Event()
+    attempts: list[_Attempt] = []
+    errors: list[BaseException] = []
+    held_fds: list[int] = []
+    releasers: list[tuple[PosixTerminal, Thread]] = []
+    native_acquire, native_release = PosixTerminal.acquire, PosixTerminal.release
+
+    def acquire(terminal: PosixTerminal) -> None:
+        native_acquire(terminal)
+        held_fds.extend((terminal.master_fd, terminal.slave_fd))
+        acquired.set()
+        assert resume.wait(3)
+
+    def restore(terminal: PosixTerminal) -> tuple[BaseException, ...]:
+        releasers.append((terminal, current_thread()))
+        return native_release(terminal)
+
+    def forbidden(*args: Any, **kwargs: Any) -> None:
+        pytest.fail("Cancelled acquisition admitted a native client")
+
+    def call() -> None:
+        try:
+            io = CarrierIO(TerminalInput(borrowed, borrowed, "fixture", Source()), SinkOutput(Sink(), Sink()))
+            attempt = _Attempt([sys.executable, "-c", "pass"], io, Deadline.after(0.1), custody)
+            attempts.append(attempt)
+            result = attempt.run()
+            assert not result.started and result.failure is Failure.DEADLINE
+        except BaseException as error:
+            errors.append(error)
+        finally:
+            caller_done.set()
+
+    monkeypatch.setattr(PosixTerminal, "acquire", acquire)
+    monkeypatch.setattr(PosixTerminal, "release", restore)
+    monkeypatch.setattr(LocalProcessOwner, "start", forbidden)
+    caller = Thread(target=call, daemon=True)
+    caller.start()
+    try:
+        assert acquired.wait(2) and caller_done.wait(2)
+        if errors:
+            raise errors[0]
+        attempt = attempts[0]
+        assert caller.daemon and not attempt._worker.daemon
+        assert custody._owner is attempt._owner and custody._cleanup is attempt
+        assert attempt._terminal._owner_thread is attempt._worker
+        assert not attempt._done.is_set() and not custody.settled and not releasers
+        assert termios.tcgetattr(borrowed) != mode
+        for fd in (*endpoint, *held_fds):
+            os.fstat(fd)
+        assert not custody.close(Deadline.after(0.02))
+        with pytest.raises(StateError):
+            custody.begin_process()
+    finally:
+        resume.set()
+        assert caller_done.wait(3)
+        caller.join(1)
+        assert custody.close(Deadline.after(3))
+    assert custody.settled and attempt._done.is_set()
+    assert releasers == [(attempt._terminal, attempt._worker)]
+    assert termios.tcgetattr(borrowed) == mode
+    for fd in held_fds:
+        with pytest.raises(OSError):
+            os.fstat(fd)
+    for fd in endpoint:
+        os.fstat(fd)
+
+
 def test_thread_start_refusal_settles_inert_owner_without_restart(
     endpoint: tuple[int, int], custody: LocalDeliveryCustody, monkeypatch: pytest.MonkeyPatch
 ) -> None:
