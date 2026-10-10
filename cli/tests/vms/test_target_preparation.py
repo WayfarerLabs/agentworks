@@ -9,7 +9,9 @@ from unittest.mock import Mock, call
 
 import pytest
 
+from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorUnavailable, VMPlatform
+from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import (
     Database,
     LifecycleObligationState,
@@ -18,6 +20,7 @@ from agentworks.db import (
     OperationResourceKind,
     OperationScope,
     VMRow,
+    VMStatus,
 )
 from agentworks.db.operations import OperationRepository
 from agentworks.errors import StateError, ValidationError
@@ -32,6 +35,7 @@ from agentworks.execution._vm_guest_identity_protocol import (
     encode_vm_guest_identity_failure,
     encode_vm_guest_identity_success,
 )
+from agentworks.execution._wsl2_owned_operation import WSL2OwnedOperation
 from agentworks.execution.binding import NativeExecutionBinding, _EarlyGuestFactsRoute
 from agentworks.execution.carrier import (
     CapturedOutput,
@@ -47,7 +51,10 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
+from agentworks.execution.carriers.wsl2 import WSL2Connection
 from agentworks.operations import OperationBorrow, OperationOwner, release_borrow_after_custody
+from agentworks.plugins.proxmox._native_access import ProxmoxOwnedNativePlatformAccess
+from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms.target_identity import compose_managed_vm_target_identity
 from agentworks.vms.target_preparation import (
     VMTargetPreparation,
@@ -205,17 +212,22 @@ def _compose(
     expected_locator: ProviderLocator = _DEFAULT_LOCATOR,
     binding: NativeExecutionBinding | None = None,
     custody=None,
+    observe_locator=None,
 ):
-    local_delivery = LocalDeliveryCustody()
+    local_delivery = custody or LocalDeliveryCustody()
+    selected_vm = vm or _vm()
+
+    def observe(selected_deadline: Deadline):
+        return platform.observe_provider_locator(selected_vm, ctx, deadline=selected_deadline, custody=local_delivery)
+
     return prepare_managed_vm_target_from_platform(
-        vm or _vm(),
+        selected_vm,
         platform,
-        ctx,
         expected_locator,
         binding if binding is not None else platform.test_binding,
         deadline=deadline or Deadline.after(10),
         owner=owner,
-        provider_custody=local_delivery,
+        observe_locator=observe if observe_locator is None else observe_locator,
     )
 
 
@@ -664,19 +676,21 @@ def test_platform_preflight_refuses_before_any_io_or_borrow(
             database.operations, OperationScope(OperationResourceKind.VM, "other"), "target-preparation"
         )
     borrow = Mock(wraps=OperationOwner.borrow)
+    observer = Mock(side_effect=AssertionError("Unexpected locator observation"))
     monkeypatch.setattr(OperationOwner, "borrow", borrow)
     try:
         if reason in {"wrong_owner", "malformed_marker"}:
             with pytest.raises(ValidationError):
-                _compose(selected_owner, platform, vm=vm, deadline=deadline)
+                _compose(selected_owner, platform, vm=vm, deadline=deadline, observe_locator=observer)
         else:
-            result = _compose(selected_owner, platform, vm=vm, deadline=deadline)
+            result = _compose(selected_owner, platform, vm=vm, deadline=deadline, observe_locator=observer)
             assert result.failure is (
                 VMTargetPreparationFailure.DEADLINE
                 if reason == "expired"
                 else VMTargetPreparationFailure.MARKER_MISSING
             )
         platform.observe_provider_locator.assert_not_called()
+        observer.assert_not_called()
         platform.resolve_native_execution_binding.assert_not_called()
         assert carrier.calls == 0
         borrow.assert_not_called()
@@ -739,13 +753,118 @@ def test_forged_fresh_locator_is_revalidated_at_plugin_boundary(
     owner.close()
 
 
-def test_selected_platform_must_be_bound_to_vm_site(owned: tuple[Database, OperationOwner]) -> None:
+def test_selected_platform_must_be_bound_to_vm_site(
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
+) -> None:
     _, owner = owned
     platform = _platform(TranscriptCarrier(_success_payload()))
     platform.site_name = "other"
+    observer = Mock(return_value=_DEFAULT_LOCATOR)
+    borrow = Mock(side_effect=AssertionError("Unexpected borrow"))
+    monkeypatch.setattr(OperationOwner, "borrow", borrow)
     with pytest.raises(ValidationError):
-        _compose(owner, platform)
+        _compose(owner, platform, observe_locator=observer)
+    observer.assert_not_called()
+    borrow.assert_not_called()
     platform.observe_provider_locator.assert_not_called()
+    owner.close()
+
+
+def test_selected_observer_surrounds_one_probe_without_settling_its_custody(
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, owner = owned
+    carrier = TranscriptCarrier(_success_payload(), deadlines=[])
+    platform = _platform(carrier)
+    deadline = Deadline.after(10)
+    events = []
+    retained_custody = Mock(spec=LocalDeliveryCustody)
+    borrows, releases = _watch_custody(monkeypatch)
+
+    def observe(selected_deadline):
+        assert selected_deadline is deadline
+        assert len(borrows) == 1 and releases == []
+        events.append(carrier.calls)
+        return _DEFAULT_LOCATOR
+
+    observer = Mock(side_effect=observe)
+    result = _compose(owner, platform, deadline=deadline, custody=retained_custody, observe_locator=observer)
+
+    assert result.status is VMTargetPreparationStatus.PREPARED
+    assert events == [0, 1]
+    assert observer.call_args_list == [call(deadline), call(deadline)]
+    assert carrier.deadlines == [deadline]
+    assert len(borrows) == 1 and releases == borrows
+    platform.observe_provider_locator.assert_not_called()
+    retained_custody.close.assert_not_called()
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+@pytest.mark.parametrize("kind", ["wsl2", "proxmox"])
+@pytest.mark.parametrize("outcome", ["locator", "unavailable", "keyboard", "exit"])
+def test_selected_access_observer_delegates_exact_retained_inputs(owned, kind, outcome, monkeypatch):
+    _, owner = owned
+    vm = _vm()
+    ctx = Mock(spec=RunContext)
+    custody = LocalDeliveryCustody()
+    deadline = Deadline.after(10)
+    result = _DEFAULT_LOCATOR if outcome == "locator" else ProviderLocatorUnavailable()
+    control = KeyboardInterrupt() if outcome == "keyboard" else SystemExit(3) if outcome == "exit" else None
+    selected: WSL2OwnedOperation | ProxmoxOwnedNativePlatformAccess
+    if kind == "wsl2":
+        platform = WSL2Platform("local", {})
+        selected = WSL2OwnedOperation(
+            vm,
+            platform,
+            ctx,
+            _DEFAULT_LOCATOR,
+            WSL2Connection("Ubuntu", "admin", "wsl.exe"),
+            _runtime(),
+            owner=owner,
+            provider_custody=custody,
+            native=Mock(),
+            observer=Mock(),
+        )
+    else:
+        platform = Mock(spec=ProxmoxPlatform)
+        selected = ProxmoxOwnedNativePlatformAccess(vm, platform, ctx, owner, custody)
+    provider_observer = Mock(side_effect=control) if control else Mock(return_value=result)
+    monkeypatch.setattr(platform, "observe_provider_locator", provider_observer)
+    if control is None:
+        assert selected.observe_locator(deadline) is result
+    else:
+        with pytest.raises(type(control)) as stopped:
+            selected.observe_locator(deadline)
+        assert stopped.value is control
+    provider_observer.assert_called_once_with(vm, ctx, deadline=deadline, custody=custody)
+    owner.close()
+
+
+def test_proxmox_preparation_uses_retained_observer_for_both_guest_observations(owned, monkeypatch):
+    _, owner = owned
+    vm = _vm()
+    platform = Mock(spec=ProxmoxPlatform)
+    platform.site_name = vm.site
+    platform.observe_provider_locator.return_value = _DEFAULT_LOCATOR
+    carrier = TranscriptCarrier(_success_payload(), deadlines=[])
+    platform.resolve_native_execution_binding.return_value = _binding(carrier)
+    ctx = Mock(spec=RunContext)
+    ctx.config = None
+    custody = LocalDeliveryCustody()
+    selected = ProxmoxOwnedNativePlatformAccess(vm, platform, ctx, owner, custody)
+    deadline = Deadline.after(10)
+    observer = Mock(wraps=selected.observe_locator)
+    monkeypatch.setattr(selected, "observe_locator", observer)
+    selected.prepare(VMStatus.RUNNING, deadline)
+    assert selected.preparation is not None
+    assert selected.preparation.status is VMTargetPreparationStatus.PREPARED
+    assert observer.call_args_list == [call(deadline), call(deadline)]
+    assert platform.observe_provider_locator.call_args_list == [call(vm, ctx, deadline=deadline, custody=custody)] * 3
+    assert carrier.deadlines == [deadline]
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
     owner.close()
 
 

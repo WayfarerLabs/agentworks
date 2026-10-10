@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.vm_platform.base import ProviderLocatorObservation
     from agentworks.db import VMRow
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.binding import NativeExecutionBinding
@@ -45,6 +46,10 @@ class ProxmoxOwnedNativePlatformAccess:
     def observe_power(self, deadline: Deadline) -> VMStatus:
         return self.platform.observe_execution_power(self.vm, self.ctx, deadline=deadline, custody=self.custody)
 
+    def observe_locator(self, deadline: Deadline) -> ProviderLocatorObservation:
+        """Observe the retained selection under the caller's native custody."""
+        return self.platform.observe_provider_locator(self.vm, self.ctx, deadline=deadline, custody=self.custody)
+
     def prepare(self, power: VMStatus, deadline: Deadline) -> None:
         if self._used:
             raise StateError("Owned Proxmox native access preparation is single use")
@@ -72,12 +77,11 @@ class ProxmoxOwnedNativePlatformAccess:
             preparation = prepare_managed_vm_target_from_platform(
                 self.vm,
                 self.platform,
-                self.ctx,
                 locator,
                 binding,
                 deadline=deadline,
                 owner=self.owner,
-                provider_custody=self.custody,
+                observe_locator=self.observe_locator,
             )
         except BaseException as control:
             if isinstance(control.__cause__, VMTargetPreparationControlFact):

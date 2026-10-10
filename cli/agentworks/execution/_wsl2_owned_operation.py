@@ -36,6 +36,7 @@ from agentworks.vms.target_preparation import (
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.vm_platform.base import ProviderLocatorObservation
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
@@ -226,12 +227,11 @@ class WSL2OwnedOperation:
         self.preparation = prepare_managed_vm_target_from_platform(
             self._vm,
             self._platform,
-            self._ctx,
             self._locator,
             self._binding,
             deadline=deadline,
             owner=self.owner,
-            provider_custody=self._provider_custody,
+            observe_locator=self.observe_locator,
         )
         if self.preparation.status is not VMTargetPreparationStatus.PREPARED:
             return None
@@ -275,11 +275,15 @@ class WSL2OwnedOperation:
             return None
         return identity
 
-    def revalidate_selected_route(self, deadline: Deadline) -> WSL2RouteStatus:
-        """Classify fresh route facts; propagate exceptional observations unchanged."""
-        locator = self._platform.observe_provider_locator(
+    def observe_locator(self, deadline: Deadline) -> ProviderLocatorObservation:
+        """Observe the retained selection under the caller's native custody."""
+        return self._platform.observe_provider_locator(
             self._vm, self._ctx, deadline=deadline, custody=self._provider_custody
         )
+
+    def revalidate_selected_route(self, deadline: Deadline) -> WSL2RouteStatus:
+        """Classify fresh route facts; propagate exceptional observations unchanged."""
+        locator = self.observe_locator(deadline)
         if deadline.expired:
             return WSL2RouteStatus.UNCONFIRMED
         if type(locator) is not ProviderLocator:
@@ -309,9 +313,7 @@ class WSL2OwnedOperation:
             return WSL2RouteStatus.UNCONFIRMED
         if runtime != self._runtime:
             return WSL2RouteStatus.CHANGED
-        confirmation = self._platform.observe_provider_locator(
-            self._vm, self._ctx, deadline=deadline, custody=self._provider_custody
-        )
+        confirmation = self.observe_locator(deadline)
         if deadline.expired:
             return WSL2RouteStatus.UNCONFIRMED
         if type(confirmation) is not ProviderLocator:

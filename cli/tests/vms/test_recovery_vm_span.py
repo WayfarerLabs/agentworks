@@ -21,6 +21,7 @@ from agentworks.errors import StateError, ValidationError
 from agentworks.execution._account import resolve_account
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._fixed_helper_operation import AttemptBoundHelperCarrier
+from agentworks.execution._recovery_guest_preparation import RecoveryGuestPreparationBatch
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 from agentworks.execution._wsl2_lifecycle import HandleSettlement, HostClientStatus
@@ -107,7 +108,35 @@ def _validate(carrier: Carrier) -> None:
 def test_existing_recovery_claim_retains_hold_through_exact_bound_action(setup, monkeypatch):
     database, owner, old_id, _, carrier, native, _, span, routes = setup
     monkeypatch.setattr(OperationOwner, "acquire", Mock(side_effect=AssertionError("Second claim")))
-    prepared = span.open(Deadline.after(10))
+    deadline = Deadline.after(10)
+    original_prepare = RecoveryGuestPreparationBatch.prepare
+    observed = []
+
+    def prepare(
+        batch, vm, platform, expected_locator, *, workload_account, include_elevated, deadline, observe_locator
+    ):
+        selected = span._selected
+        assert selected is not None
+        assert observe_locator == selected.observe_locator
+
+        def observe(selected_deadline):
+            observed.append((selected, selected_deadline, list(carrier.calls)))
+            return observe_locator(selected_deadline)
+
+        return original_prepare(
+            batch,
+            vm,
+            platform,
+            expected_locator,
+            workload_account=workload_account,
+            include_elevated=include_elevated,
+            deadline=deadline,
+            observe_locator=observe,
+        )
+
+    monkeypatch.setattr(RecoveryGuestPreparationBatch, "prepare", prepare)
+    prepared = span.open(deadline)
+    assert observed == [(span._selected, deadline, []), (span._selected, deadline, ["guest"])]
     assert carrier.calls == ["guest", "admin", "root"]
     assert [route.user for route in routes] == ["root", "admin", "admin"]
     assert prepared.guest == VMGuestIdentity(_MARKER, BOOT, 4096)
