@@ -11,6 +11,7 @@ _MODULE_NAMES = (
     "_vm_guest_identity_guest",
     "_file_effect_gate",
     "_file_paths",
+    "_scratch_root",
     "_scratch_receipt",
     "_scratch",
     "_file_wire",
@@ -22,4 +23,10 @@ _MODULE_NAMES = (
 FIXED_BUNDLE = build_file_helper_bundle(_PACKAGE, _MODULE_NAMES, "_file_stage_guest")
 ROOT_PROGRAM = build_root_guest_program(
     _PACKAGE, _MODULE_NAMES, "_file_stage_guest", delivery=RootGuestDelivery.FIXED_PREFIX
+)
+ROOT_SCRATCH_PROGRAM = build_root_guest_program(
+    _PACKAGE,
+    _MODULE_NAMES + ("_file_stage_scratch_guest",),
+    "_file_stage_scratch_guest",
+    delivery=RootGuestDelivery.FIXED_PREFIX,
 )

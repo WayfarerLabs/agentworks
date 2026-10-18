@@ -66,7 +66,7 @@ def _json(value: object) -> bytes:
 
 
 def encode_request(request: StagedHelperRequest) -> bytes:
-    """Validate externally supplied private control before encoding it."""
+    """Encode a validated private control within its envelope bound."""
     try:
         if type(request) is not StagedHelperRequest:
             raise ValueError
@@ -85,7 +85,8 @@ def encode_request(request: StagedHelperRequest) -> bytes:
                 "remaining_ns": request.remaining_ns,
             }
         )
-        decode_request(data)
+        if len(data) > MAX_ENVELOPE_BYTES:
+            raise ValueError
     except (ValueError, TypeError, AttributeError, OverflowError):
         raise StagedHelperError("invalid staged helper control") from None
     return data

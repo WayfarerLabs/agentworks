@@ -747,7 +747,7 @@ def test_reconcile_closes_owned_descriptors_on_control_interrupt(
         1.0,
     )
 
-    monkeypatch.setattr(_file_stage_guest, "_open_parent", lambda _request: (root_fd, parent_fd))
+    monkeypatch.setattr(_file_stage_guest, "_open_parent", lambda *_args, **_kwargs: (root_fd, parent_fd))
 
     def interrupt(*_args, **_kwargs):
         raise KeyboardInterrupt

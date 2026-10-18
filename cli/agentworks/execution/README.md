@@ -2259,6 +2259,12 @@ them through `_file_upload.py`; downloads use the separate snapshot exchanges be
 retain the token, original binding and known references; an unavailable creation reply does not
 establish absence or quiescence.
 
+Prepared helper inputs use the explicit private `fixed_scratch_root` stage variant. It requires a
+numeric guest bootstrap and selects a packaged root-only entry, rather than changing the request
+grammar. That entry refuses file-effect gates and caller-selected parents, and opens the same
+validated root-owned `01777` Linux `/tmp` as the staged loader before any scratch effect. Ordinary
+file-path staging retains its separate confined-parent behavior.
+
 `_scratch_root.py` opens the fixed Linux `/tmp` directory without following symlinks and requires
 UID 0 and mode 01777. It creates and repairs nothing, ignores environment-selected temporary paths,
 and returns a caller-owned descriptor or a closed failure kind. Download snapshots can use this
