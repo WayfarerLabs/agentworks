@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import secrets
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, cast
@@ -18,10 +18,11 @@ from ._execution_operation import ExecutionOperation, ManagedExecutionControlFac
 from ._execution_result import check_owned_inline_result, reduce_owned_inline_result
 from ._file_local_custody import LocalFileCall, local_failure, owned_local_call
 from ._file_local_download import FileLocalDownloadControlFact, FileLocalDownloadOutcome, download_to_local_file
-from ._file_operation import FileOperation
+from ._file_operation import FileGateSetupControlFact, FileOperation
 from ._file_paths import normalized_relative_path, normalized_root
 from ._file_result import (
     _raise_reason,
+    _runtime_reason,
     reduce_file_inventory,
     reduce_file_metadata,
     reduce_file_remove,
@@ -44,7 +45,12 @@ from ._managed_live_result import compose_managed_live_result
 from ._managed_observation_exchange import ManagedObservationState
 from ._managed_result import _fact
 from ._managed_runs import ManagedOutputMode
-from ._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from ._runtime_prerequisite import (
+    RuntimePrerequisiteObservation,
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+    RuntimeTargetOS,
+)
 from .carrier import Deadline, Dispatch, Failure, Retention
 from .diagnostics import ExecutionPhase, check_execution_result
 from .files import (
@@ -80,7 +86,7 @@ from .profiles import Protection
 from .result import ApplicationState, ExecutionFailure, ExecutionOutput, ExecutionResult, ExitCode, Signal
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Iterator, Mapping
     from typing import Never
 
     from ._managed_resource_start import ResourceStartAcknowledgement
@@ -657,22 +663,49 @@ class FileAccess:
         self._deadline = deadline
         self._route_check = route_check
 
+    def _raise_setup_error(self, control: Exception) -> None:
+        """Reduce gate-control custody without claiming a data-file mutation."""
+        fact = control.__cause__
+        if isinstance(fact, FileLocalDownloadControlFact):
+            fact = fact.__cause__
+        if isinstance(fact, FileGateSetupControlFact):
+            reason = (
+                _runtime_reason(RuntimePrerequisiteObservation(fact.runtime_state, None))
+                if fact.runtime_state is not None and fact.runtime_state is not RuntimePrerequisiteState.UNKNOWN
+                else None
+            )
+            _raise_reason(
+                FileOperationPhase.OBSERVATION,
+                reason or FileFailureReason.COORDINATION,
+                entity_kind=self._entity_kind,
+                entity_name=self._entity_name,
+            )
+
+    @contextmanager
+    def _setup_errors(self) -> Iterator[None]:
+        try:
+            yield
+        except Exception as control:
+            self._raise_setup_error(control)
+            raise
+
     def read_file(self, path: PurePosixPath, *, max_bytes: int, sudo: bool = False) -> ReadResult | None:
         """Read one bounded regular-file snapshot."""
         if type(max_bytes) is not int or not 0 < max_bytes <= _MAX_DOWNLOAD_SIZE:
             raise ValidationError("File read requires a positive representable byte bound")
         root, leaf, plan, deadline = self._request(path, sudo)
         self._admit_request(deadline)
-        outcome = _file_memory_read.read_file(
-            self._carrier,
-            trusted_root_path=root,
-            relative_path=leaf,
-            max_bytes=max_bytes,
-            plan=plan,
-            deadline=deadline,
-            runtime_selection=self._runtime_selection,
-            operation=self._operation,
-        )
+        with self._setup_errors():
+            outcome = _file_memory_read.read_file(
+                self._carrier,
+                trusted_root_path=root,
+                relative_path=leaf,
+                max_bytes=max_bytes,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=self._runtime_selection,
+                operation=self._operation,
+            )
         return reduce_file_memory_read(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
 
     def stat(self, path: PurePosixPath, *, sudo: bool = False) -> FileMetadata | None:
@@ -753,18 +786,19 @@ class FileAccess:
         _validate_creation_metadata(create_metadata, kind=FileKind.REGULAR)
         private_condition = _private_write_condition(condition)
         self._admit_request(deadline)
-        outcome = self._operation.upload(
-            self._carrier,
-            trusted_root_path=root,
-            relative_path=leaf,
-            source=_UploadSourceAdapter(source),
-            size=size,
-            condition=private_condition,
-            create_metadata=create_metadata,
-            plan=plan,
-            deadline=deadline,
-            runtime_selection=self._runtime_selection,
-        )
+        with self._setup_errors():
+            outcome = self._operation.upload(
+                self._carrier,
+                trusted_root_path=root,
+                relative_path=leaf,
+                source=_UploadSourceAdapter(source),
+                size=size,
+                condition=private_condition,
+                create_metadata=create_metadata,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=self._runtime_selection,
+            )
         return reduce_file_upload(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
 
     def upload_file(
@@ -807,19 +841,20 @@ class FileAccess:
                 raise LocalFileLimitError()
             call.phase = FileOperationPhase.TRANSFER
             adapter = _OwnedUploadSourceAdapter(local)
-            outcome = self._operation.upload(
-                self._carrier,
-                trusted_root_path=root,
-                relative_path=leaf,
-                source=adapter,
-                size=size,
-                condition=private_condition,
-                create_metadata=create_metadata,
-                plan=plan,
-                deadline=deadline,
-                runtime_selection=self._runtime_selection,
-                local_call=call,
-            )
+            with self._setup_errors():
+                outcome = self._operation.upload(
+                    self._carrier,
+                    trusted_root_path=root,
+                    relative_path=leaf,
+                    source=adapter,
+                    size=size,
+                    condition=private_condition,
+                    create_metadata=create_metadata,
+                    plan=plan,
+                    deadline=deadline,
+                    runtime_selection=self._runtime_selection,
+                    local_call=call,
+                )
             if (
                 adapter.failure is not None
                 and not outcome.requires_owner_retention
@@ -974,6 +1009,8 @@ class FileAccess:
                         local_call=call,
                     )
                 except BaseException as control:
+                    if isinstance(control, Exception):
+                        self._raise_setup_error(control)
                     fact = control.__cause__
                     if not isinstance(fact, FileLocalDownloadControlFact):
                         raise
@@ -1051,20 +1088,21 @@ class FileAccess:
         source = _json_source(document, max_bytes=max_bytes, max_depth=max_depth)
         private_strategy = cast("_JsonFileStrategy", _private_json_strategy(strategy))
         self._admit_request(deadline)
-        outcome = self._operation.update_json(
-            self._carrier,
-            trusted_root_path=root,
-            relative_path=leaf,
-            source=source,
-            strategy=private_strategy,
-            create=create,
-            create_metadata=create_metadata,
-            max_bytes=max_bytes,
-            max_depth=max_depth,
-            plan=plan,
-            deadline=deadline,
-            runtime_selection=self._runtime_selection,
-        )
+        with self._setup_errors():
+            outcome = self._operation.update_json(
+                self._carrier,
+                trusted_root_path=root,
+                relative_path=leaf,
+                source=source,
+                strategy=private_strategy,
+                create=create,
+                create_metadata=create_metadata,
+                max_bytes=max_bytes,
+                max_depth=max_depth,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=self._runtime_selection,
+            )
         return reduce_file_json(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
 
     def create_directory(
@@ -1078,17 +1116,18 @@ class FileAccess:
         _validate_creation_metadata(metadata, kind=FileKind.DIRECTORY)
         root, leaf, plan, deadline = self._request(path, sudo)
         self._admit_request(deadline)
-        outcome = self._operation.create_directory(
-            self._carrier,
-            trusted_root_path=root,
-            relative_path=leaf,
-            trusted_owner=metadata.owner,
-            trusted_group=metadata.group,
-            mode=metadata.mode,
-            plan=plan,
-            deadline=deadline,
-            runtime_selection=self._runtime_selection,
-        )
+        with self._setup_errors():
+            outcome = self._operation.create_directory(
+                self._carrier,
+                trusted_root_path=root,
+                relative_path=leaf,
+                trusted_owner=metadata.owner,
+                trusted_group=metadata.group,
+                mode=metadata.mode,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=self._runtime_selection,
+            )
         return reduce_file_metadata(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
 
     def ensure_directory(
@@ -1102,17 +1141,18 @@ class FileAccess:
         _validate_creation_metadata(metadata, kind=FileKind.DIRECTORY)
         root, leaf, plan, deadline = self._request(path, sudo)
         self._admit_request(deadline)
-        outcome = self._operation.ensure_directory(
-            self._carrier,
-            trusted_root_path=root,
-            relative_path=leaf,
-            trusted_owner=metadata.owner,
-            trusted_group=metadata.group,
-            mode=metadata.mode,
-            plan=plan,
-            deadline=deadline,
-            runtime_selection=self._runtime_selection,
-        )
+        with self._setup_errors():
+            outcome = self._operation.ensure_directory(
+                self._carrier,
+                trusted_root_path=root,
+                relative_path=leaf,
+                trusted_owner=metadata.owner,
+                trusted_group=metadata.group,
+                mode=metadata.mode,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=self._runtime_selection,
+            )
         return reduce_file_metadata(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
 
     def set_metadata(
@@ -1128,17 +1168,18 @@ class FileAccess:
         root, leaf, plan, deadline = self._request(path, sudo)
         metadata = NewMetadata(owner, group, mode)
         self._admit_request(deadline)
-        outcome = self._operation.set_metadata(
-            self._carrier,
-            trusted_root_path=root,
-            relative_path=leaf,
-            trusted_owner=metadata.owner,
-            trusted_group=metadata.group,
-            mode=metadata.mode,
-            plan=plan,
-            deadline=deadline,
-            runtime_selection=self._runtime_selection,
-        )
+        with self._setup_errors():
+            outcome = self._operation.set_metadata(
+                self._carrier,
+                trusted_root_path=root,
+                relative_path=leaf,
+                trusted_owner=metadata.owner,
+                trusted_group=metadata.group,
+                mode=metadata.mode,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=self._runtime_selection,
+            )
         return reduce_file_metadata(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
 
     def remove(
@@ -1156,16 +1197,17 @@ class FileAccess:
         private_kind = _private_file_kind(expected_kind)
         private_revision = _file_revision_from_revision(expected)
         self._admit_request(deadline)
-        outcome = self._operation.remove(
-            self._carrier,
-            trusted_root_path=root,
-            relative_path=leaf,
-            expected_kind=private_kind,
-            expected_revision=private_revision,
-            plan=plan,
-            deadline=deadline,
-            runtime_selection=self._runtime_selection,
-        )
+        with self._setup_errors():
+            outcome = self._operation.remove(
+                self._carrier,
+                trusted_root_path=root,
+                relative_path=leaf,
+                expected_kind=private_kind,
+                expected_revision=private_revision,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=self._runtime_selection,
+            )
         return reduce_file_remove(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
 
     def _request(self, path: PurePosixPath, sudo: bool) -> tuple[str, str, IdentityPlan, Deadline]:

@@ -49,7 +49,7 @@ from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms._native_operation import VMOperationControlFact, _vm_operation
 from tests.execution.test_target_identity import SyntheticCarrier
 from tests.execution.test_wsl2_owned_download import GuestThenFileCarrier
-from tests.vms.test_native_operation import _PackedCarrier
+from tests.vms.test_native_operation import _install_gate_namespace, _PackedCarrier
 from tests.vms.test_target_preparation import _MARKER
 
 if TYPE_CHECKING:
@@ -115,6 +115,7 @@ class _Route:
 def _install(database: Database, monkeypatch: pytest.MonkeyPatch) -> tuple[ProxmoxPlatform, _Route]:
     platform = ProxmoxPlatform("pve", {"api_url": "https://pve.test", "node": "node", "token_id": "token"})
     route = _Route(database)
+    _install_gate_namespace(database, route.local, monkeypatch)
     connection = ProxmoxConnection("https://pve.test", "node", 101, "token", "secret")
     binding = NativeExecutionBinding(
         ProxmoxCarrier(connection),
@@ -238,7 +239,7 @@ def test_running_views_share_owner_bootstrap_and_settle(database, tmp_path, monk
         assert views.execution.run(Command(["/usr/bin/touch", str(effect)]), profile=Protection.DIRECT, check=True).ok
         assert effect.exists() and not source.exists()
         assert route.ownership == views.owner.ownership
-    assert route.resolutions == 1 and route.local.calls == 3
+    assert route.resolutions == 1 and route.local.calls == 4
     assert all(value is deadline for value in route.deadlines)
     assert database.operations.inspect(_scope()) is None
 

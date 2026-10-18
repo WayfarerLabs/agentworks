@@ -152,19 +152,28 @@ def download_to_local_file(
             operation.retain_local_download_stage(writer)
 
     local_deadline_exceeded = deadline.expired or (download.deadline_exceeded if download is not None else False)
-    outcome = FileLocalDownloadOutcome(
-        download,
-        published=writer.published if writer is not None else False,
-        publication_uncertain=writer.publication_uncertain if writer is not None else False,
-        cleanup_uncertain=writer.cleanup_uncertain if writer is not None else construction_cleanup_uncertain,
-        cleanup_failed=cleanup_failed,
-        deadline_exceeded=local_deadline_exceeded,
-        unfinished_stage=writer if cleanup_failed else None,
-    )
-    if local_call is not None:
-        operation.capture_local_download(local_call, outcome)
+    try:
+        outcome = FileLocalDownloadOutcome(
+            download,
+            published=writer.published if writer is not None else False,
+            publication_uncertain=writer.publication_uncertain if writer is not None else False,
+            cleanup_uncertain=writer.cleanup_uncertain if writer is not None else construction_cleanup_uncertain,
+            cleanup_failed=cleanup_failed,
+            deadline_exceeded=local_deadline_exceeded,
+            unfinished_stage=writer if cleanup_failed else None,
+        )
+        if local_call is not None:
+            operation.capture_local_download(local_call, outcome)
+        if control is not None:
+            fact = FileLocalDownloadControlFact(outcome)
+            fact.__cause__ = control.__cause__
+    except BaseException:
+        # Pending setup or bound remote custody remains attached even when no
+        # snapshot outcome or local fact can be allocated. Preserve an escaping
+        # control interrupt without hiding a later ordinary reporting failure.
+        if control is not None and not isinstance(control, Exception):
+            raise control from control.__cause__
+        raise
     if control is not None:
-        fact = FileLocalDownloadControlFact(outcome)
-        fact.__cause__ = control.__cause__
         raise control from fact
     return outcome

@@ -107,6 +107,41 @@ class EvidenceCarrier:
         return CarrierReport(Dispatch.SENT, completion=self.completion)
 
 
+@pytest.fixture(autouse=True)
+def acknowledged_setup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Model the distinct successful control exchange before body fault vectors."""
+
+    def setup(op: BorrowedFixedHelperCarrier, **kwargs: Any) -> GateControlCandidateResult:
+        carrier = op._carrier
+        assert isinstance(carrier, EvidenceCarrier)
+        old_control, old_completion = carrier.control, carrier.completion
+        carrier.control, carrier.completion = False, ExitStatus(code=0)
+        try:
+            report = _dispatch(op, kwargs["deadline"])
+        finally:
+            carrier.control, carrier.completion = old_control, old_completion
+        gate = FileEffectGateBinding(
+            kwargs["path"],
+            b"a" * 16,
+            b"b" * 16,
+            kwargs["guest"],
+            kwargs["plan"].expected.euid,
+            kwargs["scope_name"],
+            1,
+            2,
+        )
+        return GateControlCandidateResult(
+            report.dispatch,
+            report.completion,
+            None,
+            None,
+            _READY,
+            GateControlObservation(GateControlObservationState.RESOLVED, gate),
+        )
+
+    monkeypatch.setattr(_file_operation, "exchange_file_effect_gate", setup)
+
+
 def _context(tmp_path: Path, *, numeric: bool = True) -> tuple[Database, OperationOwner, FileOperation]:
     database = Database(tmp_path / "state.db")
     owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "numeric-vm"), "files")
@@ -264,6 +299,21 @@ def test_constructor_refuses_inapplicable_context_without_obligations(
     owner = OperationOwner.acquire(database.operations, OperationScope(kind, "wrong"), "files")
     with pytest.raises(ValidationError):
         FileOperation(owner, target_for_owner(owner), bootstrap=_BOOTSTRAP)
+    assert not database.operations.list_pending_lifecycle_obligations(owner.ownership)
+    owner.close()
+
+
+@pytest.mark.parametrize("field", ["instance_marker", "boot_id", "init_start_ticks"])
+def test_constructor_refuses_disagreeing_raw_guest(tmp_path: Path, field: str) -> None:
+    database, owner, _ = _context(tmp_path)
+    guest = {
+        "instance_marker": replace(_GUEST, instance_marker="b" * 32),
+        "boot_id": replace(_GUEST, boot_id="123e4567-e89b-12d3-a456-426614174001"),
+        "init_start_ticks": replace(_GUEST, init_start_ticks=11),
+    }[field]
+    target = replace(target_for_owner(owner), boot_id=vm_guest_boot_id(_GUEST))
+    with pytest.raises(ValidationError):
+        FileOperation(owner, target, bootstrap=_BOOTSTRAP, guest=guest)
     assert not database.operations.list_pending_lifecycle_obligations(owner.ownership)
     owner.close()
 
@@ -434,7 +484,8 @@ def test_json_lost_child_publication_retains_exact_child_context(
 
     def publish(self: LifecycleObligation, *, expected_revision: int, payload_version: int, payload: bytes):
         original_publish(self, expected_revision=expected_revision, payload_version=payload_version, payload=payload)
-        raise RuntimeError("child publication committed but reply lost")
+        if decode_file_call_obligation(payload).token is not None:
+            raise RuntimeError("child publication committed but reply lost")
 
     monkeypatch.setattr(_file_json, "stat_file", stat)
     monkeypatch.setattr(LifecycleObligation, "publish_payload", publish)
@@ -449,7 +500,7 @@ def test_json_lost_child_publication_retains_exact_child_context(
     assert child.binding is child.state.binding
     record = _row(database, owner)
     assert record.attempt == 1 and record.token == child.state.token
-    assert carrier.calls == 1
+    assert carrier.calls == 2
     with pytest.raises(StateError):
         owner.close()
 
@@ -466,6 +517,7 @@ def test_owned_capture_failure_preserves_actual_active_call(
 ) -> None:
     database, owner, operation = _context(tmp_path)
     prepared_type: Any
+    original_publish = LifecycleObligation.publish_payload
     records: Any
     prepared_type, records = {
         "stat": (_file_operations._PreparedStat, operation._active_stats),
@@ -495,6 +547,9 @@ def test_owned_capture_failure_preserves_actual_active_call(
         return outcome
 
     def fail_capture(*args: Any, **kwargs: Any) -> None:
+        if not outcomes:
+            original_publish(*args, **kwargs)
+            return
         (active,) = records.values()
         assert active.outcome is outcomes[0]
         raise MemoryError("capture failed")

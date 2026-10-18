@@ -215,7 +215,7 @@ def test_stopped_start_prepares_file_and_direct_body_under_same_owner(
     assert startup.route.ownership == startup.owner and startup.route.resolutions == 1
     assert startup.events == ["start", "task", "task", "power", "info", "info", "guest"]
     assert all(value is deadline for value in startup.route.deadlines)
-    assert startup.route.guest.calls == 1 and startup.route.local.calls == 3
+    assert startup.route.guest.calls == 1 and startup.route.local.calls == 4
     assert startup.workflow is not None
     access = startup.workflow.access
     assert isinstance(access, ProxmoxOwnedNativePlatformAccess) and access.activation is not None

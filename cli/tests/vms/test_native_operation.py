@@ -31,8 +31,8 @@ from agentworks.db import (
     VMStatus,
 )
 from agentworks.db.operations import OperationRepository
-from agentworks.errors import ExternalError, StateError, UncertainOutcomeError, ValidationError
-from agentworks.execution import _wsl2_owned_operation
+from agentworks.errors import ExternalError, StateError, ValidationError
+from agentworks.execution import _file_effect_gate, _file_gate_setup, _wsl2_owned_operation
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_obligation import decode_file_call_obligation
 from agentworks.execution._file_operation import _ActiveFileUpload
@@ -484,6 +484,7 @@ import builtins,contextlib,json,os,sys
 real_exec=builtins.exec
 observed=json.loads(sys.argv[3])
 scratch=sys.argv[4]
+gate_root=sys.argv[5]
 @contextlib.contextmanager
 def admit(uid,gid,groups):
  assert (uid,gid,groups)==(os.geteuid(),os.getegid(),tuple(sorted(set(os.getgroups())|{os.getegid()})))
@@ -501,6 +502,9 @@ def execute(source,scope=None,local=None):
  elif scope.get('__name__','').endswith('._scratch_root') and scratch:
   scope['_LINUX_SCRATCH_ROOT']=scratch
   scope['_EXPECTED_OWNER_UID']=os.geteuid()
+ elif scope.get('__name__','').endswith('._file_effect_gate'):
+  scope['_GATE_NAMESPACE']=gate_root
+  scope['_ROOT_UID']=os.geteuid()
 wrapper=sys.argv[2]
 sys.argv=['fixed-helper',sys.argv[1]]
 builtins.exec=execute
@@ -514,6 +518,7 @@ class _PackedCarrier:
         self.calls = 0
         self.observed = VMGuestIdentity(_MARKER, BOOT, 4096)
         self.scratch: Path | None = None
+        self.gate_root: Path | None = None
 
     def execute(
         self,
@@ -539,6 +544,7 @@ class _PackedCarrier:
                 invocation.argv[-2],
                 json.dumps((guest.instance_marker, guest.boot_id, guest.init_start_ticks)),
                 str(self.scratch) if self.scratch is not None else "",
+                str(self.gate_root) if self.gate_root is not None else "",
             ],
             input=io.input.data,
             capture_output=True,
@@ -569,6 +575,7 @@ class _RouteCarrier:
         self.routes: list[WSL2Connection] = []
         self.ownership: OperationOwnership | None = None
         self.file_records: list[bytes] = []
+        self.file_ids: list[str] = []
         self.prepared_guest: VMGuestIdentity | None = None
 
     def execute(
@@ -603,6 +610,7 @@ class _RouteCarrier:
             if row.obligation_kind == "file-call":
                 assert row.payload_version == 2
                 self.file_records.append(row.payload)
+                self.file_ids.append(row.obligation_id)
         return self.local.execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
@@ -610,6 +618,7 @@ def _install_route(
     database: Database, platform: WSL2Platform, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[_RouteCarrier, FakeNative, FakeObserver]:
     route = _RouteCarrier(database)
+    _install_gate_namespace(database, route.local, monkeypatch)
     original_check = WSL2OwnedOperation.require_ready_guest
 
     def check(selected: WSL2OwnedOperation, guest: VMGuestIdentity) -> None:
@@ -642,6 +651,16 @@ def _install_route(
         ),
     )
     return route, native, observer
+
+
+def _install_gate_namespace(database: Database, local: _PackedCarrier, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Supply the fixture guest's protected namespace without provisioning a host."""
+    gate_root = database.path.parent / "run" / "agentworks" / "file-gates-v1"
+    gate_root.joinpath(str(os.geteuid())).mkdir(parents=True, mode=0o700)
+    local.gate_root = gate_root
+    monkeypatch.setattr(_file_gate_setup, "_NAMESPACE", str(gate_root))
+    monkeypatch.setattr(_file_effect_gate, "_GATE_NAMESPACE", str(gate_root))
+    monkeypatch.setattr(_file_effect_gate, "_ROOT_UID", os.geteuid())
 
 
 def test_actual_hold_ready_precedes_single_shared_guest_probe(database, tmp_path, monkeypatch):
@@ -1066,7 +1085,7 @@ def test_full_guest_mismatch_prevents_file_and_command_application_effects(
                     Command(["/usr/bin/touch", str(command_effect)]), profile=Protection.DIRECT, check=True
                 )
         else:
-            with pytest.raises(UncertainOutcomeError if action == "remove" else ExternalError):
+            with pytest.raises(ExternalError):
                 if action == "stat":
                     views.files.stat(PurePosixPath(source))
                 elif action == "read":
