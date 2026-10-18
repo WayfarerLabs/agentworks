@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 from collections.abc import Callable
+from pathlib import Path
 from threading import Event, Thread
 
 import pytest
@@ -615,7 +616,8 @@ def test_idle_requires_exact_live_child_before_teardown(probe_boundary, status):
 
 
 def test_standalone_pending_cell_survives_normal_exit_until_outer_supervision():
-    script = r"""
+    probe = str(Path(__file__).with_name("windows_pseudoconsole_probe.py").resolve())
+    script = f"""
 import ctypes, runpy, sys, threading
 import agentworks.execution._terminal_handoff
 import agentworks.execution._windows_pseudoconsole as native
@@ -636,17 +638,23 @@ class QuickJoin(RealThread):
         return super().join(0.01)
 threading.Thread = QuickJoin
 sys.platform = 'win32'
-runpy.run_module('tests.execution.windows_pseudoconsole_probe', run_name='__main__')
+runpy.run_path({probe!r}, run_name='__main__')
 """
     process = subprocess.Popen(
         [sys.executable, "-I", "-B", "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
     try:
-        with pytest.raises(subprocess.TimeoutExpired) as caught:
-            process.communicate(timeout=10)
-        report = json.loads(caught.value.output)
-        assert report["stage"] == "retained_worker_pending" and not report["accepted"]
-        assert process.poll() is None
+        try:
+            stdout, stderr = process.communicate(timeout=10)
+        except subprocess.TimeoutExpired as caught:
+            report = json.loads(caught.output)
+            assert report["stage"] == "retained_worker_pending" and not report["accepted"]
+            assert process.poll() is None
+        else:
+            pytest.fail(
+                "standalone probe exited before outer supervision: "
+                f"returncode={process.returncode}, stdout={stdout!r}, stderr={stderr!r}"
+            )
     finally:
         if process.poll() is None:
             process.kill()
