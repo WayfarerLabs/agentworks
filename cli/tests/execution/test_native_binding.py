@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import VMRow
@@ -298,7 +299,8 @@ def test_unimplemented_platform_hook_fails_without_making_old_subclass_abstract(
     platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
 
     with pytest.raises(StateError) as raised:
-        platform.resolve_native_execution_binding(
+        VMPlatform.resolve_native_execution_binding(
+            platform,
             _vm(metadata={"instance_name": "vm-one"}),
             RunContext(),
             deadline=Deadline(None),

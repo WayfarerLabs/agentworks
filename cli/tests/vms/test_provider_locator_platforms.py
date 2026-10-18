@@ -9,7 +9,7 @@ from typing import cast
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorUnavailable
+from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.errors import ConfigError, ConnectivityError, LimitExceededError, StateError
@@ -50,15 +50,13 @@ def _proxmox() -> ProxmoxPlatform:
     )
 
 
-def test_lima_locator_is_unavailable_without_provider_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_remote_lima_locator_refuses_without_provider_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
     local_delivery = LocalDeliveryCustody()
-    platform = LimaPlatform("lima", {})
+    platform = LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "remote"}})
     monkeypatch.setattr(platform, "_run_lima", lambda *_args, **_kwargs: pytest.fail("unexpected lookup"))
 
-    assert (
+    with pytest.raises(StateError):
         platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10), custody=local_delivery)
-        == ProviderLocatorUnavailable()
-    )
 
 
 def test_proxmox_locator_requires_scoped_configuration_without_legacy_lookup(monkeypatch: pytest.MonkeyPatch) -> None:

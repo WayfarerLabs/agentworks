@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
@@ -23,6 +24,7 @@ from agentworks.naming import NAME_RE
 
 if TYPE_CHECKING:
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
+    from agentworks.execution._lima_selection import LimaDirectoryIdentity
     from agentworks.execution.carrier import Deadline, PreparedInvocation
 
 
@@ -32,6 +34,8 @@ class LimaConnection:
 
     instance: str = field(repr=False)
     limactl_executable: str = field(repr=False)
+    lima_home: str | None = field(default=None, repr=False)
+    selected_directory: LimaDirectoryIdentity | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.instance, str) or NAME_RE.fullmatch(self.instance) is None:
@@ -43,6 +47,17 @@ class LimaConnection:
             or any(ord(char) < 32 or ord(char) == 127 for char in self.limactl_executable)
         ):
             raise ValidationError("Lima executable must be an explicit command name or native path")
+        if self.lima_home is not None and (
+            not isinstance(self.lima_home, str) or not os.path.isabs(self.lima_home) or "\0" in self.lima_home
+        ):
+            raise ValidationError("Lima home must be an explicit absolute native path")
+        if self.selected_directory is not None and self.lima_home is None:
+            raise ValidationError("Lima directory selection requires a pinned home")
+        if self.selected_directory is not None:
+            from agentworks.execution._lima_selection import LimaDirectoryIdentity
+
+            if type(self.selected_directory) is not LimaDirectoryIdentity:
+                raise ValidationError("Lima directory selection requires an explicit directory identity")
 
 
 class LimaCarrier:
@@ -82,6 +97,12 @@ class LimaCarrier:
         self.validate(invocation, io=io)
         if not custody.settled:
             raise StateError("Local delivery custody is unsettled")
+        directory = self._connection.selected_directory
+        if directory is not None:
+            directory.check()
+        environment = (
+            None if self._connection.lima_home is None else {**os.environ, "LIMA_HOME": self._connection.lima_home}
+        )
         result = run_process(
             [
                 self._connection.limactl_executable,
@@ -110,7 +131,10 @@ class LimaCarrier:
             io=io,
             deadline=deadline,
             custody=custody,
+            env=environment,
         )
+        if directory is not None:
+            directory.check()
         completion = ExitStatus(code=0) if result.started and result.exit_status == 0 else None
         dispatch = (
             Dispatch.SENT

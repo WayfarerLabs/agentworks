@@ -196,6 +196,7 @@ def test_literal_argv_and_original_controls_reach_one_pump_call(monkeypatch: pyt
         io=io,
         deadline=deadline,
         custody=custody,
+        env=None,
     )
     assert pump.call_args.kwargs["io"] is io
     assert pump.call_args.kwargs["deadline"] is deadline
