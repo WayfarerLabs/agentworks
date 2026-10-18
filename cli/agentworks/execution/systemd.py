@@ -22,7 +22,7 @@ from agentworks.execution._inline import _manifest
 from agentworks.execution._inline_bundle import FIXED_SOURCE
 from agentworks.execution._inline_control import WaitKind
 from agentworks.execution._inline_observer import InlineObservation, InlineObserver
-from agentworks.execution._inline_request import ManifestError, ManifestErrorCode, OutputMode, encode_manifest
+from agentworks.execution._inline_request import ManifestError, ManifestErrorCode, OutputMode, encode_request_envelope
 from agentworks.execution.carrier import (
     Capture,
     CarrierIO,
@@ -345,7 +345,7 @@ def _manifest_data(
         capture_limit=capture_limit,
     )
     try:
-        return encode_manifest(manifest)
+        return encode_request_envelope(manifest)
     except ManifestError as error:
         if error.code is ManifestErrorCode.OVERSIZED:
             raise ValidationError("Managed invocation exceeds the 32768-byte candidate manifest bound") from None

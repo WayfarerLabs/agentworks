@@ -11,6 +11,7 @@ _MODULE_NAMES = (
     "_evidence_wire",
     "_inline_request",
     "_inline_control",
+    "_inline_guest_io",
     "_inline_guest",
 )
 
