@@ -1791,6 +1791,15 @@ complete this admission before constructing their workstation writer; local tran
 original serial borrow. STAT, inventory and no-staging readiness do not create gates. Gate
 coordination failure reduces to an observation failure, not a claim of data-file mutation.
 
+For a selected managed agent, explicit VM operation preparation also prepares its UID gate directory
+and persistent per-UID boot rule before exposing file views. One namespace obligation precedes
+root-gate setup and publishes its exact binding before namespace effects. A separate fixed root
+helper holds that gate through direct filesystem work and owned temporary cleanup. It accepts exact
+existing entries, refuses unsafe metadata, links, ACLs or changed rule content, and publishes only a
+completely prepared new rule without replacing an existing one. It never launches a mutating child
+or creates missing root gate anchors. Passive context construction and readiness do not run this
+helper; incomplete preparation retains the original workflow and ownership.
+
 Historical private operations without verified guest facts and platform-host operations retain their
 separate contracts; they do not fabricate a VM identity. This wiring does not migrate legacy
 callers, activate permissions or complete production recovery. Managed-agent namespace lifecycle,

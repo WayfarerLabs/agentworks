@@ -49,6 +49,13 @@ preparation too. Native and canonical views report their actual semantic route; 
 switches delivery. Full platform/native acceptance, creation/rollback and public surface completion
 remain separate gates.
 
+When a managed agent is selected, the private operation retains explicit UID-namespace preparation
+after numeric account identity and root bootstrap verification, before constructing its file view.
+Its original VM owner covers root-gate setup, exact binding publication and the separate fixed
+namespace helper. Aggregate cleanup retains that preparation through uncertainty. This does not
+coordinate legacy account creation, deletion or numeric UID reuse; those lifecycle and native boot
+gates remain required before production agent adoption.
+
 Local Lima's owned access selects its own opaque instance metadata and pins the client, home and
 directory identity before native delivery. Availability and native route selection remain separate;
 the latter pins the configured delivery user and driver. Startup is one-shot, with durable possible

@@ -1211,7 +1211,7 @@ deletion and UID reuse must share the VM ownership boundary with file effects an
 rule while an old gate helper or obligation can still act. Numeric UID reuse is the relevant
 identity hazard even when agent names differ.
 
-The private implementation may prepare a managed UID namespace inside the explicit new-stack VM
+The private implementation prepares a managed UID namespace inside the explicit new-stack VM
 operation after identity preparation, before constructing its file view. This is stateful core
 preparation, not an effect hidden in a passive constructor, account lookup or readiness probe. It
 uses the verified root bootstrap to set up the already bootstrapped root-UID gate in one retained

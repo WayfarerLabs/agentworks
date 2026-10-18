@@ -5100,11 +5100,19 @@ RunContext factory, native delivery drain and recovery remain open.
       evidence of that `OperationOwner` exclusion. Cover interrupted provisioning, repeated reinit,
       retained work, deletion and numeric UID reuse without repairing or replacing a live gate file.
 
-The next private implementation unit prepares the namespace inside the explicit new-stack VM
-operation, after verifying the selected agent's numeric identity and guest epoch and before exposing
-its file view. This uses an existing owned consumer without first duplicating account orchestration.
-It does not enable production agent use: account creation, deletion and UID reuse must still join
-that same owner boundary before the broader lifecycle gate can close.
+The private namespace candidate prepares it inside the explicit new-stack VM operation, after
+verifying the selected agent's numeric identity and guest epoch and before exposing its file view.
+This uses an existing owned consumer without first duplicating account orchestration. It does not
+enable production agent use: account creation, deletion and UID reuse must still join that same
+owner boundary before the broader lifecycle gate can close.
+
+Owner candidate `c489acc5f` adds the separate fixed helper, bounded custody codec and retained
+preparation wrapper, with explicit VM workflow integration. Local isolated checks cover direct
+filesystem behavior, Bookworm Python, complete QGA request bounds and 274 selected helper/workflow
+cases; 54 focused checks follow test-only typing corrections, and strict typing covers 1,534
+sources. A broader VM run was deliberately interrupted for fixture capacity and is not a pass; its
+original view is retained. Independent reviews and lead composition gates remain pending, so neither
+checkbox below nor the broader account-lifecycle gate is completed by these worker results.
 
 - [ ] Bind managed-UID namespace preparation into the new-stack VM operation. Reuse one exact owner,
       selected route, verified root bootstrap and finite deadline. Register one durable row before
