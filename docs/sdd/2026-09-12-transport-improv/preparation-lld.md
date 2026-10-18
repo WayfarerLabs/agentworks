@@ -774,6 +774,19 @@ memory until publication, as the existing inline helper does. This is bounded by
 capture policy, not by provider output capacity. Streaming capture can replace that implementation
 later without changing the output or ownership contract.
 
+Publication failure after child observation is a separate normal outcome. This output mode emits one
+closed record per stream: either a ready reference bound to its retained-prefix facts, or an
+explicit unavailable-capture record with those facts and that token's creation disposition
+(`NOT_ENTERED` or `POSSIBLE`). Set `POSSIBLE` before entering scratch creation; only a creation
+never entered may report `NOT_ENTERED`. An unavailable record grants no ready reference, verified
+local bytes or complete public output. The mode's grammar accepts the actual wait after both
+records, then the ordinary failure and terminal records. Thus a handled create/write/verify failure
+can retain known application status instead of making scratch publication a prerequisite to
+reporting the child's wait. Preserve an earlier process failure; otherwise publication failure
+reports `OUTPUT`. Cleanup debt remains independent. If only one stream publishes, retain and
+retrieve its ready prefix without inventing the other stream's storage. Lost or interrupted terminal
+evidence still cannot establish application completion or a token's non-creation.
+
 The parent retains one exact cleanup binding for the two capture tokens before application dispatch.
 It includes the selected target/runtime/workload identity, not application bytes. Creation occurs
 inside the single fixed application helper, so the parent must also retain its actual delivery and
