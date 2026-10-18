@@ -182,11 +182,11 @@ Linux/macOS/Windows SSH proof remain explicit acceptance work. The transport lea
 SSH lane before implementation; no SSH source or policy change is implied by this candidate.
 
 The Windows owned-stdin candidate now uses synchronous native `WriteFile` on the existing
-nonblocking pipe handle. Controlled native probes distinguished a closed reader's `BrokenPipeError`
-(Win32 232) from the CRT wrapper's generic `EINVAL`, live backpressure with a successful zero-byte
+non-blocking pipe handle. Controlled native probes distinguished a closed reader's `BrokenPipeError`
+(Win32 232) from the CRT wrapper's generic `EINVAL`, live pipe pressure with a successful zero-byte
 native write, and an invalid handle. Only positively accepted bytes advance the pending suffix. A
 zero-byte offer shrinks within that suffix, at most 17 attempts for the bounded chunk, then yields
-temporary backpressure. Original native errors propagate; there is no generic `EINVAL` suppression
+temporary pipe pressure. Original native errors propagate; there is no generic `EINVAL` suppression
 or CRT fallback. The production writer still needs fresh native proof, including byte-exact
 resumption and the complete process-completion cases.
 

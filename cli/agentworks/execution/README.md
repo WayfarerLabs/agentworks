@@ -836,7 +836,7 @@ guest delivery, framing or workload supervision.
 On Windows, owned stdin writes use the native pipe handle rather than the CRT write wrapper,
 preserving the originating broken-pipe error. A successful zero-byte write means no progress, not
 consumer closure. The writer retries only smaller unaccepted prefixes, bounded to 17 attempts per
-65,536-byte chunk, then reports temporary backpressure. Other native errors remain failures. POSIX
+65,536-byte chunk, then reports temporary pipe pressure. Other native errors remain failures. POSIX
 uses `os.write` unchanged.
 
 The pump supports finite or explicitly enabled live input, separate bounded outputs, explicit
