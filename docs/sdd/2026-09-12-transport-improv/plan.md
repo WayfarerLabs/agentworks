@@ -5367,6 +5367,12 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
       capture/spooling limits. Preserve requested profile, identity and sensitivity; never
       downgrade, substitute capture, or infer guest termination from observation loss. The DIRECT
       pipe prerequisite above does not narrow these requirements.
+- [ ] Implement the [managed foreground pipe design](managed-live-io-lld.md): retain settled
+      buffered launch and keeper admission, add explicit protected live-direction metadata and one
+      controller-owned per-run socket, and connect one foreground relay under the original owner.
+      Prove bounded admission, independent directions, lease/stop progress under backpressure, no
+      retained live output, exact socket disposal and actual presentation in the foreground result.
+      Local proof must not substitute for native root/cgroup/SSH acceptance.
 
 The private pipe checkpoint at `6b8fe8128` passes 1,318 scoped tests with one skip and strict typing
 across 1,442 sources. Changed-file Python and Markdown quality checks pass. Project, complexity and
