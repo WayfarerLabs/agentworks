@@ -1407,6 +1407,40 @@ and
 [integer mapping](https://github.com/python/cpython/blob/v3.12.13/Modules/posixmodule.c#L1954-L2005).
 Synthetic Windows mappings and Linux fixtures do not supply native Windows or Lima evidence.
 
+### Lima non-waking Windows observation
+
+The private provider snapshot now uses host registration plus `wsl --list --verbose` for WSL,
+reserving Lima's guest-capable delivery-user inspection for authorized running availability. The
+[upstream WSL implementation](https://github.com/lima-vm/lima/blob/v2.2.1/pkg/driver/wsl2/vm_windows.go)
+names distributions `lima-<instance>` without the Lima home. Therefore selection also compares the
+registered installation directory, machine, account SID and registration GUID. Absence is a possible
+first import, not permission to adopt an unrelated existing registration. One natural successful
+start and fresh matching running evidence permit that transition; lost acknowledgment does not.
+
+Driver defaults cannot be inferred from the Python workstation architecture or one Lima release. The
+source audit distinguishes these Windows cases:
+
+| Lima family       | Implicit Windows driver                                                         | Source                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| 0.18 through 0.23 | QEMU; empty/default values resolve as implicit                                  | [0.23 defaults](https://github.com/lima-vm/lima/blob/v0.23.0/pkg/limayaml/defaults.go) |
+| 1.0 through 1.2   | QEMU; scan override, instance and default for an explicit non-placeholder value | [1.2 defaults](https://github.com/lima-vm/lima/blob/v1.2.1/pkg/limayaml/defaults.go)   |
+| 2.0               | WSL, including non-native architecture                                          | [2.0 resolver](https://github.com/lima-vm/lima/blob/v2.0.0/pkg/driverutil/vm.go)       |
+| 2.1               | WSL for native architecture, QEMU otherwise                                     | [2.1 resolver](https://github.com/lima-vm/lima/blob/v2.1.0/pkg/driverutil/vm.go)       |
+| 2.2               | QEMU; only an absent driver selects the implicit default                        | [2.2 resolver](https://github.com/lima-vm/lima/blob/v2.2.1/pkg/driverutil/vm.go)       |
+
+This adds no minimum version and does not extrapolate unknown defaults. Explicit built-in selections
+can avoid a version query. The ambiguous 2.1 architecture case reads the selected Windows client's
+bounded PE machine header, not the Python host architecture; emulation can make them differ. The
+[Microsoft PE specification](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format)
+defines the signature offset and machine field. Unknown wrappers or machine types remain unconfirmed
+rather than allowing a potentially guest-capable inspector. A full user/config merger is not needed:
+Lima resolves the native account, while later checks pin the three YAML inputs and the instance
+`lima-version` used by
+[upstream defaults](https://github.com/lima-vm/lima/blob/v2.2.1/pkg/limayaml/defaults.go).
+
+These are source and local fixture conclusions. They do not prove native Windows behavior or a WSL
+availability hold; observing running power cannot prevent subsequent idle shutdown.
+
 ### Darwin ownership feasibility
 
 The follow-up source audit distinguishes ordinary process-group cleanup from inherited ownership

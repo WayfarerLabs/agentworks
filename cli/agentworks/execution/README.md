@@ -69,6 +69,17 @@ macOS/Windows behavior. The owned local platform composition below selects the a
 delivery account and activation; that source implementation is not native acceptance. Live and
 terminal I/O are unavailable in this private carrier.
 
+Local Lima selection separates provider observations from native delivery-user resolution. A bounded
+host-input classifier admits known built-in drivers before invoking inspection; version-sensitive
+defaults use observed client evidence. WSL power uses only host registration and
+`wsl --list --verbose` before availability, avoiding Lima inspection's guest address commands.
+Selection checks the registration's machine, SID, GUID, name and installation directory against the
+held instance. Only the existing one-shot successful start plus matching running evidence can adopt
+a first import's new GUID. Native user resolution then uses Lima and pins instance/global YAML and
+`lima-version` fingerprints for later checks. This does not provide a WSL availability hold: both
+operation-length and independent-job holds for Lima's WSL driver remain open, as do native Windows
+and remote platform-host acceptance.
+
 The private managed-start exchange stages the five fixed protected request assets and invokes the
 first-party derived Linux service controller through one transient root systemd service. An
 operation-owned request also publishes its separate protected lease control. Its canonical request

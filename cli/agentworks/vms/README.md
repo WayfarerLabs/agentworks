@@ -55,6 +55,12 @@ the latter pins the configured delivery user and driver. Startup is one-shot, wi
 effect recorded before dispatch and exact running evidence required alongside successful client
 completion. Cleanup settles that request and local resources, not Lima's continuing VM runtime.
 Directory replacement checks do not promise identity that cannot be copied or automatic restore
-adoption. Windows directory-handle coverage, a non-waking power path for Lima's WSL driver and
-remote SSH-accessed platform-host composition still require their own native evidence and
-implementation.
+adoption. WSL power observation uses only host registration and power listings before availability;
+native delivery-user resolution follows it. Registration identity includes the selected Windows
+machine, account SID, distribution GUID and installation directory. First import can adopt its new
+GUID only after the one successful start and matching fresh running evidence. Later native checks
+pin the four configuration inputs used for selection. Unsupported or unconfirmed driver selection
+refuses before invoking its inspector. Windows directory-handle coverage and this non-waking path
+still need native evidence. Lima WSL has no operation-length availability hold or independent-job
+hold yet; running observations alone do not prevent idle shutdown. Remote SSH-accessed platform-host
+composition remains unimplemented here.

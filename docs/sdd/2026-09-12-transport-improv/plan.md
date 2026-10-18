@@ -5822,6 +5822,27 @@ and file quality, but cannot replace the full result. The final read-bound corre
 clears all three source-review lanes and 55 worker tests; combined regression correction and
 full-suite revalidation remain open. No completion checkbox or public handoff follows.
 
+Private corrections now include worker `dd548b472` for the three cloud regression modules and
+`145b9e046` for managed admission. The former retains actual staged startup/authentication fault
+reachability and makes Azure's after-cleanup refusal deterministic without weakening borrowed
+credential protection; 221 worker tests pass. The latter restores StateError for known unavailable
+managed binding, preserves ValidationError for mismatched supplied bindings, and replaces brittle
+route-read counts with actual lookup/clock/start ordering; 252 worker tests pass. Both report strict
+typing across 1,509 sources and clean changed-file quality. Combined review and full-suite
+revalidation remain required.
+
+- [ ] Complete private combined review and validation of Lima's provider/native observation split
+      (`43a0ed94a`, test portability follow-up `328440dda`). Preserve host-only WSL observations,
+      audited version-sensitive defaults, exact registration/directory checks, native account
+      resolution after availability, four input fingerprints and one-shot first import. Worker
+      evidence reports 1,597 broad adjacent passes with one native-Windows skip, 177 passes at the
+      production commit and 54 provider cases at the final tip, plus strict typing across 1,511
+      sources. These are fixture/source checks, not native Windows acceptance.
+- [ ] Bind an actual operation-length availability hold for Lima's WSL driver before complete
+      additive acceptance. Reuse the existing WSL ownership/lifetime machinery where applicable;
+      host-only running snapshots do not prevent idle shutdown. Independent-job hold adoption
+      remains separately required before that lifetime can be exposed.
+
 - [ ] Complete combined validation and independent review of the private Darwin buffered DIRECT
       helper (`c9bd8f1dd`), then obtain native macOS proof with the approved interpreter
       prerequisite. Preserve source/input separation, fixed fresh-exec identity and honest

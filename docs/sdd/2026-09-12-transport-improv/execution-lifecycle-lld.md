@@ -175,14 +175,19 @@ general process-loss recovery.
 
 ### Local Lima composition
 
-Explicit local preparation pins the installed client and absolute Lima home. One bounded fixed
-`list --format=json --yq` projection observes the instance name, status, directory, driver,
-configured delivery user and presence of inspection errors. Discard raw diagnostics and never retain
-the whole configuration. The versioned provider locator hashes the site/local placement namespace,
-home, instance and actual directory device/inode. Owned access holds that directory, comparing the
-named path around observations and before effects. On Windows, reuse the existing native
-directory-handle API and compare its full file ID with Python's path observation; no new host lock
-or privileged setup is needed.
+Explicit local preparation pins the installed client and absolute Lima home. Provider observation
+and native delivery-user resolution are separate snapshots under the existing placement owner.
+Classify the built-in driver from bounded host configuration inputs, using observed client-version
+evidence when defaults differ. Unknown inspectors are not a passive fallback. QEMU/VZ observations
+use a bounded fixed `list --format=json --yq` projection without retaining raw configuration or
+diagnostics. WSL observations instead use host registration and `wsl --list --verbose`, never a
+guest address probe before availability. Native user resolution follows authorized running
+availability; later checks pin the instance YAML, global default/override YAML and `lima-version`
+inputs. The versioned provider locator hashes the site/local placement namespace, home, instance,
+driver and actual directory device/inode, plus exact WSL registration where applicable. Owned access
+holds that directory, comparing the named path around observations and before effects. On Windows,
+reuse the existing native directory-handle API and compare its full file ID with Python's path
+observation; no new host lock or privileged setup is needed.
 
 This detects ordinary directory replacement and same-name clones materialized in a new directory. It
 does not promise a universal generation that cannot be copied, engineered inode-reuse protection or
@@ -199,10 +204,14 @@ continuing runtime. Do not substitute a generic macOS supervisor, mandatory fore
 cleanup that stops the intended VM. Native route selection separately pins the actual configured
 delivery user and driver; common guest/account preparation remains core-owned.
 
-Upstream list inspection may remove stale PID files, and Lima's Windows WSL driver can invoke guest
-address commands. A proved non-waking power path for that driver remains unfinished. Independent
-availability is not inferred from the Lima client: the current native binding supplies the
-no-idle-stop fact only for QEMU and VZ, never unknown or WSL drivers. Native Windows directory
+WSL registration selection distinguishes absence from ambiguity and requires matching machine,
+account SID, distribution name/GUID and installation directory. The existing activation owner may
+adopt a first import's new GUID only after successful natural client completion and matching fresh
+running evidence. Lost acknowledgment cannot authorize adoption or another start. These are local
+source and fixture proofs; native Windows evidence remains open. No operation-length Lima WSL hold
+or independent-job hold is implemented: running observations are not idle-stop prevention.
+Independent availability is not inferred from the Lima client: the current native binding supplies
+the no-idle-stop fact only for QEMU and VZ, never unknown or WSL drivers. Native Windows directory
 mapping, installed Lima behavior, driver/version coverage and remote placement-host composition
 remain required acceptance gates. Remote Lima is the first instance of generalized SSH access to a
 VM platform host; local implementation does not complete that arm or provision/rollback workflows.
