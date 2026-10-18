@@ -1295,13 +1295,25 @@ remains preserved. This is not native acceptance, SDK-wide drain or completed cl
 settlement, endpoints, routes, guest preparation and RunContext admission remain unfinished. Keep
 both GCP items unchecked until their respective acceptance gates are met.
 
-- [ ] Implement and privately review the retained GCP
+- [x] Implement and privately review the retained GCP
       [start completion observer](execution-lifecycle-lld.md#gcp-start-completion-observation).
       Preserve canonical version-1 payload compatibility; prove one fixed matching operation GET per
       explicit observation, strict bounded status/error selection, terminal evidence retention
       before late refusal, original cleanup and control priority, no-ACK/expired-record uncertainty,
       lost publication/resolution replies and no-provider-I/O settlement. Do not mark complete GCP
       access, startup readiness, recovery or native acceptance from this increment.
+
+The paired private checkpoint at `a730e5d3` clears all three independent source-review lanes.
+Project review found an interruption between acknowledgment retention and a separate pending-state
+write; pending knowledge now derives directly from the retained acknowledgment, with two recovery
+regressions. The complexity pass removed a redundant post-GET ledger check while preserving pre-GET
+fencing/acknowledgment repair and settlement fencing. Developer verification passes all 629 GCP
+cases in bounded module batches. Lead composition verification passes 706 GCP, context and native
+operation cases without skips or deselection, full strict typing over 1,412 sources and scoped
+Python style checks. The source reviews executed no runtime. Earlier failed diagnostics and fixtures
+remain preserved. This proves neither native API compatibility nor completed GCP access or
+RunContext delivery; the next item and the complete additive-surface gate remain open.
+
 - [ ] Complete owned GCP access with the LLD's observational identity guarantee: a fresh exact
       provider observation refuses known stale-target admission, matching receipt and subsequent
       fresh identity/trust/preparation admit guest work, and changed or unconfirmed identity refuses
@@ -5315,6 +5327,15 @@ intermediate public API.
       operation's lifetime. Package exports, new RunContext accessors, derived environment views,
       remaining file/I/O methods, broader platform composition and native acceptance are not
       completed by this private increment; the complete additive-surface gate remains open.
+- [x] Implement and privately review the passive constructor bindings for `admin_execution_target()`
+      and `agent_execution_target()` alongside unchanged legacy targets. Store exactly the supplied
+      independent views without inspection, activation, fallback, authority manufacture or cleanup
+      ownership. The paired checkpoint at `a730e5d3` clears all three source-review lanes; twenty
+      focused context/capability cases and the lead's 706-case composition selection pass. This
+      private construction increment does not populate production contexts, prove whole-workflow
+      lifetime or legacy-import independence, activate permissions, or constitute an accessor-only
+      public handoff. Deliver the complete surface under the next checkbox, not these bindings
+      alone.
 - [ ] Add `admin_execution_target()` and `agent_execution_target()` to the existing RunContext,
       returning the new target without changing legacy accessors or callers. Use permanent names, no
       union target type, stack selector or forwarding adapter. Prove passive construction/access and
