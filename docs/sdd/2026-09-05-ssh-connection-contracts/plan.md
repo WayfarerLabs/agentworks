@@ -53,8 +53,7 @@ owner-authored commits are now adopted; SSH compatibility fixtures pass private 
 combined validation remains in progress. Permanently unproved original-pipe cleanup must still
 prevent restoration and reuse. Installed held acquisition/construction, live cleanup refusal,
 shutdown, native Windows and complete RunContext/production acceptance remain open. No full
-implementation checkbox or merge
-intent follows from these corrections.
+implementation checkbox or merge intent follows from these corrections.
 
 Transport solely owns the carrier contract, common types, acceptance criteria, shared preparation,
 public outcomes and proof harness. SSH owns its independent carrier, connection/trust migration,
