@@ -66,6 +66,77 @@ handles support the same mechanism. The
 are constraints for the endpoint proof, not an assertion that cancellation or terminal support is
 already solved. A core adapter that cannot establish bounded use must refuse before dispatch.
 
+## Nonterminal live execution composition
+
+The next shared implementation connects the byte endpoints to decoded application I/O, not raw
+carrier streams. It uses the existing inline helper, numeric guest bootstrap, process pump and
+application evidence grammar. No carrier type, SSH policy or durable job/file record changes are
+needed. The private inline request is delivered with its fixed first-party helper code, not stored
+for later replay; its unreleased format can change without a legacy decoder.
+
+### Request framing and application input
+
+Use one request envelope for finite and live inline calls: the five bytes `AGWI2`, a four-byte
+unsigned big-endian manifest length, then exactly that many canonical JSON bytes. The existing
+32,768-byte private manifest bound remains; reject a bad marker, invalid length, incomplete request
+or invalid manifest before application launch. The manifest version is two. The canonical JSON
+encoder/decoder remains separate from envelope encoding so codec checks do not depend on reading a
+descriptor. The older private systemd proof producer adopts the same envelope rather than retaining
+another inline input format.
+
+The manifest's `stdin` is finite bytes or null. Finite bytes retain their existing meaning; after
+reading that envelope the guest requires carrier EOF, rejecting trailing bytes before effects. Null
+selects live application input from the remaining carrier stream and does not wait for EOF before
+launch. A host-owned prefix source delivers the complete envelope before reading the borrowed live
+source. It has bounded pending bytes and neither closes nor changes the source. There is still only
+one `CarrierIO.input`. Script source remains in its own manifest field and guest descriptor, never
+mixed with application stdin. Numeric root entry, body credentials and the full guest checkpoint are
+unchanged and precede operation code.
+
+The guest's live stdin adapter belongs to its pipe helper, not a borrowed terminal. It must satisfy
+the existing nonblocking source contract, preserve any flags it changes and stop using the endpoint
+before return. There is no keyboard, terminal mode, background pump or cancellation behavior in this
+path.
+
+### Incremental decoded output
+
+Add an explicit delivery mode to the private inline output policy and `DELIVERED` stream retention.
+Guest output uses the existing process sink path. Each application chunk becomes one ordinary
+nonce-bound stdout/stderr evidence frame; raw carrier stderr stays private diagnostics. The frame
+writer uses bounded pending storage and nonblocking writes while the process pump runs. It cannot
+block the pump in an ordinary write loop or allocate output proportional to job duration. Control
+records remain ordered with data, and final stream facts include the count and rolling digest of the
+represented bytes. Name the common private stream count `count`, not captured-only `retained`;
+capture stays bounded and discard/suppression represent no retained bytes. Delivery counts use a
+bounded integer, without imposing a capture-sized total-stream ceiling.
+
+The evidence decoder consumes at most one complete matching record per write. A host live collector
+drains its one bounded decoded data chunk into the selected application sink before accepting
+another record. Decoder callbacks only update trusted state; they do not call an external sink.
+Stalled/short writes propagate backpressure through the existing carrier pump. Stream count/digest,
+record order, completion and carrier/runtime facts are still validated. Delivery does not place
+application bytes in results or retained helper facts. Release borrowed source/sink references and
+pending presentation bytes when observation ends; bookkeeping/cleanup retries retain facts, not
+endpoints or a replayable payload. Invalid endpoint results and exceptions remain safe input/output
+failures, preserving independently known facts and original control flow.
+
+### Caller choices and scope of the first increment
+
+`Input.live(source, sensitive=False)` selects a borrowed nonblocking application byte source.
+`Output.live(stdout, stderr)` explicitly selects borrowed nonblocking application sinks. Finite
+input with live output and live input with capture/discard are both valid pipe choices. Selecting
+live output is the FRD R4 presentation choice: it may reflect sensitive data without enabling
+retained output, logging or guest artifacts. Default capture/discard remains suppressed for
+effective sensitivity, and the carrier still receives that sensitivity marker.
+
+The first private implementation proves DIRECT `run` with these choices. Unsupported channels refuse
+through pure carrier validation before operation borrowing or request dispatch. `start`, independent
+lifetime and the not-yet-integrated MANAGED live path refuse before effects rather than dropping a
+live endpoint, capturing instead or downgrading protection. That MANAGED combination, active managed
+output, terminal launch/attachment, native workstation/SSH proof and production capture/spooling
+limits remain separate required additive-surface gates. The first pipe increment does not narrow
+their requirements or constitute a public handoff.
+
 ## Transient collection and sensitive control evidence
 
 A carrier stream sink receives raw carrier bytes, not supposedly separated application streams.

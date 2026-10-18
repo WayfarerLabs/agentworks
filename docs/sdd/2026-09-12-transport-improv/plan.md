@@ -5337,6 +5337,21 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
 
 ## 5. Add the complete new RunContext surface
 
+- [ ] Connect nonterminal live input/output to DIRECT execution through the existing inline helper
+      and process pump. Use one bounded length-delimited request for finite and live input, keep
+      script source separate, and deliver decoded stdout/stderr incrementally without retaining
+      presentation bytes. Prove duplex progress before input EOF, binary separation, nonzero exits,
+      explicit sensitive presentation, bounded short/stalled/faulting endpoints, pre-borrow refusal
+      on unsupported routes, original control-flow preservation and endpoint release. Update the
+      older private systemd producer to the same request format; do not keep a legacy decoder for
+      this unreleased exchange. This is a private prerequisite, not a partial public API handoff.
+- [ ] Complete the remaining live/terminal integration before additive RunContext acceptance:
+      MANAGED foreground live I/O, active managed output and attachment, shared terminal preparation
+      plus SSH-owned native relay adoption, supported workstation/backend proof and production
+      capture/spooling limits. Preserve requested profile, identity and sensitivity; never
+      downgrade, substitute capture, or infer guest termination from observation loss. The DIRECT
+      pipe prerequisite above does not narrow these requirements.
+
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
 one all-callers cutover. PR #830 publishes this design only. The following implementation PR adds
 the new surface; migration and removal follow in their own PRs. Permissions are groundwork until
