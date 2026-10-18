@@ -4656,9 +4656,8 @@ the directory facade, native proof or complete R7 delivery.
       selected core 128-unfinished-obligation bound and preserve commit-without-reply evidence and
       immutable completed receipts, rather than pruning, reusing IDs or increasing the limit.
       Per-file public calls must not make a supported artifact package fail only because its owning
-      command accumulated resolved rows. Reassess the serial-package candidate against actual
-      directory-transfer and application-checkpoint consumers once the core bound removes its
-      capacity-only justification; retain only mechanisms those consumers need.
+      command accumulated resolved rows. Prove actual directory-transfer and artifact consumers
+      retain exact unfinished child custody without accumulating successful-call debt.
 
 The 2026-09-24 inventory found a generic capture ceiling of 4,096 regular-file members in
 `package_sources.py`, while the native harness inventory probe caps 512 entries including implied
@@ -4667,16 +4666,10 @@ integrations. Current artifact publication iterates files and checkpoints each c
 mapping those calls one-for-one to retained lifecycle rows would exhaust the 128-row bound for a
 supported large package.
 
-The [serial package candidate](file-operations-lld.md#serial-package-capacity-candidate) uses one
-row for the current child across preflight and mutation. A private originating-path
-`FileOperation.upload_package` increment now uses one borrow and row for up to 4,096 upload members,
-persists each child index and token before dispatch, and waits for a caller-supplied durable
-checkpoint before preparing the next child. A real 129-member test stops after a checkpoint commits
-but loses its reply; a synthetic 4,096-member test exercises the ledger bound without claiming 4,096
-native file writes. The tests also cover a lost child-CAS reply, an unconfirmed CAS, a later invalid
-member and control-flow interruption. This is not yet a process-loss recovery proof or a complete
-package API: upload-wide helper drain, takeover, preflight reads, retirement, application checkpoint
-integration and production artifact callers remain open. The capacity checkbox stays unchecked.
+The private serial-package producer is superseded by ordinary file calls on 2026-10-18; the
+completed checkboxes below preserve its historical work. The separate
+[artifact application checkpoint](file-operations-lld.md#artifact-application-checkpoints) remains a
+consumer-migration gate, not an implication of directory-transfer progress.
 
 - [x] Extend the private upload helpers and pre-bound `FileOperation` upload/package paths to carry
       one exact existing gate through stage, publication, reconciliation and cleanup. Validate its

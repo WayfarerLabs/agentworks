@@ -555,20 +555,16 @@ failed registration permits cleanup of its never-dispatched borrow; uncertain re
 custody remains attached. Managed starts use the same core rule for their keeper and start
 admission.
 
-The private `FileOperation.upload_package` path accepts 1 to 4,096 upload members under one serial
-borrow and one `file-call` row. The row carries only the current child's path, token, index and
-bounded recovery facts. It replaces that identity by expected-revision publication before the next
-child can dispatch. The caller's checkpoint callback must durably record each completed member
-before returning; a failed or uncertain checkpoint retains the current row and stops the batch.
-Incomplete upload and uncertain row publication also stop the batch without replaying a child. Each
-member is validated when reached; a later invalid member stops the batch after earlier members have
-already passed their checkpoints. The caller owns its original plan and partial progress. This
-originating path is not wired to artifact publication. A private package takeover adapter can now
-advance an exact bound guest gate for the retained child, but it does not reconcile or clean that
-child. Native mutation-path coverage, predecessor-controller and non-gated effect evidence, and
-application-checkpoint reconciliation remain necessary before package recovery can settle. The
-one-row package path provides serial checkpoint custody, not a workaround for completed-call
-history.
+Directory transfer uses ordinary file calls, not a separate package-upload producer. Persisted
+package formats and their recovery readers remain supported; they cannot start another member or
+resume a batch. Artifact publication still needs application-owned intent and completion records
+before the final resource row is committed. Ordinary file-call completion alone does not close that
+application crash window.
+
+Stat, inventory, removal and metadata calls share one execution/capture path after their explicit
+preparation and admission. It records returned or interrupted outcomes before removing the active
+call. A failed capture or borrow close leaves that exact record available; it is never removed in a
+finally block that would discard custody.
 
 Ordinary uploads and downloads do not admit transfer associations or publish durable success
 history. Each call retains its actual outcome and exact unfinished-debt publication intent until
@@ -1567,17 +1563,16 @@ writing a local sink. Gate setup is separately admitted under the operation owne
 snapshot dispatch. A complete existing gate can be adopted, but an incomplete or replaced inode is
 not repaired during the same guest epoch.
 
-Private stage and publication requests can carry that same exact binding. The private upload and
-package-upload operation accepts an already proved binding for its selected Linux VM and stores it
-in the file-call row before dispatch. Every stage and publication attempt, including reconciliation
-and cleanup, carries that binding. The guest holds the gate through stage creation, chunk writes,
-scratch cleanup, publication, publication cleanup and reconciliation. Requests without a binding
-retain their legacy behavior. Upload destinations inside the gate control namespace are refused
-before filesystem access. A private single upload or package member zero may register a setup-only
-row and promote that same row to an exact binding before stage work or source reads. The token and
-borrow remain continuous across setup and upload; package members retain their durable child index
-and checkpoint protocol. Native carrier drain and package process-loss recovery remain separate
-work.
+Private stage and publication requests can carry that same exact binding. The private upload
+operation accepts an already proved binding for its selected Linux VM and stores it in the file-call
+row before dispatch. Every stage and publication attempt, including reconciliation and cleanup,
+carries that binding. The guest holds the gate through stage creation, chunk writes, scratch
+cleanup, publication, publication cleanup and reconciliation. Requests without a binding retain
+their unbound private behavior. Upload destinations inside the gate control namespace are refused
+before filesystem access. A private single upload may register a setup-only row and promote that
+same row to an exact binding before stage work or source reads. The token and borrow remain
+continuous across setup and upload. Native carrier drain and retained package process-loss recovery
+remain separate work.
 
 `_file_gate_setup_recovery.py` handles a lost download, single-upload or package-upload setup reply
 whose durable row remains setup-only after database generation takeover. It rechecks that exact row,

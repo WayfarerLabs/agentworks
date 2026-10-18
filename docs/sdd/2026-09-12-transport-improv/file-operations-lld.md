@@ -952,48 +952,23 @@ must be published before in-memory custody is released, and leaves the row in `p
 payload never contains file bytes, JSON values, source or sink objects, raw helper responses,
 commands, credentials or unrestricted paths.
 
-### Serial package capacity candidate
+### Artifact application checkpoints
 
-The private total-history limit originally motivated a separate logical batch call for directory and
-artifact-package workflows. It counts resolved preflight, read, publication and cleanup rows against
-128, while supported captures can contain 4,096 files. The selected core unfinished-debt rule in the
-[lifecycle LLD](execution-lifecycle-lld.md#durable-lifecycle-obligation-ledger) removes that
-ordinary sequential-call limit. A batch must therefore justify its own ownership and
-application-checkpoint scope, not exist only to bypass capacity. Reassess that need before public
-directory-transfer composition; the existing implementation remains private.
+The [lifecycle ledger](execution-lifecycle-lld.md#durable-lifecycle-obligation-ledger) bounds
+unfinished debt, not successful sequential calls. Directory movement therefore composes ordinary
+calls without a package producer, rotating row or durable callback.
 
-The candidate batch design retains one serial borrow and one adapter-owned row, with the current
-child's bounded recovery identity and cleanup facts in the payload. Admit a distinct child before
-its effect. Artifact workflows require their application's durable per-file ownership checkpoint
-before advancing; a progress ordinal cannot establish which artifacts the application owns for later
-reconciliation or retirement. Generic directory copying instead uses the ordinary-call composition
-below and does not enter this package path.
+Artifact publication has a separate application obligation: durable per-file ownership intent and
+completion before the final resource row exists. A transfer progress ordinal cannot establish which
+artifacts that application owns for later reconciliation or retirement. Design and prove those
+records with the actual artifact consumer during migration; ordinary upload success does not close
+the crash window between publication and application recording.
 
-Advance by expected-revision payload replacement, reconciling a lost reply against that same child
-and revision. Retain exact current-child identity and outstanding cleanup facts until its checkpoint
-and any next-child admission are confirmed; an ordinal or confirmed bit alone is insufficient. On
-takeover, recover only the retained child and stop; do not reconstruct or resume the remaining plan
-or undo confirmed prior destinations. Keep completed artifact ownership in the application
-checkpoint, not a growing row payload.
-
-For downloads, remote snapshot completion is not local publication. Record successful progress only
-after the requested local Create or Replace publication has succeeded and local custody has settled.
-The recovery row does not persist workstation destination paths and promises no post-crash local
-repair or reconstruction of local completion from remote evidence.
-
-This requires an actual post-child checkpoint gate in core file custody and a package-aware recovery
-adapter. The private `FileOperation.upload_package` increment implements the originating upload gate
-and one-row child admission, including exact-payload CAS retry after a lost reply. It does not yet
-supply an upload-wide helper-drain producer or process-loss takeover, cover per-member preflight
-reads and retirement, or wire artifact publication to a durable application checkpoint. A second
-peer that duplicates `FileOperation` admission and capture would not satisfy the intended shared
-boundary merely by reusing the generic borrow. Preserve the current bounds and exact retry semantics
-until the complete workflow is proved at the largest supported package size and interruption
-boundaries.
-
-The existing `upload_package` requires the real durable application ownership checkpoint. Generic
-directory copying does not use that callback, with either a no-op or an in-memory acknowledgment.
-Its ordinary-call composition below has a different contract and remains unfinished.
+Keep persisted package formats, codecs and recovery readers until their explicit compatibility
+disposition. Recovery is limited to the retained current child: never reconstruct or resume a plan,
+dispatch another member, or undo confirmed prior destinations. Parsing a record or advancing its
+gate alone does not settle that child. No new package originator is needed to preserve
+compatibility. Native drain and application-checkpoint reconciliation remain open.
 
 ### Generic directory-transfer child checkpoints
 
@@ -1009,8 +984,8 @@ inspecting or discarding operator databases to justify deletion.
 
 Generic directory copying composes ordinary owned file calls. The 128 limit applies to unfinished
 obligations, not completed history. It needs no parent coordinator, rotating row, transfer ordinal
-or durable success-history record. The serial-package candidate above retains its distinct durable
-application ownership callback; generic progress cannot replace that callback.
+or durable success-history record. Generic progress does not replace the application's separate
+durable ownership checkpoint.
 
 The aggregate owns the resource claim and availability. Each child holds the ordinary serial borrow.
 Copying is non-atomic; other calls belonging to the same operation may run between settled children.
@@ -1105,22 +1080,22 @@ machine-wide file-object lock, a platform-host administrator prerequisite, or a 
 malicious target-user process. Arbitrary commands, jobs, VM power operations and WSL lifetime holds
 retain their separate recovery obligations.
 
-Package-upload takeover needs this fence too. Its upload workflow makes separate ownership, stage,
-chunk, publication, reconciliation and cleanup requests. The private stage/publication request
-codecs accept an optional exact gate, and their fixed guest handlers hold it across the operation.
-The private pre-bound `FileOperation.upload()` and `upload_package()` paths validate a supplied gate
-against the Linux VM scope, effective UID, deterministic path and derived guest boot, persist it in
-the current child row before dispatch, and pass it through stage and publication requests including
-cleanup. Their legacy path without a gate still exists; production composition must explicitly
-require a gate, match the verified raw guest marker and selected provider locator, and never
-downgrade a bound request. Read-only preflight is not an effect. An acknowledged generation advance
-under the same gate flock would wait for admitted old effects to leave and make delayed
-old-generation requests refuse before effects. That can replace a controller-side enumeration of
-queued SSH, QGA or WSL helpers **only after** complete mutation-path coverage, one stable gate
-across routes, and native delayed-delivery proof. The current local DOWNLOAD journal is not such
-proof for upload. Recovery must keep the current package child and its cleanup facts durable through
-advance, then reconcile only that child; it cannot infer or replay remaining package members. No
-adapter may manufacture drain evidence from a retained token alone.
+Retained package-upload takeover needs this fence too. Its upload workflow made separate ownership,
+stage, chunk, publication, reconciliation and cleanup requests. The private stage/publication
+request codecs accept an optional exact gate, and their fixed guest handlers hold it across the
+operation. The private pre-bound `FileOperation.upload()` path validates a supplied gate against the
+Linux VM scope, effective UID, deterministic path and derived guest boot, persist it in the current
+child row before dispatch, and pass it through stage and publication requests including cleanup. Its
+private path without a gate still exists; production composition must explicitly require a gate,
+match the verified raw guest marker and selected provider locator, and never downgrade a bound
+request. Read-only preflight is not an effect. An acknowledged generation advance under the same
+gate flock would wait for admitted old effects to leave and make delayed old-generation requests
+refuse before effects. That can replace a controller-side enumeration of queued SSH, QGA or WSL
+helpers **only after** complete mutation-path coverage, one stable gate across routes, and native
+delayed-delivery proof. The current local DOWNLOAD journal is not such proof for upload. Recovery
+must keep the current package child and its cleanup facts durable through advance, then reconcile
+only that child; it cannot infer or replay remaining package members. No adapter may manufacture
+drain evidence from a retained token alone.
 
 The private `FilePackageFenceRecovery` now implements only the first durable takeover step for a
 bound current child. It rebinds the exact possible-effect row after database-owner takeover,
