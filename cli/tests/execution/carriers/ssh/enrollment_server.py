@@ -57,6 +57,7 @@ def enrollment_server(
                 subprocess.run, ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True, timeout=10
             )
         )
+        key.chmod(0o600)
     authorized = tmp_path / "authorized"
     authorized.write_bytes(b"" if scenario == "auth_failure" else identity.with_suffix(".pub").read_bytes())
     with socket.socket() as listener:

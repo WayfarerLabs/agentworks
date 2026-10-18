@@ -182,3 +182,49 @@ Node tests, four builds and both deterministic comparisons. The corrected focuse
 second full-suite run. Settled fixture/output roots are independently checked before removal; logs
 remain retained. These reviews and gates concern this private persistence increment, not full PR
 approval or native/production acceptance.
+
+## Native Linux CA and KRL observations
+
+The two migration test bodies described above now have scoped native observations at
+`a920eceb368dcfd031939015939d3d6501ea494f`. This supersedes their earlier unexecuted status for
+Linux OpenSSH 9.2 only. A tester invoked the unchanged original test functions against sequential,
+fixture-owned loopback servers using the actual SSH carrier and managed-trust implementation. Each
+application attempt used its original isolated interpreter with retirement imports blocked; all
+eleven observations confirmed the expected checkout's SSH, trust and shared process modules. No
+production result, assertion, application command or operation deadline was substituted.
+
+The first CA attempt stopped before server startup: the generated signing key had mode `0640`, which
+OpenSSH refused. All four original child handles settled; the failure remains retained. A separately
+reviewed fixture preparation correction set the three owned private keys to `0600` before signing,
+then one fresh invocation passed both original test bodies. The scratch runner's SHA256 is
+`43aa27010686f9fa3283e14f242af459837029b4ff63ed1a8c61a9add104c53b`. The helper now explicitly
+restricts each newly generated private key immediately after generation, before signing or server
+use. That source correction is separate from the native observation pin.
+
+- CA policy: two complete unknown-CA refusals followed by two accepted commands; explicit refresh,
+  retained generations, source bytes/timestamp rollback, stale writer and re-import refusal all
+  passed. The application marker contained exactly `xx`; no refusal marker existed.
+- KRL policy: two accepted commands, three blocked admissions and two native refusals identifying
+  the actual served key and selected KRL. Learned trust, failed partial-update evidence, blocking
+  across source rollback and complete forward repair were retained. The marker contained exactly
+  `xx`; no refusal marker existed.
+
+The installed client was OpenSSH 9.2p1 and server OpenSSH 9.2 on Linux arm64, Python 3.12.13. The
+tester used only owned keys and loopback listeners, an environment limited to PATH/LANG, and
+effective server configuration with PAM and user SSH RC disabled. An owned `ZDOTDIR` startup hook
+positively confirmed isolated shell startup before each body. No operator home, configuration,
+database, credentials, account, service, VM or cloud resource was changed.
+
+Cleanup evidence has an explicit limit. Thirty parent-owned original process handles had closed
+pipes, known exits and independent same-execution `ECHILD` observations. Both listeners rebound; the
+lead independently confirmed both disposable fixture paths were absent. All original product
+custody-close assertions passed. However, the isolated controller's profile observer missed SSH
+constructors launched through raw `_thread` threads. Its empty child lists do not prove those
+children absent. The original receipt's broad `native_settled=true` fields remain preserved but are
+qualified by a separate record stating that independent SSH grandchild and aggregate cleanup are
+unmeasured. No native retry was performed to improve that observation.
+
+These results establish the recorded native CA/KRL behaviors, not live CA reload, minimum-client or
+macOS/Windows coverage, genuine provider creation, production writer coexistence, persisted
+configuration rollback or usable RunContext delivery. Full R1-R5 and integrated acceptance remain
+open; no completion checkbox, SDD lock or retirement claim follows.
