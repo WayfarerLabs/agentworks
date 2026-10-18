@@ -91,10 +91,12 @@ class LimaOwnedNativePlatformAccess:
         return current
 
     def observe_power(self, deadline: Deadline) -> VMStatus:
-        if self.selected is not None:
-            raise StateError("Lima original power observation is single use")
-        self.selected = self._observe(deadline)
-        return self.selected.power
+        current = self._observe(deadline)
+        if self.selected is None:
+            self.selected = current
+        elif current.locator != self.selected.locator:
+            raise StateError("Lima selected provider locator changed")
+        return current.power
 
     def observe_locator(self, deadline: Deadline) -> ProviderLocator:
         current = self._observe(deadline)

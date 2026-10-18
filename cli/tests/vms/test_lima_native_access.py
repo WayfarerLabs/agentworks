@@ -7,7 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -221,6 +221,71 @@ def test_original_power_change_refuses_before_start(local, monkeypatch) -> None:
     with pytest.raises(StateError):
         prepare_native(access, original, Deadline.after(10))
     assert access.activation is None and not access.owner.list_pending_lifecycle_obligations()
+
+
+@pytest.mark.parametrize("initial", ["Running", "Stopped"])
+@pytest.mark.parametrize("current", ["Running", "Stopped"])
+def test_repeated_power_is_fresh_without_replacing_original_selection(local, initial, current) -> None:
+    fake, access = local
+    fake.status = initial
+    deadline = Deadline.after(5)
+    original_power = access.observe_power(deadline)
+    original = access.selected
+    fake.status = current
+    assert access.observe_power(deadline) is VMStatus(current.lower())
+    assert access.selected is original and original.power is original_power
+    assert len(fake.calls) == 2 and all(argv[1] == "list" for argv, _, _ in fake.calls)
+    assert all(observed_deadline is deadline for _, observed_deadline, _ in fake.calls)
+    assert access.activation is None and access.binding is None and access.route_check is None
+    assert not access.owner.list_pending_lifecycle_obligations()
+    if initial != current:
+        with pytest.raises(StateError):
+            access.ensure_available(original_power, deadline)
+        assert access.activation is None
+
+
+def test_repeated_power_requires_original_locator(local, monkeypatch) -> None:
+    fake, access = local
+    deadline = Deadline.after(5)
+    access.observe_power(deadline)
+    original = access.selected
+    observe = LimaLocalSelection.observe
+
+    def changed(*args, **kwargs):
+        return replace(observe(*args, **kwargs), namespace="different-placement")
+
+    monkeypatch.setattr(LimaLocalSelection, "observe", changed)
+    with pytest.raises(StateError):
+        access.observe_power(deadline)
+    assert access.selected is original and len(fake.calls) == 2
+    assert access.activation is None and access.binding is None
+
+
+def test_repeated_power_clears_unavailable_fact_without_native_route(local) -> None:
+    fake, access = local
+    deadline = Deadline.after(5)
+    original_power = access.observe_power(deadline)
+    original = access.selected
+    access.ensure_available(original_power, deadline)
+    assert access.independent_availability is not None
+    fake.status = "Stopped"
+    assert access.observe_power(deadline) is VMStatus.STOPPED
+    assert access.selected is original and original.power is VMStatus.RUNNING
+    assert access.independent_availability is None and access.binding is None
+    assert access.activation is None and all(argv[1] == "list" for argv, _, _ in fake.calls)
+
+
+@pytest.mark.parametrize("closed", [False, True])
+def test_repeated_power_refuses_closed_or_expired_access(local, closed) -> None:
+    fake, access = local
+    access.observe_power(Deadline.after(5))
+    original = access.selected
+    if closed:
+        assert access.settle(Deadline.after(5))
+    with pytest.raises(StateError if closed else LimitExceededError):
+        access.observe_power(Deadline.after(0))
+    assert access.selected is original and len(fake.calls) == 1
+    assert access.activation is None and access.binding is None
 
 
 @pytest.mark.parametrize("change", ["user", "vm_type", "replacement"])
