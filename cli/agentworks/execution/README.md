@@ -1988,6 +1988,12 @@ local return or from the absence of an open child attempt.
 database transition. Already-admitted work can finish its transition afterward; the signal proves
 neither cancellation nor quiescence. Bookkeeping, settlement and release remain serialized.
 
+During native shutdown, `retire_unused_borrow()` can revoke a pristine local borrow after a strict
+current-ownership read. A started attempt, dispatch registration or armed effect excludes that
+borrow. Revocation performs no database mutation and resolves no adapter debt. Late use of the
+revoked handle refuses. Actual local delivery is drained before helper bookkeeping; that drain does
+not prove guest termination or aggregate completion.
+
 Recovery may construct a new owner only by rotating the persisted generation from an exact
 predecessor. That atomically seals the stable operation ledger and restores persisted reserved,
 possible-dispatch, or resolved state without inferring remote quiescence. A recovery adapter may
@@ -2248,9 +2254,10 @@ asset and applies the full request validator, including lifetime and launch bind
 preparation reserves full lease headroom but does not authorize dispatch. `ManagedStartPreparation`
 validates the immutable body and delivery limits without creating an executable attempt. It freezes
 one launch-bound lease/null tail and finalizes against the original carrier and deadline. The
-private OPERATION parent uses this path before reservation. When inline delivery does not fit, it
-stages the prefix and body before sampling the initial lease, appends that single tail, and
-activates the fixed loader once. INDEPENDENT parent adoption and native acceptance remain
+private OPERATION and INDEPENDENT parents use this path before reservation. When inline delivery
+does not fit, they stage the original prefix and body before activation. OPERATION samples its
+initial lease after that bulk transfer and appends the frozen lease tail; INDEPENDENT appends one
+null tail without clock sampling. Each activates the fixed loader once. Native acceptance remains
 incomplete.
 
 The private stage chunk cap is 12 KiB, below the scratch primitive's 24 KiB write-chunk cap. The
@@ -2285,16 +2292,20 @@ receipts and lost bookkeeping replies retain uncertainty. Same-process continuat
 actual stage helper borrow, delivery and bounded candidate, observes exact closure under a fresh
 cleanup budget, and reconciles local bookkeeping without replaying preparation.
 
-The private OPERATION parent retains its stage and `ManagedStartCustody` before their effects.
-Activation closure is independent of launch acknowledgment. `PreparedStageCleanup` may remove the
-exact owned stage after ordinary operation admission stops; it cannot create, append or activate
-work. Unknown cleanup delivery blocks another helper until closure is proved. Later explicit
-idempotent removal still requires the original cleanup debt and positive removal evidence. An
-abandoned activation that never reached start admission uses an explicit no-dispatch proof, not a
-fabricated exit code. When a native closure delivery is selected, its proof governs helper closure;
-a generic zero exit cannot bypass missing native evidence. Process-loss recovery and the pre-entry
-borrow-publication interruption window remain open ownership-integration gates. These classes do not
-provide a public FileAccess operation.
+Both private parents retain stage cleanup before effects. OPERATION uses `ManagedStartCustody`;
+INDEPENDENT retains activation custody on its exact resource-start binding. Activation closure is
+independent of launch acknowledgment. `PreparedStageCleanup` may remove the exact owned stage after
+ordinary operation admission stops; it cannot create, append or activate work. Unknown cleanup
+delivery blocks another helper until closure is proved. Later explicit idempotent removal still
+requires the original cleanup debt and positive removal evidence. An abandoned activation that never
+reached start admission uses an explicit no-dispatch proof, not a fabricated exit code. When a
+native closure delivery is selected, its proof governs helper closure; a generic zero exit cannot
+bypass missing native evidence. Before acquiring a stage helper borrow, the parent records its
+preparation phase. If the borrow reply is lost, core first revokes only a pristine orphan; exact
+no-entry bookkeeping can then resolve an unused BEGIN row without querying remote absence. An
+unentered CHUNK retains the prior stage's cleanup debt. Process-loss recovery and the remaining
+helper-owner integration audit stay open. These classes do not provide a public FileAccess
+operation.
 
 `_scratch_root.py` opens the fixed Linux `/tmp` directory without following symlinks and requires
 UID 0 and mode 01777. It creates and repairs nothing, ignores environment-selected temporary paths,
@@ -2313,11 +2324,11 @@ bytes stay data. Scratch descriptor borrowing reuses receipt, object identity, t
 cleanup-debt checks without copying the whole input into memory. Stdin and argv are restored;
 integer `SystemExit` returns through outer admission cleanup, while other controls propagate.
 
-The private OPERATION managed-start path selects this loader when the original inline delivery does
-not fit; FileAccess and INDEPENDENT launch do not use it. Its remaining allowance bounds
-verification/admission cooperatively, not stalled envelope delivery or the invoked helper's complete
-lifetime. Envelope reading still requires EOF, and actual native helper closure remains separate
-evidence. Local packed-helper and scripted composition tests are not native acceptance.
+Both private managed-start paths select this loader when the original inline delivery does not fit;
+FileAccess does not use it. Its remaining allowance bounds verification/admission cooperatively, not
+stalled envelope delivery or the invoked helper's complete lifetime. Envelope reading still requires
+EOF, and actual native helper closure remains separate evidence. Local packed-helper and scripted
+composition tests are not native acceptance.
 
 ## Private file snapshot exchanges
 

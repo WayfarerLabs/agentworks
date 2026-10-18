@@ -5435,6 +5435,14 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
       not strand same-process cleanup. Use a general exact admission or core-owned unused borrow
       drain, not adoption of an unidentified borrow by a particular stage. Process-loss recovery
       alone does not satisfy this continuation gate.
+- [ ] Add conservative token-only prepared-stage process-loss recovery. Establish an exact current
+      recovered, sealed owner and a pending ledger containing only this stage row before a new
+      recovery span admits support. Other pending predecessor helper/activation rows refuse this
+      path; neither caller booleans nor receipt presence substitutes for their closure. Every
+      exchange and resolution retry requires its exact fresh protected action. Historical receipt
+      reconciliation supplies cleanup debt only; missing or invalid receipts remain debt. Resolve
+      only this row after positively closed CLEANED evidence, retain actual recovery delivery on
+      interruption, and keep all-platform availability and general predecessor-drain gates open.
 
 The private pipe checkpoint at `6b8fe8128` passes 1,318 scoped tests with one skip and strict typing
 across 1,442 sources. Changed-file Python and Markdown quality checks pass. Project, complexity and
@@ -5519,6 +5527,21 @@ quality gates pass at the corrected head. These are private implementation and l
 whole-PR or native acceptance. INDEPENDENT staging, process-loss recovery, the pre-entry
 borrow-publication seam and the two old inline-envelope fixtures remain open, along with the
 complete-surface gates above.
+
+The next private unit adds INDEPENDENT staging with one null tail and no clock sample. It retains
+the full original input and actual activation custody before effects; unknown launch debt stops
+ordinary owner admission while exact scratch cleanup remains possible. The general core shutdown
+primitive revokes only a strictly fenced pristine local borrow, without changing durable debt.
+Prepared-stage acquisition records no-entry proof before requesting that borrow. Root's combined
+260-case selection passes, including lost BEGIN/CHUNK acquisition replies, exact local row retry and
+native aggregate close. The review found that generic known helper completion with unsettled local
+delivery required manual child cleanup; the correction drains actual local delivery before helper
+bookkeeping, and normal workflow close now owns the entire path. The two old envelope fixtures use
+the selected delivery constructor while preserving their names, complete 65,536-byte serializer
+limit and exact 10,000/8,192-byte workloads. Worker tests pass both fixtures and all 46 cases in
+their module; this is constructor evidence, not native proof. Combined broad gates and the three
+private source-review lanes for this unit remain pending. No full helper-owner audit, process-loss
+recovery, complete RunContext surface or PR acceptance is claimed.
 
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
 one all-callers cutover. PR #830 publishes this design only. The following implementation PR adds
