@@ -156,10 +156,11 @@ remain independent choices.
 Core prepares a mandatory ordinary identity plan and, when composition explicitly includes
 elevation, an optional elevated plan before constructing a passive execution or file view. Its
 inputs are the carrier, delivery account, bound workload account, elevation-inclusion choice,
-runtime selection, deadline and already-acquired operation owner. These are private composition
-inputs, not public request fields or enforcement of the future permission model. Canonical admin and
-agent targets normally use separate direct-login routes; native provisioning and recovery prepare
-the admin target.
+runtime selection, deadline and already-acquired operation owner. An optional numeric guest
+bootstrap binds an already-prepared root entry and full observed guest for body admission. These are
+private composition inputs, not public request fields or enforcement of the future permission model.
+Separate direct-login routes remain possible. Native composition can instead prepare an explicitly
+selected agent account over the admin delivery route without exposing an elevated agent API.
 
 The composer resolves delivery and workload accounts and must produce the ordinary plan before it
 considers elevation. An unsupported ordinary transition fails without a root lookup. When elevation
@@ -176,9 +177,21 @@ deadline facts separately from whether preparation succeeded.
 The ordinary plan selects direct entry when delivery already uses the bound identity, or exact
 demotion when delivery has UID zero and the workload does not. An included elevated plan selects
 direct entry from root delivery or fixed sudo entry from the bound non-root workload identity.
-Non-root delivery through a different workload identity is refused by this initial composer, never
-silently elevated or treated as direct. Account lookup is not proof that sudo or demotion will
-succeed; the final helper still verifies its actual identity before accessing workload data.
+Non-root delivery through a different non-root workload identity requires the explicitly supplied
+numeric guest bootstrap with a usable fixed sudo root entry. Without it, the transition refuses;
+there is no inferred sudo authority or fallback. That body's plan remains demotion, while the
+bootstrap supplies root entry and drops to the exact body credentials before loading workload code.
+This adds no persisted identity mode. Omitting elevated access still omits its root lookup and
+elevated plan, even when the core bootstrap uses root for admission. Account lookup is not proof
+that sudo or demotion will succeed; the final helper still verifies its actual identity before
+accessing workload data.
+
+Paired native views share one operation owner, file operation, execution operation, carrier, numeric
+guest bootstrap and deadline. Core selects the agent from its recorded row and checks VM membership
+before platform effects; descriptive context scope does not select the agent. Both identity
+preparations remain in aggregate custody. Failed or uncertain agent preparation cannot publish a
+partial pair. Sharing operation state avoids a second cleanup lifecycle; each view still supplies
+its own body plan, and only the admin view includes an elevated plan.
 
 The existing carrier admission adapter is shared by account preparation and file workflows. It owns
 dispatch and termination evidence only; callers own their protocol facts. A lookup without
@@ -188,8 +201,9 @@ activates a route, retries a lookup, launches a workload or constructs a legacy 
 
 The sessions/console migration must separately disposition the existing admin-owned multi-console
 pane that enters an agent account with sudo. It is a real cross-user consumer, not a reason to infer
-agent authority for every native admin target. This remains required migration work; the initial
-three-mode composer does not claim to have migrated it.
+agent authority for every native admin target. The explicit bootstrap-bound preparation path is
+available to that migration, but does not itself migrate the consumer or prove native credential
+transitions.
 
 ### Sudo bootstrap
 
@@ -204,7 +218,10 @@ password prompt or fallback to non-elevated execution.
 database. It therefore selects root's shell for an elevated request and the demoted user's shell for
 provider-root delivery. The resolved absolute path is recorded in the private invocation plan before
 application start. Only the supported sh/bash paths are accepted initially; a configured zsh, fish,
-missing path, or non-executable object is an explicit interpreter refusal, not substitution.
+missing path, or non-executable object is an explicit interpreter refusal, not substitution. Managed
+shell lookup on a numeric-bound operation uses the same root entry, exact body credentials and full
+guest checkpoint as other fixed helpers. A bootstrap-bound agent lookup must not attempt ordinary
+demotion directly from the admin delivery account.
 
 The bootstrap emits its identity-verified frame only after the transition and checks succeed. That
 frame proves what the trusted helper observed, not hostile same-user isolation. Guest root and a

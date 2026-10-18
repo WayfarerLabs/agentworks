@@ -5372,6 +5372,15 @@ intermediate public API.
       union target type, stack selector or forwarding adapter. Prove passive construction/access and
       composition-owned lifetime, no new effects on existing callers, and independent new-stack
       usability with legacy modules unavailable. Do not claim restricted recipient authority.
+- [ ] Complete and privately review paired native admin/agent preparation using an explicit
+      core-selected agent row on the same VM. Reuse one file operation, execution operation, numeric
+      guest bootstrap, carrier, owner and deadline; retain both account preparations and publish no
+      partial pair on requested-agent failure. The agent view has its own ordinary body plan and no
+      elevated API. Bind managed user-default shell lookup to that same guest/bootstrap, including
+      the independent-start seam. Preserve no-bootstrap refusal, original control/cause and
+      uncertain custody without introducing a persisted identity mode. Scoped tests and source
+      reviews establish this private unit only; native cross-user proof, production context wiring
+      and complete additive RunContext remain under the broader unchecked gate above.
 - [ ] Add platform-owned new-stack connection/provisioning composition without decoding opaque VM
       metadata in core or constructing legacy targets. Apply the
       [2026-09-21 factory inventory](migration-strategy.md#new-target-composition-inventory-2026-09-21):
@@ -5473,10 +5482,10 @@ complete additive RunContext remain open, so the broader factory checkbox is not
       certify legacy detached descendants by moving only a surviving parent into a new cgroup.
 
 - [ ] During sessions/console migration, replace the admin-owned multi-console agent-pane sudo path
-      with an explicitly bound and proved cross-user execution path. The current three-plan identity
-      composer does not support non-root delivery into a different non-root workload identity. Do
-      not hide this gap with ambient sudo or expose native agent authority merely to make this
-      consumer fit.
+      with an explicitly bound and proved cross-user execution path. Private numeric-bootstrap-bound
+      preparation supplies a non-root delivery-to-agent path, but does not migrate this consumer or
+      establish its native credential transitions. Do not substitute ambient sudo or infer an agent
+      target from the existence of an admin target.
 
 ## 7. Remove legacy and activate permissions
 

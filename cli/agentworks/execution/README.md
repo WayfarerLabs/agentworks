@@ -1387,6 +1387,13 @@ and normalized groups. Demotion clears inheritable/ambient capabilities, not the
 permission to gain privileges later. Protection profiles are separate. Invalid plan combinations
 refuse before payload preparation; a failed wrapper never triggers fallback or replay.
 
+Private target preparation can bind an already-prepared numeric guest bootstrap to an explicitly
+selected non-root workload account. This permits admin delivery through fixed sudo root entry,
+followed by numeric demotion to the agent before its body loads. Without that binding, a different
+non-root delivery/workload pair refuses. Including the core bootstrap does not include an elevated
+API plan or root account lookup when elevated access was omitted. The identity modes and their
+persisted representation are unchanged.
+
 The fixed launcher gives Python a minimal environment. Trusted numeric identity metadata may appear
 in wrapper argv; workload source, paths, environment and input remain in stdin. Linux helpers verify
 real/effective/saved IDs and normalized groups before workload access. A non-Linux destination with
@@ -1417,16 +1424,23 @@ gate observations through the bound reader. Every family entry forwards the same
 reconciliation and cleanup. Private download, upload, JSON and single-call bindings retain this
 context through their exchanges and outcomes. JSON gives each independently prepared upload child
 the same context, including after a publication conflict. Existing context-free private candidates
-remain unchanged. Core file state binds this context once. The private WSL2 native factory
-constructs one context from the prepared elevated plan and actual full guest, requires both identity
-plans and shares it between file and buffered execution state. Missing preparation refuses before
-exposing views. Fresh recovery, outer managed helpers and other platform composition still need
-adoption. The fixed managed service entry separately validates bounded controller/guest argv data
-and reuses numeric admission with an INLINE two-phase loader before controller modules and store
-effects. Tests simulate its admission and observations; native controller and later workload-child
-guest admission remain unproved. Complete provider envelopes include the selected prefix and encoded
-request; even a valid request can refuse before QGA dispatch when their aggregate exceeds the
-carrier limit.
+remain unchanged. Core file state binds this context once. The private native factory constructs one
+context from the prepared elevated plan and actual full guest, requires both identity plans and
+shares it between file and buffered execution state. Missing preparation refuses before exposing
+views. Fresh recovery, outer managed helpers and other platform composition still need adoption. The
+fixed managed service entry separately validates bounded controller/guest argv data and reuses
+numeric admission with an INLINE two-phase loader before controller modules and store effects. Tests
+simulate its admission and observations; native controller and later workload-child guest admission
+remain unproved. Complete provider envelopes include the selected prefix and encoded request; even a
+valid request can refuse before QGA dispatch when their aggregate exceeds the carrier limit.
+
+Private paired native composition selects an agent from its recorded VM membership before platform
+effects. Its optional agent target and existing admin target share the same file and execution
+operations, owner, carrier, root bootstrap and deadline; per-call body plans remain distinct. Only
+the admin view includes an elevated plan. Aggregate cleanup retains both account preparations and
+closes the shared operations once. Managed user-default shell lookup on a numeric-bound operation
+uses that same bootstrap and verifies the selected body identity and full guest before reading its
+shell. These private views do not populate production RunContext instances or activate permissions.
 
 The separate private `build_named_guest_bootstrap_argv` handles early fixed guest operations before
 numeric account preparation. It resolves a core-bound account name through the system account
