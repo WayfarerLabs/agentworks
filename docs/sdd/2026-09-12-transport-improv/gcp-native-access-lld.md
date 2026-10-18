@@ -112,10 +112,15 @@ history.
 ## Settlement
 
 Aggregate settlement bars body admission, retires reader/source originals and independently settles
-route/start custody, preserving the first escaping control. Pending starts remain explicitly
-observable before terminal producer close. Only after all dependents and guest preparation custody
-settle may shared auth retire. Memoize positive child settlement so a credential-close retry does
-not revisit resolved rows after outer release. Do not stop the VM or close the outer owner.
+route/start custody, preserving the first escaping control. Before dependent provider cleanup, retry
+eligible credential-response and completed copied-request retirement without closing shared
+authentication. Otherwise retryable credential debt could bar route deletion while final auth
+retirement waits for that route. Do not reset uncertain worker completion or acquire another
+credential. Repeat this cleanup when needed; subsequent cleanup calls may produce fresh credential
+debt. Pending starts remain explicitly observable before terminal producer close. Only after all
+dependents and guest preparation custody settle may shared auth retire. Memoize positive child
+settlement so a credential-close retry does not revisit resolved rows after outer release. Do not
+stop the VM or close the outer owner.
 
 Route close bars new open/check admission and retries local originals only; it does not claim
 provider deletion. Explicit route settlement first retires those originals and reconciles retained
@@ -141,6 +146,11 @@ exact owned rule still exists and fresh checks and durable intent succeed. No im
 that same failing attempt; pending, unknown or missing-ACK deletion is observation/bookkeeping only.
 Final resolution also requires positive local original retirement. Do not sweep other nonces, use
 broad tuple deletion or equate rule deletion with closing SSH.
+
+Fresh absence is a precondition for fenced resolution, not an extra persisted absence snapshot.
+Validate reconstructed payloads at the persisted-input boundary; ordinary publication encodes typed
+controller facts. Reconciliation accepts only the controller's exact retained payload bytes and
+revision (or its one unresolved before/after publication), never a newly adopted payload.
 
 ## Proof and primary sources
 

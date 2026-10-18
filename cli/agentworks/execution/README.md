@@ -235,9 +235,8 @@ or operator-stopped intent refuses preparation without activation, holds, routes
 Initial read failures retain the same access for cleanup and, when retirement is uncertain, cleanup
 retry. The access also keeps platform activation, hold and partial preparation evidence; only core
 closes child work and local delivery, checks the complete ledger, seals obligations and releases the
-aggregate owner. WSL2, Proxmox and AWS supply private owned access adapters; Azure and GCP have
-private retained read clients. Complete platform coverage, native acceptance and the public
-RunContext surface remain pending.
+aggregate owner. WSL2, Proxmox, AWS, Azure and GCP supply private owned access adapters. Complete
+platform coverage, native acceptance and the public RunContext surface remain pending.
 
 `plugins/aws/_native_access.py` supplies private, passive `EC2OwnedAccess` for exact power, locator
 and public-endpoint observations and the AWS owned native access factory. The caller retains it
