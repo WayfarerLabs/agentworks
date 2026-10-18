@@ -65,6 +65,11 @@ BOOTSTRAP = _NumericGuestBootstrap(ROOT, GUEST)
 RUNTIME = RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
 
 
+@pytest.fixture(autouse=True)
+def fixed_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agentworks.execution.carrier.time.monotonic", lambda: 100.0)
+
+
 def _receipt() -> bytes:
     value = wire.decode_fact(_launch())
     value.update(owner={"kind": "operation", "owner_id": "c" * 32}, lifetime="operation")
@@ -114,6 +119,7 @@ def _prepare(*, input: bool = True, output: bool = True, sensitive: bool = False
         live_io=ManagedLiveIO(NONCE, input, output),
         bootstrap=BOOTSTRAP,
         runtime_selection=RUNTIME,
+        deadline=Deadline.after(3),
         source=Source() if input else None,
         stdout=Sink() if output else None,
         stderr=Sink() if output else None,
@@ -206,6 +212,7 @@ def test_preparation_is_passive_and_binds_only_bootstrap_root(input: bool, outpu
         live_io=live,
         bootstrap=BOOTSTRAP,
         runtime_selection=RUNTIME,
+        deadline=Deadline.after(3),
         source=source if input else None,
         stdout=stdout if output else None,
         stderr=stderr if output else None,
@@ -217,7 +224,7 @@ def test_preparation_is_passive_and_binds_only_bootstrap_root(input: bool, outpu
     assert prepared.closure_expectation.nonce == NONCE
     assert prepared.closure_expectation.guest == GUEST
     assert prepared.closure_expectation.candidates == ("/usr/bin/python3",)
-    request = ManagedLiveRequest(live, ROOT.expected, GUEST, _receipt())
+    request = ManagedLiveRequest(live, ROOT.expected, GUEST, _receipt(), remaining_ns=3_000_000_000)
     prefix = ROOT_PROGRAM.prefix + encode_envelope(request)
     if isinstance(prepared.io.input, LiveInput):
         consumed = b""
@@ -252,6 +259,13 @@ def test_preparation_is_passive_and_binds_only_bootstrap_root(input: bool, outpu
         {"expected_launch": b"canary-invalid"},
         {"bootstrap": _NumericGuestBootstrap(ROOT, replace(GUEST, init_start_ticks=1235))},
         {"runtime_selection": RuntimeSelection(RuntimeTargetOS.DARWIN)},
+        {"deadline": None},
+        {"deadline": False},
+        {"deadline": Deadline(None)},
+        {"deadline": Deadline(99)},
+        {"deadline": Deadline(100)},
+        {"deadline": Deadline(100 + 5e-10)},
+        {"deadline": Deadline(1e308)},
     ],
 )
 def test_invalid_preparation_refuses_without_endpoint_touch(change: dict[str, object]) -> None:
@@ -261,6 +275,7 @@ def test_invalid_preparation_refuses_without_endpoint_touch(change: dict[str, ob
         live_io=ManagedLiveIO(NONCE, True, True),
         bootstrap=BOOTSTRAP,
         runtime_selection=RUNTIME,
+        deadline=Deadline.after(3),
         source=source,
         stdout=stdout,
         stderr=stderr,
@@ -269,6 +284,25 @@ def test_invalid_preparation_refuses_without_endpoint_touch(change: dict[str, ob
     with pytest.raises(ValidationError):
         prepare_managed_live(**options)
     assert source.calls == stdout.calls == stderr.calls == 0
+
+
+@pytest.mark.parametrize(("remaining", "expected"), [(1e-9, 1), (1.25, 1_250_000_000), (1.2345678909, 1_234_567_890)])
+def test_preparation_samples_and_floors_one_budget(
+    monkeypatch: pytest.MonkeyPatch, remaining: float, expected: int
+) -> None:
+    calls = 0
+
+    def sample(deadline: Deadline) -> float:
+        nonlocal calls
+        calls += 1
+        return remaining
+
+    monkeypatch.setattr(Deadline, "remaining", sample)
+    prepared = _prepare(input=False)
+    assert isinstance(prepared.io.input, FiniteInput)
+    body = prepared.io.input.data[len(ROOT_PROGRAM.prefix) + ENVELOPE_HEADER_BYTES :]
+    assert decode_request(body).remaining_ns == expected and calls == 1
+    prepared.clear()
 
 
 @pytest.mark.parametrize(
@@ -457,6 +491,7 @@ def test_sink_faults_are_outside_decoder_and_controls_keep_identity(control: Bas
         live_io=ManagedLiveIO(NONCE, False, True),
         bootstrap=BOOTSTRAP,
         runtime_selection=RUNTIME,
+        deadline=Deadline.after(3),
         stdout=Fault(),
         stderr=Sink(),
         sensitive=True,
@@ -477,6 +512,7 @@ def test_clearing_releases_endpoint_weakrefs_without_closing_them(outcome: str) 
         live_io=ManagedLiveIO(NONCE, True, True),
         bootstrap=BOOTSTRAP,
         runtime_selection=RUNTIME,
+        deadline=Deadline.after(3),
         source=source,
         stdout=stdout,
         stderr=stderr,

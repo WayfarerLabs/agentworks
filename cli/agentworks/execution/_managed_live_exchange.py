@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -25,11 +26,21 @@ from ._runtime_prerequisite import (
     _NumericGuestBootstrap,
     build_root_guest_bootstrap_argv,
 )
-from .carrier import CarrierIO, Dispatch, Failure, FiniteInput, LiveInput, PreparedInvocation, Retention, SinkOutput
+from .carrier import (
+    CarrierIO,
+    Deadline,
+    Dispatch,
+    Failure,
+    FiniteInput,
+    LiveInput,
+    PreparedInvocation,
+    Retention,
+    SinkOutput,
+)
 
 if TYPE_CHECKING:
     from ._fixed_helper_operation import BoundHelperCarrier
-    from .carrier import ByteSink, ByteSource, Deadline, ExitStatus
+    from .carrier import ByteSink, ByteSource, ExitStatus
 
 
 class ManagedLiveIssue(StrEnum):
@@ -225,6 +236,7 @@ def prepare_managed_live(
     live_io: ManagedLiveIO,
     bootstrap: _NumericGuestBootstrap,
     runtime_selection: RuntimeSelection,
+    deadline: Deadline,
     source: ByteSource | None = None,
     stdout: ByteSink | None = None,
     stderr: ByteSink | None = None,
@@ -243,7 +255,18 @@ def prepare_managed_live(
         or (stdout is None) != (stderr is None)
     ):
         raise ValidationError("Managed live endpoints must match the protected directions")
-    request = ManagedLiveRequest(live_io, bootstrap.root_entry.expected, bootstrap.guest, expected_launch)
+    if type(deadline) is not Deadline:
+        raise ValidationError("Managed live preparation requires a finite unexpired deadline")
+    remaining = deadline.remaining()
+    if remaining is None or not math.isfinite(remaining):
+        raise ValidationError("Managed live preparation requires a finite unexpired deadline")
+    numerator, denominator = remaining.as_integer_ratio()
+    remaining_ns = numerator * 1_000_000_000 // denominator
+    if not 0 < remaining_ns <= 2**63 - 1:
+        raise ValidationError("Managed live preparation requires a positive bounded nanosecond budget")
+    request = ManagedLiveRequest(
+        live_io, bootstrap.root_entry.expected, bootstrap.guest, expected_launch, remaining_ns=remaining_ns
+    )
     try:
         envelope = ROOT_PROGRAM.prefix + encode_envelope(request)
     except ValueError:
