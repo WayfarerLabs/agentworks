@@ -46,6 +46,7 @@ from agentworks.execution.models import Command, Input, JobRef, Lifetime, Output
 from agentworks.execution.profiles import Protection
 from agentworks.operations import OperationAttempt, OperationBorrow
 
+from .test_delivery_custody import Cleanup
 from .test_managed_execution_access import bound as bound
 from .test_managed_execution_access import view as view
 from .test_workload_shell import NONCE, CarrierStub
@@ -406,12 +407,17 @@ def test_aggregate_close_during_lookup_permanently_blocks_body_admission(view, l
 def test_successful_helper_reply_without_local_cleanup_retains_exact_delivery(view, lookup, monkeypatch):
     _, workflow, access, _, _ = view
     retained = []
+    cleanups = []
     original = lookup[0].execute
 
     def unsettled(*args, **kwargs):
         custody = kwargs["custody"]
         retained.append(custody)
-        custody.begin_process()
+        owner = custody.begin_process()
+        cleanup = Cleanup(owner)
+        cleanup.restore_ready = False
+        custody.retain_cleanup(owner, cleanup)
+        cleanups.append(cleanup)
         return original(*args, **kwargs)
 
     monkeypatch.setattr(lookup[0], "execute", unsettled)
@@ -423,8 +429,16 @@ def test_successful_helper_reply_without_local_cleanup_retains_exact_delivery(vi
             workflow.close(cleanup_deadline=Deadline.after(2))
         assert workflow.owner._outstanding_attempt.local_delivery is retained[0]
         assert not retained[0].settled
+        assert cleanups[0].events == ["borrowers-stopped", "process-cleaned"]
     finally:
-        assert retained[0].close(Deadline.after(2))
+        cleanups[0].restore_ready = True
+        assert workflow.owner.close_local_delivery(Deadline.after(2))
+    assert cleanups[0].settled and retained[0].settled
+    assert workflow.owner._outstanding_attempt.local_delivery is retained[0]
+    with pytest.raises(StateError):
+        start(access)
+    assert lookup[0].calls == 1
+    no_run(view)
 
 
 @pytest.mark.parametrize("invocation", [Command(["/bin/true"]), Script("true", Shell.SH), Script("true", Shell.BASH)])
