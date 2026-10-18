@@ -1450,53 +1450,44 @@ class FileOperation:
     ) -> FileEffectGateBinding | None:
         """Bind setup before mutation, or return None for settled, undispatched setup."""
         with _gate_admission():
-            return self._bind_mutation_gate(active, family, setup, deadline)
-
-    def _bind_mutation_gate(
-        self,
-        active: _ActiveFileJsonUpdate | _ActiveFileRemove | _ActiveFileMetadata,
-        family: FileCallFamily,
-        setup: FileEffectGateSetup,
-        deadline: Deadline,
-    ) -> FileEffectGateBinding | None:
-        binding = active.binding
-        operation = active.prepared.state.operation
-        result = exchange_file_effect_gate(
-            operation,
-            operation=GateControlOperation.SETUP,
-            path=setup.path,
-            guest=setup.guest,
-            scope_name=self._target.name,
-            plan=binding.identity_plan,
-            deadline=deadline,
-            runtime_selection=binding.runtime_selection,
-            bootstrap=binding.bootstrap,
-        )
-        normal = operation.settle(result.dispatch, result.carrier_completion)
-        if result.dispatch is Dispatch.NOT_SENT and not operation.requires_owner_retention:
-            return None
-        observed = result.observation
-        if (
-            not normal
-            or result.runtime_prerequisite.state is not RuntimePrerequisiteState.READY
-            or observed is None
-            or observed.state is not GateControlObservationState.RESOLVED
-            or observed.binding is None
-        ):
-            raise GateControlMutationUncertain(
-                "file-effect gate setup was not acknowledged"
-            ) from FileGateSetupControlFact(result.runtime_prerequisite)
-        bound = replace(binding, effect_gate=observed.binding)
-        self._validate_effect_gate(bound)
-        record = self._obligation(family, bound)
-        obligation = active.obligation
-        assert obligation is not None
-        obligation.publish_payload(
-            expected_revision=obligation.payload_revision,
-            payload_version=record.payload_version,
-            payload=encode_file_call_obligation(record),
-        )
-        return observed.binding
+            binding = active.binding
+            operation = active.prepared.state.operation
+            result = exchange_file_effect_gate(
+                operation,
+                operation=GateControlOperation.SETUP,
+                path=setup.path,
+                guest=setup.guest,
+                scope_name=self._target.name,
+                plan=binding.identity_plan,
+                deadline=deadline,
+                runtime_selection=binding.runtime_selection,
+                bootstrap=binding.bootstrap,
+            )
+            normal = operation.settle(result.dispatch, result.carrier_completion)
+            if result.dispatch is Dispatch.NOT_SENT and not operation.requires_owner_retention:
+                return None
+            observed = result.observation
+            if (
+                not normal
+                or result.runtime_prerequisite.state is not RuntimePrerequisiteState.READY
+                or observed is None
+                or observed.state is not GateControlObservationState.RESOLVED
+                or observed.binding is None
+            ):
+                raise GateControlMutationUncertain(
+                    "file-effect gate setup was not acknowledged"
+                ) from FileGateSetupControlFact(result.runtime_prerequisite)
+            bound = replace(binding, effect_gate=observed.binding)
+            self._validate_effect_gate(bound)
+            record = self._obligation(family, bound)
+            obligation = active.obligation
+            assert obligation is not None
+            obligation.publish_payload(
+                expected_revision=obligation.payload_revision,
+                payload_version=record.payload_version,
+                payload=encode_file_call_obligation(record),
+            )
+            return observed.binding
 
     def _install[BindingT: _FileCallBinding, PreparedT, OutcomeT](
         self,
