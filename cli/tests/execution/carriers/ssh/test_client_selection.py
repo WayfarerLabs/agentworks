@@ -12,12 +12,13 @@ import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
-from agentworks.execution.carrier import CarrierIO, Deadline, Dispatch, PreparedInvocation
+from agentworks.execution.carrier import CarrierIO, Deadline, Dispatch, Failure, PreparedInvocation
 from agentworks.execution.carriers._subprocess import ProcessResult
 from agentworks.execution.carriers.ssh import client
 from agentworks.execution.carriers.ssh._io import run_process
 from agentworks.execution.carriers.ssh.connection import SSHConnection
 from agentworks.execution.carriers.ssh.trust import SSHTrustFiles
+from tests.execution.carriers.ssh._client_banner import client_banner
 
 pytestmark = pytest.mark.windows
 
@@ -81,12 +82,22 @@ def test_relative_path_entry_is_pinned_before_cwd_changes(
     assert Path(pinned).is_absolute()
 
 
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize("banner", [client_banner(), "OpenSSH_10.5p1, secret-canary"])
 def test_probe_and_delivery_share_one_selection(
-    connection: SSHConnection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
+    connection: SSHConnection,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    custody: LocalDeliveryCustody,
+    explicit: bool,
+    banner: str,
 ) -> None:
-    selected = selectable_client(tmp_path / "selected%$ directory")
+    directory = "selected directory" if explicit else "selected%$ directory"
+    selected = selectable_client(tmp_path / directory)
     replacement = selectable_client(tmp_path / "replacement")
     monkeypatch.setenv("PATH", str(selected.parent))
+    if explicit:
+        connection = replace(connection, ssh_executable=str(selected))
     calls: list[list[str]] = []
     original = run_process
 
@@ -96,7 +107,7 @@ def test_probe_and_delivery_share_one_selection(
             monkeypatch.setenv("PATH", str(replacement.parent))
             # Run a real owned child while substituting only the fixture executable.
             return original(
-                [sys.executable, "-c", "import sys; sys.stderr.write('OpenSSH_9.9p1')"],
+                [sys.executable, "-c", f"import sys; sys.stderr.write({banner!r})"],
                 io=io,
                 deadline=deadline,
                 custody=custody,
@@ -107,12 +118,18 @@ def test_probe_and_delivery_share_one_selection(
     report = client.SSHCarrier(connection).execute(
         PreparedInvocation(("true",)), io=CarrierIO(), deadline=Deadline.after(5), custody=custody
     )
-    assert report.dispatch is Dispatch.SENT
-    assert len(calls) == 2
-    assert os.path.samefile(calls[0][0], selected)
+    accepted = os.name != "nt" or banner.startswith("OpenSSH_for_Windows_")
+    assert report.dispatch is (Dispatch.SENT if accepted else Dispatch.NOT_SENT)
+    assert report.failure is (None if accepted else Failure.DISPATCH)
+    assert report.stderr.data == b"" and "secret-canary" not in repr(report)
+    assert custody.settled
+    assert len(calls) == (2 if accepted else 1)
+    assert calls[0][-1] == "-V" and os.path.samefile(calls[0][0], selected)
     assert Path(calls[0][0]).is_absolute()
-    assert calls[0][0] == calls[1][0]
-    assert os.path.samefile(client.resolve_client_executable(connection), replacement)
+    if accepted:
+        assert calls[0][0] == calls[1][0]
+    expected = selected if explicit else replacement
+    assert os.path.samefile(client.resolve_client_executable(connection), expected)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Requires native Windows PATH semantics")
@@ -156,7 +173,22 @@ def test_windows_native_version_probe_never_executes_cwd_decoy(
     monkeypatch.delenv("NoDefaultCurrentDirectoryInExePath", raising=False)
     pinned = client.resolve_client_executable(connection)
     assert pinned == selected and pinned != str(decoy)
-    assert client.check_client_version(pinned, deadline=Deadline.after(5), custody=custody) is None
+    observed: list[ProcessResult] = []
+    original = run_process
+
+    def probe(argv, *, io, deadline, custody):
+        assert argv == [pinned, "-V"]
+        result = original(argv, io=io, deadline=deadline, custody=custody)
+        observed.append(result)
+        return result
+
+    monkeypatch.setattr(client, "run_process", probe)
+    failure = client.check_client_version(pinned, deadline=Deadline.after(5), custody=custody)
+    assert len(observed) == 1 and observed[0].failure is None and observed[0].exit_status == 0
+    assert observed[0].stderr.data.startswith(b"OpenSSH_")
+    native = observed[0].stderr.data.startswith(b"OpenSSH_for_Windows_")
+    assert failure is (None if native else Failure.DISPATCH)
+    assert custody.settled
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Requires native Windows executable suffix selection")

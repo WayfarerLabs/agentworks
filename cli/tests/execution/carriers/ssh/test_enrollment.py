@@ -21,7 +21,7 @@ from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import CapturedOutput, CarrierIO, Deadline, Failure, PreparedInvocation
 from agentworks.execution.carriers._subprocess import ProcessResult
 from agentworks.execution.carriers.ssh import _trust_files as files
-from agentworks.execution.carriers.ssh import enrollment
+from agentworks.execution.carriers.ssh import client, enrollment
 from agentworks.execution.carriers.ssh._io import run_process
 from agentworks.execution.carriers.ssh.client import SSHCarrier
 from agentworks.execution.carriers.ssh.connection import SSHConnection, admit_connection
@@ -103,6 +103,32 @@ def synthetic(
     monkeypatch.setattr(enrollment, "check_client_version", lambda *args, **kwargs: None)
     monkeypatch.setattr(enrollment, "run_process", result.run)
     return result
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows refuses non-native SSH clients")
+def test_non_native_client_refused_before_enrollment_launch(
+    synthetic: SyntheticEnrollment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    probes: list[list[str]] = []
+
+    def probe(argv, *, io, deadline, custody):
+        probes.append(argv)
+        return run_process(
+            [sys.executable, "-c", "import sys; sys.stderr.write('OpenSSH_10.5p1 secret-canary')"],
+            io=io,
+            deadline=deadline,
+            custody=custody,
+        )
+
+    monkeypatch.setattr(enrollment, "check_client_version", client.check_client_version)
+    monkeypatch.setattr(client, "run_process", probe)
+    with pytest.raises(SSHEnrollmentError) as caught:
+        synthetic.enroll()
+    assert caught.value.failure is Failure.DISPATCH
+    assert "secret-canary" not in repr(caught.value)
+    assert len(probes) == 1 and probes[0] == [sys.executable, "-V"]
+    assert not synthetic.calls and not list(synthetic.bundle.directory.glob("enrollment-*"))
+    assert synthetic.maintenance.delivery.settled
 
 
 def test_success_preserves_complete_policy_and_requires_strict_second_connection(

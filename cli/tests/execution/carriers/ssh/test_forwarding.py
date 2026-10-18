@@ -35,6 +35,7 @@ from agentworks.execution.carriers.ssh.trust import (
     resolve_trust,
     trust_status,
 )
+from tests.execution.carriers.ssh._client_banner import client_banner
 from tests.execution.carriers.ssh._held_resources import ForwardingCaller, SSHResourceCaller, held_resource
 
 pytestmark = pytest.mark.windows
@@ -49,7 +50,7 @@ class SyntheticForwarding:
     connection: SSHConnection
     custody: LocalDeliveryCustody
     script: str = "os.write(1, marker); sys.stdin.buffer.read()"
-    version: str = "import sys; sys.stderr.write('OpenSSH_9.2p1\\n')"
+    version: str = f"import sys; sys.stderr.write({client_banner('9.2p1')!r})"
     children: list[subprocess.Popen[bytes]] = field(default_factory=list)
     calls: list[list[str]] = field(default_factory=list)
     resources: list[forwarding.OwnedForwarding] = field(default_factory=list)
@@ -305,6 +306,18 @@ def test_version_probe_uses_startup_deadline(synthetic: SyntheticForwarding) -> 
         synthetic.open(seconds=0.2)
     assert caught.value.failure == Failure.DEADLINE
     assert len(synthetic.calls) == 1
+    synthetic.assert_closed()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows refuses non-native SSH clients")
+def test_non_native_client_refused_before_forwarding_launch(synthetic: SyntheticForwarding) -> None:
+    synthetic.version = "import sys; sys.stderr.write('OpenSSH_10.5p1 secret-canary')"
+    with pytest.raises(ForwardingError) as caught:
+        synthetic.open()
+    assert caught.value.failure is Failure.DISPATCH and caught.value.local_status is None
+    assert "secret-canary" not in repr(caught.value)
+    assert len(synthetic.calls) == 1 and synthetic.calls[0][-1] == "-V"
+    assert synthetic.custody.settled
     synthetic.assert_closed()
 
 
