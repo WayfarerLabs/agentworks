@@ -997,6 +997,10 @@ Its ordinary-call composition below has a different contract and remains unfinis
 
 ### Generic directory-transfer child checkpoints
 
+The [directory/local-path response design](directory-transfer-lld.md) specifies the public facade,
+bounded complete traversal, host primitives and concrete local-file custody needed to implement this
+ordinary-call contract.
+
 The former generic positive-history checkpoint design is superseded by ordinary-call composition.
 Its completed private kernel work remains historical evidence in the plan. Ordinary-call admission
 no longer produces those associations or positive-history writes; real custody safeguards remain.

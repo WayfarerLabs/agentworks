@@ -4634,11 +4634,12 @@ the directory facade, native proof or complete R7 delivery.
       custody, including an empty source that grows after inventory. Keep in-memory read bounds
       positive. This is a directory-composition prerequisite, not delivery of that facade.
 - [ ] Deliver bounded directory upload/download by composing ordinary successful child results under
-      one original deadline. Define explicit existing-file conflict selection and bounded partial
-      progress, including failed/uncertain current-child effects. Merge directory structure without
-      pruning or rolling back confirmed entries. Prove complete traversal rather than interpreting a
-      depth-limited inventory as a whole tree. Cover conservative local traversal, directory
-      creation and publication on supported workstation systems before public exposure.
+      one original deadline under the [directory/local-path response](directory-transfer-lld.md).
+      Define explicit existing-file conflict selection and bounded partial progress, including
+      failed/uncertain current-child effects. Merge directory structure without pruning or rolling
+      back confirmed entries. Prove complete traversal rather than interpreting a depth-limited
+      inventory as a whole tree. Cover conservative local traversal, directory creation and
+      publication on supported workstation systems before public exposure.
 - [ ] Resolve lifecycle-ledger capacity before migrating high-volume artifact publication. Apply the
       selected core 128-unfinished-obligation bound and preserve commit-without-reply evidence and
       immutable completed receipts, rather than pruning, reusing IDs or increasing the limit.
