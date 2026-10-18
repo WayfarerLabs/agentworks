@@ -5931,6 +5931,13 @@ to the WSL interrupt test. Combined validation and independent review remain req
       source-cleanup uncertainty. This does not complete platform-host identity/files/context
       composition, live foreground execution or any MANAGED host guarantee.
 
+- [ ] Pin fresh-process independence tests to the reviewed checkout explicitly. Isolated Python
+      ignores `PYTHONPATH`, so a shared tooling environment's editable installation is not proof of
+      candidate source. Install retirement guards before any first-party import, reject preloaded
+      first-party modules, and validate package origins and search locations. Exercise an actual new
+      RunContext workflow with command bytes/status, files, JSON, claim release, exact cleanup and
+      post-close refusal. Keep this synthetic Linux proof distinct from native/platform and
+      supervised-job acceptance.
 - [ ] Prove fresh-process platform composition without retirement dependencies, not only calls to
       already-imported native hooks. The first-binding audit at `6149cf06` found that VM-platform
       package initialization imports Lima's legacy dependencies, while plugin initialization imports

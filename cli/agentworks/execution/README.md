@@ -1781,12 +1781,13 @@ native privilege transitions, predecessor drain or production recovery acceptanc
 
 ## Private inline file reads
 
-`_file_read.py` composes a bounded, identity-bound Linux file read through one carrier attempt. The
-core selects a trusted root and relative path; the helper checks the expected UID, GID and groups
-before opening the target. Absolute root traversal uses path-only descriptors and refuses links
-without requiring directory read permission. The existing snapshot reader also refuses descendant
-mount crossings and unsupported objects. Missing roots or files produce an absent observation, not
-an I/O success with empty bytes.
+`_file_read.py` composes a bounded, identity-bound Linux or Darwin file read through one carrier
+attempt. The core selects a trusted root and relative path; the helper checks the expected UID, GID
+and groups before opening the target. Linux absolute root traversal uses path-only descriptors and
+refuses links without requiring directory read permission; descendant mount crossings refuse. Darwin
+requires readable directory ancestry, uses no-follow descriptors and refuses descendant device
+changes, not same-filesystem mounts. Both refuse unsupported objects. Missing roots or files produce
+an absent observation, not an I/O success with empty bytes.
 
 Workload paths and request payload travel only in sensitive stdin. `_file_wire.py` supplies the
 shared bounded `AGWF1` record framing; the read schema remains concrete. A file-specific collector
@@ -2209,12 +2210,13 @@ and native streaming performance acceptance remain open.
 
 ## Private object observation and removal
 
-`_file_objects.py` observes a supported Linux regular file, directory or Unix socket without
-requiring content-read permission. It uses confined path-only descriptors and checks named/held
-identity and metadata. Observed links, multiply linked regular files and other special objects
-refuse. Removal requires exact kind and revision; digest-bearing regular revisions also recheck
-content through the bounded revision reader. Only empty directories can be removed. Initial absence
-returns unchanged; interrupted or ambiguous mutation is not reported as unchanged.
+`_file_objects.py` observes supported objects and checks named/held identity and metadata. Linux
+uses confined path-only descriptors for regular files, directories and Unix sockets without
+requiring content-read permission. Darwin requires readable regular files or directories and
+readable ancestry; sockets refuse. Observed links, multiply linked regular files and other special
+objects refuse. Removal requires exact kind and revision; digest-bearing regular revisions also
+recheck content through the bounded revision reader. Only empty directories can be removed. Initial
+absence returns unchanged; interrupted or ambiguous mutation is not reported as unchanged.
 
 The caller owns the trusted parent and operation serialization. Removal neither checks tmux liveness
 nor provides atomic compare-and-remove against external writers. Session code must coordinate server
@@ -2238,12 +2240,13 @@ not establish privileged or cross-identity native acceptance or public FileAcces
 
 ## Private metadata convergence
 
-`_file_metadata.py` converges regular-file or directory ownership and mode on a held Linux inode. It
+`_file_metadata.py` converges regular-file or directory ownership and mode on a held inode. Linux
 verifies the fixed procfs descriptor bridge instead of reopening the caller's mutable path;
 unavailable or incompatible procfs refuses. Ordinary attributes remain in place, and access-ACL
-permissions are checked against the resulting mode. Directory modes can include set-group-ID and
-sticky bits; regular-file modes are ordinary permissions only. Socket metadata and set-user-ID
-requests are not supported.
+permissions are checked against the resulting mode. Darwin uses readable descriptors with `fchown`
+and `fchmod`, refusing unsupported ACLs, attributes, flags and regular-file privilege bits rather
+than removing them. Directory modes can include set-group-ID and sticky bits; regular-file modes are
+ordinary permissions only. Socket metadata and set-user-ID requests are not supported.
 
 `ensure_directory` creates only the final component, initially with mode 0700, then converges it. It
 does not remove a created public directory if a later step fails. Errors distinguish unchanged,
@@ -2266,11 +2269,13 @@ marker.
 
 ## Private directory inventory
 
-`_file_inventory.py` reads a bounded Linux directory inventory beneath a borrowed trusted root and
-caller-owned operation serialization. It observes regular files, directories and sockets without
-reading file content, refusing links, multiply linked regular files, unsupported special objects and
-descendant mount crossings. Depth one returns immediate children; a directory at the requested depth
-is observed but its children are not enumerated.
+`_file_inventory.py` reads a bounded directory inventory beneath a borrowed trusted root and
+caller-owned operation serialization. Linux observes regular files, directories and sockets without
+reading file content and refuses descendant mount crossings. Darwin requires readable directories
+and regular-file descriptors, refuses sockets and checks descendant devices rather than Linux mount
+boundaries. Both refuse links, multiply linked regular files and unsupported special objects. Depth
+one returns immediate children; a directory at the requested depth is observed but its children are
+not enumerated.
 
 Results are sorted by relative UTF-8 path bytes. Entry, name and encoded-output limits fail rather
 than returning a truncated result. The shared encoder defines the exact compact JSON byte count,
