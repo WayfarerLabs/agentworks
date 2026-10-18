@@ -435,6 +435,18 @@ bindings or migrate provisioning. Identity preparation retains completed or part
 and conservative custody on borrow-release failure, preserving original escaping control. No target
 or root identity is inferred as a fallback.
 
+The private `native_vm_context` entry point yields a normal RunContext inside that same native
+operation. It acquires no second claim and adds no context-owned cleanup. The existing operation
+holds ownership before platform construction, power observation and activation, then binds its
+prepared admin and explicitly selected agent targets into the yielded context. Config, descriptive
+scope, scoped secrets and existing legacy handles pass through unchanged without resolution,
+inspection or fallback. Retaining the context cannot extend its target operations' lifetime. Context
+construction and body failures unwind the same aggregate; uncertain teardown retains the original
+cleanup fact. A SYSTEM or absent description does not create a broader database claim: the explicit
+VM argument still selects one exact VM claim. Same-VM workspace, agent and session descriptions are
+preserved rather than interpreted as target selection or grants. Existing production contexts and
+activation/rollback orchestrators remain unchanged.
+
 One shared `ExecutionOperation` keeps one lazily registered empty carrier-dispatch row for its
 lifetime, rather than consuming a row per clean command. Every call still uses a fresh serial
 borrow, explicitly installs and arms that row before carrier validation, and hands the retained

@@ -113,6 +113,15 @@ scope. Finalization also remains explicit: returning from a legacy helper or lea
 does not prove that remote effects stopped. This inventory locates the integration work, not
 implemented production ownership or accepted recovery.
 
+Private native-context composition reuses the existing owned native operation instead of creating
+another owner or embedding cleanup in RunContext. It yields a normal context only after native
+preparation and binds the prepared admin and explicitly selected agent views. Config, descriptive
+scope, scoped secrets and legacy handles retain their supplied identity. Same-VM descendant scopes
+and SYSTEM descriptions do not change the exact VM claim or choose an agent. Construction/body
+failures unwind the retained native aggregate. This provides a new-only context entry point, not
+adoption of the existing gate, creation or rollback roots listed above. Those migration seams and
+the canonical SSH context path remain required; this leaf supplies no whole-platform acceptance.
+
 The follow-up activation audit confirms that acquisition can precede the existing gate, but safe
 release cannot be inferred from that gate's current return path. `platform.start` may take effect
 before raising; WSL's current hold suppresses cleanup errors; route and Tailscale repair span remote
