@@ -5499,9 +5499,10 @@ complete additive RunContext remain open, so the broader factory checkbox is not
 - [ ] Activate explicit core recipient grants and the successor file allowlist only with legacy
       absent. Inventory all approved workflow actions/paths before activation, then prove restricted
       file-only, observe-only, elevation and exact-profile views, denial before effects and no
-      indirect bypass. Keep operational failure, channel support and permission denial distinct.
-      This is not registration/consent or an in-process plugin sandbox. If either removal or
-      enforcement evidence fails, do not claim permission isolation or close the effort.
+      indirect bypass, including existing job references across admin and agent views. Keep
+      operational failure, channel support and permission denial distinct. This is not
+      registration/consent or an in-process plugin sandbox. If either removal or enforcement
+      evidence fails, do not claim permission isolation or close the effort.
 
 Each stage is independently green and updates permanent collateral to the behavior it actually
 ships. Temporary coexistence has an explicit final removal owner and gate, not indefinite support

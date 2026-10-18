@@ -191,7 +191,10 @@ guest bootstrap and deadline. Core selects the agent from its recorded row and c
 before platform effects; descriptive context scope does not select the agent. Both identity
 preparations remain in aggregate custody. Failed or uncertain agent preparation cannot publish a
 partial pair. Sharing operation state avoids a second cleanup lifecycle; each view still supplies
-its own body plan, and only the admin view includes an elevated plan.
+its own body plan, and only the admin view includes an elevated plan. Job observation/control in
+this private composition is operation/resource- and VM-bound, not recipient-account authorization.
+Recipient checks on existing job references remain required at permission activation; paired views
+do not supply that isolation during coexistence.
 
 The existing carrier admission adapter is shared by account preparation and file workflows. It owns
 dispatch and termination evidence only; callers own their protocol facts. A lookup without

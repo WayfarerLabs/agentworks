@@ -1441,6 +1441,9 @@ the admin view includes an elevated plan. Aggregate cleanup retains both account
 closes the shared operations once. Managed user-default shell lookup on a numeric-bound operation
 uses that same bootstrap and verifies the selected body identity and full guest before reading its
 shell. These private views do not populate production RunContext instances or activate permissions.
+Existing-job actions bind to the shared operation/resource and VM target, not the view's account.
+Possession of an admin job reference is not isolated from an agent view by this private composition;
+recipient authority checks remain a prerequisite for permission activation.
 
 The separate private `build_named_guest_bootstrap_argv` handles early fixed guest operations before
 numeric account preparation. It resolves a core-bound account name through the system account

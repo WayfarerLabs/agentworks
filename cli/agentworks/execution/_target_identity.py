@@ -390,8 +390,7 @@ def _validate_inputs(
     if not isinstance(owner, OperationOwner):
         raise ValidationError("Target identity preparation requires an operation owner")
     if bootstrap is not None and (
-        type(bootstrap) is not _NumericGuestBootstrap
-        or runtime_selection.target_os is not RuntimeTargetOS.LINUX
+        runtime_selection.target_os is not RuntimeTargetOS.LINUX
         or runtime_selection.explicit_path not in (None, "/usr/bin/python3")
     ):
         raise ValidationError("Numeric target identity preparation requires bound Linux system Python and bootstrap")
