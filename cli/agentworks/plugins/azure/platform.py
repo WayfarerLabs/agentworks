@@ -25,6 +25,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import LimitExceededError, NotFoundError, StateError
+from agentworks.plugins.azure._identity import canonical_vm_id, parse_resource_id
 from agentworks.plugins.azure.auth import (
     _build_ambient_credential,
     _build_service_principal_credential,
@@ -626,7 +627,6 @@ class AzureVMPlatform(VMPlatform):
                     ),
                 )
                 vm_result = vm_poller.result()
-                resource_id = vm_result.id or ""
 
             except Exception as exc:
                 output.detail("Cleaning up resources...")
@@ -649,6 +649,11 @@ class AzureVMPlatform(VMPlatform):
             # that repeat is safe because every teardown step is
             # idempotent or best-effort.
             try:
+                resource_id = vm_result.id or ""
+                if parse_resource_id(resource_id) != (az.subscription_id, az.resource_group, vm_name):
+                    raise StateError("Azure created VM resource identity does not match the requested VM")
+                vm_id = canonical_vm_id(vm_result.vm_id)
+
                 output.detail(f"Azure VM '{vm_name}' provisioned (IP: {public_ip})")
 
                 from agentworks.transports import SSHTransport
@@ -682,7 +687,7 @@ class AzureVMPlatform(VMPlatform):
             rollback_create_on_interrupt(compute, network, az.resource_group, vm_name)
             raise
 
-        metadata = {"resource_id": resource_id} if resource_id else {}
+        metadata = {"resource_id": resource_id, "vm_id": vm_id}
         return ProvisionResult(
             native_transport=prov_transport,
             platform_metadata=metadata,

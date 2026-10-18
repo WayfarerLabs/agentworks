@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 # The resource ID the fake VM create returns; shared with the test
 # files' VMRow stand-ins so route ops parse back to the same rg/name.
 _RESOURCE_ID = "/subscriptions/sub-A/resourceGroups/rg1/providers/Microsoft.Compute/virtualMachines/vm1"
+_VM_ID = "01234567-89ab-cdef-0123-456789abcdef"
 
 
 def _authorization_denied() -> Exception:
@@ -191,6 +192,10 @@ class _FakeVMs:
         self.delete_error: BaseException | None = None
         self._events = events if events is not None else []
 
+        from azure.mgmt.compute.models import VirtualMachine
+
+        self.create_result: object = VirtualMachine({"id": _RESOURCE_ID, "properties": {"vmId": _VM_ID}})
+
     def get(self, rg: str, name: str, **_kw: object) -> Any:
         from azure.core.exceptions import ResourceNotFoundError
 
@@ -198,7 +203,7 @@ class _FakeVMs:
 
     def begin_create_or_update(self, rg: str, name: str, vm: object) -> _Poller:
         self.created.append((rg, name, vm))
-        return _Poller(SimpleNamespace(id=_RESOURCE_ID))
+        return _Poller(self.create_result)
 
     def begin_delete(self, rg: str, name: str) -> _Poller:
         if self.delete_error is not None:

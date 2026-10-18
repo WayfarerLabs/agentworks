@@ -23,6 +23,7 @@ no test hits the network.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
@@ -33,7 +34,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConfigError, ConnectivityError
+from agentworks.errors import ConfigError, ConnectivityError, StateError
 from agentworks.plugins.azure import network as azure_network
 from agentworks.plugins.azure.network import (
     ALLOW_PRIORITY_BAND_END,
@@ -44,10 +45,12 @@ from agentworks.plugins.azure.network import (
     DENY_ALL_INBOUND_RULE_PRIORITY,
     LEGACY_SSH_RULE_NAME,
     TRANSIENT_ALLOW_RULE_PREFIX,
+    AzureError,
 )
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from tests._azure_platform_support import (
     _RESOURCE_ID,
+    _VM_ID,
     _FakeSecurityRules,
     _install_fakes,
     _Poller,
@@ -207,7 +210,7 @@ class TestCreate:
             RunContext(config=_operator_config(["198.51.100.0/24"])),
         )
 
-        assert result.platform_metadata == {"resource_id": _RESOURCE_ID}
+        assert result.platform_metadata == {"resource_id": _RESOURCE_ID, "vm_id": _VM_ID}
         assert network.public_ip_addresses.created == [("rg1", "vm1-ip")]
 
         assert len(network.network_security_groups.created) == 1
@@ -225,6 +228,77 @@ class TestCreate:
 
         # No per-rule create/delete during create; the hooks own the close.
         assert network.security_rules.events == []
+
+    @pytest.mark.parametrize(
+        "vm_id",
+        [
+            "01234567-89AB-4DEF-8123-456789ABCDEF",
+            "01234567-89AB-CDEF-0123-456789ABCDEF",
+            "00000000-0000-0000-0000-000000000000",
+        ],
+    )
+    @pytest.mark.parametrize("system_slug", [None, "team"])
+    def test_records_creation_response_incarnation(
+        self, monkeypatch: pytest.MonkeyPatch, vm_id: str, system_slug: str | None
+    ) -> None:
+        from azure.mgmt.compute.models import VirtualMachine
+
+        fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
+        resource_id = _RESOURCE_ID.replace("/vm1", "/team-vm1") if system_slug else _RESOURCE_ID
+        fakes.compute.virtual_machines.create_result = VirtualMachine(
+            {"id": resource_id, "properties": {"vmId": vm_id}}
+        )
+
+        result = _platform().create(replace(self._request(), system_slug=system_slug), RunContext())
+
+        assert result.platform_metadata == {"resource_id": resource_id, "vm_id": vm_id.lower()}
+        assert fakes.events == []
+
+    @pytest.mark.parametrize(
+        ("resource_id", "vm_id"),
+        [
+            (None, _VM_ID),
+            ("", _VM_ID),
+            (_RESOURCE_ID + "/extensions/agent", _VM_ID),
+            (_RESOURCE_ID.replace("sub-A", "sub-B"), _VM_ID),
+            (_RESOURCE_ID.replace("rg1", "rg2"), _VM_ID),
+            (_RESOURCE_ID.replace("vm1", "vm2"), _VM_ID),
+            (_RESOURCE_ID.replace("sub-A", "sub-a"), _VM_ID),
+            (_RESOURCE_ID, None),
+            (_RESOURCE_ID, ""),
+            (_RESOURCE_ID, "not-a-uuid"),
+            (_RESOURCE_ID, _VM_ID.replace("-", "")),
+        ],
+    )
+    def test_invalid_creation_identity_rolls_back_before_bootstrap(
+        self, monkeypatch: pytest.MonkeyPatch, resource_id: str | None, vm_id: str | None
+    ) -> None:
+        from azure.mgmt.compute.models import VirtualMachine
+
+        fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
+        fakes.compute.virtual_machines.create_result = VirtualMachine(
+            {"id": resource_id, "properties": {"vmId": vm_id}}
+        )
+        fakes.compute.disks.disks = [SimpleNamespace(name="vm1_OsDisk_1", tags={"owner": "agentworks"})]
+        bootstrap = MagicMock()
+        transport = MagicMock()
+        monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", bootstrap)
+        monkeypatch.setattr("agentworks.transports.SSHTransport", transport)
+
+        with pytest.raises((AzureError, StateError)):
+            _platform().create(self._request(), RunContext())
+
+        assert fakes.compute.virtual_machines.created
+        assert fakes.events == [
+            ("delete", "vm", "rg1", "vm1"),
+            ("delete", "nic", "rg1", "vm1-nic"),
+            ("delete", "ip", "rg1", "vm1-ip"),
+            ("delete", "nsg", "rg1", "vm1-nsg"),
+            ("delete", "vnet", "rg1", "vm1-vnet"),
+            ("delete", "disk", "rg1", "vm1_OsDisk_1"),
+        ]
+        transport.assert_not_called()
+        bootstrap.assert_not_called()
 
     def test_create_announces_the_bootstrap_route_open(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
