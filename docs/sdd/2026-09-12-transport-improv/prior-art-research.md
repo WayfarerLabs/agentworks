@@ -5,6 +5,40 @@
 
 ## Findings
 
+### Lima delivery needs an observed account and an explicit bootstrap shell
+
+The 2026-10-18 source check uses [Lima v2.2.1](https://github.com/lima-vm/lima/releases/tag/v2.2.1),
+the latest published stable release at inspection. This selects research sources, not a new
+supported-version floor or native acceptance.
+
+The pinned shell implementation quotes command arguments but executes them through a login shell,
+even when a command and explicit `--shell` are supplied. It connects as the configured instance user
+and forwards its standard streams. Automatic start and reconnect are separate options. Decision:
+make the bootstrap shell intentional, keep application-shell policy above delivery, and disable
+implicit startup/reconnect in ordinary delivery. A successful local client status cannot by itself
+establish which guest bootstrap or application ran. These are source findings, not tested
+byte-stream, terminal or disconnect guarantees.
+
+Source:
+[v2.2.1 shell implementation](https://github.com/lima-vm/lima/blob/v2.2.1/cmd/limactl/shell.go).
+
+The instance JSON includes configuration, including `config.user.name`; the JSON listing uses the
+inspected instance model. This supplies a candidate bounded observation of the actual delivery
+account, distinct from Agentworks' separately provisioned admin. Decision: resolve and retain that
+observed account during explicit native preparation rather than infer it from the workstation user
+or admin row. Missing or invalid account facts must refuse, not fall back. Observation is not a
+durable provider incarnation identifier or a replacement for the recorded guest marker.
+
+Sources:
+[instance model](https://github.com/lima-vm/lima/blob/v2.2.1/pkg/limatype/lima_instance.go),
+[user configuration](https://github.com/lima-vm/lima/blob/v2.2.1/pkg/limatype/lima_yaml.go),
+[JSON listing](https://github.com/lima-vm/lima/blob/v2.2.1/cmd/limactl/list.go),
+[JSON printing](https://github.com/lima-vm/lima/blob/v2.2.1/pkg/store/instance.go).
+
+SSH placement-host endpoint/account/trust/runtime selection and platform-owned provisioning,
+rollback and availability still need independent implementation and native proof. The observation
+above does not provide those facts, migrate creation, or justify Lima-specific behavior in SSH.
+
 ### Provider SDK invocation is not a dispatch boundary
 
 The 2026-10-09 locked-source audit finds that Azure compute 38.3.0 and network's default pipelines
