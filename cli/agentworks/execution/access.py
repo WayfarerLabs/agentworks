@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Literal, cast
 from agentworks.errors import StateError, ValidationError
 
 from . import _directory_transfer, _file_memory_read
+from ._bound_environment import _BoundEnvironment
 from ._diagnostic_values import validate_logical_entity_value
 from ._execution_operation import ExecutionOperation, ManagedExecutionControlFact, OwnedInlineOutcome
 from ._execution_result import check_owned_inline_result, reduce_owned_inline_result
@@ -110,6 +111,7 @@ class ExecutionAccess:
         entity_kind: str,
         entity_name: str,
         deadline: Callable[[], Deadline],
+        bound_environment: _BoundEnvironment | None = None,
     ) -> None:
         if type(operation) is not ExecutionOperation:
             raise ValidationError("Execution access requires an acquired execution operation")
@@ -123,6 +125,8 @@ class ExecutionAccess:
         validate_logical_entity_value(entity_name, "name", subject="Execution access")
         if not callable(deadline):
             raise ValidationError("Execution access requires a composition-owned deadline policy")
+        if bound_environment is not None and type(bound_environment) is not _BoundEnvironment:
+            raise ValidationError("Execution access requires a core-composed bound environment")
         self._operation = operation
         self._carrier = carrier
         self._runtime_selection = runtime_selection
@@ -131,6 +135,21 @@ class ExecutionAccess:
         self._entity_kind = entity_kind
         self._entity_name = entity_name
         self._deadline = deadline
+        self._environment = _BoundEnvironment() if bound_environment is None else bound_environment
+
+    def with_env(self, env: Mapping[str, str], *, sensitive: bool = False) -> ExecutionAccess:
+        """Derive a passive environment view with the same authority and custody."""
+        return ExecutionAccess(
+            self._operation,
+            self._carrier,
+            runtime_selection=self._runtime_selection,
+            ordinary_plan=self._ordinary_plan,
+            elevated_plan=self._elevated_plan,
+            entity_kind=self._entity_kind,
+            entity_name=self._entity_name,
+            deadline=self._deadline,
+            bound_environment=self._environment.with_env(env, sensitive=sensitive),
+        )
 
     def _job_deadline(self, deadline: Deadline | None) -> Deadline:
         self._operation.require_job_binding(self._carrier, self._runtime_selection)
@@ -402,6 +421,7 @@ class ExecutionAccess:
                 selected = deadline
         plan = self._elevated_plan if sudo else self._ordinary_plan
         assert plan is not None
+        environment = self._environment.with_env({} if env is None else env, sensitive=sensitive or stdin.is_sensitive)
         if lifetime is Lifetime.INDEPENDENT:
             return self._operation.start_resource_managed(
                 self._carrier,
@@ -411,9 +431,9 @@ class ExecutionAccess:
                 deadline=selected,
                 input=stdin,
                 output=output,
-                env=env,
+                env=environment.values,
                 cwd=cwd,
-                sensitive=sensitive or stdin.is_sensitive,
+                sensitive=environment.sensitive,
             ).reference
         return self._operation.start_managed(
             self._carrier,
@@ -423,9 +443,9 @@ class ExecutionAccess:
             deadline=selected,
             input=stdin,
             output=output,
-            env=env,
+            env=environment.values,
             cwd=cwd,
-            sensitive=sensitive or stdin.is_sensitive,
+            sensitive=environment.sensitive,
         )
 
     def run(
@@ -476,7 +496,8 @@ class ExecutionAccess:
             raise ValidationError("Managed execution requires a finite deadline")
         plan = self._elevated_plan if sudo else self._ordinary_plan
         assert plan is not None
-        effective_sensitive = sensitive or stdin.is_sensitive
+        environment = self._environment.with_env({} if env is None else env, sensitive=sensitive or stdin.is_sensitive)
+        effective_sensitive = environment.sensitive
 
         if profile is Protection.MANAGED:
             if lifetime is Lifetime.INDEPENDENT:
@@ -488,7 +509,7 @@ class ExecutionAccess:
                     deadline=selected_deadline,
                     input=stdin,
                     output=output,
-                    env=env,
+                    env=environment.values,
                     cwd=cwd,
                     sensitive=effective_sensitive,
                 )
@@ -511,7 +532,7 @@ class ExecutionAccess:
                 deadline=selected_deadline,
                 input=stdin,
                 output=output,
-                env=env,
+                env=environment.values,
                 cwd=cwd,
                 sensitive=effective_sensitive,
                 live_io=live_io,
@@ -538,7 +559,7 @@ class ExecutionAccess:
             source=stdin.source,
             stdout=output.stdout,
             stderr=output.stderr,
-            env=env,
+            env=environment.values,
             cwd=cwd,
             capture_limit=output.max_bytes,
             sensitive=effective_sensitive,
