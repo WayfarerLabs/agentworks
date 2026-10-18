@@ -1314,6 +1314,19 @@ Python style checks. The source reviews executed no runtime. Earlier failed diag
 remain preserved. This proves neither native API compatibility nor completed GCP access or
 RunContext delivery; the next item and the complete additive-surface gate remain open.
 
+- [x] Implement and privately review GCP full-instance observations, nonce firewall-route ownership
+      and aggregate access preparation under the existing VM owner. Keep small power reads separate;
+      retain all fresh tags/accounts, valid provider-selected subnets and actual IPv4 endpoint
+      facts. Preserve one-shot start/insert/delete, exact request receipts, unknown-outcome
+      retention, fenced publication/resolution and dependent cleanup before final shared-auth
+      retirement. The corrected source `c13deee5a` clears all three private source-review lanes;
+      lead verification passes 1,028 focused cases without skips and strict typing over 1,425 files.
+      Actual SDK/SQLite unified cases use an explicit guest-preparation stub, not native GCP or
+      guest-delivery proof. Project review corrected a retryable credential-cleanup/route-settlement
+      cycle; the complexity pass removed unused absence publication and repeated interior payload
+      validation. Native compatibility, operation retention/recovery, complete availability and
+      production RunContext delivery remain required by the following item and the complete
+      additive-surface gate.
 - [ ] Complete owned GCP access under the [native access LLD](gcp-native-access-lld.md) with its
       observational identity guarantee: a fresh exact provider observation refuses known
       stale-target admission, matching receipt and subsequent fresh identity/trust/preparation admit
