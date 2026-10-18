@@ -266,7 +266,8 @@ def test_escaping_clock_exception_does_not_retain_outer_caller_payload(bound) ->
                 identity=receipt.identity,
                 spec=receipt.spec,
             )
-            run.start(body, Deadline.after(1))
+            # Reach the injected clock fault after real reservation and fencing.
+            run.start(body, Deadline.after(30))
         except KeyboardInterrupt as escaped:
             assert escaped is error
         else:
@@ -385,14 +386,17 @@ def test_clock_failure_or_interruption_retains_reservation_without_start(bound, 
     else:
         clock.interrupt = KeyboardInterrupt()
     run, _, start, _ = make_run(bound, clock_carrier=clock)
+    # This tests the clock outcome, not persistence within a one-second budget.
+    deadline = Deadline.after(30)
     try:
         if fault == "interrupt":
             with pytest.raises(KeyboardInterrupt) as caught:
-                run.start(body_for(receipt), Deadline.after(1))
+                run.start(body_for(receipt), deadline)
             assert caught.value is clock.interrupt
         else:
-            assert run.start(body_for(receipt), Deadline.after(1)) is None
+            assert run.start(body_for(receipt), deadline) is None
             assert run.keeper.last_clock is not None
+        assert clock.calls == 1
         assert run.reserved is not None and start.calls == 0 and run.keeper._worker is None
     finally:
         assert run.keeper.drain(Deadline.after(1)).drained
