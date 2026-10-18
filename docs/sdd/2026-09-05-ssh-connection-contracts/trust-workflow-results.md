@@ -318,9 +318,10 @@ prose wording is asserted.
 
 Independent file checks verify complete source/revocation bytes and manifest hashes, three distinct
 successful generations, blocked current policy after the failed refresh and retained partial copies
-of both known-host inputs. Stale refusal leaves the complete bundle snapshot unchanged. Forward
-repair unblocks a new complete generation while retaining every previous generation and partial
-publication byte and timestamp. Original sources remain unchanged.
+of both known-host inputs. Stale refusal preserves the recorded bundle file hashes and timestamps,
+excluding `.lock` and directory metadata. Forward repair unblocks a new complete generation while
+retaining every previous generation and partial publication byte and timestamp. Original sources
+remain unchanged.
 
 The reviewed runner's SHA256 is `4a337363f15749935c509a4fbaa1fdeae78a215e5ea5d035b32de4df18c283bc`;
 its additive observer is `666d626123a40116a129c6a10fe1a32d03c122ad9eb14a933224bc2216bcf0d3`. The
