@@ -11,7 +11,7 @@ from agentworks.db.operations import LifecycleObligationState
 from agentworks.errors import LimitExceededError, StateError
 from agentworks.execution.carrier import Deadline
 from agentworks.operations import LifecycleObligation, OperationOwner
-from agentworks.plugins.gcp._activation import ActivationState
+from agentworks.plugins.gcp._activation import ActivationState, GCEActivation
 from tests.plugins.gcp.test_activation_completion import completion, receipt
 from tests.plugins.gcp.test_activation_sdk import isolated_config as isolated_config
 from tests.plugins.gcp.test_activation_sdk import sdk as sdk
@@ -76,11 +76,11 @@ def test_lost_ack_publication_can_be_repaired_before_one_get(sdk, monkeypatch, c
 
 
 @pytest.mark.parametrize("error_type", [OSError, KeyboardInterrupt, SystemExit])
-def test_validated_terminal_survives_ledger_failure_before_cleanup(sdk, monkeypatch, error_type):
+def test_validated_terminal_survives_settlement_ledger_failure(sdk, monkeypatch, error_type):
     sdk.adapter.start(Deadline.after(5))
     sdk.data = json.dumps(completion(sdk.adapter.payload)).encode()
     original = OperationOwner.inspect_lifecycle_obligation
-    primary = error_type("terminal observation bookkeeping")
+    primary = error_type("terminal settlement bookkeeping")
 
     def inspect(owner, obligation_id):
         if sdk.adapter.state is ActivationState.SUCCEEDED:
@@ -88,8 +88,9 @@ def test_validated_terminal_survives_ledger_failure_before_cleanup(sdk, monkeypa
         return original(owner, obligation_id)
 
     monkeypatch.setattr(OperationOwner, "inspect_lifecycle_obligation", inspect)
+    assert sdk.adapter.observe(Deadline.after(5)) is ActivationState.SUCCEEDED
     with pytest.raises(error_type) as caught:
-        sdk.adapter.observe(Deadline.after(5))
+        sdk.adapter.settle(Deadline.after(5))
     assert caught.value is primary and sdk.adapter.state is ActivationState.SUCCEEDED
     assert not sdk.adapter.cleanup_incomplete
     monkeypatch.setattr(OperationOwner, "inspect_lifecycle_obligation", original)
@@ -98,31 +99,56 @@ def test_validated_terminal_survives_ledger_failure_before_cleanup(sdk, monkeypa
 
 
 @pytest.mark.parametrize("primary_type", [KeyboardInterrupt, SystemExit])
-def test_get_original_control_survives_other_cleanup_controls(sdk, monkeypatch, primary_type):
+def test_get_original_control_survives_other_cleanup_controls(sdk, primary_type):
     sdk.adapter.start(Deadline.after(5))
     sdk.data = json.dumps(completion(sdk.adapter.payload)).encode()
-    primary = primary_type("terminal publication")
-    original = OperationOwner.inspect_lifecycle_obligation
+    primary = primary_type("GET body read")
 
-    def inspect(owner, obligation_id):
-        if sdk.adapter.state is ActivationState.SUCCEEDED:
-            raise primary
-        return original(owner, obligation_id)
+    def read(data):
+        raise primary
 
     def fail(label, original, normal):
         raise (KeyboardInterrupt if primary_type is SystemExit else SystemExit)("cleanup")
 
     sdk.before_close = fail
-    monkeypatch.setattr(OperationOwner, "inspect_lifecycle_obligation", inspect)
+    sdk.read_callback = read
     with pytest.raises(primary_type) as caught:
         sdk.adapter.observe(Deadline.after(5))
     assert caught.value is primary
     assert sdk.adapter._response is sdk.responses[-1]
     assert sdk.adapter._service_session is sdk.service_session
     assert not sdk.adapter._lock.locked() and not sdk.auth.closed
+    assert sdk.adapter.state is ActivationState.PENDING
     sdk.before_close = None
-    monkeypatch.setattr(OperationOwner, "inspect_lifecycle_obligation", original)
+    assert not sdk.adapter.settle(Deadline.after(5))
+    assert not sdk.adapter.cleanup_incomplete and len(sdk.service_calls) == 2
+
+
+@pytest.mark.parametrize("primary_type", [KeyboardInterrupt, SystemExit])
+def test_interrupt_after_ack_payload_retention_preserves_observable_pending(sdk, monkeypatch, primary_type):
+    primary = primary_type("after ACK payload retention")
+    fired: list[bool] = []
+
+    def retain_then_interrupt(self, name, value):
+        object.__setattr__(self, name, value)
+        if self is sdk.adapter and name == "_payload" and value.operation_name is not None and not fired:
+            fired.append(True)
+            raise primary
+
+    with monkeypatch.context() as patch:
+        patch.setattr(GCEActivation, "__setattr__", retain_then_interrupt)
+        with pytest.raises(primary_type) as caught:
+            sdk.adapter.start(Deadline.after(5))
+    assert caught.value is primary and fired == [True]
+    assert sdk.adapter.payload.operation_name == "Operation_1"
+    assert sdk.adapter.state is ActivationState.PENDING and not sdk.adapter.cleanup_incomplete
+    sdk.adapter.reconcile(Deadline.after(5))
+    sdk.data = json.dumps(completion(sdk.adapter.payload)).encode()
+    assert sdk.adapter.observe(Deadline.after(5)) is ActivationState.SUCCEEDED
     assert sdk.adapter.settle(Deadline.after(5))
+    with pytest.raises(StateError):
+        sdk.adapter.start(Deadline.after(5))
+    assert [method for method, _ in sdk.service_calls] == ["POST", "GET"]
 
 
 def test_close_pending_ack_bars_get_and_preserves_debt(sdk):

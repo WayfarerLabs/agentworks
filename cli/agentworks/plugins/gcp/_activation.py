@@ -81,7 +81,7 @@ class GCEActivation:
         self._obligation: LifecycleObligation | None = None
         self._attempted = False
         self._mark_began = False
-        self._state = ActivationState.UNKNOWN
+        self._observed_state: ActivationState | None = None
         self._closed = False
         self._resolution_intended = False
         self._settled = False
@@ -105,7 +105,9 @@ class GCEActivation:
     @property
     def state(self) -> ActivationState:
         """Retained request knowledge, not VM or guest readiness."""
-        return self._state
+        if self._observed_state is not None:
+            return self._observed_state
+        return ActivationState.UNKNOWN if self._payload.operation_name is None else ActivationState.PENDING
 
     @property
     def cleanup_incomplete(self) -> bool:
@@ -185,7 +187,7 @@ class GCEActivation:
     def observe(self, deadline: Deadline) -> ActivationState:
         """Admit at most one selected Operation GET, retaining validated terminal state."""
         self._request(deadline, observing=True)
-        return self._state
+        return self.state
 
     def _request(self, deadline: Deadline, *, observing: bool) -> None:
         self._acquire(deadline)
@@ -196,9 +198,9 @@ class GCEActivation:
             if self._closed or self.cleanup_incomplete:
                 raise StateError("GCE activation service admission is closed")
             if observing:
-                if self._state is ActivationState.UNKNOWN:
+                if self.state is ActivationState.UNKNOWN:
                     raise StateError("GCE activation has no acknowledged operation")
-                if self._state in (ActivationState.SUCCEEDED, ActivationState.FAILED):
+                if self.state in (ActivationState.SUCCEEDED, ActivationState.FAILED):
                     return
                 self._reconcile_locked()
             else:
@@ -241,12 +243,11 @@ class GCEActivation:
                 )
                 body = self._read_body(deadline)
                 if observing:
-                    self._state = decode_completion(body, self._payload)
+                    self._observed_state = decode_completion(body, self._payload)
                 else:
                     operation_name = decode_acknowledgment(body, self._payload)
                     self._payload = replace(self._payload, operation_name=operation_name)
-                    self._state = ActivationState.PENDING
-                self._reconcile_locked()
+                    self._reconcile_locked()
             except BaseException as error:
                 if not isinstance(error, Exception):
                     control = error
@@ -383,7 +384,7 @@ class GCEActivation:
         if (
             settling
             and row.state is LifecycleObligationState.POSSIBLE_EFFECT
-            and self._state in (ActivationState.SUCCEEDED, ActivationState.FAILED)
+            and self.state in (ActivationState.SUCCEEDED, ActivationState.FAILED)
             and not self.cleanup_incomplete
         ):
             self._resolution_intended = True
