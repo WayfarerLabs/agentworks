@@ -331,6 +331,8 @@ class ExecutionAccess:
             raise StateError("Managed execution is unavailable on this runtime")
         if type(request) not in {Command, Script} or type(stdin) is not Input or type(output) is not Output:
             raise ValidationError("Managed start requires finite invocation, input and output values")
+        if stdin.source is not None or output.stdout is not None:
+            raise StateError("Live pipes are unavailable for managed start")
         if type(sudo) is not bool or type(sensitive) is not bool:
             raise ValidationError("Managed execution flags must be booleans")
         if sudo and self._elevated_plan is None:
@@ -396,7 +398,11 @@ class ExecutionAccess:
         if type(request) not in {Command, Script}:
             raise ValidationError("Foreground execution requires a command or script")
         if type(stdin) is not Input or type(output) is not Output:
-            raise ValidationError("Foreground execution requires finite input and bounded output")
+            raise ValidationError("Foreground execution requires explicit input and output values")
+        if (stdin.source is not None or output.stdout is not None) and (
+            profile is not Protection.DIRECT or lifetime is not Lifetime.OPERATION
+        ):
+            raise StateError("Live pipes require DIRECT operation execution")
         if type(sudo) is not bool or type(sensitive) is not bool or type(check) is not bool:
             raise ValidationError("Foreground execution flags must be booleans")
         if sudo and self._elevated_plan is None:
@@ -458,7 +464,10 @@ class ExecutionAccess:
             plan=plan,
             deadline=selected_deadline,
             runtime_selection=self._runtime_selection,
-            stdin=stdin.data,
+            stdin=stdin.data if stdin.data is not None else b"",
+            source=stdin.source,
+            stdout=output.stdout,
+            stderr=output.stderr,
             env=env,
             cwd=cwd,
             capture_limit=output.max_bytes,

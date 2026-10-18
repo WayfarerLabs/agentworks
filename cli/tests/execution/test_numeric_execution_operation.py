@@ -20,7 +20,7 @@ from agentworks.execution._execution_result import reduce_owned_inline_result
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._inline_bundle import ROOT_PROGRAM
-from agentworks.execution._inline_request import decode_manifest
+from agentworks.execution._inline_request import REQUEST_HEADER_BYTES, decode_manifest
 from agentworks.execution._managed_runs import ManagedTargetKind
 from agentworks.execution._runtime_prerequisite import (
     RuntimeSelection,
@@ -112,7 +112,7 @@ class PreparedCarrier(RecordingCarrier):
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         super().validate(invocation, io=io)
         assert isinstance(io.input, FiniteInput)
-        manifest = decode_manifest(io.input.data)
+        manifest = decode_manifest(io.input.data[REQUEST_HEADER_BYTES:])
         assert manifest.identity == self.body.expected
         expected, _, _ = build_root_guest_bootstrap_argv(
             self.bootstrap.root_entry,

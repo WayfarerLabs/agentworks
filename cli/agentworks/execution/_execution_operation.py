@@ -111,7 +111,7 @@ if TYPE_CHECKING:
     )
     from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
     from agentworks.execution.binding import NativeExecutionBinding
-    from agentworks.execution.carrier import Carrier, Deadline
+    from agentworks.execution.carrier import ByteSink, ByteSource, Carrier, Deadline
     from agentworks.execution.models import Command, Input, Output
     from agentworks.operations import OperationBorrow, OperationOwner
 
@@ -1195,6 +1195,9 @@ class ExecutionOperation:
         cwd: str | None = None,
         capture_limit: int | None = 4_096,
         sensitive: bool = False,
+        source: ByteSource | None = None,
+        stdout: ByteSink | None = None,
+        stderr: ByteSink | None = None,
     ) -> OwnedInlineOutcome:
         """Prepare, dispatch and settle one inline candidate without replay."""
         prepared = prepare_inline_candidate(
@@ -1205,16 +1208,24 @@ class ExecutionOperation:
             cwd=cwd,
             capture_limit=capture_limit,
             sensitive=sensitive,
+            source=source,
+            stdout=stdout,
+            stderr=stderr,
             runtime_selection=runtime_selection,
             bootstrap=self._bootstrap,
         )
-        if deadline.expired:
-            raise ValidationError("Inline execution deadline expired during preparation")
-        with self._admission_guard:
-            if self._finishing or self._active_inline_calls or self._unfinished_inline_executions:
-                raise StateError("Inline execution cannot admit new work")
-            active = self._borrow_helper_call(carrier, prepared, inline=True)
-            operation = active.operation
+        try:
+            carrier.validate(prepared.invocation, io=prepared.io)
+            if deadline.expired:
+                raise ValidationError("Inline execution deadline expired during preparation")
+            with self._admission_guard:
+                if self._finishing or self._active_inline_calls or self._unfinished_inline_executions:
+                    raise StateError("Inline execution cannot admit new work")
+                active = self._borrow_helper_call(carrier, prepared, inline=True)
+                operation = active.operation
+        except BaseException:
+            prepared.release()
+            raise
         try:
             try:
                 binding = self._native_binding
@@ -1246,6 +1257,9 @@ class ExecutionOperation:
 
     @staticmethod
     def _detach_helper_payload(active: _ActiveHelperCall) -> None:
+        if isinstance(active.prepared, PreparedInlineCandidate):
+            active.prepared.release()
+            active.prepared = None
         if isinstance(active.prepared, PreparedManagedRead) and isinstance(
             active.candidate, ManagedObservationCandidate
         ):

@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 import builtins
+import inspect
 from dataclasses import KW_ONLY, dataclass, field
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
+
+if TYPE_CHECKING:
+    from .carrier import ByteSink, ByteSource
+
+
+def _endpoint(endpoint: object, method: str) -> None:
+    """Check external endpoint shape without invoking caller descriptors or I/O."""
+    if not callable(inspect.getattr_static(endpoint, method, None)):
+        raise ValidationError("Execution live I/O requires nonblocking byte endpoints")
 
 
 class Shell(Enum):
@@ -41,14 +52,19 @@ class JobRef:
 
 @dataclass(frozen=True, repr=False)
 class Input:
-    """Finite application input; empty bytes represent explicit EOF."""
+    """Finite input or an explicitly borrowed nonblocking application source."""
 
-    data: builtins.bytes
+    data: builtins.bytes | None
     is_sensitive: bool = False
+    source: ByteSource | None = field(default=None, repr=False, kw_only=True)
 
     def __post_init__(self) -> None:
-        if type(self.data) is not builtins.bytes or type(self.is_sensitive) is not bool:
+        if type(self.is_sensitive) is not bool or (self.data is not None and type(self.data) is not builtins.bytes):
             raise ValidationError("Execution input requires bytes and a sensitivity choice")
+        if self.data is None:
+            _endpoint(self.source, "try_read")
+        elif self.source is not None:
+            raise ValidationError("Execution input requires exactly one source")
 
     @classmethod
     def eof(cls) -> Input:
@@ -62,16 +78,27 @@ class Input:
     def sensitive(cls, data: builtins.bytes) -> Input:
         return cls(data, True)
 
+    @classmethod
+    def live(cls, source: ByteSource, *, sensitive: bool = False) -> Input:
+        return cls(None, sensitive, source=source)
+
 
 @dataclass(frozen=True)
 class Output:
-    """Bounded capture or discarded application output."""
+    """Bounded capture, discard, or explicitly borrowed application sinks."""
 
     max_bytes: int | None
+    stdout: ByteSink | None = field(default=None, repr=False, kw_only=True)
+    stderr: ByteSink | None = field(default=None, repr=False, kw_only=True)
 
     def __post_init__(self) -> None:
         if self.max_bytes is not None and (type(self.max_bytes) is not int or self.max_bytes < 0):
             raise ValidationError("Execution capture requires a nonnegative byte bound")
+        if self.stdout is not None or self.stderr is not None:
+            if self.max_bytes is not None:
+                raise ValidationError("Execution live output cannot also capture bytes")
+            _endpoint(self.stdout, "try_write")
+            _endpoint(self.stderr, "try_write")
 
     @classmethod
     def capture(cls, max_bytes: int = 4_096) -> Output:
@@ -82,6 +109,12 @@ class Output:
     @classmethod
     def discard(cls) -> Output:
         return cls(None)
+
+    @classmethod
+    def live(cls, stdout: ByteSink, stderr: ByteSink) -> Output:
+        _endpoint(stdout, "try_write")
+        _endpoint(stderr, "try_write")
+        return cls(None, stdout=stdout, stderr=stderr)
 
 
 @dataclass(frozen=True)

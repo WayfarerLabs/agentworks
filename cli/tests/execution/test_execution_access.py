@@ -47,7 +47,7 @@ class LocalCarrier:
 
     @property
     def features(self) -> ChannelFeatures:
-        return ChannelFeatures()
+        return ChannelFeatures(live_stdio=True)
 
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         pass
@@ -69,6 +69,7 @@ class LocalCarrier:
             deadline=deadline,
             custody=custody,
             standalone_custody=self.local_delivery,
+            live_stdio=True,
         )
         completion = None
         if result.exit_status is not None:

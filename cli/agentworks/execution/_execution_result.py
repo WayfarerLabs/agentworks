@@ -125,6 +125,7 @@ def _empty_output(mode: OutputMode) -> ExecutionOutput:
         OutputMode.CAPTURE: Retention.CAPTURED,
         OutputMode.DISCARD: Retention.DISCARDED,
         OutputMode.SUPPRESS: Retention.SUPPRESSED,
+        OutputMode.DELIVER: Retention.DELIVERED,
     }[mode]
     return ExecutionOutput(retention=retention)
 
@@ -138,6 +139,8 @@ def _output(observation: StreamObservation | None) -> ExecutionOutput:
 
 def _failure(candidate: InlineCandidateResult, completed: bool) -> ExecutionFailure | None:
     observation = candidate.observation
+    if candidate.carrier_failure in {Failure.INPUT, Failure.OUTPUT}:
+        return _carrier_failure(candidate.carrier_failure)
     if _runtime_refused(candidate):
         return ExecutionFailure.PREPARATION
     if candidate.runtime_prerequisite.state is RuntimePrerequisiteState.UNKNOWN:

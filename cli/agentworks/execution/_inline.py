@@ -19,7 +19,7 @@ from agentworks.execution._inline_request import (
     ManifestErrorCode,
     OutputMode,
     ScriptShell,
-    encode_manifest,
+    encode_request_envelope,
 )
 from agentworks.execution._runtime_prerequisite import (
     HelperClosureExpectation,
@@ -36,6 +36,7 @@ from agentworks.execution.carrier import (
     Dispatch,
     Failure,
     FiniteInput,
+    LiveInput,
     PreparedInvocation,
     Retention,
     SinkOutput,
@@ -47,7 +48,49 @@ if TYPE_CHECKING:
 
     from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
     from agentworks.execution._helper_launcher import IdentityPlan
-    from agentworks.execution.carrier import Deadline, ExitStatus
+    from agentworks.execution.carrier import ByteSink, ByteSource, Deadline, ExitStatus
+
+
+class _RequestSource:
+    """Send the complete request before borrowing the application source."""
+
+    def __init__(self, envelope: bytes, source: ByteSource) -> None:
+        self._prefix = envelope
+        self._source: ByteSource | None = source
+
+    def try_read(self, limit: int) -> bytes | None:
+        if self._prefix:
+            chunk = self._prefix[:limit]
+            self._prefix = self._prefix[len(chunk) :]
+            return chunk
+        return b"" if self._source is None else self._source.try_read(limit)
+
+    def release(self) -> None:
+        self._prefix = b""
+        self._source = None
+
+
+class _LiveCollector:
+    """Drain one decoded chunk before allowing the next evidence frame."""
+
+    def __init__(self, reader: FrameReader, observer: InlineObserver) -> None:
+        self._reader = reader
+        self._observer = observer
+        self._awaiting_ack = False
+
+    def try_write(self, data: memoryview) -> int | None:
+        if not self._observer.drain():
+            return None
+        if self._awaiting_ack:
+            self._awaiting_ack = False
+            return 1
+        consumed = self._reader.try_write(data)
+        if not self._observer.drain():
+            # Keep the final encoded byte pending in the carrier so it keeps
+            # polling delivery even when the guest waits for application input.
+            self._awaiting_ack = True
+            return consumed - 1 if consumed > 1 else None
+        return consumed
 
 
 class _DiscardSink:
@@ -71,6 +114,13 @@ class PreparedInlineCandidate:
     _reader: FrameReader = field(repr=False)
     _observer: InlineObserver = field(repr=False)
     _claimed: bool = field(default=False, init=False, repr=False)
+
+    def release(self) -> None:
+        """Drop caller endpoints and request bytes after the sole observation."""
+        if isinstance(self.io.input, LiveInput) and isinstance(self.io.input.source, _RequestSource):
+            self.io.input.source.release()
+        self.io = CarrierIO()
+        self._observer.release()
 
     def claim(self) -> None:
         if self._claimed:
@@ -134,13 +184,13 @@ def _manifest(
     *,
     nonce: str,
     identity: IdentityExpectation,
-    stdin: bytes,
+    stdin: bytes | None,
     env: Mapping[str, str] | None,
     cwd: str | None,
     output_mode: OutputMode,
     capture_limit: int,
 ) -> InlineManifest:
-    if type(stdin) is not bytes:
+    if stdin is not None and type(stdin) is not bytes:
         raise ValidationError("Inline application input must be bytes")
     if type(identity) is not IdentityExpectation:
         raise ValidationError("Inline execution requires a bound identity expectation")
@@ -188,6 +238,9 @@ def prepare_inline_candidate(
     cwd: str | None = None,
     capture_limit: int | None = 4_096,
     sensitive: bool = False,
+    source: ByteSource | None = None,
+    stdout: ByteSink | None = None,
+    stderr: ByteSink | None = None,
     runtime_selection: RuntimeSelection,
     bootstrap: _NumericGuestBootstrap | None = None,
 ) -> PreparedInlineCandidate:
@@ -215,7 +268,11 @@ def prepare_inline_candidate(
             raise ValidationError("Inline working directory must be absolute")
     if capture_limit is not None and (type(capture_limit) is not int or not 0 <= capture_limit <= 4_096):
         raise ValidationError("Inline capture limit must be between 0 and 4096 bytes")
-    if sensitive:
+    if stdout is not None and stderr is not None:
+        output_mode, retained_limit = OutputMode.DELIVER, 0
+    elif stdout is not None or stderr is not None:
+        raise ValidationError("Inline delivery requires both application sinks")
+    elif sensitive:
         output_mode, retained_limit = OutputMode.SUPPRESS, 0
     elif capture_limit is None:
         output_mode, retained_limit = OutputMode.DISCARD, 0
@@ -225,7 +282,7 @@ def prepare_inline_candidate(
         request,
         nonce=nonce,
         identity=plan.expected,
-        stdin=stdin,
+        stdin=None if source is not None else stdin,
         env=env,
         cwd=cwd,
         output_mode=output_mode,
@@ -234,7 +291,7 @@ def prepare_inline_candidate(
     manifest_error: ManifestErrorCode | None = None
     manifest_data = b""
     try:
-        manifest_data = encode_manifest(manifest)
+        manifest_data = encode_request_envelope(manifest)
     except ManifestError as error:
         manifest_error = error.code
     if manifest_error is ManifestErrorCode.OVERSIZED:
@@ -242,14 +299,17 @@ def prepare_inline_candidate(
     if manifest_error is not None:
         raise ValidationError("Inline invocation contains an invalid field")
 
-    observer = InlineObserver(output_mode, retained_limit)
+    observer = InlineObserver(output_mode, retained_limit, stdout=stdout, stderr=stderr)
     reader = FrameReader(nonce, observer.accept)
-    runtime = RuntimePrefixSink(nonce, candidates, reader, system_shim)
+    collector = _LiveCollector(reader, observer)
+    runtime = RuntimePrefixSink(nonce, candidates, collector, system_shim)
     return PreparedInlineCandidate(
         invocation=PreparedInvocation(fixed_argv),
         io=CarrierIO(
-            input=FiniteInput(manifest_data, sensitive=sensitive),
-            output=SinkOutput(runtime, _DiscardSink(), require_live=False),
+            input=FiniteInput(manifest_data, sensitive=sensitive)
+            if source is None
+            else LiveInput(_RequestSource(manifest_data, source), sensitive=sensitive),
+            output=SinkOutput(runtime, _DiscardSink(), require_live=output_mode is OutputMode.DELIVER),
             sensitive=sensitive,
         ),
         nonce=nonce,
@@ -277,6 +337,7 @@ def execute_inline_candidate(
         prepared._reader.finish()
         runtime_prerequisite = prepared._runtime.observation
         prepared._runtime.clear()
+        prepared.release()
     if runtime_prerequisite.state is RuntimePrerequisiteState.READY:
         delivered = report.stdout.retention is Retention.DELIVERED and report.stderr.retention is Retention.DELIVERED
         observation = prepared._observer.finish(

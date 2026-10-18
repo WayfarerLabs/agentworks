@@ -104,17 +104,18 @@ class FrameReader:
         return self._error
 
     def try_write(self, data: memoryview) -> int:
-        """Consume at most one maximum-sized record's worth of borrowed bytes."""
+        """Consume an exact prefix ending at at most one matching complete frame."""
         consumed = min(len(data), _MAX_RECORD_BYTES)
         if self._finished or self._error is not None:
             return consumed
-        for byte in data[:consumed]:
+        for offset, byte in enumerate(data[:consumed], 1):
+            in_record = self._record is not None
             if self._record is not None:
                 self._append_record_byte(byte)
             else:
                 self._scan_line_start(byte)
-            if self._error is not None:
-                break
+            if self._error is not None or (in_record and self._record is None):
+                return offset
         return consumed
 
     def finish(self) -> None:

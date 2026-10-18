@@ -188,14 +188,14 @@ def test_oversized_own_record_closes_at_the_encoded_bound_and_drains() -> None:
     assert canary.decode() not in repr(reader)
 
 
-def test_malformed_record_consumes_and_drains_the_rest_of_the_write() -> None:
+def test_malformed_record_stops_at_its_exact_prefix_then_drains() -> None:
     frames: list[Frame] = []
     reader = FrameReader(NONCE, frames.append)
     malformed = _record(body=b"not-base64")
     valid = encode_frame(NONCE, Frame(0, FrameKind.FINISHED, b""))
 
     combined = malformed + valid
-    assert reader.try_write(memoryview(combined)) == len(combined)
+    assert reader.try_write(memoryview(combined)) == len(malformed)
     _feed(reader, valid)
     reader.finish()
 

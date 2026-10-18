@@ -73,6 +73,8 @@ def compose_managed_body(
         or type(spec) is not ManagedRunSpec
     ):
         raise ValidationError("Invalid managed body")
+    if input.data is None or output.stdout is not None:
+        raise ValidationError("Managed execution requires finite input and capture or discard output")
 
     if isinstance(invocation, Command):
         kind, argv, source = "command", invocation.argv, b""
