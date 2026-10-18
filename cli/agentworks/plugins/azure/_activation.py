@@ -3,21 +3,20 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
-from urllib.parse import parse_qsl, quote, unquote, urlsplit
+from urllib.parse import quote
 
 from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES
 from agentworks.errors import ValidationError
 from agentworks.plugins.azure._identity import MAX_RESOURCE_ID_BYTES as MAX_RESOURCE_ID_BYTES
 from agentworks.plugins.azure._identity import parse_resource_id
+from agentworks.plugins.azure._operation_url import valid_operation_url
 
 OBLIGATION_KIND = "azure-vm-start"
 PAYLOAD_VERSION = 1
 MAX_REQUEST_ID_BYTES = 256
-MAX_OPERATION_URL_BYTES = 8192
 
 
 def _subscription(resource_id: object) -> str:
@@ -36,28 +35,7 @@ def _bounded_ascii(value: object, limit: int) -> bool:
 
 
 def _operation_url(value: object, resource_id: str) -> bool:
-    if not _bounded_ascii(value, MAX_OPERATION_URL_BYTES):
-        return False
-    assert isinstance(value, str)
-    try:
-        parsed = urlsplit(value)
-        query = parse_qsl(parsed.query, keep_blank_values=True, strict_parsing=True)
-        decoded_path = unquote(parsed.path, errors="strict")
-        return (
-            parsed.scheme == "https"
-            and parsed.netloc == "management.azure.com"
-            and not parsed.fragment
-            and "#" not in value
-            and "," not in value
-            and re.search(r"%(?![0-9a-fA-F]{2})", value) is None
-            and all(component not in {".", ".."} for component in decoded_path.split("/"))
-            and "\\" not in decoded_path
-            and all(ord(char) >= 32 and ord(char) != 127 for char in decoded_path)
-            and parsed.path.startswith(f"/subscriptions/{quote(_subscription(resource_id), safe='')}/")
-            and (not parsed.query or (len(query) == 1 and query[0][0] == "api-version" and bool(query[0][1])))
-        )
-    except ValueError:
-        return False
+    return valid_operation_url(value, _subscription(resource_id))
 
 
 @dataclass(frozen=True, slots=True, repr=False)
