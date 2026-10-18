@@ -667,8 +667,9 @@ from application completion and preserve the actual activation delivery until cl
 Keep helper custody and prepared-input cleanup as separate outcome facts. A later stage-cleanup
 failure retains the owner and prevents cleanup confirmation without erasing independently known
 application status or verified output. Reserve normal execution admission across chunk delivery and
-transfer that reservation to the actual activation call; another helper must not enter between
-chunks. Releasing that reservation never discards retained stage or activation cleanup custody.
+transfer that reservation to the actual activation call; another execution helper must not enter
+between chunks. This is operation-local admission, not a new cross-file-operation lock. Releasing
+that reservation never discards retained stage or activation cleanup custody.
 
 A separate fixed prepared-input entry may accept the larger canonical request. The small inline
 entry and its no-staging readiness limits stay unchanged. Choose the delivery before application
