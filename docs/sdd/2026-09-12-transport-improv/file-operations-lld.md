@@ -1280,14 +1280,14 @@ incarnation hash and derived boot UUID. That projection cannot be reversed. The 
 composition therefore supplies the raw identity through the numeric bootstrap to `FileOperation`;
 the owned WSL2 download path supplies its separately observed raw guest at construction. The
 operation derives setup from those bound facts and the selected effective UID, rather than asking
-the public file caller to supply it. Local transfers reuse their original borrow; download setup
-and durable binding publication precede workstation writer construction. STAT, inventory and
-no-staging readiness remain non-creating observations. File custody and the durable gate binding
-retain the actual triple, not just its projection. The helper independently observes the
-_current_ guest triple before trusting the gate. A request-to-record comparison is not a guest
-identity check. These composition paths do not establish native route, provider-locator or recovery
-acceptance. SSH-accessed macOS platform hosts still need their own concrete host identity/epoch
-proof, not the VM marker protocol; file recovery there remains unavailable until that proof exists.
+the public file caller to supply it. Local transfers reuse their original borrow; download setup and
+durable binding publication precede workstation writer construction. STAT, inventory and no-staging
+readiness remain non-creating observations. File custody and the durable gate binding retain the
+actual triple, not just its projection. The helper independently observes the _current_ guest triple
+before trusting the gate. A request-to-record comparison is not a guest identity check. These
+composition paths do not establish native route, provider-locator or recovery acceptance.
+SSH-accessed macOS platform hosts still need their own concrete host identity/epoch proof, not the
+VM marker protocol; file recovery there remains unavailable until that proof exists.
 
 Every effect-bearing fixed helper opens the _existing_ gate without following its final symlink,
 validates its exact bound inode and acquires an exclusive Linux `flock` within the request's
