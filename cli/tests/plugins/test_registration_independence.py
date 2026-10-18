@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import subprocess
-import sys
+from pathlib import Path
 
 import pytest
+
+from tests.execution.test_independence import _run_fresh_process
 
 
 @pytest.mark.windows
@@ -13,30 +14,15 @@ import pytest
 def test_shipped_registration_and_native_bindings_without_retired_modules(first_import: str) -> None:
     script = r"""
 import importlib
-import importlib.abc
 import sys
 from types import SimpleNamespace
-
-roots = (
-    "agentworks.transports", "agentworks.ssh", "agentworks.remote_exec",
-    "agentworks.harness_setup.runner", "agentworks.native_files",
-    "agentworks.plugins.proxmox.transport",
-)
-assert not any(name == root or name.startswith(root + ".")
-               for name in sys.modules for root in roots)
-
-class Guard(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if any(fullname == root or fullname.startswith(root + ".") for root in roots):
-            raise AssertionError("retired execution imported: " + fullname)
 
 def forbid_effects(event, args):
     if event in ("subprocess.Popen", "os.system", "socket.connect", "socket.getaddrinfo"):
         raise AssertionError("passive binding performed I/O: " + event)
 
-sys.meta_path.insert(0, Guard())
 sys.addaudithook(forbid_effects)
-importlib.import_module(sys.argv[1])
+importlib.import_module(sys.argv[2])
 import agentworks.plugins as plugins
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
@@ -44,6 +30,8 @@ from agentworks.execution._runtime_prerequisite import RuntimeSelection, Runtime
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier
 from agentworks.execution.carriers.wsl2 import WSL2Carrier
+
+assert_first_party_origins()
 
 # Importing the actual shipped index must seat every installed descriptor.
 assert plugins._INSTALLED_MODULES
@@ -90,12 +78,8 @@ assert (connection.node, connection.vmid, connection.token_secret) == (
 assert secrets.requests == ["fixture-token"]
 assert pve_binding.delivery_account == "root"
 assert pve_binding.runtime_selection == RuntimeSelection(RuntimeTargetOS.LINUX)
-assert not any(name == root or name.startswith(root + ".")
-               for name in sys.modules for root in roots)
+assert not any(name == root or name.startswith(root + ".") for name in sys.modules for root in retired)
+assert_first_party_origins()
 """
-    result = subprocess.run(
-        [sys.executable, "-I", "-c", script, first_import],
-        capture_output=True,
-        timeout=20,
-    )
-    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    cli_root = Path(__file__).resolve().parents[2]
+    _run_fresh_process(cli_root, script, first_import)
