@@ -9,7 +9,8 @@ from enum import Enum
 
 from agentworks.errors import ValidationError
 
-from .carrier import ByteSink, ByteSource
+# Runtime introspection of public values resolves these annotation names.
+from .carrier import ByteSink, ByteSource  # noqa: TC001
 
 
 def _endpoint(endpoint: object, method: str) -> None:
