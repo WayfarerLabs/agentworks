@@ -15,6 +15,8 @@ from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._managed_job_store import FactName, Stream
 from agentworks.execution._managed_observation_protocol import (
     MAX_OUTPUT_PAGE_BYTES,
+    ControllerObservation,
+    ControllerState,
     ManagedOperation,
     ManagedOutputRange,
     ManagedResultControl,
@@ -31,11 +33,12 @@ from agentworks.execution._managed_runs import (
     ManagedOutputPolicy,
     ManagedRunReceipt,
 )
+from agentworks.execution._vm_guest_identity_protocol import vm_guest_boot_id
 from agentworks.execution.carrier import Deadline, Dispatch, Retention
 from agentworks.execution.result import ApplicationState, ExecutionFailure, ExitCode, Signal
 
 from .test_managed_observation import ScriptedCarrier, _fact, _records
-from .test_managed_observe_access import RUN, _options, _reserved
+from .test_managed_observe_access import RUN, _read_operation, _read_options, _reserved
 
 
 def _confirmed(tmp_path: Path, policy: ManagedOutputPolicy | None = None):  # type: ignore[no-untyped-def]
@@ -107,7 +110,14 @@ def _reply(
     if boundary:
         names.append(FactName.BOUNDARY_EMPTY)
         facts.append(_fact(FactName.BOUNDARY_EMPTY, launch))
-    return _records(request.nonce, ManagedResultControl(tuple(names)), tuple(facts))
+    launch_value = wire.decode_fact(launch)
+    controller = ControllerObservation(
+        ControllerState.EXITED if boundary else ControllerState.RUNNING,
+        launch_value["unit"],
+        vm_guest_boot_id(request.guest),
+        hashlib.sha256(launch).hexdigest(),
+    )
+    return _records(request.nonce, ManagedResultControl(tuple(names), controller), tuple(facts))
 
 
 @pytest.mark.parametrize(
@@ -123,8 +133,9 @@ def test_exact_zero_and_settled_streams_succeed(
 ) -> None:
     database, repository, owner = _confirmed(tmp_path, policy)
     carrier = ScriptedCarrier(lambda request: _reply(request, disposition=disposition))
+    operation = _read_operation(repository, owner, carrier)
     try:
-        outcome = collect_bound_managed_result(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
+        outcome = collect_bound_managed_result(repository, RUN, **_read_options(owner, carrier, operation))  # type: ignore[arg-type]
         result = outcome.result
         assert result.ok
         assert result.dispatch is Dispatch.UNKNOWN
@@ -165,8 +176,11 @@ def test_closed_streams_collect_sequential_pages_under_one_deadline(
 
     selected = deadline
     carrier = Carrier(reply)
+    operation = _read_operation(repository, owner, carrier)
     try:
-        outcome = collect_bound_managed_result(repository, RUN, **_options(owner, carrier, deadline=deadline))  # type: ignore[arg-type]
+        outcome = collect_bound_managed_result(
+            repository, RUN, **_read_options(owner, carrier, operation, deadline=deadline)
+        )  # type: ignore[arg-type]
         assert outcome.result.status == ExitCode(0)
         assert outcome.result.stdout.data == contents[Stream.STDOUT]
         assert outcome.result.stderr.data == contents[Stream.STDERR]
@@ -233,8 +247,11 @@ def test_later_page_failure_preserves_prefix_status_and_each_attempt_without_ret
 
     monkeypatch.setattr(result_module, "read_bound_managed_output", read)
     carrier = ScriptedCarrier(reply)
+    operation = _read_operation(repository, owner, carrier)
     try:
-        outcome = wait_bound_managed_result(repository, RUN, **_options(owner, carrier, deadline=deadline))  # type: ignore[arg-type]
+        outcome = wait_bound_managed_result(
+            repository, RUN, **_read_options(owner, carrier, operation, deadline=deadline)
+        )  # type: ignore[arg-type]
         result = outcome.result
         assert result.application_state is ApplicationState.COMPLETED and result.status == ExitCode(7)
         assert result.stdout.data == contents[Stream.STDOUT][:page] and not result.stdout.complete
@@ -266,9 +283,10 @@ def test_later_page_interruption_preserves_original_control_cause_and_all_attemp
             return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
     carrier = Interrupted(lambda request: _reply(request, wait=7, contents=contents))
+    operation = _read_operation(repository, owner, carrier)
     try:
         with pytest.raises(KeyboardInterrupt) as caught:
-            collect_bound_managed_result(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
+            collect_bound_managed_result(repository, RUN, **_read_options(owner, carrier, operation))  # type: ignore[arg-type]
         assert caught.value is control and isinstance(control.__cause__, ManagedResultControlFact)
         custody = control.__cause__
         assert isinstance(custody.__cause__, ManagedObserveControlFact)
@@ -312,12 +330,13 @@ def test_independent_wait_stream_and_boundary_facts(
     carrier = ScriptedCarrier(
         lambda request: _reply(request, wait=wait, signal=signal, boundary=boundary, ends=ends, disposition=disposition)
     )
+    operation = _read_operation(repository, owner, carrier)
     try:
-        outcome = collect_bound_managed_result(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
+        outcome = collect_bound_managed_result(repository, RUN, **_read_options(owner, carrier, operation))  # type: ignore[arg-type]
         result = outcome.result
         assert not result.ok
         assert result.failure is failure
-        assert result.owned_cleanup_confirmed is boundary
+        assert result.owned_cleanup_confirmed is (boundary and set(ends) == set(Stream))
         assert result.application_state is (
             ApplicationState.UNKNOWN if wait is None and signal is None else ApplicationState.COMPLETED
         )
@@ -336,8 +355,9 @@ def test_independent_wait_stream_and_boundary_facts(
 def test_ambiguous_observation_retains_owner_and_stops(tmp_path: Path) -> None:
     database, repository, owner = _confirmed(tmp_path)
     carrier = ScriptedCarrier(lambda request: _reply(request), dispatch=Dispatch.UNKNOWN, code=None)
+    operation = _read_operation(repository, owner, carrier)
     try:
-        outcome = collect_bound_managed_result(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
+        outcome = collect_bound_managed_result(repository, RUN, **_read_options(owner, carrier, operation))  # type: ignore[arg-type]
         assert carrier.calls == 1
         assert outcome.requires_owner_retention
         assert outcome.result.application_state is ApplicationState.UNKNOWN
@@ -355,9 +375,10 @@ def test_requires_reconciled_launch_before_carrier(tmp_path: Path, possible: boo
     if possible:
         repository.mark_possible_dispatch(reserved)
     carrier = ScriptedCarrier(lambda request: _reply(request))
+    operation = _read_operation(repository, owner, carrier)
     try:
         with pytest.raises(ValidationError):
-            collect_bound_managed_result(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
+            collect_bound_managed_result(repository, RUN, **_read_options(owner, carrier, operation))  # type: ignore[arg-type]
         assert carrier.calls == 0
     finally:
         database.close()
@@ -375,9 +396,10 @@ def test_second_stream_interruption_carries_all_attempt_custody(tmp_path: Path) 
             return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
     carrier = InterruptedCarrier(lambda request: _reply(request))
+    operation = _read_operation(repository, owner, carrier)
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
-            collect_bound_managed_result(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
+            collect_bound_managed_result(repository, RUN, **_read_options(owner, carrier, operation))  # type: ignore[arg-type]
         assert raised.value is interruption
         assert isinstance(interruption.__cause__, ManagedResultControlFact)
         assert len(interruption.__cause__.attempts) == 3
@@ -397,9 +419,10 @@ def test_first_observation_interruption_uses_collector_custody_fact(tmp_path: Pa
             raise interruption
 
     carrier = InterruptedCarrier(lambda request: _reply(request))
+    operation = _read_operation(repository, owner, carrier)
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
-            collect_bound_managed_result(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
+            collect_bound_managed_result(repository, RUN, **_read_options(owner, carrier, operation))  # type: ignore[arg-type]
         assert raised.value is interruption
         assert isinstance(interruption.__cause__, ManagedResultControlFact)
         assert len(interruption.__cause__.attempts) == 1
@@ -422,11 +445,12 @@ def test_deadline_crossing_before_output_admission_returns_partial_result(
         return real_read(*args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(result_module, "read_bound_managed_output", expire_before_read)
+    operation = _read_operation(repository, owner, carrier)
     try:
         outcome = collect_bound_managed_result(
             repository,
             RUN,
-            **_options(owner, carrier, deadline=deadline),  # type: ignore[arg-type]
+            **_read_options(owner, carrier, operation, deadline=deadline),  # type: ignore[arg-type]
         )
         assert outcome.result.application_state is ApplicationState.COMPLETED
         assert outcome.result.status == ExitCode(0)
@@ -458,12 +482,13 @@ def test_unrelated_admission_refusal_is_not_rewritten_as_deadline(
         return real_inspect(identity)
 
     monkeypatch.setattr(repository, "inspect", inspect)
+    operation = _read_operation(repository, owner, carrier)
     try:
         with pytest.raises(ValidationError) as raised:
             collect_bound_managed_result(
                 repository,
                 RUN,
-                **_options(owner, carrier, deadline=deadline),  # type: ignore[arg-type]
+                **_read_options(owner, carrier, operation, deadline=deadline),  # type: ignore[arg-type]
             )
         assert isinstance(raised.value.__cause__, ManagedResultControlFact)
         assert len(raised.value.__cause__.attempts) == 1
@@ -486,8 +511,9 @@ def test_wait_polls_only_clean_pending_facts(tmp_path: Path, monkeypatch: pytest
 
     carrier = ScriptedCarrier(reply)
     monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    operation = _read_operation(repository, owner, carrier)
     try:
-        outcome = wait_bound_managed_result(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
+        outcome = wait_bound_managed_result(repository, RUN, **_read_options(owner, carrier, operation))  # type: ignore[arg-type]
         assert observations == 2
         assert carrier.calls == 4
         assert outcome.result.ok
@@ -506,11 +532,12 @@ def test_wait_expiry_returns_partial_evidence_without_repoll(tmp_path: Path, mon
         object.__setattr__(deadline, "expires_at", 0.0)
 
     monkeypatch.setattr(time, "sleep", expire)
+    operation = _read_operation(repository, owner, carrier)
     try:
         outcome = wait_bound_managed_result(
             repository,
             RUN,
-            **_options(owner, carrier, deadline=deadline),  # type: ignore[arg-type]
+            **_read_options(owner, carrier, operation, deadline=deadline),  # type: ignore[arg-type]
         )
         assert carrier.calls == 1
         assert outcome.result.failure is ExecutionFailure.DEADLINE
@@ -540,11 +567,12 @@ def test_wait_expiry_at_next_poll_admission_keeps_last_evidence(
 
     monkeypatch.setattr(result_module, "collect_bound_managed_result", collect)
     monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    operation = _read_operation(repository, owner, carrier)
     try:
         outcome = wait_bound_managed_result(
             repository,
             RUN,
-            **_options(owner, carrier, deadline=deadline),  # type: ignore[arg-type]
+            **_read_options(owner, carrier, operation, deadline=deadline),  # type: ignore[arg-type]
         )
         assert collections == 2
         assert carrier.calls == 1
@@ -570,8 +598,9 @@ def test_wait_nonzero_main_exit_still_observes_boundary(tmp_path: Path, monkeypa
 
     carrier = ScriptedCarrier(reply)
     monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    operation = _read_operation(repository, owner, carrier)
     try:
-        outcome = wait_bound_managed_result(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
+        outcome = wait_bound_managed_result(repository, RUN, **_read_options(owner, carrier, operation))  # type: ignore[arg-type]
         assert observations == 2
         assert outcome.result.status == ExitCode(7)
         assert outcome.result.owned_cleanup_confirmed
@@ -584,8 +613,9 @@ def test_wait_nonzero_main_exit_still_observes_boundary(tmp_path: Path, monkeypa
 def test_wait_does_not_retry_uncertain_observation(tmp_path: Path) -> None:
     database, repository, owner = _confirmed(tmp_path)
     carrier = ScriptedCarrier(lambda request: _reply(request), dispatch=Dispatch.UNKNOWN, code=None)
+    operation = _read_operation(repository, owner, carrier)
     try:
-        outcome = wait_bound_managed_result(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
+        outcome = wait_bound_managed_result(repository, RUN, **_read_options(owner, carrier, operation))  # type: ignore[arg-type]
         assert carrier.calls == 1
         assert outcome.requires_owner_retention
         assert not outcome.awaiting_facts
@@ -605,8 +635,9 @@ def test_wait_does_not_retry_terminal_outcomes(
 ) -> None:
     database, repository, owner = _confirmed(tmp_path)
     carrier = ScriptedCarrier(lambda request: _reply(request, wait=wait, disposition=disposition))
+    operation = _read_operation(repository, owner, carrier)
     try:
-        outcome = wait_bound_managed_result(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
+        outcome = wait_bound_managed_result(repository, RUN, **_read_options(owner, carrier, operation))  # type: ignore[arg-type]
         assert carrier.calls == 3
         assert outcome.result.status == ExitCode(wait)
         assert outcome.result.failure is failure

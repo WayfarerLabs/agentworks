@@ -10,9 +10,11 @@ from typing import NoReturn
 import pytest
 
 from agentworks.errors import StateError
+from agentworks.execution import _execution_operation as execution
 from agentworks.execution import _managed_disposal_access as disposal
 from agentworks.execution import _managed_job_access as job
 from agentworks.execution import _managed_observe_access as observe
+from agentworks.execution._execution_operation import ExecutionOperation
 from agentworks.execution._managed_runs import ManagedRunRepository
 from agentworks.execution.models import Script, Shell
 from agentworks.operations import OperationBorrow, OperationOwner
@@ -20,11 +22,11 @@ from agentworks.operations import OperationBorrow, OperationOwner
 from .test_managed_job_access import RUN as START_RUN
 from .test_managed_job_access import _call
 from .test_managed_observation import ScriptedCarrier
-from .test_managed_observe_access import RUN, _options
+from .test_managed_observe_access import RUN, _options, _read_operation, _read_options
 from .test_managed_result import _confirmed, _reply
 
 SETUPS = (
-    (observe, "BorrowedFixedHelperCarrier"),
+    (execution, "BorrowedFixedHelperCarrier"),
     (disposal, "BorrowedFixedHelperCarrier"),
     (disposal, "ManagedActionCustody"),
     (job, "BorrowedFixedHelperCarrier"),
@@ -32,10 +34,15 @@ SETUPS = (
 
 
 def _invoke(
-    module: ModuleType, repository: ManagedRunRepository, owner: OperationOwner, carrier: ScriptedCarrier
+    module: ModuleType,
+    repository: ManagedRunRepository,
+    owner: OperationOwner,
+    carrier: ScriptedCarrier,
+    operation: ExecutionOperation | None,
 ) -> None:
-    if module is observe:
-        observe.observe_bound_managed_run(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
+    if module is execution:
+        assert operation is not None
+        observe.observe_bound_managed_run(repository, RUN, **_read_options(owner, carrier, operation))  # type: ignore[arg-type]
     elif module is disposal:
         disposal.dispose_bound_managed_run(repository, RUN, obligation_id="e" * 32, **_options(owner, carrier))  # type: ignore[arg-type]
     else:
@@ -55,6 +62,7 @@ def test_unused_setup_preserves_original_failure_and_actual_owner_custody(
 ) -> None:
     database, repository, owner = _confirmed(tmp_path)
     carrier = ScriptedCarrier(_reply)
+    operation = _read_operation(repository, owner, carrier) if module is execution else None
     original_cause = OSError("prior cause")
     failure = failure_type("setup interrupted")
     failure.__cause__ = original_cause
@@ -98,7 +106,7 @@ def test_unused_setup_preserves_original_failure_and_actual_owner_custody(
         monkeypatch.setattr(OperationBorrow, "install_dispatch_obligation", forbid_registration)
         monkeypatch.setattr(module, constructor, fail_allocation)
         with pytest.raises(failure_type) as raised:
-            _invoke(module, repository, owner, carrier)
+            _invoke(module, repository, owner, carrier, operation)
         assert raised.value is failure
         assert failure.__cause__ is original_cause
         current: TracebackType | None = raised.tb
@@ -109,6 +117,9 @@ def test_unused_setup_preserves_original_failure_and_actual_owner_custody(
         assert closes == borrows
         assert carrier.calls == 0
         assert registrations == []
+        if operation is not None:
+            assert operation.active_inline_calls == ()
+            assert operation.unfinished_inline_executions == ()
         assert owner.list_pending_lifecycle_obligations() == ()
         assert repository.inspect(RUN) == before
         assert repository.inspect(START_RUN) is None
