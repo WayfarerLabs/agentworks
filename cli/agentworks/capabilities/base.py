@@ -50,6 +50,7 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.descriptor import Facet
     from agentworks.config import Config
+    from agentworks.execution.target import ExecutionTarget
     from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ConfigReference
     from agentworks.topics import TopicProse
@@ -181,12 +182,18 @@ class RunContext:
       ``operation_scope`` (why the command is running; reading it
       grants no capability, so it is ungated).
     - The POWER-GRANTING world (execution targets, resolved secrets)
-      is reached through plain accessor METHODS,
-      :meth:`admin_target` / :meth:`agent_target` / :meth:`secret`.
-      In v1 they are pure pass-through (no requester binding, no
-      grant check); the method shape exists so the node-facing
-      signature is stable when a later permission model gates by the
-      requesting node.
+      is reached through plain accessor METHODS. ``admin_target``
+      and ``agent_target`` return the existing legacy transports;
+      ``admin_execution_target`` and ``agent_execution_target`` return
+      independently supplied new execution target bindings. All are
+      passive pass-throughs, with no fallback between the two views.
+      Existing orchestrators do not yet supply the new bindings.
+      ``secret`` reads the supplied resolved-secret reader.
+
+    Construction and target access do not inspect, activate, or close
+    targets. The caller owns target/resource closure, and the target
+    enforces its lifetime. Permission enforcement is not active;
+    security activation remains deferred until the old stack is removed.
 
     The rule that goes with it: readiness's pre-resolve concerns read
     ``self`` (config bound at construct); ``runup`` and ops read the
@@ -197,6 +204,8 @@ class RunContext:
     operation_scope: OperationScope | None
     _admin_target: Transport | None
     _agent_target: Transport | None
+    _admin_execution_target: ExecutionTarget | None
+    _agent_execution_target: ExecutionTarget | None
     _secrets: SecretReader | None
 
     def __init__(
@@ -206,6 +215,8 @@ class RunContext:
         operation_scope: OperationScope | None = None,
         admin_target: Transport | None = None,
         agent_target: Transport | None = None,
+        admin_execution_target: ExecutionTarget | None = None,
+        agent_execution_target: ExecutionTarget | None = None,
         secrets: SecretReader | None = None,
     ) -> None:
         # Hand-written only to store the power-granting inputs under
@@ -221,17 +232,27 @@ class RunContext:
         object.__setattr__(self, "operation_scope", operation_scope)
         object.__setattr__(self, "_admin_target", admin_target)
         object.__setattr__(self, "_agent_target", agent_target)
+        object.__setattr__(self, "_admin_execution_target", admin_execution_target)
+        object.__setattr__(self, "_agent_execution_target", agent_execution_target)
         object.__setattr__(self, "_secrets", secrets)
 
     def admin_target(self) -> Transport | None:
-        """The admin execution target, when one exists at this stage's
+        """The legacy admin transport, when one exists at this stage's
         timing. Plain pass-through in v1."""
         return self._admin_target
 
     def agent_target(self) -> Transport | None:
-        """The agent execution target, when one exists at this stage's
+        """The legacy agent transport, when one exists at this stage's
         timing. Plain pass-through in v1."""
         return self._agent_target
+
+    def admin_execution_target(self) -> ExecutionTarget | None:
+        """Return the supplied admin execution target binding unchanged."""
+        return self._admin_execution_target
+
+    def agent_execution_target(self) -> ExecutionTarget | None:
+        """Return the supplied agent execution target binding unchanged."""
+        return self._agent_execution_target
 
     def secret(self, name: str) -> str:
         """A resolved secret value, from the operation's boundary
