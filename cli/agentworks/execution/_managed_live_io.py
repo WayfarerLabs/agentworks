@@ -12,12 +12,13 @@ from typing import TYPE_CHECKING
 
 from ._evidence_wire import Frame, FrameKind, encode_frame
 from ._inline_control import StreamEnd, StreamName, StreamRetention, empty_body, encode_stream_end
+from ._managed_live_protocol import HANDSHAKE_BYTES, encode_handshake
+from ._managed_live_protocol import LIVE_SOCKET_NAME as LIVE_SOCKET_NAME
 
 if TYPE_CHECKING:
     from ._managed_job_request import ManagedLiveIO
     from ._managed_job_store import ManagedJobStore
 
-LIVE_SOCKET_NAME = "live-io.sock"
 _ADMISSION_SECONDS = 30.0
 
 
@@ -47,7 +48,7 @@ class LiveIO:
         self._pending_body = b""
         self._sequence = 0
         self._handshake = b""
-        self._expected = f"AGWL1 {metadata.nonce} {int(metadata.input)} {int(metadata.output)}\n".encode("ascii")
+        self._expected = encode_handshake(metadata)
         self._counts = dict.fromkeys(StreamName, 0)
         self._digests = {name: hashlib.sha256() for name in StreamName}
         self._ended: set[StreamName] = set()
@@ -184,7 +185,7 @@ class LiveIO:
                 return
             if events & selectors.EVENT_READ:
                 if not self.admitted and self._pending_kind is not FrameKind.LAUNCHING:
-                    chunk = self.connection.recv(len(self._expected) - len(self._handshake))
+                    chunk = self.connection.recv(HANDSHAKE_BYTES - len(self._handshake))
                     if not chunk:
                         self.refuse()
                         return
