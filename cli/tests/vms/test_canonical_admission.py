@@ -1,7 +1,7 @@
 """Effective call budgets precede provider admission in the shared VM context.
 
-Provider observations and SSH credential delivery are synthetic; the common
-kernel, held WSL operation, SQLite claim and packed helpers remain intact.
+Provider and delivery boundaries are synthetic; the common kernel, owned
+platform access, SQLite claim and packed helpers remain intact.
 """
 
 from __future__ import annotations
@@ -15,7 +15,8 @@ from agentworks.errors import ExternalError, LimitExceededError, StateError, Val
 from agentworks.execution.binding import _IndependentJobAvailability
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.ssh import SSHCarrier
-from agentworks.execution.models import Command, JobRef, Lifetime
+from agentworks.execution.files import Create, FileKind, JsonStrategy, NewMetadata
+from agentworks.execution.models import Command, JobRef, Lifetime, Output
 from agentworks.execution.profiles import Protection
 from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 from agentworks.vms._wsl2_native_access import WSL2OwnedNativePlatformAccess
@@ -186,4 +187,158 @@ def test_both_file_views_refuse_canonical_selection_drift_before_dispatch(canoni
         with pytest.raises(StateError):
             files.stat(p.root / "missing")
         assert len(p.connections) == before
+    assert database.operations.inspect(_scope()) is None
+
+
+@pytest.mark.parametrize("lifetime", [Lifetime.OPERATION, Lifetime.INDEPENDENT])
+@pytest.mark.parametrize("invalid", ["cwd", "capture"])
+def test_invalid_managed_body_refuses_before_provider_even_during_outage(
+    canonical, database, monkeypatch, lifetime, invalid
+):
+    """The injected fact permits testing RESOURCE input, not WSL job safety."""
+    p = canonical
+    monkeypatch.setattr(
+        WSL2OwnedNativePlatformAccess,
+        "independent_availability",
+        property(lambda _: _IndependentJobAvailability.NO_IDLE_STOP),
+    )
+    with p.operation() as ctx:
+        execution = ctx.admin_execution_target().execution()
+        reads = []
+
+        def outage(deadline):
+            reads.append(deadline)
+            raise ExternalError("synthetic provider outage")
+
+        monkeypatch.setattr(p.accesses[0], "observe_power", outage)
+        monkeypatch.setattr(p.accesses[0], "observe_locator", outage)
+        before = len(p.connections)
+        with pytest.raises(ValidationError):
+            execution.start(
+                Command(["/bin/true"]),
+                profile=Protection.MANAGED,
+                lifetime=lifetime,
+                cwd="relative" if invalid == "cwd" else None,
+                output=Output.capture(1 << 30) if invalid == "capture" else Output.capture(),
+            )
+        assert not reads and len(p.connections) == before
+        assert not execution._operation.managed_runs and not execution._operation.active_inline_calls
+        assert database._conn.execute("SELECT COUNT(*) FROM execution_runs").fetchone()[0] == 0
+    assert database.operations.inspect(_scope()) is None
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        "upload-size",
+        "upload-condition",
+        "upload-mode",
+        "json-document",
+        "json-strategy",
+        "json-limit",
+        "json-mode",
+        "metadata-owner",
+        "metadata-mode",
+        "remove-kind",
+        "remove-revision",
+    ],
+)
+def test_invalid_file_request_refuses_before_provider_even_during_outage(canonical, database, monkeypatch, invalid):
+    from pathlib import Path
+
+    p = canonical
+
+    class Source:
+        calls = 0
+
+        def read(self, limit):
+            self.calls += 1
+            pytest.fail("invalid upload consumed its caller-owned source")
+
+    source = Source()
+    metadata = NewMetadata("admin", "admin", 0o600)
+    with p.operation() as ctx:
+        files = ctx.admin_execution_target().files()
+        path = p.root / "file"
+        revision = None
+        if invalid == "remove-kind":
+            Path(p.root).mkdir()
+            Path(path).write_bytes(b"untouched")
+            revision = files.stat(path).revision
+        reads = []
+
+        def outage(deadline):
+            reads.append(deadline)
+            raise ExternalError("synthetic provider outage")
+
+        monkeypatch.setattr(p.accesses[0], "observe_power", outage)
+        monkeypatch.setattr(p.accesses[0], "observe_locator", outage)
+        before = len(p.connections)
+        with pytest.raises(ValidationError):
+            if invalid.startswith("upload-"):
+                files.upload(
+                    path,
+                    source,
+                    size=-1 if invalid == "upload-size" else 0,
+                    condition="invalid" if invalid == "upload-condition" else Create(),
+                    create_metadata=NewMetadata("admin", "admin", 0o4000) if invalid == "upload-mode" else metadata,
+                )
+            elif invalid.startswith("json-"):
+                files.update_json(
+                    path,
+                    [] if invalid == "json-document" else {},
+                    strategy="invalid" if invalid == "json-strategy" else JsonStrategy.REPLACE,
+                    create=True,
+                    create_metadata=NewMetadata("admin", "admin", 0o4000) if invalid == "json-mode" else metadata,
+                    max_depth=0 if invalid == "json-limit" else 64,
+                )
+            elif invalid.startswith("metadata-"):
+                files.set_metadata(
+                    path,
+                    owner="" if invalid == "metadata-owner" else "admin",
+                    group="admin",
+                    mode=-1 if invalid == "metadata-mode" else 0o600,
+                )
+            else:
+                files.remove(
+                    path,
+                    expected_kind="invalid" if invalid == "remove-kind" else FileKind.REGULAR,
+                    expected=revision if invalid == "remove-kind" else "invalid",
+                )
+        assert not reads and len(p.connections) == before and source.calls == 0
+        if revision is not None:
+            assert Path(path).read_bytes() == b"untouched"
+    assert database.operations.inspect(_scope()) is None
+
+
+def test_unavailable_resource_lifetime_refuses_before_provider(canonical, database, monkeypatch):
+    p = canonical
+    with p.operation() as ctx:
+        execution = ctx.admin_execution_target().execution()
+        assert execution._operation._native_binding._independent_availability is None
+        reads = record_provider_reads(monkeypatch, p.accesses[0])
+        before = len(p.connections)
+        with pytest.raises(StateError):
+            execution.start(Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.INDEPENDENT)
+        assert not reads and len(p.connections) == before and not execution._operation.managed_runs
+        assert database._conn.execute("SELECT COUNT(*) FROM execution_runs").fetchone()[0] == 0
+    assert database.operations.inspect(_scope()) is None
+
+
+def test_valid_file_request_checks_route_before_packed_dispatch(canonical, database, monkeypatch):
+    p = canonical
+    with p.operation() as ctx:
+        files = ctx.admin_execution_target().files()
+        reads = record_provider_reads(monkeypatch, p.accesses[0])
+        ordinary = SSHCarrier.execute
+        dispatched = []
+
+        def execute(carrier, invocation, *, io, deadline, custody):
+            assert reads and all(item is deadline is p.deadline for item in reads)
+            dispatched.append(deadline)
+            return ordinary(carrier, invocation, io=io, deadline=deadline, custody=custody)
+
+        monkeypatch.setattr(SSHCarrier, "execute", execute)
+        assert files.stat(p.root / "missing") is None
+        assert dispatched
     assert database.operations.inspect(_scope()) is None

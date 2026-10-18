@@ -213,6 +213,8 @@ def start_resource_job(
         body: _ManagedBody | None = compose_managed_body(
             invocation, input=input, output=output, env=env, cwd=cwd, sensitive=sensitive, identity=identity, spec=spec
         )
+        if operation._route_check is not None:
+            operation._route_check(deadline)
         if user_default:
             resolved = operation._observe_workload_shell(carrier, plan, runtime_selection, deadline)
             spec = replace(spec, shell=replace(shell, resolved_executable=resolved))

@@ -662,6 +662,7 @@ class FileAccess:
         if type(max_bytes) is not int or max_bytes <= 0:
             raise ValidationError("File read requires a positive byte bound")
         root, leaf, plan, deadline = self._request(path, sudo)
+        self._admit_request(deadline)
         outcome = _file_memory_read.read_file(
             self._carrier,
             trusted_root_path=root,
@@ -677,6 +678,7 @@ class FileAccess:
     def stat(self, path: PurePosixPath, *, sudo: bool = False) -> FileMetadata | None:
         """Observe one supported filesystem object."""
         root, leaf, plan, deadline = self._request(path, sudo)
+        self._admit_request(deadline)
         outcome = self._operation.stat(
             self._carrier,
             trusted_root_path=root,
@@ -698,6 +700,7 @@ class FileAccess:
         if type(limit) is not DirectoryLimit:
             raise ValidationError("File inventory requires exact directory limits")
         root, leaf, plan, deadline = self._request(path, sudo)
+        self._admit_request(deadline)
         outcome = self._operation.list_directory(
             self._carrier,
             trusted_root_path=root,
@@ -749,6 +752,7 @@ class FileAccess:
             raise ValidationError("File upload size must be a nonnegative bounded integer")
         _validate_creation_metadata(create_metadata, kind=FileKind.REGULAR)
         private_condition = _private_write_condition(condition)
+        self._admit_request(deadline)
         outcome = self._operation.upload(
             self._carrier,
             trusted_root_path=root,
@@ -793,6 +797,7 @@ class FileAccess:
         root, leaf, plan, deadline = self._request(path, sudo)
         if deadline.expires_at is None:
             raise ValidationError("Path upload requires a finite composition deadline")
+        self._admit_request(deadline)
 
         def publish(call: LocalFileCall) -> MutationResult:
             local = LocalFileSource(source, expected=expected)
@@ -850,6 +855,7 @@ class FileAccess:
         _, _, _, deadline = self._request(path, sudo)
         if deadline.expires_at is None:
             raise ValidationError("Directory transfer requires one finite composition deadline")
+        self._admit_request(deadline)
         return FileAccess(
             self._operation,
             self._carrier,
@@ -928,6 +934,7 @@ class FileAccess:
         if max_bytes is not None and (type(max_bytes) is not int or not 0 <= max_bytes <= _MAX_DOWNLOAD_SIZE):
             raise ValidationError("File download requires a nonnegative representable byte bound")
         root, leaf, plan, deadline = self._request(path, sudo)
+        self._admit_request(deadline)
         if deadline.expired:
             return reduce_file_local_download(
                 FileLocalDownloadOutcome(None, deadline_exceeded=True),
@@ -1038,15 +1045,18 @@ class FileAccess:
     ) -> MutationResult:
         """Validate and apply one bounded JSON-object update."""
         root, leaf, plan, deadline = self._request(path, sudo)
-        if type(document) is not dict or type(create) is not bool or type(create_metadata) is not NewMetadata:
+        if type(document) is not dict or type(create) is not bool:
             raise ValidationError("JSON update requires an object, creation choice, and creation metadata")
+        _validate_creation_metadata(create_metadata, kind=FileKind.REGULAR)
         source = _json_source(document, max_bytes=max_bytes, max_depth=max_depth)
+        private_strategy = cast("_JsonFileStrategy", _private_json_strategy(strategy))
+        self._admit_request(deadline)
         outcome = self._operation.update_json(
             self._carrier,
             trusted_root_path=root,
             relative_path=leaf,
             source=source,
-            strategy=cast("_JsonFileStrategy", _private_json_strategy(strategy)),
+            strategy=private_strategy,
             create=create,
             create_metadata=create_metadata,
             max_bytes=max_bytes,
@@ -1067,6 +1077,7 @@ class FileAccess:
         """Create exactly one absent directory without converging an existing entry."""
         _validate_creation_metadata(metadata, kind=FileKind.DIRECTORY)
         root, leaf, plan, deadline = self._request(path, sudo)
+        self._admit_request(deadline)
         outcome = self._operation.create_directory(
             self._carrier,
             trusted_root_path=root,
@@ -1090,6 +1101,7 @@ class FileAccess:
         """Create or converge exactly one directory and its metadata."""
         _validate_creation_metadata(metadata, kind=FileKind.DIRECTORY)
         root, leaf, plan, deadline = self._request(path, sudo)
+        self._admit_request(deadline)
         outcome = self._operation.ensure_directory(
             self._carrier,
             trusted_root_path=root,
@@ -1115,6 +1127,7 @@ class FileAccess:
         """Converge ownership and mode for one existing supported object."""
         root, leaf, plan, deadline = self._request(path, sudo)
         metadata = NewMetadata(owner, group, mode)
+        self._admit_request(deadline)
         outcome = self._operation.set_metadata(
             self._carrier,
             trusted_root_path=root,
@@ -1140,12 +1153,15 @@ class FileAccess:
         root, leaf, plan, deadline = self._request(path, sudo)
         if type(expected) is not Revision:
             raise ValidationError("File removal requires an exact revision")
+        private_kind = _private_file_kind(expected_kind)
+        private_revision = _file_revision_from_revision(expected)
+        self._admit_request(deadline)
         outcome = self._operation.remove(
             self._carrier,
             trusted_root_path=root,
             relative_path=leaf,
-            expected_kind=_private_file_kind(expected_kind),
-            expected_revision=_file_revision_from_revision(expected),
+            expected_kind=private_kind,
+            expected_revision=private_revision,
             plan=plan,
             deadline=deadline,
             runtime_selection=self._runtime_selection,
@@ -1156,13 +1172,12 @@ class FileAccess:
         plan = self._select_plan(sudo)
         root, leaf = self._decompose(path)
         deadline = self._deadline()
-        self._admit_request(deadline)
+        if type(deadline) is not Deadline:
+            raise ValidationError("File access deadline policy must return one deadline")
         return root, leaf, plan, deadline
 
     def _admit_request(self, deadline: Deadline) -> None:
         """Check the selected route only after local request validation."""
-        if type(deadline) is not Deadline:
-            raise ValidationError("File access deadline policy must return one deadline")
         if not deadline.expired and self._route_check is not None:
             self._route_check(deadline)
 
