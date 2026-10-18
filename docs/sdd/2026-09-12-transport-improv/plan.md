@@ -5811,6 +5811,17 @@ effect. It reports 434 focused and 684 adjacent passes, strict typing across 1,5
 changed-file lint/format. Combined revalidation and independent re-review remain open; neither this
 checkpoint nor the earlier scoped counts establish native or full-suite acceptance.
 
+The lead's full non-integration run at `63a105a4b` returned 21,199 passes, 56 skips and 52 failures
+in 479.34 seconds. It is not a green suite. Most cloud failures still invoke the removed provider
+`prepare()` method; those tests must use the current staged composition without restoring a
+production compatibility wrapper. Three managed-admission failures need contract/fixture review, and
+Azure's concurrent credential cleanup needs diagnosis before changing its assertions. Three carried
+SSH fixtures and the isolated offline packaging failure remain separately recorded. The scoped run
+at that same pin passes 2,003 tests with one native-Windows skip, strict typing across 1,509 sources
+and file quality, but cannot replace the full result. The final read-bound correction `3b584c6ec`
+clears all three source-review lanes and 55 worker tests; combined regression correction and
+full-suite revalidation remain open. No completion checkbox or public handoff follows.
+
 - [ ] Complete combined validation and independent review of the private Darwin buffered DIRECT
       helper (`c9bd8f1dd`), then obtain native macOS proof with the approved interpreter
       prerequisite. Preserve source/input separation, fixed fresh-exec identity and honest
