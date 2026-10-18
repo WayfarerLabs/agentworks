@@ -5838,6 +5838,19 @@ revalidation remain required.
       evidence reports 1,597 broad adjacent passes with one native-Windows skip, 177 passes at the
       production commit and 54 provider cases at the final tip, plus strict typing across 1,511
       sources. These are fixture/source checks, not native Windows acceptance.
+
+The combined checkpoint at `088059e22` passes 2,225 targeted tests with one native-Windows skip,
+strict typing across 1,512 sources and changed-file quality. Project and complexity reviews are
+clear, but correctness review identified a stale Lima version cache across ordinary executable
+upgrades. Worker `b98d5a6a9` removes that cache: each ambiguous provider observation obtains fresh,
+bounded version evidence before choosing an inspector. Its two-observation regression changes 2.2 to
+2.1 at the same executable path and proves registration/BasePath checks precede guest-capable
+inspection; mismatched BasePath also refuses before WSL power listing. Worker validation passes 179
+tests with one native-Windows skip and strict typing across 1,512 sources. Combined revalidation and
+re-review remain required. Controlled package-build and installed-wheel proof at `088059e22` passes
+separately; it does not turn the earlier offline full-suite failure into a pass. No native or
+complete additive acceptance follows.
+
 - [ ] Bind an actual operation-length availability hold for Lima's WSL driver before complete
       additive acceptance. Reuse the existing WSL ownership/lifetime machinery where applicable;
       host-only running snapshots do not prevent idle shutdown. Independent-job hold adoption
