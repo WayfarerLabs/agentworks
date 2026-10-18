@@ -36,6 +36,7 @@ from agentworks.execution._file_json import (
     _prepare_json_update,
     _PreparedJsonUpdate,
 )
+from agentworks.execution._file_local_custody import LocalFileCall
 from agentworks.execution._file_metadata_protocol import FileMetadataOperation
 from agentworks.execution._file_obligation import (
     MAX_PACKAGE_UPLOAD_MEMBERS,
@@ -302,6 +303,7 @@ class FileOperation:
         self._unfinished_downloads: list[UnfinishedFileDownload] = []
         self._unfinished_local_download: LocalDownloadStage | None = None
         self._local_download_call: _LocalDownloadCall | None = None
+        self._local_file_call: LocalFileCall | None = None
         self._active_uploads: dict[int, _ActiveFileUpload] = {}
         self._unfinished_uploads: list[UnfinishedFileUpload] = []
         self._active_package_uploads: dict[int, _ActiveFileUpload] = {}
@@ -317,6 +319,64 @@ class FileOperation:
     @property
     def active_downloads(self) -> tuple[_ActiveFileDownload, ...]:
         return tuple(self._active_downloads.values())
+
+    @property
+    def has_unfinished_local_file_call(self) -> bool:
+        """Whether a workstation original or its finalization still has custody."""
+        return self._local_file_call is not None
+
+    def begin_local_file(self) -> LocalFileCall:
+        """Acquire serial admission before constructing or touching local originals."""
+        borrow = self._owner.borrow()
+        try:
+            if self._local_file_call is not None:
+                raise StateError("A local file call still holds core custody")
+            call = LocalFileCall(borrow)
+            self._local_file_call = call
+            return call
+        except BaseException:
+            borrow.close()
+            raise
+
+    def finish_local_file(self, call: LocalFileCall, deadline: Deadline) -> None:
+        """Close exact originals and release only after completed typed reduction."""
+        if self._local_file_call is not call:
+            raise StateError("Local file call is not active")
+        try:
+            resource = call.resource
+            if resource is not None:
+                resource.close(deadline)
+                if not resource.settled:
+                    raise StateError("Local file cleanup remains uncertain")
+            if not call.reduction_complete or any(
+                active.borrow is call.borrow for active in self._active_uploads.values()
+            ):
+                raise StateError("Local file capture or reduction remains incomplete")
+            if not call.borrow.closed:
+                release_borrow_after_custody(call.borrow, retain_effect=call.remote_requires_owner_retention)
+            self._local_file_call = None
+        except BaseException:
+            self._owner.stop_admission()
+            raise
+
+    def settle_local_file_bookkeeping(self, deadline: Deadline) -> None:
+        """Retry only retained original closure and captured bookkeeping."""
+        call = self._local_file_call
+        first: BaseException | None = None
+        if call is not None and call.resource is not None and not call.resource.settled:
+            try:
+                call.resource.close(deadline)
+            except BaseException as error:
+                first = error
+        try:
+            self.settle_upload_bookkeeping()
+        except BaseException as error:
+            if first is None:
+                first = error
+        if first is not None:
+            raise first
+        if call is not None:
+            self.finish_local_file(call, deadline)
 
     @property
     def unfinished_downloads(self) -> tuple[UnfinishedFileDownload, ...]:
@@ -717,8 +777,11 @@ class FileOperation:
         runtime_selection: RuntimeSelection,
         effect_gate: FileEffectGateBinding | None = None,
         gate_setup: FileEffectGateSetup | None = None,
+        local_call: LocalFileCall | None = None,
     ) -> FileUploadOutcome:
         """Run and capture one concrete upload under a whole-call borrow."""
+        if local_call is not None and (self._local_file_call is not local_call or gate_setup is not None):
+            raise StateError("Owned local upload requires its active serial borrow")
         if gate_setup is not None:
             return self._upload_with_gate_setup(
                 carrier,
@@ -734,7 +797,7 @@ class FileOperation:
                 gate_setup=gate_setup,
                 effect_gate=effect_gate,
             )
-        borrow = self._owner.borrow()
+        borrow = self._owner.borrow() if local_call is None else local_call.borrow
         try:
             prepared = _prepare_upload(
                 carrier,
@@ -757,16 +820,18 @@ class FileOperation:
                 carrier, prepared.binding, borrow, prepared, admission.obligation_id
             )
         except BaseException:
-            borrow.close()
+            if local_call is None:
+                borrow.close()
             raise
 
         try:
             self._active_uploads[id(active)] = active
         except BaseException:
-            borrow.close()
+            if local_call is None:
+                borrow.close()
             self._active_uploads.pop(id(active), None)
             raise
-        self._install(active, admission, self._active_uploads)
+        self._install(active, admission, self._active_uploads, close_borrow_on_refusal=local_call is None)
 
         return self._run_prepared_upload(active, prepared)
 
@@ -1467,13 +1532,14 @@ class FileOperation:
         plan: IdentityPlan,
         deadline: Deadline,
         runtime_selection: RuntimeSelection,
+        _operation: FileMetadataOperation = FileMetadataOperation.ENSURE_DIRECTORY,
     ) -> OwnedFileOutcome[FileMetadataCandidateResult]:
         """Resolve and capture one directory convergence under one borrow."""
         borrow = self._owner.borrow()
         try:
             prepared = _prepare_metadata(
                 carrier,
-                operation=FileMetadataOperation.ENSURE_DIRECTORY,
+                operation=_operation,
                 trusted_root_path=trusted_root_path,
                 relative_path=relative_path,
                 trusted_owner=trusted_owner,
@@ -1512,6 +1578,33 @@ class FileOperation:
         self._capture_owned(active, outcome, FileCallFamily.ENSURE_DIRECTORY)
         self._active_metadata.pop(id(active))
         return outcome
+
+    def create_directory(
+        self,
+        carrier: Carrier,
+        *,
+        trusted_root_path: str,
+        relative_path: str,
+        trusted_owner: str,
+        trusted_group: str,
+        mode: int,
+        plan: IdentityPlan,
+        deadline: Deadline,
+        runtime_selection: RuntimeSelection,
+    ) -> OwnedFileOutcome[FileMetadataCandidateResult]:
+        """Create one absent directory through ordinary metadata admission."""
+        return self.ensure_directory(
+            carrier,
+            trusted_root_path=trusted_root_path,
+            relative_path=relative_path,
+            trusted_owner=trusted_owner,
+            trusted_group=trusted_group,
+            mode=mode,
+            plan=plan,
+            deadline=deadline,
+            runtime_selection=runtime_selection,
+            _operation=FileMetadataOperation.CREATE_DIRECTORY,
+        )
 
     def _install[BindingT: _FileCallBinding, PreparedT, OutcomeT](
         self,
@@ -1750,6 +1843,11 @@ class FileOperation:
 
     def _capture_upload(self, active: _ActiveFileUpload, outcome: FileUploadOutcome) -> None:
         active.outcome = outcome
+        local_call = self._local_file_call
+        if local_call is not None and local_call.borrow is active.borrow:
+            local_call.upload_outcome = outcome
+            local_call.remote_requires_owner_retention = outcome.requires_owner_retention
+            local_call.changed = outcome.publication_confirmed
         try:
             if outcome.requires_owner_retention:
                 record = self._obligation(
@@ -1817,7 +1915,8 @@ class FileOperation:
         self._publish_captured_debt(active)
         if outcome.requires_owner_retention:
             self._retain_unfinished_upload(UnfinishedFileUpload(active.carrier, active.binding, outcome))
-        if not active.borrow.closed:
+        local_call = self._local_file_call
+        if (local_call is None or local_call.borrow is not active.borrow) and not active.borrow.closed:
             release_borrow_after_custody(active.borrow, retain_effect=outcome.requires_owner_retention)
         self._active_uploads.pop(id(active))
 

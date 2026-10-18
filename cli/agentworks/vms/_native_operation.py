@@ -99,6 +99,7 @@ class _Workflow:
             files.active_downloads
             or files.unfinished_downloads
             or files.has_unfinished_local_download_call
+            or files.has_unfinished_local_file_call
             or files.retained_local_download_stage is not None
             or files.active_uploads
             or files.active_package_uploads
@@ -146,7 +147,7 @@ class _Workflow:
         if self.views is not None:
             for run in self.views.execution_operation.managed_runs:
                 run.finish_cleanup(budget)
-            self.views.file_operation.settle_upload_bookkeeping()
+            self.views.file_operation.settle_local_file_bookkeeping(budget)
             self.views.file_operation.settle_download_bookkeeping()
         if not self._components_settled():
             raise StateError("Native VM operation retains unsettled work")

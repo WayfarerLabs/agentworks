@@ -24,6 +24,7 @@ from agentworks.execution._file_inventory_exchange import (
 )
 from agentworks.execution._file_metadata_exchange import (
     FileMetadataCandidateResult,
+    create_file_directory,
     ensure_file_directory,
     set_file_metadata,
 )
@@ -282,9 +283,11 @@ class _PreparedMetadata:
             or observation.ownership is None
         ):
             return self.state.finish()
-        exchange = (
-            set_file_metadata if binding.operation is FileMetadataOperation.SET_METADATA else ensure_file_directory
-        )
+        exchange = {
+            FileMetadataOperation.SET_METADATA: set_file_metadata,
+            FileMetadataOperation.ENSURE_DIRECTORY: ensure_file_directory,
+            FileMetadataOperation.CREATE_DIRECTORY: create_file_directory,
+        }[binding.operation]
         self.state.result = exchange(
             self.state.operation,
             trusted_root_path=binding.trusted_root_path,

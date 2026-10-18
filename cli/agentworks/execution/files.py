@@ -46,6 +46,12 @@ __all__ = [
     "Create",
     "DirectoryEntry",
     "DirectoryLimit",
+    "DirectoryTransferEntry",
+    "DirectoryTransferLimit",
+    "DirectoryTransferProgress",
+    "DirectoryTransferControlFact",
+    "directory_transfer_progress",
+    "ExistingFile",
     "FileFailureReason",
     "FileKind",
     "FileMetadata",
@@ -150,6 +156,118 @@ class Change(StrEnum):
 
     CHANGED = "changed"
     UNCHANGED = "unchanged"
+
+
+class ExistingFile(StrEnum):
+    """Explicit conflict choice for an existing regular destination."""
+
+    ERROR = "error"
+    PRESERVE = "preserve"
+    REPLACE = "replace"
+
+
+@dataclass(frozen=True)
+class DirectoryTransferLimit:
+    """Aggregate transferred bytes and bounded tree metadata."""
+
+    max_bytes: int
+    max_entries: int = 1_024
+    max_depth: int = 8
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.max_bytes) is not int
+            or not 0 <= self.max_bytes <= (1 << 63) - 1
+            or type(self.max_entries) is not int
+            or not 1 <= self.max_entries <= 4_096
+            or type(self.max_depth) is not int
+            or not 0 <= self.max_depth <= 8
+        ):
+            raise ValidationError("Directory transfer requires finite supported limits")
+
+
+def _validate_transfer_path(path: PurePosixPath) -> None:
+    if type(path) is not PurePosixPath or path.is_absolute() or ".." in path.parts or "\0" in str(path):
+        raise ValidationError("Directory transfer requires a normalized relative path")
+    try:
+        if len(str(path).encode("utf-8")) > 4_096 or len(path.parts) > 8:
+            raise ValidationError("Directory transfer path exceeds supported limits")
+    except UnicodeEncodeError:
+        raise ValidationError("Directory transfer path requires valid UTF-8") from None
+
+
+@dataclass(frozen=True, repr=False)
+class DirectoryTransferEntry:
+    """One successfully settled tree child, without private path or content data."""
+
+    relative_path: PurePosixPath
+    kind: FileKind
+    change: Change
+    transferred_bytes: int
+
+    def __post_init__(self) -> None:
+        _validate_transfer_path(self.relative_path)
+        if (
+            type(self.kind) is not FileKind
+            or self.kind not in (FileKind.REGULAR, FileKind.DIRECTORY)
+            or type(self.change) is not Change
+            or type(self.transferred_bytes) is not int
+            or not 0 <= self.transferred_bytes <= (1 << 63) - 1
+            or (self.kind is FileKind.DIRECTORY and self.transferred_bytes != 0)
+            or (self.relative_path == PurePosixPath(".") and self.kind is not FileKind.DIRECTORY)
+            or (self.change is Change.UNCHANGED and self.transferred_bytes != 0)
+        ):
+            raise ValidationError("Directory transfer entry requires consistent settled facts")
+
+
+@dataclass(frozen=True, repr=False)
+class DirectoryTransferProgress:
+    """Bounded prior settled children and their actual transferred byte total."""
+
+    entries: tuple[DirectoryTransferEntry, ...]
+    transferred_bytes: int
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.entries) is not tuple
+            or len(self.entries) > 4_096
+            or any(type(entry) is not DirectoryTransferEntry for entry in self.entries)
+            or type(self.transferred_bytes) is not int
+            or not 0 <= self.transferred_bytes <= (1 << 63) - 1
+            or self.transferred_bytes != sum(entry.transferred_bytes for entry in self.entries)
+        ):
+            raise ValidationError("Directory transfer progress requires bounded consistent facts")
+        paths: dict[PurePosixPath, FileKind] = {}
+        for entry in self.entries:
+            if entry.relative_path in paths or (
+                entry.relative_path.parts and paths.get(entry.relative_path.parent) is not FileKind.DIRECTORY
+            ):
+                raise ValidationError("Directory transfer progress requires unique parent-first entries")
+            paths[entry.relative_path] = entry.kind
+
+
+class DirectoryTransferControlFact(Exception):
+    """Prior progress attached behind an unchanged escaping child exception."""
+
+    def __init__(self, progress: DirectoryTransferProgress, relative_path: PurePosixPath) -> None:
+        if type(progress) is not DirectoryTransferProgress:
+            raise ValidationError("Directory transfer control requires exact progress")
+        _validate_transfer_path(relative_path)
+        self.progress = progress
+        self.relative_path = relative_path
+        super().__init__("Directory transfer stopped at one child")
+
+
+def directory_transfer_progress(error: BaseException) -> DirectoryTransferProgress | None:
+    """Read attached progress without performing cleanup or reconstructing a plan."""
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        if isinstance(current, DirectoryTransferControlFact):
+            return current.progress
+        seen.add(id(current))
+        current = current.__cause__
+    return None
 
 
 class _RevisionTokenError(ValueError):

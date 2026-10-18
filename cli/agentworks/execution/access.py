@@ -10,10 +10,11 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from agentworks.errors import StateError, ValidationError
 
-from . import _file_memory_read
+from . import _directory_transfer, _file_memory_read
 from ._diagnostic_values import validate_logical_entity_value
 from ._execution_operation import ExecutionOperation, ManagedExecutionControlFact
 from ._execution_result import check_owned_inline_result, reduce_owned_inline_result
+from ._file_local_custody import LocalFileCall, local_failure, owned_local_call
 from ._file_local_download import FileLocalDownloadControlFact, FileLocalDownloadOutcome, download_to_local_file
 from ._file_operation import FileOperation
 from ._file_paths import normalized_relative_path, normalized_root
@@ -32,6 +33,7 @@ from ._file_result_transfer import (
 )
 from ._helper_launcher import IdentityPlan
 from ._json import serialize_json_source, validate_json_object
+from ._local_file_io import LocalFileLimitError, LocalFileSource, LocalIdentity
 from ._managed_bound_run import ManagedDeadlineExpired
 from ._managed_job_protocol import StreamDisposition, WorkloadWaitFact
 from ._managed_job_store import FactName, Stream
@@ -46,6 +48,9 @@ from .files import (
     Create,
     DirectoryEntry,
     DirectoryLimit,
+    DirectoryTransferLimit,
+    DirectoryTransferProgress,
+    ExistingFile,
     FileFailureReason,
     FileKind,
     FileMetadata,
@@ -489,6 +494,21 @@ class _UploadSourceAdapter:
         return self._source.read(limit)
 
 
+class _OwnedUploadSourceAdapter(_UploadSourceAdapter):
+    """Retain a local read refusal until the ordinary upload captures cleanup."""
+
+    def __init__(self, source: LocalFileSource) -> None:
+        super().__init__(source)
+        self.failure: OSError | None = None
+
+    def try_read(self, limit: int) -> bytes | None:
+        try:
+            return super().try_read(limit)
+        except OSError as error:
+            self.failure = error
+            raise
+
+
 class FileAccess:
     """One non-production, bound view of the supplied file-operation custody."""
 
@@ -637,6 +657,152 @@ class FileAccess:
         )
         return reduce_file_upload(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
 
+    def upload_file(
+        self,
+        path: PurePosixPath,
+        source: Path,
+        *,
+        condition: WriteCondition,
+        create_metadata: NewMetadata,
+        sudo: bool = False,
+    ) -> MutationResult:
+        """Own one admitted workstation source through publication and cleanup."""
+        return self._upload_file(path, source, condition=condition, create_metadata=create_metadata, sudo=sudo)
+
+    def _upload_file(
+        self,
+        path: PurePosixPath,
+        source: Path,
+        *,
+        condition: WriteCondition,
+        create_metadata: NewMetadata,
+        sudo: bool,
+        expected: LocalIdentity | None = None,
+        max_bytes: int = _MAX_UPLOAD_SIZE,
+    ) -> MutationResult:
+        if not isinstance(source, Path) or type(create_metadata) is not NewMetadata:
+            raise ValidationError("Path upload requires a local path and exact creation metadata")
+        private_condition = _private_write_condition(condition)
+        root, leaf, plan, deadline = self._request(path, sudo)
+        if deadline.expires_at is None:
+            raise ValidationError("Path upload requires a finite composition deadline")
+
+        def publish(call: LocalFileCall) -> MutationResult:
+            local = LocalFileSource(source, expected=expected)
+            call.resource = local
+            size = local.open(deadline)
+            if size > max_bytes:
+                raise LocalFileLimitError()
+            call.phase = FileOperationPhase.TRANSFER
+            adapter = _OwnedUploadSourceAdapter(local)
+            outcome = self._operation.upload(
+                self._carrier,
+                trusted_root_path=root,
+                relative_path=leaf,
+                source=adapter,
+                size=size,
+                condition=private_condition,
+                create_metadata=create_metadata,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=self._runtime_selection,
+                local_call=call,
+            )
+            if (
+                adapter.failure is not None
+                and not outcome.requires_owner_retention
+                and not outcome.publication_confirmed
+                and not outcome.publication_uncertain
+            ):
+                local_failure(
+                    adapter.failure,
+                    entity_kind=self._entity_kind,
+                    entity_name=self._entity_name,
+                    phase=FileOperationPhase.TRANSFER,
+                )
+            return reduce_file_upload(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
+
+        return owned_local_call(
+            self._operation, deadline, publish, entity_kind=self._entity_kind, entity_name=self._entity_name
+        )
+
+    def _directory_view(
+        self,
+        path: PurePosixPath,
+        local: Path,
+        limit: DirectoryTransferLimit,
+        existing_files: ExistingFile,
+        sudo: bool,
+    ) -> tuple[FileAccess, Deadline]:
+        if (
+            not isinstance(local, Path)
+            or type(limit) is not DirectoryTransferLimit
+            or type(existing_files) is not ExistingFile
+        ):
+            raise ValidationError("Directory transfer requires a local path, limits, and conflict choice")
+        _, _, _, deadline = self._request(path, sudo)
+        if deadline.expires_at is None:
+            raise ValidationError("Directory transfer requires one finite composition deadline")
+        return FileAccess(
+            self._operation,
+            self._carrier,
+            trusted_root=self._trusted_root,
+            runtime_selection=self._runtime_selection,
+            ordinary_plan=self._ordinary_plan,
+            elevated_plan=self._elevated_plan,
+            entity_kind=self._entity_kind,
+            entity_name=self._entity_name,
+            deadline=lambda: deadline,
+        ), deadline
+
+    def upload_directory(
+        self,
+        path: PurePosixPath,
+        source: Path,
+        *,
+        limit: DirectoryTransferLimit,
+        existing_files: ExistingFile,
+        file_metadata: NewMetadata,
+        directory_metadata: NewMetadata,
+        sudo: bool = False,
+    ) -> DirectoryTransferProgress:
+        """Merge a bounded local tree through serial ordinary owned file calls."""
+        if type(file_metadata) is not NewMetadata or type(directory_metadata) is not NewMetadata:
+            raise ValidationError("Directory upload requires explicit creation metadata")
+        view, deadline = self._directory_view(path, source, limit, existing_files, sudo)
+        return _directory_transfer.upload_directory(
+            view,
+            path,
+            source,
+            deadline=deadline,
+            limit=limit,
+            existing_files=existing_files,
+            file_metadata=file_metadata,
+            directory_metadata=directory_metadata,
+            sudo=sudo,
+        )
+
+    def download_directory(
+        self,
+        path: PurePosixPath,
+        destination: Path,
+        *,
+        limit: DirectoryTransferLimit,
+        existing_files: ExistingFile,
+        sudo: bool = False,
+    ) -> DirectoryTransferProgress:
+        """Merge a bounded remote tree using ordinary local download publishers."""
+        view, deadline = self._directory_view(path, destination, limit, existing_files, sudo)
+        return _directory_transfer.download_directory(
+            view,
+            path,
+            destination,
+            deadline=deadline,
+            limit=limit,
+            existing_files=existing_files,
+            sudo=sudo,
+        )
+
     def download(
         self,
         path: PurePosixPath,
@@ -782,6 +948,30 @@ class FileAccess:
             runtime_selection=self._runtime_selection,
         )
         return reduce_file_json(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
+
+    def create_directory(
+        self,
+        path: PurePosixPath,
+        *,
+        metadata: NewMetadata,
+        sudo: bool = False,
+    ) -> MutationResult:
+        """Create exactly one absent directory without converging an existing entry."""
+        if type(metadata) is not NewMetadata:
+            raise ValidationError("Directory creation requires exact metadata")
+        root, leaf, plan, deadline = self._request(path, sudo)
+        outcome = self._operation.create_directory(
+            self._carrier,
+            trusted_root_path=root,
+            relative_path=leaf,
+            trusted_owner=metadata.owner,
+            trusted_group=metadata.group,
+            mode=metadata.mode,
+            plan=plan,
+            deadline=deadline,
+            runtime_selection=self._runtime_selection,
+        )
+        return reduce_file_metadata(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
 
     def ensure_directory(
         self,
