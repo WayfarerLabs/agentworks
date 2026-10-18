@@ -74,7 +74,7 @@ class ManagedLaunchState(StrEnum):
 
 
 class ManagedOutputMode(StrEnum):
-    """Closed requested handling for both managed output streams."""
+    """Closed durable-retention policy for both managed output streams."""
 
     CAPTURE = "capture"
     DISCARD = "discard"
@@ -83,7 +83,7 @@ class ManagedOutputMode(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ManagedOutputPolicy:
-    """Host request fact validated at the repository caller boundary."""
+    """Durable retention, distinct from foreground presentation of live bytes."""
 
     mode: ManagedOutputMode
     capture_prefix_bytes: int | None = None
