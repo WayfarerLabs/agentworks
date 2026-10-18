@@ -335,7 +335,9 @@ def test_actual_guest_revalidates_untrusted_manifest(manifest: bytes, code: Fail
     completed = subprocess.run(invocation, input=manifest, capture_output=True, timeout=10, check=True)
     frames: list[Frame] = []
     reader = FrameReader(NONCE, frames.append)
-    reader.try_write(memoryview(completed.stdout))
+    pending = memoryview(completed.stdout)
+    while pending:
+        pending = pending[reader.try_write(pending) :]
     reader.finish()
 
     assert completed.stderr == b""
