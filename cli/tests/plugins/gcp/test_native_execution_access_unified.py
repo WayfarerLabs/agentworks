@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import json
 from contextlib import closing
+from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -35,6 +36,7 @@ from agentworks.plugins.gcp._native_execution_access import GCEOwnedAccess
 from agentworks.plugins.gcp.platform import GCEPlatform
 from agentworks.vms.target_preparation import VMTargetPreparation, VMTargetPreparationStatus
 from tests.plugins.gcp.test_native_instance import native_instance
+from tests.plugins.gcp.test_owned_auth_copy import run_copy
 from tests.plugins.gcp.test_owned_read_sdk import FreshCredential
 
 ROOT = "https://compute.googleapis.com/compute/v1/projects/project"
@@ -79,6 +81,12 @@ def unified(request, tmp_path, monkeypatch):
         failed_response=None,
         full_reads=0,
         adapters=set(),
+        credential_responses=[],
+        credential_close_failures=0,
+        refreshes=0,
+        copied_sessions=[],
+        copy_close_failures=0,
+        copy_close_attempts=0,
     )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", tmp_path / "absent.toml")
     session_close = requests.Session.close
@@ -106,6 +114,28 @@ def unified(request, tmp_path, monkeypatch):
             assert type(amt) is int and 0 < amt <= 8192 and decode_content is False
             return super().read(amt, decode_content=decode_content, cache_content=cache_content)
 
+    class CredentialResponse(requests.Response):  # type: ignore[misc]
+        closed_original = False
+        close_calls = 0
+
+        def close(self):
+            self.close_calls += 1
+            if p.credential_close_failures:
+                p.credential_close_failures -= 1
+                raise RuntimeError("scripted credential response close failure")
+            super().close()
+            self.closed_original = True
+            p.events.append("credential-response-close")
+
+    class RefreshingCredential(FreshCredential):
+        def refresh(self, request: Any) -> None:
+            p.refreshes += 1
+            response = request("https://credential.invalid/token", method="POST", body=b"synthetic")
+            assert response.status == 200 and response.data == b"{}"
+            self.token = "offline-selected-token"
+
+    p.credential = RefreshingCredential()
+
     def operation(action: str, target: str, incarnation: str, request_id: str) -> dict[str, Any]:
         name = "start-operation" if action == "start" else f"{action}-operation"
         scope = "zones/us-central1-a" if action == "start" else "global"
@@ -124,6 +154,12 @@ def unified(request, tmp_path, monkeypatch):
 
     def send(adapter, prepared, **kwargs):
         p.adapters.add(adapter)
+        if prepared.url in ("https://credential.invalid/token", "https://credential.invalid/copied"):
+            response = CredentialResponse()
+            response.status_code, response.url, response.request = 200, prepared.url, prepared
+            response.raw = HTTPResponse(body=io.BytesIO(b"{}"), preload_content=False)
+            p.credential_responses.append(response)
+            return response
         assert kwargs["verify"] is True and kwargs["proxies"] == {} and kwargs["stream"] is True
         assert adapter.max_retries.total == 0
         assert prepared.headers["Accept-Encoding"] == "identity"
@@ -200,13 +236,21 @@ def unified(request, tmp_path, monkeypatch):
         if session is p.auth_session:
             assert p.source.closed == 1
             assert all(response.closed_original for response in p.responses)
+            assert all(response.closed_original for response in p.credential_responses)
             assert not p.owner.list_pending_lifecycle_obligations()
             assert p.database.operations.inspect(p.owner.ownership.scope) is not None
             assert p.access._reader._response is None and p.access._reader._service_session is None
-            assert len(p.closed_sessions) == len(p.sends)
+            assert sum(session not in p.copied_sessions for session in p.closed_sessions) == len(p.sends)
+            assert all(session in p.closed_sessions for session in p.copied_sessions)
             assert p.access._route is None or not p.access._route.cleanup_incomplete
             assert p.access._start is None or not p.access._start.cleanup_incomplete
             p.events.append("auth-close")
+        elif session in p.copied_sessions:
+            p.copy_close_attempts += 1
+            if p.copy_close_failures:
+                p.copy_close_failures -= 1
+                raise RuntimeError("scripted copied session close failure")
+            p.events.append("copy-close")
         else:
             p.events.append("service-close")
         session_close(session)
@@ -340,4 +384,79 @@ def test_actual_returned_route_response_close_failure_then_fresh_cleanup(unified
     original.failures = 0
     assert p.access.settle(Deadline.after(5))
     assert original.closed_original and not p.guest_calls
+    finish(p, monkeypatch)
+
+
+@pytest.mark.parametrize("unified", [("RUNNING", False), ("TERMINATED", False)], indirect=True)
+def test_open_route_then_refresh_response_close_failure_recovers_without_reselection(unified, monkeypatch):
+    p = unified
+    p.access.prepare(VMStatus.RUNNING if p.initial == "RUNNING" else VMStatus.STOPPED, p.deadline)
+    assert p.rule is not None and len(p.guest_calls) == 1
+    selected = p.access._auth._credential
+    root_session = p.auth_session
+    p.credential.token = None
+    p.credential_close_failures = 1
+    check = p.access.route_check
+    with pytest.raises(StateError):
+        check(p.deadline)
+    assert p.access._auth.cleanup_incomplete and not p.access._auth.closed
+    original = p.credential_responses[0]
+    assert original.close_calls == 1 and not original.closed_original
+    assert p.rule is not None and "auth-close" not in p.events
+    assert p.access.settle(Deadline.after(5))
+    assert original.close_calls == 2 and original.closed_original
+    assert p.refreshes == 1 and p.access._auth._credential is selected and p.auth_session is root_session
+    assert len(p.guest_calls) == 1
+    with pytest.raises(StateError):
+        check(Deadline.after(5))
+    finish(p, monkeypatch)
+
+
+@pytest.mark.parametrize("unified", [("RUNNING", False)], indirect=True)
+@pytest.mark.parametrize("debt", ["response", "session"])
+def test_open_route_then_completed_copy_close_failure_recovers_originals(unified, monkeypatch, debt):
+    p = unified
+    p.access.prepare(VMStatus.RUNNING, p.deadline)
+    auth = p.access._auth
+    selected = auth._credential
+    auth.begin(Deadline.after(5))
+    try:
+        clone = deepcopy(auth._request)
+    finally:
+        auth.end()
+    p.copied_sessions.append(clone.session)
+    worker, outcomes = run_copy(clone)
+    worker.join(2)
+    assert not worker.is_alive() and outcomes == [b"{}"]
+    response = clone._responses[0]
+    if debt == "response":
+        p.credential_close_failures = 1
+    else:
+        p.copy_close_failures = 1
+    with pytest.raises(StateError):
+        p.access.route_check(p.deadline)
+    assert auth.cleanup_incomplete and not auth.closed and clone in auth._copies
+    assert p.rule is not None and "auth-close" not in p.events
+    assert p.access.settle(Deadline.after(5))
+    assert not auth._copies and response.closed_original and clone.session is None
+    assert auth._credential is selected and len(p.guest_calls) == 1
+    assert p.copy_close_attempts == (2 if debt == "session" else 1)
+    finish(p, monkeypatch)
+
+
+@pytest.mark.parametrize("unified", [("RUNNING", False)], indirect=True)
+def test_route_cleanup_refresh_creates_new_debt_after_positive_auth_retry(unified, monkeypatch):
+    p = unified
+    p.access.prepare(VMStatus.RUNNING, p.deadline)
+    p.credential.token = None
+    p.credential_close_failures = 1
+    with pytest.raises(StateError):
+        p.access.settle(Deadline.after(5))
+    auth = p.access._auth
+    assert auth.cleanup_incomplete and not auth.closed and p.rule is not None
+    assert p.access.route_check is None and "auth-close" not in p.events
+    original = p.credential_responses[0]
+    assert original.close_calls == 1 and not original.closed_original
+    assert p.access.settle(Deadline.after(5))
+    assert original.close_calls == 2 and p.refreshes == 1 and len(p.guest_calls) == 1
     finish(p, monkeypatch)

@@ -312,7 +312,7 @@ class _OwnedAuth:
         if self._request is not None:
             self._request.retire_responses(retry=retry)
 
-    def retire_copies(self, deadline: Deadline, *, final: bool = False) -> None:
+    def retire_copies(self, deadline: Deadline, *, final: bool = False, retry: bool = False) -> None:
         """Bar entry first; join only positively observed consumers outside the barrier."""
         control: BaseException | None = None
         with self._entry:
@@ -359,7 +359,7 @@ class _OwnedAuth:
                         control = error
                     continue
                 try:
-                    lane.retire_responses(retry=final)
+                    lane.retire_responses(retry=final or retry)
                 except BaseException as error:
                     lane._uncertain = True
                     if control is None:
@@ -382,6 +382,50 @@ class _OwnedAuth:
     def bar_entry(self) -> None:
         with self._entry:
             self.closed = True
+
+    def retry_cleanup(self, deadline: Deadline) -> bool:
+        """Retry eligible local originals without closing shared auth admission.
+
+        The root session remains available to dependent cleanup. Copied lanes
+        retire only with the existing completion, expiry or barred evidence;
+        retry never clears poisoned consumer witnesses or acquisition failure.
+        """
+        remaining = provider_locator_remaining(deadline, vm_name=self._vm_name)
+        if self._caller is current_thread():
+            raise self.refusal()
+        if not self._operation.acquire(timeout=min(remaining, TIMEOUT_MAX)):
+            raise LimitExceededError("GCP authentication cleanup exceeded its deadline")
+        failure: BaseException | None = None
+        try:
+            provider_locator_remaining(deadline, vm_name=self._vm_name)
+            if self.closed:
+                raise self.refusal()
+            actions: tuple[Callable[[], None], ...] = (
+                lambda: self.retire_responses(retry=True),
+                lambda: self.retire_copies(deadline, retry=True),
+            )
+            for action in actions:
+                try:
+                    provider_locator_remaining(deadline, vm_name=self._vm_name)
+                    action()
+                    provider_locator_remaining(deadline, vm_name=self._vm_name)
+                except BaseException as error:
+                    if failure is None or (isinstance(failure, Exception) and not isinstance(error, Exception)):
+                        failure = error
+            if failure is not None:
+                raise failure
+            return not self.cleanup_incomplete
+        except BaseException as error:
+            if failure is None:
+                failure = error
+            raise
+        finally:
+            try:
+                self._operation.release()
+            except BaseException:
+                if failure is not None:
+                    raise failure from None
+                raise
 
     def close(self, deadline: Deadline) -> None:
         remaining = provider_locator_remaining(deadline, vm_name=self._vm_name)

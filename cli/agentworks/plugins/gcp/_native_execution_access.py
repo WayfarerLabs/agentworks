@@ -127,6 +127,7 @@ class GCEOwnedAccess:
         with self._transition(deadline):
             self._require_open()
             require_ssh_settings(self._vm, self._ctx, self._ctx.config)
+            self._auth = self._reader.borrow_auth(deadline)
             power = self._reader.observe_power(deadline)
             self._require_open()
             return power
@@ -174,8 +175,8 @@ class GCEOwnedAccess:
                 raise StateError("GCE native preparation cannot be admitted")
             self._used = True
             settings = require_ssh_settings(self._vm, self._ctx, self._ctx.config)
-            current = self._fresh_instance(deadline, power)
             self._auth = self._reader.borrow_auth(deadline)
+            current = self._fresh_instance(deadline, power)
             if power is VMStatus.STOPPED:
                 identity = self._identity
                 self._start = GCEActivation(
@@ -301,16 +302,20 @@ class GCEOwnedAccess:
             settled = True
             ordinary: Exception | None = None
             control: BaseException | None = None
-            actions: list[tuple[str, Callable[[Deadline], bool]]] = []
+            actions: list[tuple[str | None, Callable[[Deadline], bool]]] = []
             if not self._reader_settled:
                 actions.append(("_reader_settled", self._reader.close_read_client))
             if self._exposure is not None and not self._exposure_settled:
                 actions.append(("_exposure_settled", self._exposure.close))
+            if self._auth is not None and not self._auth.closed:
+                # Dependent provider cleanup may create fresh credential debt.
+                actions.append((None, self._auth.retry_cleanup))
             actions.extend((("_route_settled", self._settle_route), ("_start_settled", self._settle_start)))
             for attribute, action in actions:
                 try:
                     if action(deadline):
-                        setattr(self, attribute, True)
+                        if attribute is not None:
+                            setattr(self, attribute, True)
                     else:
                         settled = False
                 except Exception as error:
