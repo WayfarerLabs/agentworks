@@ -1627,9 +1627,12 @@ operations retain their exact managed identity and boot fence. Managed/job actio
 actual target before preparation, borrowing, reservation, route checks or dispatch; the existing
 supplied-target consistency checks remain. No fabricated VM marker, production compatibility setter,
 host discovery or identity provider is introduced. Worker checks pass 453 focused execution cases,
-476 managed-action cases, 173 VM composition cases and strict typing across 1,513 sources. Combined
-review remains required. This enables private host DIRECT composition, not a complete host factory,
-durable host-file recovery, native host acceptance or production host delivery.
+476 managed-action cases, 173 VM composition cases and strict typing across 1,513 sources. The
+combined prerequisite and passive host-context checkpoint at `a0db5e20d` clears project and
+complexity reviews at Astra/high and a generic correctness review. Lead validation passes 2,378
+platform/composition cases with ten native/platform skips, strict typing across 1,513 sources and
+changed-file quality checks. This enables private host DIRECT composition, not a complete host
+factory, durable host-file recovery, native host acceptance or production host delivery.
 
 - [ ] Prove additive ownership without silently migrating legacy callers: enter the new workflow's
       core operation boundary before activation, carry the claim through nested contexts and
@@ -5695,13 +5698,22 @@ intermediate public API.
       union target type, stack selector or forwarding adapter. Prove passive construction/access and
       composition-owned lifetime, no new effects on existing callers, and independent new-stack
       usability with legacy modules unavailable. Do not claim restricted recipient authority.
-- [ ] Add the independent passive `platform_host_execution_target()` constructor binding and its
+- [x] Add the independent passive `platform_host_execution_target()` constructor binding and its
       supplied absence reason for platform-operation stages. Keep guest and legacy views separate,
       preserve immutable pass-through behavior, and prove a host can be supplied before any guest
       exists without inspection, activation or ownership manufacture. This is private construction
       groundwork; complete host execution/files, ownership, provisioning/recovery and native
       acceptance before a production platform-host handoff. Existing context builders remain
       unchanged, and this introduces neither active recipient enforcement nor a new transport.
+
+The passive host binding is integrated from worker `0e601f4c9` at `a768a3dc9`, with final reviewed
+code at `a0db5e20d`. All three private source-review lanes are clear. The worker's 114 focused and
+adjacent context cases and the lead's 2,378-case platform/composition selection pass, as do complete
+strict typing and changed-file quality checks. Ordinary host execution does not require a fabricated
+managed VM identity; managed jobs retain their actual target requirement. This closes the private
+constructor checkbox only. Complete additive context delivery, host files and recovery, native
+acceptance and permission activation remain separate open gates.
+
 - [x] Complete and privately review paired native admin/agent preparation using an explicit
       core-selected agent row on the same VM. Reuse one file operation, execution operation, numeric
       guest bootstrap, carrier, owner and deadline; retain both account preparations and publish no
