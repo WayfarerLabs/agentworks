@@ -779,16 +779,23 @@ def test_live_input_early_close_drains_output_and_observes_exit(
 
 
 def test_status_first_observed_during_cleanup_is_not_exit_evidence(
-    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
+    children: list[subprocess.Popen[bytes]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    custody: LocalDeliveryCustody,
 ) -> None:
+    input_closed = tmp_path / "input-closed"
+
     class FailingSource:
         calls = 0
 
-        def try_read(self, limit: int) -> bytes:
+        def try_read(self, limit: int) -> bytes | None:
             self.calls += 1
-            if self.calls > 1:
+            if self.calls == 1:
+                return b"x"
+            if input_closed.exists():
                 raise RuntimeError("source fault")
-            return b"x"
+            return None
 
     def hide_status_until_cleanup(status: process_core._ProcessStatus) -> None:
         return None
@@ -803,7 +810,8 @@ def test_status_first_observed_during_cleanup_is_not_exit_evidence(
     monkeypatch.setattr(process_core._ProcessStatus, "poll", hide_status_until_cleanup)
     monkeypatch.setattr(process_core, "_cleanup", observe_during_cleanup)
     result = execute(
-        "import os,sys; os.read(0,1); os.close(0); sys.exit(23)",
+        "import os,sys; from pathlib import Path; os.read(0,1); os.close(0); "
+        f"Path({str(input_closed)!r}).touch(); sys.exit(23)",
         io=CarrierIO(input=LiveInput(FailingSource())),
         seconds=2,
         live_stdio=True,
@@ -813,6 +821,7 @@ def test_status_first_observed_during_cleanup_is_not_exit_evidence(
     assert result.failure == Failure.INPUT
     assert result.local_status == 23
     assert result.exit_status is None
+    assert input_closed.exists()
     assert_closed(children)
 
 

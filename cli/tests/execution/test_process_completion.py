@@ -105,9 +105,10 @@ def test_prefix_consumer_does_not_require_remaining_input(
 
 
 def test_broken_input_pipe_stops_source_before_later_output_and_sink_pressure(
-    monkeypatch: pytest.MonkeyPatch, children: list[subprocess.Popen[bytes]]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, children: list[subprocess.Popen[bytes]]
 ) -> None:
     source = OpenSource()
+    release = tmp_path / "release-consumer"
     native_write = os.write
     close_stdin = core.LocalProcessPipes.close_stdin
     broken = False
@@ -120,6 +121,7 @@ def test_broken_input_pipe_stops_source_before_later_output_and_sink_pressure(
         except BrokenPipeError:
             broken = True
             source.forbidden = True
+            release.touch()
             raise
 
     def observe_close(pipes: core.LocalProcessPipes) -> None:
@@ -147,19 +149,25 @@ def test_broken_input_pipe_stops_source_before_later_output_and_sink_pressure(
     monkeypatch.setattr(os, "write", observe_write)
     monkeypatch.setattr(core.LocalProcessPipes, "close_stdin", observe_close)
     owner = core.LocalProcessOwner()
-    result = core.run_owned_process(
-        [
-            sys.executable,
-            "-c",
-            "import os,sys,time; os.close(0); time.sleep(.05); "
-            "sys.stdout.buffer.write(b'after-close'*16000); sys.stdout.buffer.flush(); "
-            "sys.stderr.buffer.write(b'final'); sys.exit(1)",
-        ],
-        input=core.ProcessInput(source=source),
-        output=core.ProcessOutput(stdout_sink=stdout, stderr_sink=stderr),
-        deadline=core.Deadline(time.monotonic() + 5),
-        owner=owner,
-    )
+    try:
+        result = core.run_owned_process(
+            [
+                sys.executable,
+                "-c",
+                "import os,sys,time; from pathlib import Path; os.close(0); "
+                f"release=Path({str(release)!r}); end=time.monotonic()+5\n"
+                "while not release.exists() and time.monotonic()<end: time.sleep(.01)\n"
+                "assert release.exists()\n"
+                "sys.stdout.buffer.write(b'after-close'*16000); sys.stdout.buffer.flush(); "
+                "sys.stderr.buffer.write(b'final'); sys.exit(1)",
+            ],
+            input=core.ProcessInput(source=source),
+            output=core.ProcessOutput(stdout_sink=stdout, stderr_sink=stderr),
+            deadline=core.Deadline(time.monotonic() + 5),
+            owner=owner,
+        )
+    finally:
+        release.touch()
     assert broken and source.calls > 0 and close_attempts == 1
     assert result.failure is None and result.local_status == result.exit_status == 1
     assert bytes(stdout.data) == b"after-close" * 16000 and bytes(stderr.data) == b"final"
