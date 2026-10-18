@@ -29,8 +29,9 @@ from agentworks.execution.target import ExecutionIdentity, ExecutionRoute
 from agentworks.operations import OperationOwner
 from agentworks.orchestration.secrets import ScopedSecrets
 from agentworks.vms import _native_operation
-from agentworks.vms._native_operation import NativeVMOperation, NativeVMOperationControlFact, native_vm_context
+from agentworks.vms._native_operation import VMOperation, VMOperationControlFact, vm_execution_context
 from tests.test_run_context import _UntouchableTarget
+from tests.vms.canonical_support import ADDRESS, canonical_config, install_canonical_delivery
 from tests.vms.test_native_operation import _install_route, _root, _scope
 from tests.vms.test_native_operation import database as database
 
@@ -43,9 +44,9 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="synthetic Linux
 
 
 @pytest.fixture
-def prepared(monkeypatch: pytest.MonkeyPatch) -> list[NativeVMOperation]:
+def prepared(monkeypatch: pytest.MonkeyPatch) -> list[VMOperation]:
     original = _native_operation._prepare
-    operations: list[NativeVMOperation] = []
+    operations: list[VMOperation] = []
 
     def prepare(*args, **kwargs):
         operation = original(*args, **kwargs)
@@ -57,12 +58,14 @@ def prepared(monkeypatch: pytest.MonkeyPatch) -> list[NativeVMOperation]:
 
 
 @pytest.mark.parametrize("agent_name", [None, "worker"])
+@pytest.mark.parametrize("execution_route", [ExecutionRoute.NATIVE, ExecutionRoute.CANONICAL])
 def test_context_delivers_exact_prepared_views_and_preserves_input_world(
     database: Database,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    prepared: list[NativeVMOperation],
+    prepared: list[VMOperation],
     agent_name: str | None,
+    execution_route: ExecutionRoute,
 ) -> None:
     import grp
     import os
@@ -102,7 +105,12 @@ def test_context_delivers_exact_prepared_views_and_preserves_input_world(
     monkeypatch.setattr(platform, "build_native_execution_access", build)
     monkeypatch.setattr(platform, "observe_execution_power", power)
     monkeypatch.setattr(native, "spawn_owned", start)
-    config = cast("Config", _UntouchableTarget())
+    if execution_route is ExecutionRoute.CANONICAL:
+        database.update_vm_tailscale("box", ADDRESS)
+        config = canonical_config(tmp_path)
+        install_canonical_delivery(monkeypatch, route)
+    else:
+        config = cast("Config", _UntouchableTarget())
     legacy_admin = cast("Transport", _UntouchableTarget())
     legacy_agent = cast("Transport", _UntouchableTarget())
     stale_target = cast("ExecutionTarget", _UntouchableTarget())
@@ -126,11 +134,18 @@ def test_context_delivers_exact_prepared_views_and_preserves_input_world(
     route.local.scratch = scratch
     deadline = Deadline.after(30)
     metadata = NewMetadata(pwd.getpwuid(os.geteuid()).pw_name, grp.getgrgid(os.getegid()).gr_name, 0o600)
-    with native_vm_context(
-        database, "box", platform, incoming, deadline=deadline, trusted_root=root, agent_name=agent_name
+    with vm_execution_context(
+        database,
+        "box",
+        platform,
+        incoming,
+        deadline=deadline,
+        route=execution_route,
+        trusted_root=root,
+        agent_name=agent_name,
     ) as ctx:
         assert type(ctx) is RunContext and ctx is not incoming
-        assert events == ["build", "power", "start"]
+        assert events[:3] == ["build", "power", "start"] and set(events[3:]) <= {"power"}
         assert len(prepared) == 1 and prepared[0].owner is owners[0]
         operation = prepared[0]
         assert route.prepared_guest is not None and route.guest.calls == 1
@@ -160,7 +175,7 @@ def test_context_delivers_exact_prepared_views_and_preserves_input_world(
         assert target is not None
         expected = route.accounts.identities["admin"]
         assert target.identity == ExecutionIdentity("admin", expected.euid, expected.egid, expected.groups)
-        assert target.route is ExecutionRoute.NATIVE
+        assert target.route is execution_route
         files, execution = target.files(), target.execution()
         assert files is not None and execution is not None
         code = (
@@ -180,7 +195,7 @@ def test_context_delivers_exact_prepared_views_and_preserves_input_world(
         else:
             assert agent is not None
             assert agent.identity == ExecutionIdentity("recorded-worker", 2401, 2402, (2402, 2403))
-            assert agent.route is ExecutionRoute.NATIVE
+            assert agent.route is execution_route
             agent_files, agent_execution = agent.files(), agent.execution()
             assert agent_files is not None and agent_execution is not None
             plans = []
@@ -215,7 +230,7 @@ def test_context_delivers_exact_prepared_views_and_preserves_input_world(
         reused = RunContext(admin_execution_target=target)
         assert reused.admin_execution_target() is target
         assert reused.admin_execution_target_absence() is None
-        assert target.route is ExecutionRoute.NATIVE
+        assert target.route is execution_route
         assert target.identity.account == ("admin" if target is operation.target else "recorded-worker")
         files, execution = target.files(), target.execution()
         assert files is not None and execution is not None
@@ -250,7 +265,7 @@ def test_descriptive_scope_never_selects_an_agent(
     platform = WSL2Platform("wsl2", {})
     route, _, _ = _install_route(database, platform, monkeypatch)
     monkeypatch.setattr(database, "get_agent", lambda name: pytest.fail("unrequested agent lookup"))
-    with native_vm_context(
+    with vm_execution_context(
         database,
         "box",
         platform,
@@ -260,6 +275,7 @@ def test_descriptive_scope_never_selects_an_agent(
             agent_execution_target_absence=absence,
         ),
         deadline=Deadline.after(30),
+        route=ExecutionRoute.NATIVE,
         trusted_root=_root(tmp_path),
     ) as ctx:
         assert ctx.operation_scope is scope and ctx.agent_execution_target() is None
@@ -283,12 +299,13 @@ def test_refusal_precedes_provider_build(
     scope = OperationScope(ScopeLevel.AGENT, vm="other", agent="worker") if refusal == "scope" else None
     with (
         pytest.raises(ValidationError if refusal == "scope" else StateError),
-        native_vm_context(
+        vm_execution_context(
             database,
             "box",
             platform,
             RunContext(operation_scope=scope),
             deadline=Deadline.after(30),
+            route=ExecutionRoute.NATIVE,
             trusted_root=_root(tmp_path),
         ),
     ):
@@ -304,17 +321,24 @@ def test_refusal_precedes_provider_build(
 
 @pytest.mark.parametrize("stage", ["construction", "body"])
 @pytest.mark.parametrize("control_type", [RuntimeError, KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("execution_route", [ExecutionRoute.NATIVE, ExecutionRoute.CANONICAL])
 def test_context_failure_unwinds_original_span(
     database: Database,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    prepared: list[NativeVMOperation],
+    prepared: list[VMOperation],
     stage: str,
     control_type: type[BaseException],
+    execution_route: ExecutionRoute,
 ) -> None:
     platform = WSL2Platform("wsl2", {})
-    _, native, observer = _install_route(database, platform, monkeypatch)
-    incoming = RunContext()
+    route, native, observer = _install_route(database, platform, monkeypatch)
+    if execution_route is ExecutionRoute.CANONICAL:
+        database.update_vm_tailscale("box", ADDRESS)
+        install_canonical_delivery(monkeypatch, route)
+        incoming = RunContext(config=canonical_config(tmp_path))
+    else:
+        incoming = RunContext()
     control, cause = control_type(), ValueError("fixture cause")
 
     def fail(*args: object, **kwargs: object) -> None:
@@ -326,8 +350,14 @@ def test_context_failure_unwinds_original_span(
             construction.setattr(RunContext, "__init__", fail)
         with (
             pytest.raises(control_type) as caught,
-            native_vm_context(
-                database, "box", platform, incoming, deadline=Deadline.after(30), trusted_root=_root(tmp_path)
+            vm_execution_context(
+                database,
+                "box",
+                platform,
+                incoming,
+                deadline=Deadline.after(30),
+                route=execution_route,
+                trusted_root=_root(tmp_path),
             ),
         ):
             assert stage == "body"
@@ -341,17 +371,24 @@ def test_context_failure_unwinds_original_span(
 
 @pytest.mark.parametrize("stage", ["construction", "body"])
 @pytest.mark.parametrize("unsettled", ["local", "remote"])
+@pytest.mark.parametrize("execution_route", [ExecutionRoute.NATIVE, ExecutionRoute.CANONICAL])
 def test_uncertain_cleanup_retains_original_control_cause_and_owner(
     database: Database,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    prepared: list[NativeVMOperation],
+    prepared: list[VMOperation],
     stage: str,
     unsettled: str,
+    execution_route: ExecutionRoute,
 ) -> None:
     platform = WSL2Platform("wsl2", {})
-    _, native, observer = _install_route(database, platform, monkeypatch)
-    incoming = RunContext()
+    route, native, observer = _install_route(database, platform, monkeypatch)
+    if execution_route is ExecutionRoute.CANONICAL:
+        database.update_vm_tailscale("box", ADDRESS)
+        install_canonical_delivery(monkeypatch, route)
+        incoming = RunContext(config=canonical_config(tmp_path))
+    else:
+        incoming = RunContext()
     original = _native_operation._prepare
     local_calls = []
     control, cause = KeyboardInterrupt(), ValueError("fixture cause")
@@ -373,15 +410,21 @@ def test_uncertain_cleanup_retains_original_control_cause_and_owner(
             construction.setattr(RunContext, "__init__", fail)
         with (
             pytest.raises(KeyboardInterrupt) as caught,
-            native_vm_context(
-                database, "box", platform, incoming, deadline=Deadline.after(30), trusted_root=_root(tmp_path)
+            vm_execution_context(
+                database,
+                "box",
+                platform,
+                incoming,
+                deadline=Deadline.after(30),
+                route=execution_route,
+                trusted_root=_root(tmp_path),
             ),
         ):
             assert stage == "body"
             fail()
     assert caught.value is control
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact) and fact.__cause__ is cause
+    assert isinstance(fact, VMOperationControlFact) and fact.__cause__ is cause
     operation = prepared[0]
     assert fact._workflow.views is operation and fact._workflow.owner is operation.owner
     claim = database.operations.inspect(_scope())

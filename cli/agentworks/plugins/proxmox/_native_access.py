@@ -10,6 +10,7 @@ from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.db import LifecycleObligationState, VMStatus
 from agentworks.errors import StateError
 from agentworks.execution._proxmox_activation import ProxmoxActivation, TaskPhase
+from agentworks.execution.binding import _IndependentJobAvailability
 from agentworks.execution.carriers.proxmox import _ProxmoxWire
 from agentworks.plugins.proxmox._native_binding import proxmox_native_binding
 
@@ -46,6 +47,10 @@ class ProxmoxOwnedNativePlatformAccess:
     _route_used: bool = field(default=False, init=False, repr=False)
     _available: bool = field(default=False, init=False, repr=False)
     _wire: _ProxmoxWire | None = field(default=None, init=False, repr=False)
+
+    @property
+    def independent_availability(self) -> _IndependentJobAvailability:
+        return _IndependentJobAvailability.NO_IDLE_STOP
 
     def observe_power(self, deadline: Deadline) -> VMStatus:
         return self.platform.observe_execution_power(self.vm, self.ctx, deadline=deadline, custody=self.custody)

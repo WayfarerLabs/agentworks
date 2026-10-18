@@ -311,7 +311,7 @@ def test_incomplete_capture_refuses_bookkeeping_without_repeating_file_work(held
 
 def test_aggregate_retries_closure_before_component_check(held, monkeypatch):
     from agentworks.execution._execution_operation import ExecutionOperation
-    from agentworks.vms._native_operation import NativeVMOperation, _Workflow
+    from agentworks.vms._native_operation import VMOperation, _Workflow
 
     db, owner, operation, _, _ = held
     carrier = ObligationInspectingCarrier(db, owner)
@@ -324,9 +324,7 @@ def test_aggregate_retries_closure_before_component_check(held, monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         upload(held, carrier, BytesSource(b"settled"))
     workflow = _Workflow(owner, Deadline.after(20))
-    workflow.views = NativeVMOperation(
-        owner, None, None, operation, ExecutionOperation(owner, target_for_owner(owner)), None
-    )
+    workflow.views = VMOperation(owner, None, None, operation, ExecutionOperation(owner, target_for_owner(owner)), None)
     with pytest.raises(KeyboardInterrupt):
         workflow.close()
     monkeypatch.setattr(OperationBorrow, "close", close)

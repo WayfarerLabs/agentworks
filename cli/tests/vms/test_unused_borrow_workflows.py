@@ -22,7 +22,7 @@ from agentworks.execution.files import Create, JsonStrategy, NewMetadata
 from agentworks.execution.models import Command, Lifetime, Output, Script, Shell
 from agentworks.execution.profiles import Protection
 from agentworks.operations import OperationBorrow, OperationOwner
-from agentworks.vms._native_operation import NativeVMOperationControlFact, native_vm_operation
+from agentworks.vms._native_operation import VMOperationControlFact, native_vm_operation
 from tests.execution.test_managed_execution_access import Delivery
 from tests.execution.test_wsl2_platform_hold import FakeObserver
 from tests.vms.test_native_operation import _install_route, _root, _scope
@@ -63,7 +63,7 @@ def interrupt_borrow(
 def finish_retry(database: Database, observer: FakeObserver, control: BaseException, retry: bool) -> None:
     if retry:
         fact = control.__cause__
-        assert isinstance(fact, NativeVMOperationControlFact)
+        assert isinstance(fact, VMOperationControlFact)
         assert database.operations.inspect(_scope()) is not None
         with pytest.raises(StateError):
             fact._workflow.owner.borrow()

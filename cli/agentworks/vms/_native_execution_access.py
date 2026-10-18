@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorObservation
     from agentworks.db import VMStatus
     from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
-    from agentworks.execution.binding import NativeExecutionBinding
+    from agentworks.execution.binding import NativeExecutionBinding, _IndependentJobAvailability
     from agentworks.execution.carrier import Deadline
 
 
@@ -19,6 +19,9 @@ class OwnedNativePlatformAccess(Protocol):
 
     @property
     def binding(self) -> NativeExecutionBinding | None: ...
+
+    @property
+    def independent_availability(self) -> _IndependentJobAvailability | None: ...
 
     @property
     def native_configuration_check(self) -> Callable[[], None] | None: ...

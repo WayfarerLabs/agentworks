@@ -834,7 +834,7 @@ class AzureVMPlatform(VMPlatform):
     ) -> NativeExecutionBinding:
         """Read the exact owned endpoint and construct passive SSH delivery."""
         from agentworks.plugins.azure.network import read_native_public_ipv4
-        from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_native_binding
+        from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_execution_binding
 
         settings = require_ssh_settings(vm, ctx, config)
         resource_id = _resource_id(vm)
@@ -851,7 +851,7 @@ class AzureVMPlatform(VMPlatform):
         finally:
             with contextlib.suppress(Exception):
                 network.close()
-        binding = ssh_native_binding(
+        binding = ssh_execution_binding(
             vm, endpoint, settings, independent_availability=_IndependentJobAvailability.NO_IDLE_STOP
         )
         provider_locator_remaining(deadline, vm_name=vm.name)

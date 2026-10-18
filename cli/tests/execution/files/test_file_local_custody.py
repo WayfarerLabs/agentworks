@@ -27,7 +27,7 @@ from agentworks.execution.files import (
 )
 from agentworks.execution.target import ExecutionIdentity, ExecutionRoute, ExecutionTarget
 from agentworks.operations import OperationOwner
-from agentworks.vms._native_operation import NativeVMOperation, _Workflow
+from agentworks.vms._native_operation import VMOperation, _Workflow
 from tests.execution.files._file_access_support import bound_access as bound_access
 from tests.execution.files._file_access_support import plan as plan
 from tests.execution.files._file_read_support import LocalCarrier
@@ -48,7 +48,7 @@ def workflow(access: FileAccess, owner: OperationOwner) -> _Workflow:
         entity_name="configuration",
         deadline=access._deadline,
     )
-    views = NativeVMOperation(
+    views = VMOperation(
         owner,
         access,
         execution,

@@ -609,7 +609,7 @@ class GCEPlatform(VMPlatform):
         config: Config | None = None,
     ) -> NativeExecutionBinding:
         """Read the exact owned endpoint and construct passive SSH delivery."""
-        from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_native_binding
+        from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_execution_binding
 
         settings = require_ssh_settings(vm, ctx, config)
         identity = _VMIdentity.from_row(vm)
@@ -619,7 +619,7 @@ class GCEPlatform(VMPlatform):
         provider_locator_remaining(deadline, vm_name=vm.name)
         verify_instance_network(current, network_url=identity.network_url, subnet_url=identity.subnet_url)
         endpoint = live_external_ipv4(current, access_config_name=identity.access_config_name)
-        binding = ssh_native_binding(
+        binding = ssh_execution_binding(
             vm, endpoint, settings, independent_availability=_IndependentJobAvailability.NO_IDLE_STOP
         )
         provider_locator_remaining(deadline, vm_name=vm.name)

@@ -26,7 +26,7 @@ from agentworks.operations import OperationOwner
 from agentworks.plugins.proxmox import _native_access
 from agentworks.plugins.proxmox._native_access import ProxmoxOwnedNativePlatformAccess
 from agentworks.vms import _native_operation as native
-from agentworks.vms._native_operation import NativeVMOperation, NativeVMOperationControlFact, native_vm_operation
+from agentworks.vms._native_operation import VMOperation, VMOperationControlFact, native_vm_operation
 from tests.vms.test_proxmox_native_operation import _install, _scope
 from tests.vms.test_proxmox_native_operation import database as database
 
@@ -139,7 +139,7 @@ class Startup:
         self.responsive = response == INFO
         return response
 
-    def operation(self, root, deadline) -> AbstractContextManager[NativeVMOperation]:
+    def operation(self, root, deadline) -> AbstractContextManager[VMOperation]:
         return native_vm_operation(
             self.database,
             "box",
@@ -248,7 +248,7 @@ def test_uncertain_activation_never_prepares_or_replays(database, tmp_path, monk
         pytest.fail("uncertain activation admitted body")
     assert "untrusted provider text" not in str(caught.value)
     fact = caught.value.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     assert isinstance(fact._workflow.access, ProxmoxOwnedNativePlatformAccess)
     assert fact._workflow.access.activation is not None
     assert database.operations.inspect(_scope()) is not None
@@ -274,7 +274,7 @@ def test_startup_control_and_failed_cleanup_preserve_original(database, tmp_path
         )
     with pytest.raises(control_type) as caught, startup.operation(tmp_path, Deadline.after(10)):
         pytest.fail("interrupted startup admitted body")
-    assert caught.value is primary and isinstance(primary.__cause__, NativeVMOperationControlFact)
+    assert caught.value is primary and isinstance(primary.__cause__, VMOperationControlFact)
     assert database.operations.inspect(_scope()) is not None
     startup.tasks = [task()]
     if phase == "info":
@@ -314,7 +314,7 @@ def test_activation_lost_commit_reply_through_workflow(database, tmp_path, monke
         assert claim is None
         assert startup.events.count("start") == int(stage != "register")
     else:
-        assert claim is not None and isinstance(primary.__cause__, NativeVMOperationControlFact)
+        assert claim is not None and isinstance(primary.__cause__, VMOperationControlFact)
         fact = primary.__cause__
         if stage == "mark":
             with pytest.raises(StateError):
@@ -336,7 +336,7 @@ def test_changed_locator_after_start_suppresses_body(database, tmp_path, monkeyp
 
     startup.route.locators = [ProviderLocator("initial")]
     if after_guest:
-        startup.route.locators.append(ProviderLocator("initial"))
+        startup.route.locators.extend([ProviderLocator("initial")] * 2)
     startup.route.locators.append(ProviderLocator("changed"))
     with pytest.raises(StateError), startup.operation(tmp_path, Deadline.after(10)):
         pytest.fail("changed locator admitted body")
@@ -370,7 +370,7 @@ def test_late_startup_reply_refuses_and_cleanup_never_resumes_preparation(databa
         pytest.fail("late startup admitted body")
     monkeypatch.setattr(_ProxmoxWire, name, original)
     if phase in {"start", "task"}:
-        assert isinstance(caught.value.__cause__, NativeVMOperationControlFact)
+        assert isinstance(caught.value.__cause__, VMOperationControlFact)
         caught.value.__cause__.retry_cleanup(Deadline.after(10))
     assert database.operations.inspect(_scope()) is None
     assert startup.events.count("start") == 1
@@ -418,7 +418,7 @@ def test_fresh_cleanup_observes_only_known_task_after_failed_read(database, tmp_
     with pytest.raises(StateError) as caught, startup.operation(tmp_path, Deadline.after(10)):
         pytest.fail("failed read admitted helper")
     fact = caught.value.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     events = list(startup.events)
     startup.tasks = [task(phase="running"), task()]
     fact.retry_cleanup(Deadline.after(10))
@@ -440,7 +440,7 @@ def test_takeover_during_info_cannot_admit_guest_or_release_successor(database, 
     monkeypatch.setattr(_ProxmoxWire, "request_guest_info", takeover)
     with pytest.raises(StateError) as caught, startup.operation(tmp_path, Deadline.after(10)):
         pytest.fail("stale owner admitted guest")
-    assert isinstance(caught.value.__cause__, NativeVMOperationControlFact)
+    assert isinstance(caught.value.__cause__, VMOperationControlFact)
     claim = database.operations.inspect(_scope())
     assert claim is not None and claim.ownership.generation_id == "b" * 32
     assert not startup.route.guest.calls and not startup.route.accounts.calls
@@ -461,7 +461,7 @@ def test_uncertain_fence_cannot_clear_absent_registration(database, tmp_path, mo
     monkeypatch.setattr(OperationRepository, "list_pending_lifecycle_obligations", unavailable)
     with pytest.raises(KeyboardInterrupt) as caught, startup.operation(tmp_path, Deadline.after(10)):
         pytest.fail("lost registration admitted helper")
-    assert caught.value is primary and isinstance(primary.__cause__, NativeVMOperationControlFact)
+    assert caught.value is primary and isinstance(primary.__cause__, VMOperationControlFact)
     assert database.operations.inspect(_scope()) is not None
     monkeypatch.setattr(OperationRepository, "list_pending_lifecycle_obligations", original)
     primary.__cause__.retry_cleanup(Deadline.after(10))

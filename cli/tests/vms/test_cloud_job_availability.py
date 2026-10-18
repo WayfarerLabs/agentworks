@@ -12,7 +12,7 @@ from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.ssh import SSHSettings
 from agentworks.execution.models import Command, Lifetime, Output, Script, Shell
 from agentworks.execution.profiles import Protection
-from agentworks.vms._ssh_native_binding import ssh_native_binding
+from agentworks.vms._ssh_native_binding import ssh_execution_binding
 from tests.execution.test_independent_execution_reads import observer as observer
 
 
@@ -24,7 +24,7 @@ def test_unproved_binding_refuses_before_shell_reservation_and_dispatch(
     _, repository, operation, access, main, workflow = observer
     vm = SimpleNamespace(name="vm-one", admin_username="root", platform_metadata={"distro_name": "recorded"})
     if platform == "ssh":
-        binding = ssh_native_binding(vm, "198.51.100.2", SSHSettings(tmp_path / "trust", tmp_path / "key"))
+        binding = ssh_execution_binding(vm, "198.51.100.2", SSHSettings(tmp_path / "trust", tmp_path / "key"))
     elif platform == "wsl2":
         binding = WSL2Platform("wsl2", {}).resolve_native_execution_binding(
             vm, RunContext(), deadline=Deadline.after(5)

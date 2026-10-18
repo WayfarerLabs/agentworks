@@ -64,7 +64,7 @@ from agentworks.execution.profiles import Protection
 from agentworks.execution.result import ApplicationState, ExecutionFailure
 from agentworks.execution.target import ExecutionIdentity, ExecutionRoute, ExecutionTarget
 from agentworks.operations import OperationBorrow
-from agentworks.vms._native_operation import NativeVMOperation, _Workflow
+from agentworks.vms._native_operation import VMOperation, _Workflow
 
 from . import test_managed_disposal as disposal_tests
 from . import test_managed_observation as observation_tests
@@ -215,7 +215,7 @@ def view(bound):
         ExecutionRoute.NATIVE,
     )
     workflow = _Workflow(
-        owner, Deadline.after(5), views=NativeVMOperation(owner, file_access, access, files, operation, target)
+        owner, Deadline.after(5), views=VMOperation(owner, file_access, access, files, operation, target)
     )
     try:
         yield database, workflow, access, main, keeper

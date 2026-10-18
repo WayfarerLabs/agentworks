@@ -30,7 +30,7 @@ from agentworks.execution.carrier import Deadline
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
 from agentworks.vms import _native_operation
-from agentworks.vms._native_operation import NativeVMOperationControlFact, native_vm_operation
+from agentworks.vms._native_operation import VMOperationControlFact, native_vm_operation
 from tests.vms.test_native_operation import _install_route, _root, _scope
 from tests.vms.test_native_operation import database as database
 
@@ -233,7 +233,7 @@ def test_agent_preparation_failure_never_admits_partial_pair(
     assert route.accounts.calls == ["admin", "root", "admin", "recorded-worker"]
     if failure in {"uncertain", "deadline"}:
         fact = caught.value.__cause__
-        assert isinstance(fact, NativeVMOperationControlFact)
+        assert isinstance(fact, VMOperationControlFact)
         workflow = fact._workflow
         assert workflow.views is None
         assert workflow.identity is not None and workflow.identity.status is TargetIdentityStatus.PREPARED
@@ -282,7 +282,7 @@ def test_each_agent_custody_fact_keeps_aggregate_claim(
     ):
         pytest.fail("unsettled agent preparation admitted body")
     fact = caught.value.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     workflow = fact._workflow
     assert workflow.identity is observed[0] and workflow.views is None
     assert workflow.agent_identity is not None
@@ -330,7 +330,7 @@ def test_interrupted_agent_lookup_preserves_control_partial_facts_and_claim(
         pytest.fail("interrupted pair admitted body")
     assert caught.value is primary
     aggregate = primary.__cause__
-    assert isinstance(aggregate, NativeVMOperationControlFact)
+    assert isinstance(aggregate, VMOperationControlFact)
     account_fact = aggregate.__cause__
     assert isinstance(account_fact, TargetIdentityControlFact)
     assert account_fact.__cause__ is underlying

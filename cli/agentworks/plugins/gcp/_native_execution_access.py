@@ -17,7 +17,7 @@ from agentworks.operations import OperationOwner
 from agentworks.plugins.gcp._activation import ActivationState, GCEActivation
 from agentworks.plugins.gcp._native_access import GCEOwnedRead
 from agentworks.plugins.gcp._native_identity import NativeIdentity
-from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_native_binding
+from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_execution_binding
 from agentworks.vms._ssh_native_exposure import OwnedSSHExposure
 
 if TYPE_CHECKING:
@@ -80,6 +80,10 @@ class GCEOwnedAccess:
         self.binding: NativeExecutionBinding | None = None
         self.guest_check: Callable[[VMGuestIdentity], None] | None = None
         self._settings: SSHSettings | None = None
+
+    @property
+    def independent_availability(self) -> _IndependentJobAvailability:
+        return _IndependentJobAvailability.NO_IDLE_STOP
 
     @property
     def native_configuration_check(self) -> Callable[[], None]:
@@ -227,8 +231,8 @@ class GCEOwnedAccess:
                     self._pause(deadline)
                     current = self._fresh_instance(deadline, VMStatus.RUNNING)
             self._endpoint = current.endpoint
-            self.binding = ssh_native_binding(
-                self._vm, self._endpoint, settings, independent_availability=_IndependentJobAvailability.NO_IDLE_STOP
+            self.binding = ssh_execution_binding(
+                self._vm, self._endpoint, settings, independent_availability=self.independent_availability
             )
             self._exposure = OwnedSSHExposure(self._vm.name)
             prefixes = self._exposure.resolve(config_allow_cidrs(self._ctx.config), deadline)

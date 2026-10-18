@@ -47,7 +47,7 @@ from agentworks.execution.profiles import Protection
 from agentworks.execution.result import ApplicationState, ExecutionFailure
 from agentworks.execution.target import ExecutionIdentity, ExecutionRoute, ExecutionTarget
 from agentworks.operations import OperationOwner
-from agentworks.vms._native_operation import NativeVMOperation, _Workflow
+from agentworks.vms._native_operation import VMOperation, _Workflow
 
 from .test_managed_execution_access import Delivery, fact
 from .test_managed_job_access import RUN, _call
@@ -162,7 +162,7 @@ def observer(tmp_path):
         ExecutionRoute.NATIVE,
     )
     workflow = _Workflow(
-        owner, Deadline.after(5), views=NativeVMOperation(owner, file_access, access, files, operation, target)
+        owner, Deadline.after(5), views=VMOperation(owner, file_access, access, files, operation, target)
     )
     try:
         yield database, repository, operation, access, main, workflow

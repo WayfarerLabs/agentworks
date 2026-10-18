@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow, VMStatus
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
-    from agentworks.execution.binding import NativeExecutionBinding
+    from agentworks.execution.binding import NativeExecutionBinding, _IndependentJobAvailability
     from agentworks.execution.carrier import Deadline
     from agentworks.operations import OperationOwner
 
@@ -37,6 +37,10 @@ class WSL2OwnedNativePlatformAccess:
     _used: bool = field(default=False, init=False, repr=False)
     _available: bool = field(default=False, init=False, repr=False)
     _route_used: bool = field(default=False, init=False, repr=False)
+
+    @property
+    def independent_availability(self) -> _IndependentJobAvailability | None:
+        return None
 
     @property
     def binding(self) -> NativeExecutionBinding | None:

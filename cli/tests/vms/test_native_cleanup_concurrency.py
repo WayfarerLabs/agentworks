@@ -9,7 +9,7 @@ import pytest
 from agentworks.errors import StateError
 from agentworks.execution._prepared_helper_obligation import PREPARED_HELPER_OBLIGATION_KIND
 from agentworks.execution.carrier import Deadline
-from agentworks.vms._native_operation import NativeVMOperationControlFact
+from agentworks.vms._native_operation import VMOperationControlFact
 from tests.execution.test_independent_execution_reads import observer as observer
 from tests.execution.test_independent_execution_start import available as available
 from tests.execution.test_independent_staged_start import bulk_start
@@ -25,7 +25,7 @@ def test_competing_retry_refuses_before_paused_cleanup_can_lose_its_call(staged,
     (cleanup,) = operation._prepared_stages
     before = len(carrier.requests)
     carrier.code = completion
-    fact = NativeVMOperationControlFact(workflow)
+    fact = VMOperationControlFact(workflow)
     entered, resume = Event(), Event()
     results: dict[str, BaseException | None] = {}
     stops: list[str] = []
@@ -104,7 +104,7 @@ def test_reentrant_retry_refuses_and_outer_cleanup_keeps_its_exact_call(staged, 
     bulk_start(access)
     (cleanup,) = operation._prepared_stages
     before = len(carrier.requests)
-    fact = NativeVMOperationControlFact(workflow)
+    fact = VMOperationControlFact(workflow)
     stops = []
     original_stop = workflow.owner.stop_admission
 
@@ -133,7 +133,7 @@ def test_route_control_releases_aggregate_guard_for_exact_later_retry(staged):
     bulk_start(access)
     (cleanup,) = operation._prepared_stages
     before = len(carrier.requests)
-    fact = NativeVMOperationControlFact(workflow)
+    fact = VMOperationControlFact(workflow)
     control = KeyboardInterrupt("route")
 
     def interrupt(deadline):

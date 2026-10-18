@@ -45,7 +45,7 @@ from agentworks.execution.result import ApplicationState, CheckedExecutionError
 from agentworks.operations import OperationAttempt, OperationOwner, release_borrow_after_custody
 from agentworks.plugins.proxmox._native_access import ProxmoxOwnedNativePlatformAccess
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.vms._native_operation import NativeVMOperationControlFact, native_vm_operation
+from agentworks.vms._native_operation import VMOperationControlFact, native_vm_operation
 from tests.execution.test_target_identity import SyntheticCarrier
 from tests.execution.test_wsl2_owned_download import GuestThenFileCarrier
 from tests.vms.test_native_operation import _PackedCarrier
@@ -329,7 +329,7 @@ def test_native_direct_selects_closure_factory_and_finite_cleanup_before_finish(
         assert active.closure_expectation.guest == views.execution_operation._bootstrap.guest
         assert active.prepared is None and active.candidate is None
     fact = caught.value.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     access = fact._workflow.access
     assert isinstance(access, ProxmoxOwnedNativePlatformAccess) and access.route_check is not None
     provider_calls = []
@@ -466,7 +466,7 @@ def test_stopped_access_retains_single_activation_without_replay(database, tmp_p
     ):
         pytest.fail("unsettled activation admitted body")
     fact = caught.value.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     assert fact._workflow.access is selected[0]
     assert selected[0].activation is not None and fact._workflow.preparation is None
     with pytest.raises(StateError):
@@ -531,7 +531,7 @@ def test_changed_locator_suppresses_body(database, tmp_path, monkeypatch, after_
     platform, route = _install(database, monkeypatch)
     route.locators = [ProviderLocator("initial")]
     if after_guest:
-        route.locators.append(ProviderLocator("initial"))
+        route.locators.extend([ProviderLocator("initial")] * 2)
     route.locators.append(ProviderLocator("changed"))
     with (
         pytest.raises(StateError),
@@ -572,7 +572,7 @@ def test_changed_guest_after_plausible_accounts_blocks_body(database, tmp_path, 
             else:
                 views.execution.run(Command(["/usr/bin/touch", str(effect)]), profile=Protection.DIRECT, check=True)
     assert not effect.exists() and database.operations.inspect(_scope()) is not None
-    assert isinstance(retained.value.__cause__, NativeVMOperationControlFact)
+    assert isinstance(retained.value.__cause__, VMOperationControlFact)
     assert retained.value.__cause__._workflow.views is views
 
 
@@ -594,7 +594,7 @@ def test_preparation_control_retains_exact_facts(database, tmp_path, monkeypatch
         pytest.fail("interrupted preparation admitted")
     assert caught.value is control
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     workflow = fact._workflow
     assert isinstance(workflow.access, ProxmoxOwnedNativePlatformAccess)
     assert workflow.access.locator == ProviderLocator("pve:generation")
@@ -631,7 +631,7 @@ def test_unsettled_preparation_reply_retains_owner(database, tmp_path, monkeypat
         pytest.fail("uncertain account preparation admitted")
     assert database.operations.inspect(_scope()) is not None
     fact = caught.value.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     assert isinstance(fact._workflow.access, ProxmoxOwnedNativePlatformAccess)
     preparation = fact._workflow.identity if phase == "accounts" else fact._workflow.preparation
     assert preparation is not None and preparation.pending_remote_effects
@@ -704,7 +704,7 @@ def test_settlement_failure_retains_observed_preparation_facts(database, tmp_pat
         pytest.fail("unsettled observation admitted")
     assert caught.value is control
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     workflow = fact._workflow
     assert isinstance(workflow.access, ProxmoxOwnedNativePlatformAccess)
     assert workflow.preparation is not None and workflow.preparation.guest_result is not None
@@ -742,7 +742,7 @@ def test_interrupted_owner_release_retries_exact_cleanup(database, tmp_path, mon
         pass
     assert caught.value is control
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     assert (database.operations.inspect(_scope()) is None) is committed
     fact.retry_cleanup(Deadline.after(10))
     assert database.operations.inspect(_scope()) is None
@@ -764,7 +764,7 @@ def test_locator_control_survives_borrow_release_failure(database, tmp_path, mon
     def locator(*args, **kwargs):
         nonlocal observations
         observations += 1
-        if observations == 3:
+        if observations == 4:
             raise control
         return ProviderLocator("pve:generation")
 
@@ -786,7 +786,7 @@ def test_locator_control_survives_borrow_release_failure(database, tmp_path, mon
         pytest.fail("uncertain preparation admitted body")
     assert caught.value is control
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     assert isinstance(fact._workflow.access, ProxmoxOwnedNativePlatformAccess)
     preparation = fact._workflow.preparation
     assert preparation is not None and preparation.requires_owner_retention
@@ -821,7 +821,7 @@ def test_identity_borrow_release_failure_cannot_release_owner(database, tmp_path
         pytest.fail("unreleased identity borrow admitted")
     assert caught.value is control and retained_borrow is not None
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     assert isinstance(fact._workflow.access, ProxmoxOwnedNativePlatformAccess)
     assert fact._workflow.preparation is not None
     assert fact._workflow.identity is not None and fact._workflow.identity.delivery_result is not None

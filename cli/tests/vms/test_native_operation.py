@@ -62,10 +62,10 @@ from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
 from agentworks.execution.result import CheckedExecutionError
-from agentworks.execution.target import ExecutionTarget
+from agentworks.execution.target import ExecutionRoute, ExecutionTarget
 from agentworks.operations import OperationOwner
 from agentworks.vms import _native_operation
-from agentworks.vms._native_operation import NativeVMOperationControlFact, native_vm_operation
+from agentworks.vms._native_operation import VMOperationControlFact, native_vm_operation
 from agentworks.vms._wsl2_native_access import WSL2OwnedNativePlatformAccess
 from agentworks.vms.target_preparation import (
     VMTargetPreparation,
@@ -196,6 +196,7 @@ def test_root_retains_access_before_effects_and_independently_checks_ledger(
         owner: OperationOwner
         custody: LocalDeliveryCustody
         binding = None
+        independent_availability = None
         guest_check = None
         native_configuration_check = None
         route_check = None
@@ -250,7 +251,7 @@ def test_root_retains_access_before_effects_and_independently_checks_ledger(
         pytest.fail("interrupted access admitted body")
     assert caught.value is control
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     assert fact._workflow.access is access
     assert events == ["build", "power", "prepare", "settle"]
     access.settled = True
@@ -379,6 +380,7 @@ def test_fresh_intent_and_power_gate_precedes_preparation_and_wake(
 
     class Access:
         binding = None
+        independent_availability = None
         guest_check = None
         native_configuration_check = None
         route_check = None
@@ -826,7 +828,7 @@ def test_same_kind_foreign_hold_debt_prevents_owned_hold_release(
     assert not observer.events
     assert database.operations.inspect(_scope()) is not None
     fact = raised.value.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     foreign.resolve()
     fact.retry_cleanup(Deadline.after(5))
     assert observer.events == ["observe"] and database.operations.inspect(_scope()) is None
@@ -918,7 +920,7 @@ def test_missing_root_plan_refuses_before_views_and_preserves_hold_custody(
     assert (database.operations.inspect(_scope()) is not None) is uncertain_hold
     if uncertain_hold:
         fact = raised.value.__cause__
-        assert isinstance(fact, NativeVMOperationControlFact)
+        assert isinstance(fact, VMOperationControlFact)
         assert fact._workflow.views is None
         assert fact._workflow.identity is not None and fact._workflow.identity.elevated_plan is None
         with pytest.raises(StateError):
@@ -930,15 +932,25 @@ def test_missing_root_plan_refuses_before_views_and_preserves_hold_custody(
 
 @pytest.mark.parametrize("field", ["instance_marker", "boot_id", "init_start_ticks"])
 @pytest.mark.parametrize("action", ["stat", "read", "remove", "command"])
+@pytest.mark.parametrize("execution_route", [ExecutionRoute.NATIVE, ExecutionRoute.CANONICAL])
 def test_full_guest_mismatch_prevents_file_and_command_application_effects(
     database: Database,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     field: str,
     action: str,
+    execution_route: ExecutionRoute,
 ) -> None:
     platform = WSL2Platform("wsl2", {})
     route, _, observer = _install_route(database, platform, monkeypatch)
+    if execution_route is ExecutionRoute.CANONICAL:
+        from tests.vms.canonical_support import ADDRESS, canonical_config, install_canonical_delivery
+
+        database.update_vm_tailscale("box", ADDRESS)
+        install_canonical_delivery(monkeypatch, route)
+        ctx = RunContext(config=canonical_config(tmp_path))
+    else:
+        ctx = RunContext()
     guest = route.local.observed
     mismatched = {
         "instance_marker": replace(guest, instance_marker="b" * 32),
@@ -952,8 +964,14 @@ def test_full_guest_mismatch_prevents_file_and_command_application_effects(
     command_effect = root / "command-effect"
     with (
         pytest.raises(StateError) as teardown,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=PurePosixPath(root)
+        _native_operation._vm_operation(
+            database,
+            "box",
+            platform,
+            ctx,
+            route=execution_route,
+            deadline=Deadline.after(30),
+            trusted_root=PurePosixPath(root),
         ) as views,
     ):
         metadata = views.files.stat(PurePosixPath(source))
@@ -976,7 +994,7 @@ def test_full_guest_mismatch_prevents_file_and_command_application_effects(
     assert route.local.calls == 2
     assert not observer.events and database.operations.inspect(_scope()) is not None
     fact = teardown.value.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     assert fact._workflow.views is views
     with pytest.raises(StateError):
         views.owner.borrow()
@@ -1032,7 +1050,7 @@ def test_interruption_after_selected_preparation_keeps_actual_child_custody(
         pytest.fail("interrupted selected preparation admitted body")
     assert caught.value is control
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     access = fact._workflow.access
     assert isinstance(access, WSL2OwnedNativePlatformAccess) and access.selected is not None
     assert fact._workflow.preparation is not None and fact._workflow.preparation.pending_remote_effects
@@ -1062,7 +1080,7 @@ def test_native_view_cannot_escape_expired_body_budget_and_cleanup_uses_new_one(
             views.execution.run(Command(["/bin/true"]), profile=Protection.DIRECT, deadline=Deadline(None))
         assert route.local.calls == 0
     fact = teardown.value.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     assert database.operations.inspect(_scope()) is not None
     fact.retry_cleanup(Deadline.after(10))
     assert observer.events == ["observe"]
@@ -1099,7 +1117,7 @@ def test_claim_release_interrupt_retries_only_finalization(
         pass
     assert caught.value is control
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     assert (repository.inspect(_scope()) is None) is committed
     with pytest.raises(StateError):
         views.execution.run(Command(["/bin/true"]), profile=Protection.DIRECT)
@@ -1138,7 +1156,7 @@ def test_uncertain_hold_keeps_claim_and_stops_new_body_admission(
         selected.execution.run(Command(["/bin/true"]), profile=Protection.DIRECT)
     assert route.local.calls == 0
     fact = raised.value.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     observer.presence = GuestAnchorPresence.ABSENT_CONFIRMED
     fact.retry_cleanup(Deadline.after(10))
     assert database.operations.inspect(_scope()) is None
@@ -1161,7 +1179,7 @@ def test_interruption_keeps_original_control_and_uncertain_claim(
     assert caught.value is control
     assert database.operations.inspect(_scope()) is not None
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     observer.presence = GuestAnchorPresence.ABSENT_CONFIRMED
     fact.retry_cleanup(Deadline.after(10))
     assert database.operations.inspect(_scope()) is None
@@ -1194,7 +1212,7 @@ def test_interrupted_pre_yield_hold_retains_exact_cleanup_without_traceback(
     assert caught.value is control
     assert database.operations.inspect(_scope()) is not None
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     control.__traceback__ = None
     control.__context__ = None
     gc.collect()
@@ -1240,7 +1258,7 @@ def test_preparation_control_fact_survives_failed_teardown_handoff(
         pytest.fail("preparation interruption must not yield")
     assert caught.value is control
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     assert fact.__cause__ is original_fact
     assert original_fact.preparation is preparation
     assert database.operations.inspect(_scope()) is not None

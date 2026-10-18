@@ -735,14 +735,14 @@ class EC2Platform(VMPlatform):
         config: Config | None = None,
     ) -> NativeExecutionBinding:
         """Read the exact owned endpoint and construct passive SSH delivery."""
-        from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_native_binding
+        from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_execution_binding
 
         settings = require_ssh_settings(vm, ctx, config)
         identity = self._locator_metadata(vm)
         provider_locator_remaining(deadline, vm_name=vm.name)
         current = self._read_exact_instance(vm, ctx, identity, deadline=deadline)
         provider_locator_remaining(deadline, vm_name=vm.name)
-        binding = ssh_native_binding(
+        binding = ssh_execution_binding(
             vm,
             current.get("PublicIpAddress"),
             settings,

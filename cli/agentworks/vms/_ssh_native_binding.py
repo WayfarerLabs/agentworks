@@ -1,4 +1,4 @@
-"""Passive independent SSH bindings for cloud-selected endpoints."""
+"""Passive independent SSH bindings for literal VM endpoints."""
 
 from __future__ import annotations
 
@@ -25,28 +25,28 @@ def require_ssh_settings(vm: VMRow, ctx: RunContext, config: Config | None) -> S
     settings = selected.operator.ssh if selected is not None else None
     if settings is None:
         raise ConfigError(
-            "Native cloud execution requires explicit operator SSH settings",
+            "VM execution requires explicit operator SSH settings",
             entity_kind="vm",
             entity_name=vm.name,
         )
     return settings
 
 
-def ssh_native_binding(
+def ssh_execution_binding(
     vm: VMRow,
     endpoint: object,
     settings: SSHSettings,
     *,
     independent_availability: _IndependentJobAvailability | None = None,
 ) -> NativeExecutionBinding:
-    """Bind a provider's current literal IPv4 without admitting local files."""
+    """Bind one selected literal IPv4 without admitting local files."""
     try:
         if not isinstance(endpoint, str):
             raise ValueError
         IPv4Address(endpoint)
     except ValueError:
         raise StateError(
-            "Native cloud execution requires a current public IPv4 endpoint",
+            "VM execution requires a literal IPv4 endpoint",
             entity_kind="vm",
             entity_name=vm.name,
         ) from None

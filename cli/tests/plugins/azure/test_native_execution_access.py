@@ -249,7 +249,7 @@ def test_availability_needs_no_public_endpoint_native_ingress_or_guest(full, mon
         pytest.fail("availability selected native delivery")
 
     monkeypatch.setattr(p.access._reader, "observe_public_endpoint", deny)
-    monkeypatch.setattr(native, "ssh_native_binding", deny)
+    monkeypatch.setattr(native, "ssh_execution_binding", deny)
     monkeypatch.setattr(native, "OwnedSSHExposure", deny)
     monkeypatch.setattr("agentworks.vms._native_operation.prepare_managed_vm_target_from_platform", deny)
     assert p.access.observe_power(p.deadline) is power

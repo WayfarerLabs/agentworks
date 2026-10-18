@@ -22,7 +22,7 @@ from agentworks.execution.carrier import Deadline
 from agentworks.operations import OperationOwner
 from agentworks.plugins.proxmox._native_access import ProxmoxOwnedNativePlatformAccess
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.vms._native_operation import NativeVMOperationControlFact, native_vm_operation
+from agentworks.vms._native_operation import VMOperationControlFact, native_vm_operation
 from agentworks.vms._wsl2_native_access import WSL2OwnedNativePlatformAccess
 
 if TYPE_CHECKING:
@@ -56,6 +56,7 @@ class _FailingAccess:
     events: list[str]
     retirement: str = "settled"
     binding = None
+    independent_availability = None
     guest_check = None
     native_configuration_check = None
     route_check = None
@@ -142,7 +143,7 @@ def test_initial_failure_settles_or_retains_same_access(
         assert control.__cause__ is None and database.operations.inspect(_scope()) is None
         return
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     assert fact._workflow.access is access
     assert fact._workflow.owner is access.owner and fact._workflow.local_delivery is access.custody
     with pytest.raises(StateError):
@@ -203,7 +204,7 @@ def test_local_retirement_defers_same_access_until_retry(
     assert caught.value is control and events == ["build", "power"]
     (access,) = retained
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     assert fact._workflow.access is access and not access.custody.settled
     refused_cleanup = Deadline.after(10)
     with pytest.raises(OSError if close_error else StateError):

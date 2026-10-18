@@ -1,4 +1,4 @@
-"""Platform-owned native carrier and delivery identity facts."""
+"""Selected carrier, delivery identity and platform availability facts."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class _EarlyGuestFactsRoute:
 
 @dataclass(frozen=True, slots=True)
 class NativeExecutionBinding:
-    """A passive native route binding, before target identity composition."""
+    """A passive delivery binding, before target identity composition."""
 
     carrier: Carrier = field(repr=False)
     delivery_account: str

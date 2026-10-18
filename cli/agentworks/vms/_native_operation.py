@@ -1,9 +1,9 @@
-"""Private core-owned existing-VM native operation and availability boundary."""
+"""Private core-owned VM operation, selected route and context lifetime."""
 
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import PurePosixPath
 from threading import Lock
 from typing import TYPE_CHECKING
@@ -30,6 +30,7 @@ from agentworks.execution.carrier import Deadline
 from agentworks.execution.target import ExecutionIdentity, ExecutionRoute, ExecutionTarget
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
 from agentworks.operations import OperationOwner
+from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_execution_binding
 from agentworks.vms.identity import validate_vm_instance_marker
 from agentworks.vms.target_preparation import (
     VMTargetPreparation,
@@ -48,7 +49,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class NativeVMOperation:
+class VMOperation:
     """Private operation custody and target sharing one exact claim and deadline."""
 
     owner: OperationOwner
@@ -60,17 +61,17 @@ class NativeVMOperation:
     agent_target: ExecutionTarget | None = None
 
 
-class NativeVMOperationControlFact(Exception):
+class VMOperationControlFact(Exception):
     """Safe handoff of exact in-memory cleanup custody after failed teardown."""
 
     def __init__(self, workflow: _Workflow) -> None:
         self._workflow = workflow
-        super().__init__("native VM operation retains cleanup custody")
+        super().__init__("VM operation retains cleanup custody")
 
     def retry_cleanup(self, deadline: Deadline) -> None:
         """Retry only aggregate cleanup under a fresh finite observation budget."""
         if type(deadline) is not Deadline or deadline.expires_at is None or deadline.expired:
-            raise ValidationError("Native VM cleanup requires a live finite deadline")
+            raise ValidationError("VM cleanup requires a live finite deadline")
         self._workflow.close(cleanup_deadline=deadline)
 
 
@@ -83,8 +84,9 @@ class _Workflow:
     preparation: VMTargetPreparation | None = None
     identity: TargetIdentityPreparation | None = None
     agent_identity: TargetIdentityPreparation | None = None
-    views: NativeVMOperation | None = None
+    views: VMOperation | None = None
     finalizing: bool = False
+    body_admission_closed: bool = False
     _cleanup_lock: Lock = field(default_factory=Lock, init=False, repr=False)
 
     def _components_settled(self) -> bool:
@@ -128,9 +130,10 @@ class _Workflow:
 
     def close(self, *, cleanup_deadline: Deadline | None = None) -> None:
         """Stop body admission, then release only on aggregate exact settlement."""
+        self.body_admission_closed = True
         self.owner.stop_admission()
         if not self._cleanup_lock.acquire(blocking=False):
-            raise StateError("Native VM operation cleanup is already active")
+            raise StateError("VM operation cleanup is already active")
         try:
             self._close(cleanup_deadline=cleanup_deadline)
         finally:
@@ -157,11 +160,11 @@ class _Workflow:
             if interrupted is not None:
                 raise interrupted
             if not drained:
-                raise StateError("Native VM managed keeper drain remains unsettled")
+                raise StateError("VM managed keeper drain remains unsettled")
             # Bookkeeping cannot settle a finished helper while its actual
             # host delivery is still open. This drain proves no guest closure.
             if not self.owner.close_local_delivery(budget):
-                raise StateError("Native VM operation retains unsettled helper delivery")
+                raise StateError("VM operation retains unsettled helper delivery")
             if self.views.execution_operation.active_inline_calls:
                 self.views.execution_operation.observe_inline_cleanup(budget)
             try:
@@ -176,14 +179,14 @@ class _Workflow:
                 raise
             self.views.execution_operation.finish_prepared_stages(budget)
         if not self.local_delivery.close(budget) or not self.owner.close_local_delivery(budget):
-            raise StateError("Native VM operation retains unsettled local delivery")
+            raise StateError("VM operation retains unsettled local delivery")
         if self.views is not None:
             for run in self.views.execution_operation.managed_runs:
                 run.finish_cleanup(budget)
             self.views.file_operation.settle_local_file_bookkeeping(budget)
             self.views.file_operation.settle_download_bookkeeping()
         if not self._components_settled():
-            raise StateError("Native VM operation retains unsettled work")
+            raise StateError("VM operation retains unsettled work")
         access_settled = self.access is None or self.access.settle(budget)
         obligations = self.owner.list_pending_lifecycle_obligations()
         if access_settled and self.local_delivery.settled and not obligations:
@@ -194,7 +197,7 @@ class _Workflow:
             self.finalizing = True
             self.owner.close()
             return
-        raise StateError("Native VM operation retains unsettled work")
+        raise StateError("VM operation retains unsettled work")
 
 
 def _prepare_target(
@@ -227,14 +230,12 @@ def _prepare_target(
 def _require_vm_row(db: Database, vm_name: str, platform: VMPlatform, ctx: RunContext) -> VMRow:
     vm = db.get_vm(vm_name)
     if vm is None:
-        raise NotFoundError("Native VM operation requires an existing VM", entity_kind="vm", entity_name=vm_name)
+        raise NotFoundError("VM operation requires an existing VM", entity_kind="vm", entity_name=vm_name)
     if vm.site != platform.site_name:
-        raise StateError(
-            "Native VM operation platform does not match the VM site", entity_kind="vm", entity_name=vm_name
-        )
+        raise StateError("VM operation platform does not match the VM site", entity_kind="vm", entity_name=vm_name)
     scope = ctx.operation_scope
     if scope is not None and scope.vm is not None and scope.vm != vm_name:
-        raise ValidationError("Native VM operation context names a different VM")
+        raise ValidationError("VM operation context names a different VM")
     return vm
 
 
@@ -246,43 +247,87 @@ def _prepare(
     ctx: RunContext,
     trusted_root: PurePosixPath,
     agent_name: str | None,
-) -> NativeVMOperation:
+    route: ExecutionRoute,
+) -> VMOperation:
     vm = _require_vm_row(db, vm_name, platform, ctx)
     instance_marker = validate_vm_instance_marker(vm.instance_marker)
     try:
         encode_account_request(AccountRequest("0" * 32, vm.admin_username))
     except AccountRequestError as error:
-        raise ValidationError("Native VM operation requires a valid administrative account") from error
+        raise ValidationError("VM operation requires a valid administrative account") from error
     agent: AgentRow | None = None
     if agent_name is not None:
         agent = db.get_agent(agent_name)
         if agent is None:
-            raise NotFoundError(
-                "Native VM operation requires an existing agent", entity_kind="agent", entity_name=agent_name
-            )
+            raise NotFoundError("VM operation requires an existing agent", entity_kind="agent", entity_name=agent_name)
         if agent.vm_name != vm_name:
             raise StateError(
-                "Native VM operation agent does not belong to the selected VM",
+                "VM operation agent does not belong to the selected VM",
                 entity_kind="agent",
                 entity_name=agent_name,
             )
         try:
             encode_account_request(AccountRequest("0" * 32, agent.linux_user))
         except AccountRequestError as error:
-            raise ValidationError("Native VM operation requires a valid agent account") from error
+            raise ValidationError("VM operation requires a valid agent account") from error
+    canonical_binding = (
+        ssh_execution_binding(vm, vm.tailscale_host, require_ssh_settings(vm, ctx, ctx.config))
+        if route is ExecutionRoute.CANONICAL
+        else None
+    )
+    selected_vm = (vm.site, vm.instance_marker, vm.admin_username, vm.tailscale_host)
+    selected_agent = (agent.vm_name, agent.linux_user) if agent is not None else None
     access = platform.build_native_execution_access(vm, ctx, owner=workflow.owner, custody=workflow.local_delivery)
     workflow.access = access
-    if access.native_configuration_check is not None:
+    if route is ExecutionRoute.NATIVE and access.native_configuration_check is not None:
         access.native_configuration_check()
     power = access.observe_power(workflow.deadline)
     if workflow.deadline.expired:
-        raise StateError("Native VM power observation exceeded its deadline", entity_kind="vm", entity_name=vm_name)
+        raise StateError("VM power observation exceeded its deadline", entity_kind="vm", entity_name=vm_name)
     if type(power) is not VMStatus or power not in {VMStatus.RUNNING, VMStatus.STOPPED, VMStatus.DEALLOCATED}:
-        raise StateError("Native VM power cannot authorize activation", entity_kind="vm", entity_name=vm_name)
+        raise StateError("VM power cannot authorize activation", entity_kind="vm", entity_name=vm_name)
     if power in {VMStatus.STOPPED, VMStatus.DEALLOCATED} and vm.operator_stopped:
         raise StateError("Operator-stopped VM cannot be started automatically", entity_kind="vm", entity_name=vm_name)
     locator = access.ensure_available(power, workflow.deadline)
-    binding = access.prepare_native_route(workflow.deadline)
+    selected_availability = access.independent_availability
+
+    def check_canonical(deadline: Deadline) -> None:
+        """Revalidate the retained provider and pinned canonical selection without activation."""
+        if workflow.body_admission_closed:
+            raise StateError("VM operation no longer admits body work")
+        provider_locator_remaining(deadline, vm_name=vm_name)
+        claim = db.operations.inspect(workflow.owner.ownership.scope)
+        if claim is None or claim.ownership != workflow.owner.ownership:
+            raise StateError("Canonical VM operation no longer owns its selected claim")
+        current = _require_vm_row(db, vm_name, platform, ctx)
+        if (current.site, current.instance_marker, current.admin_username, current.tailscale_host) != selected_vm:
+            raise StateError("Canonical VM selection changed")
+        if agent is not None:
+            current_agent = db.get_agent(agent.name)
+            if current_agent is None or (current_agent.vm_name, current_agent.linux_user) != selected_agent:
+                raise StateError("Canonical VM agent selection changed")
+        if access.observe_power(deadline) is not VMStatus.RUNNING:
+            raise StateError("Canonical VM availability is unconfirmed")
+        if access.observe_locator(deadline) != locator:
+            raise StateError("Canonical VM provider locator changed or is unavailable")
+        if access.independent_availability is not selected_availability:
+            raise StateError("Canonical VM platform availability changed")
+        provider_locator_remaining(deadline, vm_name=vm_name)
+
+    if route is ExecutionRoute.NATIVE:
+        binding = access.prepare_native_route(workflow.deadline)
+        route_check = access.route_check
+    else:
+        assert canonical_binding is not None
+        binding = replace(canonical_binding, _independent_availability=selected_availability)
+        route_check = check_canonical
+
+    def check_route() -> None:
+        if route_check is not None:
+            route_check(workflow.deadline)
+        provider_locator_remaining(workflow.deadline, vm_name=vm_name)
+
+    check_route()
     preparation = _prepare_target(workflow, vm, platform, locator, binding)
     result = preparation.guest_result if preparation is not None else None
     observation = result.observation if result is not None else None
@@ -294,12 +339,13 @@ def _prepare(
         or preparation.status is not VMTargetPreparationStatus.PREPARED
     ):
         raise StateError(
-            "Native VM target preparation did not establish an exact guest", entity_kind="vm", entity_name=vm_name
+            "VM target preparation did not establish an exact guest", entity_kind="vm", entity_name=vm_name
         )
     target = preparation.target
     assert target is not None
     if access.guest_check is not None:
         access.guest_check(guest)
+    check_route()
 
     try:
         identity = prepare_target_identity(
@@ -322,7 +368,8 @@ def _prepare(
         or identity.ordinary_plan is None
         or identity.elevated_plan is None
     ):
-        raise StateError("Native VM account preparation is unavailable", entity_kind="vm", entity_name=vm_name)
+        raise StateError("VM account preparation is unavailable", entity_kind="vm", entity_name=vm_name)
+    check_route()
     bootstrap = _NumericGuestBootstrap(identity.elevated_plan, guest)
     agent_identity: TargetIdentityPreparation | None = None
     if agent is not None:
@@ -347,9 +394,8 @@ def _prepare(
             or agent_identity.status is not TargetIdentityStatus.PREPARED
             or agent_identity.ordinary_plan is None
         ):
-            raise StateError(
-                "Native VM agent account preparation is unavailable", entity_kind="agent", entity_name=agent.name
-            )
+            raise StateError("VM agent account preparation is unavailable", entity_kind="agent", entity_name=agent.name)
+        check_route()
     file_operation = FileOperation(workflow.owner, target, bootstrap=bootstrap)
     execution_operation = ExecutionOperation(
         workflow.owner,
@@ -358,10 +404,14 @@ def _prepare(
         managed_repository=ManagedRunRepository(db),
         resource_owner=ManagedRunOwner(ManagedRunOwnerKind.RESOURCE, "vm:" + instance_marker),
         native_binding=binding,
-        route_check=access.route_check,
+        route_check=route_check,
     )
 
     def selected_deadline() -> Deadline:
+        if workflow.body_admission_closed:
+            raise StateError("VM operation no longer admits body work")
+        if route is ExecutionRoute.CANONICAL:
+            check_canonical(workflow.deadline)
         return workflow.deadline
 
     files = FileAccess(
@@ -391,7 +441,7 @@ def _prepare(
         files,
         binding.carrier.features,
         ExecutionIdentity(vm.admin_username, expected.euid, expected.egid, expected.groups),
-        ExecutionRoute.NATIVE,
+        route,
     )
     agent_target = None
     if agent is not None and agent_identity is not None:
@@ -423,13 +473,60 @@ def _prepare(
             agent_files,
             binding.carrier.features,
             ExecutionIdentity(agent.linux_user, expected.euid, expected.egid, expected.groups),
-            ExecutionRoute.NATIVE,
+            route,
         )
-    views = NativeVMOperation(
+    views = VMOperation(
         workflow.owner, files, execution, file_operation, execution_operation, execution_target, agent_target
     )
     workflow.views = views
     return views
+
+
+@contextmanager
+def _vm_operation(
+    db: Database,
+    vm_name: str,
+    platform: VMPlatform,
+    ctx: RunContext,
+    *,
+    route: ExecutionRoute,
+    deadline: Deadline,
+    trusted_root: PurePosixPath,
+    agent_name: str | None = None,
+) -> Iterator[VMOperation]:
+    """Claim and close one selected-route operation with shared prepared views."""
+    if type(route) is not ExecutionRoute or route not in {ExecutionRoute.NATIVE, ExecutionRoute.CANONICAL}:
+        raise ValidationError("VM execution requires an explicit native or canonical route")
+    if type(db) is not Database or not isinstance(platform, VMPlatform):
+        raise ValidationError("VM operation requires core database and platform values")
+    if type(ctx) is not RunContext or type(deadline) is not Deadline or deadline.expires_at is None or deadline.expired:
+        raise ValidationError("VM operation requires context and a live finite deadline")
+    validate_name(vm_name, max_length=MAX_VM_NAME_LENGTH)
+    if type(trusted_root) is not PurePosixPath or not normalized_root(str(trusted_root)):
+        raise ValidationError("VM operation requires a trusted normalized file root")
+
+    owner = OperationOwner.acquire(
+        db.operations, OperationScope(OperationResourceKind.VM, vm_name), "vm-execution-operation"
+    )
+    workflow = _Workflow(owner, deadline)
+    primary: BaseException | None = None
+    try:
+        yield _prepare(workflow, db, vm_name, platform, ctx, trusted_root, agent_name, route)
+    except BaseException as control:
+        primary = control
+        raise
+    finally:
+        try:
+            workflow.close()
+        except BaseException as cleanup:
+            fact = VMOperationControlFact(workflow)
+            if primary is None:
+                fact.__cause__ = cleanup.__cause__
+                raise cleanup from fact
+            primary.add_note("VM operation teardown retained unresolved custody")
+            fact.__cause__ = primary.__cause__
+            primary.__cause__ = fact
+            primary.__suppress_context__ = True
 
 
 @contextmanager
@@ -442,59 +539,41 @@ def native_vm_operation(
     deadline: Deadline,
     trusted_root: PurePosixPath,
     agent_name: str | None = None,
-) -> Iterator[NativeVMOperation]:
-    """Claim and close one native operation with admin and optional selected agent views."""
-    if type(db) is not Database or not isinstance(platform, VMPlatform):
-        raise ValidationError("Native VM operation requires core database and platform values")
-    if type(ctx) is not RunContext or type(deadline) is not Deadline or deadline.expires_at is None or deadline.expired:
-        raise ValidationError("Native VM operation requires context and a live finite deadline")
-    validate_name(vm_name, max_length=MAX_VM_NAME_LENGTH)
-    if type(trusted_root) is not PurePosixPath or not normalized_root(str(trusted_root)):
-        raise ValidationError("Native VM operation requires a trusted normalized file root")
-
-    owner = OperationOwner.acquire(
-        db.operations, OperationScope(OperationResourceKind.VM, vm_name), "native-vm-operation"
-    )
-    workflow = _Workflow(owner, deadline)
-    primary: BaseException | None = None
-    try:
-        yield _prepare(workflow, db, vm_name, platform, ctx, trusted_root, agent_name)
-    except BaseException as control:
-        primary = control
-        raise
-    finally:
-        try:
-            workflow.close()
-        except BaseException as cleanup:
-            fact = NativeVMOperationControlFact(workflow)
-            if primary is None:
-                fact.__cause__ = cleanup.__cause__
-                raise cleanup from fact
-            primary.add_note("Native VM operation teardown retained unresolved custody")
-            fact.__cause__ = primary.__cause__
-            primary.__cause__ = fact
-            primary.__suppress_context__ = True
+) -> Iterator[VMOperation]:
+    """Select native delivery inside the shared VM operation lifetime."""
+    with _vm_operation(
+        db,
+        vm_name,
+        platform,
+        ctx,
+        route=ExecutionRoute.NATIVE,
+        deadline=deadline,
+        trusted_root=trusted_root,
+        agent_name=agent_name,
+    ) as operation:
+        yield operation
 
 
 @contextmanager
-def native_vm_context(
+def vm_execution_context(
     db: Database,
     vm_name: str,
     platform: VMPlatform,
     ctx: RunContext,
     *,
+    route: ExecutionRoute,
     deadline: Deadline,
     trusted_root: PurePosixPath,
     agent_name: str | None = None,
 ) -> Iterator[RunContext]:
-    """Bind prepared native targets for one operation-owned context lifetime.
+    """Bind prepared selected-route targets for one operation-owned context lifetime.
 
     Scope describes the caller's operation; VM and optional agent selection
-    come only from the explicit arguments. The native operation owns admission,
+    come only from the explicit arguments. The shared operation owns admission,
     preparation and aggregate teardown, including failures during context assembly.
     """
-    with native_vm_operation(
-        db, vm_name, platform, ctx, deadline=deadline, trusted_root=trusted_root, agent_name=agent_name
+    with _vm_operation(
+        db, vm_name, platform, ctx, route=route, deadline=deadline, trusted_root=trusted_root, agent_name=agent_name
     ) as operation:
         yield RunContext(
             config=ctx.config,

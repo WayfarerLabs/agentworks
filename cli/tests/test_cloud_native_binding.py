@@ -324,7 +324,7 @@ def test_gcp_persisted_network_policy(cloud: Any, fault: str) -> None:
 
 
 def test_binding_construction_does_not_admit_files(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agentworks.vms._ssh_native_binding import ssh_native_binding
+    from agentworks.vms._ssh_native_binding import ssh_execution_binding
 
     def denied(*args: Any, **kwargs: Any) -> Any:
         raise AssertionError("binding construction must stay passive")
@@ -332,7 +332,7 @@ def test_binding_construction_does_not_admit_files(monkeypatch: pytest.MonkeyPat
     for method in ("stat", "is_file", "exists", "open"):
         monkeypatch.setattr(Path, method, denied)
     monkeypatch.setattr(subprocess, "Popen", denied)
-    binding = ssh_native_binding(NS(name="vm", admin_username="admin"), IP, SETTINGS)
+    binding = ssh_execution_binding(NS(name="vm", admin_username="admin"), IP, SETTINGS)
     assert binding.carrier.features.live_stdio
     assert binding._independent_availability is None
     assert binding._new_managed_delivery is not None

@@ -16,7 +16,7 @@ from agentworks.operations import OperationOwner
 from agentworks.plugins.azure._incarnation_start import AzureIncarnationStart
 from agentworks.plugins.azure._incarnation_start_payload import TERMINAL_STATES, StartState
 from agentworks.plugins.azure._native_access import AzureOwnedReadAccess
-from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_native_binding
+from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_execution_binding
 from agentworks.vms._ssh_native_exposure import OwnedSSHExposure
 
 if TYPE_CHECKING:
@@ -72,6 +72,10 @@ class AzureOwnedAccess:
         self.binding: NativeExecutionBinding | None = None
         self.guest_check: Callable[[VMGuestIdentity], None] | None = None
         self._settings: SSHSettings | None = None
+
+    @property
+    def independent_availability(self) -> _IndependentJobAvailability:
+        return _IndependentJobAvailability.NO_IDLE_STOP
 
     @property
     def native_configuration_check(self) -> Callable[[], None]:
@@ -209,8 +213,8 @@ class AzureOwnedAccess:
             assert settings is not None
             self._endpoint = self._reader.observe_public_endpoint(deadline)
             self._require_open()
-            self.binding = ssh_native_binding(
-                self._vm, self._endpoint, settings, independent_availability=_IndependentJobAvailability.NO_IDLE_STOP
+            self.binding = ssh_execution_binding(
+                self._vm, self._endpoint, settings, independent_availability=self.independent_availability
             )
             self._exposure = OwnedSSHExposure(self._vm.name)
             prefixes = self._exposure.resolve(config_allow_cidrs(self._ctx.config), deadline)

@@ -20,7 +20,7 @@ from agentworks.plugins.aws._owned_auth import _OwnedRoleSession
 from agentworks.plugins.aws.auth import _build_ambient_session
 from agentworks.plugins.aws.config import AwsAmbientAuth
 from agentworks.plugins.aws.network import error_code, wrap_ec2_error
-from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_native_binding
+from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_execution_binding
 from agentworks.vms._ssh_native_exposure import OwnedSSHExposure
 
 if TYPE_CHECKING:
@@ -76,6 +76,10 @@ class EC2OwnedAccess:
         self._running: tuple[ProviderLocator, dict[str, Any]] | None = None
         self._effects_settled = False
         self._settings: SSHSettings | None = None
+
+    @property
+    def independent_availability(self) -> _IndependentJobAvailability:
+        return _IndependentJobAvailability.NO_IDLE_STOP
 
     @property
     def native_configuration_check(self) -> Callable[[], None]:
@@ -145,8 +149,8 @@ class EC2OwnedAccess:
             raise StateError("EC2 selected locator changed")
         self._require_running(instance)
         self._endpoint = instance.get("PublicIpAddress")
-        self.binding = ssh_native_binding(
-            self._vm, self._endpoint, settings, independent_availability=_IndependentJobAvailability.NO_IDLE_STOP
+        self.binding = ssh_execution_binding(
+            self._vm, self._endpoint, settings, independent_availability=self.independent_availability
         )
         provider_locator_remaining(deadline, vm_name=self._vm.name)
         self._exposure = OwnedSSHExposure(self._vm.name)

@@ -268,7 +268,7 @@ def test_availability_needs_no_native_topology_nat_ingress_or_guest(full, monkey
         pytest.fail("availability selected native delivery")
 
     monkeypatch.setattr(p.access._reader, "observe_instance", deny)
-    monkeypatch.setattr(native, "ssh_native_binding", deny)
+    monkeypatch.setattr(native, "ssh_execution_binding", deny)
     monkeypatch.setattr(native, "OwnedSSHExposure", deny)
     monkeypatch.setattr("agentworks.vms._native_operation.prepare_managed_vm_target_from_platform", deny)
     locator = p.access.ensure_available(power, p.deadline)
