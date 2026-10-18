@@ -1273,18 +1273,17 @@ acceptance invariants. One selected helper cannot prove what the other routes se
 ordinary-user `/dev/shm` contents at logout. The `/run` choice is a Linux guest candidate, not
 proved WSL2/SSH/QGA mount or boot-lifetime behavior and not a macOS host setup requirement.
 
-The first concrete binding is Linux VM-specific. Target preparation already observes a
-`VMGuestIdentity` containing the raw instance marker, kernel boot ID and PID 1 start time and
-retains it inside its `guest_result`. It also projects those facts into `ManagedTargetIdentity`'s
-provider-bound incarnation hash and derived boot UUID. That projection cannot be reversed inside
-`FileOperation`; the current private constructor receives only the projected identity. When
-production composition is built, carry the verified raw triple from the prepared result into file
-custody and the exact durable gate binding, without adding an otherwise unused field first. The
-helper must independently observe the _current_ guest triple before trusting the gate. Do not accept
-a request-to-record comparison as a guest identity check. No production caller currently constructs
-`FileOperation`, so this handoff and the provider locator proof are still open. SSH-accessed macOS
-platform hosts need their own concrete host identity/epoch proof, not the VM marker protocol; file
-recovery there remains unavailable until that proof exists.
+The concrete guest binding is Linux VM-specific. Target preparation observes a `VMGuestIdentity`
+containing the raw instance marker, kernel boot ID and PID 1 start time and retains it inside its
+`guest_result`. It also projects those facts into `ManagedTargetIdentity`'s provider-bound
+incarnation hash and derived boot UUID. That projection cannot be reversed. The private VM operation
+composition therefore supplies the raw identity through the numeric bootstrap to `FileOperation`;
+the owned WSL2 download path supplies it through gate setup. File custody and the durable gate
+binding retain the actual triple, not just its projection. The helper independently observes the
+_current_ guest triple before trusting the gate. A request-to-record comparison is not a guest
+identity check. These composition paths do not establish native route, provider-locator or recovery
+acceptance. SSH-accessed macOS platform hosts still need their own concrete host identity/epoch
+proof, not the VM marker protocol; file recovery there remains unavailable until that proof exists.
 
 Every effect-bearing fixed helper opens the _existing_ gate without following its final symlink,
 validates its exact bound inode and acquires an exclusive Linux `flock` within the request's
