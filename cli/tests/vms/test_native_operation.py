@@ -34,8 +34,13 @@ from agentworks.db.operations import OperationRepository
 from agentworks.errors import ExternalError, StateError, ValidationError
 from agentworks.execution import _file_effect_gate, _file_gate_setup, _wsl2_owned_operation
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
+from agentworks.execution._file_effect_gate import FileEffectGateBinding
+from agentworks.execution._file_effect_gate_protocol import encode_gate_control_result
+from agentworks.execution._file_gate_namespace_obligation import decode_namespace_obligation
+from agentworks.execution._file_gate_namespace_protocol import NamespaceStatus, encode_namespace_status
 from agentworks.execution._file_obligation import decode_file_call_obligation
 from agentworks.execution._file_operation import _ActiveFileUpload
+from agentworks.execution._file_wire import FileRecord, FileRecordKind, encode_file_record
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_runs import ManagedRunOwner, ManagedRunOwnerKind
@@ -605,6 +610,28 @@ class _RouteCarrier:
                 request = None
             if isinstance(request, dict) and "account" in request:
                 return self.accounts.execute(invocation, io=io, deadline=deadline, custody=custody)
+        for row in self.guest.database.operations.list_pending_lifecycle_obligations(claim.ownership):
+            if row.obligation_kind == "file-gate-namespace":
+                # Root-owned namespace effects have their own isolated helper
+                # proofs. This route fixture simulates that privilege boundary.
+                record = decode_namespace_obligation(row.payload)
+                assert isinstance(io.output, SinkOutput)
+                nonce = invocation.argv[invocation.argv.index("agentworks-runtime-prerequisite") + 1]
+                if record.binding is None:
+                    binding = FileEffectGateBinding(
+                        record.setup.path, b"i" * 16, b"g" * 16, record.setup.guest, 0, record.target.name, 1, 2
+                    )
+                    body = encode_gate_control_result(binding)
+                else:
+                    body = encode_namespace_status(NamespaceStatus.PREPARED)
+                payload = (
+                    f"AGW_RUNTIME_1:{nonce}:ready:0\n".encode()
+                    + encode_file_record(nonce, FileRecord(0, FileRecordKind.RESULT, body))
+                    + encode_file_record(nonce, FileRecord(1, FileRecordKind.FINISHED, b"{}"))
+                )
+                io.output.stdout.try_write(memoryview(payload))
+                streams = CapturedOutput(complete=True, retention=Retention.DELIVERED)
+                return CarrierReport(Dispatch.SENT, ExitStatus(code=0), stdout=streams, stderr=streams)
         self.local_deadlines.append(deadline)
         for row in self.guest.database.operations.list_pending_lifecycle_obligations(claim.ownership):
             if row.obligation_kind == "file-call":

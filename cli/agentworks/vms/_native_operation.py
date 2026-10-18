@@ -15,6 +15,7 @@ from agentworks.errors import NotFoundError, StateError, ValidationError
 from agentworks.execution._account_protocol import AccountRequest, AccountRequestError, encode_account_request
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._execution_operation import ExecutionOperation
+from agentworks.execution._file_gate_namespace import NamespacePreparation
 from agentworks.execution._file_operation import FileOperation
 from agentworks.execution._file_paths import normalized_root
 from agentworks.execution._managed_runs import ManagedRunOwner, ManagedRunOwnerKind, ManagedRunRepository
@@ -84,12 +85,15 @@ class _Workflow:
     preparation: VMTargetPreparation | None = None
     identity: TargetIdentityPreparation | None = None
     agent_identity: TargetIdentityPreparation | None = None
+    namespace: NamespacePreparation | None = None
     views: VMOperation | None = None
     finalizing: bool = False
     body_admission_closed: bool = False
     _cleanup_lock: Lock = field(default_factory=Lock, init=False, repr=False)
 
     def _components_settled(self) -> bool:
+        if self.namespace is not None and not self.namespace.settled:
+            return False
         preparation = self.preparation
         if preparation is not None and (
             preparation.pending_remote_effects
@@ -180,6 +184,8 @@ class _Workflow:
             self.views.execution_operation.finish_prepared_stages(budget)
         if not self.local_delivery.close(budget) or not self.owner.close_local_delivery(budget):
             raise StateError("VM operation retains unsettled local delivery")
+        if self.namespace is not None:
+            self.namespace.settle_local(budget)
         if self.views is not None:
             for run in self.views.execution_operation.managed_runs:
                 run.finish_cleanup(budget)
@@ -395,6 +401,17 @@ def _prepare(
             or agent_identity.ordinary_plan is None
         ):
             raise StateError("VM agent account preparation is unavailable", entity_kind="agent", entity_name=agent.name)
+        check_route()
+        workflow.namespace = NamespacePreparation(
+            workflow.owner,
+            binding.carrier,
+            target,
+            agent_identity.ordinary_plan,
+            bootstrap,
+            binding.runtime_selection,
+            workflow.deadline,
+        )
+        workflow.namespace.prepare()
         check_route()
     file_operation = FileOperation(workflow.owner, target, bootstrap=bootstrap)
     execution_operation = ExecutionOperation(
