@@ -920,5 +920,40 @@ delayed application-entry controls pass after correcting fixture timing and cano
 interpretation. The parent observes raw `16 07 CR`, while the restored remote canonical mode
 observes `07 LF`. Literal and encoded privacy, exact status/output and retained cleanup remain
 checked. These are synthetic Linux observations. The candidate remains separate from public feature
-activation; installed-client proof, macOS/Windows, Windows owner/keyboard delivery and shared
-presentation cleanup remain open. Full standup and the later retirement sequence are unchanged.
+activation. The scoped installed-client observations below do not close macOS/Windows, Windows
+owner/keyboard delivery or shared presentation cleanup. Full standup and the later retirement
+sequence are unchanged.
+
+## Native Linux terminal component observations
+
+The
+[complete private patch handoff](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6255718238)
+contains all three mail commits through `e9442d6a8`. Applying the entire sequence onto public
+`72a841d830d8b74a99ec27ab64b46b459d25187a` succeeds cleanly and reproduces the native-tested CLI
+tree `93efaef5949db5231ca2eae389a9a6fcc9a7fd3d`. Native joint pin
+`09dff3511f0f1af39f9499d8c154b7802a854528` includes transport `9011809a7` and the reviewed drain
+fixture correction. The patch is component evidence, without public terminal activation or a new
+review-requested/ready edge.
+
+Actual preparation and SSHCarrier execution pass on Linux arm64, Python 3.12.13 and installed
+OpenSSH client 9.2p1/server 9.2. The lead's positive host case verifies binary source, environment
+and argument hashes, 3,740 payload bytes, keyboard input, remote resize observations at 42x113 then
+58x144, exact completion/local status zero and literal/encoded privacy. It measures original child
+reaping, pipe and owned PTY closure, settled custody and exact borrowed terminal restoration. The
+positively identified guest process is observed absent within that same original host execution.
+
+An independent tester's fresh missing-runtime host case passes all 26 measurement gates. It observes
+MISSING/prerequisite refusal with zero payload or keyboard release and no application records. The
+native selector exits zero: SENT/completion zero/local status zero coexist with Failure.OUTPUT and
+incomplete output streams. This records preparation refusal, not application success. Original
+process handles are reaped, custody settles, terminal state restores and the exact listener port
+accepts an independent bind after cleanup. No application identity or retirement is claimed for this
+refusal.
+
+Both cases use fresh owned loopback fixtures and isolated owned shell startup, without operator
+state, service or account changes. The earlier sandbox PTY ownership failure remains a separate
+failed environment observation. These host results do not establish native early-key/fault matrices,
+the minimum client version, macOS/Windows, shared presentation cleanup, CLI/RunContext or full R1-R5
+acceptance. The complete combined run above still has one transport fixture failure; the owner's
+controlled test-only correction is in progress. No implementation checkbox, SDD lock or retirement
+step closes on these scoped observations.

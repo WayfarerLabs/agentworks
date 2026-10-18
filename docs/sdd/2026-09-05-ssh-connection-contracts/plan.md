@@ -226,13 +226,13 @@ proves that restoring old TOML does not discard current managed policy, revocati
 partial-update custody. Production writer coexistence and rollback through both usable RunContext
 paths still require transport composition and native acceptance.
 
-Current public shared dependency: transport #833 at `dd10ebbeee677570c95f9b0f30688f32f6891aeb`, with
-separately adopted owner-authored cleanup and CI fixture corrections. The fourth round additionally
-adopts the six focused shared-retirement commits from `1368ada65` through `40748a3c`, integrated at
-`bf4cd46e2`; documentation conflicts preserve only those intended additions. This does not adopt the
-full private transport branch, its Windows prototype, printable preparation or unfinished
-platform/FileAccess/RunContext work. The latest full native SSH testing pin remains
-`1fcabfe6082ab23b1e04eeac115e842f541eee95`. The
+Current public shared dependency: transport #833 at `9011809a70d32535d871b451d7a3e637cc65a107`,
+incorporated into SSH working head `72a841d830d8b74a99ec27ab64b46b459d25187a`. Production CLI source
+and the transport SDD match the owner head; the extra CLI change is the reviewed SSH drain fixture
+correction. The complete combined local run still has one transport fixture failure. This working
+composition does not accept unfinished terminal, platform/FileAccess or RunContext work. The latest
+full native SSH testing pin remains `1fcabfe6082ab23b1e04eeac115e842f541eee95`; subsequent private
+Linux terminal component observations are separately scoped in the progress record. The
 [dependency chronology](phase2-results.md#historical-dependency-chronology) retains earlier pins,
 measurements and limits without changing completed plan records or the
 [coordinated final stack](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6032839010).
@@ -249,9 +249,10 @@ settles.
 ### Complete the carrier and migration
 
 The [POSIX resource implementation](terminal-lld.md#posix-resource-implementation) and privately
-reviewed relay advance acquisition, cleanup evidence and retained restoration. Resize composition,
-shared presentation cleanup and complete native terminal delivery remain open; the completed-carrier
-and supported-workstation gates below are unchanged.
+reviewed relay advance acquisition, cleanup evidence and retained restoration. The private actual
+carrier composition now has scoped Linux native handoff, resize and runtime-refusal evidence. Shared
+presentation cleanup and complete supported-workstation terminal delivery remain open; the
+completed-carrier and supported-workstation gates below are unchanged.
 
 - [x] Adopt transport #833's shared finite-input subprocess pump at `e85e9f5c` while preserving SSH
       environment policy and report provenance. Integration code `1b2c6832` passes the combined
