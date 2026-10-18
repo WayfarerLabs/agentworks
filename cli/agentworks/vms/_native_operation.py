@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
+from threading import Lock
 from typing import TYPE_CHECKING
 
 from agentworks.capabilities.base import RunContext
@@ -78,6 +79,7 @@ class _Workflow:
     agent_identity: TargetIdentityPreparation | None = None
     views: NativeVMOperation | None = None
     finalizing: bool = False
+    _cleanup_lock: Lock = field(default_factory=Lock, init=False, repr=False)
 
     def _components_settled(self) -> bool:
         preparation = self.access.preparation if self.access is not None else None
@@ -120,10 +122,19 @@ class _Workflow:
 
     def close(self, *, cleanup_deadline: Deadline | None = None) -> None:
         """Stop body admission, then release only on aggregate exact settlement."""
+        self.owner.stop_admission()
+        if not self._cleanup_lock.acquire(blocking=False):
+            raise StateError("Native VM operation cleanup is already active")
+        try:
+            self._close(cleanup_deadline=cleanup_deadline)
+        finally:
+            self._cleanup_lock.release()
+
+    def _close(self, *, cleanup_deadline: Deadline | None = None) -> None:
+        """Run aggregate cleanup while this workflow holds its cleanup lock."""
         if self.finalizing:
             self.owner.close()
             return
-        self.owner.stop_admission()
         self.owner.retire_unused_borrow()
         budget = self.deadline if cleanup_deadline is None else cleanup_deadline
         if self.views is not None:
