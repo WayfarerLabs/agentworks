@@ -5392,6 +5392,17 @@ intermediate public API.
       and permanent developer teaching without adding an alias or claiming cloud/provider and
       create-time adoption. All three private lanes accept this correction at `4a53c39a`; the
       broader native composition gate above remains open.
+- [x] Implement and privately review buffered host-local Lima carrier delivery using the existing
+      process owner, original deadline and explicit bootstrap shell. Disable implicit start,
+      reconnect, UI and host-environment propagation; preserve literal prepared argv through a fixed
+      Bash trampoline and keep nonzero client completion ambiguous. At `c99d37651`, the lead's
+      carrier/native/context selection passes 254 cases with one skip and strict typing passes
+      across 1,438 sources. Project, complexity and generic correctness source reviews are clear.
+      Actual local process regressions cover assignment-looking and option-looking executables,
+      binary I/O and sensitivity. These are not native Lima quoting or workstation proofs.
+      Delivery-account observation, provider identity, activation, SSH placement-host composition,
+      provisioning, rollback and complete RunContext delivery remain required and unfinished under
+      the broader factory gate.
 - [ ] Prove fresh-process platform composition without retirement dependencies, not only calls to
       already-imported native hooks. The first-binding audit at `6149cf06` found that VM-platform
       package initialization imports Lima's legacy dependencies, while plugin initialization imports

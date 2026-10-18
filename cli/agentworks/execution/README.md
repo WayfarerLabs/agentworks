@@ -55,8 +55,8 @@ stream whose EOF cannot be established within the carrier's collection bound. `O
 distinct capture-limit outcome. These local failures preserve independently observed completion and
 partial-stream evidence; none establishes guest cancellation or permits replay.
 
-`carriers/lima.py` provides private buffered delivery through an explicit host-local Lima client
-and instance. It uses the caller's existing delivery custody and original deadline. Automatic start,
+`carriers/lima.py` provides private buffered delivery through an explicit host-local Lima client and
+instance. It uses the caller's existing delivery custody and original deadline. Automatic start,
 reconnect, terminal UI and host-environment propagation are disabled. The bootstrap shell is
 explicitly Bash; Lima still runs its outer login startup hooks. A fixed non-login Bash trampoline
 executes literal prepared argv, including executable names containing `=` or beginning with `-`,
