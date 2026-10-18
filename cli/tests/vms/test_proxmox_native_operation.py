@@ -357,7 +357,7 @@ def test_native_direct_selects_closure_factory_and_finite_cleanup_before_finish(
     monkeypatch.setattr(platform, "observe_provider_locator", locator)
     if route_fault == "guest":
         operation = views.execution_operation
-        operation._target = replace(operation._target, boot_id="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+        operation._managed_target = replace(operation._target, boot_id="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
     if route_fault:
         attempt = active.operation.outstanding_attempt
         for _ in range(2):

@@ -59,7 +59,7 @@ def scenario(inline_scenario):
     # DIRECT does not elevate the local test process. The actual root helper
     # refuses identity here while still emitting authentic runtime evidence.
     plan = IdentityPlan(IdentityExpectation(0, 0, (0,)), IdentityMode.DIRECT)
-    operation._target = replace(operation._target, boot_id=vm_guest_boot_id(GUEST))
+    operation._managed_target = replace(operation._target, boot_id=vm_guest_boot_id(GUEST))
     return database, owner, operation, base, plan, runtime, qga, deliveries
 
 

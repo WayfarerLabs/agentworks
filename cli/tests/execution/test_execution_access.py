@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Iterator
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -157,6 +158,60 @@ def test_command_runs_with_exact_default_deadline_and_exit_status(bound: Bound, 
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
+
+
+@pytest.mark.parametrize("status", [0, 17])
+@_LINUX_ONLY
+def test_platform_host_direct_needs_no_managed_identity(tmp_path: Path, status: int) -> None:
+    with closing(Database(tmp_path / "host.db")) as database:
+        owner = OperationOwner.acquire(
+            database.operations,
+            OperationScope(OperationResourceKind.PLATFORM_HOST, "shared-platform-host"),
+            "host-inline",
+        )
+        carrier = LocalCarrier()
+        deadline = Deadline.after(30)
+        checks: list[Deadline] = []
+        operation = ExecutionOperation(owner, None, route_check=checks.append)
+        groups = tuple(sorted(set(os.getgroups()) | {os.getegid()}))
+        access = ExecutionAccess(
+            operation,
+            carrier,
+            runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable),
+            ordinary_plan=IdentityPlan(IdentityExpectation(os.geteuid(), os.getegid(), groups), IdentityMode.DIRECT),
+            elevated_plan=None,
+            entity_kind="platform-host",
+            entity_name="shared-platform-host",
+            deadline=lambda: deadline,
+        )
+        payload = b"\x00\xffhost input\n"
+        literal = "literal ; $(false) ' \" *"
+        command = Command(
+            (
+                sys.executable,
+                "-c",
+                "import sys; sys.stdout.buffer.write(sys.argv[1].encode() + sys.stdin.buffer.read()); "
+                "sys.stderr.buffer.write(b'host error'); sys.exit(int(sys.argv[2]))",
+                literal,
+                str(status),
+            )
+        )
+        try:
+            result = access.run(command, profile=Protection.DIRECT, stdin=Input.bytes(payload))
+            assert result.status == ExitCode(status)
+            assert result.stdout.data == literal.encode() + payload
+            assert result.stderr.data == b"host error"
+            assert carrier.calls == 1 and carrier.deadlines == [deadline]
+            assert checks == [deadline]
+            assert operation.active_inline_calls == () and operation.unfinished_inline_executions == ()
+            operation.finish()
+            assert owner.list_pending_lifecycle_obligations() == ()
+            owner.seal_lifecycle_obligations()
+            owner.record_effects_resolved()
+            owner.close()
+            assert database.operations.inspect(owner.ownership.scope) is None
+        finally:
+            assert owner.close_local_delivery(Deadline.after(3))
 
 
 @_LINUX_ONLY

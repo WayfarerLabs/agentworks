@@ -427,7 +427,7 @@ def test_exact_context_mismatch_refuses_disposal_before_borrow(observer, change)
     _, _, operation, access, main, workflow = observer
     guest = GUEST
     if change == "vm":
-        operation._target = replace(operation._target, name="another-vm")
+        operation._managed_target = replace(operation._target, name="another-vm")
     elif change in {"marker", "boot"}:
         guest = replace(
             GUEST,

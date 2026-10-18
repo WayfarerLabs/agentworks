@@ -21,12 +21,14 @@ from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._inline import InlineCandidateResult, prepare_inline_candidate
 from agentworks.execution._inline_control import StreamRetention
 from agentworks.execution._inline_observer import InlineObservation, StreamObservation
+from agentworks.execution._managed_runs import ManagedRunIdentity, ManagedRunRepository
 from agentworks.execution._runtime_prerequisite import (
     RuntimePrerequisiteObservation,
     RuntimePrerequisiteState,
     RuntimeSelection,
     RuntimeTargetOS,
 )
+from agentworks.execution.binding import NativeExecutionBinding
 from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
@@ -37,9 +39,10 @@ from agentworks.execution.carrier import (
     Failure,
     PreparedInvocation,
 )
-from agentworks.execution.models import Command
+from agentworks.execution.models import Command, Input, JobRef, Output
 from agentworks.operations import OperationOwner
 from tests.execution.files._target_support import target_for_owner
+from tests.execution.test_numeric_inline_bootstrap_adoption import _CONTEXT
 
 
 @dataclass
@@ -119,6 +122,112 @@ def plan() -> IdentityPlan:
 @pytest.fixture
 def runtime_selection() -> RuntimeSelection:
     return RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
+
+
+@pytest.mark.parametrize("native_binding", [False, True])
+@pytest.mark.parametrize(
+    "action",
+    [
+        "binding",
+        "access",
+        "run",
+        "observe",
+        "read",
+        "wait",
+        "stop",
+        "dispose",
+        "relay",
+        "output_policy",
+        "terminal",
+        "managed_read",
+        "start",
+        "resource_start",
+    ],
+)
+def test_host_without_managed_target_refuses_job_admission_before_effects(
+    tmp_path, monkeypatch, plan, runtime_selection, action, native_binding
+) -> None:
+    database = Database(tmp_path / "host.db")
+    owner = OperationOwner.acquire(
+        database.operations, OperationScope(OperationResourceKind.PLATFORM_HOST, "host-jobs"), "host-job-refusal"
+    )
+    carrier = RecordingCarrier()
+
+    def refuse(*args, **kwargs):
+        pytest.fail("unavailable managed target crossed local admission")
+
+    repository = ManagedRunRepository(database)
+    binding = NativeExecutionBinding(carrier, "delivery", runtime_selection, _new_managed_delivery=refuse)
+    owned = execution_operation.ExecutionOperation(
+        owner,
+        None,
+        managed_repository=repository,
+        native_binding=binding if native_binding else None,
+        route_check=refuse,
+    )
+    monkeypatch.setattr(owner, "borrow", refuse)
+    monkeypatch.setattr(owner, "list_pending_lifecycle_obligations", refuse)
+    monkeypatch.setattr(repository, "reserve", refuse)
+    monkeypatch.setattr(repository, "inspect", refuse)
+    monkeypatch.setattr(execution_operation, "prepare_managed_read", refuse)
+    monkeypatch.setattr(execution_operation, "prepare_managed_live", refuse)
+    monkeypatch.setattr(execution_operation, "compose_managed_body", refuse)
+    reference = JobRef("a" * 32)
+    deadline = Deadline.after(30)
+    context = dict(
+        repository=repository,
+        owner=owner,
+        target=target_for_owner(owner),
+        guest=_CONTEXT.guest,
+        root_plan=_CONTEXT.root_entry,
+        runtime_selection=runtime_selection,
+    )
+    start = dict(
+        plan=plan,
+        runtime_selection=runtime_selection,
+        deadline=deadline,
+        input=Input.eof(),
+        output=Output.capture(),
+        env=None,
+        cwd=None,
+        sensitive=False,
+    )
+    calls: dict[str, Callable[[], object]] = {
+        "binding": lambda: owned.require_job_binding(carrier, runtime_selection),
+        "access": lambda: owned.require_managed_access(ManagedRunIdentity(reference.run_id), **context),
+        "run": lambda: owned.require_managed_run(ManagedRunIdentity(reference.run_id), **context),
+        "observe": lambda: owned.observe_job(reference, carrier, deadline),
+        "read": lambda: owned.read_job(reference, carrier, deadline, "stdout"),
+        "wait": lambda: owned.wait_job(reference, carrier, deadline),
+        "stop": lambda: owned.stop_job(reference, deadline),
+        "dispose": lambda: owned.dispose_job(reference, carrier, deadline),
+        "relay": lambda: owned.relay_managed(reference, carrier, deadline=deadline),
+        "output_policy": lambda: owned.unobserved_managed_output(reference),
+        "terminal": lambda: owned.retain_job_terminal_observation(reference, None),
+        "managed_read": lambda: owned.observe_managed(
+            carrier,
+            expected_launch=b"",
+            root_plan=_CONTEXT.root_entry,
+            runtime_selection=runtime_selection,
+            deadline=deadline,
+            guest=_CONTEXT.guest,
+            stream=None,
+        ),
+        "start": lambda: owned.start_managed(carrier, Command(("/bin/true",)), **start),
+        "resource_start": lambda: owned.start_resource_managed(carrier, Command(("/bin/true",)), **start),
+    }
+    try:
+        with pytest.raises(StateError):
+            calls[action]()
+        assert carrier.calls == 0 and carrier.validations == 0
+        assert owned.managed_runs == () and owned.active_inline_calls == ()
+        assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
+        claim = database.operations.inspect(owner.ownership.scope)
+        assert claim is not None and claim.state is OperationClaimState.RESERVED
+        owned.finish()
+        owner.close()
+    finally:
+        database.close()
 
 
 def _candidate(report: CarrierReport, *, payload: bytes = b"") -> InlineCandidateResult:

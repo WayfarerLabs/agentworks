@@ -7,7 +7,7 @@ from threading import Lock
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from agentworks.db import LifecycleObligationState
+from agentworks.db import LifecycleObligationState, OperationResourceKind
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._helper_launcher import _validate_plan
@@ -207,7 +207,7 @@ class ExecutionOperation:
     def __init__(
         self,
         owner: OperationOwner,
-        target: ManagedTargetIdentity,
+        target: ManagedTargetIdentity | None,
         *,
         bootstrap: _NumericGuestBootstrap | None = None,
         managed_repository: ManagedRunRepository | None = None,
@@ -215,24 +215,29 @@ class ExecutionOperation:
         resource_owner: ManagedRunOwner | None = None,
         route_check: Callable[[Deadline], None] | None = None,
     ) -> None:
-        """Bind inline calls to one exact owner scope and selected target."""
+        """Bind helper custody to an owner; host DIRECT calls need no managed target."""
         scope = owner.ownership.scope
         if resource_owner is not None and (
             type(resource_owner) is not ManagedRunOwner or resource_owner.kind is not ManagedRunOwnerKind.RESOURCE
         ):
             raise ValidationError("Execution resource binding requires an immutable RESOURCE owner")
-        if (
+        if target is None:
+            if scope.resource_kind is not OperationResourceKind.PLATFORM_HOST:
+                raise ValidationError("Execution without a managed target requires a platform-host owner")
+        elif (
             type(target) is not ManagedTargetIdentity
             or target.kind.value != scope.resource_kind.value
             or target.name != scope.resource_name
         ):
             raise ValidationError("Execution operation target must match its owner scope")
         if bootstrap is not None and (
-            target.kind is not ManagedTargetKind.VM or vm_guest_boot_id(bootstrap.guest) != target.boot_id
+            target is None
+            or target.kind is not ManagedTargetKind.VM
+            or vm_guest_boot_id(bootstrap.guest) != target.boot_id
         ):
             raise ValidationError("Numeric execution bootstrap must match the selected VM boot")
         self._owner = owner
-        self._target = target
+        self._managed_target = target
         self._bootstrap = bootstrap
         self._managed_repository = managed_repository
         self._native_binding = native_binding
@@ -249,11 +254,22 @@ class ExecutionOperation:
         self._dispatch_obligation: LifecycleObligation | None = None
 
     @property
+    def _target(self) -> ManagedTargetIdentity:
+        return self._require_managed_target()
+
+    def _require_managed_target(self) -> ManagedTargetIdentity:
+        target = self._managed_target
+        if target is None:
+            raise StateError("Managed delivery is unavailable without a managed target")
+        return target
+
+    @property
     def managed_runs(self) -> tuple[ManagedOperationRun, ...]:
         return tuple(self._managed_runs)
 
     def require_job_binding(self, carrier: Carrier, runtime_selection: RuntimeSelection) -> None:
         """Fence an ordinary job call to this live selected operation binding."""
+        self._require_managed_target()
         binding = self._native_binding
         if self._finishing or self._finished:
             raise StateError("Execution operation is closing")
@@ -278,6 +294,7 @@ class ExecutionOperation:
         runtime_selection: RuntimeSelection,
     ) -> None:
         """Match exact context facts before inspecting any managed reservation."""
+        self._require_managed_target()
         bootstrap, binding = self._bootstrap, self._native_binding
         if (
             owner is not self._owner
@@ -371,6 +388,7 @@ class ExecutionOperation:
         stream: Stream | None,
     ) -> tuple[ManagedObservationCandidate, ManagedObserveOutcome]:
         """Run one fixed read using the same lifetime row as inline execution."""
+        self._require_managed_target()
         prepared = prepare_managed_read(
             operation=ManagedOperation.OBSERVE if stream is None else ManagedOperation.READ_OUTPUT,
             expected_launch=expected_launch,
@@ -428,6 +446,7 @@ class ExecutionOperation:
 
     def unobserved_managed_output(self, reference: JobRef) -> ExecutionOutput:
         """Return original OP output policy without borrowing or observing again."""
+        self._require_managed_target()
         with self._admission_guard:
             run = next((run for run in self._managed_runs if run.receipt.identity.run_id == reference.run_id), None)
             if run is None or not run.acknowledged or run.reserved is None:
@@ -451,6 +470,7 @@ class ExecutionOperation:
         sensitive: bool = False,
     ) -> tuple[ManagedLiveCandidate, OwnedInlineOutcome]:
         """Borrow one foreground relay for an exact acknowledged OPERATION run."""
+        self._require_managed_target()
         prepared = None
         active = None
         try:
@@ -519,6 +539,7 @@ class ExecutionOperation:
 
     def observe_job(self, reference: JobRef, carrier: Carrier, deadline: Deadline) -> ManagedObserveOutcome:
         """Observe a retained OP job or an exact constructor-bound RESOURCE job."""
+        self._require_managed_target()
         repository, bootstrap = self._managed_repository, self._bootstrap
         if type(reference) is not JobRef or repository is None or bootstrap is None or self._native_binding is None:
             raise ValidationError("Managed observation requires its bound operation")
@@ -546,6 +567,7 @@ class ExecutionOperation:
         candidate: ManagedObservationCandidate | None,
     ) -> bool:
         """Retain only positive closure, without caching absent application facts."""
+        self._require_managed_target()
         run = next((run for run in self._managed_runs if run.receipt.identity.run_id == reference.run_id), None)
         if run is None or not run.terminal_proved(candidate):
             return False
@@ -560,6 +582,7 @@ class ExecutionOperation:
         stream: Stream,
     ) -> ManagedReadOutputOutcome:
         """Read a closed output stream through retained operation custody."""
+        self._require_managed_target()
         repository, bootstrap = self._managed_repository, self._bootstrap
         if type(reference) is not JobRef or repository is None or bootstrap is None or self._native_binding is None:
             raise ValidationError("Managed output requires its bound operation")
@@ -579,6 +602,7 @@ class ExecutionOperation:
 
     def wait_job(self, reference: JobRef, carrier: Carrier, deadline: Deadline) -> ManagedResultOutcome:
         """Wait only for observations; the selected keeper remains independent."""
+        self._require_managed_target()
         repository, bootstrap = self._managed_repository, self._bootstrap
         if (
             type(reference) is not JobRef
@@ -638,6 +662,7 @@ class ExecutionOperation:
             )
 
     def _control_run(self, reference: JobRef, deadline: Deadline) -> ManagedOperationRun:
+        self._require_managed_target()
         repository, bootstrap, binding = self._managed_repository, self._bootstrap, self._native_binding
         if type(reference) is not JobRef or repository is None or bootstrap is None or binding is None:
             raise ValidationError("Managed control requires its bound operation")
@@ -665,6 +690,7 @@ class ExecutionOperation:
 
     def stop_job(self, reference: JobRef, deadline: Deadline) -> JobStop:
         """Stop one exact OP or RESOURCE job without adopting independent custody."""
+        self._require_managed_target()
         if type(reference) is not JobRef:
             raise ValidationError("Managed control requires its bound operation")
         if not any(run.receipt.identity.run_id == reference.run_id for run in self._managed_runs):
@@ -707,6 +733,7 @@ class ExecutionOperation:
         self, expected_launch: bytes, deadline: Deadline, *, run: ManagedOperationRun | None = None
     ) -> ManagedStopOutcome:
         """Acquire ordinary lifetime custody; drain only an actual selected OP keeper."""
+        self._require_managed_target()
         binding, bootstrap = self._native_binding, self._bootstrap
         assert binding is not None and bootstrap is not None
         with self._admission_guard:
@@ -755,6 +782,7 @@ class ExecutionOperation:
 
     def dispose_job(self, reference: JobRef, carrier: Carrier, deadline: Deadline) -> JobDisposal:
         """Observe terminal proof before draining, then dispose with exact retry custody."""
+        self._require_managed_target()
         if type(reference) is JobRef and not any(
             run.receipt.identity.run_id == reference.run_id for run in self._managed_runs
         ):
@@ -1021,6 +1049,7 @@ class ExecutionOperation:
         deadline: Deadline,
     ) -> str:
         """Resolve the selected account through the tracked helper lifetime."""
+        self._require_managed_target()
         with self._admission_guard:
             if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
                 raise StateError("Execution operation cannot admit a shell lookup")
@@ -1167,7 +1196,14 @@ class ExecutionOperation:
         if (
             expectation is None
             or expectation.guest != (bootstrap.guest if bootstrap is not None else None)
-            or (expectation.guest is not None and vm_guest_boot_id(expectation.guest) != self._target.boot_id)
+            or (
+                expectation.guest is not None
+                and (
+                    self._managed_target is None
+                    or self._managed_target.kind is not ManagedTargetKind.VM
+                    or vm_guest_boot_id(expectation.guest) != self._managed_target.boot_id
+                )
+            )
         ):
             raise StateError("Inline closure guest binding changed")
 
