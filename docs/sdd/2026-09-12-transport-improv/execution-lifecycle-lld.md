@@ -1938,61 +1938,6 @@ original handle and wrapper custody, primary control and cleanup-entry/lock regr
 Credential-provider requests remain a separately attributed limit. Earlier middleware audits do not
 prove this new producer, native compatibility, complete owned access or RunContext acceptance.
 
-### Shared local process retirement
-
-`LocalProcessTerminal.cleaned` represents positive retirement of the existing owner's local native
-capabilities after construction settles and all borrowers stop. It is independent of execution
-status. Exact POSIX child-wait loss irreversibly retires authority to signal, resize or reap that
-numeric PID; both status fields remain unknown and observation failure remains a failure. A generic
-poll error does not establish this loss. Windows retains its handle-backed child wait and cleanup
-requirements. Neither case establishes guest completion, descendant cleanup or remote effect drain.
-
-On exact POSIX wait loss only, retire CPython `Popen` destructor polling through its private
-`_child_created` bookkeeping flag, leaving `returncode` unknown. The supported-runtime source audit
-is recorded in [prior art](prior-art-research.md); runtime tests must also cover actual object
-release without another native poll or deferred subprocess-list admission. A generic poll error does
-not authorize this retirement, and Windows handle ownership is unaffected.
-
-The existing `LocalProcessPipes` retains one close record for each actual owned endpoint. Mark an
-attempt before native close; only normal return confirms it. Error or exceptional control leaves
-sticky uncertainty, including interruption after the descriptor closed but before confirmation. The
-input pump requests EOF through `close_stdin()` on that same collection. Owner teardown uses those
-original records rather than raw `Popen` aliases, attempts every independent endpoint, and continues
-separately safe cleanup of a still-owned process even when a pipe close fails. Preserve the caller's
-original control exception. Raw `closed` flags never substitute for native evidence.
-
-Retry only remaining safe work under the same owner: an original never-attempted close or cleanup
-through still-held process authority. Never retry an uncertain descriptor close or probe a lost PID.
-Existing explicit bounded retry and immutable first observations remain; later status or closure
-cannot erase sticky uncertainty. When no safe action remains, stop the worker but retain the actual
-status, raw process, original pipe collection and evidence privately on its owner. No replacement
-records, general handle framework, EOF request worker, global registry or result-carried cleanup
-capability is needed.
-
-`run_owned_process` requires an externally retained owner. An optional finite cleanup allowance
-selects bounded observation; its absence still uses waiting closure. The inline guest retains one
-inert owner in its fixed module and passes that exact owner to the waiting runner. Both fixed helper
-entry paths already retain that module through `sys.modules`; a transient bootstrap dictionary is
-not the retaining lifetime. The one-manifest helper cannot replace or reuse its owner. Waiting
-closure preserves the script-source descriptor through construction. Module retention lasts through
-ordinary body return until interpreter finalization, not beyond finalization or as a substitute for
-kernel process-exit evidence. A FINISHED frame does not repair close uncertainty or prove
-quiescence.
-
-Published raw streams are internal borrowed I/O endpoints, not close authority or plugin resources.
-Current managed close routes use the shared records; this does not interpose foreign raw closes or
-Python destructors. Caller-held delivery custody also requires its independent coordinator to stop
-borrowers and restore resources before reuse. The SSH coordinator owns the relay and its PTY;
-restoration safety must be proved against that actual arrangement, not inferred for arbitrary
-inherited terminal users. A pending constructor still holds caller stdin and passed descriptors.
-Local retirement leaves unknown remote helper and operation debt unresolved.
-
-Implementation, independent code review, final SSH coordinator composition, installed Linux/macOS
-exact-loss and restoration probes, held construction, repeated control and shutdown evidence remain
-open. Native Windows regressions retain the separate HANDLE guarantees. No global signal reset,
-guessed status zero, special SSH bypass or full RunContext/native acceptance follows from this
-design.
-
 ### Proxmox activation evidence boundary
 
 Stopped Proxmox startup needs a new bounded producer, not the retired start waiter. Its first
