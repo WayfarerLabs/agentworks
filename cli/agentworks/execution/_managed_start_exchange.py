@@ -262,7 +262,7 @@ class _Collector:
         return observation
 
 
-def prepare_managed_start(
+def _validate_managed_start_context(
     carrier: Carrier,
     identity: ManagedRunIdentity,
     spec: ManagedRunSpec,
@@ -272,8 +272,8 @@ def prepare_managed_start(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     guest: VMGuestIdentity,
-) -> _PreparedAttempt:
-    """Prepare one exact managed start before delivering it."""
+) -> bytes:
+    """Bind either preparation path to the same planned launch and authority."""
     if (
         type(identity) is not ManagedRunIdentity
         or type(spec) is not ManagedRunSpec
@@ -307,20 +307,32 @@ def prepare_managed_start(
             or request.capture_prefix_bytes != output_policy.capture_prefix_bytes
         ):
             raise ValidationError("Managed start output policy mismatch")
-        nonce = secrets.token_hex(16)
-        request_data = encode_request(ManagedStartRequest(nonce, plan.expected, request, guest))
-        argv, candidates, shim = build_runtime_identity_helper_argv(
-            plan, selection=runtime_selection, fixed_source=FIXED_BUNDLE.bootstrap, nonce=nonce
-        )
     except (ManagedJobFactError, request_wire.RequestError, ManagedStartError):
         raise ValidationError("Invalid managed start request") from None
+    return expected_launch
+
+
+def _finalize_managed_start(
+    carrier: Carrier,
+    identity: ManagedRunIdentity,
+    spec: ManagedRunSpec,
+    output_policy: ManagedOutputPolicy,
+    deadline: Deadline,
+    expected_launch: bytes,
+    *,
+    nonce: str,
+    invocation: PreparedInvocation,
+    candidates: tuple[str, ...],
+    shim: str | None,
+    input_data: bytes,
+) -> _PreparedAttempt:
+    """Build and validate actual delivery with the shared response reducer."""
     collector = _Collector(expected_launch)
     reader = FileRecordReader(nonce, collector.accept)
     runtime = RuntimePrefixSink(nonce, candidates, reader, shim)
     stderr = _DiagnosticSink()
-    invocation = PreparedInvocation(argv)
     io = CarrierIO(
-        input=FiniteInput(FIXED_BUNDLE.prefix + request_data, sensitive=True),
+        input=FiniteInput(input_data, sensitive=True),
         output=SinkOutput(runtime, stderr, require_live=False),
         sensitive=True,
     )
@@ -344,6 +356,44 @@ def prepare_managed_start(
         prepared.discard()
         raise
     return prepared
+
+
+def prepare_managed_start(
+    carrier: Carrier,
+    identity: ManagedRunIdentity,
+    spec: ManagedRunSpec,
+    output_policy: ManagedOutputPolicy,
+    request: request_wire.ManagedJobRequest,
+    plan: IdentityPlan,
+    deadline: Deadline,
+    runtime_selection: RuntimeSelection,
+    guest: VMGuestIdentity,
+) -> _PreparedAttempt:
+    """Prepare one exact managed start before delivering it."""
+    expected_launch = _validate_managed_start_context(
+        carrier, identity, spec, output_policy, request, plan, deadline, runtime_selection, guest
+    )
+    try:
+        nonce = secrets.token_hex(16)
+        request_data = encode_request(ManagedStartRequest(nonce, plan.expected, request, guest))
+        argv, candidates, shim = build_runtime_identity_helper_argv(
+            plan, selection=runtime_selection, fixed_source=FIXED_BUNDLE.bootstrap, nonce=nonce
+        )
+    except (ManagedJobFactError, request_wire.RequestError, ManagedStartError):
+        raise ValidationError("Invalid managed start request") from None
+    return _finalize_managed_start(
+        carrier,
+        identity,
+        spec,
+        output_policy,
+        deadline,
+        expected_launch,
+        nonce=nonce,
+        invocation=PreparedInvocation(argv),
+        candidates=candidates,
+        shim=shim,
+        input_data=FIXED_BUNDLE.prefix + request_data,
+    )
 
 
 def _exchange(carrier: BoundHelperCarrier, prepared: _PreparedAttempt, deadline: Deadline) -> ManagedStartCandidate:
