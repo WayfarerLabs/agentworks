@@ -1777,8 +1777,17 @@ stays a possible effect: this fence does not prove helper exit, stop non-gated o
 predecessor-controller effects, replay a mutation, reconcile its application checkpoint, clean up,
 or release ownership. DOWNLOAD keeps its separate snapshot reconciliation and cleanup adapter.
 
-These bindings remain optional private plumbing. Ordinary VM FileAccess composition does not yet
-supply them automatically. Complete production admission, managed-agent namespace lifecycle,
+New-stack VM file operations bind the verified raw guest through their numeric bootstrap or the
+separately observed WSL guest at construction. They derive gate setup from that guest and each
+selected effective UID, including ordinary and elevated file calls. Effect-bearing calls register
+setup and publish the confirmed binding in the same durable row before file effects. Local
+downloads complete this admission before constructing their workstation writer; local transfers
+retain their original serial borrow. STAT, inventory and no-staging readiness do not create gates.
+Gate coordination failure reduces to an observation failure, not a claim of data-file mutation.
+
+Historical private operations without verified guest facts and platform-host operations retain
+their separate contracts; they do not fabricate a VM identity. This wiring does not migrate legacy
+callers, activate permissions or complete production recovery. Managed-agent namespace lifecycle,
 predecessor-controller settlement and native route/recovery evidence remain required before claiming
 full file recovery support.
 

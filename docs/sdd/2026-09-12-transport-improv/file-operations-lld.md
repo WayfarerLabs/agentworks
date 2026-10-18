@@ -1278,8 +1278,12 @@ containing the raw instance marker, kernel boot ID and PID 1 start time and reta
 `guest_result`. It also projects those facts into `ManagedTargetIdentity`'s provider-bound
 incarnation hash and derived boot UUID. That projection cannot be reversed. The private VM operation
 composition therefore supplies the raw identity through the numeric bootstrap to `FileOperation`;
-the owned WSL2 download path supplies it through gate setup. File custody and the durable gate
-binding retain the actual triple, not just its projection. The helper independently observes the
+the owned WSL2 download path supplies its separately observed raw guest at construction. The
+operation derives setup from those bound facts and the selected effective UID, rather than asking
+the public file caller to supply it. Local transfers reuse their original borrow; download setup
+and durable binding publication precede workstation writer construction. STAT, inventory and
+no-staging readiness remain non-creating observations. File custody and the durable gate binding
+retain the actual triple, not just its projection. The helper independently observes the
 _current_ guest triple before trusting the gate. A request-to-record comparison is not a guest
 identity check. These composition paths do not establish native route, provider-locator or recovery
 acceptance. SSH-accessed macOS platform hosts still need their own concrete host identity/epoch

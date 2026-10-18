@@ -4737,6 +4737,15 @@ consumer-migration gate, not an implication of directory-transfer progress.
       reconciliation. Neither the local DOWNLOAD helper journal nor a caller-asserted drain value
       proves upload takeover.
 
+The new-stack automatic admission implementation binds verified raw guest facts at construction and
+derives setup for each selected effective UID. Snapshots, uploads, JSON, removal and directory or
+metadata effects retain one pending-to-bound row; local transfers reuse their original borrow and
+downloads admit before workstation writer creation. STAT, inventory and no-staging readiness stay
+non-creating. The developer's local checks pass 2,557 file cases with 25 skips, 1,303 VM adapter
+fixtures and 260 bounds/Python 3.11 cases. Independent combined review and lead composition checks
+are still pending. These are synthetic local results, not native delivery, managed-agent namespace
+lifecycle, predecessor settlement or complete recovery acceptance; the broader checkbox stays open.
+
 The production artifact publisher currently preflights destinations, then retires and publishes
 members with a per-file ownership callback. Agent and workspace creation can call that publisher in
 `buffered` mode before their resource row exists; in that mode `run_setup` does not persist those
