@@ -31,7 +31,7 @@ from ._managed_runs import (
 )
 from ._managed_start_exchange import prepare_managed_start
 from ._managed_start_operation import ManagedStartOutcome, start_owned_managed_run
-from ._runtime_prerequisite import RuntimePrerequisiteState, RuntimeSelection, RuntimeTargetOS
+from ._runtime_prerequisite import RuntimePrerequisiteState, RuntimeSelection, RuntimeTargetOS, _NumericGuestBootstrap
 from ._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from ._workload_shell import WorkloadShellObservationResult, WorkloadShellObservationState, observe_workload_shell
 from .carrier import Carrier, Deadline, Dispatch, ExitStatus
@@ -164,7 +164,11 @@ def start_bound_managed_job(
             result: WorkloadShellObservationResult | None = None
             try:
                 result = observe_workload_shell(
-                    operation, plan=workload_plan, runtime_selection=runtime_selection, deadline=deadline
+                    operation,
+                    plan=workload_plan,
+                    runtime_selection=runtime_selection,
+                    deadline=deadline,
+                    bootstrap=_NumericGuestBootstrap(root_plan, guest),
                 )
                 operation.settle(result.dispatch, result.carrier_completion)
             except BaseException as control:

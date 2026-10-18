@@ -13,6 +13,7 @@ import pytest
 from agentworks.db import Database, LifecycleObligationState, OperationClaimState, OperationResourceKind, OperationScope
 from agentworks.db.operations import OperationRepository
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution import _target_identity as identity_module
 from agentworks.execution._account_protocol import (
     AccountFailure,
     encode_account_failure,
@@ -20,14 +21,15 @@ from agentworks.execution._account_protocol import (
 )
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._helper_identity import IdentityExpectation
-from agentworks.execution._helper_launcher import IdentityMode
-from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS, _NumericGuestBootstrap
 from agentworks.execution._target_identity import (
     TargetIdentityControlFact,
     TargetIdentityFailure,
     TargetIdentityStatus,
     prepare_target_identity,
 )
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 from agentworks.execution.carrier import (
     CapturedOutput,
     CarrierIO,
@@ -53,6 +55,10 @@ pytestmark = pytest.mark.windows
 _ROOT = IdentityExpectation(0, 0, (0,))
 _WORKER = IdentityExpectation(1001, 1002, (1002, 1003))
 _OTHER = IdentityExpectation(2001, 2002, (2002,))
+_BOOTSTRAP = _NumericGuestBootstrap(
+    IdentityPlan(_ROOT, IdentityMode.SUDO_ROOT),
+    VMGuestIdentity("a" * 32, "123e4567-e89b-12d3-a456-426614174000", 1234),
+)
 
 
 def _runtime(path: str = "/usr/bin/python3") -> RuntimeSelection:
@@ -234,6 +240,7 @@ def _prepare(
     include_elevated: bool = False,
     deadline: Deadline | None = None,
     runtime_path: str = "/usr/bin/python3",
+    bootstrap: _NumericGuestBootstrap | None = None,
 ):
     return prepare_target_identity(
         carrier,
@@ -243,6 +250,7 @@ def _prepare(
         runtime_selection=_runtime(runtime_path),
         deadline=deadline or Deadline.after(15),
         owner=owner,
+        bootstrap=bootstrap,
     )
 
 
@@ -360,6 +368,121 @@ def test_duplicate_name_reuses_one_observation_only_within_the_call(
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
+
+
+def test_explicit_bootstrap_prepares_cross_user_without_elevated_lookup_or_surface(
+    owned: tuple[Database, OperationOwner],
+) -> None:
+    _, owner = owned
+    carrier = SyntheticCarrier({"delivery": _WORKER, "workload": _OTHER})
+    deadline = Deadline.after(15)
+
+    result = _prepare(owner, carrier, delivery="delivery", workload="workload", deadline=deadline, bootstrap=_BOOTSTRAP)
+
+    assert result.status is TargetIdentityStatus.PREPARED
+    assert result.ordinary_plan == IdentityPlan(_OTHER, IdentityMode.DEMOTE)
+    assert result.elevated_plan is None and result.root_result is None
+    assert result.delivery_result is not None and result.workload_result is not None
+    assert carrier.calls == ["delivery", "workload"]
+    assert all(item is deadline for item in carrier.deadlines)
+    assert not result.requires_owner_retention
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+@pytest.mark.parametrize("workload_identity", [_WORKER, _OTHER])
+def test_nonroot_delivery_cannot_use_direct_root_bootstrap(
+    owned: tuple[Database, OperationOwner],
+    workload_identity: IdentityExpectation,
+) -> None:
+    _, owner = owned
+    carrier = SyntheticCarrier({"delivery": _WORKER, "workload": workload_identity})
+    bootstrap = _NumericGuestBootstrap(IdentityPlan(_ROOT, IdentityMode.DIRECT), _BOOTSTRAP.guest)
+
+    result = _prepare(owner, carrier, delivery="delivery", workload="workload", bootstrap=bootstrap)
+
+    assert result.status is TargetIdentityStatus.FAILED
+    assert result.failure is TargetIdentityFailure.IDENTITY_PATH
+    assert result.ordinary_plan is None and result.elevated_plan is None and result.root_result is None
+    assert carrier.calls == ["delivery", "workload"]
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+@pytest.mark.parametrize("runtime_path", ["/usr/bin/python3.11", "/opt/private/python"])
+def test_bootstrap_requires_usable_system_runtime_before_borrow(
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch, runtime_path: str
+) -> None:
+    _, owner = owned
+    carrier = SyntheticCarrier()
+    monkeypatch.setattr(owner, "borrow", lambda: pytest.fail("unusable bootstrap borrowed the owner"))
+
+    with pytest.raises(ValidationError):
+        _prepare(owner, carrier, bootstrap=_BOOTSTRAP, runtime_path=runtime_path)
+
+    assert carrier.calls == []
+    owner.close()
+
+
+def test_bootstrap_workload_refusal_keeps_delivery_evidence(
+    owned: tuple[Database, OperationOwner],
+) -> None:
+    _, owner = owned
+    carrier = SyntheticCarrier({"delivery": _WORKER}, missing={"workload"})
+
+    result = _prepare(owner, carrier, delivery="delivery", workload="workload", bootstrap=_BOOTSTRAP)
+
+    assert result.status is TargetIdentityStatus.FAILED and result.failure is TargetIdentityFailure.ACCOUNT
+    assert result.delivery_result is not None and result.workload_result is not None
+    assert result.ordinary_plan is None and result.elevated_plan is None and result.root_result is None
+    assert not result.requires_owner_retention
+    assert carrier.calls == ["delivery", "workload"]
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+@pytest.mark.parametrize("release_fails", [False, True])
+def test_bootstrap_partial_control_retains_original_cause_and_release_custody(
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch, release_fails: bool
+) -> None:
+    database, owner = owned
+    carrier = SyntheticCarrier({"delivery": _WORKER})
+    original = carrier.execute
+    control = ControlStop("workload-control")
+    cause = RuntimeError("original-cause")
+    control.__cause__ = cause
+
+    def interrupt_workload(invocation, *, io, deadline, custody):
+        if json.loads(io.input.data)["account"] == "workload":
+            raise control
+        return original(invocation, io=io, deadline=deadline, custody=custody)
+
+    def interrupt_release(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(carrier, "execute", interrupt_workload)
+    if release_fails:
+        monkeypatch.setattr(identity_module, "release_borrow_after_custody", interrupt_release)
+
+    with pytest.raises(ControlStop) as caught:
+        _prepare(owner, carrier, delivery="delivery", workload="workload", bootstrap=_BOOTSTRAP)
+
+    assert caught.value is control
+    fact = caught.value.__cause__
+    assert isinstance(fact, TargetIdentityControlFact)
+    assert fact.preparation.delivery_result is not None and fact.preparation.workload_result is None
+    assert fact.preparation.requires_owner_retention and fact.preparation.pending_remote_effects
+    assert fact.preparation.coordination_uncertain is release_fails
+    original_cause = fact.__cause__
+    while isinstance(original_cause, TargetIdentityControlFact):
+        original_cause = original_cause.__cause__
+    assert original_cause is cause
+    assert database.operations.inspect(owner.ownership.scope) is not None
+    with pytest.raises(StateError):
+        owner.borrow()
 
 
 @pytest.mark.parametrize(

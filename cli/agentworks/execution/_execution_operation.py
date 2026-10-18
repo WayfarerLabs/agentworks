@@ -890,7 +890,7 @@ class ExecutionOperation:
             if self._route_check is not None:
                 self._route_check(deadline)
             result = observe_workload_shell(
-                operation, plan=plan, runtime_selection=runtime_selection, deadline=deadline
+                operation, plan=plan, runtime_selection=runtime_selection, deadline=deadline, bootstrap=self._bootstrap
             )
             active.candidate = result
             operation.settle(result.dispatch, result.carrier_completion)
