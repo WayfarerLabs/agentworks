@@ -526,10 +526,6 @@ class ManagedJobStore:
             os.close(directory)
             raise
 
-    def read_capture(self, stream: Stream, expected_launch: bytes) -> bytes | None:
-        """Read a closed capture for local store consumers."""
-        return self.read_capture_range(stream, expected_launch, offset=0, count=wire.MAX_CAPTURE_PREFIX_BYTES_V1)
-
     def read_capture_range(self, stream: Stream, expected_launch: bytes, *, offset: int, count: int) -> bytes | None:
         """Verify the entire persisted spool while retaining only the requested range."""
         if type(stream) is not Stream or type(expected_launch) is not bytes:

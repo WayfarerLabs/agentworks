@@ -170,7 +170,7 @@ def test_bidirectional_binary_eof_and_presentation_status(tmp_path: Path, code: 
         directory = tmp_path / "managed" / RUN
         for stream in Stream:
             assert not (directory / stream.value).exists()
-            assert store.read_capture(stream, request.launch) is None
+            assert store.read_capture_range(stream, request.launch, offset=0, count=31) is None
         assert store.dispose(request.launch)
         assert sorted(path.name for path in directory.iterdir()) == ["disposal"]
 
@@ -188,7 +188,9 @@ def test_input_only_preserves_retention_and_omits_presentation(tmp_path: Path, m
 
     with _execute(tmp_path, request, peer) as store:
         assert [frame.kind for frame in frames] == [FrameKind.LAUNCHING, FrameKind.FINISHED]
-        assert store.read_capture(Stream.STDOUT, request.launch) == (payload[:31] if mode == "capture" else None)
+        assert store.read_capture_range(Stream.STDOUT, request.launch, offset=0, count=31) == (
+            payload[:31] if mode == "capture" else None
+        )
 
 
 def test_output_only_relay_eof_does_not_replace_finite_stdin(tmp_path: Path) -> None:
@@ -297,7 +299,7 @@ def test_disconnected_consumer_keeps_entered_job_and_durable_capture(tmp_path: P
 
     with _execute(tmp_path, request, peer) as store:
         assert marker.exists()
-        assert store.read_capture(Stream.STDOUT, request.launch) == b"done"
+        assert store.read_capture_range(Stream.STDOUT, request.launch, offset=0, count=31) == b"done"
         assert wire.decode_fact(store.read_fact(FactName.WAIT))["exit_code"] == 0
 
 

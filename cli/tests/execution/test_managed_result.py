@@ -19,7 +19,7 @@ from agentworks.execution._managed_observation_protocol import (
     ManagedOutputRange,
     ManagedResultControl,
 )
-from agentworks.execution._managed_observe_access import read_bound_managed_output
+from agentworks.execution._managed_observe_access import ManagedObserveControlFact, read_bound_managed_output
 from agentworks.execution._managed_result import (
     ManagedResultControlFact,
     collect_bound_managed_result,
@@ -224,7 +224,7 @@ def test_later_page_failure_preserves_prefix_status_and_each_attempt_without_ret
                 carrier.complete = False
         return _reply(request, wait=7, contents=contents, disposition=disposition)
 
-    real_read = result_module.read_bound_managed_output
+    real_read = read_bound_managed_output
 
     def read(*args, **kwargs):  # type: ignore[no-untyped-def]
         if fault == "expire-before-borrow" and kwargs["offset"] == page:
@@ -271,7 +271,7 @@ def test_later_page_interruption_preserves_original_control_cause_and_all_attemp
             collect_bound_managed_result(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
         assert caught.value is control and isinstance(control.__cause__, ManagedResultControlFact)
         custody = control.__cause__
-        assert isinstance(custody.__cause__, result_module.ManagedObserveControlFact)
+        assert isinstance(custody.__cause__, ManagedObserveControlFact)
         assert custody.__cause__.__cause__ is cause
         assert len(custody.attempts) == carrier.calls == 3
         assert custody.attempts[-1].requires_owner_retention

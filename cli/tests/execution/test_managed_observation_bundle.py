@@ -264,7 +264,8 @@ def test_standalone_closed_binary_range_fits_complete_fake_qga_exchange(
         and isinstance(prepared.io.input, FiniteInput)
         and isinstance(prepared.io.output, SinkOutput)
     )
-    request = decode_request(prepared.io.input.data[len(FIXED_BUNDLE.prefix) :])
+    request_bytes = prepared.io.input.data
+    request = decode_request(request_bytes[len(FIXED_BUNDLE.prefix) :])
     bound = prepared.io.output.required_complete_stdout_bytes
     assert bound is not None and bound <= 1048576
     setup = """
@@ -298,7 +299,7 @@ raise SystemExit(result)
     source = FIXED_BUNDLE.bootstrap.rsplit("raise SystemExit(", 1)[0] + setup
     result = subprocess.run(
         [interpreter, "-I", "-S", "-B", "-c", source, request.nonce, str(tmp_path)],
-        input=prepared.io.input.data,
+        input=request_bytes,
         capture_output=True,
         cwd=tmp_path,
         env={"PYTHONPATH": str(tmp_path)},
@@ -318,7 +319,7 @@ raise SystemExit(result)
         if method == "POST":
             assert body is not None and len(body) <= 65536
             post = json.loads(body)
-            assert post["input-data"].encode("ascii") == prepared.io.input.data
+            assert post["input-data"].encode("ascii") == request_bytes
             return {"pid": 71}
         assert suffix == "exec-status?pid=71"
         return status
