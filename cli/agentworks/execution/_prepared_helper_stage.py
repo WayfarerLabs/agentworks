@@ -66,7 +66,6 @@ class _ActiveStageCall:
     operation: BorrowedFixedHelperCarrier
     phase: FileStageOperation
     closure_delivery: HelperClosureDelivery | None = None
-    closure_expectation: HelperClosureExpectation | None = None
     candidate: FileStageCandidateResult | None = None
 
 
@@ -111,13 +110,17 @@ class PreparedHelperStage:
         self.cleanup_debt: ScratchCleanupDebt | None = None
         self.offset = 0
         self.registration_uncertain = False
-        self.helper_uncertain = False
         self.failed = False
         self.cleaned = False
         self.cleanup_resolution_uncertain = False
         self._begun = False
         self._activation_prepared = False
         self._activation_settled = False
+
+    @property
+    def helper_uncertain(self) -> bool:
+        """Whether the exact staging call still retains local or helper custody."""
+        return self._active is not None
 
     @property
     def deadline(self) -> Deadline:
@@ -146,7 +149,6 @@ class PreparedHelperStage:
         operation = BorrowedFixedHelperCarrier(self._carrier, borrow)
         active = _ActiveStageCall(borrow, operation, phase)
         self._active = active
-        self.helper_uncertain = True
         try:
             if self._before_dispatch is not None:
                 self._before_dispatch(self.deadline if deadline is None else deadline)
@@ -164,14 +166,12 @@ class PreparedHelperStage:
             self._settle_active(active)
             return result
         except BaseException:
-            self.helper_uncertain = True
             self.failed = True
             raise
 
     def _prepare_delivery(self, expectation: HelperClosureExpectation) -> BoundHelperCarrier:
         active = self._active
         assert active is not None
-        active.closure_expectation = expectation
         if self._new_helper_delivery is not None:
             delivery = self._new_helper_delivery(expectation)
             active.closure_delivery = delivery
@@ -200,11 +200,8 @@ class PreparedHelperStage:
         row = self._inspect_registration()
         if row is None or row.state is not LifecycleObligationState.POSSIBLE_EFFECT:
             raise StateError("Prepared stage cleanup obligation is no longer admitted")
-        expectation = active.closure_expectation
         delivery = active.closure_delivery
-        if (expectation is not None and expectation.guest != self._bootstrap.guest) or not active.operation.wraps(
-            self._carrier if delivery is None else delivery
-        ):
+        if not active.operation.wraps(self._carrier if delivery is None else delivery):
             raise StateError("Prepared stage helper binding changed")
 
     def _settle_active(self, active: _ActiveStageCall) -> None:
@@ -237,7 +234,6 @@ class PreparedHelperStage:
         if not active.borrow.closed:
             active.borrow.close()
         self._active = None
-        self.helper_uncertain = False
 
     def _recover_dispatch_registration(self, active: _ActiveStageCall) -> None:
         """Recover only the generic row whose registration preceded carrier entry."""
@@ -447,6 +443,18 @@ class PreparedHelperStage:
         self._activation_settled = local_delivery.settled and (
             dispatch is Dispatch.NOT_SENT or (dispatch is Dispatch.SENT and completion == ExitStatus(0))
         )
+
+    def note_activation_closure(self, local_delivery: LocalDeliveryCustody) -> None:
+        """Accept the parent's exact helper-closure proof and actual local custody."""
+        if not self._activation_prepared or self._activation_settled or not local_delivery.settled:
+            raise StateError("Prepared helper activation closure is unavailable")
+        self._activation_settled = True
+
+    def note_activation_not_dispatched(self) -> None:
+        """Accept parent proof that its retained start-custody callback was never reached."""
+        if not self._activation_prepared or self._activation_settled:
+            raise StateError("Prepared helper activation handoff is unavailable")
+        self._activation_settled = True
 
     def cleanup(self, *, deadline: Deadline | None = None) -> bool:
         """Remove exact owned objects, optionally under a fresh cleanup budget.

@@ -216,20 +216,18 @@ def test_route_control_drain_after_stop_admission_has_no_remote_work(owned) -> N
     assert prepared.cleaned and pending(owner) == []
 
 
-@pytest.mark.parametrize("changed", ["borrow", "attempt", "guest", "carrier"])
+@pytest.mark.parametrize("changed", ["borrow", "attempt", "carrier"])
 def test_changed_exact_binding_refuses_continuation(owned, changed: str) -> None:
     _, owner, carrier = owned
     prepared = stage(owned)
     carrier.unsettled = True
     assert not prepared.begin()
     active = prepared._active
-    assert active is not None and active.closure_expectation is not None
+    assert active is not None
     if changed == "borrow":
         owner._active_borrow = OperationBorrow(owner)
     elif changed == "attempt":
         owner._outstanding_attempt = OperationAttempt(active.borrow)
-    elif changed == "guest":
-        active.closure_expectation = replace(active.closure_expectation, guest=None)
     else:
         prepared._carrier = Carrier(owner)
     with pytest.raises(StateError):
