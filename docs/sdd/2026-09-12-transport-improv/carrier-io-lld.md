@@ -76,13 +76,14 @@ for later replay; its unreleased format can change without a legacy decoder.
 
 ### Request framing and application input
 
-Use one request envelope for finite and live inline calls: the five bytes `AGWI2`, a four-byte
-unsigned big-endian manifest length, then exactly that many canonical JSON bytes. The existing
-32,768-byte private manifest bound remains; reject a bad marker, invalid length, incomplete request
-or invalid manifest before application launch. The manifest version is two. The canonical JSON
-encoder/decoder remains separate from envelope encoding so codec checks do not depend on reading a
-descriptor. The older private systemd proof producer adopts the same envelope rather than retaining
-another inline input format.
+Use one ASCII request envelope for finite and live inline calls: the five bytes `AGWI2`, exactly
+eight lowercase hexadecimal manifest-length digits, then exactly that many canonical ASCII JSON
+bytes. This preserves the existing native carrier's ASCII-armored input contract without adding
+provider-specific byte conversions. The existing 32,768-byte private manifest bound remains; reject
+a bad marker, noncanonical or invalid length, incomplete request or invalid manifest before
+application launch. The manifest version is two. The canonical JSON encoder/decoder remains separate
+from envelope encoding so codec checks do not depend on reading a descriptor. The older private
+systemd proof producer adopts the same envelope rather than retaining another inline input format.
 
 The manifest's `stdin` is finite bytes or null. Finite bytes retain their existing meaning; after
 reading that envelope the guest requires carrier EOF, rejecting trailing bytes before effects. Null
