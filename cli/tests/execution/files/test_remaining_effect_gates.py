@@ -9,6 +9,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING
 
@@ -16,7 +17,12 @@ import pytest
 
 from agentworks.db.operations import LifecycleObligationState
 from agentworks.errors import AgentworksError, ValidationError
-from agentworks.execution import _file_effect_gate, _file_metadata_exchange, _file_object_exchange
+from agentworks.execution import (
+    _file_effect_gate,
+    _file_metadata_exchange,
+    _file_object_exchange,
+    _runtime_prerequisite,
+)
 from agentworks.execution._file_effect_gate_exchange import exchange_file_effect_gate
 from agentworks.execution._file_effect_gate_protocol import GateControlOperation
 from agentworks.execution._file_gate_control import advance_file_effect_gate
@@ -65,8 +71,6 @@ from tests.execution.files.test_file_operation_upload_gate import _GUEST, _RowCh
 from tests.execution.files.test_file_operation_upload_gate import context as context
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from agentworks.execution._file_effect_gate import FileEffectGateBinding
     from agentworks.execution._file_operation import FileOperation
     from agentworks.execution._helper_bundle import FixedFileHelperBundle
@@ -134,7 +138,9 @@ def test_metadata_wire_carries_exact_gate(context) -> None:
 @pytest.mark.parametrize("case", ["set_metadata", "ensure_directory", "create_directory", "remove", "json"])
 @pytest.mark.parametrize("setup", [False, True])
 @pytest.mark.parametrize("runtime", [sys.executable, "/usr/bin/python3.11"])
-def test_exact_gate_is_durable_before_every_dispatch(effects, case, setup, runtime, bind_carrier):
+def test_exact_gate_is_durable_before_every_dispatch(effects, case, setup, runtime: str, bind_carrier):
+    if not Path(runtime).is_file():
+        pytest.skip(f"compatibility interpreter is unavailable: {runtime}")
     database, owner, operation, root, plan, gate = effects
     path = root / "target"
     if case in {"set_metadata", "remove"}:
@@ -398,8 +404,10 @@ def test_lost_setup_recovery_inspects_only_setup_and_stale_publisher_cannot_disp
 @pytest.mark.parametrize("case", ["metadata", "remove"])
 @pytest.mark.parametrize("runtime", [sys.executable, "/usr/bin/python3.11"])
 def test_actual_packed_effect_holds_gate_until_cleanup_and_delayed_request_refuses(
-    effects, monkeypatch, bind_carrier, case, runtime
+    effects, monkeypatch, bind_carrier, case, runtime: str
 ):
+    if not Path(runtime).is_file():
+        pytest.skip(f"compatibility interpreter is unavailable: {runtime}")
     _, _, _, root, plan, gate = effects
     target = root / "target"
     target.write_bytes(b"original")
@@ -745,6 +753,9 @@ guest.hold_file_effect_gate=forbidden
 
 def test_nongated_darwin_entry_needs_no_guest_epoch_or_gate(effects, monkeypatch, bind_carrier):
     _, _, _, root, plan, _ = effects
+    # This Linux-only emulation is not native macOS readiness evidence.
+    # Its host interpreter may alias Linux's system shim.
+    monkeypatch.setattr(_runtime_prerequisite, "_DARWIN_SYSTEM_SHIM", str(root / "absent-darwin-system-python"))
     extra = f"""
 from {METADATA_PACKAGE}._file_stat import FileRevision, FileStat
 def forbidden(*args, **kwargs):
