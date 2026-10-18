@@ -1849,6 +1849,9 @@ establish the exact selected endpoint/firewall route and trust, prepare the gues
 remaining dependents before shared authentication and aggregate release. This completion increment
 supplies none of those missing steps by implication.
 
+The [GCP native access LLD](gcp-native-access-lld.md) specifies the retained instance/endpoint,
+firewall and aggregate composition that follows this producer.
+
 Actual locked public-pipeline tests must cover one POST/no service GET or replay, unread redirect
 and non-200/encoded bodies, finite identity reads and overflow, partial expiry and matching late
 ACK, ledger interruption/lost replies, fencing/concurrency, bounded identity/recovery parsing,

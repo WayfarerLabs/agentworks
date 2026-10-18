@@ -1314,15 +1314,16 @@ Python style checks. The source reviews executed no runtime. Earlier failed diag
 remain preserved. This proves neither native API compatibility nor completed GCP access or
 RunContext delivery; the next item and the complete additive-surface gate remain open.
 
-- [ ] Complete owned GCP access with the LLD's observational identity guarantee: a fresh exact
-      provider observation refuses known stale-target admission, matching receipt and subsequent
-      fresh identity/trust/preparation admit guest work, and changed or unconfirmed identity refuses
-      it while retaining uncertainty. Do not adopt a replacement or claim an atomic start selector;
-      external same-name replacement may receive the start before detection. Prove supported native
-      receipt compatibility, startup settlement and operation retention/recovery, exact guest
-      preparation, fresh endpoint trust, selected firewall-route lifetime and aggregate release. A
-      preceding read, database lock, UUID or post-response targetId cannot prevent that external
-      race. Preserve required native capabilities and honest operational failures.
+- [ ] Complete owned GCP access under the [native access LLD](gcp-native-access-lld.md) with its
+      observational identity guarantee: a fresh exact provider observation refuses known
+      stale-target admission, matching receipt and subsequent fresh identity/trust/preparation admit
+      guest work, and changed or unconfirmed identity refuses it while retaining uncertainty. Do not
+      adopt a replacement or claim an atomic start selector; external same-name replacement may
+      receive the start before detection. Prove supported native receipt compatibility, startup
+      settlement and operation retention/recovery, exact guest preparation, fresh endpoint trust,
+      selected firewall-route lifetime and aggregate release. A preceding read, database lock, UUID
+      or post-response targetId cannot prevent that external race. Preserve required native
+      capabilities and honest operational failures.
 - [ ] Implement private owned Azure credential and exact-incarnation reads following the
       [owned credential/incarnation design](execution-lifecycle-lld.md#owned-azure-credentials-and-incarnation).
       Retain credentials before token work, preserve selected ambient fallback only after positive
