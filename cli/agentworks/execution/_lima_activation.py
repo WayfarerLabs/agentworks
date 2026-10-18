@@ -134,11 +134,11 @@ class LimaActivation:
 
     def confirm_running(self, current: LimaSelection, deadline: Deadline) -> None:
         provider_locator_remaining(deadline, vm_name=self.route.vm_name)
-        self.selected.require_same_route(current)
         from agentworks.db import VMStatus
 
         if not self.client_completed or current.power is not VMStatus.RUNNING or not self.custody.settled:
             raise StateError("Lima startup did not establish fresh running readiness")
+        self.selected.require_activation_result(current)
         self.running_observed = True
         self.reconcile(deadline)
 

@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.db import VMRow
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
-    from agentworks.execution._lima_selection import LimaSelection
+    from agentworks.execution._lima_selection import LimaNativeSelection, LimaSelection
     from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
     from agentworks.execution.binding import NativeExecutionBinding, _IndependentJobAvailability
     from agentworks.execution.carrier import Deadline
@@ -38,7 +38,7 @@ class LimaOwnedNativePlatformAccess:
     binding: NativeExecutionBinding | None = field(default=None, init=False)
     route: LimaLocalSelection | None = field(default=None, init=False, repr=False)
     selected: LimaSelection | None = field(default=None, init=False, repr=False)
-    _native_selected: LimaSelection | None = field(default=None, init=False, repr=False)
+    _native_selected: LimaNativeSelection | None = field(default=None, init=False, repr=False)
     activation: LimaActivation | None = field(default=None, init=False, repr=False)
     _used: bool = field(default=False, init=False, repr=False)
     _available_selection: LimaSelection | None = field(default=None, init=False, repr=False)
@@ -91,18 +91,20 @@ class LimaOwnedNativePlatformAccess:
         return current
 
     def observe_power(self, deadline: Deadline) -> VMStatus:
+        selected = self._available_selection or self.selected
         current = self._observe(deadline)
         if self.selected is None:
             self.selected = current
-        elif current.locator != self.selected.locator:
+        elif selected is not None and current.locator != selected.locator:
             raise StateError("Lima selected provider locator changed")
         return current.power
 
     def observe_locator(self, deadline: Deadline) -> ProviderLocator:
+        selected = self._available_selection or self.selected
         current = self._observe(deadline)
-        if self.selected is None:
+        if selected is None:
             raise StateError("Lima native selection is unavailable")
-        if current.locator != self.selected.locator:
+        if current.locator != selected.locator:
             raise StateError("Lima selected provider locator changed")
         return current.locator
 
@@ -122,34 +124,32 @@ class LimaOwnedNativePlatformAccess:
             self.activation = LimaActivation(self.owner, selected, route, self.custody)
             self.activation.start(deadline)
         current = self._observe(deadline)
-        if current.locator != selected.locator:
-            raise StateError("Lima selected provider locator changed")
         if current.power is not VMStatus.RUNNING:
             raise StateError("Lima native preparation requires fresh running readiness")
         if self.activation is not None:
             self.activation.confirm_running(current, deadline)
+        else:
+            selected.require_same_route(current)
         self._available_selection = current
-        return selected.locator
+        return current.locator
 
     def prepare_native_route(self, deadline: Deadline) -> NativeExecutionBinding:
         if self._native_used or self._closed or self._available_selection is None:
             raise StateError("Lima native route requires available single-use access")
         self._native_used = True
+        available = self._available_selection
         current = self._observe(deadline)
-        assert self.selected is not None
-        if current.locator != self.selected.locator or current.power is not VMStatus.RUNNING:
+        if current.locator != available.locator or current.power is not VMStatus.RUNNING:
             raise StateError("Lima selected native route changed or is no longer running")
-        self._native_selected = current
-        self.binding = lima_native_binding(current)
+        assert self.route is not None
+        self._native_selected = self.route.resolve_native(current, deadline, self.custody)
+        self.binding = lima_native_binding(self._native_selected)
         return self.binding
 
     def _check_route(self, deadline: Deadline) -> None:
-        current = self._observe(deadline)
-        if self._native_selected is None:
+        if self._native_selected is None or self.route is None:
             raise StateError("Lima native route is not selected")
-        self._native_selected.require_same_route(current)
-        if current.power is not VMStatus.RUNNING:
-            raise StateError("Lima selected native route is no longer running")
+        self.route.check_native(self._native_selected, deadline, self.custody)
 
     def settle(self, deadline: Deadline) -> bool:
         """Retire local custody and exact bookkeeping without stopping the VM."""

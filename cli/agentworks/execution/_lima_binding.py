@@ -11,7 +11,7 @@ from agentworks.execution.binding import NativeExecutionBinding, _EarlyGuestFact
 from agentworks.execution.carriers.lima import LimaCarrier, LimaConnection
 
 if TYPE_CHECKING:
-    from agentworks.execution._lima_selection import LimaSelection
+    from agentworks.execution._lima_selection import LimaNativeSelection
 
 
 def lima_independent_availability(vm_type: str) -> _IndependentJobAvailability | None:
@@ -19,9 +19,10 @@ def lima_independent_availability(vm_type: str) -> _IndependentJobAvailability |
     return _IndependentJobAvailability.NO_IDLE_STOP if vm_type in {"qemu", "vz"} else None
 
 
-def lima_native_binding(selected: LimaSelection) -> NativeExecutionBinding:
+def lima_native_binding(selected: LimaNativeSelection) -> NativeExecutionBinding:
     """Root entry obtains early facts; their body uses Lima's actual account."""
-    connection = LimaConnection(selected.instance, selected.executable, selected.home, selected.directory)
+    provider = selected.provider
+    connection = LimaConnection(provider.instance, provider.executable, provider.home, provider.directory)
     carrier = LimaCarrier(connection)
     root_entry = IdentityPlan(
         IdentityExpectation(0, 0, (0,)),
@@ -33,5 +34,5 @@ def lima_native_binding(selected: LimaSelection) -> NativeExecutionBinding:
         RuntimeSelection(RuntimeTargetOS.LINUX),
         _early_guest_facts_route=_EarlyGuestFactsRoute(carrier, root_entry, selected.user),
         _new_managed_delivery=lambda: LimaCarrier(connection),
-        _independent_availability=lima_independent_availability(selected.vm_type),
+        _independent_availability=lima_independent_availability(provider.vm_type),
     )

@@ -20,14 +20,17 @@ from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
 from agentworks.execution import _lima_activation, _lima_selection
+from agentworks.execution._lima_selection import LimaDirectoryCustody, LimaLocalSelection
+from agentworks.execution._wsl2_registration import WSLRegistration
 from agentworks.execution.binding import _IndependentJobAvailability
-from agentworks.execution.carrier import Deadline
+from agentworks.execution.carrier import Deadline, SinkOutput
 from agentworks.execution.carriers.lima import LimaCarrier
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
 from agentworks.execution.target import ExecutionRoute
 from agentworks.vms._lima_native_access import LimaOwnedNativePlatformAccess
 from agentworks.vms._native_operation import vm_execution_context
+from tests.execution.carriers.test_lima import process_result
 from tests.vms.canonical_support import ADDRESS, canonical_config, install_canonical_delivery
 from tests.vms.test_lima_native_access import LocalLima
 from tests.vms.test_native_operation import _root, _RouteCarrier, _scope
@@ -42,6 +45,8 @@ def lima(database, tmp_path, monkeypatch, request):
     home = tmp_path / "lima-home"
     home.mkdir()
     (home / "selected").mkdir()
+    (home / "selected/lima.yaml").write_text(f"vmType: {driver}\n")
+    held = LimaDirectoryCustody.open(str(home / "selected")) if driver == "wsl2" else None
     database.update_vm_platform_metadata("box", {"instance_name": "selected"})
     database.update_vm_tailscale("box", ADDRESS)
     platform = LimaPlatform("wsl2", {})
@@ -53,6 +58,8 @@ def lima(database, tmp_path, monkeypatch, request):
         connections=connections,
         access=None,
         fake=None,
+        host_calls=[],
+        initial_power=VMStatus.RUNNING if status == "Running" else VMStatus.STOPPED,
         original=None,
         deadline=Deadline.after(30),
         root=_root(tmp_path),
@@ -73,6 +80,9 @@ def lima(database, tmp_path, monkeypatch, request):
         assert access.independent_availability is None
         state.access = access
         state.fake = LocalLima(home, owner, status=status, vm_type=driver)
+        if driver == "wsl2":
+            access.route = LimaLocalSelection(platform.site_name, "selected", "box", str(home), "/literal/limactl")
+            access.route.directory = held
         return access
 
     def run(argv, *, io, deadline, custody, env):
@@ -84,7 +94,27 @@ def lima(database, tmp_path, monkeypatch, request):
             if state.original is None:
                 state.original = access.selected
             assert access.selected is state.original
+        if argv == ["wsl", "--list", "--verbose"]:
+            state.host_calls.append(("power", deadline))
+            assert isinstance(io.output, SinkOutput)
+            io.output.stdout.try_write(memoryview(f"lima-selected {state.fake.status} 2\n".encode("utf-16-le")))
+            return process_result()
         return state.fake.run(argv, io=io, deadline=deadline, custody=custody, env=env)
+
+    def registration(name, vm_name, deadline, custody):
+        assert (name, vm_name, deadline, custody) == ("lima-selected", "box", state.deadline, state.access.custody)
+        state.host_calls.append(("registry", deadline))
+        return WSLRegistration(
+            "2f1b1ed8-a629-4fc5-93ef-504e9a780a37",
+            "S-1-5-21-1001",
+            None if state.fake.status == "Uninitialized" else "613ea898-8445-4e6e-82c7-f6e9ae8d7235",
+            name,
+            None if state.fake.status == "Uninitialized" else str(home / "selected"),
+        )
+
+    if driver == "wsl2":
+        monkeypatch.setattr(_lima_selection, "sys", SimpleNamespace(platform="win32"))
+        monkeypatch.setattr(_lima_selection, "observe_registration", registration)
 
     monkeypatch.setattr(platform, "build_native_execution_access", build)
     monkeypatch.setattr(platform, "resolve_native_execution_binding", deny)
@@ -97,7 +127,9 @@ def lima(database, tmp_path, monkeypatch, request):
 
 
 @pytest.mark.parametrize(
-    "lima", [("qemu", "Running"), ("vz", "Stopped"), ("wsl2", "Running"), ("unknown", "Running")], indirect=True
+    "lima",
+    [("qemu", "Running"), ("vz", "Stopped"), ("wsl2", "Running"), ("wsl2", "Stopped"), ("wsl2", "Uninitialized")],
+    indirect=True,
 )
 def test_canonical_lima_repeated_observations_share_context_owner_and_cleanup(database, tmp_path, lima):
     config = canonical_config(tmp_path)
@@ -113,8 +145,10 @@ def test_canonical_lima_repeated_observations_share_context_owner_and_cleanup(da
     ) as ctx:
         access, fake = lima.access, lima.fake
         assert access.selected is lima.original
-        assert access.selected.power is (VMStatus.STOPPED if fake.vm_type == "vz" else VMStatus.RUNNING)
-        assert len(fake.calls) > 3
+        assert access.selected.power is lima.initial_power
+        assert len(fake.calls) + len(lima.host_calls) > 3
+        if fake.vm_type == "wsl2":
+            assert all(argv[1] == "start" for argv, _, _ in fake.calls)
         assert access.binding is access.route_check is None
         assert lima.route.guest.calls == 1 and lima.route.accounts.calls == ["admin", "root"]
         held = access.route.directory
@@ -145,13 +179,32 @@ def test_canonical_lima_repeated_observations_share_context_owner_and_cleanup(da
         os.fstat(descriptor)
     assert access.custody.settled and access.independent_availability is None
     assert database.operations.inspect(_scope()) is None
-    assert sum(argv[1] == "start" for argv, _, _ in fake.calls) == (fake.vm_type == "vz")
+    assert sum(argv[1] == "start" for argv, _, _ in fake.calls) == (lima.initial_power is VMStatus.STOPPED)
     before = len(fake.calls), len(lima.connections)
     with pytest.raises(StateError):
         execution.run(Command(["/bin/true"]), profile=Protection.DIRECT)
     with pytest.raises(StateError):
         files.stat(lima.root / "missing")
     assert before == (len(fake.calls), len(lima.connections))
+
+
+@pytest.mark.parametrize("lima", [("unknown", "Running")], indirect=True)
+def test_canonical_lima_unproved_driver_refuses_before_inspection(database, tmp_path, lima):
+    with (
+        pytest.raises(StateError),
+        vm_execution_context(
+            database,
+            "box",
+            lima.platform,
+            RunContext(config=canonical_config(tmp_path)),
+            route=ExecutionRoute.CANONICAL,
+            deadline=lima.deadline,
+            trusted_root=lima.root,
+        ),
+    ):
+        pytest.fail("unproved external driver admitted a context")
+    assert lima.fake.calls == [] and not lima.host_calls and not lima.connections
+    assert database.operations.inspect(_scope()) is None
 
 
 @pytest.mark.parametrize("drift", ["driver", "power", "locator", "directory"])

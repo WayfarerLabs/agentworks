@@ -66,7 +66,7 @@ def test_activation_payload_roundtrip_has_one_versioned_opaque_locator() -> None
         {"hasErrors": 0},
     ],
 )
-def test_projection_external_fields_are_checked_before_directory_or_guest(local, changed) -> None:
+def test_projection_external_fields_are_checked_before_activation_or_native_route(local, changed) -> None:
     fake, access = local
     fake.raw = json.dumps(
         {
@@ -74,14 +74,13 @@ def test_projection_external_fields_are_checked_before_directory_or_guest(local,
             "status": "Running",
             "dir": str(fake.directory),
             "vmType": "qemu",
-            "user": "limauser",
             "hasErrors": False,
             **changed,
         }
     ).encode()
     with pytest.raises(StateError):
         access.observe_power(Deadline.after(5))
-    assert access.route.directory is None
+    assert access.binding is None and access.activation is None
 
 
 def test_reported_inspection_errors_refuse_before_start_or_guest(local) -> None:
@@ -103,7 +102,6 @@ def test_selected_query_discards_real_process_diagnostics_and_retains_only_proje
             "status": "Running",
             "dir": str(fake.directory),
             "vmType": "qemu",
-            "user": "limauser",
             "hasErrors": False,
         }
     )
@@ -133,7 +131,7 @@ def test_selected_query_discards_real_process_diagnostics_and_retains_only_proje
     assert len(results) == 1
     assert results[0].stdout.retention is Retention.DELIVERED
     assert results[0].stdout.data == results[0].stderr.data == b""
-    assert access.selected.user == "limauser"
+    assert not hasattr(access.selected, "user")
 
 
 def finalize_owner(access) -> None:
@@ -194,6 +192,7 @@ def test_unreadable_registration_absence_retains_custody_until_fenced_read_recov
 
 def test_missing_directory_is_not_a_selected_instance(local) -> None:
     fake, access = local
+    (fake.directory / "lima.yaml").unlink()
     fake.directory.rmdir()
     with pytest.raises(StateError):
         access.observe_power(Deadline.after(5))
@@ -275,10 +274,11 @@ def test_malformed_optional_directory_connection_refuses_at_boundary() -> None:
         LimaConnection("selected", "/limactl", "relative")
 
 
-@pytest.mark.parametrize("driver", ["qemu", "vz", "wsl2", "external-driver"])
+@pytest.mark.parametrize("driver", ["qemu", "vz"])
 def test_availability_stage_never_binds_or_probes_native_guest(local, monkeypatch, driver: str) -> None:
     fake, access = local
     fake.vm_type = driver
+    (fake.directory / "lima.yaml").write_text(f"vmType: {driver}\n")
     assert access.independent_availability is None
     power = access.observe_power(Deadline.after(5))
     assert access.independent_availability is None
@@ -286,7 +286,7 @@ def test_availability_stage_never_binds_or_probes_native_guest(local, monkeypatc
         "agentworks.vms._lima_native_access.lima_native_binding",
         lambda *a: pytest.fail("availability constructed a native binding"),
     )
-    locator = access.ensure_available(power, Deadline.after(5))
+    access.ensure_available(power, Deadline.after(5))
     assert access.binding is None and access.route_check is None and access.guest_check is None
     count = len(fake.calls)
     expected = _IndependentJobAvailability.NO_IDLE_STOP if driver in {"qemu", "vz"} else None
@@ -296,24 +296,22 @@ def test_availability_stage_never_binds_or_probes_native_guest(local, monkeypatc
         access.independent_availability = None
     fake.user = "changed-native-user"
     fake.vm_type = "changed-native-driver"
-    assert access.observe_locator(Deadline.after(5)) == locator
+    with pytest.raises(StateError):
+        access.observe_locator(Deadline.after(5))
     assert access.independent_availability is None
     assert access.settle(Deadline.after(5))
     assert access.independent_availability is None
     assert all(argv[1] == "list" for argv, _, _ in fake.calls)
 
 
-@pytest.mark.parametrize("original, fresh", [("qemu", "external-driver"), ("qemu", "wsl2"), ("external-driver", "vz")])
-def test_availability_fact_uses_fresh_confirmed_driver_instead_of_original_power_selection(
-    local, original, fresh
-) -> None:
+@pytest.mark.parametrize("fresh", ["external-driver", "wsl2", "vz"])
+def test_availability_refuses_provider_driver_drift(local, fresh) -> None:
     fake, access = local
-    fake.vm_type = original
     power = access.observe_power(Deadline.after(5))
     fake.vm_type = fresh
-    access.ensure_available(power, Deadline.after(5))
-    expected = _IndependentJobAvailability.NO_IDLE_STOP if fresh in {"qemu", "vz"} else None
-    assert access.independent_availability is expected
+    with pytest.raises(StateError):
+        access.ensure_available(power, Deadline.after(5))
+    assert access.independent_availability is None
     assert access.binding is None
 
 
@@ -366,27 +364,28 @@ def test_availability_fact_uses_final_running_observation(local, monkeypatch) ->
         return result
 
     monkeypatch.setattr(_lima_selection, "run_process", change_after_revalidation)
-    access.ensure_available(power, Deadline.after(5))
+    with pytest.raises(StateError):
+        access.ensure_available(power, Deadline.after(5))
     assert access.selected.vm_type == "qemu"
     assert access.independent_availability is None and access.binding is None
 
 
-def test_stopped_start_preserves_original_full_route_selection(local) -> None:
+def test_stopped_start_does_not_resolve_native_user_during_availability(local) -> None:
     fake, access = local
     fake.status = "Stopped"
     power = access.observe_power(Deadline.after(5))
     fake.user = "changed-native-user"
-    with pytest.raises(StateError):
-        access.ensure_available(power, Deadline.after(5))
-    assert access.activation is not None and not access.activation.attempted
+    access.ensure_available(power, Deadline.after(5))
+    assert access.activation is not None and access.activation.running_observed
     assert not access.owner.list_pending_lifecycle_obligations()
-    assert all(argv[1] == "list" for argv, _, _ in fake.calls)
+    assert all(".config.user.name" not in argv for argv, _, _ in fake.calls)
 
 
-@pytest.mark.parametrize("driver", ["qemu", "vz", "wsl2", "external-driver"])
+@pytest.mark.parametrize("driver", ["qemu", "vz"])
 def test_independent_availability_requires_a_source_proved_driver_lifetime(local, driver: str) -> None:
     fake, access = local
     fake.vm_type = driver
+    (fake.directory / "lima.yaml").write_text(f"vmType: {driver}\n")
     binding = access.platform.resolve_native_execution_binding(access.vm, access.ctx, deadline=Deadline.after(5))
     expected = _IndependentJobAvailability.NO_IDLE_STOP if driver in {"qemu", "vz"} else None
     assert binding._independent_availability is expected

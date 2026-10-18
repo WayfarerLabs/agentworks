@@ -89,6 +89,7 @@ class LocalLima:
             self.status = "Running"
             return process_result()
         assert argv[1] == "list" and argv[-1] == "selected"
+        native = ".config.user.name" in argv[4]
         data = (
             self.raw
             if self.raw is not None
@@ -98,7 +99,7 @@ class LocalLima:
                     "status": self.status,
                     "dir": str(self.directory),
                     "vmType": self.vm_type,
-                    "user": self.user,
+                    **({"user": self.user} if native else {}),
                     "hasErrors": self.has_errors,
                 }
             ).encode()
@@ -116,6 +117,7 @@ def local(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Loc
     home = tmp_path / "lima-home"
     home.mkdir()
     (home / "selected").mkdir()
+    (home / "selected/lima.yaml").write_text("vmType: qemu\n")
     database = Database(tmp_path / "state.db")
     database.insert_vm("box", "local", "box", admin_username="different-admin", instance_marker=_MARKER)
     database.update_vm_platform_metadata("box", {"instance_name": "selected"})
@@ -301,6 +303,8 @@ def test_selected_route_drift_refuses_before_guest(local, monkeypatch, change: s
         fake.directory.mkdir()
     else:
         setattr(fake, change, "changed")
+        if change == "user":
+            (fake.directory / "lima.yaml").write_text("vmType: qemu\nuser:\n  name: changed\n")
     with pytest.raises(StateError):
         access.route_check(Deadline.after(10))
     assert guest.calls == 0
@@ -320,6 +324,7 @@ def test_locator_namespace_and_materialized_clone_are_distinct(local) -> None:
         route.close()
     fake.directory.rename(fake.home / "old")
     fake.directory.mkdir()
+    (fake.directory / "lima.yaml").write_text("vmType: qemu\n")
     route = LimaLocalSelection("local", "selected", "box", str(fake.home), "/literal/limactl")
     try:
         assert route.observe(deadline, LocalDeliveryCustody()).locator != original
@@ -365,10 +370,9 @@ def test_finite_deadline_required_before_lookup(local) -> None:
 
 def test_direct_resolver_never_starts_and_preserves_snapshot(local, monkeypatch) -> None:
     fake, access = local
-    fake.status = "Stopped"
     binding = access.platform.resolve_native_execution_binding(access.vm, access.ctx, deadline=Deadline.after(5))
     assert binding.delivery_account == fake.user
-    assert [argv[1] for argv, _, _ in fake.calls] == ["list"]
+    assert all(argv[1] == "list" for argv, _, _ in fake.calls)
     route = binding.carrier.connection
     assert route.selected_directory is not None
     fake.directory.rename(fake.home / "old")
