@@ -5440,6 +5440,16 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
       termination from missing observation. Coordinate any shared pump semantic change with the SSH
       lane before integration. Local core and packed-helper tests alone do not satisfy this
       native/joint gate.
+
+The private Windows writer candidate adopts owner commit `8bae107ce` without changing SSH-owned
+code. Native CPython 3.13.16 probes established closed-reader native `BrokenPipeError`/Win32 232
+versus CRT `EINVAL`, temporary native zero-byte writes, and invalid-handle errors. The shared pump
+now writes through the native handle on Windows, retries only smaller unaccepted prefixes with a
+fixed bound, and preserves other errors. Local process, carrier and helper-bound suites pass;
+Windows-only cases skip on Linux. Temporary diagnostic warnings are removed. Independent review,
+composed validation and fresh native verification of this writer remain required; the native/joint
+checkbox stays open.
+
 - [ ] Complete the remaining live/terminal integration before additive RunContext acceptance:
       MANAGED foreground live I/O, active managed output and attachment, shared terminal preparation
       plus SSH-owned native relay adoption, supported workstation/backend proof and production

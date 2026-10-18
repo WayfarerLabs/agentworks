@@ -833,6 +833,12 @@ that core without changing its call signature. The core is compatible with Pytho
 non-blocking Windows pipes require Python 3.12 or newer. Sharing this code does not itself implement
 guest delivery, framing or workload supervision.
 
+On Windows, owned stdin writes use the native pipe handle rather than the CRT write wrapper,
+preserving the originating broken-pipe error. A successful zero-byte write means no progress, not
+consumer closure. The writer retries only smaller unaccepted prefixes, bounded to 17 attempts per
+65,536-byte chunk, then reports temporary backpressure. Other native errors remain failures. POSIX
+uses `os.write` unchanged.
+
 The pump supports finite or explicitly enabled live input, separate bounded outputs, explicit
 environment binding and bounded local cleanup. Borrowed byte endpoints must return without waiting
 on external I/O. The pump never closes them or changes their descriptor flags. Short sink writes
