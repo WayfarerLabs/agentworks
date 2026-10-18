@@ -29,8 +29,11 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.execution.carrier import Deadline
-from agentworks.plugins.gcp._native_access import INSTANCE_FIELDS, MAX_BODY_BYTES
+from agentworks.plugins.gcp._native_access import INSTANCE_FIELDS, MAX_BODY_BYTES, NATIVE_INSTANCE_FIELDS
+from agentworks.plugins.gcp._native_identity import NativeIdentity
 from agentworks.plugins.gcp.config import GcpServiceAccountAuth
+from tests.plugins.gcp.test_native_identity import native_selection
+from tests.plugins.gcp.test_native_instance import native_instance
 from tests.plugins.gcp.test_owned_read import instance, make_reader
 
 if TYPE_CHECKING:
@@ -59,6 +62,7 @@ class ServiceResponse(requests.Response):  # type: ignore[misc]
 def sdk(monkeypatch):
     p = SimpleNamespace(
         now=1.0,
+        fields=INSTANCE_FIELDS,
         body=json.dumps(instance()).encode(),
         status=200,
         headers={},
@@ -146,7 +150,7 @@ def sdk(monkeypatch):
             assert request.method == "GET" and request.body is None
             assert parts.scheme == "https" and parts.netloc == "compute.googleapis.com"
             assert parts.path == "/compute/v1/projects/project/zones/us-central1-a/instances/backend"
-            assert parse_qs(parts.query, strict_parsing=True) == {"fields": [INSTANCE_FIELDS]}
+            assert parse_qs(parts.query, strict_parsing=True) == {"fields": [p.fields]}
             assert kwargs["stream"] is True
             assert request.headers["Accept-Encoding"] == "identity"
             response = ServiceResponse()
@@ -656,4 +660,44 @@ def test_invalid_credential_timeout_refuses_before_transport(sdk, timeout):
         assert len(sdk.sends) == 1
     finally:
         reader._auth.end()
+    assert reader.close(Deadline.after(5))
+
+
+def test_native_projection_uses_owned_middleware_and_fresh_bounded_reads(sdk):
+    reader, vm = native_selection()
+    identity = NativeIdentity.from_row(vm)
+    sdk.fields = NATIVE_INSTANCE_FIELDS
+    sdk.body = json.dumps(native_instance()).encode()
+    auth = reader.borrow_auth(Deadline.after(5))
+    first = reader.observe_instance(Deadline.after(5), identity=identity)
+    assert first.endpoint == "192.0.2.17"
+    value = native_instance()
+    value["networkInterfaces"][0]["accessConfigs"][0]["natIP"] = "192.0.2.18"
+    sdk.body = json.dumps(value).encode()
+    second = reader.observe_instance(Deadline.after(5), identity=identity)
+    assert second.endpoint == "192.0.2.18"
+    assert len(sdk.sends) == 2
+    assert all(request.headers["Authorization"] == "Bearer offline-selected-token" for _, request, _ in sdk.sends)
+    assert sdk.raw_reads
+    assert reader.close_read_client(Deadline.after(5))
+    assert not auth.closed
+    assert reader.close(Deadline.after(5))
+
+
+@pytest.mark.parametrize("failure", ["foreign-tag", "foreign-network", "oversize"])
+def test_native_invalid_body_retires_same_service_originals(sdk, failure):
+    reader, vm = native_selection()
+    sdk.fields = NATIVE_INSTANCE_FIELDS
+    value = native_instance()
+    if failure == "foreign-tag":
+        value["tags"]["items"] = ["foreign"]
+    elif failure == "foreign-network":
+        value["networkInterfaces"][0]["network"] = "projects/foreign/global/networks/default"
+    sdk.body = json.dumps(value).encode() if failure != "oversize" else b" " * (MAX_BODY_BYTES + 1)
+    with pytest.raises(ValidationError):
+        reader.observe_instance(Deadline.after(5), identity=NativeIdentity.from_row(vm))
+    assert not reader.cleanup_incomplete
+    assert len(sdk.sends) == 1
+    assert any(label == "service-response" for label, _ in sdk.closes)
+    assert any(label == "service-session" for label, _ in sdk.closes)
     assert reader.close(Deadline.after(5))

@@ -227,3 +227,53 @@ def test_cleanup_control_retains_original_and_attempts_independent_close(reader,
     assert reader._response is response
     assert reader._lock.acquire(blocking=False)
     reader._lock.release()
+
+
+def test_borrowed_auth_is_passive_same_helper_and_survives_reader_close(reader, monkeypatch):
+    monkeypatch.setattr(reader._auth, "acquire", lambda: pytest.fail("borrow acquired credentials"))
+    borrowed = reader.borrow_auth(Deadline.after(5))
+    assert borrowed is reader._auth
+    assert reader.close_read_client(Deadline.after(5))
+    assert not borrowed.closed
+    for observe in (reader.observe_power, reader.observe_locator, reader.borrow_auth):
+        with pytest.raises(StateError):
+            observe(Deadline.after(5))
+    borrowed.begin(Deadline.after(5))
+    borrowed.end()
+    assert reader.close(Deadline.after(5))
+    assert borrowed.closed
+
+
+@pytest.mark.parametrize("control_type", [RuntimeError, KeyboardInterrupt, SystemExit])
+def test_reader_close_bars_admission_before_fallible_originals(reader, control_type):
+    original_control = control_type("original")
+    calls = []
+
+    def fail():
+        with pytest.raises(StateError):
+            reader._check_admission()
+        calls.append("response")
+        raise original_control
+
+    reader._response = SimpleNamespace(close=fail)
+    reader._service_session = SimpleNamespace(close=lambda: calls.append("service"))
+    if control_type is RuntimeError:
+        assert not reader.close_read_client(Deadline.after(5))
+    else:
+        with pytest.raises(control_type) as caught:
+            reader.close_read_client(Deadline.after(5))
+        assert caught.value is original_control
+    assert calls == ["response", "service"]
+    assert not reader._auth.closed
+    assert reader._lock.acquire(blocking=False)
+    reader._lock.release()
+    reader._response.close = lambda: None
+    assert reader.close_read_client(Deadline.after(5))
+    assert reader.close(Deadline.after(5))
+
+
+def test_borrow_refuses_dirty_reader_before_returning_auth(reader):
+    reader._response = SimpleNamespace(close=lambda: None)
+    with pytest.raises(StateError):
+        reader.borrow_auth(Deadline.after(5))
+    assert reader.close(Deadline.after(5))
