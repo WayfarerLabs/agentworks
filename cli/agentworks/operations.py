@@ -115,6 +115,43 @@ class OperationOwner:
         """Publish close intent without waiting for admitted work or proving quiescence."""
         self._close_requested.set()
 
+    def retire_unused_borrow(self) -> None:
+        """Revoke a pristine local borrow after shutdown stops admission.
+
+        A fenced ownership read protects against stale cleanup. This changes
+        only local borrow authority; other adapter debt remains untouched.
+        """
+        with self._guard:
+            if not self._close_requested.is_set():
+                raise StateError(
+                    "operation ownership must stop admission before retiring an unused borrow",
+                    entity_kind=self._ownership.scope.resource_kind,
+                    entity_name=self._ownership.scope.resource_name,
+                )
+            borrowed = self._active_borrow
+            if (
+                borrowed is None
+                or borrowed._attempt_started
+                or borrowed._dispatch_obligation is not None
+                or borrowed._dispatch_obligation_id is not None
+                or borrowed._supplied_dispatch is not None
+                or borrowed._dispatch_armed
+                or self._outstanding_attempt is not None
+                or self._active_recovery_dispatch is not None
+            ):
+                return
+            claim = self._repository.inspect(self._ownership.scope)
+            if claim is None or claim.ownership != self._ownership:
+                raise StateError(
+                    "operation ownership is missing or stale",
+                    entity_kind=self._ownership.scope.resource_kind,
+                    entity_name=self._ownership.scope.resource_name,
+                )
+            # Publish terminal flags first so an interrupted revocation can retry.
+            borrowed._closing = True
+            borrowed._closed = True
+            self._active_borrow = None
+
     def close_local_delivery(self, deadline: Deadline) -> bool:
         """Drain the held attempt without reopening dispatch or resolving effects.
 
