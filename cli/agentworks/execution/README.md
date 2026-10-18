@@ -488,8 +488,15 @@ file, DIRECT execution and private MANAGED OPERATION start, and aggregate cleanu
 native binding supplies a distinct passive WSL2 or Proxmox carrier for each managed keeper. WSL2
 binds its selected-route check as an optional `route_check` callable. Proxmox supplies a body-free
 current-config check through its retained provider custody and requires the same
-origin/VM/generation locator. Neither check establishes a fresh guest boot. Execution invokes it at
-the existing managed reads, stop/disposal, shell observation and armed start checkpoints. Absence
+origin/VM/generation locator. Neither check establishes a fresh guest boot. Execution invokes it
+before DIRECT helper borrowing, before OPERATION or RESOURCE start reservations and clock helpers,
+and at managed reads, stop/disposal, shell observation and armed start checkpoints. Checks use the
+effective request deadline, including a shorter explicit execution budget, without holding the
+execution admission lock across provider I/O. Admission and expiry are checked again before DIRECT
+borrowing. FileAccess accepts the same core-bound callback after local path/elevation validation,
+including directory child calls. Already-expired file calls skip provider reads and retain ordinary
+DEADLINE result reduction. Deadline retrieval itself is passive except for refusing a closed view.
+Absence
 binds no additional route check beyond shared preparation; it supplies no route-freshness evidence.
 This is not broader provider-route or boot acceptance. Proxmox retains one selected QGA binding and
 checks its locator before and after target preparation. The bounded read-only account probe is not
@@ -1555,6 +1562,17 @@ binds the destination OS and an optional sole interpreter path. Linux otherwise 
 first existing entry wins, including a broken link; an unusable selection never triggers fallback.
 Darwin rejects aliases of the system Python shim without executing it. Selection installs nothing
 and does not invoke developer-tools discovery. Native Darwin acceptance remains open.
+
+The private inline helper supports buffered DIRECT foreground execution on Darwin through the same
+manifest, framing and result interpretation as Linux. Its fixed fresh-exec entry checks real and
+effective account IDs and observed groups; this does not establish Linux group-drop containment.
+Darwin script source uses a separately owned `/dev/fd` pipe, leaving application stdin independent.
+The nonblocking writer has bounded cancellation and retains actual source custody if closure cannot
+be established. Such uncertainty preserves observed application bytes and wait facts but withholds
+the terminal helper record and successful helper exit. Linux retains its memfd source path and
+saved-ID checks. Darwin MANAGED and live foreground calls remain unavailable. Local fixture and
+packed Python 3.11 checks do not establish native macOS acceptance or complete platform-host
+identity, file, job or context composition.
 
 In that same invocation, an isolated Python trampoline checks version 3.11 or newer and the common
 bundle-loader imports before entering the account helper. One bounded nonce-bound prerequisite
