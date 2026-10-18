@@ -1614,9 +1614,12 @@ another adapter's dispatch-drain, fencing, workload or cleanup requirements.
       independent obligation. Replace the legacy hold only after nested lifetimes, delayed delivery,
       every crash window, controller/locator/marker/boot mismatch and production recovery pass live
       validation.
-- [ ] Select shared platform-host resource keys before enabling their admission. Canonical VM names
-      are available before create dispatch; site names and authored SSH routes are not canonical
-      host identities. Do not silently treat different aliases or users as independent hosts.
+- [ ] Bind explicit core-selected configured platform-host resource keys before enabling their
+      admission. Conflicting work across aliases, users and VMs refers to the same configured
+      resource; do not derive independent claims from site names or SSH endpoint spelling. Keep this
+      cooperative ownership key separate from freshly observed host continuity for durable file
+      recovery. Implement that observation's real producer and recovery consumer without a
+      fabricated VM marker, a physical-host alias-discovery framework or a machine-wide lock.
 - [ ] Prove additive ownership without silently migrating legacy callers: enter the new workflow's
       core operation boundary before activation, carry the claim through nested contexts and
       retained teardown nodes, and validate new-only workflows there. Keep old boundary calls and

@@ -480,6 +480,22 @@ evidence from the inner delivery. Shared host files/jobs use actual host identit
 userspace. Reuse this composition rather than introducing another SSH runner or a generic
 virtualization framework.
 
+Host coordination uses one explicit, core-selected configured resource key for work that can
+conflict. Aliases and accounts referring to that shared resource use the same key; neither an SSH
+username nor a different endpoint spelling creates independent ownership. This is cooperative
+configuration, not automatic discovery of every alias of a physical machine. A machine identifier is
+not a substitute for representing shared resources consistently.
+
+Keep that ownership key separate from observed host continuity. Ordinary DIRECT execution needs the
+selected carrier, trust/account policy, runtime, deadline and operation ownership; it must not
+manufacture a VM marker or boot UUID to satisfy an internal managed-job type. Durable host file
+recovery additionally needs freshly observed host continuity, the recorded account/root/objects and
+proof that earlier requests cannot race reconciliation. A recorded identifier alone establishes none
+of those observations. A reboot does not imply that durable files or a platform-owned VM
+disappeared, and an unchanged boot does not prove an old helper has stopped. Implement the concrete
+producer and recovery consumer together; host replacement or storage migration must not silently
+adopt old effects or discard their unresolved ownership.
+
 ### Core native binding
 
 Add `VMPlatform.resolve_native_execution_binding(vm, ctx, *, deadline, config=None)` alongside the
