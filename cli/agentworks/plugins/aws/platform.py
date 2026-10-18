@@ -84,7 +84,9 @@ if TYPE_CHECKING:
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
+    from agentworks.operations import OperationOwner
     from agentworks.transports import Transport
+    from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 
 # Debian's image naming for the EC2 architecture vocabulary. The mapping
@@ -702,6 +704,26 @@ class EC2Platform(VMPlatform):
             return vm.name
         region = vm.platform_metadata.get("region")
         return f"{instance_id}@{region}" if region else instance_id
+
+    def build_native_execution_access(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
+    ) -> OwnedNativePlatformAccess:
+        """Build passive selected AWS access under the existing VM owner."""
+        from agentworks.db.operations import OperationResourceKind
+        from agentworks.plugins.aws._native_access import EC2OwnedAccess
+
+        if (
+            owner.ownership.scope.resource_kind is not OperationResourceKind.VM
+            or owner.ownership.scope.resource_name != vm.name
+        ):
+            raise StateError("EC2 native access requires exact VM ownership")
+        self._locator_metadata(vm)
+        return EC2OwnedAccess(vm, self, ctx, owner=owner, custody=custody)
 
     def resolve_native_execution_binding(
         self,
