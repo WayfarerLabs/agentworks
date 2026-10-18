@@ -25,6 +25,9 @@ from agentworks.execution.carriers._subprocess import ProcessResult
 from agentworks.execution.carriers.ssh import client
 from agentworks.execution.carriers.ssh.connection import SSHConnection
 from agentworks.execution.carriers.ssh.trust import SSHTrustFiles
+from tests.execution.carriers.ssh._client_banner import client_banner
+
+SSH_CLIENT_BANNER = client_banner().encode()
 
 
 def _carrier(kind: str, tmp_path: Path) -> wsl2.WSL2Carrier | client.SSHCarrier:
@@ -86,7 +89,7 @@ def test_ssh_probe_and_dispatch_share_exact_store(tmp_path: Path, monkeypatch: p
     def observed(argv, **kwargs):
         assert kwargs["custody"] is custody
         calls.append(argv)
-        stderr = b"OpenSSH_9.9p1" if argv[-1] == "-V" else b"error"
+        stderr = SSH_CLIENT_BANNER if argv[-1] == "-V" else b"error"
         return ProcessResult(True, 0, 0, CapturedOutput(b"output"), CapturedOutput(stderr), None)
 
     monkeypatch.setattr(client, "run_process", observed)
@@ -106,7 +109,7 @@ def test_ssh_matching_version_with_pending_cleanup_cannot_dispatch(
         assert kwargs["custody"] is custody
         calls.append(argv)
         custody.begin_process()
-        return ProcessResult(True, 0, 0, CapturedOutput(), CapturedOutput(b"OpenSSH_9.9p1"), Failure.OBSERVATION)
+        return ProcessResult(True, 0, 0, CapturedOutput(), CapturedOutput(SSH_CLIENT_BANNER), Failure.OBSERVATION)
 
     monkeypatch.setattr(client, "run_process", pending)
     try:
@@ -181,7 +184,10 @@ def test_late_cleanup_does_not_rewrite_unknown_dispatch(
         child: subprocess.Popen[bytes] | None = None
         try:
             if stage == "ssh-version":
-                child = original([sys.executable, "-c", "import sys; sys.stderr.write('OpenSSH_9.9p1')"], **kwargs)
+                child = original(
+                    [sys.executable, "-c", f"import sys; sys.stderr.write({SSH_CLIENT_BANNER.decode()!r})"],
+                    **kwargs,
+                )
             else:
                 entered.set()
                 assert release.wait(30)
