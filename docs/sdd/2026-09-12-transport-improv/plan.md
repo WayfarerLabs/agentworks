@@ -1219,17 +1219,21 @@ retirement could exhaust reader-close admission before the auth owner became ter
 partial source checkpoint bars all copies on middleware escape and shares terminal admission before
 reader service retirement, preserving one terminal fact and the existing cleanup order. It adds four
 focused regression cases, for 126 reader/copy and 153 producer cases enumerated in source, without
-removing earlier cases. Fresh verification and paired source re-reviews remain pending; passing
-earlier tests alone does not clear these findings. Fresh producer verification stopped at the
-private allocation guard after 146 starts, without a completion certificate or a reported assertion
-failure. Independent source review proves that subtracting two overlapping allocation walks can
-misclassify growth inside the test directory as outside growth, but the stopped run did not retain
-its failing numeric samples and its actual cause remains unknown. Retain that evidence and all data;
-do not count the incomplete run as passing or weaken allocation limits. Verification also needs more
-workspace disk headroom before another full run. This is not native acceptance, whole-composition
-typing, SDK-wide drain or completed cloud access: startup settlement, endpoints, routes, guest
-preparation and RunContext admission remain unfinished. Keep both GCP items unchecked until their
-respective acceptance gates are met.
+removing earlier cases. All three independent paired source re-reviews clear that correction at
+`3a478785`. Fresh verification on author `985085e6` passes all 279 cases without skips or
+deselection: 153 producer cases in 106.41 seconds and 126 reader/copy cases in 89.98 seconds. Full
+strict typing passes 1,380 sources, and nine-file lint and formatting checks pass. The nine verified
+source files match the composed checkpoint byte for byte; whole-composition typing and tests are not
+established by the earlier-base runs. An earlier producer verification stopped at the private
+allocation guard after 146 starts, without a completion certificate or a reported assertion failure.
+Independent source review proves that subtracting two overlapping allocation walks can misclassify
+test-directory growth as outside growth, but that run's failing numeric samples and actual cause
+remain unknown. The corrected accounting uses one partitioned traversal. After the operator restored
+disk capacity, a reader run was interrupted with the worker session after 96 starts; the fresh
+complete run above replaces neither its evidence nor its starts. All failed and interrupted evidence
+remains preserved. This is not native acceptance, SDK-wide drain or completed cloud access: startup
+settlement, endpoints, routes, guest preparation and RunContext admission remain unfinished. Keep
+both GCP items unchecked until their respective acceptance gates are met.
 
 - [ ] Complete owned GCP access with the LLD's observational identity guarantee: a fresh exact
       provider observation refuses known stale-target admission, matching receipt and subsequent
