@@ -25,6 +25,7 @@ class StreamName(StrEnum):
 
 class StreamRetention(StrEnum):
     CAPTURED = "captured"
+    DELIVERED = "delivered"
     DISCARDED = "discarded"
     SUPPRESSED = "suppressed"
 
@@ -82,7 +83,7 @@ _FAILURE_PAIRS = frozenset(
 @dataclass(frozen=True, slots=True)
 class StreamEnd:
     stream: StreamName
-    retained: int
+    count: int
     sha256: str
     complete: bool
     truncated: bool
@@ -132,7 +133,7 @@ def encode_stream_end(value: StreamEnd) -> bytes:
     return _json_bytes(
         {
             "complete": value.complete,
-            "retained": value.retained,
+            "count": value.count,
             "retention": value.retention.value,
             "sha256": value.sha256,
             "stream": value.stream.value,
@@ -142,7 +143,7 @@ def encode_stream_end(value: StreamEnd) -> bytes:
 
 
 def parse_stream_end(body: bytes) -> StreamEnd:
-    value = _object(body, {"complete", "retained", "retention", "sha256", "stream", "truncated"})
+    value = _object(body, {"complete", "count", "retention", "sha256", "stream", "truncated"})
     failed = False
     stream = StreamName.STDOUT
     retention = StreamRetention.CAPTURED
@@ -153,23 +154,27 @@ def parse_stream_end(body: bytes) -> StreamEnd:
         failed = True
     if failed:
         raise ControlError
-    retained = value["retained"]
+    count = value["count"]
     digest = value["sha256"]
     complete = value["complete"]
     truncated = value["truncated"]
     if (
-        type(retained) is not int
-        or not 0 <= retained <= 4_096
+        type(count) is not int
+        or not 0 <= count <= (2**63 - 1 if retention is StreamRetention.DELIVERED else 4_096)
         or type(digest) is not str
         or len(digest) != 64
         or any(character not in _LOWER_HEX for character in digest)
         or type(complete) is not bool
         or type(truncated) is not bool
         or (truncated and complete)
-        or (retention is not StreamRetention.CAPTURED and (retained != 0 or digest != _EMPTY_SHA256 or truncated))
+        or (retention is StreamRetention.DELIVERED and truncated)
+        or (
+            retention in (StreamRetention.DISCARDED, StreamRetention.SUPPRESSED)
+            and (count != 0 or digest != _EMPTY_SHA256 or truncated)
+        )
     ):
         raise ControlError
-    return StreamEnd(stream, retained, digest, complete, truncated, retention)
+    return StreamEnd(stream, count, digest, complete, truncated, retention)
 
 
 def encode_wait(value: WaitFact) -> bytes:

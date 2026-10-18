@@ -14,6 +14,8 @@ from ._helper_identity import IdentityExpectation
 
 MAX_CAPTURE_BYTES = 4_096
 MAX_MANIFEST_BYTES = 32_768
+REQUEST_MARKER = b"AGWI2"
+REQUEST_HEADER_BYTES = len(REQUEST_MARKER) + 4
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z_0-9]*\Z")
 _LOWER_HEX = frozenset("0123456789abcdef")
 _RESERVED_ENV = frozenset({"BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "BASH_XTRACEFD"})
@@ -48,6 +50,7 @@ class ScriptShell(StrEnum):
 
 class OutputMode(StrEnum):
     CAPTURE = "capture"
+    DELIVER = "deliver"
     DISCARD = "discard"
     SUPPRESS = "suppress"
 
@@ -61,7 +64,7 @@ class InlineManifest:
     shell: ScriptShell | None
     env: tuple[tuple[str, str], ...] = field(repr=False)
     cwd: str | None = field(repr=False)
-    stdin: bytes = field(repr=False)
+    stdin: bytes | None = field(repr=False)
     output_mode: OutputMode
     capture_limit: int
     identity: IdentityExpectation
@@ -210,7 +213,7 @@ def decode_manifest(data: bytes) -> InlineManifest:
         raise _invalid()
     if type(value) is not dict or set(value) != _FIELDS or _json_bytes(value) != data:
         raise _invalid()
-    if type(value["version"]) is not int or value["version"] != 1:
+    if type(value["version"]) is not int or value["version"] != 2:
         raise _invalid()
     nonce = value["nonce"]
     if type(nonce) is not str or len(nonce) != 32 or any(character not in _LOWER_HEX for character in nonce):
@@ -260,7 +263,7 @@ def decode_manifest(data: bytes) -> InlineManifest:
         shell=shell,
         env=_environment(value["env"]),
         cwd=cwd,
-        stdin=_decode_b64(value["stdin"]),
+        stdin=None if value["stdin"] is None else _decode_b64(value["stdin"]),
         output_mode=output_mode,
         capture_limit=capture_limit,
         identity=_identity(value["identity"]),
@@ -283,11 +286,17 @@ def encode_manifest(manifest: InlineManifest) -> bytes:
         "output": {"limit": manifest.capture_limit, "mode": manifest.output_mode.value},
         "shell": None if manifest.shell is None else manifest.shell.value,
         "source": None if manifest.source is None else _b64(manifest.source),
-        "stdin": _b64(manifest.stdin),
-        "version": 1,
+        "stdin": None if manifest.stdin is None else _b64(manifest.stdin),
+        "version": 2,
     }
     encoded = _json_bytes(value)
     if len(encoded) > MAX_MANIFEST_BYTES:
         raise ManifestError(ManifestErrorCode.OVERSIZED)
     decode_manifest(encoded)
     return encoded
+
+
+def encode_request_envelope(manifest: InlineManifest) -> bytes:
+    """Prefix canonical JSON with the single bounded private request header."""
+    encoded = encode_manifest(manifest)
+    return REQUEST_MARKER + len(encoded).to_bytes(4, "big") + encoded
