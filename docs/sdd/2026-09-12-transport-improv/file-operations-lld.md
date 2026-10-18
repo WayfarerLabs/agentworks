@@ -335,11 +335,12 @@ native carrier acceptance remain open.
 
 Snapshot storage is independent of source authority. Download must work when the selected identity
 can read the approved source but cannot write its parent. The Linux candidate uses the existing
-fixed `/tmp` directory as a core-selected scratch parent, opened without symlinks and validated as a
-root-owned directory with mode 01777. It does not trust `TMPDIR`, application environment, the
-source path, an account-home convention or a caller-selected staging path. Missing or unsafe state
-refuses; runtime neither creates nor repairs the parent. This selection is private helper machinery,
-not a grant to read or write arbitrary `/tmp` children.
+fixed `/tmp` directory as a core-selected scratch parent; Darwin selects the existing `/private/tmp`
+directory, not the `/tmp` symlink. Both are opened without following links and validated as
+root-owned directories with mode 01777. Selection does not trust `TMPDIR`, application environment,
+the source path, an account-home convention or a caller-selected staging path. Missing or unsafe
+state refuses; runtime neither creates nor repairs the parent. This is private helper machinery, not
+a grant to read or write arbitrary children of either directory.
 
 The existing token-derived 0700 directory, 0600 data and immutable receipt own each operation's
 objects. Linux [sticky-parent semantics](https://man7.org/linux/man-pages/man2/rename.2.html)
@@ -350,8 +351,9 @@ completion. Operation coordination belongs to the database-backed caller, not th
 directory. Root selection creates no object and is not part of readiness. The private
 `_scratch_root.py` selector implements this admission. Local fixtures cover a non-root caller with a
 read-only source parent, unsafe/missing scratch roots, deadline and descriptor cleanup, and
-independence from payload environment. These fixtures do not establish native default-root
-acceptance or select the macOS host root.
+independence from payload environment. Darwin uses its conservative readable-directory admission
+rather than pretending Linux path-only descriptors are portable. These fixtures do not establish
+native default-root acceptance on either platform or complete platform-host composition.
 
 The first creation acknowledgment remains a transfer-delivery gate. The helper derives the scratch
 name from core's fresh token and records its inode identities before returning them; losing that
@@ -709,18 +711,26 @@ uncertainty.
   devices, FIFOs, and unexpected sockets when observed. Revalidate the held destination and staging
   objects before publication. This is safe object handling for the stated cooperative boundary, not
   protection from a malicious same-user process adding a hard link in the next system-call window.
-- Publication creates one unpredictable, operation-owned sibling in the destination directory,
-  writes and verifies all bytes, establishes the required metadata, syncs the staged file,
-  revalidates the destination condition, and uses descriptor-relative rename. Create-only uses Linux
-  `renameat2(RENAME_NOREPLACE)` and macOS `renameatx_np(RENAME_EXCL)`; lack of filesystem support is
-  a refusal. Replacement uses the platform's atomic same-directory rename. Replacement requires the
-  selected identity to have ordinary write authority for the existing file as well as sibling
-  creation/rename authority in its parent; atomic replacement must not bypass an otherwise
-  unwritable destination. Either missing authority is a refusal under that identity, with no
-  fallback or elevation retry. There is no cross-filesystem copy, direct-write, non-atomic fallback,
-  or retry with a different identity/elevation. Atomic visibility is promised; crash durability of
-  the directory entry is not yet promised. Replacement normally changes inode identity, so callers
-  cannot rely on same-inode equivalence or on already-open handles observing the new bytes.
+- Publication first writes and verifies an unpredictable, operation-owned sibling in the destination
+  directory, establishes the required metadata, syncs the staged file and revalidates the
+  destination condition. Create-only uses descriptor-relative Linux `renameat2(RENAME_NOREPLACE)` or
+  macOS `renameatx_np(RENAME_EXCL)`; lack of filesystem support is a refusal, not check-then-rename.
+- Linux replacement uses same-directory rename after proving ordinary write authority for the held
+  existing file as well as sibling creation/rename authority. It must not bypass an unwritable
+  destination. It changes inode identity and supplies atomic visibility, not promised
+  directory-entry crash durability or an update to already-open handles.
+- Darwin replacement explicitly selects in-place copying into the held, single-link regular file.
+  The helper verifies the complete staged content before the first destination mutation, rechecks
+  the requested condition and metadata, then copies, truncates and syncs under the same identity.
+  This preserves the admitted inode and its access metadata without promising atomic visibility.
+  Once mutation may have begun, any write, truncate, sync, close or deadline failure reports partial
+  or uncertain publication and retains exact cleanup custody. It must not report an unchanged file
+  or a successful write from an incomplete transfer. Unsupported ACLs, attributes, flags or other
+  metadata are refused rather than stripped or reconstructed speculatively. Native proof remains
+  required before public exposure.
+- These are explicit selected platform semantics, not runtime fallbacks from a failed rename.
+  Neither platform retries with a different identity/elevation, silently crosses filesystems, or
+  bypasses ordinary destination authority. There is no cross-platform atomic-replace guarantee.
 - Cleanup names and recorded inode identity belong to the operation. Cleanup never scans a prefix or
   removes a name whose identity changed. A cleanup failure leaves bounded debt for the owner; it
   does not authorize broader deletion.
