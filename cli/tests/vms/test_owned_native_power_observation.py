@@ -211,7 +211,7 @@ def test_local_retirement_defers_same_access_until_retry(
     assert database.operations.inspect(_scope()) is None
 
 
-@pytest.mark.parametrize("invalid", ["missing", "site", "no-marker", "marker", "account", "level", "context-vm"])
+@pytest.mark.parametrize("invalid", ["missing", "site", "no-marker", "marker", "account", "context-vm"])
 def test_selection_is_validated_before_factory_or_read(
     database: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: str
 ) -> None:
@@ -228,9 +228,7 @@ def test_selection_is_validated_before_factory_or_read(
         )
         monkeypatch.setattr(database, "get_vm", lambda name: replace(vm, **changes))
     ctx = RunContext()
-    if invalid == "level":
-        ctx = RunContext(operation_scope=ContextScope(ScopeLevel.SYSTEM))
-    elif invalid == "context-vm":
+    if invalid == "context-vm":
         ctx = RunContext(operation_scope=ContextScope(ScopeLevel.VM, vm="other"))
     for method in ("build_native_execution_access", "observe_execution_power"):
         monkeypatch.setattr(platform, method, lambda *args, **kwargs: pytest.fail("invalid selection reached provider"))

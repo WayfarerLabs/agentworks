@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
-from agentworks.capabilities.base import RunContext, ScopeLevel
+from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.db import Database, OperationResourceKind, OperationScope, VMStatus
 from agentworks.errors import NotFoundError, StateError, ValidationError
@@ -173,8 +173,8 @@ def _require_vm_row(db: Database, vm_name: str, platform: VMPlatform, ctx: RunCo
             "Native VM operation platform does not match the VM site", entity_kind="vm", entity_name=vm_name
         )
     scope = ctx.operation_scope
-    if scope is not None and (scope.level is not ScopeLevel.VM or scope.vm != vm_name):
-        raise ValidationError("Native VM operation requires the selected VM context")
+    if scope is not None and scope.vm is not None and scope.vm != vm_name:
+        raise ValidationError("Native VM operation context names a different VM")
     return vm
 
 
@@ -396,3 +396,35 @@ def native_vm_operation(
             fact.__cause__ = primary.__cause__
             primary.__cause__ = fact
             primary.__suppress_context__ = True
+
+
+@contextmanager
+def native_vm_context(
+    db: Database,
+    vm_name: str,
+    platform: VMPlatform,
+    ctx: RunContext,
+    *,
+    deadline: Deadline,
+    trusted_root: PurePosixPath,
+    agent_name: str | None = None,
+) -> Iterator[RunContext]:
+    """Bind prepared native targets for one operation-owned context lifetime.
+
+    Scope describes the caller's operation; VM and optional agent selection
+    come only from the explicit arguments. The native operation owns admission,
+    preparation and aggregate teardown, including failures during context assembly.
+    """
+    with native_vm_operation(
+        db, vm_name, platform, ctx, deadline=deadline, trusted_root=trusted_root, agent_name=agent_name
+    ) as operation:
+        yield RunContext(
+            config=ctx.config,
+            operation_scope=ctx.operation_scope,
+            admin_target=ctx.admin_target(),
+            agent_target=ctx.agent_target(),
+            admin_execution_target=operation.target,
+            agent_execution_target=operation.agent_target,
+            # Trusted core stage assembly preserves the exact scoped reader.
+            secrets=ctx._secrets,  # noqa: SLF001
+        )
