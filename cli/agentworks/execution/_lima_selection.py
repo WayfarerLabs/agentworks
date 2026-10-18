@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import stat
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -25,6 +26,7 @@ from agentworks.execution.carriers._subprocess import run_process
 
 if TYPE_CHECKING:
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
+    from agentworks.execution._local_download_publication_windows import _WindowsAPI
     from agentworks.execution.carrier import Deadline
 
 # Lima omits errors when its inspection-error slice is empty. Only the boolean
@@ -76,32 +78,93 @@ class LimaDirectoryCustody:
 
     identity: LimaDirectoryIdentity
     descriptor: int | None
+    _windows_api: _WindowsAPI | None = field(default=None, repr=False)
+    _close_uncertain: bool = field(default=False, init=False, repr=False)
 
     @classmethod
     def open(cls, path: str) -> LimaDirectoryCustody:
-        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        observed = os.stat(path)
+        identity = LimaDirectoryIdentity(path, observed.st_dev, observed.st_ino)
+        held = cls(identity, None)
         try:
-            observed = os.fstat(descriptor)
-            identity = LimaDirectoryIdentity(path, observed.st_dev, observed.st_ino)
-            identity.check()
-            return cls(identity, descriptor)
-        except BaseException:
-            os.close(descriptor)
+            if sys.platform == "win32":
+                from agentworks.execution._local_download_publication_windows import (
+                    _BACKUP_SEMANTICS,
+                    _LIST_DIRECTORY,
+                    _OPEN_EXISTING,
+                    _READ_ATTRIBUTES,
+                    _SHARE_DELETE,
+                    _SHARE_READ,
+                    _SHARE_WRITE,
+                )
+
+                held._windows_api = _windows_directory_api()
+                held.descriptor = held._windows_api.open(
+                    Path(path),
+                    _READ_ATTRIBUTES | _LIST_DIRECTORY,
+                    _SHARE_READ | _SHARE_WRITE | _SHARE_DELETE,
+                    _OPEN_EXISTING,
+                    _BACKUP_SEMANTICS,
+                )
+            else:
+                held.descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+            held.check()
+            return held
+        except BaseException as control:
+            try:
+                held.close()
+            except BaseException:
+                raise control from LimaDirectoryControlFact(held)
             raise
 
     def check(self) -> None:
         descriptor = self.descriptor
-        if descriptor is None:
+        if descriptor is None or self._close_uncertain:
             raise StateError("Lima selected directory custody is closed")
-        held = os.fstat(descriptor)
-        if (held.st_dev, held.st_ino) != (self.identity.device, self.identity.inode):
+        if self._windows_api is None:
+            held = os.fstat(descriptor)
+            current = held.st_dev, held.st_ino
+            directory = stat.S_ISDIR(held.st_mode)
+        else:
+            from agentworks.execution._local_download_publication_windows import _DIRECTORY
+
+            native = self._windows_api.info(descriptor)
+            current = native.identity.volume, int.from_bytes(native.identity.file_id, "little")
+            directory = bool(native.attributes & _DIRECTORY)
+        if not directory or current != (self.identity.device, self.identity.inode):
             raise StateError("Lima selected directory custody changed")
         self.identity.check()
 
-    def close(self) -> None:
-        if self.descriptor is not None:
-            os.close(self.descriptor)
+    @property
+    def settled(self) -> bool:
+        return self.descriptor is None and not self._close_uncertain
+
+    def close(self) -> bool:
+        if self.descriptor is not None and not self._close_uncertain:
+            # Match the existing local publication owner's close-uncertainty
+            # rule. An ambiguously closed number is diagnostic, not retry custody.
+            self._close_uncertain = True
+            if self._windows_api is None:
+                os.close(self.descriptor)
+            else:
+                self._windows_api.close(self.descriptor)
             self.descriptor = None
+            self._close_uncertain = False
+        return self.settled
+
+
+def _windows_directory_api() -> _WindowsAPI:
+    from agentworks.execution._local_download_publication_windows import _WindowsAPI
+
+    return _WindowsAPI()
+
+
+class LimaDirectoryControlFact(Exception):
+    """Retain the actual directory owner after interrupted construction cleanup."""
+
+    def __init__(self, custody: LimaDirectoryCustody) -> None:
+        self.custody = custody
+        super().__init__("Lima selected directory retains uncertain local closure")
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -191,8 +254,12 @@ class LimaLocalSelection:
             # Store custody immediately after acquisition, before any later check.
             try:
                 self.directory = LimaDirectoryCustody.open(path)
-            except OSError:
-                raise StateError("Lima selected instance directory is unavailable") from None
+            except BaseException as control:
+                if isinstance(control.__cause__, LimaDirectoryControlFact):
+                    self.directory = control.__cause__.custody
+                if isinstance(control, OSError):
+                    raise StateError("Lima selected instance directory is unavailable") from None
+                raise
         if path != self.directory.identity.path:
             raise StateError("Lima selected instance directory route changed")
         self.directory.check()
@@ -201,9 +268,8 @@ class LimaLocalSelection:
             self.namespace, self.home, self.instance, self.executable, self.directory.identity, user, vm_type, power
         )
 
-    def close(self) -> None:
-        if self.directory is not None:
-            self.directory.close()
+    def close(self) -> bool:
+        return self.directory is None or self.directory.close()
 
 
 class LimaObservationControlFact(Exception):
@@ -217,8 +283,7 @@ class LimaObservationControlFact(Exception):
     def close(self, deadline: Deadline) -> bool:
         if not self.custody.close(deadline):
             return False
-        self.route.close()
-        return True
+        return self.route.close()
 
 
 def observe_lima_once(
@@ -232,16 +297,22 @@ def observe_lima_once(
         if not custody.settled:
             raise control from LimaObservationControlFact(route, custody)
         try:
-            route.close()
+            closed = route.close()
         except BaseException:
+            raise control from LimaObservationControlFact(route, custody)
+        if not closed:
             raise control from LimaObservationControlFact(route, custody)
         raise
     if not custody.settled:
         raise StateError("Lima observation retains local custody") from LimaObservationControlFact(route, custody)
     try:
-        route.close()
+        closed = route.close()
     except BaseException as control:
         raise control from LimaObservationControlFact(route, custody)
+    if not closed:
+        raise StateError("Lima observation retains uncertain directory closure") from LimaObservationControlFact(
+            route, custody
+        )
     return selected
 
 
