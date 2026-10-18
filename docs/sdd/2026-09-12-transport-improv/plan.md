@@ -5345,14 +5345,22 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
       on unsupported routes, original control-flow preservation and endpoint release. Update the
       older private systemd producer to the same request format; do not keep a legacy decoder for
       this unreleased exchange. This is a private prerequisite, not a partial public API handoff.
-- [ ] Settle and prove shared input-completion semantics before public live-I/O acceptance.
-      Distinguish finite required-byte delivery, live source EOF and a consumer that finishes or
-      closes input early. Cover commands that do not read stdin, prefix consumers, sources that
-      remain open, real source faults and output/control facts buffered when input ends. Preserve
-      independently observed completion, original controls, bounded collection and endpoint release;
-      never infer termination from missing observation. Coordinate any shared pump semantic change
-      with the SSH lane before integration. The current private pipe checkpoint does not satisfy
-      this gate merely because its cooperative-EOF cases pass.
+- [x] Implement and privately prove ordinary pipe-consumer completion in the shared process pump and
+      packed DIRECT helper. Offered finite/live bytes need not all be consumed. On pump-observed
+      original-child exit or actual broken input pipe, release pending input, stop borrowing the
+      source and close only owned stdin through the original record. Continue bounded output
+      collection. Cover no-read/prefix consumers, open sources, delayed output, exits 0/1/255,
+      buffered final records, real faults, original controls and endpoint lifetime. Notify SSH
+      before changing shared semantics; leave its code and policy untouched. This local proof does
+      not establish native Windows mapping, joint SSH acceptance or complete live-I/O support.
+- [ ] Complete native and joint SSH input-completion proof before public live-I/O acceptance.
+      Distinguish offered finite bytes, live source EOF and a consumer that finishes or closes input
+      early. Cover commands that do not read stdin, prefix consumers, sources that remain open, real
+      source faults and output/control facts buffered when input ends. Preserve independently
+      observed completion, original controls, bounded collection and endpoint release; never infer
+      termination from missing observation. Coordinate any shared pump semantic change with the SSH
+      lane before integration. Local core and packed-helper tests alone do not satisfy this
+      native/joint gate.
 - [ ] Complete the remaining live/terminal integration before additive RunContext acceptance:
       MANAGED foreground live I/O, active managed output and attachment, shared terminal preparation
       plus SSH-owned native relay adoption, supported workstation/backend proof and production
@@ -5369,12 +5377,17 @@ owned SSH suite inside a network namespace with loopback down; its errors and fa
 validation, and that suite is excluded from this private unit's final selection rather than reported
 green.
 
-Additional bounded local probes show that an early-exiting command with an open live source
-currently returns INPUT failure. Depending on available evidence it reports either unknown
-application status or independently validated exit zero. No deadline expiry, replay or retained
-attempt was observed. These probes establish the open input-completion gate above, not acceptable
-public semantics. MANAGED live I/O, active output, terminal/native proof, production capture limits,
-complete RunContext and production ownership remain required and unfinished.
+The prior bounded probes established the baseline defect: an early-exiting command with an open live
+source returned INPUT failure, sometimes before all final records were collected. The shared
+consumer-completion increment at `0d9c193bb` corrects it without an input-policy flag. The lead's
+combined local selection passes 1,396 tests with one existing skip; strict typing covers 1,443
+sources, and changed-file quality checks pass. Core and packed-helper worker suites separately pass
+195 and 629 tests, each with one existing skip; these totals overlap rather than add to the lead's
+run. Project, complexity and generic correctness source reviews are clear. Exit observation remains
+sampled: no further source call starts after the pump's positive observation, not a promise of zero
+race with physical exit between samples. SSH was notified before implementation, but joint native
+acceptance is still owed. MANAGED live I/O, active output, terminal/native proof, production capture
+limits, complete RunContext and production ownership remain required and unfinished.
 
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
 one all-callers cutover. PR #830 publishes this design only. The following implementation PR adds
