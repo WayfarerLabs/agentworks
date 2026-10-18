@@ -5600,6 +5600,13 @@ complete-surface gates.
       diagnostics, pre-effect refusal and unchanged lifetime; keep production context population and
       grant activation with their existing gates.
 
+The private bound-environment worker implements that shape with one immutable copied value and
+`ExecutionAccess.with_env`, without a resolver, namespace-specific permission service or new carrier
+contract. Its 59 focused and 433 adjacent cases pass, including actual DIRECT/managed preparation,
+protected collisions, inherited sensitivity and explicit live presentation. Root integration and
+independent review remain pending; these worker results do not close production context or
+complete-surface acceptance.
+
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
 one all-callers cutover. PR #830 publishes this design only. The following implementation PR adds
 the new surface; migration and removal follow in their own PRs. Permissions are groundwork until

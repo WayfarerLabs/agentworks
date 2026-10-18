@@ -166,6 +166,18 @@ unavailable elevation, invalid values and initially expired deadlines refuse bef
 DIRECT performs one preparation and dispatch attempt, then uses the contextual result reducer. It is
 not exported from the package root or supplied through RunContext.
 
+Core may bind `_BoundEnvironment` to this view: a copied immutable final payload environment,
+separate core-protected values and explicit sensitivity provenance. Per-call `env` overrides
+ordinary values; a different protected value refuses before effects, while an equal value is
+permitted. Protection follows the core-supplied keys, not a guessed namespace.
+`with_env(env, sensitive=...)` returns a passive view over the exact same operation, carrier,
+identities and deadline policy. Neither caller mapping mutation nor later overrides can lower bound
+sensitivity. DIRECT and managed execution, both managed lifetimes and explicit elevation use the
+same composed values and effective sensitivity. Buffered sensitive output remains suppressed;
+explicit live output remains presentation without retained output. This layer resolves no config or
+secrets and never exports payload values into the helper or client environment. Production context
+population remains incomplete.
+
 Its private `start(...)` accepts explicit MANAGED protection and either admitted lifetime for finite
 commands or scripts with SH, BASH or USER_DEFAULT selection, including optional elevation.
 USER_DEFAULT freezes and validates the finite body before observing the selected workload account's
