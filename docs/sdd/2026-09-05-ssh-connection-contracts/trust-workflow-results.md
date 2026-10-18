@@ -228,3 +228,75 @@ These results establish the recorded native CA/KRL behaviors, not live CA reload
 macOS/Windows coverage, genuine provider creation, production writer coexistence, persisted
 configuration rollback or usable RunContext delivery. Full R1-R5 and integrated acceptance remain
 open; no completion checkbox, SDD lock or retirement claim follows.
+
+## Native Linux authentication offers
+
+All six original authentication-offer cases now pass at `526b6e9b400aece54ec03152bc870738081f016e`
+through installed Linux OpenSSH 9.2 servers and agents. This supersedes their earlier unexecuted
+status for this client/workstation only. The test bodies, full wire algorithm/key comparisons,
+operation deadlines and native owners were unchanged. The fixture's eighteen generated private keys
+were measured as `0600` without a permission overlay, exercising the source correction recorded
+above.
+
+The inherited-agent cases and rejected explicit-agent case each observed one query and no signed
+attempt. The authorized explicit-agent, matching/stale sibling and sibling-certificate cases each
+observed one query and one signed attempt. Every case offered exactly the selected ordinary key; no
+unrelated key or certificate was offered. The stale sibling's second call refused before dispatch
+and emitted no additional native client or packet. Each agent held both specified keys, checked by
+the original inventory assertion; successful authentication alone was not the verdict.
+
+Each server used the independently verified owned startup guard described above. Its positive
+startup proof log was preserved separately, then the actual owned diagnostic descriptor and file
+were reset to offset/size zero before the original case. Complete case packet logs were not
+filtered. The scratch runner's SHA256 is
+`b2541ad574c4caf11fc9c8421c1c711751eb261b40a392b3f27cbdd79839bdc4`.
+
+A transparent recorder retained original process objects across raw threads. All 73 direct native
+handles had known statuses, closed pipes and independent same-execution `ECHILD` observations; this
+includes the actual carrier clients. All six original custody closes returned true, listeners
+rebound, and exact owned agent sockets/roots and disposable fixture paths were absent. The lead
+independently audited the receipts and path absence. Server-internal descendants were not audited;
+the earlier CA/KRL cleanup gap is not retroactively closed by this separate run.
+
+The new-path interpreter refused six retired import roots and recorded the expected checkout's
+SSH/client/connection/shared-process origins. No operator state or credentials were accessed and no
+native retry occurred. Default/system configuration placement, other platform agents, minimum
+OpenSSH 8.5, macOS/Windows, provider hops and complete RunContext/R1-R5 acceptance remain open.
+
+## Native Linux trust maintenance and hashed lookup
+
+The four original trust-workflow cases now pass at `526b6e9b400aece54ec03152bc870738081f016e`, using
+the actual in-process CLI app and installed Linux OpenSSH 9.2. This supersedes their earlier
+unexecuted status for this workstation/client. Both ordinary and alias workflows retained
+enrollment/recovery evidence, refused ordinary use of an unpublished creation receipt, published
+complete learned/original policy and KRL, blocked use, retained a failed partial refresh, repaired
+explicitly and reconnected. Each application marker contained exactly `xx`. The two real
+hashed-policy cases accepted only the selected alias/port lookup; a different lookup returned native
+status 255 without another marker effect, leaving each marker exactly `x` and the policy
+bytes/timestamps unchanged.
+
+The eight original CLI invocations were observed without replacing their app or commands: each
+workflow's refresh, block, deliberately failed refresh and repair returned respectively zero, zero,
+`StateError` with exit one, and zero. All original assertions, finite deadlines, native owners,
+retained generations and partial learned-policy checks remained active. The runner's SHA256 is
+`60374fe65fa75a9f497d7a9109ffb102a4a8a00b397e857c2f5c9c5de9e13404`.
+
+Private HOME/XDG directories and state guards were installed before CLI imports. The bounded Python
+audit observed no operator/default configuration, database-service or legacy-delivery attempts; the
+private CLI root retained only its four empty initial directories. CLI registration imports were
+allowed during coexistence. This is not a whole-CLI import-independence or kernel audit. Function
+profiling does not cover arbitrary raw-thread calls; the transparent native launch-stack recorder
+separately covers the actual observed raw-thread SSH constructions.
+
+Each server's positive startup proof used a separate owned host pin, preserving the original
+managed/hashed test policy. The owned shell-startup guard, loopback-only listening and disabled PAM
+and user SSH RC were verified before each original body. The twelve generated private keys were
+already `0600`, with no permission overlay. All 62 original direct native handles had known exits,
+closed pipes and same-execution independent `ECHILD` observations. Original custody closes
+succeeded, all four listeners rebound and disposable fixtures were removed; the lead independently
+audited those receipts, fixture absence and the empty private CLI directories.
+
+No retries or source changes occurred in this native run. Server descendants, the external `agw`
+entrypoint, genuine provider creation, production writer coexistence, persisted operator-config
+rollback, other workstation/client versions and full RunContext delivery remain unproved. These
+local fixture observations do not close full R1-R5 or integrated acceptance.

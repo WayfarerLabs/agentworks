@@ -3,8 +3,9 @@
 - Updated: 2026-10-18
 - PR: [#832](https://github.com/WayfarerLabs/agentworks/pull/832), draft
 - Main/contract base: `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (#830)
-- State: the Windows client-family refusal is implemented; three input-fixture corrections are
-  supplied for transport composition. Full terminal and production acceptance remain open
+- State: the input corrections are integrated; the latest private transport composition passes the
+  full local suite. Twelve Linux native trust/authentication cases add scoped evidence. Full
+  terminal and production acceptance remain open
 
 Earlier checkpoint evidence and dependency history live in separate files. The headings below retain
 existing plan links; the linked sections preserve the complete original records. Historical round 1
@@ -971,25 +972,5 @@ step closes on these scoped observations.
 
 ## Latest transport increment composition
 
-Joint pin `442c067ccc80409a5b6ed5e372ab4cc3398cc6fb` incorporates published transport
-`08b5ce9d1dd0be71bdee7f4df18d9ce4dbd628e5` without conflicts. Production CLI source and the entire
-transport SDD exactly match that owner head. Its finite Linux VM DIRECT preparation uses the shared
-stage before application dispatch; the existing SSH byte path needs no additional staging protocol.
-All three independent integration reviews clear this composition and preserve completed plan
-records. Their focused checks include actual passive SSH validation of staged request shapes;
-privileged admission in packed fixtures remains injected.
-
-The complete local non-integration selection passes 21,971 tests with 78 skips and 51 fork warnings
-in 408.48 seconds. The formerly failing managed-admission case now passes in the full run after the
-owner's reviewed peer-publication correction. Ruff, format, strict typing across 1,541 sources,
-canonical file quality, Rulesync, locked-SDD and Typer isolation pass. Older failed views remain
-preserved. The refreshed private terminal composition `983eb5a38301fdb353be19ad8f642cc0139cebd9`
-passes all 578 SSH cases with 12 skips; its SSH production bytes equal reviewed `e9442d6a8`. Native
-observations remain attributed to their actual joint pin `09dff3511`.
-
-[Hosted verification](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6255846632)
-also clears earlier source `72a841d83`: Linux 3.12/3.13/3.14 each pass 21,707 tests with 308 skips;
-Windows 3.13 passes 2,182 with 80 skips. The synthetic Windows client module includes all three
-supplied input corrections. Those checks do not prove installed OpenSSH or terminal workflows, and
-do not clear fresh hosted verification of this newer transport composition. Full R1-R5 acceptance,
-both usable RunContext paths and the existing retirement sequence remain open.
+See the [transport composition evidence](phase2-transport-results.md) for exact dependency pins,
+combined gates, hosted results and retained failure qualifications.

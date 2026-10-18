@@ -226,15 +226,16 @@ proves that restoring old TOML does not discard current managed policy, revocati
 partial-update custody. Production writer coexistence and rollback through both usable RunContext
 paths still require transport composition and native acceptance.
 
-Current public shared dependency: transport #833 at `08b5ce9d1dd0be71bdee7f4df18d9ce4dbd628e5`,
-incorporated into SSH working composition `442c067ccc80409a5b6ed5e372ab4cc3398cc6fb`. Production CLI
-source and the transport SDD match the owner head; the extra CLI change is the reviewed SSH drain
-fixture correction. The complete combined local run passes 21,971 tests with 78 skips. This working
-composition does not accept unfinished terminal, platform/FileAccess or RunContext work. The latest
-full native SSH testing pin remains `1fcabfe6082ab23b1e04eeac115e842f541eee95`; subsequent private
-Linux terminal component observations are separately scoped in the progress record. The
-[dependency chronology](phase2-results.md#historical-dependency-chronology) retains earlier pins,
-measurements and limits without changing completed plan records or the
+Current public shared dependency: transport #833 at `c0298ba16f945ca4725145cefc39f3a6282acfaf`,
+incorporated into SSH evaluated runtime/test composition `1c901c857e89ede043de211c12710396069e78ba`.
+Production CLI source and the transport SDD match the owner head; the extra CLI changes are the
+reviewed SSH drain and generated-key permission fixtures. The complete combined local run passes
+21,972 tests with 78 skips. This working composition does not accept unfinished terminal,
+platform/FileAccess or RunContext work. The latest full native SSH testing pin remains
+`1fcabfe6082ab23b1e04eeac115e842f541eee95`; subsequent private Linux terminal component and
+trust/authentication fixture observations are separately scoped in the progress and trust workflow
+records. The [dependency chronology](phase2-results.md#historical-dependency-chronology) retains
+earlier pins, measurements and limits without changing completed plan records or the
 [coordinated final stack](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6032839010).
 
 The [round 3 record](phase2-results.md#round-3-collected-feedback-and-corrections) preserves its
