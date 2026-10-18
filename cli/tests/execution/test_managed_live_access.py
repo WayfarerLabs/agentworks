@@ -141,7 +141,7 @@ def test_unsettled_relay_does_not_overlap_a_durable_poll(access_view, monkeypatc
 
     def uncertain(self, *args, **kwargs):
         candidate, custody = relay(self, *args, **kwargs)
-        return candidate, replace(custody, pending_remote_effects=True, requires_owner_retention=True)
+        return candidate, replace(custody, pending_remote_effects=True, helper_requires_owner_retention=True)
 
     monkeypatch.setattr(ExecutionOperation, "relay_managed", uncertain)
     result = access.run(Command(["/bin/true"]), profile=Protection.MANAGED, output=Output.live(Sink(), Sink()))
@@ -228,7 +228,7 @@ def test_input_only_unsettled_relay_uses_retained_output_policy(access_view, mon
 
     def uncertain(self, *args, **kwargs):
         candidate, custody = relay(self, *args, **kwargs)
-        return candidate, replace(custody, requires_owner_retention=True)
+        return candidate, replace(custody, helper_requires_owner_retention=True)
 
     monkeypatch.setattr(ExecutionOperation, "relay_managed", uncertain)
     result = access.run(

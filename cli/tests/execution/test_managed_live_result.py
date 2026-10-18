@@ -109,7 +109,7 @@ def test_discarded_wait_cannot_repair_missing_presentation(observation: ManagedL
     [
         OwnedInlineOutcome(pending_remote_effects=True),
         OwnedInlineOutcome(coordination_uncertain=True),
-        OwnedInlineOutcome(requires_owner_retention=True),
+        OwnedInlineOutcome(helper_requires_owner_retention=True),
     ],
 )
 def test_uncertain_relay_custody_prevents_aggregate_cleanup(custody: OwnedInlineOutcome) -> None:

@@ -95,7 +95,7 @@ def capture_disposal_call(
     active.outcome = replace(
         outcome,
         pending_remote_effects=outcome.pending_remote_effects or (active.armed and not proved),
-        requires_owner_retention=outcome.requires_owner_retention or not proved,
+        helper_requires_owner_retention=outcome.helper_requires_owner_retention or not proved,
     )
     active.bookkeeping_retained = True
     if (
@@ -192,6 +192,7 @@ def dispose_resource_job(
         raise ValidationError("Managed resource disposal requires a confirmed launch receipt")
     active: _ActiveHelperCall | None
     with operation._admission_guard:
+        operation._require_no_inline_preparation()
         if operation._finishing or operation._finished:
             raise StateError("Execution operation is closing")
         retained = tuple(operation._active_inline_calls.values())
@@ -236,6 +237,7 @@ def dispose_resource_job(
         if deadline.expired:
             return JobDisposal(reference, False, ExecutionFailure.DEADLINE, True)
         with operation._admission_guard:
+            operation._require_no_inline_preparation()
             if operation._finishing or operation._finished:
                 raise StateError("Execution operation is closing")
             if operation._active_inline_calls or operation._unfinished_inline_executions:
@@ -243,6 +245,7 @@ def dispose_resource_job(
             active = operation._borrow_helper_call(carrier, None, disposal=action)
     else:
         with operation._admission_guard:
+            operation._require_no_inline_preparation()
             if operation._finishing or operation._finished:
                 raise StateError("Execution operation is closing")
             row = inspect_disposal_row(operation, active)
@@ -278,7 +281,7 @@ def dispose_resource_job(
 
 
 def _result(reference: JobRef, active: _ActiveHelperCall, deadline: Deadline) -> JobDisposal:
-    settled = active.outcome is not None and not active.outcome.requires_owner_retention
+    settled = active.outcome is not None and not active.outcome.helper_requires_owner_retention
     candidate = active.candidate
     disposed = (
         settled

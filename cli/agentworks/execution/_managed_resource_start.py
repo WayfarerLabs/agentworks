@@ -143,7 +143,9 @@ def capture_resource_start(
         and record.launch_state in {ManagedLaunchState.RESERVED, ManagedLaunchState.POSSIBLE_DISPATCH}
     )
     proved = settled and (acknowledged or never_entered or not_sent)
-    active.outcome = replace(outcome, requires_owner_retention=outcome.requires_owner_retention or not proved)
+    active.outcome = replace(
+        outcome, helper_requires_owner_retention=outcome.helper_requires_owner_retention or not proved
+    )
     active.bookkeeping_retained = True
     if not proved:
         # Actual helper closure permits exact scratch cleanup even while the
@@ -235,6 +237,7 @@ def start_resource_job(
             bootstrap.guest,
         )
         with operation._admission_guard:
+            operation._require_no_inline_preparation()
             if (
                 operation._finishing
                 or operation._finished
@@ -279,6 +282,7 @@ def start_resource_job(
             uuid4().hex, ManagedRunReceipt(identity, identity.unit_name, spec), body.output_policy, stage
         )
         with operation._admission_guard:
+            operation._require_no_inline_preparation()
             operation.require_job_binding(carrier, runtime_selection)
             if operation._active_inline_calls or operation._unfinished_inline_executions:
                 raise StateError("Execution operation cannot admit a managed resource start")
@@ -322,7 +326,7 @@ def start_resource_job(
                 )
             if (
                 active.outcome is None
-                or active.outcome.requires_owner_retention
+                or active.outcome.helper_requires_owner_retention
                 or attempt.record.launch_state is not ManagedLaunchState.RECEIPT_CONFIRMED
             ):
                 raise StateError("Independent managed start was not acknowledged")

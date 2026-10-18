@@ -239,19 +239,26 @@ def build_root_guest_bootstrap_argv(
     ):
         raise ValidationError("Root guest bootstrap requires bound Linux system Python and identities")
     _validate_plan(IdentityPlan(target_identity, IdentityMode.DIRECT))
+    source = _root_guest_bootstrap_source(target_identity, program, expected_guest)
+    return _build_root_bootstrap_argv(root_entry, selection=selection, fixed_source=source, nonce=nonce)
+
+
+def _root_guest_bootstrap_source(
+    target_identity: IdentityExpectation, program: RootGuestProgram, expected_guest: VMGuestIdentity
+) -> str:
+    """Assemble trusted numeric admission for direct or verified staged entry."""
     bootstrap_source = files(__package__).joinpath("_guest_bootstrap.py").read_text(encoding="utf-8")
     guest_tuple = (
         expected_guest.instance_marker,
         expected_guest.boot_id,
         expected_guest.init_start_ticks,
     )
-    source = (
+    return (
         bootstrap_source
         + "\nraise SystemExit(main("
         + f"{target_identity.euid!r},{target_identity.egid!r},{target_identity.groups!r},"
         + f"{program.loader_source!r},{guest_tuple!r}))\n"
     )
-    return _build_root_bootstrap_argv(root_entry, selection=selection, fixed_source=source, nonce=nonce)
 
 
 def _build_root_bootstrap_argv(
