@@ -21,7 +21,7 @@ from agentworks.execution._managed_start_operation import (
     start_owned_managed_run,
 )
 from agentworks.execution._runtime_prerequisite import HelperClosureExpectation, RuntimeSelection, RuntimeTargetOS
-from agentworks.execution.carrier import Deadline, Dispatch
+from agentworks.execution.carrier import Deadline, Dispatch, ExitStatus
 from agentworks.operations import OperationAttempt, OperationBorrow, OperationOwner
 
 from .test_managed_start_operation import GUEST, OBLIGATION, ROOT, RUN, Carrier, _records, _request
@@ -200,6 +200,42 @@ def test_selected_delivery_does_not_change_original_carrier_matching(owned):
     operation = BorrowedFixedHelperCarrier(carrier, borrow, delivery=delivery)
     assert operation.wraps(carrier) and not operation.wraps(delivery)
     borrow.close()
+
+
+@pytest.mark.parametrize("receipt", [False, True])
+def test_zero_completion_cannot_replace_supplied_native_closure_proof(owned, receipt):
+    _, repository, _, owner = owned
+    delivery = Delivery()
+    delivery.code = 0
+    delivery.response = lambda request: _records(request, receipt=receipt)
+    delivery.prove = False
+    carrier = Carrier(lambda request: b"")
+    held, launch = start(owned, carrier, delivery=delivery)
+    outcome = launch()
+    custody = held[0]
+    borrow, attempt = owner._active_borrow, owner._outstanding_attempt
+    state = ManagedLaunchState.RECEIPT_CONFIRMED if receipt else ManagedLaunchState.POSSIBLE_DISPATCH
+    assert outcome.launch_state is state and outcome.requires_owner_retention and outcome.pending_remote_effects
+    assert borrow is not None and attempt is not None and not borrow.closed
+    assert custody.completion_view is None
+    with pytest.raises(StateError):
+        custody.retry_bookkeeping()
+    with pytest.raises(StateError):
+        custody.observe_cleanup(Deadline.after(10))
+    assert custody.completion_view is None and owner._outstanding_attempt is attempt
+    assert delivery.calls == 1 and carrier.calls == 0
+    delivery.prove = True
+    custody.observe_cleanup(Deadline.after(10))
+    view = custody.completion_view
+    assert view is not None and view[:2] == (Dispatch.SENT, ExitStatus(0))
+    assert view[2] is attempt.local_delivery
+    custody.retry_bookkeeping()
+    assert owner._active_borrow is None and owner._outstanding_attempt is None
+    assert delivery.calls == 1 and carrier.calls == 0
+    assert repository.inspect(RUN).launch_state is state
+    row = owner.inspect_lifecycle_obligation(OBLIGATION)
+    assert row is not None
+    assert row.state is (LifecycleObligationState.RESOLVED if receipt else LifecycleObligationState.POSSIBLE_EFFECT)
 
 
 @pytest.mark.parametrize("committed", [False, True])

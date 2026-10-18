@@ -120,8 +120,11 @@ class ManagedStartCustody:
         return operation is None or (
             not operation.delivery_started
             or self._dispatch is Dispatch.NOT_SENT
-            or (self._dispatch is Dispatch.SENT and self._completion == ExitStatus(0))
-            or (self._delivery is not None and self._delivery.closure_proven)
+            or (
+                self._delivery.closure_proven
+                if self._delivery is not None
+                else self._dispatch is Dispatch.SENT and self._completion == ExitStatus(0)
+            )
         )
 
     def _validate(self) -> None:
@@ -320,7 +323,10 @@ def start_owned_managed_run(
             before_possible_dispatch=before_possible_dispatch,
             publish_candidate=custody._capture,
         )
-        operation.settle(attempt.candidate.dispatch, attempt.candidate.carrier_completion)
+        if custody._delivery is None or custody._closed_helper:
+            operation.settle(attempt.candidate.dispatch, attempt.candidate.carrier_completion)
+        else:
+            operation.pending_remote_effects = True
         confirmed = (
             attempt.record.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
             and not operation.has_outstanding_attempt
