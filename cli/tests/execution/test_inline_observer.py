@@ -135,7 +135,7 @@ def _stream_end(stream: StreamName, data: bytes = b"") -> bytes:
     return encode_stream_end(
         StreamEnd(
             stream=stream,
-            retained=len(data),
+            count=len(data),
             sha256=hashlib.sha256(data).hexdigest(),
             complete=True,
             truncated=False,

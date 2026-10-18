@@ -90,8 +90,8 @@ class OperationOwner:
         """Take over one exact predecessor without inferring remote quiescence.
 
         Recovery seals ordinary ledger registrations and restores only durable claim
-        facts. The caller still establishes every adapter and whole-operation
-        no-further-effects fact before resolution or release.
+        facts. The caller still establishes every adapter's reviewed completion
+        condition and independently settles delivery and cleanup before release.
         """
         claim = repository.recover_takeover(predecessor, generation_id)
         controller = repository._controller_identity  # noqa: SLF001
@@ -114,6 +114,43 @@ class OperationOwner:
     def stop_admission(self) -> None:
         """Publish close intent without waiting for admitted work or proving quiescence."""
         self._close_requested.set()
+
+    def retire_unused_borrow(self) -> None:
+        """Revoke a pristine local borrow after shutdown stops admission.
+
+        A fenced ownership read protects against stale cleanup. This changes
+        only local borrow authority; other adapter debt remains untouched.
+        """
+        with self._guard:
+            if not self._close_requested.is_set():
+                raise StateError(
+                    "operation ownership must stop admission before retiring an unused borrow",
+                    entity_kind=self._ownership.scope.resource_kind,
+                    entity_name=self._ownership.scope.resource_name,
+                )
+            borrowed = self._active_borrow
+            if (
+                borrowed is None
+                or borrowed._attempt_started
+                or borrowed._dispatch_obligation is not None
+                or borrowed._dispatch_obligation_id is not None
+                or borrowed._supplied_dispatch is not None
+                or borrowed._dispatch_armed
+                or self._outstanding_attempt is not None
+                or self._active_recovery_dispatch is not None
+            ):
+                return
+            claim = self._repository.inspect(self._ownership.scope)
+            if claim is None or claim.ownership != self._ownership:
+                raise StateError(
+                    "operation ownership is missing or stale",
+                    entity_kind=self._ownership.scope.resource_kind,
+                    entity_name=self._ownership.scope.resource_name,
+                )
+            # Publish terminal flags first so an interrupted revocation can retry.
+            borrowed._closing = True
+            borrowed._closed = True
+            self._active_borrow = None
 
     def close_local_delivery(self, deadline: Deadline) -> bool:
         """Drain the held attempt without reopening dispatch or resolving effects.
@@ -349,11 +386,12 @@ class OperationOwner:
             return borrowed
 
     def record_effects_resolved(self) -> None:
-        """Persist caller-established evidence that effects cannot remain.
+        """Persist caller-established aggregate completion evidence.
 
-        Resolution is whole-operation evidence, not an inference from settled
-        child attempts. Retrying after an interrupted transition first reads
-        the fenced claim to distinguish a committed resolution from a retry.
+        Every obligation must meet its adapter's reviewed completion condition,
+        with delivery and cleanup independently settled. Resolution is not an
+        inference from settled child attempts. Retrying an interrupted transition
+        reads the fenced claim to distinguish committed resolution from a retry.
         """
         with self._guard:
             self._require_no_active_work_locked()
@@ -382,7 +420,7 @@ class OperationOwner:
         A refused close stays closed to new borrowers. The current borrower
         may only record and settle its already-started attempt and relinquish
         the borrow. Later close calls require the caller to record
-        whole-operation no-further-effects evidence before finalization.
+        aggregate completion and independently settled cleanup before finalization.
         """
         self._close_requested.set()
         with self._guard:
@@ -575,7 +613,10 @@ class LifecycleObligation:
         return self._obligation
 
     def resolve(self) -> None:
-        """Persist adapter-established no-further-effects evidence."""
+        """Record this obligation's reviewed adapter completion condition.
+
+        This does not resolve other obligations or the whole operation.
+        """
         owner = self._owner
         with owner._guard:  # noqa: SLF001
             owner._require_no_active_work_locked()  # noqa: SLF001
@@ -795,6 +836,15 @@ class OperationBorrow:
     @property
     def ownership(self) -> OperationOwnership:
         return self._owner.ownership
+
+    @property
+    def closed(self) -> bool:
+        """Whether local borrow authority ended, including unresolved handoff.
+
+        This does not prove an effect resolved or any adapter checkpoint.
+        """
+        with self._owner._guard:  # noqa: SLF001
+            return self._closed
 
     @property
     def has_outstanding_attempt(self) -> bool:

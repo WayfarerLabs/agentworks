@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
 MAX_REQUEST_BYTES = 32_768
 MAX_PATH_BYTES = 4_096
-MAX_SNAPSHOT_CHUNK_BYTES = 12 * 1_024
+MAX_SNAPSHOT_CHUNK_BYTES = 256 * 1_024
 _MAX_LENGTH = (1 << 63) - 1
 _LOWER_HEX = frozenset("0123456789abcdef")
 _COMMON_FIELDS = frozenset({"identity", "nonce", "operation", "remaining_seconds", "token", "version"})
@@ -271,9 +271,8 @@ def _identity(value: object) -> IdentityExpectation:
     return identity
 
 
-def _bounded_request_integer(value: object, maximum: int, *, positive: bool = False) -> int:
-    minimum = 1 if positive else 0
-    if type(value) is not int or not minimum <= value <= maximum:
+def _bounded_request_integer(value: object, maximum: int) -> int:
+    if type(value) is not int or not 0 <= value <= maximum:
         raise _invalid_request()
     return value
 
@@ -343,7 +342,7 @@ def decode_file_snapshot_request(data: bytes) -> FileSnapshotRequest:
             token,
             _decode_path(value["root"], root=True),
             _decode_path(value["path"], root=False),
-            _bounded_request_integer(value["max_bytes"], _MAX_LENGTH, positive=True),
+            _bounded_request_integer(value["max_bytes"], _MAX_LENGTH),
             identity,
             remaining,
             effect_gate,

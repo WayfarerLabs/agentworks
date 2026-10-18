@@ -5,6 +5,10 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .carrier import ByteSink
 
 from ._evidence_wire import Frame, FrameKind, WireError
 from ._inline_control import (
@@ -21,6 +25,7 @@ from ._inline_control import (
     parse_wait,
 )
 from ._inline_request import OutputMode
+from ._process import try_write_to_sink
 
 
 class ObservationError(StrEnum):
@@ -35,7 +40,7 @@ class ObservationError(StrEnum):
 @dataclass(frozen=True, slots=True)
 class StreamObservation:
     data: bytes = field(repr=False)
-    retained: int
+    count: int
     sha256: str
     complete: bool
     truncated: bool
@@ -56,7 +61,14 @@ class InlineObservation:
 class InlineObserver:
     """Validate phase grammar without retaining raw carrier noise or diagnostics."""
 
-    def __init__(self, output_mode: OutputMode, capture_limit: int) -> None:
+    def __init__(
+        self,
+        output_mode: OutputMode,
+        capture_limit: int,
+        *,
+        stdout: ByteSink | None = None,
+        stderr: ByteSink | None = None,
+    ) -> None:
         self._output_mode = output_mode
         self._capture_limit = capture_limit
         self._launching = False
@@ -67,6 +79,34 @@ class InlineObserver:
         self._failure: FailureFact | None = None
         self._terminal = False
         self._error: ObservationError | None = None
+        self._sinks = {StreamName.STDOUT: stdout, StreamName.STDERR: stderr}
+        self._pending: tuple[StreamName, bytes] | None = None
+        self._offset = 0
+        self._counts = {StreamName.STDOUT: 0, StreamName.STDERR: 0}
+        self._hashes = {StreamName.STDOUT: hashlib.sha256(), StreamName.STDERR: hashlib.sha256()}
+
+    def drain(self) -> bool:
+        """Offer the bounded decoded chunk outside the trusted decoder callback."""
+        if self._pending is None:
+            return True
+        stream, data = self._pending
+        sink = self._sinks[stream]
+        assert sink is not None
+        while self._offset < len(data):
+            remaining = memoryview(data)[self._offset :]
+            written = try_write_to_sink(sink, remaining)
+            if written is None:
+                return False
+            self._offset += written
+        self._pending = None
+        self._offset = 0
+        return True
+
+    def release(self) -> None:
+        """End endpoint borrowing and discard undelivered presentation bytes."""
+        self._sinks.clear()
+        self._pending = None
+        self._offset = 0
 
     def accept(self, frame: Frame) -> None:
         """Consume one codec-validated frame; schema failures stay inside the sink."""
@@ -120,19 +160,28 @@ class InlineObserver:
         stream = StreamName.STDOUT if frame.kind is FrameKind.STDOUT else StreamName.STDERR
         if (
             not self._launching
-            or self._output_mode is not OutputMode.CAPTURE
+            or self._output_mode not in {OutputMode.CAPTURE, OutputMode.DELIVER}
             or stream in self._streams
             or self._wait is not None
             or self._failure is not None
         ):
             self._error = ObservationError.ORDER
             return
+        self._saw_data = True
+        if self._output_mode is OutputMode.DELIVER:
+            if self._pending is not None or self._counts[stream] + len(frame.body) > 2**63 - 1:
+                self._error = ObservationError.STREAM
+                return
+            self._counts[stream] += len(frame.body)
+            self._hashes[stream].update(frame.body)
+            if frame.body:
+                self._pending = (stream, frame.body)
+            return
         data = self._data[stream]
         if len(data) + len(frame.body) > self._capture_limit:
             self._error = ObservationError.STREAM
             data.clear()
             return
-        self._saw_data = True
         data.extend(frame.body)
 
     def _accept_stream_end(self, end: StreamEnd) -> None:
@@ -140,16 +189,24 @@ class InlineObserver:
             OutputMode.CAPTURE: StreamRetention.CAPTURED,
             OutputMode.DISCARD: StreamRetention.DISCARDED,
             OutputMode.SUPPRESS: StreamRetention.SUPPRESSED,
+            OutputMode.DELIVER: StreamRetention.DELIVERED,
         }[self._output_mode]
         data = bytes(self._data[end.stream])
+        count = self._counts[end.stream] if self._output_mode is OutputMode.DELIVER else len(data)
+        digest = (
+            self._hashes[end.stream].hexdigest()
+            if self._output_mode is OutputMode.DELIVER
+            else hashlib.sha256(data).hexdigest()
+        )
         invalid = (
             not self._launching
             or end.stream in self._streams
             or self._wait is not None
             or self._failure is not None
             or end.retention is not expected_retention
-            or end.retained != len(data)
-            or end.sha256 != hashlib.sha256(data).hexdigest()
+            or self._pending is not None
+            or end.count != count
+            or end.sha256 != digest
             or (end.truncated and len(data) != self._capture_limit)
         )
         if invalid:
@@ -157,7 +214,7 @@ class InlineObserver:
             return
         self._streams[end.stream] = StreamObservation(
             data=data,
-            retained=end.retained,
+            count=end.count,
             sha256=end.sha256,
             complete=end.complete,
             truncated=end.truncated,

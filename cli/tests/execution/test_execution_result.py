@@ -236,6 +236,14 @@ def test_inline_checked_reducer_keeps_carrier_input_failure_phase_unknown() -> N
     assert caught.value.details.reason is ExecutionFailureReason.INPUT
 
 
+@pytest.mark.parametrize("failure", [Failure.INPUT, Failure.OUTPUT])
+def test_endpoint_failure_preserves_independently_completed_application(failure: Failure) -> None:
+    result = _reduce(_candidate(carrier_failure=failure))
+    assert result.application_state is ApplicationState.COMPLETED
+    assert result.status == ExitCode(0)
+    assert result.failure is (ExecutionFailure.INPUT if failure is Failure.INPUT else ExecutionFailure.OUTPUT)
+
+
 def test_inline_checked_reducer_returns_a_successful_result() -> None:
     result = _check()
 

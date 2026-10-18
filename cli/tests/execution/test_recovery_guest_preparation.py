@@ -12,7 +12,7 @@ from dataclasses import replace
 from pathlib import Path
 from types import FrameType
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -162,26 +162,26 @@ def recovery(tmp_path: Path):
 
 
 def _batch(owner: OperationOwner, carrier: FixedCarrier, *, delivery: str = "admin", early: FixedCarrier | None = None):
-    local_delivery = LocalDeliveryCustody()
     route = None if early is None else _EarlyGuestFactsRoute(early, IdentityPlan(_ROOT, IdentityMode.DIRECT), delivery)
     binding = NativeExecutionBinding(
         carrier, delivery, RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"), route
     )
-    return RecoveryGuestPreparationBatch(binding, owner, _BATCH_ID, provider_custody=local_delivery)
+    return RecoveryGuestPreparationBatch(binding, owner, _BATCH_ID)
 
 
 def _prepare(batch: RecoveryGuestPreparationBatch, *, workload: str = "admin", elevated: bool = True, **kwargs):
     platform = Mock(spec=VMPlatform)
     platform.site_name = "local"
     platform.observe_provider_locator.return_value = _LOCATOR
+    platform = kwargs.pop("platform", platform)
     return batch.prepare(
         kwargs.pop("vm", _vm()),
-        kwargs.pop("platform", platform),
-        None,
+        platform,
         _LOCATOR,
         workload_account=workload,
         include_elevated=elevated,
         deadline=kwargs.pop("deadline", Deadline.after(10)),
+        observe_locator=kwargs.pop("observe_locator", platform.observe_provider_locator),
         **kwargs,
     )
 
@@ -192,7 +192,7 @@ def _row(owner: OperationOwner):
     return row
 
 
-def test_distinct_batch_debt_and_selected_guest_route(recovery):
+def test_distinct_batch_debt_and_selected_guest_route(recovery, monkeypatch):
     database, owner, old_id, hold = recovery
     carrier, early = FixedCarrier(), FixedCarrier()
     batch = _batch(owner, carrier, early=early)
@@ -220,7 +220,22 @@ def test_distinct_batch_debt_and_selected_guest_route(recovery):
     early.after.side_effect = during_probe
     carrier.after.side_effect = during_probe
     deadline = Deadline.after(10)
-    result = _prepare(batch, deadline=deadline)
+    observed = []
+
+    def observe(selected_deadline):
+        assert selected_deadline is deadline
+        assert _row(owner).state is LifecycleObligationState.POSSIBLE_EFFECT
+        observed.append(list(early.calls))
+        return _LOCATOR
+
+    observer = Mock(side_effect=observe)
+    with monkeypatch.context() as patch:
+        borrow = Mock(side_effect=AssertionError("Ordinary borrow during recovery"))
+        patch.setattr(OperationOwner, "borrow", borrow)
+        result = _prepare(batch, deadline=deadline, observe_locator=observer)
+        borrow.assert_not_called()
+    assert observed == [[], ["guest"]]
+    assert observer.call_args_list == [call(deadline), call(deadline)]
     assert early.calls == ["guest"]
     assert carrier.calls == ["admin", "root"]
     assert seen == ["guest", "admin", "root"]
@@ -324,11 +339,14 @@ def test_selected_locator_failures_skip_accounts(recovery, when):
 def test_marker_and_deadline_preflight_resolve_without_dispatch(recovery, missing):
     _, owner, _, _ = recovery
     carrier = FixedCarrier()
+    observer = Mock(side_effect=AssertionError("Unexpected locator observation"))
     result = _prepare(
         _batch(owner, carrier),
         vm=_vm(marker=None) if missing else _vm(),
         deadline=Deadline.after(10) if missing else Deadline.after(0),
+        observe_locator=observer,
     )
+    observer.assert_not_called()
     assert carrier.calls == []
     assert result.guest.failure is (
         VMTargetPreparationFailure.MARKER_MISSING if missing else VMTargetPreparationFailure.DEADLINE
@@ -431,13 +449,25 @@ def test_fresh_identifier_and_pinned_api(recovery):
     assert carrier.calls == []
 
 
-def test_boundary_validation_precedes_admission(recovery):
+@pytest.mark.parametrize("fault", ["owner", "deadline", "site"])
+def test_boundary_validation_precedes_admission(recovery, fault, monkeypatch):
     _, owner, _, _ = recovery
     batch = _batch(owner, FixedCarrier())
+    platform = Mock(spec=VMPlatform)
+    platform.site_name = "other" if fault == "site" else "local"
+    observer = Mock(side_effect=AssertionError("Unexpected locator observation"))
+    borrow = Mock(side_effect=AssertionError("Ordinary borrow during recovery"))
+    monkeypatch.setattr(OperationOwner, "borrow", borrow)
     with pytest.raises(ValidationError):
-        _prepare(batch, vm=replace(_vm(), name="different"))
-    with pytest.raises(ValidationError):
-        _prepare(batch, deadline=Deadline.after(None))
+        _prepare(
+            batch,
+            vm=replace(_vm(), name="different") if fault == "owner" else _vm(),
+            deadline=Deadline.after(None) if fault == "deadline" else Deadline.after(10),
+            platform=platform,
+            observe_locator=observer,
+        )
+    observer.assert_not_called()
+    borrow.assert_not_called()
     assert _BATCH_ID not in {row.obligation_id for row in owner.list_pending_lifecycle_obligations()}
 
 

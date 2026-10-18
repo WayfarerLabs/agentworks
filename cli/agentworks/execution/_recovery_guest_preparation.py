@@ -30,10 +30,10 @@ from agentworks.vms.target_preparation import (
 )
 
 if TYPE_CHECKING:
-    from agentworks.capabilities.base import RunContext
-    from agentworks.capabilities.vm_platform.base import ProviderLocator, VMPlatform
+    from collections.abc import Callable
+
+    from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorObservation, VMPlatform
     from agentworks.db import VMRow
-    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import (
         Carrier,
@@ -155,12 +155,9 @@ class RecoveryGuestPreparationBatch:
         binding: NativeExecutionBinding,
         owner: OperationOwner,
         obligation_id: str,
-        *,
-        provider_custody: LocalDeliveryCustody,
     ) -> None:
         self._binding = binding
         self._owner = owner
-        self._provider_custody = provider_custody
         self._obligation_id = obligation_id
         self._started = False
         self._obligation: LifecycleObligation | None = None
@@ -195,12 +192,12 @@ class RecoveryGuestPreparationBatch:
         self,
         vm: VMRow,
         platform: VMPlatform,
-        ctx: RunContext,
         expected_locator: ProviderLocator,
         *,
         workload_account: str,
         include_elevated: bool,
         deadline: Deadline,
+        observe_locator: Callable[[Deadline], ProviderLocatorObservation],
     ) -> RecoveryGuestPreparation:
         """Confirm the guest, then compose numeric plans on the pinned route."""
         if self._started:
@@ -229,13 +226,11 @@ class RecoveryGuestPreparationBatch:
                 guest_carrier = self._binding.carrier if early is None else early.carrier
                 self._guest = _prepare_selected_platform_observations(
                     vm,
-                    platform,
-                    ctx,
                     expected_locator,
                     self._binding,
                     _RecoveryFixedObservationCarrier(guest_carrier, self),
                     deadline=deadline,
-                    provider_custody=self._provider_custody,
+                    observe_locator=observe_locator,
                 )
                 if self._guest.status is VMTargetPreparationStatus.PREPARED:
                     self._identity = _prepare_target_identity_observations(

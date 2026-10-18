@@ -1,4 +1,4 @@
-"""Destination entry point for one Linux file-object operation."""
+"""Destination entry point for one file-object operation."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import sys
 import time
 from contextlib import suppress
 
+from ._file_effect_gate import FileEffectGateError, hold_file_effect_gate
 from ._file_object_protocol import (
     MAX_REQUEST_BYTES,
     FileObjectFailureCode,
@@ -29,9 +30,10 @@ from ._file_objects import (
     revision_kind,
     stat_file_object,
 )
-from ._file_paths import ConfinedOpenError, open_linux_confined, open_linux_root
+from ._file_paths import ConfinedOpenError, directory_path_flags, open_file_confined, open_file_root
 from ._file_wire import FileRecordKind, FileRecordWriter
-from ._helper_identity import matches_current_identity
+from ._helper_identity import matches_file_helper_identity
+from ._vm_guest_identity_guest import _GuestRefusal, _identity
 
 
 class _SafeFailure(Exception):
@@ -52,16 +54,16 @@ def _read_request() -> FileObjectRequest:
 
 def _parent(request: FileObjectRequest) -> tuple[int | None, int | None, str]:
     try:
-        root_fd = open_linux_root(request.root_path)
+        root_fd = open_file_root(request.root_path)
     except ConfinedOpenError:
         raise _SafeFailure(FileObjectFailureControl(FileObjectFailureCode.ROOT_REFUSED)) from None
     components = request.relative_path.split("/")
     leaf = components[-1]
     if root_fd is None or len(components) == 1:
         return root_fd, None, leaf
-    flags = os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    flags = directory_path_flags()
     try:
-        parent_fd = open_linux_confined(root_fd, "/".join(components[:-1]), flags)
+        parent_fd = open_file_confined(root_fd, "/".join(components[:-1]), flags)
     except ConfinedOpenError:
         failure: BaseException = _SafeFailure(FileObjectFailureControl(FileObjectFailureCode.PARENT_REFUSED))
     except BaseException as error:
@@ -136,9 +138,9 @@ def main(nonce: str) -> int:
         return _finish_failure(writer, FileObjectFailureControl(error.failure))
     if request.nonce != nonce:
         return _finish_failure(writer, FileObjectFailureControl(FileObjectFailureCode.NONCE_MISMATCH))
-    if sys.platform != "linux":
+    if sys.platform not in {"linux", "darwin"}:
         return _finish_failure(writer, FileObjectFailureControl(FileObjectFailureCode.UNSUPPORTED_RUNTIME))
-    if not matches_current_identity(request.identity):
+    if not matches_file_helper_identity(request.identity):
         return _finish_failure(writer, FileObjectFailureControl(FileObjectFailureCode.IDENTITY_MISMATCH))
     expires_at = None if request.remaining_seconds is None else time.monotonic() + request.remaining_seconds
     if expires_at is not None and time.monotonic() >= expires_at:
@@ -150,9 +152,15 @@ def main(nonce: str) -> int:
             FileObjectFailureControl(FileObjectFailureCode.OBJECT, FileObjectFailureKind.DEADLINE, phase),
         )
     try:
-        result = _operate(request, expires_at)
+        if request.effect_gate is None:
+            result = _operate(request, expires_at)
+        else:
+            with hold_file_effect_gate(request.effect_gate, _identity, expires_at=expires_at):
+                result = _operate(request, expires_at)
     except _SafeFailure as error:
         return _finish_failure(writer, error.failure)
+    except (FileEffectGateError, _GuestRefusal):
+        return _finish_failure(writer, FileObjectFailureControl(FileObjectFailureCode.EFFECT_GATE_REFUSED))
     writer.write(FileRecordKind.RESULT, encode_file_object_result(result))
     writer.write(FileRecordKind.FINISHED, empty_file_object_body())
     return 0

@@ -31,6 +31,7 @@ from agentworks.capabilities.vm_platform.base import (
     ProvisionResult,
     RetainedProvisioningError,
     VMPlatform,
+    execution_power_remaining,
     provider_locator_remaining,
 )
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
@@ -43,6 +44,7 @@ from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscal
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import AuthorizationError, ConfigError, NotFoundError, StateError, TokenRejectedError
+from agentworks.execution.binding import _IndependentJobAvailability
 from agentworks.plugins.aws.auth import _build_access_key_session, _build_ambient_session
 from agentworks.plugins.aws.config import (
     AwsAmbientAuth,
@@ -81,8 +83,11 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
+    from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
+    from agentworks.operations import OperationOwner
     from agentworks.transports import Transport
+    from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 
 # Debian's image naming for the EC2 architecture vocabulary. The mapping
@@ -701,6 +706,51 @@ class EC2Platform(VMPlatform):
         region = vm.platform_metadata.get("region")
         return f"{instance_id}@{region}" if region else instance_id
 
+    def build_native_execution_access(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
+    ) -> OwnedNativePlatformAccess:
+        """Build passive selected AWS access under the existing VM owner."""
+        from agentworks.db.operations import OperationResourceKind
+        from agentworks.plugins.aws._native_access import EC2OwnedAccess
+
+        if (
+            owner.ownership.scope.resource_kind is not OperationResourceKind.VM
+            or owner.ownership.scope.resource_name != vm.name
+        ):
+            raise StateError("EC2 native access requires exact VM ownership")
+        self._locator_metadata(vm)
+        return EC2OwnedAccess(vm, self, ctx, owner=owner)
+
+    def resolve_native_execution_binding(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+        config: Config | None = None,
+    ) -> NativeExecutionBinding:
+        """Read the exact owned endpoint and construct passive SSH delivery."""
+        from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_execution_binding
+
+        settings = require_ssh_settings(vm, ctx, config)
+        identity = self._locator_metadata(vm)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        current = self._read_exact_instance(vm, ctx, identity, deadline=deadline)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        binding = ssh_execution_binding(
+            vm,
+            current.get("PublicIpAddress"),
+            settings,
+            independent_availability=_IndependentJobAvailability.NO_IDLE_STOP,
+        )
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        return binding
+
     def observe_provider_locator(
         self,
         vm: VMRow,
@@ -711,11 +761,40 @@ class EC2Platform(VMPlatform):
     ) -> ProviderLocatorObservation:
         """Read the exact EC2 instance and bind its live account namespace."""
         instance_id, region, account_id = self._locator_metadata(vm)
-        remaining = provider_locator_remaining(deadline, vm_name=vm.name)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        self._read_exact_instance(vm, ctx, (instance_id, region, account_id), deadline=deadline)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        return ProviderLocator(f"aws-ec2:{account_id}:{region}:{instance_id}")
+
+    def observe_execution_power(
+        self, vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody: LocalDeliveryCustody
+    ) -> VMStatus:
+        """Read exact owned EC2 power with best-effort SDK timeouts, without activation."""
+        identity = self._locator_metadata(vm)
+        execution_power_remaining(deadline, vm_name=vm.name)
+        instance = self._read_exact_instance(vm, ctx, identity, deadline=deadline)
+        execution_power_remaining(deadline, vm_name=vm.name)
+        state = instance.get("State")
+        name = state.get("Name") if isinstance(state, dict) else None
+        if type(name) is not str:
+            return VMStatus.UNKNOWN
+        return {"running": VMStatus.RUNNING, "stopped": VMStatus.STOPPED}.get(name, VMStatus.UNKNOWN)
+
+    def _read_exact_instance(
+        self, vm: VMRow, ctx: RunContext, identity: tuple[str, str, str], *, deadline: Deadline
+    ) -> dict[str, Any]:
+        """Invoke one SDK read and verify the persisted instance's account owner.
+
+        Timeouts are deadline-derived at client construction and cannot shrink
+        during setup. SDK credential work is non-preemptible; callers reject
+        successful results after the original deadline without replaying reads.
+        """
+        instance_id, region, account_id = identity
 
         from botocore.config import Config
 
         session = self._get_session(ctx)
+        remaining = provider_locator_remaining(deadline, vm_name=vm.name)
         try:
             ec2 = session.client(
                 "ec2",
@@ -729,6 +808,7 @@ class EC2Platform(VMPlatform):
         except Exception as exc:
             raise wrap_ec2_error(exc) from exc
         try:
+            provider_locator_remaining(deadline, vm_name=vm.name)
             try:
                 result = ec2.describe_instances(InstanceIds=[instance_id])
             except Exception as exc:
@@ -751,8 +831,9 @@ class EC2Platform(VMPlatform):
                 entity_name=vm.name,
                 hint="restore the original persisted AWS account identity before retrying",
             )
-        provider_locator_remaining(deadline, vm_name=vm.name)
-        return ProviderLocator(f"aws-ec2:{owner_id}:{region}:{instance_id}")
+        # _locator_owner_id validated the exact reservation and instance layout.
+        instance: dict[str, Any] = result["Reservations"][0]["Instances"][0]
+        return instance
 
     @staticmethod
     def _locator_metadata(vm: VMRow) -> tuple[str, str, str]:

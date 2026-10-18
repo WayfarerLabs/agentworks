@@ -14,6 +14,7 @@ import sys
 from contextlib import closing
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -30,11 +31,16 @@ from agentworks.db import (
     VMStatus,
 )
 from agentworks.db.operations import OperationRepository
-from agentworks.errors import ExternalError, StateError, UncertainOutcomeError, ValidationError
-from agentworks.execution import _wsl2_owned_operation
+from agentworks.errors import ExternalError, StateError, ValidationError
+from agentworks.execution import _file_effect_gate, _file_gate_setup, _wsl2_owned_operation
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
+from agentworks.execution._file_effect_gate import FileEffectGateBinding
+from agentworks.execution._file_effect_gate_protocol import encode_gate_control_result
+from agentworks.execution._file_gate_namespace_obligation import decode_namespace_obligation
+from agentworks.execution._file_gate_namespace_protocol import NamespaceStatus, encode_namespace_status
 from agentworks.execution._file_obligation import decode_file_call_obligation
 from agentworks.execution._file_operation import _ActiveFileUpload
+from agentworks.execution._file_wire import FileRecord, FileRecordKind, encode_file_record
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_runs import ManagedRunOwner, ManagedRunOwnerKind
@@ -61,24 +67,29 @@ from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
 from agentworks.execution.result import CheckedExecutionError
+from agentworks.execution.target import ExecutionRoute, ExecutionTarget
 from agentworks.operations import OperationOwner
 from agentworks.vms import _native_operation
-from agentworks.vms._native_operation import NativeVMOperationControlFact, native_vm_operation
+from agentworks.vms._native_operation import VMOperationControlFact, _vm_operation
+from agentworks.vms._wsl2_native_access import WSL2OwnedNativePlatformAccess
 from agentworks.vms.target_preparation import (
     VMTargetPreparation,
     VMTargetPreparationControlFact,
     VMTargetPreparationFailure,
     VMTargetPreparationStatus,
+    prepare_managed_vm_target_from_platform,
 )
 from tests.execution.test_target_identity import SyntheticCarrier
 from tests.execution.test_wsl2_owned_download import GuestThenFileCarrier
 from tests.execution.test_wsl2_platform_hold import BOOT, FakeNative, FakeObserver
+from tests.plugins._fixtures import FixtureVMPlatform
 from tests.vms.test_target_preparation import _MARKER
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from agentworks.db import VMRow
+    from agentworks.operations import LifecycleObligation
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="synthetic Linux helper proof")
 
@@ -114,8 +125,14 @@ def test_conflicting_claim_prevents_passive_provider_work(
     monkeypatch.setattr(platform, "observe_execution_power", observe)
     with (
         pytest.raises(StateError),
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=_root(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=_root(tmp_path),
         ),
     ):
         pass
@@ -123,6 +140,152 @@ def test_conflicting_claim_prevents_passive_provider_work(
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
+
+
+def test_native_preflight_refusal_precedes_provider_reads_and_activation(database, tmp_path, monkeypatch):
+    platform = WSL2Platform("wsl2", {})
+    events = []
+
+    def refuse():
+        assert database.operations.inspect(_scope()) is not None
+        events.append("preflight")
+        raise ValidationError("native configuration unavailable")
+
+    def deny(*args, **kwargs):
+        pytest.fail("invalid native configuration admitted provider work")
+
+    access = SimpleNamespace(native_configuration_check=refuse, observe_power=deny, ensure_available=deny)
+
+    def settle(deadline):
+        events.append("settle")
+        return True
+
+    access.settle = settle
+    monkeypatch.setattr(platform, "build_native_execution_access", lambda *args, **kwargs: access)
+    with (
+        pytest.raises(ValidationError),
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=_root(tmp_path),
+        ),
+    ):
+        pytest.fail("invalid native configuration admitted body")
+    assert events == ["preflight", "settle"] and database.operations.inspect(_scope()) is None
+
+
+def test_owned_access_factory_is_passive(database: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = WSL2Platform("wsl2", {})
+    owner = OperationOwner.acquire(database.operations, _scope(), "passive-access")
+    vm = database.get_vm("box")
+    assert vm is not None
+    monkeypatch.setattr(platform, "observe_provider_locator", lambda *args, **kwargs: pytest.fail("factory observed"))
+    monkeypatch.setattr(
+        platform, "resolve_native_execution_binding", lambda *args, **kwargs: pytest.fail("factory resolved")
+    )
+    custody = LocalDeliveryCustody()
+    access = platform.build_native_execution_access(vm, RunContext(), owner=owner, custody=custody)
+    assert isinstance(access, WSL2OwnedNativePlatformAccess)
+    assert access.owner is owner and access.custody is custody
+    assert access.selected is None and access.binding is None and access.guest_check is None
+    assert access.route_check is None and not owner.list_pending_lifecycle_obligations()
+    assert access.settle(Deadline.after(10)) and custody.settled
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+@pytest.mark.parametrize("foreign_debt", [False, True])
+def test_root_retains_access_before_effects_and_independently_checks_ledger(
+    database: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, foreign_debt: bool
+) -> None:
+    platform = WSL2Platform("wsl2", {})
+    monkeypatch.setattr(platform, "observe_execution_power", lambda *args, **kwargs: VMStatus.RUNNING)
+    control = KeyboardInterrupt()
+    events: list[str] = []
+    debt: LifecycleObligation | None = None
+
+    class Access:
+        owner: OperationOwner
+        custody: LocalDeliveryCustody
+        binding = None
+        independent_availability = None
+        guest_check = None
+        native_configuration_check = None
+        route_check = None
+        settled = False
+
+        def observe_power(self, deadline: Deadline) -> VMStatus:
+            events.append("power")
+            return platform.observe_execution_power(
+                database.get_vm("box"), RunContext(), deadline=deadline, custody=self.custody
+            )
+
+        def ensure_available(self, power: VMStatus, deadline: Deadline) -> ProviderLocator:
+            nonlocal debt
+            assert power is VMStatus.RUNNING and not deadline.expired
+            assert database.operations.inspect(_scope()) is not None
+            events.append("prepare")
+            if foreign_debt:
+                debt = self.owner.register_lifecycle_obligation("foreign", payload_version=1, payload=b"{}")
+                debt.mark_possible_effect()
+            raise control
+
+        def settle(self, deadline: Deadline) -> bool:
+            assert not deadline.expired and self.custody.settled
+            with pytest.raises(StateError):
+                self.owner.borrow()
+            events.append("settle")
+            return self.settled
+
+        def prepare_native_route(self, deadline: Deadline) -> NativeExecutionBinding:
+            pytest.fail("interrupted availability selected a route")
+
+        def observe_locator(self, deadline: Deadline) -> ProviderLocator:
+            pytest.fail("interrupted availability read a locator")
+
+    access = Access()
+
+    def build(vm, ctx, *, owner, custody):
+        claim = database.operations.inspect(_scope())
+        assert claim is not None and claim.ownership == owner.ownership
+        access.owner = owner
+        access.custody = custody
+        events.append("build")
+        return access
+
+    monkeypatch.setattr(platform, "build_native_execution_access", build)
+    with (
+        pytest.raises(KeyboardInterrupt) as caught,
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=_root(tmp_path),
+        ),
+    ):
+        pytest.fail("interrupted access admitted body")
+    assert caught.value is control
+    fact = control.__cause__
+    assert isinstance(fact, VMOperationControlFact)
+    assert fact._workflow.access is access
+    assert events == ["build", "power", "prepare", "settle"]
+    access.settled = True
+    if foreign_debt:
+        with pytest.raises(StateError):
+            fact.retry_cleanup(Deadline.after(10))
+        assert database.operations.inspect(_scope()) is not None
+        assert debt is not None
+        debt.resolve()
+    fact.retry_cleanup(Deadline.after(10))
+    assert database.operations.inspect(_scope()) is None
 
 
 def test_site_mismatch_refuses_before_power_observation(
@@ -139,8 +302,14 @@ def test_site_mismatch_refuses_before_power_observation(
     monkeypatch.setattr(platform, "observe_execution_power", observe)
     with (
         pytest.raises(StateError),
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=_root(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=_root(tmp_path),
         ),
     ):
         pass
@@ -154,9 +323,26 @@ def test_late_power_result_refuses_before_route(
     platform = WSL2Platform("wsl2", {})
     deadline = Deadline.after(10)
     routed = False
+    original_factory = platform.build_native_execution_access
+    retained: list[WSL2OwnedNativePlatformAccess] = []
+    settled: list[WSL2OwnedNativePlatformAccess] = []
+    original_settle = WSL2OwnedNativePlatformAccess.settle
+
+    def build(vm, ctx, *, owner, custody):
+        access = original_factory(vm, ctx, owner=owner, custody=custody)
+        assert isinstance(access, WSL2OwnedNativePlatformAccess)
+        retained.append(access)
+        return access
+
+    def settle(access, cleanup_deadline):
+        assert cleanup_deadline is deadline
+        assert access.selected is None and access.custody.settled
+        settled.append(access)
+        return original_settle(access, cleanup_deadline)
 
     def observe(vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody=None) -> VMStatus:
         assert database.operations.inspect(_scope()) is not None
+        assert len(retained) == 1 and retained[0].custody is custody
         object.__setattr__(deadline, "expires_at", 0.0)
         return VMStatus.RUNNING
 
@@ -167,55 +353,131 @@ def test_late_power_result_refuses_before_route(
 
     monkeypatch.setattr(platform, "observe_execution_power", observe)
     monkeypatch.setattr(platform, "observe_provider_locator", locator)
+    monkeypatch.setattr(platform, "build_native_execution_access", build)
+    monkeypatch.setattr(WSL2OwnedNativePlatformAccess, "settle", settle)
     with (
         pytest.raises(StateError),
-        native_vm_operation(database, "box", platform, RunContext(), deadline=deadline, trusted_root=_root(tmp_path)),
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=deadline,
+            trusted_root=_root(tmp_path),
+        ),
     ):
         pass
     assert not routed
+    assert settled == retained and len(settled) == 1
     assert database.operations.inspect(_scope()) is None
 
 
 @pytest.mark.parametrize(
-    ("power", "stopped", "permits_route"),
+    ("power", "permits_access"),
     [
-        (VMStatus.STOPPED, True, False),
-        (VMStatus.UNKNOWN, False, False),
-        (VMStatus.RUNNING, True, True),
+        (VMStatus.RUNNING, True),
+        (VMStatus.STOPPED, True),
+        (VMStatus.DEALLOCATED, True),
+        (VMStatus.UNKNOWN, False),
+        ("running", False),
+        ("stopped", False),
+        ("deallocated", False),
+        (None, False),
     ],
 )
-def test_fresh_intent_and_power_gate_precedes_route_and_wake(
+@pytest.mark.parametrize("stopped", [False, True])
+def test_fresh_intent_and_power_gate_precedes_preparation_and_wake(
     database: Database,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    power: VMStatus,
+    power: object,
     stopped: bool,
-    permits_route: bool,
+    permits_access: bool,
 ) -> None:
-    platform = WSL2Platform("wsl2", {})
+    platform = FixtureVMPlatform("wsl2", {})
     database.set_operator_stopped("box", stopped)
     events: list[str] = []
+    original_deadline = Deadline.after(10)
+    observed_claim: OperationOwnership | None = None
+    observed_custody: LocalDeliveryCustody | None = None
+    halt = StateError("test preparation stop")
 
-    def observe(vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody=None) -> VMStatus:
-        assert database.operations.inspect(_scope()) is not None
+    def observe(vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody=None) -> object:
+        nonlocal observed_claim, observed_custody
+        claim = database.operations.inspect(_scope())
+        assert claim is not None
+        observed_claim = claim.ownership
+        observed_custody = custody
+        assert isinstance(custody, LocalDeliveryCustody)
+        assert deadline is original_deadline
         assert vm.operator_stopped is stopped
         events.append("power")
         return power
 
-    def locator(vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody=None) -> ProviderLocator:
-        events.append("route")
-        raise StateError("test route stop")
+    class Access:
+        binding = None
+        independent_availability = None
+        guest_check = None
+        native_configuration_check = None
+        route_check = None
+
+        def __init__(self, owner: OperationOwner, custody: LocalDeliveryCustody) -> None:
+            self.owner = owner
+            self.custody = custody
+
+        def observe_power(self, deadline: Deadline) -> VMStatus:
+            return cast("VMStatus", observe(selected_vm, selected_ctx, deadline=deadline, custody=self.custody))
+
+        def ensure_available(self, observed_power: VMStatus, deadline: Deadline) -> ProviderLocator:
+            claim = database.operations.inspect(_scope())
+            assert claim is not None and claim.ownership == self.owner.ownership == observed_claim
+            assert self.custody is observed_custody
+            assert observed_power is power and deadline is original_deadline
+            events.append("prepare")
+            raise halt
+
+        def settle(self, deadline: Deadline) -> bool:
+            claim = database.operations.inspect(_scope())
+            assert claim is not None and claim.ownership == observed_claim
+            assert deadline is original_deadline
+            assert self.custody is observed_custody and self.custody.settled
+            events.append("settle")
+            return True
+
+    selected_vm: VMRow
+    selected_ctx: RunContext
+
+    def build(vm: VMRow, ctx: RunContext, *, owner: OperationOwner, custody: LocalDeliveryCustody) -> Access:
+        nonlocal selected_vm, selected_ctx
+        claim = database.operations.inspect(_scope())
+        assert claim is not None and claim.ownership == owner.ownership
+        assert observed_claim is None and observed_custody is None
+        assert isinstance(custody, LocalDeliveryCustody) and custody.settled
+        assert not owner.list_pending_lifecycle_obligations()
+        selected_vm, selected_ctx = vm, ctx
+        events.append("build")
+        return Access(owner, custody)
 
     monkeypatch.setattr(platform, "observe_execution_power", observe)
-    monkeypatch.setattr(platform, "observe_provider_locator", locator)
+    monkeypatch.setattr(platform, "build_native_execution_access", build)
+    monkeypatch.setattr(platform, "start", lambda *args, **kwargs: pytest.fail("core woke VM"))
+    allowed = permits_access and not (stopped and power in {VMStatus.STOPPED, VMStatus.DEALLOCATED})
     with (
-        pytest.raises(StateError),
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=_root(tmp_path)
+        pytest.raises(StateError) as caught,
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=original_deadline,
+            trusted_root=_root(tmp_path),
         ),
     ):
-        pass
-    assert events == (["power", "route"] if permits_route else ["power"])
+        pytest.fail("halted preparation admitted body")
+    assert (caught.value is halt) is allowed
+    assert events == (["build", "power", "prepare", "settle"] if allowed else ["build", "power", "settle"])
     assert database.operations.inspect(_scope()) is None
 
 
@@ -227,6 +489,7 @@ import builtins,contextlib,json,os,sys
 real_exec=builtins.exec
 observed=json.loads(sys.argv[3])
 scratch=sys.argv[4]
+gate_root=sys.argv[5]
 @contextlib.contextmanager
 def admit(uid,gid,groups):
  assert (uid,gid,groups)==(os.geteuid(),os.getegid(),tuple(sorted(set(os.getgroups())|{os.getegid()})))
@@ -244,6 +507,9 @@ def execute(source,scope=None,local=None):
  elif scope.get('__name__','').endswith('._scratch_root') and scratch:
   scope['_LINUX_SCRATCH_ROOT']=scratch
   scope['_EXPECTED_OWNER_UID']=os.geteuid()
+ elif scope.get('__name__','').endswith('._file_effect_gate'):
+  scope['_GATE_NAMESPACE']=gate_root
+  scope['_ROOT_UID']=os.geteuid()
 wrapper=sys.argv[2]
 sys.argv=['fixed-helper',sys.argv[1]]
 builtins.exec=execute
@@ -257,6 +523,7 @@ class _PackedCarrier:
         self.calls = 0
         self.observed = VMGuestIdentity(_MARKER, BOOT, 4096)
         self.scratch: Path | None = None
+        self.gate_root: Path | None = None
 
     def execute(
         self,
@@ -282,14 +549,22 @@ class _PackedCarrier:
                 invocation.argv[-2],
                 json.dumps((guest.instance_marker, guest.boot_id, guest.init_start_ticks)),
                 str(self.scratch) if self.scratch is not None else "",
+                str(self.gate_root) if self.gate_root is not None else "",
             ],
             input=io.input.data,
             capture_output=True,
             timeout=deadline.remaining(),
             check=False,
         )
-        io.output.stdout.try_write(memoryview(f"AGW_RUNTIME_1:{nonce}:ready:0\n".encode() + completed.stdout))
-        io.output.stderr.try_write(memoryview(completed.stderr))
+        for sink, data in (
+            (io.output.stdout, f"AGW_RUNTIME_1:{nonce}:ready:0\n".encode() + completed.stdout),
+            (io.output.stderr, completed.stderr),
+        ):
+            remaining = memoryview(data)
+            while remaining:
+                written = sink.try_write(remaining)
+                assert written is not None and 0 < written <= len(remaining)
+                remaining = remaining[written:]
         output = CapturedOutput(complete=True, retention=Retention.DELIVERED)
         return CarrierReport(Dispatch.SENT, ExitStatus(code=completed.returncode), 0, output, output, None)
 
@@ -305,6 +580,7 @@ class _RouteCarrier:
         self.routes: list[WSL2Connection] = []
         self.ownership: OperationOwnership | None = None
         self.file_records: list[bytes] = []
+        self.file_ids: list[str] = []
         self.prepared_guest: VMGuestIdentity | None = None
 
     def execute(
@@ -334,11 +610,34 @@ class _RouteCarrier:
                 request = None
             if isinstance(request, dict) and "account" in request:
                 return self.accounts.execute(invocation, io=io, deadline=deadline, custody=custody)
+        for row in self.guest.database.operations.list_pending_lifecycle_obligations(claim.ownership):
+            if row.obligation_kind == "file-gate-namespace":
+                # Root-owned namespace effects have their own isolated helper
+                # proofs. This route fixture simulates that privilege boundary.
+                record = decode_namespace_obligation(row.payload)
+                assert isinstance(io.output, SinkOutput)
+                nonce = invocation.argv[invocation.argv.index("agentworks-runtime-prerequisite") + 1]
+                if record.binding is None:
+                    binding = FileEffectGateBinding(
+                        record.setup.path, b"i" * 16, b"g" * 16, record.setup.guest, 0, record.target.name, 1, 2
+                    )
+                    body = encode_gate_control_result(binding)
+                else:
+                    body = encode_namespace_status(NamespaceStatus.PREPARED)
+                payload = (
+                    f"AGW_RUNTIME_1:{nonce}:ready:0\n".encode()
+                    + encode_file_record(nonce, FileRecord(0, FileRecordKind.RESULT, body))
+                    + encode_file_record(nonce, FileRecord(1, FileRecordKind.FINISHED, b"{}"))
+                )
+                io.output.stdout.try_write(memoryview(payload))
+                streams = CapturedOutput(complete=True, retention=Retention.DELIVERED)
+                return CarrierReport(Dispatch.SENT, ExitStatus(code=0), stdout=streams, stderr=streams)
         self.local_deadlines.append(deadline)
         for row in self.guest.database.operations.list_pending_lifecycle_obligations(claim.ownership):
             if row.obligation_kind == "file-call":
                 assert row.payload_version == 2
                 self.file_records.append(row.payload)
+                self.file_ids.append(row.obligation_id)
         return self.local.execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
@@ -346,13 +645,14 @@ def _install_route(
     database: Database, platform: WSL2Platform, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[_RouteCarrier, FakeNative, FakeObserver]:
     route = _RouteCarrier(database)
-    original_start = WSL2OwnedOperation.start_and_prepare
+    _install_gate_namespace(database, route.local, monkeypatch)
+    original_check = WSL2OwnedOperation.require_ready_guest
 
-    def start(selected: WSL2OwnedOperation, deadline: Deadline) -> VMGuestIdentity | None:
-        route.prepared_guest = original_start(selected, deadline)
-        return route.prepared_guest
+    def check(selected: WSL2OwnedOperation, guest: VMGuestIdentity) -> None:
+        original_check(selected, guest)
+        route.prepared_guest = guest
 
-    monkeypatch.setattr(WSL2OwnedOperation, "start_and_prepare", start)
+    monkeypatch.setattr(WSL2OwnedOperation, "require_ready_guest", check)
     native = FakeNative([])
     observer = FakeObserver([])
     connection = WSL2Connection("Ubuntu", "admin", "wsl.exe")
@@ -380,6 +680,67 @@ def _install_route(
     return route, native, observer
 
 
+def _install_gate_namespace(database: Database, local: _PackedCarrier, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Supply the fixture guest's protected namespace without provisioning a host."""
+    gate_root = database.path.parent / "run" / "agentworks" / "file-gates-v1"
+    gate_root.joinpath(str(os.geteuid())).mkdir(parents=True, mode=0o700)
+    local.gate_root = gate_root
+    monkeypatch.setattr(_file_gate_setup, "_NAMESPACE", str(gate_root))
+    monkeypatch.setattr(_file_effect_gate, "_GATE_NAMESPACE", str(gate_root))
+    monkeypatch.setattr(_file_effect_gate, "_ROOT_UID", os.geteuid())
+
+
+def test_actual_hold_ready_precedes_single_shared_guest_probe(database, tmp_path, monkeypatch):
+    platform = WSL2Platform("wsl2", {})
+    route, native, _ = _install_route(database, platform, monkeypatch)
+    original = prepare_managed_vm_target_from_platform
+    calls = []
+
+    def probe(*args, **kwargs):
+        access = kwargs["observe_locator"].__self__
+        assert isinstance(access, WSL2OwnedNativePlatformAccess)
+        selected = access.selected
+        assert selected is not None and selected.ready is not None
+        assert selected._ready_is_durable(selected.ready)
+        assert native.events.count("dispatch") == 1 and route.guest.calls == 0
+        calls.append(selected)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(_native_operation, "prepare_managed_vm_target_from_platform", probe)
+    with _vm_operation(
+        database,
+        "box",
+        platform,
+        RunContext(),
+        route=ExecutionRoute.NATIVE,
+        deadline=Deadline.after(30),
+        trusted_root=_root(tmp_path),
+    ):
+        assert len(calls) == 1 and route.guest.calls == 1
+    assert native.events.count("dispatch") == 1 and database.operations.inspect(_scope()) is None
+
+
+def test_shared_guest_must_match_actual_hold_ready(database, tmp_path, monkeypatch):
+    platform = WSL2Platform("wsl2", {})
+    route, native, _ = _install_route(database, platform, monkeypatch)
+    route.guest.init_ticks = 8192
+    with (
+        pytest.raises(StateError),
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(30),
+            trusted_root=_root(tmp_path),
+        ),
+    ):
+        pytest.fail("guest differing from held READY admitted body")
+    assert native.events.count("dispatch") == 1 and route.guest.calls == 1
+    assert not route.accounts.calls and database.operations.inspect(_scope()) is None
+
+
 def test_prepared_views_share_claim_and_clean_teardown(
     database: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -394,10 +755,31 @@ def test_prepared_views_share_claim_and_clean_teardown(
     route.local.scratch = scratch
     views = None
     body_deadline = Deadline.after(30)
-    with native_vm_operation(
-        database, "box", platform, RunContext(), deadline=body_deadline, trusted_root=PurePosixPath(root)
+    with _vm_operation(
+        database,
+        "box",
+        platform,
+        RunContext(),
+        route=ExecutionRoute.NATIVE,
+        deadline=body_deadline,
+        trusted_root=PurePosixPath(root),
     ) as selected:
         views = selected
+        target = selected.target
+        assert target.execution() is selected.execution
+        assert target.files() is selected.files
+        features = selected.execution._carrier.features
+        assert target.features is features is selected.files._carrier.features
+        before = (len(route.routes), list(native.events), list(observer.events), route.accounts.calls.copy())
+        obligations = selected.owner.list_pending_lifecycle_obligations()
+        for execution in (None, selected.execution):
+            for files in (None, selected.files):
+                passive = ExecutionTarget(execution, files, features, target.identity, target.route)
+                assert passive.execution() is execution
+                assert passive.files() is files
+                assert passive.features is features
+        assert before == (len(route.routes), native.events, observer.events, route.accounts.calls)
+        assert selected.owner.list_pending_lifecycle_obligations() == obligations
         claim = database.operations.inspect(_scope())
         assert claim is not None and claim.ownership == selected.owner.ownership
         assert selected.file_operation._owner is selected.owner
@@ -413,13 +795,16 @@ def test_prepared_views_share_claim_and_clean_teardown(
         assert selected.files._ordinary_plan is selected.execution._ordinary_plan
         assert bootstrap.root_entry.mode is IdentityMode.SUDO_ROOT
         assert bootstrap.root_entry.expected == IdentityExpectation(0, 0, (0,))
-        assert selected.files.stat(PurePosixPath(root / "source")) is not None
-        read = selected.files.read_file(PurePosixPath(root / "source"), max_bytes=64)
+        file_access = target.files()
+        execution_access = target.execution()
+        assert file_access is not None and execution_access is not None
+        assert file_access.stat(PurePosixPath(root / "source")) is not None
+        read = file_access.read_file(PurePosixPath(root / "source"), max_bytes=64)
         assert read is not None and read.data == b"native-file"
         code = (
             "import json,os;print(json.dumps([os.geteuid(),os.getegid(),sorted(set(os.getgroups())|{os.getegid()})]))"
         )
-        result = selected.execution.run(
+        result = execution_access.run(
             Command(["/usr/bin/python3", "-I", "-S", "-B", "-c", code]),
             profile=Protection.DIRECT,
             deadline=Deadline(None),
@@ -451,11 +836,15 @@ def test_prepared_views_share_claim_and_clean_teardown(
     assert all(connection == WSL2Connection("Ubuntu", "admin", "wsl.exe") for connection in route.routes[1:])
     assert observer.events == ["observe"]
     assert database.operations.inspect(_scope()) is None
+    calls_after_close = route.local.calls
     with pytest.raises(StateError):
-        views.execution.run(Command(["/bin/true"]), profile=Protection.DIRECT)
+        execution_access.run(Command(["/bin/true"]), profile=Protection.DIRECT)
     destination = tmp_path / "not-staged"
     with pytest.raises(StateError):
-        views.files.download(PurePosixPath(root / "source"), destination, max_bytes=64)
+        file_access.download(PurePosixPath(root / "source"), destination, max_bytes=64)
+    assert target.execution() is execution_access and target.files() is file_access
+    assert target.features is features
+    assert route.local.calls == calls_after_close
     assert not destination.exists()
     assert route.local.calls >= 3
     assert not list(scratch.iterdir())
@@ -493,8 +882,14 @@ def test_actual_native_bound_managed_start_and_normal_close(
         return managed.execute(invocation, io=io, deadline=deadline, custody=custody)
 
     monkeypatch.setattr(WSL2Carrier, "execute", execute)
-    with native_vm_operation(
-        database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=_root(tmp_path)
+    with _vm_operation(
+        database,
+        "box",
+        platform,
+        RunContext(),
+        route=ExecutionRoute.NATIVE,
+        deadline=Deadline.after(10),
+        trusted_root=_root(tmp_path),
     ) as views:
         invocation = Script("printf managed", Shell.SH) if script else Command(["/bin/true"])
         reference = views.execution.start(invocation, profile=Protection.MANAGED, lifetime=Lifetime.OPERATION)
@@ -525,8 +920,14 @@ def test_same_kind_foreign_hold_debt_prevents_owned_hold_release(
     _, _, observer = _install_route(database, platform, monkeypatch)
     with (
         pytest.raises(StateError) as raised,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=_root(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=_root(tmp_path),
         ) as views,
     ):
         (held_row,) = (
@@ -541,7 +942,7 @@ def test_same_kind_foreign_hold_debt_prevents_owned_hold_release(
     assert not observer.events
     assert database.operations.inspect(_scope()) is not None
     fact = raised.value.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     foreign.resolve()
     fact.retry_cleanup(Deadline.after(5))
     assert observer.events == ["observe"] and database.operations.inspect(_scope()) is None
@@ -572,12 +973,21 @@ def test_managed_route_guard_retains_exact_start_debt_before_delivery(
     control = KeyboardInterrupt("route interrupted") if route == "interrupted" else RuntimeError("provider failed")
     with (
         pytest.raises(StateError),
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=_root(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=_root(tmp_path),
         ) as views,
     ):
 
         def observe(*args, **kwargs):
+            # Inject after the initial clock, at the armed launch checkpoint.
+            if managed.clock.calls == 0:
+                return ProviderLocator("wsl2:registration")
             if route in {"interrupted", "failed"}:
                 raise control
             return ProviderLocator("wsl2:replacement") if route == "changed" else None
@@ -622,8 +1032,14 @@ def test_missing_root_plan_refuses_before_views_and_preserves_hold_custody(
         observer.presence = GuestAnchorPresence.UNKNOWN
     with (
         pytest.raises(StateError) as raised,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=_root(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(30),
+            trusted_root=_root(tmp_path),
         ),
     ):
         pytest.fail("missing root plan must not expose operation views")
@@ -633,7 +1049,7 @@ def test_missing_root_plan_refuses_before_views_and_preserves_hold_custody(
     assert (database.operations.inspect(_scope()) is not None) is uncertain_hold
     if uncertain_hold:
         fact = raised.value.__cause__
-        assert isinstance(fact, NativeVMOperationControlFact)
+        assert isinstance(fact, VMOperationControlFact)
         assert fact._workflow.views is None
         assert fact._workflow.identity is not None and fact._workflow.identity.elevated_plan is None
         with pytest.raises(StateError):
@@ -645,15 +1061,25 @@ def test_missing_root_plan_refuses_before_views_and_preserves_hold_custody(
 
 @pytest.mark.parametrize("field", ["instance_marker", "boot_id", "init_start_ticks"])
 @pytest.mark.parametrize("action", ["stat", "read", "remove", "command"])
+@pytest.mark.parametrize("execution_route", [ExecutionRoute.NATIVE, ExecutionRoute.CANONICAL])
 def test_full_guest_mismatch_prevents_file_and_command_application_effects(
     database: Database,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     field: str,
     action: str,
+    execution_route: ExecutionRoute,
 ) -> None:
     platform = WSL2Platform("wsl2", {})
     route, _, observer = _install_route(database, platform, monkeypatch)
+    if execution_route is ExecutionRoute.CANONICAL:
+        from tests.vms.canonical_support import ADDRESS, canonical_config, install_canonical_delivery
+
+        database.update_vm_tailscale("box", ADDRESS)
+        install_canonical_delivery(monkeypatch, route)
+        ctx = RunContext(config=canonical_config(tmp_path))
+    else:
+        ctx = RunContext()
     guest = route.local.observed
     mismatched = {
         "instance_marker": replace(guest, instance_marker="b" * 32),
@@ -667,8 +1093,14 @@ def test_full_guest_mismatch_prevents_file_and_command_application_effects(
     command_effect = root / "command-effect"
     with (
         pytest.raises(StateError) as teardown,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=PurePosixPath(root)
+        _native_operation._vm_operation(
+            database,
+            "box",
+            platform,
+            ctx,
+            route=execution_route,
+            deadline=Deadline.after(30),
+            trusted_root=PurePosixPath(root),
         ) as views,
     ):
         metadata = views.files.stat(PurePosixPath(source))
@@ -680,7 +1112,7 @@ def test_full_guest_mismatch_prevents_file_and_command_application_effects(
                     Command(["/usr/bin/touch", str(command_effect)]), profile=Protection.DIRECT, check=True
                 )
         else:
-            with pytest.raises(UncertainOutcomeError if action == "remove" else ExternalError):
+            with pytest.raises(ExternalError):
                 if action == "stat":
                     views.files.stat(PurePosixPath(source))
                 elif action == "read":
@@ -691,7 +1123,7 @@ def test_full_guest_mismatch_prevents_file_and_command_application_effects(
     assert route.local.calls == 2
     assert not observer.events and database.operations.inspect(_scope()) is not None
     fact = teardown.value.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     assert fact._workflow.views is views
     with pytest.raises(StateError):
         views.owner.borrow()
@@ -706,14 +1138,69 @@ def test_never_created_hold_releases_without_ready(
     monkeypatch.setattr(native, "read_stdout_line", lambda limit, deadline: b"")
     with (
         pytest.raises(ValidationError),
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=_root(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(30),
+            trusted_root=_root(tmp_path),
         ),
     ):
         pass
     assert native.events and "dispatch" in native.events
     assert not observer.events
     assert route.guest.calls == 0
+    assert database.operations.inspect(_scope()) is None
+
+
+def test_interruption_after_selected_preparation_keeps_actual_child_custody(
+    database: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    platform = WSL2Platform("wsl2", {})
+    _install_route(database, platform, monkeypatch)
+    original = prepare_managed_vm_target_from_platform
+    control = KeyboardInterrupt()
+    prepared: VMTargetPreparation | None = None
+
+    def interrupted(*args, **kwargs) -> VMTargetPreparation:
+        nonlocal prepared
+        prepared = original(*args, **kwargs)
+        partial = replace(
+            prepared,
+            status=VMTargetPreparationStatus.UNCERTAIN,
+            pending_remote_effects=True,
+            requires_owner_retention=True,
+        )
+        raise control from VMTargetPreparationControlFact(partial)
+
+    monkeypatch.setattr(_native_operation, "prepare_managed_vm_target_from_platform", interrupted)
+    with (
+        pytest.raises(KeyboardInterrupt) as caught,
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=_root(tmp_path),
+        ),
+    ):
+        pytest.fail("interrupted selected preparation admitted body")
+    assert caught.value is control
+    fact = control.__cause__
+    assert isinstance(fact, VMOperationControlFact)
+    access = fact._workflow.access
+    assert isinstance(access, WSL2OwnedNativePlatformAccess) and access.selected is not None
+    assert fact._workflow.preparation is not None and fact._workflow.preparation.pending_remote_effects
+    assert database.operations.inspect(_scope()) is not None
+    with pytest.raises(StateError):
+        fact.retry_cleanup(Deadline.after(10))
+    assert prepared is not None
+    fact._workflow.preparation = prepared
+    fact.retry_cleanup(Deadline.after(10))
     assert database.operations.inspect(_scope()) is None
 
 
@@ -725,8 +1212,14 @@ def test_native_view_cannot_escape_expired_body_budget_and_cleanup_uses_new_one(
     body_deadline = Deadline.after(30)
     with (
         pytest.raises(StateError) as teardown,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=body_deadline, trusted_root=_root(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=body_deadline,
+            trusted_root=_root(tmp_path),
         ) as views,
     ):
         object.__setattr__(body_deadline, "expires_at", 0.0)
@@ -734,7 +1227,7 @@ def test_native_view_cannot_escape_expired_body_budget_and_cleanup_uses_new_one(
             views.execution.run(Command(["/bin/true"]), profile=Protection.DIRECT, deadline=Deadline(None))
         assert route.local.calls == 0
     fact = teardown.value.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     assert database.operations.inspect(_scope()) is not None
     fact.retry_cleanup(Deadline.after(10))
     assert observer.events == ["observe"]
@@ -764,14 +1257,20 @@ def test_claim_release_interrupt_retries_only_finalization(
     monkeypatch.setattr(OperationRepository, "release_resolved", interrupted_release)
     with (
         pytest.raises(KeyboardInterrupt) as caught,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=_root(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(30),
+            trusted_root=_root(tmp_path),
         ) as views,
     ):
         pass
     assert caught.value is control
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     assert (repository.inspect(_scope()) is None) is committed
     with pytest.raises(StateError):
         views.execution.run(Command(["/bin/true"]), profile=Protection.DIRECT)
@@ -798,8 +1297,14 @@ def test_uncertain_hold_keeps_claim_and_stops_new_body_admission(
     selected = None
     with (
         pytest.raises(StateError) as raised,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=_root(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(30),
+            trusted_root=_root(tmp_path),
         ) as views,
     ):
         selected = views
@@ -810,7 +1315,7 @@ def test_uncertain_hold_keeps_claim_and_stops_new_body_admission(
         selected.execution.run(Command(["/bin/true"]), profile=Protection.DIRECT)
     assert route.local.calls == 0
     fact = raised.value.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     observer.presence = GuestAnchorPresence.ABSENT_CONFIRMED
     fact.retry_cleanup(Deadline.after(10))
     assert database.operations.inspect(_scope()) is None
@@ -825,15 +1330,21 @@ def test_interruption_keeps_original_control_and_uncertain_claim(
     control = KeyboardInterrupt()
     with (
         pytest.raises(KeyboardInterrupt) as caught,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=_root(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(30),
+            trusted_root=_root(tmp_path),
         ),
     ):
         raise control
     assert caught.value is control
     assert database.operations.inspect(_scope()) is not None
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     observer.presence = GuestAnchorPresence.ABSENT_CONFIRMED
     fact.retry_cleanup(Deadline.after(10))
     assert database.operations.inspect(_scope()) is None
@@ -858,15 +1369,21 @@ def test_interrupted_pre_yield_hold_retains_exact_cleanup_without_traceback(
     monkeypatch.setattr(native, "spawn_owned", interrupted_spawn)
     with (
         pytest.raises(KeyboardInterrupt) as caught,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=_root(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(30),
+            trusted_root=_root(tmp_path),
         ),
     ):
         pytest.fail("startup interruption must not yield")
     assert caught.value is control
     assert database.operations.inspect(_scope()) is not None
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     control.__traceback__ = None
     control.__context__ = None
     gc.collect()
@@ -900,17 +1417,25 @@ def test_preparation_control_fact_survives_failed_teardown_handoff(
     def interrupt_preparation(*args: object, **kwargs: object) -> VMTargetPreparation:
         raise control from original_fact
 
-    monkeypatch.setattr(_wsl2_owned_operation, "prepare_managed_vm_target_from_platform", interrupt_preparation)
+    monkeypatch.setattr(
+        "agentworks.vms._native_operation.prepare_managed_vm_target_from_platform", interrupt_preparation
+    )
     with (
         pytest.raises(KeyboardInterrupt) as caught,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=_root(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(30),
+            trusted_root=_root(tmp_path),
         ),
     ):
         pytest.fail("preparation interruption must not yield")
     assert caught.value is control
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     assert fact.__cause__ is original_fact
     assert original_fact.preparation is preparation
     assert database.operations.inspect(_scope()) is not None
@@ -931,8 +1456,14 @@ def test_local_download_call_custody_blocks_aggregate_release(
     call = None
     with (
         pytest.raises(StateError),
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=_root(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(30),
+            trusted_root=_root(tmp_path),
         ) as views,
     ):
         selected = views
@@ -945,7 +1476,7 @@ def test_local_download_call_custody_blocks_aggregate_release(
         selected.file_operation.begin_local_download()
 
 
-def test_active_package_registry_blocks_aggregate_release(
+def test_active_upload_registry_blocks_aggregate_release(
     database: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     platform = WSL2Platform("wsl2", {})
@@ -953,18 +1484,24 @@ def test_active_package_registry_blocks_aggregate_release(
     selected = None
     with (
         pytest.raises(StateError),
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=_root(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(30),
+            trusted_root=_root(tmp_path),
         ) as views,
     ):
         selected = views
         borrow = views.owner.borrow()
-        # Model retained package registry custody after its borrow has settled.
-        active = cast("_ActiveFileUpload", object())
-        views.file_operation._active_package_uploads[id(active)] = active
+        # Model retained upload registry custody after its borrow has settled.
+        active = cast("_ActiveFileUpload", SimpleNamespace(outcome=None))
+        views.file_operation._active_uploads[id(active)] = active
         borrow.close()
     assert selected is not None
     assert database.operations.inspect(_scope()) is not None
-    assert selected.file_operation.active_package_uploads
+    assert selected.file_operation.active_uploads
     with pytest.raises(StateError):
         selected.execution.run(Command(["/bin/true"]), profile=Protection.DIRECT)

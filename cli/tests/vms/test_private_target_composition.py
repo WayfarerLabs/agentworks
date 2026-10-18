@@ -211,17 +211,22 @@ def _prepared_accesses(
 ) -> tuple[ExecutionOperation, ExecutionAccess, FileAccess]:
     """Prepare the private target and account plan under one existing owner."""
     local_delivery = LocalDeliveryCustody()
-    binding = platform.resolve_native_execution_binding(vm, RunContext(), deadline=Deadline.after(30))
+    ctx = RunContext()
+    deadline = Deadline.after(30)
+    binding = platform.resolve_native_execution_binding(vm, ctx, deadline=deadline)
     dispatch.binding = binding
+
+    def observe_locator(selected_deadline: Deadline):
+        return platform.observe_provider_locator(vm, ctx, deadline=selected_deadline, custody=local_delivery)
+
     prepared = prepare_managed_vm_target_from_platform(
         vm,
         platform,
-        RunContext(),
         _LOCATOR,
         binding,
-        deadline=Deadline.after(30),
+        deadline=deadline,
         owner=owner,
-        provider_custody=local_delivery,
+        observe_locator=observe_locator,
     )
     assert prepared.status is VMTargetPreparationStatus.PREPARED
     assert prepared.target is not None

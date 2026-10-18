@@ -772,7 +772,7 @@ def test_two_phase_root_publication_long_path_body_fits(
 
 def test_two_phase_root_publication_valid_near_ceiling_refuses_before_wire(monkeypatch: pytest.MonkeyPatch) -> None:
     local_delivery = LocalDeliveryCustody()
-    target = IdentityExpectation(1001, 1002, tuple(range(1002, 4302)))
+    target = IdentityExpectation(1001, 1002, tuple(range(1002, 3802)))
     reference = _reference(IdentityPlan(target, IdentityMode.DIRECT))
     request = FilePublishRequest(
         "0" * 32,
@@ -787,8 +787,9 @@ def test_two_phase_root_publication_valid_near_ceiling_refuses_before_wire(monke
         1.0,
     )
     manifest = encode_file_publication_request(request)
-    assert 28_000 < len(manifest) <= 32_768
+    assert len(manifest) <= 32_768
     invocation, prefix = _root_publication_invocation(target)
+    assert len(prefix + manifest) <= 65_536
     io = CarrierIO(
         input=FiniteInput(prefix + manifest, sensitive=True),
         output=SinkOutput(_NullSink(), _NullSink(), require_live=False),

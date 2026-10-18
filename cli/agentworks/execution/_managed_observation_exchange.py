@@ -28,6 +28,7 @@ from ._managed_observation_protocol import (
     encode_request,
 )
 from ._runtime_prerequisite import (
+    HelperClosureExpectation,
     RuntimePrefixSink,
     RuntimePrerequisiteObservation,
     RuntimePrerequisiteState,
@@ -262,8 +263,42 @@ class _Collector:
         return ManagedObservation(state, facts, output, controller=control.controller)
 
 
-def _exchange(
-    carrier: BoundHelperCarrier,
+@dataclass(slots=True, repr=False)
+class PreparedManagedRead:
+    """One read's non-payload closure identity and detachable exchange input."""
+
+    closure_expectation: HelperClosureExpectation | None
+    invocation: PreparedInvocation | None = None
+    io: CarrierIO | None = None
+    _runtime: RuntimePrefixSink | None = None
+    _reader: FileRecordReader | None = None
+    _collector: _Collector | None = None
+    _stderr: _DiagnosticSink | None = None
+    _claimed: bool = field(default=False, init=False)
+
+    def claim(self) -> None:
+        if self._claimed:
+            raise ValidationError("A managed read cannot be dispatched more than once")
+        self._claimed = True
+
+    def clear(self) -> None:
+        if self._runtime is not None:
+            self._runtime.clear()
+        if self._reader is not None:
+            self._reader.abort()
+        if self._collector is not None:
+            self._collector.abort()
+        if self._stderr is not None:
+            self._stderr.clear()
+        self.invocation = None
+        self.io = None
+        self._runtime = None
+        self._reader = None
+        self._collector = None
+        self._stderr = None
+
+
+def prepare_managed_read(
     *,
     operation: ManagedOperation,
     expected_launch: bytes,
@@ -272,7 +307,7 @@ def _exchange(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     guest: VMGuestIdentity,
-) -> ManagedObservationCandidate:
+) -> PreparedManagedRead:
     if runtime_selection.target_os is not RuntimeTargetOS.LINUX or plan.expected.euid != 0:
         raise ValidationError("Managed observation requires a Linux root helper")
     try:
@@ -283,14 +318,7 @@ def _exchange(
     except ManagedObservationError:
         raise ValidationError("Invalid managed observation request") from None
     if deadline.expired:
-        return ManagedObservationCandidate(
-            Dispatch.NOT_SENT,
-            None,
-            None,
-            Failure.DEADLINE,
-            RuntimePrerequisiteObservation(RuntimePrerequisiteState.UNKNOWN, None),
-            None,
-        )
+        return PreparedManagedRead(None)
     argv, candidates, shim = build_runtime_identity_helper_argv(
         plan, selection=runtime_selection, fixed_source=FIXED_BUNDLE.bootstrap, nonce=request.nonce
     )
@@ -303,8 +331,36 @@ def _exchange(
         output=SinkOutput(runtime, stderr, require_live=False),
         sensitive=True,
     )
+    return PreparedManagedRead(
+        HelperClosureExpectation(request.nonce, candidates, shim, guest),
+        PreparedInvocation(argv),
+        io,
+        runtime,
+        reader,
+        collector,
+        stderr,
+    )
+
+
+def execute_managed_read(
+    carrier: BoundHelperCarrier, prepared: PreparedManagedRead, *, deadline: Deadline
+) -> ManagedObservationCandidate:
+    """Execute one prepared read, clearing its input and collectors on every path."""
+    prepared.claim()
     try:
-        report = carrier.execute(PreparedInvocation(argv), io=io, deadline=deadline)
+        if prepared.closure_expectation is None:
+            return ManagedObservationCandidate(
+                Dispatch.NOT_SENT,
+                None,
+                None,
+                Failure.DEADLINE,
+                RuntimePrerequisiteObservation(RuntimePrerequisiteState.UNKNOWN, None),
+                None,
+            )
+        runtime, reader, collector, stderr = prepared._runtime, prepared._reader, prepared._collector, prepared._stderr
+        assert runtime is not None and reader is not None and collector is not None and stderr is not None
+        assert prepared.invocation is not None and prepared.io is not None
+        report = carrier.execute(prepared.invocation, io=prepared.io, deadline=deadline)
         prerequisite = runtime.observation
         if prerequisite.state is RuntimePrerequisiteState.READY:
             reader.finish()
@@ -328,10 +384,30 @@ def _exchange(
             report.dispatch, report.completion, report.local_status, report.failure, prerequisite, observation
         )
     finally:
-        runtime.clear()
-        reader.abort()
-        collector.abort()
-        stderr.clear()
+        prepared.clear()
+
+
+def _exchange(
+    carrier: BoundHelperCarrier,
+    *,
+    operation: ManagedOperation,
+    expected_launch: bytes,
+    stream: Stream | None,
+    plan: IdentityPlan,
+    deadline: Deadline,
+    runtime_selection: RuntimeSelection,
+    guest: VMGuestIdentity,
+) -> ManagedObservationCandidate:
+    prepared = prepare_managed_read(
+        operation=operation,
+        expected_launch=expected_launch,
+        stream=stream,
+        plan=plan,
+        deadline=deadline,
+        runtime_selection=runtime_selection,
+        guest=guest,
+    )
+    return execute_managed_read(carrier, prepared, deadline=deadline)
 
 
 def observe_managed_run(

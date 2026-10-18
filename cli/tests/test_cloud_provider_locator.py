@@ -188,21 +188,21 @@ def test_aws_locator_close_does_not_mask_describe_error(monkeypatch: pytest.Monk
 
 def test_aws_locator_rejects_a_late_provider_result(monkeypatch: pytest.MonkeyPatch) -> None:
     local_delivery = LocalDeliveryCustody()
-    from agentworks.plugins.aws import platform as aws_platform
 
     platform = EC2Platform("aws", {"region": "us-east-1", "auth": {"mode": "ambient"}})
     ec2 = _EC2()
     monkeypatch.setattr(platform, "_get_session", lambda _ctx: SimpleNamespace(client=lambda *_a, **_k: ec2))
-    calls = 0
+    now = 100.0
+    monkeypatch.setattr("agentworks.execution.carrier.time.monotonic", lambda: now)
+    read = ec2.describe_instances
 
-    def remaining(_deadline: Deadline, *, vm_name: str) -> float:
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise LimitExceededError("expired", entity_kind="vm", entity_name=vm_name)
-        return 1
+    def late_read(**kwargs: object) -> object:
+        nonlocal now
+        result = read(**kwargs)
+        now = 111.0
+        return result
 
-    monkeypatch.setattr(aws_platform, "provider_locator_remaining", remaining)
+    monkeypatch.setattr(ec2, "describe_instances", late_read)
 
     with pytest.raises(LimitExceededError):
         platform.observe_provider_locator(_aws_vm(), RunContext(), deadline=Deadline.after(10), custody=local_delivery)
@@ -237,7 +237,9 @@ def test_azure_locator_reads_exact_arm_id_with_all_retries_disabled(monkeypatch:
         {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus", "auth": {"mode": "ambient"}},
     )
     vms = _AzureVMs()
-    monkeypatch.setattr(platform, "_compute_client", lambda _az, _ctx: SimpleNamespace(virtual_machines=vms))
+    monkeypatch.setattr(
+        platform, "_native_compute_client", lambda _az, _ctx: SimpleNamespace(virtual_machines=vms, close=lambda: None)
+    )
 
     observed = platform.observe_provider_locator(
         _azure_vm(), RunContext(), deadline=Deadline.after(10), custody=local_delivery
@@ -260,7 +262,9 @@ def test_azure_locator_accepts_unicode_resource_group_name(monkeypatch: pytest.M
         {"subscription_id": "sub-A", "resource_group": "région", "region": "eastus", "auth": {"mode": "ambient"}},
     )
     vms = _AzureVMs(result=SimpleNamespace(id=resource_id))
-    monkeypatch.setattr(platform, "_compute_client", lambda _az, _ctx: SimpleNamespace(virtual_machines=vms))
+    monkeypatch.setattr(
+        platform, "_native_compute_client", lambda _az, _ctx: SimpleNamespace(virtual_machines=vms, close=lambda: None)
+    )
 
     observed = platform.observe_provider_locator(
         _azure_vm(resource_id), RunContext(), deadline=Deadline.after(10), custody=local_delivery
@@ -282,7 +286,9 @@ def test_azure_locator_rejects_malformed_or_changed_arm_identity(monkeypatch: py
         )
 
     vms = _AzureVMs(result=SimpleNamespace(id=_AZURE_RESOURCE_ID + "-other"))
-    monkeypatch.setattr(platform, "_compute_client", lambda _az, _ctx: SimpleNamespace(virtual_machines=vms))
+    monkeypatch.setattr(
+        platform, "_native_compute_client", lambda _az, _ctx: SimpleNamespace(virtual_machines=vms, close=lambda: None)
+    )
     with pytest.raises(StateError):
         platform.observe_provider_locator(
             _azure_vm(), RunContext(), deadline=Deadline.after(10), custody=local_delivery
@@ -298,7 +304,9 @@ def test_azure_locator_maps_provider_not_found(monkeypatch: pytest.MonkeyPatch) 
         {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus", "auth": {"mode": "ambient"}},
     )
     vms = _AzureVMs(failure=ResourceNotFoundError(message="gone"))
-    monkeypatch.setattr(platform, "_compute_client", lambda _az, _ctx: SimpleNamespace(virtual_machines=vms))
+    monkeypatch.setattr(
+        platform, "_native_compute_client", lambda _az, _ctx: SimpleNamespace(virtual_machines=vms, close=lambda: None)
+    )
 
     with pytest.raises(NotFoundError):
         platform.observe_provider_locator(
@@ -306,7 +314,9 @@ def test_azure_locator_maps_provider_not_found(monkeypatch: pytest.MonkeyPatch) 
         )
 
 
-def test_azure_locator_rejects_expired_observation_before_compute_client(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_azure_locator_rejects_expired_observation_before_native_compute_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     local_delivery = LocalDeliveryCustody()
     platform = AzureVMPlatform(
         "azure",
@@ -319,7 +329,7 @@ def test_azure_locator_rejects_expired_observation_before_compute_client(monkeyp
         called = True
         raise AssertionError("compute client must not be built after deadline expiry")
 
-    monkeypatch.setattr(platform, "_compute_client", compute_client)
+    monkeypatch.setattr(platform, "_native_compute_client", compute_client)
     with pytest.raises(LimitExceededError):
         platform.observe_provider_locator(_azure_vm(), RunContext(), deadline=Deadline.after(0), custody=local_delivery)
     assert not called
@@ -327,24 +337,26 @@ def test_azure_locator_rejects_expired_observation_before_compute_client(monkeyp
 
 def test_azure_locator_rejects_a_late_provider_result(monkeypatch: pytest.MonkeyPatch) -> None:
     local_delivery = LocalDeliveryCustody()
-    from agentworks.plugins.azure import platform as azure_platform
 
     platform = AzureVMPlatform(
         "azure",
         {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus", "auth": {"mode": "ambient"}},
     )
     vms = _AzureVMs()
-    monkeypatch.setattr(platform, "_compute_client", lambda _az, _ctx: SimpleNamespace(virtual_machines=vms))
-    calls = 0
+    monkeypatch.setattr(
+        platform, "_native_compute_client", lambda _az, _ctx: SimpleNamespace(virtual_machines=vms, close=lambda: None)
+    )
+    now = 100.0
+    monkeypatch.setattr("agentworks.execution.carrier.time.monotonic", lambda: now)
+    read = vms.get
 
-    def remaining(_deadline: Deadline, *, vm_name: str) -> float:
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise LimitExceededError("expired", entity_kind="vm", entity_name=vm_name)
-        return 1
+    def late_read(resource_group: str, name: str, **kwargs: object) -> object:
+        nonlocal now
+        result = read(resource_group, name, **kwargs)
+        now = 111.0
+        return result
 
-    monkeypatch.setattr(azure_platform, "provider_locator_remaining", remaining)
+    monkeypatch.setattr(vms, "get", late_read)
 
     with pytest.raises(LimitExceededError):
         platform.observe_provider_locator(
@@ -501,7 +513,6 @@ def test_gcp_locator_maps_provider_not_found() -> None:
 
 def test_gcp_locator_rejects_a_late_provider_result(monkeypatch: pytest.MonkeyPatch) -> None:
     local_delivery = LocalDeliveryCustody()
-    from agentworks.plugins.gcp import platform as gcp_platform
 
     platform = GCEPlatform(
         "gcp",
@@ -511,16 +522,17 @@ def test_gcp_locator_rejects_a_late_provider_result(monkeypatch: pytest.MonkeyPa
     platform._clients = cast(
         "Any", SimpleNamespace(client=lambda service, _ctx: instances if service == "instances" else None)
     )
-    calls = 0
+    now = 100.0
+    monkeypatch.setattr("agentworks.execution.carrier.time.monotonic", lambda: now)
+    read = instances.get
 
-    def remaining(_deadline: Deadline, *, vm_name: str) -> float:
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise LimitExceededError("expired", entity_kind="vm", entity_name=vm_name)
-        return 1
+    def late_read(**kwargs: object) -> object:
+        nonlocal now
+        result = read(**kwargs)
+        now = 111.0
+        return result
 
-    monkeypatch.setattr(gcp_platform, "provider_locator_remaining", remaining)
+    monkeypatch.setattr(instances, "get", late_read)
 
     with pytest.raises(LimitExceededError):
         platform.observe_provider_locator(_gcp_vm(), RunContext(), deadline=Deadline.after(10), custody=local_delivery)

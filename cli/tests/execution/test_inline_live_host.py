@@ -1,0 +1,672 @@
+"""Bounded decoded live application I/O and public endpoint admission."""
+
+from __future__ import annotations
+
+import hashlib
+import shlex
+import sys
+import weakref
+from dataclasses import dataclass, field
+from pathlib import Path
+from threading import Event
+
+import pytest
+
+from agentworks.errors import StateError, ValidationError
+from agentworks.execution._borrowed_io import PrefixedSource, PresentationCollector
+from agentworks.execution._evidence_wire import Frame, FrameKind, FrameReader, encode_frame
+from agentworks.execution._execution_operation import OwnedInlineOutcome
+from agentworks.execution._execution_result import reduce_owned_inline_result
+from agentworks.execution._inline import (
+    execute_inline_candidate,
+    prepare_inline_candidate,
+)
+from agentworks.execution._inline_control import (
+    StreamEnd,
+    StreamName,
+    StreamRetention,
+    WaitFact,
+    WaitKind,
+    empty_body,
+    encode_stream_end,
+    encode_wait,
+)
+from agentworks.execution._inline_observer import InlineObserver, ObservationError
+from agentworks.execution._inline_request import REQUEST_HEADER_BYTES, OutputMode, decode_manifest
+from agentworks.execution._process import LocalProcessOwner
+from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution.binding import NativeExecutionBinding
+from agentworks.execution.carrier import CarrierIO, Deadline, Failure, LiveInput, Retention, SinkOutput
+from agentworks.execution.models import Command, Input, Lifetime, Output, Script, Shell
+from agentworks.execution.profiles import Protection
+from agentworks.execution.result import ApplicationState, ExecutionFailure, ExitCode
+from tests.execution.test_execution_access import Bound
+from tests.execution.test_inline_helper import LocalCarrier, _run
+
+pytest_plugins = ("tests.execution.test_execution_access", "tests.execution.test_inline_helper")
+
+NONCE = "0123456789abcdef0123456789abcdef"
+_LINUX_ONLY = pytest.mark.skipif(sys.platform != "linux", reason="packed helper proof requires Linux pipes")
+
+
+@dataclass
+class Sink:
+    bound: int = 4096
+    stalled: bool = False
+    data: bytearray = field(default_factory=bytearray)
+    calls: int = 0
+    allowance: int | None = None
+
+    def try_write(self, data: memoryview) -> int | None:
+        self.calls += 1
+        if self.stalled or self.allowance == 0:
+            return None
+        if self.allowance is not None:
+            self.allowance -= 1
+        count = min(self.bound, len(data))
+        self.data.extend(data[:count])
+        return count
+
+
+@dataclass
+class Source:
+    data: bytes
+    calls: int = 0
+
+    def try_read(self, limit: int) -> bytes | None:
+        self.calls += 1
+        chunk = self.data[:limit]
+        self.data = self.data[len(chunk) :]
+        return chunk
+
+
+@dataclass
+class OpenSource:
+    endless: bool = False
+    calls: int = 0
+    closed: bool = False
+
+    def try_read(self, limit: int) -> bytes | None:
+        self.calls += 1
+        return b"x" * limit if self.endless else None
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@dataclass
+class BorrowedSink(Sink):
+    closed: bool = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_public_endpoints_validate_passively_and_hide_values() -> None:
+    class Descriptor:
+        @property
+        def try_read(self) -> object:
+            pytest.fail("Endpoint validation executed a descriptor")
+
+    with pytest.raises(ValidationError):
+        Input.live(Descriptor())
+    for invalid in (None, object(), 4, "canary"):
+        with pytest.raises(ValidationError):
+            Input.live(invalid)
+        with pytest.raises(ValidationError):
+            Output.live(invalid, Sink())
+        with pytest.raises(ValidationError):
+            Output.live(Sink(), invalid)
+    source = Source(b"endpoint-canary")
+    sink = Sink()
+    assert Input.live(source, sensitive=True).is_sensitive
+    assert source.calls == sink.calls == 0
+    assert "endpoint-canary" not in repr(Input.live(source))
+    assert "data=" not in repr(Output.live(sink, sink))
+
+
+def test_request_prefix_does_not_read_source_until_envelope_is_complete() -> None:
+    source = Source(b"application")
+    request = PrefixedSource(b"envelope", source)
+    assert request.try_read(3) == b"env"
+    assert request.try_read(100) == b"elope"
+    assert source.calls == 0
+    assert request.try_read(100) == b"application"
+    request.release()
+    assert request.try_read(100) == b""
+    assert source.calls == 1
+
+
+def test_one_frame_per_write_and_pending_chunk_block_further_decoding() -> None:
+    stdout, stderr = Sink(bound=2, allowance=1), Sink()
+    observer = InlineObserver(OutputMode.DELIVER, 0, stdout=stdout, stderr=stderr)
+    reader = FrameReader(NONCE, observer.accept)
+    collector = PresentationCollector(reader, observer)
+    records = [
+        encode_frame(NONCE, Frame(0, FrameKind.LAUNCHING, empty_body())),
+        encode_frame(NONCE, Frame(1, FrameKind.STDOUT, b"abcdef")),
+        encode_frame(NONCE, Frame(2, FrameKind.STDERR, b"error")),
+    ]
+    combined = memoryview(b"".join(records))
+    assert collector.try_write(combined) == len(records[0])
+    combined = combined[len(records[0]) :]
+    assert collector.try_write(combined) == len(records[1]) - 1
+    assert stdout.data == b"ab"
+    combined = combined[len(records[1]) - 1 :]
+    stdout.stalled = True
+    assert collector.try_write(combined) is None
+    assert stderr.calls == 0
+    stdout.stalled = False
+    stdout.allowance = 1
+    assert collector.try_write(combined) is None
+    assert stdout.data == b"abcd"
+    stdout.allowance = None
+    assert collector.try_write(combined) == 1
+    assert collector.try_write(combined[1:]) == len(records[2])
+    assert stdout.data == b"abcdef" and stderr.data == b"error"
+    observer.release()
+
+
+def test_positive_short_writes_drain_one_bounded_chunk_without_stalling() -> None:
+    stdout = Sink(bound=1)
+    observer = InlineObserver(OutputMode.DELIVER, 0, stdout=stdout, stderr=Sink())
+    reader = FrameReader(NONCE, observer.accept)
+    collector = PresentationCollector(reader, observer)
+    launching = encode_frame(NONCE, Frame(0, FrameKind.LAUNCHING, empty_body()))
+    assert collector.try_write(memoryview(launching)) == len(launching)
+    data = encode_frame(NONCE, Frame(1, FrameKind.STDOUT, b"x" * 4096))
+    assert collector.try_write(memoryview(data)) == len(data)
+    assert stdout.data == b"x" * 4096 and stdout.calls == 4096
+    assert observer._pending is None
+    observer.release()
+
+
+@pytest.mark.parametrize("bad_digest", [False, True])
+def test_delivered_stream_counts_and_digest_are_checked_without_retained_bytes(bad_digest: bool) -> None:
+    stdout, stderr = Sink(), Sink()
+    observer = InlineObserver(OutputMode.DELIVER, 0, stdout=stdout, stderr=stderr)
+    reader = FrameReader(NONCE, observer.accept)
+    collector = PresentationCollector(reader, observer)
+    frames = [Frame(0, FrameKind.LAUNCHING, empty_body())]
+    payload = bytes(range(256)) * 32
+    for offset in range(0, len(payload), 4096):
+        frames.append(Frame(len(frames), FrameKind.STDOUT, payload[offset : offset + 4096]))
+    for stream, data in ((StreamName.STDOUT, payload), (StreamName.STDERR, b"")):
+        digest = hashlib.sha256(data).hexdigest()
+        if bad_digest and data:
+            digest = "0" * 64
+        end = StreamEnd(stream, len(data), digest, True, False, StreamRetention.DELIVERED)
+        frames.append(Frame(len(frames), FrameKind.STREAM_END, encode_stream_end(end)))
+    frames.append(Frame(len(frames), FrameKind.WAITED, encode_wait(WaitFact(WaitKind.EXIT, 255))))
+    frames.append(Frame(len(frames), FrameKind.FINISHED, empty_body()))
+    for frame in frames:
+        encoded = encode_frame(NONCE, frame)
+        assert collector.try_write(memoryview(encoded)) == len(encoded)
+    observation = observer.finish(None, carrier_stdout_complete=True)
+    assert stdout.data == payload
+    if bad_digest:
+        assert observation.error is ObservationError.STREAM
+    else:
+        assert observation.trusted_terminal
+        assert observation.stdout is not None
+        assert observation.stdout.count == len(payload)
+        assert observation.stdout.data == b""
+    observer.release()
+
+
+@pytest.mark.parametrize("status", [0, 1, 255])
+def test_packed_helper_duplex_handshake_precedes_live_source_read(plan, status: int) -> None:
+    stdout, stderr = Sink(bound=3), Sink(bound=2)
+    payload = bytes(range(256)) * 8
+
+    class HandshakeSource(Source):
+        def try_read(self, limit: int) -> bytes | None:
+            if not stdout.data.startswith(b"ready\x00\xff"):
+                return None
+            return super().try_read(limit)
+
+    source = HandshakeSource(payload)
+    code = (
+        "import os,sys;os.write(1,b'ready\\x00\\xff');"
+        "data=sys.stdin.buffer.read();os.write(1,data);os.write(2,data[::-1]);"
+        f"raise SystemExit({status})"
+    )
+    _, candidate, carrier = _run(
+        Command(["/usr/bin/python3", "-I", "-S", "-B", "-c", code]),
+        plan,
+        source=source,
+        stdout=stdout,
+        stderr=stderr,
+        sensitive=True,
+    )
+    result = reduce_owned_inline_result(OwnedInlineOutcome(candidate=candidate))
+    assert result.status == ExitCode(status)
+    assert result.failure is None
+    assert stdout.data == b"ready\x00\xff" + payload
+    assert stderr.data == payload[::-1]
+    assert result.stdout.data == result.stderr.data == b""
+    assert result.stdout.retention is result.stderr.retention is Retention.DELIVERED
+    assert carrier.last_report is not None
+    assert carrier.last_report.stdout.data == carrier.last_report.stderr.data == b""
+
+
+def test_packed_script_keeps_live_input_separate_from_source(plan) -> None:
+    payload = b"\x00stdin\xff\n"
+    stdout, stderr = Sink(), Sink()
+    code = "import os,sys;data=sys.stdin.buffer.read();os.write(1,data);os.write(2,b'err\\x00\\xff')"
+    source = f"/usr/bin/python3 -I -S -B -c {shlex.quote(code)}\nexit 1\n"
+    _, candidate, _ = _run(
+        Script(source, Shell.SH),
+        plan,
+        source=Source(payload),
+        stdout=stdout,
+        stderr=stderr,
+    )
+    assert candidate.observation is not None and candidate.observation.trusted_terminal
+    assert candidate.observation.wait == WaitFact(WaitKind.EXIT, 1)
+    assert stdout.data == payload and stderr.data == b"err\x00\xff"
+
+
+@pytest.mark.parametrize("sensitive", [False, True])
+def test_live_input_can_capture_or_suppress_output(plan, sensitive: bool) -> None:
+    _, candidate, _ = _run(
+        Command(["/bin/cat"]),
+        plan,
+        source=Source(b"live-input"),
+        sensitive=sensitive,
+    )
+    assert candidate.observation is not None
+    assert candidate.observation.stdout is not None
+    assert candidate.observation.stdout.data == (b"" if sensitive else b"live-input")
+    assert candidate.observation.stdout.retention is (
+        StreamRetention.SUPPRESSED if sensitive else StreamRetention.CAPTURED
+    )
+
+
+def test_finite_input_can_deliver_live_output(plan) -> None:
+    stdout, stderr = Sink(), Sink()
+    _, candidate, _ = _run(Command(["/bin/cat"]), plan, stdin=b"finite", stdout=stdout, stderr=stderr)
+    assert candidate.observation is not None and candidate.observation.trusted_terminal
+    assert stdout.data == b"finite"
+
+
+def test_live_input_can_discard_without_presenting_bytes(plan) -> None:
+    _, candidate, _ = _run(Command(["/bin/cat"]), plan, source=Source(b"discarded"), capture_limit=None)
+    assert candidate.observation is not None and candidate.observation.trusted_terminal
+    assert candidate.observation.stdout is not None
+    assert candidate.observation.stdout.retention is StreamRetention.DISCARDED
+    assert candidate.observation.stdout.data == b""
+
+
+def test_public_run_forwards_live_endpoints_and_keeps_only_facts(bound: Bound) -> None:
+    _, _, operation, _, access, _ = bound
+    source, stdout, stderr = Source(b"public-live"), Sink(bound=2), Sink()
+    source_ref, stdout_ref, stderr_ref = weakref.ref(source), weakref.ref(stdout), weakref.ref(stderr)
+    result = access.run(
+        Command(["/bin/cat"]),
+        profile=Protection.DIRECT,
+        stdin=Input.live(source, sensitive=True),
+        output=Output.live(stdout, stderr),
+    )
+    assert result.status == ExitCode(0) and result.failure is None
+    assert stdout.data == b"public-live"
+    assert result.stdout.data == result.stderr.data == b""
+    assert result.stdout.retention is Retention.DELIVERED
+    assert not operation.unfinished_inline_executions
+    del source, stdout, stderr
+    assert source_ref() is None
+    assert stdout_ref() is None
+    assert stderr_ref() is None
+
+
+@_LINUX_ONLY
+@pytest.mark.parametrize("status", [0, 1, 255])
+@pytest.mark.parametrize("endless", [False, True], ids=["stalled-source", "endless-source"])
+@pytest.mark.parametrize("presentation", ["capture", "suppress", "live"])
+def test_public_consumer_completion_releases_open_input(
+    bound: Bound, status: int, endless: bool, presentation: str
+) -> None:
+    _, _, operation, carrier, access, _ = bound
+    source = OpenSource(endless=endless)
+    stdout, stderr = BorrowedSink(bound=1), BorrowedSink(bound=2)
+    source_ref, stdout_ref, stderr_ref = weakref.ref(source), weakref.ref(stdout), weakref.ref(stderr)
+    code = f"import os;os.write(1,b'out\\x00\\xff');os.write(2,b'err\\xff\\x00');raise SystemExit({status})"
+    result = access.run(
+        Command(["/usr/bin/python3", "-I", "-S", "-B", "-c", code]),
+        profile=Protection.DIRECT,
+        stdin=Input.live(source, sensitive=presentation != "capture"),
+        output=Output.live(stdout, stderr) if presentation == "live" else Output.capture(),
+        deadline=Deadline.after(5),
+    )
+    assert result.status == ExitCode(status) and result.failure is None
+    assert result.application_state is ApplicationState.COMPLETED
+    assert result.stdout.complete and result.stderr.complete
+    expected = (
+        Retention.DELIVERED
+        if presentation == "live"
+        else (Retention.SUPPRESSED if presentation == "suppress" else Retention.CAPTURED)
+    )
+    assert result.stdout.retention is result.stderr.retention is expected
+    if presentation == "live":
+        assert stdout.data == b"out\x00\xff" and stderr.data == b"err\xff\x00"
+    else:
+        assert stdout.calls == stderr.calls == 0
+    assert result.stdout.data == (b"out\x00\xff" if presentation == "capture" else b"")
+    assert result.stderr.data == (b"err\xff\x00" if presentation == "capture" else b"")
+    assert not source.closed and not stdout.closed and not stderr.closed
+    assert carrier.calls == 1 and not operation.unfinished_inline_executions
+    # No owner, cached result or helper task may keep borrowing after return.
+    del source, stdout, stderr
+    assert source_ref() is None
+    assert stdout_ref() is None
+    assert stderr_ref() is None
+
+
+@_LINUX_ONLY
+@pytest.mark.parametrize("live_output", [False, True])
+def test_public_prefix_consumer_need_not_read_all_finite_input(bound: Bound, live_output: bool) -> None:
+    _, _, operation, _, access, _ = bound
+    stdout, stderr = BorrowedSink(bound=1), BorrowedSink(bound=2)
+    code = "import os;assert os.read(0,1)==b'p';os.write(1,b'prefix');os.write(2,b'done')"
+    script = Script(f"exec /usr/bin/python3 -I -S -B -c {shlex.quote(code)}\n", Shell.SH)
+    result = access.run(
+        script,
+        profile=Protection.DIRECT,
+        stdin=Input.bytes(b"p" + b"unread" * 2500),
+        output=Output.live(stdout, stderr) if live_output else Output.capture(),
+    )
+    assert result.status == ExitCode(0) and result.failure is None
+    assert result.stdout.complete and result.stderr.complete
+    if live_output:
+        assert stdout.data == b"prefix" and stderr.data == b"done"
+    else:
+        assert result.stdout.data == b"prefix" and result.stderr.data == b"done"
+    assert not stdout.closed and not stderr.closed and not operation.unfinished_inline_executions
+
+
+@_LINUX_ONLY
+def test_public_consumer_can_close_input_before_its_final_output(bound: Bound, tmp_path: Path) -> None:
+    _, _, operation, _, access, _ = bound
+    release = tmp_path / "release-output"
+
+    class ReleasingSink(BorrowedSink):
+        def try_write(self, data: memoryview) -> int | None:
+            count = super().try_write(data)
+            if self.data == b"closed":
+                release.touch()
+            return count
+
+    source, stdout, stderr = OpenSource(endless=True), ReleasingSink(bound=1), BorrowedSink(bound=1)
+    code = (
+        "import os,time;from pathlib import Path;os.close(0);os.write(1,b'closed');"
+        f"p=Path({str(release)!r});expires=time.monotonic()+5\n"
+        "while not p.exists():\n assert time.monotonic()<expires\n time.sleep(0.01)\n"
+        "os.write(1,b'after-close');os.write(2,b'final-error');raise SystemExit(1)"
+    )
+    result = access.run(
+        Command(["/usr/bin/python3", "-I", "-S", "-B", "-c", code]),
+        profile=Protection.DIRECT,
+        stdin=Input.live(source, sensitive=True),
+        output=Output.live(stdout, stderr),
+        deadline=Deadline.after(10),
+    )
+    assert release.exists()
+    assert result.status == ExitCode(1) and result.failure is None
+    assert stdout.data == b"closedafter-close" and stderr.data == b"final-error"
+    assert result.stdout.complete and result.stderr.complete
+    assert result.stdout.retention is result.stderr.retention is Retention.DELIVERED
+    assert result.stdout.data == result.stderr.data == b""
+    assert not source.closed and not stdout.closed and not stderr.closed
+    assert not operation.unfinished_inline_executions
+
+
+@_LINUX_ONLY
+def test_public_drains_buffered_completion_records_after_client_exit(
+    bound: Bound, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, _, operation, _, access, _ = bound
+    exited = Event()
+    snapshot = LocalProcessOwner.snapshot
+    write = PresentationCollector.try_write
+    accept = InlineObserver.accept
+    declined = 0
+    accepted: list[FrameKind] = []
+
+    def observe(owner):
+        observed = snapshot(owner)
+        if observed.exit_status is not None:
+            exited.set()
+        return observed
+
+    def after_exit(collector, data):
+        nonlocal declined
+        if declined == 0 or not exited.is_set():
+            declined += 1
+            return None
+        return write(collector, data)
+
+    def record(observer, frame):
+        assert exited.is_set()
+        accepted.append(frame.kind)
+        return accept(observer, frame)
+
+    monkeypatch.setattr(LocalProcessOwner, "snapshot", observe)
+    monkeypatch.setattr(PresentationCollector, "try_write", after_exit)
+    monkeypatch.setattr(InlineObserver, "accept", record)
+    source = OpenSource()
+    result = access.run(
+        Command(["/bin/sh", "-c", "printf final; printf error >&2; exit 255"]),
+        profile=Protection.DIRECT,
+        stdin=Input.live(source),
+        deadline=Deadline.after(5),
+    )
+    assert declined > 0 and exited.is_set()
+    assert accepted[-2:] == [FrameKind.WAITED, FrameKind.FINISHED]
+    assert accepted.count(FrameKind.STREAM_END) == 2
+    assert result.status == ExitCode(255) and result.failure is None
+    assert result.stdout.data == b"final" and result.stderr.data == b"error"
+    assert result.stdout.complete and result.stderr.complete
+    assert not source.closed and not operation.unfinished_inline_executions
+
+
+@_LINUX_ONLY
+@pytest.mark.parametrize("fault", ["invalid", "exception", "control"])
+def test_public_source_fault_remains_a_failure(bound: Bound, fault: str) -> None:
+    _, owner, _, _, access, _ = bound
+    control = KeyboardInterrupt("original source control")
+
+    class FaultSource(OpenSource):
+        def try_read(self, limit: int) -> bytes | None:
+            self.calls += 1
+            if fault == "invalid":
+                return "invalid"  # type: ignore[return-value]
+            if fault == "control":
+                raise control
+            raise OSError("source-canary")
+
+    source = FaultSource()
+    if fault == "control":
+        with pytest.raises(KeyboardInterrupt) as caught:
+            access.run(Command(["/bin/cat"]), profile=Protection.DIRECT, stdin=Input.live(source))
+        assert caught.value is control
+    else:
+        result = access.run(Command(["/bin/cat"]), profile=Protection.DIRECT, stdin=Input.live(source))
+        assert result.failure is ExecutionFailure.INPUT and result.status is None
+        assert "source-canary" not in repr(result)
+    assert source.calls == 1 and not source.closed
+    assert owner.close_local_delivery(Deadline.after(3))
+
+
+@_LINUX_ONLY
+@pytest.mark.parametrize("fault", ["stalled", "exception", "control"])
+def test_public_open_input_does_not_mask_output_fault(bound: Bound, fault: str) -> None:
+    _, owner, _, _, access, _ = bound
+    source = OpenSource()
+    control = KeyboardInterrupt("original sink control")
+
+    class FaultSink(BorrowedSink):
+        def try_write(self, data: memoryview) -> int | None:
+            self.calls += 1
+            if fault == "stalled":
+                return None
+            if fault == "control":
+                raise control
+            raise OSError("sink-canary")
+
+    stdout, stderr = FaultSink(), BorrowedSink()
+    options = dict(
+        profile=Protection.DIRECT,
+        stdin=Input.live(source),
+        output=Output.live(stdout, stderr),
+        deadline=Deadline.after(1),
+    )
+    command = Command(["/bin/echo", "payload"])
+    if fault == "control":
+        with pytest.raises(KeyboardInterrupt) as caught:
+            access.run(command, **options)
+        assert caught.value is control
+    else:
+        result = access.run(command, **options)
+        assert result.failure is not None and not result.stdout.complete
+        if fault == "exception":
+            assert result.failure is ExecutionFailure.OUTPUT
+        assert "sink-canary" not in repr(result)
+    assert stdout.calls > 0 and not stdout.closed and not stderr.closed and not source.closed
+    assert owner.close_local_delivery(Deadline.after(3))
+
+
+def test_actual_prepared_io_keeps_sensitivity_and_explicit_envelope(plan) -> None:
+    prepared = prepare_inline_candidate(
+        Command(["/bin/true"]),
+        plan=plan,
+        source=Source(b""),
+        stdout=Sink(),
+        stderr=Sink(),
+        sensitive=True,
+        runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable),
+    )
+    assert isinstance(prepared.io.input, LiveInput)
+    envelope = prepared.io.input.source.try_read(32768 + REQUEST_HEADER_BYTES)
+    assert envelope is not None and envelope[:5] == b"AGWI2"
+    assert int(envelope[5:REQUEST_HEADER_BYTES], 16) == len(envelope) - REQUEST_HEADER_BYTES
+    assert decode_manifest(envelope[REQUEST_HEADER_BYTES:]).stdin is None
+    assert prepared.io.sensitive and prepared.io.input.sensitive
+    assert isinstance(prepared.io.output, SinkOutput) and prepared.io.output.require_live
+    prepared.release()
+
+
+def test_unsupported_live_carrier_refuses_before_operation_borrow(bound: Bound, monkeypatch) -> None:
+    _, owner, operation, carrier, access, _ = bound
+    source = Source(b"unused")
+    sink = Sink()
+
+    def refuse(invocation: object, *, io: CarrierIO) -> None:
+        assert isinstance(io.input, LiveInput)
+        raise StateError("unsupported live channel")
+
+    def no_borrow():
+        pytest.fail("Borrowed an operation before pure live-I/O validation")
+
+    monkeypatch.setattr(carrier, "validate", refuse)
+    monkeypatch.setattr(owner, "borrow", no_borrow)
+    with pytest.raises(StateError):
+        access.run(
+            Command(["/bin/true"]), profile=Protection.DIRECT, stdin=Input.live(source), output=Output.live(sink, sink)
+        )
+    assert source.calls == sink.calls == carrier.calls == 0
+    assert not operation.unfinished_inline_executions
+
+
+@pytest.mark.parametrize(
+    "start,lifetime",
+    [
+        (False, Lifetime.OPERATION),
+        (False, Lifetime.INDEPENDENT),
+        (True, Lifetime.OPERATION),
+        (True, Lifetime.INDEPENDENT),
+    ],
+)
+def test_managed_live_choices_refuse_before_effects(bound: Bound, start: bool, lifetime: Lifetime) -> None:
+    _, _, operation, carrier, access, _ = bound
+    assert operation._native_binding is None
+    source = Source(b"unused")
+    method = access.start if start else access.run
+    with pytest.raises(StateError):
+        method(Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=lifetime, stdin=Input.live(source))
+    assert source.calls == carrier.calls == 0
+    assert (
+        not operation.unfinished_inline_executions and not operation.active_inline_calls and not operation.managed_runs
+    )
+
+
+@pytest.mark.parametrize("mismatch", ["carrier", "runtime"])
+def test_job_binding_mismatch_remains_invalid_without_effects(bound: Bound, mismatch: str) -> None:
+    _, owner, operation, carrier, access, _ = bound
+    runtime = access._runtime_selection
+    operation._native_binding = NativeExecutionBinding(carrier, "root", runtime)
+    with pytest.raises(ValidationError):
+        operation.require_job_binding(
+            LocalCarrier() if mismatch == "carrier" else carrier,
+            RuntimeSelection(RuntimeTargetOS.DARWIN) if mismatch == "runtime" else runtime,
+        )
+    assert carrier.calls == 0 and not operation.active_inline_calls and not operation.managed_runs
+    operation.finish()
+    owner.close()
+
+
+@pytest.mark.parametrize("side", ["input", "output"])
+@pytest.mark.parametrize("fault", ["invalid", "exception", "control"])
+def test_endpoint_failure_is_safe_and_detaches_borrowed_values(plan, side: str, fault: str) -> None:
+    control = KeyboardInterrupt("original endpoint control") if fault == "control" else ValueError("endpoint-canary")
+
+    class FaultSource:
+        def try_read(self, limit: int) -> bytes | None:
+            if fault == "invalid":
+                return "invalid"  # type: ignore[return-value]
+            raise control
+
+    class FaultSink:
+        def try_write(self, data: memoryview) -> int | None:
+            if fault == "invalid":
+                return True
+            raise control
+
+    prepared = prepare_inline_candidate(
+        Command(["/bin/cat"] if side == "input" else ["/bin/echo", "payload"]),
+        plan=plan,
+        source=FaultSource() if side == "input" else None,
+        stdout=FaultSink() if side == "output" else Sink(),
+        stderr=Sink(),
+        runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable),
+    )
+    carrier = LocalCarrier()
+    if fault == "control":
+        with pytest.raises(KeyboardInterrupt) as caught:
+            execute_inline_candidate(carrier, prepared, deadline=Deadline.after(3))
+        assert caught.value is control
+    else:
+        candidate = execute_inline_candidate(carrier, prepared, deadline=Deadline.after(3))
+        assert candidate.carrier_failure is (Failure.INPUT if side == "input" else Failure.OUTPUT)
+        result = reduce_owned_inline_result(OwnedInlineOutcome(candidate=candidate))
+        assert result.failure is (ExecutionFailure.INPUT if side == "input" else ExecutionFailure.OUTPUT)
+        assert "endpoint-canary" not in repr(result)
+    assert not isinstance(prepared.io.input, LiveInput)
+    assert not prepared._observer._sinks and prepared._observer._pending is None
+
+
+def test_stalled_output_ends_with_truthful_failure_and_releases_pending_bytes(plan) -> None:
+    sink = Sink(stalled=True)
+    prepared = prepare_inline_candidate(
+        Command(["/bin/echo", "payload"]),
+        plan=plan,
+        stdout=sink,
+        stderr=Sink(),
+        runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable),
+    )
+    candidate = execute_inline_candidate(LocalCarrier(), prepared, deadline=Deadline.after(3))
+    result = reduce_owned_inline_result(OwnedInlineOutcome(candidate=candidate))
+    assert result.failure is not None
+    assert not result.stdout.complete
+    assert result.stdout.data == b""
+    assert result.application_state is ApplicationState.UNKNOWN
+    assert not prepared._observer._sinks and prepared._observer._pending is None

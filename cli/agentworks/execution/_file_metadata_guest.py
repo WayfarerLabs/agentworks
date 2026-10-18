@@ -1,4 +1,4 @@
-"""Destination entry point for one Linux metadata operation."""
+"""Destination entry point for one metadata operation."""
 
 from __future__ import annotations
 
@@ -7,11 +7,16 @@ import sys
 import time
 from contextlib import suppress
 
+from ._file_effect_gate import (
+    FileEffectGateError,
+    hold_file_effect_gate,
+)
 from ._file_metadata import (
     MetadataError,
     MetadataFailureKind,
     MetadataPhase,
     MetadataResult,
+    create_directory,
     ensure_directory,
     set_metadata,
 )
@@ -28,10 +33,12 @@ from ._file_metadata_protocol import (
     empty_file_metadata_body,
     encode_file_metadata_failure,
     encode_file_metadata_result,
+    targets_metadata_gate_ancestor,
 )
-from ._file_paths import ConfinedOpenError, open_linux_confined, open_linux_root
+from ._file_paths import ConfinedOpenError, directory_path_flags, open_file_confined, open_file_root
 from ._file_wire import FileRecordKind, FileRecordWriter
-from ._helper_identity import matches_current_identity
+from ._helper_identity import matches_file_helper_identity
+from ._vm_guest_identity_guest import _GuestRefusal, _identity
 
 
 class _SafeFailure(Exception):
@@ -52,7 +59,7 @@ def _read_request() -> FileMetadataRequest:
 
 def _parent(request: FileMetadataRequest) -> tuple[int, int | None, str]:
     try:
-        root_fd = open_linux_root(request.root_path)
+        root_fd = open_file_root(request.root_path)
     except ConfinedOpenError:
         raise _SafeFailure(FileMetadataFailureControl(FileMetadataFailureCode.ROOT_REFUSED)) from None
     if root_fd is None:
@@ -61,9 +68,9 @@ def _parent(request: FileMetadataRequest) -> tuple[int, int | None, str]:
     leaf = components[-1]
     if len(components) == 1:
         return root_fd, None, leaf
-    flags = os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    flags = directory_path_flags()
     try:
-        parent_fd = open_linux_confined(root_fd, "/".join(components[:-1]), flags)
+        parent_fd = open_file_confined(root_fd, "/".join(components[:-1]), flags)
         if parent_fd is None:
             raise _SafeFailure(FileMetadataFailureControl(FileMetadataFailureCode.PARENT_REFUSED))
     except ConfinedOpenError:
@@ -88,10 +95,21 @@ def _metadata_failure(error: MetadataError) -> FileMetadataFailureControl:
 
 
 def _operate(request: FileMetadataRequest, expires_at: float | None) -> FileMetadataResultControl:
+    if (
+        sys.platform == "linux"
+        and request.operation is not FileMetadataOperation.CREATE_DIRECTORY
+        and targets_metadata_gate_ancestor(request.root_path, request.relative_path)
+    ):
+        raise _SafeFailure(FileMetadataFailureControl(FileMetadataFailureCode.EFFECT_GATE_REFUSED))
     root_fd, parent_fd, leaf = _parent(request)
     descriptor = root_fd if parent_fd is None else parent_fd
     try:
-        function = set_metadata if request.operation is FileMetadataOperation.SET_METADATA else ensure_directory
+        if request.operation is FileMetadataOperation.SET_METADATA:
+            function = set_metadata
+        elif request.operation is FileMetadataOperation.ENSURE_DIRECTORY:
+            function = ensure_directory
+        else:
+            function = create_directory
         result: MetadataResult = function(
             descriptor,
             leaf,
@@ -129,9 +147,9 @@ def main(nonce: str) -> int:
         return _finish_failure(writer, FileMetadataFailureControl(error.failure))
     if request.nonce != nonce:
         return _finish_failure(writer, FileMetadataFailureControl(FileMetadataFailureCode.NONCE_MISMATCH))
-    if sys.platform != "linux":
+    if sys.platform not in {"linux", "darwin"}:
         return _finish_failure(writer, FileMetadataFailureControl(FileMetadataFailureCode.UNSUPPORTED_RUNTIME))
-    if not matches_current_identity(request.identity):
+    if not matches_file_helper_identity(request.identity):
         return _finish_failure(writer, FileMetadataFailureControl(FileMetadataFailureCode.IDENTITY_MISMATCH))
     expires_at = None if request.remaining_seconds is None else time.monotonic() + request.remaining_seconds
     if expires_at is not None and time.monotonic() >= expires_at:
@@ -146,9 +164,15 @@ def main(nonce: str) -> int:
     failure: FileMetadataFailureControl | None = None
     result: FileMetadataResultControl | None = None
     try:
-        result = _operate(request, expires_at)
+        if request.effect_gate is None:
+            result = _operate(request, expires_at)
+        else:
+            with hold_file_effect_gate(request.effect_gate, _identity, expires_at=expires_at):
+                result = _operate(request, expires_at)
     except _SafeFailure as error:
         failure = error.failure
+    except (FileEffectGateError, _GuestRefusal):
+        return _finish_failure(writer, FileMetadataFailureControl(FileMetadataFailureCode.EFFECT_GATE_REFUSED))
     if failure is not None:
         return _finish_failure(writer, failure)
     assert result is not None

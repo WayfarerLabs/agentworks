@@ -15,6 +15,7 @@ from agentworks.execution._helper_bundle import build_helper_modules
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._inline_bundle import _MODULE_NAMES, ROOT_PROGRAM
 from agentworks.execution._inline_control import FailureCode, FailurePhase, parse_failure
+from agentworks.execution._inline_guest_io import FrameWriter
 from agentworks.execution._inline_request import InlineManifest, InvocationKind, OutputMode, ScriptShell
 from agentworks.execution._process import ProcessResult, StreamResult
 
@@ -41,9 +42,9 @@ def manifest() -> InlineManifest:
 
 def _install_manifest(monkeypatch: pytest.MonkeyPatch, manifest: InlineManifest) -> None:
     monkeypatch.setattr(os, "read", lambda descriptor, limit: b"")
-    monkeypatch.setattr(guest, "decode_manifest", lambda data: manifest)
+    monkeypatch.setattr(guest, "_read_request", lambda: manifest)
     monkeypatch.setattr(guest, "matches_current_identity", lambda identity: True)
-    monkeypatch.setattr(guest._Emitter, "_write", staticmethod(lambda data: None))
+    monkeypatch.setattr(FrameWriter, "_write", staticmethod(lambda data: None))
 
 
 def _prepared_source(monkeypatch: pytest.MonkeyPatch) -> int:
@@ -63,7 +64,7 @@ def test_prepared_source_closes_when_launching_emission_fails(
 ) -> None:
     _install_manifest(monkeypatch, manifest)
     descriptor = _prepared_source(monkeypatch)
-    monkeypatch.setattr(guest._Emitter, "emit", lambda self, kind, body: (_ for _ in ()).throw(OSError()))
+    monkeypatch.setattr(FrameWriter, "emit", lambda self, kind, body: (_ for _ in ()).throw(OSError()))
 
     with pytest.raises(OSError):
         guest.main(NONCE)
@@ -78,7 +79,7 @@ def test_prepared_source_closes_after_dispatch_failure(
     _install_manifest(monkeypatch, manifest)
     descriptor = _prepared_source(monkeypatch)
     emitted: list[tuple[FrameKind, bytes]] = []
-    monkeypatch.setattr(guest._Emitter, "emit", lambda self, kind, body: emitted.append((kind, body)))
+    monkeypatch.setattr(FrameWriter, "emit", lambda self, kind, body: emitted.append((kind, body)))
     monkeypatch.setattr(
         guest,
         "run_owned_process",
@@ -108,7 +109,7 @@ def test_source_close_failure_is_reported_after_successful_wait(
     _install_manifest(monkeypatch, manifest)
     descriptor = _prepared_source(monkeypatch)
     emitted: list[tuple[FrameKind, bytes]] = []
-    monkeypatch.setattr(guest._Emitter, "emit", lambda self, kind, body: emitted.append((kind, body)))
+    monkeypatch.setattr(FrameWriter, "emit", lambda self, kind, body: emitted.append((kind, body)))
     monkeypatch.setattr(
         guest,
         "run_owned_process",
@@ -152,6 +153,7 @@ def test_fixed_module_retains_one_owner_and_waits_for_script_construction(
     )
     probe = r"""
 import gc, os, subprocess, sys, threading, weakref
+from _agw_inline._inline_guest_io import FrameWriter
 g = sys.modules['_agw_inline._inline_guest']
 c = sys.modules['_agw_inline._process']
 request = sys.modules['_agw_inline._inline_request']
@@ -163,11 +165,11 @@ manifest = request.InlineManifest(
     shell=request.ScriptShell.SH, env=(), cwd=None, stdin=b'',
     output_mode=request.OutputMode.CAPTURE, capture_limit=100,
     identity=identity.IdentityExpectation(0,0,(0,)))
-g.decode_manifest = lambda data: manifest
+g._read_request = lambda: manifest
 g.matches_current_identity = lambda value: True
-g._Emitter._write = staticmethod(lambda data: None)
+FrameWriter._write = staticmethod(lambda data: None)
 emissions=[]
-g._Emitter.emit = lambda self, kind, body: emissions.append(kind.value)
+FrameWriter.emit = lambda self, kind, body: emissions.append(kind.value)
 spawn = subprocess.Popen
 entered, release, finished = threading.Event(), threading.Event(), threading.Event()
 sources, closes, originals = [], [], []

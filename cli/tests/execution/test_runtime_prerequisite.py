@@ -21,7 +21,7 @@ from agentworks.execution._runtime_prerequisite import (
     RuntimeTargetOS,
     build_runtime_helper_argv,
 )
-from agentworks.execution.carrier import CarrierIO, Deadline, Failure, FiniteInput, SinkOutput
+from agentworks.execution.carrier import CarrierIO, Deadline, FiniteInput, SinkOutput
 from agentworks.execution.carriers._subprocess import ProcessResult
 from tests.execution._bound_carrier_support import run_fixture_process
 
@@ -457,9 +457,13 @@ def test_early_refusal_with_large_finite_input_remains_bounded_and_truthful(tmp_
     observation, output, stderr, result = _run(
         RuntimeSelection(RuntimeTargetOS.LINUX, os.fspath(tmp_path / "absent")),
         payload=b"sensitive\x00" * 500_000,
+        helper_source="import os\nos.write(1,b'workload-entered')\n",
     )
 
-    assert observation.state in (RuntimePrerequisiteState.MISSING, RuntimePrerequisiteState.UNKNOWN)
+    assert observation == RuntimePrerequisiteObservation(RuntimePrerequisiteState.MISSING, None)
     assert not output.data
     assert not stderr.data
-    assert result.failure is Failure.INPUT
+    assert result.failure is None
+    assert result.started and result.local_status == result.exit_status == 0
+    assert result.stdout.complete and result.stderr.complete
+    assert result.stdout.data == result.stderr.data == b""

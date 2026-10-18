@@ -257,8 +257,8 @@ def dispose_resource_job(
     helper = active.operation
     try:
         operation._admit(active)
-        if operation._wsl2_route is not None:
-            operation._wsl2_route.require_selected_route(deadline)
+        if operation._route_check is not None:
+            operation._route_check(deadline)
         candidate = dispose_managed_run(
             helper,
             expected_launch=expected_launch,

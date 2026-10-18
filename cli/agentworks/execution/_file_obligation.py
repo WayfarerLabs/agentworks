@@ -8,6 +8,7 @@ objects, carrier details, diagnostics, commands, or replay instructions.
 from __future__ import annotations
 
 import json
+import secrets
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import cast
@@ -45,6 +46,10 @@ from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm
 
 FILE_CALL_OBLIGATION_PAYLOAD_VERSION = 1
 NUMERIC_FILE_CALL_OBLIGATION_PAYLOAD_VERSION = 2
+UPLOAD_CHILD_OBLIGATION_PAYLOAD_VERSION = 3
+NUMERIC_UPLOAD_CHILD_OBLIGATION_PAYLOAD_VERSION = 4
+DOWNLOAD_CHILD_OBLIGATION_PAYLOAD_VERSION = 5
+NUMERIC_DOWNLOAD_CHILD_OBLIGATION_PAYLOAD_VERSION = 6
 MAX_PACKAGE_UPLOAD_MEMBERS = 4096
 _TOKEN_BYTES = 16
 _MAX_JSON_ATTEMPTS = 8
@@ -61,6 +66,8 @@ _SCRATCH_FIELDS = frozenset({"cleanup_debt", "reference"})
 _GATE_SETUP_FIELDS = frozenset({"guest", "path"})
 _GUEST_FIELDS = frozenset({"boot_id", "init_start_ticks", "instance_marker"})
 _BOOTSTRAP_FIELDS = frozenset({"guest", "root_entry"})
+_UPLOAD_CHILD_FIELDS = frozenset({"transfer_id", "member_ordinal"})
+_DOWNLOAD_CHILD_FIELDS = frozenset({"transfer_id", "member_ordinal"})
 
 
 class FileCallFamily(StrEnum):
@@ -75,6 +82,19 @@ class FileCallFamily(StrEnum):
     REMOVE = "remove"
     SET_METADATA = "set-metadata"
     ENSURE_DIRECTORY = "ensure-directory"
+
+
+FILE_EFFECT_GATE_FAMILIES = frozenset(
+    {
+        FileCallFamily.DOWNLOAD,
+        FileCallFamily.UPLOAD,
+        FileCallFamily.PACKAGE_UPLOAD,
+        FileCallFamily.JSON_UPDATE,
+        FileCallFamily.REMOVE,
+        FileCallFamily.SET_METADATA,
+        FileCallFamily.ENSURE_DIRECTORY,
+    }
+)
 
 
 class FileCallUncertainty(StrEnum):
@@ -114,6 +134,63 @@ class FileCallObligationCodecError(ValueError):
 
 
 @dataclass(frozen=True, slots=True, repr=False)
+class UploadChildAssociation:
+    """Bounded transfer identity, without a plan or application ownership."""
+
+    transfer_id: bytes
+    member_ordinal: int
+
+    def __post_init__(self) -> None:
+        """Validate caller and persisted association at the codec boundary."""
+        _validate_upload_child(self)
+
+    @classmethod
+    def fresh(cls) -> UploadChildAssociation:
+        """Begin a new bounded transfer at its first member."""
+        return cls(secrets.token_bytes(_TOKEN_BYTES), 0)
+
+
+def _validate_upload_child(child: UploadChildAssociation) -> None:
+    """Check bounded child identity at the durable codec boundary."""
+    if (
+        type(child) is not UploadChildAssociation
+        or type(child.transfer_id) is not bytes
+        or len(child.transfer_id) != _TOKEN_BYTES
+        or type(child.member_ordinal) is not int
+        or not 0 <= child.member_ordinal < MAX_PACKAGE_UPLOAD_MEMBERS
+    ):
+        raise FileCallObligationCodecError
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class DownloadChildAssociation:
+    """Bounded download identity without workstation state or a remaining plan."""
+
+    transfer_id: bytes
+    member_ordinal: int
+
+    def __post_init__(self) -> None:
+        """Validate caller and persisted identity at the codec boundary."""
+        _validate_download_child(self)
+
+    @classmethod
+    def fresh(cls) -> DownloadChildAssociation:
+        return cls(secrets.token_bytes(_TOKEN_BYTES), 0)
+
+
+def _validate_download_child(child: DownloadChildAssociation) -> None:
+    """Validate caller and durable identity at the codec boundary."""
+    if (
+        type(child) is not DownloadChildAssociation
+        or type(child.transfer_id) is not bytes
+        or len(child.transfer_id) != _TOKEN_BYTES
+        or type(child.member_ordinal) is not int
+        or not 0 <= child.member_ordinal < MAX_PACKAGE_UPLOAD_MEMBERS
+    ):
+        raise FileCallObligationCodecError
+
+
+@dataclass(frozen=True, slots=True, repr=False)
 class FileCallObligation:
     """Typed recovery identity for one private file-call lifecycle obligation."""
 
@@ -133,6 +210,10 @@ class FileCallObligation:
     gate_setup: FileEffectGateSetup | None = None
     uncertainty: frozenset[FileCallUncertainty] = frozenset()
     bootstrap: _NumericGuestBootstrap | None = None
+    upload_child: UploadChildAssociation | None = None
+    upload_child_complete: bool = False
+    download_child: DownloadChildAssociation | None = None
+    download_child_complete: bool = False
 
     def __post_init__(self) -> None:
         _validate_obligation(self)
@@ -140,6 +221,18 @@ class FileCallObligation:
     @property
     def payload_version(self) -> int:
         """Select the durable format without reinterpreting legacy records."""
+        if self.download_child is not None:
+            return (
+                NUMERIC_DOWNLOAD_CHILD_OBLIGATION_PAYLOAD_VERSION
+                if self.bootstrap is not None
+                else DOWNLOAD_CHILD_OBLIGATION_PAYLOAD_VERSION
+            )
+        if self.upload_child is not None:
+            return (
+                NUMERIC_UPLOAD_CHILD_OBLIGATION_PAYLOAD_VERSION
+                if self.bootstrap is not None
+                else UPLOAD_CHILD_OBLIGATION_PAYLOAD_VERSION
+            )
         if self.bootstrap is not None:
             return NUMERIC_FILE_CALL_OBLIGATION_PAYLOAD_VERSION
         return FILE_CALL_OBLIGATION_PAYLOAD_VERSION
@@ -223,6 +316,44 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
         type(item) is not FileCallUncertainty for item in obligation.uncertainty
     ):
         raise FileCallObligationCodecError
+    if type(obligation.upload_child_complete) is not bool:
+        raise FileCallObligationCodecError
+    if type(obligation.download_child_complete) is not bool:
+        raise FileCallObligationCodecError
+    if obligation.download_child is not None:
+        if (
+            type(obligation.download_child) is not DownloadChildAssociation
+            or obligation.family is not FileCallFamily.DOWNLOAD
+        ):
+            raise FileCallObligationCodecError
+        _validate_download_child(obligation.download_child)
+    elif obligation.download_child_complete:
+        raise FileCallObligationCodecError
+    if obligation.download_child_complete and (
+        obligation.token is None
+        or obligation.uncertainty
+        or obligation.scratch_cleanup_debt is not None
+        or obligation.publication_cleanup_debt is not None
+        or obligation.gate_setup is not None
+    ):
+        raise FileCallObligationCodecError
+    if obligation.upload_child is not None:
+        if (
+            type(obligation.upload_child) is not UploadChildAssociation
+            or obligation.family is not FileCallFamily.UPLOAD
+        ):
+            raise FileCallObligationCodecError
+        _validate_upload_child(obligation.upload_child)
+    elif obligation.upload_child_complete:
+        raise FileCallObligationCodecError
+    if obligation.upload_child_complete and (
+        obligation.uncertainty
+        or obligation.scratch_cleanup_debt is not None
+        or obligation.publication_cleanup_debt is not None
+        or obligation.gate_setup is not None
+        or obligation.scratch_reference is None
+    ):
+        raise FileCallObligationCodecError
     if obligation.family is FileCallFamily.PACKAGE_UPLOAD:
         if type(obligation.batch_index) is not int or not 0 <= obligation.batch_index < MAX_PACKAGE_UPLOAD_MEMBERS:
             raise FileCallObligationCodecError
@@ -230,7 +361,7 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
         raise FileCallObligationCodecError
     if obligation.effect_gate is not None:
         if (
-            obligation.family not in {FileCallFamily.DOWNLOAD, FileCallFamily.UPLOAD, FileCallFamily.PACKAGE_UPLOAD}
+            obligation.family not in FILE_EFFECT_GATE_FAMILIES
             or obligation.target.kind is not ManagedTargetKind.VM
             or obligation.runtime_selection.target_os is not RuntimeTargetOS.LINUX
             or type(obligation.effect_gate) is not FileEffectGateBinding
@@ -253,7 +384,7 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
     if obligation.gate_setup is not None:
         setup = obligation.gate_setup
         if (
-            obligation.family not in {FileCallFamily.DOWNLOAD, FileCallFamily.UPLOAD, FileCallFamily.PACKAGE_UPLOAD}
+            obligation.family not in FILE_EFFECT_GATE_FAMILIES
             or (obligation.family is FileCallFamily.PACKAGE_UPLOAD and obligation.batch_index != 0)
             or obligation.target.kind is not ManagedTargetKind.VM
             or obligation.runtime_selection.target_os is not RuntimeTargetOS.LINUX
@@ -342,6 +473,18 @@ def _encode_obligation(obligation: FileCallObligation) -> dict[str, object]:
             "root_entry": _encode_identity_plan(obligation.bootstrap.root_entry),
             "guest": _encode_guest(obligation.bootstrap.guest),
         }
+    if obligation.upload_child is not None:
+        value["upload_child"] = {
+            "transfer_id": obligation.upload_child.transfer_id.hex(),
+            "member_ordinal": obligation.upload_child.member_ordinal,
+        }
+        value["upload_child_complete"] = obligation.upload_child_complete
+    if obligation.download_child is not None:
+        value["download_child"] = {
+            "transfer_id": obligation.download_child.transfer_id.hex(),
+            "member_ordinal": obligation.download_child.member_ordinal,
+        }
+        value["download_child_complete"] = obligation.download_child_complete
     if obligation.token is not None:
         value["token"] = obligation.token.hex()
     if obligation.attempt is not None:
@@ -374,11 +517,37 @@ def _decode_obligation(value: object) -> FileCallObligation:
         required = _BASE_FIELDS
     elif value["version"] == NUMERIC_FILE_CALL_OBLIGATION_PAYLOAD_VERSION:
         required = _BASE_FIELDS | {"bootstrap"}
+    elif value["version"] == UPLOAD_CHILD_OBLIGATION_PAYLOAD_VERSION:
+        required = _BASE_FIELDS | {"upload_child", "upload_child_complete"}
+    elif value["version"] == NUMERIC_UPLOAD_CHILD_OBLIGATION_PAYLOAD_VERSION:
+        required = _BASE_FIELDS | {"bootstrap", "upload_child", "upload_child_complete"}
+    elif value["version"] == DOWNLOAD_CHILD_OBLIGATION_PAYLOAD_VERSION:
+        required = _BASE_FIELDS | {"download_child", "download_child_complete"}
+    elif value["version"] == NUMERIC_DOWNLOAD_CHILD_OBLIGATION_PAYLOAD_VERSION:
+        required = _BASE_FIELDS | {"bootstrap", "download_child", "download_child_complete"}
     else:
         raise FileCallObligationCodecError
     if not required <= set(value) <= required | _OPTIONAL_FIELDS:
         raise FileCallObligationCodecError
     bootstrap = _decode_bootstrap(value["bootstrap"]) if "bootstrap" in value else None
+    upload_child = None
+    if "upload_child" in value:
+        child = value["upload_child"]
+        if type(child) is not dict or set(child) != _UPLOAD_CHILD_FIELDS:
+            raise FileCallObligationCodecError
+        transfer_id = child["transfer_id"]
+        if type(transfer_id) is not str or len(transfer_id) != 32 or not set(transfer_id) <= _LOWER_HEX:
+            raise FileCallObligationCodecError
+        upload_child = UploadChildAssociation(bytes.fromhex(transfer_id), child["member_ordinal"])
+    download_child = None
+    if "download_child" in value:
+        child = value["download_child"]
+        if type(child) is not dict or set(child) != _DOWNLOAD_CHILD_FIELDS:
+            raise FileCallObligationCodecError
+        transfer_id = child["transfer_id"]
+        if type(transfer_id) is not str or len(transfer_id) != 32 or not set(transfer_id) <= _LOWER_HEX:
+            raise FileCallObligationCodecError
+        download_child = DownloadChildAssociation(bytes.fromhex(transfer_id), child["member_ordinal"])
     try:
         family = FileCallFamily(value["family"])
     except (TypeError, ValueError):
@@ -429,6 +598,10 @@ def _decode_obligation(value: object) -> FileCallObligation:
             gate_setup=gate_setup,
             uncertainty=uncertainty,
             bootstrap=bootstrap,
+            upload_child=upload_child,
+            upload_child_complete=value.get("upload_child_complete", False),
+            download_child=download_child,
+            download_child_complete=value.get("download_child_complete", False),
         )
     except FileCallObligationCodecError:
         raise

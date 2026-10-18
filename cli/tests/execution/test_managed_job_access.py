@@ -36,7 +36,7 @@ from agentworks.execution._runtime_prerequisite import (
     RuntimeTargetOS,
 )
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
-from agentworks.execution._workload_shell import WorkloadShellObservationResult
+from agentworks.execution._workload_shell import WorkloadShellObservationResult, observe_workload_shell
 from agentworks.execution._workload_shell_protocol import WorkloadShellResponse, encode_workload_shell_response
 from agentworks.execution.carrier import (
     CapturedOutput,
@@ -406,6 +406,7 @@ def test_shell_release_interrupt_preserves_original_control_and_safe_fact(
 )
 def test_user_default_start_freezes_body_before_shell_observation(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     input: Input,
     output: Output,
     sensitive: bool,
@@ -425,6 +426,15 @@ def test_user_default_start_freezes_body_before_shell_observation(
 
     environment = ProbeEnvironment(LANG="C")
     saved: list[ManagedStartRequest] = []
+    root_plan = IdentityPlan(ROOT, IdentityMode.SUDO_ROOT)
+
+    def observe(*args, **kwargs):
+        assert kwargs["bootstrap"].root_entry is root_plan
+        assert kwargs["bootstrap"].guest is GUEST
+        assert kwargs["plan"].expected == WORKLOAD
+        return observe_workload_shell(*args, **kwargs)
+
+    monkeypatch.setattr(access, "observe_workload_shell", observe)
 
     def start_response(request: ManagedStartRequest) -> bytes:
         saved.append(request)
@@ -442,6 +452,7 @@ def test_user_default_start_freezes_body_before_shell_observation(
             assert isinstance(io.input, FiniteInput)
             if io.input.data.startswith(FIXED_BUNDLE.prefix):
                 return super().execute(invocation, io=io, deadline=deadline, custody=custody)
+            assert invocation.argv[:4] == ("/usr/bin/sudo", "-n", "--user=#0", "--")
             self.calls += 1
             environment["LANG"] = "changed"
             assert isinstance(io.output, SinkOutput)
@@ -464,6 +475,7 @@ def test_user_default_start_freezes_body_before_shell_observation(
             output=output,
             sensitive=sensitive,
             cwd="/tmp",
+            root_plan=root_plan,
         )
         assert outcome.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
         assert outcome.attempt is not None

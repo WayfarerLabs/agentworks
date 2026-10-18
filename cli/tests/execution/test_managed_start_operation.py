@@ -64,7 +64,7 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
-from agentworks.operations import OperationBorrow, OperationOwner, _PreRegistrationRefusal
+from agentworks.operations import OperationAttempt, OperationBorrow, OperationOwner, _PreRegistrationRefusal
 
 RUN = ManagedRunIdentity("a" * 32)
 OBLIGATION = "b" * 32
@@ -658,6 +658,7 @@ def test_outcome_allocation_failure_keeps_confirmed_dispatch_custody(
         _start(owned, carrier)
     assert isinstance(caught.value.__cause__, ManagedStartControlFact)
     assert caught.value.__cause__.outcome.requires_owner_retention
+    assert caught.value.__cause__.outcome.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RECEIPT_CONFIRMED  # type: ignore[union-attr]
     assert (
         database.operations.list_pending_lifecycle_obligations(owner.ownership)[0].state
@@ -765,3 +766,29 @@ def test_escaping_carrier_retains_outstanding_attempt(
         is LifecycleObligationState.POSSIBLE_EFFECT
     )
     assert carrier.calls == 1
+
+
+@pytest.mark.parametrize("committed", [False, True])
+@pytest.mark.parametrize("kind", [OSError, KeyboardInterrupt, SystemExit])
+@pytest.mark.windows
+def test_settlement_control_preserves_already_confirmed_allocating_start_fact(owned, monkeypatch, committed, kind):
+    _, repository, _, _ = owned
+    carrier = Carrier(lambda request: _records(request, receipt=True))
+    original = OperationAttempt.settle
+    control = kind("settlement")
+    cause = RuntimeError("old explicit cause")
+    control.__cause__ = cause
+
+    def settle(attempt):
+        if committed:
+            original(attempt)
+        raise control
+
+    monkeypatch.setattr(OperationAttempt, "settle", settle)
+    with pytest.raises(kind) as caught:
+        _start(owned, carrier)
+    assert caught.value is control and isinstance(control.__cause__, ManagedStartControlFact)
+    assert control.__cause__.__cause__ is cause
+    assert control.__cause__.outcome.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
+    assert control.__cause__.outcome.requires_owner_retention and carrier.calls == 1
+    assert repository.inspect(RUN).launch_state is ManagedLaunchState.RECEIPT_CONFIRMED

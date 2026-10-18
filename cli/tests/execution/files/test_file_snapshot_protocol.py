@@ -279,6 +279,16 @@ def test_chunk_accepts_empty_terminal_range_and_enforces_declared_length_and_cap
         )
 
 
+def test_chunk_request_accepts_256kib_and_refuses_larger_wire_range() -> None:
+    request = _chunk(ready=_ready(length=256 * 1024 + 1), length=256 * 1024)
+    encoded = encode_file_snapshot_request(request)
+    assert decode_file_snapshot_request(encoded) == request
+    value = json.loads(encoded)
+    value["length"] += 1
+    with pytest.raises(FileSnapshotRequestError):
+        decode_file_snapshot_request(_json(value))
+
+
 def test_chunk_request_refuses_ready_reference_outside_snapshot_core_binding() -> None:
     wrong_token = ReadyScratchReference(_reference(token=b"z" * 16), _DIGEST, 7, 8)
     wrong_operation = ReadyScratchReference(
@@ -332,7 +342,10 @@ def test_cleanup_request_refuses_debt_outside_original_token_and_identity() -> N
         lambda value: value.update(remaining_seconds=True),
         lambda value: value.update(remaining_seconds=float("nan")),
         lambda value: value.update(remaining_seconds=float("inf")),
-        lambda value: value.update(max_bytes=0),
+        lambda value: value.update(max_bytes=-1),
+        lambda value: value.update(max_bytes=1 << 63),
+        lambda value: value.update(max_bytes=1.0),
+        lambda value: value.update(max_bytes=False),
         lambda value: value.update(max_bytes=True),
     ],
 )
@@ -341,6 +354,17 @@ def test_request_refuses_extra_noncanonical_wrong_typed_and_nonfinite_fields(mut
     mutate(value)
     with pytest.raises(FileSnapshotRequestError):
         decode_file_snapshot_request(_json(value, allow_nan=True))
+
+
+def test_zero_byte_bound_roundtrips_through_host_and_guest() -> None:
+    request = _begin(max_bytes=0)
+    assert decode_file_snapshot_request(encode_file_snapshot_request(request)) == request
+
+
+@pytest.mark.parametrize("max_bytes", [-1, True, False, 1 << 63, 1.0])
+def test_host_refuses_invalid_snapshot_bounds(max_bytes: object) -> None:
+    with pytest.raises(FileSnapshotRequestError):
+        encode_file_snapshot_request(_begin(max_bytes=max_bytes))
 
 
 @pytest.mark.parametrize(

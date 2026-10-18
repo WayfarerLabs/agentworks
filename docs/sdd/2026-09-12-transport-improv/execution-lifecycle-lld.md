@@ -146,6 +146,81 @@ it does not by itself make an already-running VM unavailable. Preserve that exis
 distinction when converging platform power, and do not treat transitional or unknown provider status
 as definitive stopped evidence.
 
+The shared native-operation gate admits only the typed stable states `RUNNING`, `STOPPED` and
+`DEALLOCATED`. Operator-stopped intent refuses automatic activation for both inactive states, while
+`RUNNING` can proceed regardless of that intent. Core retains passive platform access before effects
+and passes the original observed state unchanged; the adapter owns its concrete activation. This
+gate does not supply a missing platform adapter or prove native availability by itself.
+
+The private access implementation separates availability from native route preparation. Core retains
+the access before its optional pure native-configuration check, preserves early refusal before
+provider effects, observes power and enforces stopped intent. `ensure_available` returns the
+selected provider locator while retaining activation/hold custody; `prepare_native_route` selects
+the native binding and any native route exposure. Shared guest preparation and partial control facts
+belong to the core workflow before optional platform guest validation. WSL2 compares the result
+against its retained physical hold READY. Native calls retain this ordering. The private
+`vm_execution_context` requires a native or canonical route explicitly and uses one shared
+`VMOperation`, owner, preparation and aggregate teardown; a platform-host route is invalid here.
+Canonical composition validates its stored literal Tailscale endpoint and operator SSH policy before
+provider effects, skips native-only configuration and route preparation, then probes the guest over
+that SSH binding. There is no native public ingress, native guest probe, trust enrollment, alias or
+fallback on this arm.
+
+Both routes check their selected route around successful guest/admin/agent preparation. Canonical
+checks retain provider custody and require fresh running power, equal provider locator, unchanged
+selected independent availability and equal database VM/account/agent selection. Returned views
+retain the same lifetime and reject closed admission before provider reads. These source mechanics
+do not establish native acceptance, all-platform composition, public RunContext completion or
+general process-loss recovery.
+
+### Local Lima composition
+
+Explicit local preparation pins the installed client and absolute Lima home. Provider observation
+and native delivery-user resolution are separate snapshots under the existing placement owner.
+Classify the built-in driver from bounded host configuration inputs, using observed client-version
+evidence when defaults differ. Unknown inspectors are not a passive fallback. QEMU/VZ observations
+use a bounded fixed `list --format=json --yq` projection without retaining raw configuration or
+diagnostics. WSL observations instead use host registration and `wsl --list --verbose`, never a
+guest address probe before availability. Native user resolution follows authorized running
+availability; later checks pin the instance YAML, global default/override YAML and `lima-version`
+inputs. The versioned provider locator hashes the site/local placement namespace, home, instance,
+driver and actual directory device/inode, plus exact WSL registration where applicable. Owned access
+holds that directory, comparing the named path around observations and before effects. On Windows,
+reuse the existing native directory-handle API and compare its full file ID with Python's path
+observation; no new host lock or privileged setup is needed.
+
+This detects ordinary directory replacement and same-name clones materialized in a new directory. It
+does not promise a universal generation that cannot be copied, engineered inode-reuse protection or
+automatic continuity after in-place restoration. Preserve the random guest marker and complete guest
+boot/init observation. Restore workflows must decide logical identity explicitly; ordinary access
+never repairs the marker. The
+[source audit](prior-art-research.md#lima-instance-generation-evidence) records the boundary and
+supporting sources.
+
+Availability retains one ordinary `limactl start` request when needed, registered durably before
+possible dispatch. Reconciliation requires successful natural client completion and fresh exact
+running evidence; local process retirement alone cannot resolve an ambiguous start. Lima owns its
+continuing runtime. Do not substitute a generic macOS supervisor, mandatory foreground anchor or
+cleanup that stops the intended VM. Native route selection separately pins the actual configured
+delivery user and driver; common guest/account preparation remains core-owned.
+
+WSL registration selection distinguishes absence from ambiguity and requires matching machine,
+account SID, distribution name/GUID and installation directory. The existing activation owner may
+adopt a first import's new GUID only after successful natural client completion and matching fresh
+running evidence. Lost acknowledgment cannot authorize adoption or another start. These are local
+source and fixture proofs; native Windows evidence remains open. The private operation-length Lima
+WSL hold reuses the existing physical WSL owner after activation/registration adoption and before
+delivery-account lookup or canonical guest preparation. It requires durable READY and live native
+Job ownership, matches common guest boot/init observations, and retains exact hold/directory custody
+through uncertain startup or release. Unrelated obligations prevent release. Native Windows/Lima
+acceptance remains open, and no independent-job hold is implemented: running observations alone are
+not idle-stop prevention. Independent availability is not inferred from the Lima client: the current
+native binding supplies the no-idle-stop fact only for QEMU and VZ, never unknown or WSL drivers.
+Native Windows directory mapping, installed Lima behavior, driver/version coverage and remote
+placement-host composition remain required acceptance gates. Remote Lima is the first instance of
+generalized SSH access to a VM platform host; local implementation does not complete that arm or
+provision/rollback workflows.
+
 PTY is an I/O choice, not a background state. `attach(ref, terminal=...)` requires an attach grant
 and supported transport, and does not create a new run. A reusable detached terminal needs an owned
 terminal endpoint such as the session's tmux server; ordinary inherited pipes are not durable.
@@ -201,9 +276,13 @@ Freeze the complete finite invocation before tracked shell lookup. Retain its ge
 identity, planned receipt and output policy with one concrete START binding before reservation,
 alongside the actual helper, borrow and local delivery in existing tracking. Use the dedicated
 `managed-start` version-one run-ID obligation and existing one-shot preparation, reservation,
-possible-dispatch and receipt-validation transitions. Factor the current owned-start work to consume
-supplied tracked custody; keep an allocating wrapper for existing callers, rather than nesting
-another borrow. Guard that wrapper's unused setup and original control flow as well.
+possible-dispatch and receipt-validation transitions. Reuse the existing one-shot exchange with
+supplied tracked custody; retain the allocating wrapper for existing callers, rather than nesting
+another borrow or settlement wrapper. Each ownership caller retains the actual returned attempt
+before fallible settlement or outcome construction, preserving already observed launch precision
+when those steps are interrupted. Guard the allocating wrapper's unused setup and original control
+flow as well. Recheck selected binding and operation admission after marking possible dispatch and
+immediately before entering delivery; the actual helper attempt still applies its owner fence.
 
 Publish the actual start candidate into the retained entry before repository receipt reconciliation
 can commit or raise. A later confirmed database row does not prove that the original helper or local
@@ -211,8 +290,14 @@ delivery settled. START bookkeeping therefore requires both exact receipt confir
 helper/local-custody settlement for a dispatched launch, not code-zero completion alone. Interrupted
 reservation is inspected only by its already retained exact identity: proved absence or a matching
 RESERVED record can settle reservation uncertainty without launching, while conflict or unreadable
-state stays retained. Preserve unknown registration, possible dispatch and helper debt. Bookkeeping
-and finish never launch or reserve again; no replay uses the retained frozen body.
+state stays retained. Supported NOT_SENT evidence with actually settled helper, borrow and local
+delivery can resolve only that exact temporary START action under its current owner and matching
+reservation. Actual proof that the wrapper never entered delivery can do the same without a
+candidate. Neither changes a POSSIBLE_DISPATCH run into NOT_LAUNCHED, invents receipt absence or
+acknowledges launch. Unknown delivery, interrupted return without supported evidence and unsettled
+local or coordination custody remain retained. Preserve unknown registration, possible dispatch and
+helper debt. Bookkeeping and finish never launch or reserve again; no replay uses the retained
+frozen body.
 
 Discard preparation/source references when their one-shot attempt ends. Retain only the exact launch
 evidence and custody needed for zero-dispatch recovery; safe facts and durable payloads carry no
@@ -678,6 +763,13 @@ controller stops waiting at its bound and leaves boundary state unknown rather t
 emptiness. Cleanup or controller failure may likewise leave a stream-end fact unknown even when
 other terminal facts are present.
 
+That completed private producer uses finite input and capture/discard output. The planned
+[managed foreground pipe extension](managed-live-io-lld.md) keeps its settled start acknowledgment
+and lease admission, but delays the final workload release gate for explicitly live requests until
+one bounded I/O admission succeeds. Its socket acceptance runs inside the same observation loop;
+stop, lease expiry and cleanup never wait behind a blocking attachment. This extension is not yet
+implemented or native-accepted.
+
 `KillMode=control-group` is a manager-owned fallback if the controller dies, but it cannot publish
 positive facts after that death. Therefore an abrupt controller exit leaves any unrecorded wait,
 stream-end or boundary fact unknown even when systemd later removes every process. The initial
@@ -714,31 +806,26 @@ possible-dispatch run with no launch fact must reconcile first and remains uncer
 truth, while production host coordination later uses the existing operation claim and lifecycle
 obligation.
 
-The host-side stop obligation owns only delivery of the exact stop intent, not the independent job's
-continuing lifetime. It may resolve after a complete, validated `ACCEPTED` response proves the
-target has durably published that intent and the carrier attempt is settled. This never reports
-termination; only the exact `boundary-empty` fact does. A helper failure, incomplete response, lost
-delivery, or interrupted admission after possible effect retains the VM operation claim until
-recovery proves what happened. Positively established `NOT_SENT` with settled coordination also
-resolves the temporary obligation because no stop intent reached the target; ambiguous arming is not
-that proof. Before first stop dispatch, the host requires the exact run's launch receipt to have
-been reconciled; a merely possible-dispatch run is not stop authority. The resource-owned run
-continues to own the workload and target stop request after the temporary dispatch obligation
-resolves. No database stop-state field is introduced.
+OPERATION and RESOURCE stop share the existing tracked ordinary helper and operation-lifetime
+dispatch row. Retire the unused standalone host-bound stop checkpoint and its separate
+`managed-stop` dispatch API; retain the fixed guest stop protocol. A complete validated `ACCEPTED`
+response establishes durable target intent only after the actual helper settles. It neither proves
+termination nor resolves the operation-lifetime row: aggregate finish still accounts for every
+helper. Only the exact `boundary-empty` fact proves termination. An invalid or incomplete stop
+response does not establish acceptance, but does not retain helper debt when exact helper
+termination and local custody are proved settled. Unknown helper termination, lost delivery or
+uncertain admission retains the claim until recovery proves settlement; ambiguous arming is not
+positive `NOT_SENT` evidence.
 
-The private host-bound stop checkpoint implements this one-attempt shape under a caller-held exact
-VM owner. Shared preflight checks the persisted independent resource-owned VM run and matching
-current guest facts; stop additionally requires a reconciled launch receipt. Its `managed-stop`
-obligation persists only the canonical run ID; the borrowed carrier's ordinary `begin_attempt` arms
-it after deterministic validation and before carrier dispatch. Settled `NOT_SENT` or complete,
-validated `ACCEPTED`/`TERMINATED` resolves the temporary obligation. Unknown or failed delivery and
-interrupted arming retain it with the original control exception and custody facts. This is hermetic
-host binding, not proof of provider route freshness, recovery takeover or native SSH/QGA delivery.
-The shared row preflight can compare the guest's derived boot with the persisted target, but cannot
-derive the opaque incarnation fingerprint without the provider locator and persisted marker. Its
-caller must compare the observed guest marker with the persisted VM marker, then supply a target
-composed from the selected locator and that same marker before invoking any later-action adapter. A
-boot-only match is not sufficient production authority.
+Before stop dispatch, the host requires the exact run's reconciled launch receipt and current target
+facts. A merely possible-dispatch run is not stop authority. The observing operation does not adopt
+a RESOURCE run, drain its keeper or take ownership of its continuing workload and durable stop
+request. No database stop-state field is introduced. The shared row preflight can compare the
+guest's derived boot with the persisted target, but cannot derive the opaque incarnation fingerprint
+without the provider locator and persisted marker. Its caller must compare the observed guest marker
+with the persisted VM marker, then supply a target composed from the selected locator and that same
+marker before invoking any later-action adapter. A boot-only match is not sufficient production
+authority.
 
 The first `dispose` mechanism is an explicit authorized release of terminal retained artifacts, not
 a retention timer or a synonym for stop. Before committing release, the fixed helper requires the
@@ -942,10 +1029,15 @@ completion may settle that attempt while preparation still rejects an invalid ob
 refusal, carrier failure or identity mismatch. The helper neither acquires nor closes the outer
 owner and performs no activation, route selection, adoption or persistence. A second private seam
 accepts the selected VM, its bound platform, an expected locator observed before binding resolution,
-and one caller-owned native binding. It validates owner, marker and deadline before borrowing. Under
-one serial borrow it validates a fresh plugin locator and compares it to that expected value, probes
-the guest through the supplied binding and confirms the locator afterward. It never resolves another
-binding. The resolving caller must use the same deadline, validate and retain the selected route,
+one caller-owned native binding and a required bound `observe_locator(Deadline)` callable. The
+selected platform remains an input for cheap site refusal before any observation or helper borrow.
+The callable replaces context and provider-custody forwarding, with no platform-hook fallback. It
+belongs to the caller-retained selection owner, which holds any actual read clients through cleanup.
+The helper validates owner, marker and deadline before borrowing. Under one serial borrow it calls
+that observer with the original deadline, validates the plugin locator and compares it to the
+expected value, probes the guest through the supplied binding and confirms the locator afterward
+using the same observer and deadline. It never resolves another binding or settles the observer's
+resources. The resolving caller must use the same deadline, validate and retain the selected route,
 and refuse a late resolver result. WSL2's private factory copies the selected distribution and
 executable into separate ordinary-delivery and initial fixed guest-facts carriers. The probe uses
 root entry and named admission to the configured account under the same operation borrow; file
@@ -1006,11 +1098,845 @@ persisted state fail closed without launching or stopping work.
 
 The coarse operation claim has a wider lifetime than any launch attempt. Core first arms that claim
 before activation or another lifecycle effect, then lends it serially to child dispatches. Each
-child may settle only its own attempt. The claim becomes resolved only when core has aggregated
-typed evidence that activation, holds, routes, workflow and teardown can no longer cause effects.
-Closing an owner with a possible-dispatch claim but no explicit whole-operation resolution refuses;
-it never promotes "no child attempt is currently open" into quiescence. Interrupted admission,
-resolution and release reconcile the same fenced record before any later dispatch or release.
+child may settle only its own attempt. The claim becomes resolved only when core has aggregated each
+obligation's reviewed completion evidence and independently settled delivery, holds, routes,
+workflow and teardown. Closing an owner with a possible-dispatch claim but no explicit
+whole-operation resolution refuses; it never promotes "no child attempt is currently open" into
+quiescence. Interrupted admission, resolution and release reconcile the same fenced record before
+any later dispatch or release.
+
+### Shared local process retirement
+
+`LocalProcessTerminal.cleaned` represents positive retirement of the existing owner's local native
+capabilities after construction settles and all borrowers stop. It is independent of execution
+status. Exact POSIX child-wait loss irreversibly retires authority to signal, resize or reap that
+numeric PID; both status fields remain unknown and observation failure remains a failure. A generic
+poll error does not establish this loss. Windows retains its handle-backed child wait and cleanup
+requirements. Neither case establishes guest completion, descendant cleanup or remote effect drain.
+
+On exact POSIX wait loss only, retire CPython `Popen` destructor polling through its private
+`_child_created` bookkeeping flag, leaving `returncode` unknown. The supported-runtime source audit
+is recorded in [prior art](prior-art-research.md); runtime tests must also cover actual object
+release without another native poll or deferred subprocess-list admission. A generic poll error does
+not authorize this retirement, and Windows handle ownership is unaffected.
+
+The existing `LocalProcessPipes` retains one close record for each actual owned endpoint. Mark an
+attempt before native close; only normal return confirms it. Error or exceptional control leaves
+sticky uncertainty, including interruption after the descriptor closed but before confirmation. The
+input pump requests EOF through `close_stdin()` on that same collection. Owner teardown uses those
+original records rather than raw `Popen` aliases, attempts every independent endpoint, and continues
+separately safe cleanup of a still-owned process even when a pipe close fails. Preserve the caller's
+original control exception. Raw `closed` flags never substitute for native evidence.
+
+Retry only remaining safe work under the same owner: an original never-attempted close or cleanup
+through still-held process authority. Never retry an uncertain descriptor close or probe a lost PID.
+Existing explicit bounded retry and immutable first observations remain; later status or closure
+cannot erase sticky uncertainty. When no safe action remains, stop the worker but retain the actual
+status, raw process, original pipe collection and evidence privately on its owner. No replacement
+records, general handle framework, EOF request worker, global registry or result-carried cleanup
+capability is needed.
+
+`run_owned_process` requires an externally retained owner. An optional finite cleanup allowance
+selects bounded observation; its absence still uses waiting closure. The inline guest retains one
+inert owner in its fixed module and passes that exact owner to the waiting runner. Both fixed helper
+entry paths already retain that module through `sys.modules`; a transient bootstrap dictionary is
+not the retaining lifetime. The one-manifest helper cannot replace or reuse its owner. Waiting
+closure preserves the script-source descriptor through construction. Module retention lasts through
+ordinary body return until interpreter finalization, not beyond finalization or as a substitute for
+kernel process-exit evidence. A FINISHED frame does not repair close uncertainty or prove
+quiescence.
+
+Published raw streams are internal borrowed I/O endpoints, not close authority or plugin resources.
+Current managed close routes use the shared records; this does not interpose foreign raw closes or
+Python destructors. Caller-held delivery custody also requires its independent coordinator to stop
+borrowers and restore resources before reuse. The SSH coordinator owns the relay and its PTY;
+restoration safety must be proved against that actual arrangement, not inferred for arbitrary
+inherited terminal users. A pending constructor still holds caller stdin and passed descriptors.
+Local retirement leaves unknown remote helper and operation debt unresolved.
+
+Implementation, independent code review, final SSH coordinator composition, installed Linux/macOS
+exact-loss and restoration probes, held construction, repeated control and shutdown evidence remain
+open. Native Windows regressions retain the separate HANDLE guarantees. No global signal reset,
+guessed status zero, special SSH bypass or full RunContext/native acceptance follows from this
+design.
+
+### Owned native platform access
+
+The planned remaining-platform composition keeps one core operation owner and one aggregate
+teardown, but moves concrete activation and keep-awake evidence out of that orchestrator. A passive
+platform factory builds a private owned access object under the already-acquired VM owner. After
+validating the selected VM, marker, context and account, core retains that object before its first
+power observation, not merely before preparation can perform effects. The passive native binding
+remains a route description, not an activation method or a lifecycle owner.
+
+The small access contract exposes its selected binding, existing target-preparation result, and
+optional bound route-check callable. Its required `observe_power(deadline)` returns `VMStatus` using
+the original deadline. Core applies the common supported-state, deadline and operator-stopped-intent
+checks before calling `prepare(power, deadline)`. Neither factory construction nor power observation
+admits activation, a hold, a route or guest preparation. Preparation receives the observed power and
+original deadline; settlement receives a finite cleanup deadline and reports whether its own effects
+are settled. The object retains actual partial progress and interrupted-reply evidence, never
+resolves or closes the whole operation, and does not copy a second guest-identity field. Platform
+preparation calls the shared locator/guest helper rather than reimplementing it, supplying its bound
+locator observer at both observation points. WSL2 and Proxmox bind their existing selection, context
+and native custody; a future cloud access owns its concrete SDK read-client slot. Uncertain
+retirement of an earlier read client must prevent another read, including guest preparation's later
+observations. The callable does not establish provider identity or resolve activation, route or
+aggregate debt. WSL2 additionally compares the prepared guest with its durable held READY identity
+before admission. Core performs the common numeric account preparation and supplies file/execution
+views only afterward.
+
+WSL2 and Proxmox delegate the owned power method to their selected platform observer with the same
+retained native delivery custody. There is no ownerless default or old-observer fallback. Cloud
+access must retain actual SDK read clients for the initial observation and later identity/linked
+endpoint reads; constructing access after a failed read cannot recover a lost client. Native process
+custody does not become a generic SDK-handle registry. The access remains available for aggregate
+teardown after initial observation failure or interruption. Empty passive access can settle without
+waking a VM; uncertain retirement cannot report positive cleanup. Earlier local cleanup failure can
+defer access settlement while retaining the same workflow for retry.
+
+Keep the existing WSL2 route checks at managed read, shell lookup, stop, disposal and launch
+admission by binding its route-check callable. An absent callable does not assert fresh route
+evidence. No dummy hold is constructed for a platform without idle-stop, and there is no shared task
+model for Windows anchors, Proxmox UPIDs or cloud-provider payloads.
+
+Aggregate close first stops body admission and settles execution, files, keepers and local delivery.
+Only then may platform settlement reconcile its existing activation or release its real hold. WSL2
+must refuse hold release while unrelated obligations remain and preserve exact native-client and
+guest-anchor absence evidence. Proxmox observes or reconciles its single retained activation, never
+retries the POST, and never substitutes running power or HA handoff for supported task settlement.
+The core subsequently checks the final ledger and local custody independently before sealing,
+resolving and releasing its owner. RESOURCE jobs remain outside operation-owned cleanup. Ordinary
+teardown does not stop a VM merely because this operation activated it.
+
+Cloud passive observations use deadline-derived SDK budgets and reject successful late results, not
+hard preemption. AWS configures socket timeouts at client construction, so setup can consume part of
+that budget before the request. Azure and GCP disable service/network retry middleware but SDK
+authentication can still resend a read. Core does not manually replay the provider query or accept
+late evidence as activation authority. These limitations do not weaken the separate one-shot
+execution/activation admission rules. Cloud activation and route factories still require their own
+reviewed evidence; passive power observation alone is not full native access.
+
+The 2026-10-09 locked-SDK audit found automatic resource-provider registration in Azure's default
+compute and network pipelines. Disabling retry middleware did not remove that policy: a failed GET
+could cause registration POST, polling and another GET. The audited new reads did not satisfy the
+passive contract. They now own separate clients with explicit disabled-retry and ARM-authentication
+policies, without registration or redirect following; legacy clients are unchanged. The generated
+GET methods decode their own responses, so a separate content-decoding policy is unnecessary. Actual
+SDK transport tests establish refusal of this implicit mutation for both clients, not live native
+acceptance. A finite authentication resend remains read-only and deadline checks remain best effort.
+Future mutation producers must separately prove absence of authentication, redirect and
+provider-registration replay; one SDK method invocation is not that proof.
+
+### Cloud SSH route composition
+
+The first cloud binding increment selects current public IPv4 endpoints from provider-owned
+exact-instance reads, not from the retired native transport. AWS retains its persisted account,
+region and instance checks; GCP also retains the recorded network, subnet and access-configuration
+checks. Azure follows NIC/public-IP references from its verified VM and validates the linked
+identities and subscription. Its additional reads share the original deadline and reject late
+successful responses. These SDK budgets retain the best-effort limitations above.
+
+Composition requires the explicit new `operator.ssh` settings, using their resolved identity,
+managed trust directory, agent and client policy. It does not read ambient SSH configuration or fall
+back to legacy fields. The first increment intentionally uses endpoint-keyed host trust
+(`host_key_alias=None`); it does not invent a VM alias mapping, enroll a target, reset trust or
+inspect key files during binding. Preserving/importing existing trust and creation-time enrollment
+remain separate work. A changed endpoint without admitted trust is refused rather than learned by
+ordinary execution.
+
+The Linux binding retains the recorded VM admin account for delivery and a fixed root-entry,
+named-account guest probe. Delivery as root uses direct entry; other admin accounts use explicit
+passwordless sudo. The existing bootstrap resolves the account's actual UID/GID/groups before its
+named body; no UID is guessed. Managed delivery uses fresh carriers with the same immutable
+connection. AWS, Azure and GCP explicitly bind the no-idle-stop independent-job availability fact in
+passive resolution and owned preparation. The shared SSH helper defaults to no guarantee. This fact
+excludes explicit stop, reboot, host loss and external policy; complete RunContext composition and
+native proof remain open. WSL2's operation-scoped hold does not satisfy its separate recoverable
+job-length availability requirement.
+
+### AWS provider read custody
+
+The retained concrete AWS access owns one optional original EC2 read client. Construction is
+passive; selected credential-session work begins only after core retains the access. Preserve the
+configured credential mode and no-fallback rule without using the legacy EC2 client cache. Power,
+bound locator and selected public-endpoint observations share one private exact-instance read body,
+using existing pure metadata and response validators. Guest preparation receives the access's bound
+observer, not the ownerless platform read or another route lookup.
+
+Retain a successfully returned original client before dispatch or subsequent deadline checks. Use
+public deadline-derived SDK budgets, one total service attempt, exact persisted account/region/
+immutable-instance validation and late-result refusal. An occupied slot blocks another read or
+active preparation. Cleanup operates on that original and clears the slot only after its public
+close returns normally. Ordinary cleanup failure retains custody without replacing the earlier
+outcome; preserve an already escaping control exception, while a new cleanup control remains
+exceptional. Aggregate teardown retains the access while direct-client cleanup is uncertain. A
+closed access refuses further observations. No separate read obligation, registry, private pool
+walk, guessed descriptor absence or background closer is needed.
+
+Normal public close is the direct client's resource-lifecycle fact, not synchronous closure of all
+underlying sockets, cancellation of credential work or termination of the remote request. Existing
+SDK constructor-handoff, arbitrary-signal and credential work's hard-deadline limits remain
+explicit. SDK-created credential clients are not covered by the EC2 slot. Before full AWS access is
+exposed, characterize the configured explicit role path and select its concrete credential
+responsibility; static-credential tests do not prove all ambient or deferred providers. Keep this
+delivery item open without adding a universal credential-client registry or hard-drain promise.
+
+Prove original retention before dispatch, ordinary/error/control/late outcomes, exact identity, one
+service attempt, normal/failed/interrupted close, occupied-slot and closed-access refusal,
+same-observer/original-deadline forwarding and cleanup without request replay. Exercise the locked
+actual SDK service pipeline with synthetic credentials and scripted transport separately from
+application fakes. A delayed-retention counterfactual must fail cleanup evidence. These proofs do
+not establish physical socket drain, native acceptance or complete AWS access. Read/start clients,
+activation, routes, guest readiness, workloads and aggregate ownership remain separate obligations.
+
+### Owned AWS preparation and route lifetime
+
+The passive factory retains `EC2OwnedAccess` under the existing operation owner before power
+observation. Its selected session and configured-role helper serve reads, the retained one-shot
+activation and the selected SSH route. After acknowledged startup, explicitly observe supported
+pending/unchanged-stopped states in the foreground until exact running or the original finite
+deadline; do not use SDK waiters or resubmit startup. Unknown or mismatching observations refuse.
+Retain timely exact-running evidence before fenced obligation resolution and reconcile a lost
+resolution reply against the same row, payload and revision. Missing acknowledgment remains
+unresolved. Cleanup may establish completion of that existing acknowledged start using its own
+finite deadline, without reopening preparation or admitting another start.
+
+Bind the freshly observed endpoint through independent SSH connection/trust policy. Retain the
+prefix plan before route mutations. A concrete route adapter verifies selected instance ownership,
+group association, group account/tag/VPC and complete rule observations. Refuse preexisting TCP/22
+tuples rather than adopting them. Confirm revoke permission first, then durably admit each selected
+prefix before one authorization. Successful receipts must identify the exact group/account/prefix,
+rule ID and nonce description; retain that ID before later bookkeeping or expiry checks. Cleanup
+revokes only those positively owned IDs and requires fresh complete absence. Unknown authorization
+receipts retain possible effect, not an invented request-drain or force-release policy.
+
+Use the same bound locator observer in shared guest preparation, and freshly recheck endpoint,
+locator and route before work. Aggregate cleanup retains actual client/route/preparation custody,
+settles only this access's effects, and never stops an activated VM or releases the outer owner on
+its own. The new route requires `DescribeSecurityGroupRules`; its nonce description does not
+introduce an additional tagging permission.
+
+Use a passive access-owned prefix detector retained before discovery. Do not reuse process-cached
+discovery: bound its HTTP body, derive the timeout from the remaining original budget and retain
+each returned response before subsequent checks. Configured-prefix fallback requires settled
+response custody and a live deadline. Cleanup retries only the original response, without reopening
+discovery. Synchronous DNS/read/close remain best-effort bounded, and normal public close does not
+establish physical socket drain. Offline actual SDK evidence and source review do not supply native
+proof, restart recovery, independent-job availability or complete RunContext acceptance.
+
+Keep terminal work admission separate from effect settlement and final client retirement. Once
+effects settle, retain that fact before final closure so fresh cleanup can retire the original
+clients without re-entering active work. A terminally closed activation that never began admission
+has no startup effect; uncertain registration or a missing acknowledgment is not that proof.
+
+### Configured AWS role credential custody
+
+For the configured explicit access-key path with an optional role ARN, use a small private,
+access-owned credential helper rather than altering the legacy authentication builder. Preserve the
+configured source key, resolved secret, site region, role arguments and SDK deferred refresh/cache
+behavior; rejected explicit credentials never select ambient credentials. The helper is retained
+before session construction and binds the caller's original deadline across construction, endpoint
+resolution and signing. Its callbacks refuse work outside that operation. They do not acquire a
+second operation lock or create an independent lifecycle owner.
+
+Keep one optional original STS client. Supply the SDK fetcher's client-creator callback with fresh
+deadline-derived public timeouts and one total attempt, retaining the returned original before
+subsequent checks or handler registration. Wrap the SDK refresh callback with same-original public
+closure. Ordinary close failure preserves the preceding callback outcome and retains custody; normal
+public close alone clears the slot. Preserve an already escaping control exception if cleanup also
+interrupts, while a new cleanup control remains exceptional. No client proxy, fetcher subclass,
+private pool walk or universal credential-client registry is needed.
+
+The locked SDK can suppress ordinary advisory-refresh callback errors and continue using still-valid
+role credentials. A concrete before-send check on the retained EC2 client must therefore recheck the
+original deadline and unresolved STS custody after endpoint resolution/signing, before service
+dispatch. The owned STS client also checks its bound deadline before sending. A normally closed
+advisory refresh failure may retain the SDK's existing valid-credential behavior; expired admission
+or uncertain credential-client cleanup must not permit an EC2 send. Preserve deliberate typed
+admission failures at the access boundary rather than converting them into generic provider errors.
+These checks are transport lifecycle admission, not a new permission rule or configurable event
+policy framework.
+
+The access's incomplete-cleanup state includes both returned original client slots. Uncertain
+closure of either prevents another observation or active preparation. Teardown attempts both
+originals without allowing an ordinary failure of one to skip the other, and never refreshes
+credentials, reconstructs a session or replays an STS/EC2 request. Constructor handoff, SDK
+credential locks, arbitrary repeated interruption and synchronous network/close work retain their
+existing best-effort deadline limits. Public close does not prove physical socket drain or remote
+request termination. This helper covers the configured explicit role path, not every ambient or
+deferred credential provider; retain the latter limits without silently changing configured auth
+modes.
+
+Prove this through the actual locked SDK refresh/signing/send pipeline with synthetic credentials,
+including first/cached/advisory/mandatory refresh, an instrumented constructor callback, failed or
+interrupted original closes, typed refusal and late results. A missing EC2 check must fail the
+zero-send assertion after real advisory suppression, delayed STS retention must fail original
+custody evidence, and a positive valid case must actually reach one EC2 send. A stubbed SDK
+response, fabricated before-send result or independent fixture refusal cannot supply those proofs.
+Full activation, selected route/guest preparation, RunContext integration and native acceptance
+remain separate unfinished work.
+
+### AWS activation admission and acknowledgment
+
+Implement AWS startup in its plugin, not in a generic cloud task framework. A private
+`plugins/aws/_activation.py` adapter owns one EC2 start submission under the existing exact VM
+operation owner. Its constructor is passive. The platform factory retains the adapter before its
+`start(deadline)` can perform work; it supplies the selected provider session and the already
+validated account, region and instance ID. Compare that triple with the selected canonical
+`aws-ec2:<account>:<region>:<instance>` locator. Do not copy a locator hash, credentials or the
+legacy EC2 client cache into the adapter.
+
+The first implementation unit is the admission and acknowledgment producer, not complete cloud
+access. It deliberately provides no power-based settlement method. This is a recoverable private
+commit within #833, not a separately mergeable feature or permission to expose stopped AWS access.
+The subsequent access integration must establish and review the limited successful-start settlement
+rule, then prove it natively before advertising that access. Missing acknowledgment cannot be
+reconstructed from a later running-power observation.
+
+Use one fresh EC2 client with public deadline-derived connection/read timeouts and standard retries
+configured for one total attempt. The locked SDK dispatch proof covers the ordinary service
+pipeline, not arbitrary custom event handlers, credential-provider requests, exactly-once server
+acceptance or hard elapsed deadlines. Client setup and credential work remain synchronous and
+best-effort bounded; reject expiry before admission and reject successful late returns. Do not use a
+waiter, automatic retry, background polling, private SDK policy mutation or the legacy start method.
+Retain a successfully returned original client directly in adapter custody before later bookkeeping,
+then attempt closure during setup and dispatch cleanup. Expose `cleanup_incomplete` while that
+original remains retained; only a normally returning close establishes retirement. An ordinary close
+error must not replace the earlier outcome or discard the client. A new cleanup-time
+`KeyboardInterrupt` or `SystemExit` escapes; preserve an already escaping original control,
+including interruption at Python cleanup-entry and bookkeeping boundaries. Reconciliation does not
+retry closure or provider submission. This does not promise atomic resource handoff inside the SDK
+client constructor or safety under arbitrary repeated signals.
+
+For configured-role activation, pass the same retained `_OwnedRoleSession` used by the access. The
+access serializes its admitted deadline interval around `start`; the activation constructor only
+retains this optional collaborator. Register its concrete guard on the returned EC2 client's
+`before-send.ec2.StartInstances` event before possible-effect admission. This preserves SDK cache
+and valid advisory-refresh behavior while refusing expired or cleanup-uncertain service sends. Do
+not translate all SDK errors inside this private producer: the outer access owns public error
+mapping, while existing original control precedence remains unchanged.
+
+The producer's finite-deadline `close` acquires its existing transition lock, makes startup
+admission terminal, and retries only the retained original EC2 public close. Ordinary failure
+retains the original and reports incomplete cleanup; controls escape and the lock releases. This
+method does not inspect or mutate the ledger, refresh credentials, replay startup or retire the
+separately owned STS original. Whole-access settlement must still compose those responsibilities.
+
+Before invoking `StartInstances` with exactly the selected instance ID, register a fresh
+`aws-ec2-start` lifecycle obligation and durably mark its possible effect. The adapter admits at
+most one call, including after interruption. Its canonical payload contains only account, region,
+instance ID and an optional provider request ID, with version 1 carried by the ledger row. Bound and
+validate that persisted recovery input under the existing lifecycle payload limit. The request ID is
+a bounded non-secret acknowledgment identifier, not an idempotency token or an operation lookup
+endpoint.
+
+Validate returned external data before retaining acknowledgment: one state-change entry for the
+selected instance, ordinary successful HTTP metadata, zero SDK retries and a nonempty bounded
+request ID (at most 256 UTF-8 bytes, an internal storage bound). State-change fields do not
+establish acknowledgment identity or startup completion, so this producer does not interpret them.
+Retain the matching acknowledgment before payload publication and before testing whether the
+original deadline expired. A lost database reply can then reconcile the exact initial row or the
+exact acknowledged revision without another provider call. Lost, malformed, foreign or exceptional
+provider responses retain possible effect; generic SDK exceptions do not prove rejection.
+
+Reconciliation performs only fenced ledger bookkeeping. An exact registered row may be resolved only
+if this retained adapter never began possible-effect admission. Once that admission began, even a
+local interruption before the SDK call conservatively retains uncertainty. A matching acknowledgment
+may advance the payload once; it cannot resolve the possible effect. Reject foreign kind, version,
+payload, revision, fence or premature resolution. The adapter never closes the whole operation,
+stops the VM or replays the start.
+
+The next integration still owns fresh power observation, guest preparation, changed-endpoint trust,
+firewall-route lifetime and aggregate release. AWS has no public start operation token in this
+response, so those pieces must not inherit Proxmox's UPID settlement algorithm. See the
+[research](prior-art-research.md#aws-start-submission-proof) for the SDK proof and its limits.
+
+The selected full-access completion rule is observational: after a matching successful
+acknowledgment is retained and reconciled, bounded explicit `DescribeInstances` reads verify the
+same account, region and immutable instance ID. A timely exact running result completes only that
+acknowledged start obligation under its current fence. Pending or unchanged stopped states are not
+completion; malformed, unknown, foreign, absent or late observations cannot complete it. No SDK
+waiter, background poller, replay or fabricated RequestId lookup is admitted. Missing acknowledgment
+remains possible effect even if a later observation reports running.
+
+This rule establishes the observed running goal, not request-specific termination, instantaneously
+current state or absence of later provider transitions. Eventual consistency and external lifecycle
+actions limit attribution; additional timestamps, state-change fields or repeated matching samples
+do not remove that limitation. Current endpoint/trust, full guest and account preparation remain
+separate admission gates. A guest-readiness failure does not undo an already observed running goal.
+Original read/start client retirement, routes, workload and aggregate cleanup remain independently
+required.
+
+Recovery with a durable exact acknowledged payload can repeat only identity/state observation and
+fenced bookkeeping, never start. The access owner reconciles its own interrupted resolution against
+that exact row. It must not call the admission producer's reconciliation after resolving the row:
+the producer still rejects premature resolution and never supplies completion. No receipt fields or
+payload version change is needed. Implementation and supported native proof remain open.
+
+### Owned Azure credentials and incarnation
+
+Owned Azure access uses a private credential helper rather than the legacy platform credential
+cache. Retain its returned credential before token probing. Preserve the documented ambient chain
+and browser fallback within ambient mode; explicit principal failure never selects ambient or
+browser credentials. Only the existing authentication-failure trigger permits fallback. The same
+default credential must positively retire before constructing its browser replacement. Uncertain
+close retains that original, refuses replacement and provider reads, and permits only terminal
+cleanup retry; cleanup never resumes authentication. Preserve escaping control exceptions and the
+caller's original finite deadline. Public SDK timeouts are best effort, not browser/process
+cancellation or proof of physical socket drain.
+
+One retained credential and a failed/ready admission state suffice; do not build a resumable auth
+engine. Compute/network clients depend on that credential and retire before its aggregate closure.
+Their per-read cleanup and credential-last closure must remain independently observable. SDK
+construction without a returned original remains an explicit handoff limit.
+
+The private `AzureOwnedReadAccess` staging reader snapshots recorded identity without active work.
+One retained read-client slot suffices: its compute observation precedes linked NIC/public-IP reads,
+and the original compute client must positively retire before network client construction. Retain
+each returned client before later checks and keep the selected credential until the dependent
+original positively retires. Ordinary close failure may preserve the earlier result or error, but
+refuses subsequent observations; only terminal cleanup may retry the same originals, without
+authentication or request replay.
+
+Detach ordinary SDK failures from secret-bearing message, body, cause and context chains. Report
+only the SDK exception class and core-authored remediation. Apply this to initial authentication and
+later compute/NIC/public-IP work, including challenge-triggered credential refresh. Preserve
+original core domain and escaping control exceptions. Keep this adapter local to the new owned
+reader; it does not change the legacy translator or certify SDK-internal logging/drain.
+
+For newly recorded exact-incarnation access, retain Azure's observed unique VM ID as a canonical
+lowercase hyphenated 128-bit UUID, without imposing UUID version 4. The provider-owned opaque
+locator is `azure-vm:v2:<canonical-uuid>:<complete-ARM-resource-path>`. The final path is the entire
+remainder, not another colon-split field. Keep its exact validated bytes and the existing stricter
+activation path bound; do not normalize or reinterpret it as a provider-selected URL. Core continues
+to hash the opaque locator together with the guest marker. Reads validate complete observed paths
+before comparing their identity components with the recorded path, and separately compare the
+canonical unique ID. Accept ASCII casing differences in resource labels and names, but do not
+URL-decode, normalize Unicode or merge undocumented Unicode equivalents. Keep non-ASCII characters
+literal. The strict persisted activation-path parser remains unchanged. A current path match alone
+cannot admit a replacement, and case-varied observations never rewrite the frozen locator.
+
+Existing records lack historical VM-ID evidence. They must not silently acquire an ID, overwrite a
+mismatch or be presented as historically verified. An explicit adoption operation establishing a
+disclosed current baseline awaits operator disposition; its implementation is not authorized by this
+design proposal. Preserve old path-only activation payloads and cleanup/reconciliation references
+without rewriting their evidence. A later new-incarnation admission seam must remain distinct from
+old-obligation cleanup. Neither the new locator nor a fresh read makes ARM's path-based start
+selector atomic. The private reader stages recorded path/VM-ID checks and owned authentication; new
+creation now records the returned identity inside its rollback-covered interval. The separate start
+producer records request completion. Complete access, endpoint/route/guest preparation and native
+acceptance remain unfinished.
+
+### Azure activation admission and acknowledgment
+
+Azure start follows the same admission boundary, not a shared cloud task model. Retain a passive
+provider-owned adapter under the exact VM operation owner before work. Match the complete recorded
+ARM VM identity to its selected locator, register a fresh versioned lifecycle obligation, and mark
+possible effect durably before one start submission. Interrupted registration, marking or response
+publication never permits another submission. Reconciliation is fenced ledger bookkeeping, not a
+start retry or startup settlement.
+
+Use a fresh compute client with an explicit public policy list containing only bearer-token
+authentication whose public challenge hook refuses resending. Omit retry, redirect and
+resource-provider registration middleware rather than configuring forbidden retries. Submit a
+body-free POST using the public streamed request method to the fixed public ARM start endpoint with
+API version `2026-04-01`. Encode selected path components rather than interpreting a stored resource
+ID as URL syntax. Do not use the legacy client cache, a generated start poller, private SDK fields,
+a response body or background polling. Credential work and socket timeouts remain synchronous and
+best effort, with checks against the original finite deadline.
+
+Bind the response's request identity to that exact POST and accept only HTTP 200 or 202 as an
+acknowledgment. Retain a bounded, canonical non-secret record of status, optional request ID and
+optional operation headers. HTTP 202 needs at least one operation header. A retained operation URL
+must use HTTPS on the fixed public ARM origin, the selected subscription, no credentials, port or
+fragment, and only an optional API-version query. Store it as evidence; this increment does not
+follow it. Validate the retained acknowledgment headers, not discarded response metadata. Refuse
+malformed, conflicting, oversized or foreign acknowledgment data without rendering or storing the
+provider body. Separate actual-SDK scripted tests now exercise transmission and returned-handle
+cleanup for this path. Private producer review and the scoped cleanup-entry/control correction are
+complete. This bounded evidence does not establish native startup or complete Azure access.
+
+Retain a valid matching acknowledgment before publication, cleanup or late-success rejection. Keep
+actual returned response and client handles in adapter custody before cleanup starts, removing only
+positively confirmed closures. An interruption between originals must retain the remaining handles;
+an attempted close is not confirmed retirement. Retain uncertain original handles rather than
+discarding them after a cleanup exception. Ordinary cleanup failures do not replace the earlier
+outcome, a new control exception escapes, and an already escaping original control takes precedence.
+Local cleanup and remote possible effect stay separate. Submission acknowledgment is not a generic
+completion rule. Apply the request-specific completion rule below; local closure or a later power
+snapshot cannot replace it.
+
+This is private implementation within #833, not separately mergeable native access. Complete owned
+access must implement and review request-specific startup settlement, route lifetime, endpoint
+trust, guest preparation and aggregate release, then prove them natively before RunContext
+admission. A missing acknowledgment remains unknown. The
+[middleware research](prior-art-research.md#azure-and-gcp-mutation-middleware-proof) records the
+completed middleware audit and the producer's separate scripted streamed-path evidence, with their
+remaining limits.
+
+### Exact-incarnation Azure start completion
+
+Keep the path-only version-one payload codec and shared acknowledgment helpers, not a second live
+producer. New admission uses a distinct version-two payload containing the recorded canonical VM
+UUID, complete ARM path, matching acknowledgment and optional closed terminal result. Its selected
+locator must match `azure-vm:v2:<canonical-uuid>:<complete-ARM-resource-path>` exactly. Never
+synthesize a path-only locator to reuse old admission or upgrade an old obligation with a current
+UUID observation.
+
+Record the returned creation model's path and canonical VM UUID during new provisioning, within its
+existing rollback-covered creation interval and before bootstrap admission. Missing, malformed or
+foreign creation identity fails that attempt. Compare validated selected subscription, group and VM
+name components case-insensitively, since Azure may return equivalent names with different casing;
+record the exact returned path bytes for subsequent identity checks. This establishes evidence for
+newly created VMs only; historical adoption remains unimplemented and requires operator disposition.
+
+Use Azure's documented request-completion evidence, not an AWS-style power-state inference. A
+validated start response with HTTP 200 and no operation headers records synchronous success. If an
+operation header is present, including on HTTP 200, observe that exact retained monitor URL instead.
+Prefer `Azure-AsyncOperation` over `Location`; never invent another endpoint or follow a redirect.
+The existing fixed-origin, selected-subscription URL validation still applies.
+
+Each explicit observation performs at most one streamed GET under the original finite deadline,
+using the public challenge-refusing policy list without retry, redirect, registration or generated
+polling middleware. Verify the response request's exact GET and URL. For `Azure-AsyncOperation`,
+check the remaining budget before creating the body iterator and before each potentially blocking
+iteration. Late headers do not admit another body read. Retain their original response/client for
+cleanup under a fresh finite budget instead. For the status body, accept HTTP 200 with a JSON object
+whose bounded status is `Succeeded`, `Failed`, `Canceled` or a pending provider value. Bound the
+streamed body to 16 KiB, reject duplicate status fields and malformed or oversized input, and retain
+only the closed terminal fact. Never persist or render the body, provider error text or
+credential-bearing exception chains. For a Location-only monitor, HTTP 202 remains pending and HTTP
+200 or 204 records success, without reading its body. Other HTTP statuses or malformed evidence
+cannot establish completion.
+
+Retain a terminal observation before ledger publication, handle cleanup or late-result refusal.
+Publish acknowledgment and completion through exact version/revision comparisons, reconciling a lost
+reply from the same retained evidence. A separate settlement call retries only original local
+closure and fenced bookkeeping; it never sends another POST or GET. It resolves possible effect only
+after the exact terminal fact is durably confirmed and all returned originals positively retire.
+`Failed` and `Canceled` establish request termination, not successful availability. A missing
+acknowledgment or terminal observation remains uncertain regardless of later power reads. An object
+closed before start admission has no start effect; an uncertain registration is not that case.
+Cleanup does not close the outer credential or operation owner.
+
+This is request settlement, not guest readiness. The complete access adapter must separately verify
+the recorded incarnation, fresh running state, endpoint, route and guest marker before admission.
+ARM's path-based start remains observationally fenced, not an atomic UUID selector. Keep native
+proof, full route ownership, aggregate release and RunContext exposure open until their complete
+implementation and acceptance.
+
+### Owned Azure native route and access composition
+
+The complete access owner retains the reader, start producer, source-prefix discovery, temporary
+route and partial guest preparation before each begins work. Construction and the platform factory
+are passive. Use the existing VM operation owner; neither access settlement nor a child adapter
+releases it. Serialize credential use and close the retained credential only after its dependent
+originals and effects settle. Borrowing an admitted credential must not select or probe another
+credential. An uncertain read close refuses the next mutation or guest operation.
+
+Before activation, require a fresh matching incarnation and supported power state. For stopped or
+deallocated VMs, start once and observe only the retained request monitor under the original finite
+deadline. Request failure refuses guest preparation; request success still requires a separate fresh
+running observation, public endpoint and independent SSH trust binding. Observe documented starting
+or briefly stopped states under that same finite budget rather than submitting another start;
+unknown or conflicting power evidence refuses admission. Already-running VMs require the same fresh
+endpoint and guest checks. Keep the exact original locator through preparation and repeat
+incarnation, running-state, endpoint and route checks before later guest admission. Pass the fresh
+verified VM model into the route check so a changed NIC reference cannot hide behind an unchanged VM
+UUID or public endpoint. Repeat this check after opening the route and before guest preparation.
+
+Own one unpredictable nonce rule containing the selected IPv4 prefixes, not one rule per prefix or a
+whole-NSG rewrite. Follow the verified VM's actual NIC reference and that NIC's actual NSG
+reference. Validate complete same-subscription identities, the NIC's VM back-reference, core
+ownership tags, stable NIC/NSG resource GUID observations and successful parent provisioning.
+Require the NSG's reverse NIC association to contain only the selected NIC and no subnet
+associations. Do not treat derived names or placement in the VM's resource group as ownership
+evidence. Linked resources may live in another group. These observations refuse known sharing or
+replacement; they are not atomic provider preconditions against concurrent external changes.
+
+Require the existing correct priority-200 deny-all-inbound baseline without converging it. Select
+one free priority in the existing 100-199 band and one scoped inbound TCP/22 allow with its own
+nonce in name and description. Refuse collisions, occupied capacity or changed topology rather than
+retrying a create under another name. Register its bounded exact intent before marking possible
+effect, construct and retain the concrete client before that mark, and submit one PUT. Do not adopt
+preexisting rules or infer conditional-write support from an etag. The public rule contracts do not
+document the conditional create/delete guarantees needed for such a claim.
+
+Use the explicitly documented `2025-09-01` rule REST contract through the locked public network
+SDK's streamed request method, with challenge replay, retry, redirects and provider registration
+excluded from the mutation policy list. Verify the response request's exact method and URL. Retain
+bounded selected receipt fields and closed completion facts, never provider bodies or SDK exception
+messages. PUT accepts HTTP 200 or 201; operation headers take precedence over an apparent HTTP
+success, including on HTTP 200. Prefer the exact retained `Azure-AsyncOperation` monitor over
+`Location`. Validate monitor subscription identity with the same ASCII casing rule, but keep the
+retained URL bytes exact for every subsequent GET and response identity check. Without a monitor, a
+pending resource provisioning state is not completion. Prove the actual locked network SDK's
+final-send behavior; the compute start proof does not substitute.
+
+Keep request completion separate from route removal. After any known terminal create result,
+including `Failed` or `Canceled`, a fresh matching owned rule can still require deletion. Failed
+provisioning does not imply that a network resource is absent or ineffective. Validate parent
+identity and exact nonce/rule content before deleting only that rule. Fresh absence after known
+completed creation can establish that it is already removed without sending DELETE. Once DELETE is
+sent, publish its exact cleanup intent before dispatch, retain its own documented HTTP 200/202/204
+receipt and observe any supplied monitor, even on HTTP 200. Any retained terminal DELETE result plus
+fresh absence can settle removal; a failed request with the rule still present cannot. An absent
+rule cannot settle an unknown queued PUT or an unacknowledged DELETE. Never replay an uncertain
+mutation to manufacture completion evidence.
+
+A known terminal failed or canceled DELETE is different from an uncertain request. If the exact
+owned rule still exists, a later explicit settlement call may admit one fresh cleanup attempt after
+retiring originals, reconciling ownership and repeating parent/nonce/content checks. Publish the new
+intent without presenting the previous attempt's acknowledgment or terminal result as its evidence.
+A lost intent-publication reply before dispatch can resume only after exact reconciliation; a lost
+receipt after dispatch remains uncertain and cannot replay. Do not retry a newly failed deletion
+inside the same settlement call. Preserve the one-attempt-per-call boundary and continue observing
+delayed absence after known success rather than sending another DELETE.
+
+`close()` bars opening/checking and retries original public closes; explicit `settle()` remains
+allowed to observe retained monitors and remove the owned rule. The start producer's `settle()` is
+different: it performs only local cleanup and bookkeeping, so the access owner must finish any
+permitted explicit start observations before terminally closing that producer. Preserve partial
+guest-preparation custody and escaping control exceptions. Reconcile lost ledger replies from the
+same retained evidence. Do not stop the VM, sweep another nonce, alter the NSG's flow-reset setting
+or claim that deleting an allow kills established SSH connections. Full native topology, monitor,
+cleanup and aggregate-release proof remains required before acceptance.
+
+### Owned GCP authentication boundary
+
+Keep stock public Application Default Credentials selection with the cloud-platform scope and the
+caller's retained public Request. Retain its ordinary credential session and strong Request before
+acquisition, and the selected credential immediately after return. Ignore the detected project for
+VM identity and routes. Explicit service-account credentials keep their selected source and never
+fall back to ambient. Do not clone the SDK's ADC selector merely to suppress project discovery.
+Internally constructed SDK requests, CLI discovery, credential retry/backoff and constructor handoff
+remain explicit best-effort limits, not resources falsely reported as drained.
+
+Use public `before_request` with the actual service method and fixed URL before one ordinary
+service-session request. Earlier token refresh/header application staged custody, but did not
+preserve the complete selected middleware boundary. Keep selected credential security behavior,
+token identity, scopes and quota. Keep the real public Request type and session available to SDK
+credential transports; a plain callable can lose supported certificate behavior. Retain attributable
+responses before SDK consumption and refuse later owned calls while their cleanup is uncertain.
+Public session closure accounts for our originals, not every SDK-created adapter or internal
+process.
+
+Preserve the public SDK's token-state distinction after synchronous refresh. `STALE` denotes an
+unexpired token inside the SDK refresh window, not an unusable credential. Accept both `STALE` and
+`FRESH` after that refresh, and refuse `INVALID`; do not add a minimum lifetime that the selected
+SDK does not require. Keep this decision separate from regional access boundary compatibility and
+service-request replay.
+
+Credential requests preserve the public SDK's redirect behavior. Retain each returned response
+before SDK consumption, including the stock session's maximum of 30 redirects and final response.
+Retire those originals only after their consumer returns or before the next explicit owned request,
+not inside the response hook. An unexpected extra response is retained before refusal. Uncertain
+closure refuses further work; only terminal cleanup may retry the same originals. This accounting
+does not own Requests' internal redirect handoff or prove physical request drainage.
+
+The private `GCEOwnedRead` stages passive construction and fresh exact-instance power/locator
+observations, not a native access factory. Its one fixed Compute GET requests only
+`id,kind,name,selfLink,status,zone` through the public `fields` parameter. This avoids downloading
+unrelated instance metadata, including startup scripts, to establish identity and power. Keep the
+65,536-byte raw-body ingestion bound, strict UTF-8/JSON checks and exact recorded identity checks;
+do not fall back to an unrestricted instance response. Native support for that projection remains a
+compatibility gate. Retain original service response/session handles before consumption and retire
+them before credential dependencies. Ordinary failed closure may preserve a useful observation, but
+blocks later observations and aggregate release until positive retirement.
+
+The locked SDK enables background regional-access-boundary lookup for ordinary default-universe
+service-account credentials independently of Agentworks configuration. Token renewal does not renew
+that boundary. Preserve normal public middleware; do not force copy failure, change private blocking
+controls, substitute the principal or implement another boundary policy.
+
+One retained `_OwnedAuth` supplies the selected credential and concrete public Request originals to
+both reads and the start producer. Serialize borrower authentication with one finite operation lock.
+An independent short entry barrier records each copied Request's actual consumer before Session or
+Response use. Public `deepcopy` retains a copied Session before wrapper initialization; populate
+only the exact installed response-hook identity so copying cannot traverse owner locks. Preserve
+unrelated hooks, session security arguments and public redirect behavior. The concrete 32-copy
+custody bound refuses new middleware admission when occupied; active consumers are dependencies, not
+failed cleanup. A swallowed copy failure still refuses service dispatch rather than silently
+disabling SDK security.
+
+Each copy retains its original finite deadline, unaffected by borrower end or a later operation.
+Terminal close makes admission terminal under the entry barrier before invoking any fallible copy
+retirement helper. Reader close uses the same small admission action before service retirement, so a
+successful late service close cannot exhaust the budget before admission becomes terminal. This one
+terminal fact also exposes retained credential originals as cleanup debt; do not duplicate reader
+state. Release the barrier before bounded public joins or original close calls, and preserve
+service-before-credential retirement with actual credential retirement behind its operation lock.
+Only positively observed finished consumers permit their Response and Session retirement; an expired
+deadline or uncertain join retains custody. If any owned `is_alive` or `join` observation escapes,
+mark that copy's completion unconfirmed and bar further entry. An escaping public `before_request`
+bars every retained copy under the same entry barrier and marks already-entered copies without
+another Thread observation, because the SDK can observe its worker before that worker first enters
+the copied Request. A never-entered copy must then refuse its first entry before Session use; its
+original can retire without claiming that the SDK worker finished. On supported CPython, an
+interrupted observation can corrupt the same Thread's later completion state. That later state
+cannot clear the retained uncertainty; this implementation provides no independent completion
+witness. Keep this sticky uncertainty separate from retryable ordinary join timeouts and
+original-close failures. Responses returned by already-admitted consumers remain retained even after
+new entry is barred. Later explicit operations may retry eligible timeout or close debt, but cannot
+clear unconfirmed completion; do not add a reaper or drain engine. Preserve original control
+exceptions and independently attempt retained closes. Only the final access owner closes the helper;
+the start producer closes its service originals, not another borrower's credential lifetime.
+
+This seam accounts for supplied root/copied originals, not every SDK transport, internal worker or
+socket. Public copy adapters that cannot return an attributable Session remain a named profile
+limit; do not invent private native-adapter cloning. Prove real selected credential classes, default
+boundary work, certificate arguments and interrupted retirement separately from native/full-access
+acceptance.
+
+### GCP activation admission and acknowledgment
+
+Implement one private provider-owned `GCEActivation` under the acquired exact VM operation owner,
+retained before effects. Composition supplies the selected credential, recorded project, zone,
+backend instance name and canonical positive decimal uint64 incarnation, with the matching
+`gcp-gce:<project>:<zone>:<instance_id>` locator. The database VM name is not the backend name.
+Validate persisted components with the existing safe alphabet and bound uint64 here, without
+changing the legacy normalizer. Generate one nonzero UUID and persist it with the four selected
+identity values in the initial bounded canonical versioned lifecycle payload.
+
+Register `gcp-gce-start`, durably mark possible effect and admit at most one body-free POST to the
+fixed public Compute v1 start route, with that UUID as `requestId`. The UUID assists correlation and
+deduplication; it neither permits replay nor proves exactly-once acceptance. Reconciliation is
+fenced ledger bookkeeping only. No generated poller, retired start method, background task, private
+SDK session mutation or generic cloud task framework belongs in this unit.
+
+Borrow the shared selected `_OwnedAuth`, call its public credential `before_request` with the exact
+POST method and fixed URL, then dispatch through one ordinary Requests service Session. Keep
+`trust_env=False`, normal TLS verification, zero adapter retries and redirects disabled. Do not use
+service authentication replay or recreate the selected credential for this borrower. Credential
+refresh and default boundary work use the retained public Request originals described above; keep
+normal selected credential behavior rather than copying its pipeline or invoking private JWT setup.
+
+Pass `stream=True`, `allow_redirects=False` and `Accept-Encoding: identity`. One public per-request
+response hook first retains the actual original response, then refuses non-200 and Content-Encoding
+other than absent or a single identity value, including ambiguous or combined encodings. Refuse
+before returning to Requests: even with redirects disabled its Response.next preparation can read a
+redirect body. Do not duplicate this gate after return. Construct the sole POST locally and assert
+it at the final scripted transport; the locally attached PreparedRequest is not additional provider
+acknowledgment evidence.
+
+Check the original finite deadline before admission and public request entry. Set finite positive
+service connect/read and credential request timeouts from the then-remaining budget. Public
+credential middleware precedes the service request; recheck the original budget before durable
+possible-effect admission and dispatch. Synchronous SDK work and copied consumers remain best
+effort, not hard elapsed preemption. Do not use `max_allowed_time` to discard a late response before
+retaining its acknowledgment.
+
+Read admitted HTTP 200 through finite positive raw reads without content decoding, at most an
+internal chunk size or remaining capacity plus one overflow byte, whichever is smaller. Cap body
+ingestion at 65,536 bytes without trusting Content-Length or implementing decompression. Check the
+original deadline before each further read. Incomplete-body expiry leaves ACK unknown; after
+receiving the entire bounded body, retain a valid matching ACK before refusing late success. Reject
+invalid UTF-8/JSON, duplicate keys and oversize, then discard raw bytes after selection. This bounds
+service-body ingestion, not all SDK/header/TLS allocations or credential responses.
+
+Require kind `compute#operation`, a nonempty operation name matching `[A-Za-z0-9_-]{1,512}`,
+clientOperationId equal to the retained UUID, targetId equal to the selected canonical uint64
+incarnation, and targetLink equal to either complete constructed HTTPS URL on
+`compute.googleapis.com` or `www.googleapis.com` with path
+`/compute/v1/projects/{project}/zones/{zone}/instances/{name}`. Exact equality rejects credentials,
+ports, queries, fragments, escapes and dot segments without URL normalization. Required fields,
+spellings and bounds are conservative local acceptance rules needing native compatibility proof, not
+universal provider schema guarantees. If operationType is present require `start`; neither status
+nor DONE establishes successful startup. Persist only operation name in the optional ACK, not
+diagnostics or a provider-selected follow-up URL. Later lookup constructs a fixed route.
+
+Keep returned original response/service Session handles directly in producer custody before later
+Python bookkeeping, including response capture when the request method raises. Close them in that
+order; only normal closure retires an original. Retain uncertain originals with `cleanup_incomplete`
+true. The shared helper retains credential Request/Session originals and owns their separate
+terminal cleanup. Preserve original escaping control through scoped cleanup entry and bookkeeping
+and release the admission lock. Observation cleanup does not retry an uncertain close; explicit
+retained-owner cleanup may retry that same original, never submission. This does not establish
+atomic SDK-internal handoff, arbitrary repeated-signal safety, interruption during final exception
+propagation or lock release, or interpreter-shutdown guarantees.
+
+Retain a matching ACK before publication, cleanup or late-success refusal. Validate canonical
+bounded recovery payloads, then reconcile registration and at most one ACK revision under the same
+owner/fence. Missing or malformed ACK retains possible effect. Receipt, local close, power and
+deadline cannot settle startup, request drain or the whole owner.
+
+The documented start API addresses an instance name with no documented immutable-ID alias or
+incarnation precondition. A preceding exact read and database lock cannot prevent external
+delete/recreate. Matching targetId after submission detects a wrong-incarnation response, not the
+already-submitted effect. Do not invent conditional headers, numeric-ID fallback or UUID-based
+protection. Complete access uses an observational identity guarantee: before the admitted start,
+perform a fresh supported exact-instance observation and refuse a known mismatch or prohibited
+stopped intent. Construct only the selected recorded-name request and never adopt a replacement. An
+external replacement can still receive that start before mismatch is detected; report the possible
+effect honestly. Require matching receipt, separately proved startup settlement and fresh selected
+identity, power, route/trust and guest preparation before guest work. Changed or unconfirmed
+identity refuses guest admission and retains relevant uncertainty. These checks are not an atomic
+provider reservation. This lead-owned response selects neither a requirements waiver nor an
+unsupported critical operation. Native proof of this supported behavior, startup settlement,
+operation retention/recovery, guest preparation, endpoint trust, firewall-route lifetime and
+aggregate release remain open.
+
+### GCP start completion observation
+
+Extend the retained `GCEActivation` with explicit request observation and settlement. Its state is
+`UNKNOWN` before a matching acknowledgment, `PENDING` after acknowledgment, and `SUCCEEDED` or
+`FAILED` only after a validated terminal operation observation. The POST acknowledgment remains
+identity evidence even if its body contains `DONE`; do not reinterpret the existing admission
+contract as successful startup.
+
+Each explicit `observe(deadline)` admits at most one body-free GET to the constructed Compute v1
+zone operation route for the retained project, zone and operation name. Use the same selected
+`_OwnedAuth` and public middleware as submission, with actual service response/session custody,
+bounded identity-encoded raw ingestion, disabled redirects and the caller's original finite
+deadline. No generated poller, operation discovery, automatic start replay or provider-selected
+follow-up URL belongs here. A missing or expired operation record cannot establish completion.
+
+Validate kind, exact retained operation name, original `clientOperationId`, selected numeric
+`targetId`, exact selected instance `targetLink`, `operationType=start` and the closed status set
+`PENDING`, `RUNNING`, `DONE`. If `zone` or `selfLink` is present, require its complete selected
+constructed URL on one of the two accepted Google API hosts, without normalization. These are
+conservative local acceptance rules requiring native compatibility proof, not assertions that every
+provider response includes every optional field. Pending status must not carry contradictory
+terminal-error evidence. `DONE` without error evidence means request success; a well-formed nonempty
+`error.errors` array of coded errors means request failure. Refuse malformed or contradictory error
+fields instead of turning them into success. Discard raw bodies and provider diagnostics after
+selection. The public
+[zone operation API](https://docs.cloud.google.com/compute/docs/reference/rest/v1/zoneOperations/get)
+defines request completion separately from instance readiness and limits completed-record retention.
+
+Retain a validated terminal state before ledger publication, cleanup or late-budget refusal. Keep
+the existing version-1 identity/acknowledgment payload and its canonical bytes unchanged. Terminal
+state need not introduce another payload format: resolve the exact owned obligation only after the
+validated terminal observation and positive retirement of this borrower's service originals. The
+resolved row states that this request's custody settled, not that startup succeeded or that a guest
+is currently ready. A crash before resolution retains the acknowledgment for a later explicit
+operation observation; record expiration or missing acknowledgment leaves uncertainty unresolved.
+There is no inference of completion from VM power, local close or elapsed time.
+
+`settle(deadline)` retries only original local closes and exact fenced ledger bookkeeping. It never
+performs provider reads, credential acquisition or submission. Reconcile a lost acknowledgment
+publication or resolution reply against the same row, and require this producer's retained
+resolution intent before accepting a resolved row. Known registration without possible effect may
+settle by the existing no-effect rule. Once settlement is positively complete, repeated settlement
+does not need provider access or the released operation owner. `close(deadline)` bars future start
+and observation admission before fallible cleanup; it closes neither the shared authentication owner
+nor an outstanding provider request. Complete pending observations before that terminal close.
+
+The complete access owner must still observe fresh matching instance identity and `RUNNING`,
+establish the exact selected endpoint/firewall route and trust, prepare the guest, and retire the
+remaining dependents before shared authentication and aggregate release. This completion increment
+supplies none of those missing steps by implication.
+
+The [GCP native access LLD](gcp-native-access-lld.md) specifies the retained instance/endpoint,
+firewall and aggregate composition that follows this producer.
+
+Actual locked public-pipeline tests must cover one POST/no service GET or replay, unread redirect
+and non-200/encoded bodies, finite identity reads and overflow, partial expiry and matching late
+ACK, ledger interruption/lost replies, fencing/concurrency, bounded identity/recovery parsing,
+original handle and wrapper custody, primary control and cleanup-entry/lock regressions.
+Credential-provider requests remain a separately attributed limit. Earlier middleware audits do not
+prove this new producer, native compatibility, complete owned access or RunContext acceptance.
 
 ### Shared local process retirement
 
@@ -1136,7 +2062,15 @@ payload version, a bounded opaque non-secret payload, timestamps and one closed 
 
 - `registered`: the obligation exists and no effect is yet admitted;
 - `possible-effect`: admission committed before the remote or local effect;
-- `resolved`: typed adapter evidence proves this obligation can cause no further effects.
+- `resolved`: this exact obligation met its reviewed adapter completion condition.
+
+Settlement concerns the admitted operation, not every future effect of an intended persistent
+resource. A provider terminal-request rule is one completion condition; AWS instead uses the
+narrower known-success-acknowledgment plus exact observed-running rule above. Its observational
+completion does not certify request termination or all future provider effects. The VM need not stop
+and unrelated provider work need not finish. Other adapters retain their stronger completion,
+dispatch-drain and fencing rules. Separate workload, route, hold and local-cleanup obligations still
+require their own evidence. Receipt alone is not completion.
 
 Core validates the exact operation fence for every transition but never decodes adapter payloads.
 The registered adapter owns payload validation, target/incarnation comparison, observation and the
@@ -1215,6 +2149,89 @@ establish native/platform or complete RunContext acceptance. Integrated review o
 reply loss and concurrent finalization remains required before publication. DIRECT helper completion
 does not thereby acquire a stronger user-descendant cleanup or native-drain guarantee.
 
+### Later observation of an acknowledged QGA helper
+
+A QGA observation deadline can end while its acknowledged invocation still runs. For this case, the
+selected native binding supplies a passive per-call delivery/observer factory. Core retains the
+resulting object before dispatch, alongside the actual helper call, original attempt and borrow that
+can still settle that attempt. This is a private optional native composition seam, not another
+parameter on `Carrier.execute`, a stronger `CarrierReport`, or an SSH requirement. Plain delivery
+remains unchanged. The first implementation slice covers inline DIRECT helpers; managed read
+preparation then uses the same seam without creating a second recovery mechanism.
+
+The managed-read extension separates preparation from execution before admission, publishing the
+same explicit expectations for OBSERVE and READ_OUTPUT. A prepared read permits one dispatch and
+clears its request and collectors after that call. The retained call's origin is independent of its
+detachable payload or optional delivery wrapper: escaping managed reads continue to carry
+`ManagedObserveControlFact`, including interrupted final handoff. Retained cleanup stores neither
+managed observation facts nor output. Standalone reads without an actual retained core call do not
+gain this continuation merely by sharing preparation.
+
+Preparation supplies immutable non-payload closure expectations explicitly: original nonce, runtime
+candidates and shim, and the existing selected guest checkpoint where applicable. Do not derive
+these from generated argv or downcast a caller sink. After the original call returns or raises,
+retained cleanup custody detaches finite input, application collectors and sinks. Later observation
+uses a new bounded runtime-prefix reader with a discard destination, not the completed reader or
+caller I/O. It never reconstructs the returned application result.
+
+Positive NOT_SENT evidence remains available after payload detachment. An invocation known never
+dispatched needs no runtime prefix or provider observation: interrupted settlement reconciles the
+same original attempt and lifetime row through exact no-I/O bookkeeping. Missing or uncertain
+dispatch evidence does not supply this fact.
+
+The concrete observer retains the validated acknowledged PID before another status request. It
+publishes validated terminal closure evidence before optional output callbacks, because a terminal
+QGA status read consumes its record. A fresh finite cleanup budget first settles the original local
+delivery, revalidates exact database ownership and rejects a known changed route/guest binding, then
+permits only a status GET for that held PID. No new POST, fallback, supervisor or guest file is
+introduced. A failed status exchange may already have consumed a terminal response; missing status,
+lost acknowledgment and lost terminal evidence remain unknown, never absence or completion. This
+slice does not retry a failed status exchange or promise signal-atomic acknowledgment publication.
+
+Proxmox platform access supplies the route check through its existing owned provider custody:
+observe the retained origin/VM/generation locator again using the body-free current-config GET and
+require equality. Fence database ownership before and after this read. This is provider route
+evidence, not a fresh guest-boot observation; it introduces no guest execution or activation.
+
+Closure requires an authentic original runtime prefix and independent normal-zero completion of the
+exact prepared invocation. READY qualifies, as do closed prerequisite refusals for missing,
+unusable, shim, unsupported-version or missing-module runtimes: the fixed bootstrap exits before
+helper entry on those paths. Invalid or unknown runtime evidence, nonzero exit and signal
+termination do not qualify. READY precedes the helper's guest check; neither READY nor a closed
+refusal supplies a fresh current-boot receipt or proof that a managed observation succeeded. Closure
+settles only the invocation's future effects and original attempt, without changing its returned
+NOT_STARTED or UNKNOWN application result. RESOURCE disposal still requires its separate positive
+terminal observation and action proof. A failed or identity-refused managed read that returns zero
+must not acquire those proofs from helper closure.
+
+After settling a timed-out RESOURCE prerequisite read, cleanup performs no disposal action. A later
+explicit disposal request obtains a new positive managed terminal observation through the existing
+terminal-proof gate before admitting its action. The prior helper's closure does not populate the
+disposal binding, resume old collectors or replace the original caller's unknown observation.
+
+Core exposes explicit observation cleanup before aggregate execution `finish`. Fresh finite budgets
+are required only for unresolved observation or local cleanup; a provider route read is needed only
+before a fresh remote status observation, not after closure is already proved. Ordinary retained
+bookkeeping and already-proved closure with settled local custody require neither. Exact ownership
+and binding checks still apply, and bookkeeping retry stays no-I/O. Core retains the actual call
+rather than handing off its borrow and reducing it to booleans while continuation is possible. Local
+cleanup, observation and lost database replies reconcile the same retained objects. Lost ACK,
+consumed status, unknown nonzero completion, controller restart and other carriers still need their
+separately tracked recovery paths. Prove deadline-then-closure, interruption after ACK and terminal
+publication, wrong nonce, changed binding, unsettled local custody and unchanged application UNKNOWN
+before native acceptance.
+
+The private inline source candidate now selects this factory in the Proxmox native binding and calls
+explicit cleanup observation before native workflow finish. Offline tests execute the actual
+prepared helper through fake QGA status delivery, including lost settlement/resolution replies and
+repeated close. They are not measurements of either supported Proxmox major. Managed read
+preparation now uses this same optional per-call seam in the private source candidate, with explicit
+call origin and detached observation payloads. Offline cases cover OBSERVE/READ_OUTPUT and disposal
+prerequisite continuation; integrated review and native proof remain separate. Lost ACK/status
+recovery, controller restart and full native acceptance remain open.
+
+### Fenced lifecycle recovery
+
 Recovery must be fenced from a delayed original controller before it mutates an old obligation. The
 logical operation keeps its stable random operation identifier, while each database owner carries a
 separate random generation identifier. Initial acquisition creates both. A recovery controller
@@ -1292,8 +2309,14 @@ Until concrete adapter evidence supplies that proof, retain the claim without re
 
 The private `RecoveryGuestPreparationBatch` implements that serial boundary on one pinned native
 binding. It composes fresh fixed guest/selected-locator observations before numeric delivery,
-workload and optional elevated account observations. It shares ordinary observation bodies without
-opening ordinary borrowing to recovery. Original escaping control exceptions carry safe retained
+workload and optional elevated account observations. Its required bound locator observer is supplied
+by the selected operation retained in `RecoveryVMSpan`, not constructed by the shared guest kernel.
+The same observer and original deadline surround the fixed guest probe; selected-site, exact-owner,
+account and single-use checks remain at the recovery batch boundary. Remove only obsolete batch
+context and provider-custody forwarding, preserving the span's actual native custody. It shares
+ordinary observation bodies without opening ordinary borrowing to recovery. Marker or deadline
+refusal may still admit and resolve the batch's unused support row; zero provider and guest dispatch
+does not promise zero recovery bookkeeping. Original escaping control exceptions carry safe retained
 preparation facts; unknown or uncertain attempts stop the batch. A retry can reconcile only a
 stopped, settled batch's exact resolution, never repeat a probe. The caller must retain the batch
 before admission and separately own the durable-ready availability span through its last recovery
@@ -1353,19 +2376,26 @@ Concrete drain evidence and its producer remain adapter-owned. The generic opera
 validates exact ownership and row custody; it does not learn carrier process identities, helper
 tokens or proof mechanisms, and it exposes no generic replay surface or proof-provider registry. A
 proof is bound to the requested generation transition and obligation, but its meaning is broader:
-every outstanding dispatch for that obligation across all earlier generations has drained or been
-remotely fenced. Recovery of recovery cannot forget work admitted by an earlier predecessor. A
-controller exit, an arbitrary list of generation identifiers or a proof covering only the immediate
-predecessor is insufficient. If the adapter cannot reconstruct complete coverage after restart, it
-refuses recovery and retains the claim.
+every outstanding dispatch for that obligation across all earlier generations meets its reviewed
+completion condition or has drained or been remotely fenced where that adapter requires it. Recovery
+of recovery cannot forget work admitted by an earlier predecessor. A controller exit, an arbitrary
+list of generation identifiers or a proof covering only the immediate predecessor is insufficient.
+If the adapter cannot reconstruct complete coverage after restart, it refuses recovery and retains
+the claim.
 
 That database fence prevents further cooperating submissions but does not establish remote
 quiescence. For every obligation already in `possible-effect`, the adapter must then prove that
-every admitted dispatch has drained or is remotely fenced against further effects, including work
-already active. A fenced late arrival may still occur but must refuse before effects. Acceptable
-evidence includes carrier-proved non-dispatch paired with exact absence, an operation-specific
-remote generation fence, or equally strong proof from a synchronous local substrate whose controller
-and dispatch endpoint are both gone. Controller absence by itself is insufficient because provider,
+every admitted dispatch meets the adapter's reviewed completion rule, is proved not to have taken
+effect, or is remotely fenced against outstanding effects, including work already active. A fenced
+late arrival may still occur but must refuse before effects. Acceptable evidence includes exact
+provider-specific successful terminal-request completion, AWS's narrower
+known-acknowledgment/running-goal rule, carrier-proved non-dispatch paired with exact absence, an
+operation-specific remote generation fence, or equally strong proof from a synchronous local
+substrate whose controller and dispatch endpoint are both gone. Intended persistent resources and
+unrelated provider work are not themselves unsettled dispatch; separate workload, route, hold and
+local-cleanup obligations still apply. AWS's observational rule cannot settle an unknown
+acknowledgment or a local delivery/guest dispatch obligation. Stronger concrete drain/fence
+requirements elsewhere are unchanged. Controller absence by itself is insufficient because provider,
 carrier or guest queues may outlive it. This recovery fence is separate from #377's future resource
 hierarchy. The ledger remains attached to the logical operation across that transition so later
 hierarchy can bind one operation to several resource memberships without moving adapter state onto

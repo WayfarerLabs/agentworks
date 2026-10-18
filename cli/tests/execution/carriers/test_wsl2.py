@@ -74,7 +74,7 @@ def test_construction_and_feature_inspection_are_passive(monkeypatch: pytest.Mon
     pump = MagicMock()
     monkeypatch.setattr(wsl2, "run_process", pump)
     carrier = WSL2Carrier(connection())
-    assert carrier.features == carrier.features
+    assert carrier.features is carrier.features
     assert not carrier.features.live_stdio
     assert not carrier.features.terminal
     pump.assert_not_called()

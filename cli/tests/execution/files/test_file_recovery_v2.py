@@ -27,13 +27,13 @@ from agentworks.execution._file_effect_gate_protocol import (
 )
 from agentworks.execution._file_gate_setup import FileEffectGateSetup, file_effect_gate_path
 from agentworks.execution._file_gate_setup_recovery import FileGateSetupRecovery
+from agentworks.execution._file_mutation_recovery import FileMutationFenceRecovery
 from agentworks.execution._file_obligation import (
     FileCallFamily,
     FileCallObligation,
     decode_file_call_obligation,
     encode_file_call_obligation,
 )
-from agentworks.execution._file_package_recovery import FilePackageFenceRecovery
 from agentworks.execution._file_snapshot_protocol import (
     FileSnapshotCleanupRequest,
     decode_file_snapshot_request,
@@ -148,7 +148,7 @@ def _open(owner, row, context, family: str):
         # Synthetic adapter-journal proof, independent of fresh span readiness.
         evidence = _DownloadDrainEvidence(owner.ownership, row.obligation_id, row.payload_revision, row.payload)
         return FileDownloadRecovery.open(owner, target, row, evidence, context=context)
-    cls = FileGateSetupRecovery if family == "setup" else FilePackageFenceRecovery
+    cls = FileGateSetupRecovery if family == "setup" else FileMutationFenceRecovery
     return cls.open(owner, target, row, context=context)
 
 

@@ -1,4 +1,4 @@
-"""Atomic Linux publication beneath a caller-owned directory descriptor.
+"""Linux rename and Darwin held-file publication beneath a borrowed directory.
 The caller owns confinement and locking; unsupported metadata and objects refuse.
 Operational facts are carried by ``FilePublicationError`` directly or as the
 fixed cause of an escaping control-flow exception.
@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, NoReturn, Protocol, TypeVar, cast
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+from ._darwin_metadata import require_plain_metadata
+from ._file_publication_darwin import StageContentMismatch, copy_in_place, verify_stage_content
 from ._file_snapshot import _snapshot_stat
 from ._file_stat import FileRevision, FileStat
 from ._publication_receipt import (
@@ -54,6 +56,7 @@ from ._scratch import (
 
 _ACCESS_ACL = "system.posix_acl_access"
 _RENAME_NOREPLACE = 1
+_DARWIN_RENAME_EXCL = 0x00000004  # Darwin sys/stdio.h.
 _STAGE_ATTEMPTS = 16
 _STAGE_PREFIX = _PUBLICATION_STAGE_PREFIX
 _T = TypeVar("_T")
@@ -246,9 +249,21 @@ def publish_file(
                 replacement = _observe_replacement(parent_fd, leaf_name, condition, expires_at)
                 if replacement.revision.stat.mode & (stat.S_ISUID | stat.S_ISGID):
                     raise FilePublicationError(PublicationFailureKind.METADATA, PublicationPhase.METADATA)
-                _prepare_replacement(stage_fd, replacement.revision.stat, replacement.access_acl)
+                if sys.platform == "linux":
+                    _prepare_replacement(stage_fd, replacement.revision.stat, replacement.access_acl)
+                else:
+                    _require_known_metadata(stage_fd)
             _os_call(os.fsync, stage_fd, kind=PublicationFailureKind.IO, phase=PublicationPhase.METADATA)
             _verify_stage(stage_fd, parent_fd, stage_name, stage_identity, content_size)
+            if sys.platform == "darwin":
+                try:
+                    verify_stage_content(stage_fd, content_size, content_digest, expires_at)
+                except StageContentMismatch:
+                    raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONTENT) from None
+                except TimeoutError:
+                    raise FilePublicationError(PublicationFailureKind.DEADLINE, PublicationPhase.CONTENT) from None
+                except OSError:
+                    raise FilePublicationError(PublicationFailureKind.IO, PublicationPhase.CONTENT) from None
             _check_deadline(expires_at, PublicationPhase.PUBLICATION)
             if isinstance(condition, Create):
                 publication_attempted = True
@@ -259,16 +274,43 @@ def publish_file(
                 _verify_replacement_condition(parent_fd, leaf_name, replacement, expires_at)
                 _check_deadline(expires_at, PublicationPhase.PUBLICATION)
                 publication_attempted = True
-                _rename_replace(parent_fd, stage_name, leaf_name)
-                rename_succeeded = True
+                if sys.platform == "darwin":
+                    _os_call(
+                        copy_in_place,
+                        stage_fd,
+                        replacement.descriptor,
+                        content_size,
+                        expires_at,
+                        kind=PublicationFailureKind.UNCERTAIN,
+                        phase=PublicationPhase.PUBLICATION,
+                    )
+                else:
+                    _rename_replace(parent_fd, stage_name, leaf_name)
+                    rename_succeeded = True
+            direct = sys.platform == "darwin" and replacement is not None
             published_revision = _observe_published(
-                stage_fd,
+                replacement.descriptor if direct and replacement is not None else stage_fd,
                 parent_fd,
                 leaf_name,
-                stage_identity,
+                _ObjectIdentity(replacement.revision.stat.device, replacement.revision.stat.inode)
+                if direct and replacement is not None
+                else stage_identity,
                 content_digest,
                 expires_at,
             )
+            if direct and replacement is not None:
+                _require_known_metadata(replacement.descriptor)
+                original = replacement.revision.stat
+                if not _matches_access_metadata(
+                    _fstat(replacement.descriptor, PublicationPhase.PUBLICATION),
+                    original.uid,
+                    original.gid,
+                    stat.S_IMODE(original.mode),
+                    original.device,
+                ):
+                    raise FilePublicationError(PublicationFailureKind.UNCERTAIN, PublicationPhase.PUBLICATION)
+                if _cleanup_owned_stage(parent_fd, stage, prior=None) is not None:
+                    raise FilePublicationError(PublicationFailureKind.UNCERTAIN, PublicationPhase.CLEANUP)
             if stage.publication is not None:
                 assert stage.scratch_parent_fd is not None
                 try:
@@ -290,13 +332,17 @@ def publish_file(
                 stage.publication = None
                 stage.record_acquisition.identity = None
         except FilePublicationError as error:
-            if rename_succeeded or (
-                publication_attempted
-                and error.kind
-                not in {
-                    PublicationFailureKind.CONFLICT,
-                    PublicationFailureKind.UNSUPPORTED,
-                }
+            if (
+                rename_succeeded
+                or (sys.platform == "darwin" and publication_attempted and replacement is not None)
+                or (
+                    publication_attempted
+                    and error.kind
+                    not in {
+                        PublicationFailureKind.CONFLICT,
+                        PublicationFailureKind.UNSUPPORTED,
+                    }
+                )
             ):
                 failure = FilePublicationError(
                     PublicationFailureKind.UNCERTAIN,
@@ -314,17 +360,42 @@ def publish_file(
         )
 
     prior = failure or (_control_fact(control) if control is not None else None)
+    if (
+        sys.platform == "darwin"
+        and publication_attempted
+        and replacement is not None
+        and (prior is not None or control is not None)
+    ):
+        prior = FilePublicationError(
+            PublicationFailureKind.UNCERTAIN,
+            PublicationPhase.PUBLICATION,
+            cleanup_debt=None if prior is None else prior.cleanup_debt,
+        )
     if prior is None and publication_attempted and (published_revision is None or close_control is not None):
         prior = FilePublicationError(PublicationFailureKind.UNCERTAIN, PublicationPhase.PUBLICATION)
-    if close_control is not None:
+    if isinstance(close_control, OSError) and sys.platform == "darwin":
+        failure = prior = FilePublicationError(
+            PublicationFailureKind.UNCERTAIN if publication_attempted else PublicationFailureKind.IO,
+            PublicationPhase.PUBLICATION if publication_attempted else PublicationPhase.CLEANUP,
+            cleanup_debt=None if prior is None else prior.cleanup_debt,
+        )
+    elif close_control is not None and (sys.platform != "darwin" or control is None or isinstance(control, OSError)):
         control = close_control
 
     if failure is None and control is None:
         assert published_revision is not None
         return published_revision
 
-    cleanup_debt = _cleanup_owned_stage(parent_fd, stage, prior=prior)
+    try:
+        cleanup_debt = _cleanup_owned_stage(parent_fd, stage, prior=prior)
+    except BaseException as cleanup_control:
+        if sys.platform != "darwin" or control is None or isinstance(control, OSError):
+            raise
+        _raise_control(control, prior=_control_fact(cleanup_control) or prior)
     if control is not None:
+        if sys.platform == "darwin" and prior is not None:
+            # A completed cleanup attempt reports current custody, including no debt.
+            prior = FilePublicationError(prior.kind, prior.phase, cleanup_debt=cleanup_debt)
         _raise_control(control, prior=prior, cleanup_debt=cleanup_debt)
 
     assert failure is not None
@@ -373,7 +444,7 @@ def _validate_inputs(
         raise ValueError("Create metadata has an invalid type")
     if expires_at is not None and (type(expires_at) not in {int, float} or expires_at != expires_at):
         raise ValueError("Publication deadline must be a monotonic timestamp or None")
-    if sys.platform != "linux":
+    if sys.platform not in {"linux", "darwin"}:
         raise FilePublicationError(PublicationFailureKind.UNSUPPORTED, PublicationPhase.STAGING)
 
 
@@ -433,6 +504,8 @@ def _create_stage(parent_fd: int, stage: _StageOwnership, *, exact_name: str | N
             stage.identity = _ObjectIdentity(observed.st_dev, observed.st_ino)
             if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1 or observed.st_dev != parent.st_dev:
                 raise FilePublicationError(PublicationFailureKind.UNSUPPORTED, PublicationPhase.STAGING)
+            if sys.platform == "darwin":
+                _require_known_metadata(stage.descriptor)
             return
         stage.name = None
         if exact_name is not None and error_number == errno.EEXIST:
@@ -578,7 +651,9 @@ def _observe_replacement(
         raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONDITION)
     _require_supported_regular(named, parent.st_dev)
     include_digest = isinstance(condition, Match) and condition.revision.digest is not None
-    descriptor = _open_existing(parent_fd, leaf_name, parent.st_dev, readable=include_digest)
+    descriptor = _open_existing(
+        parent_fd, leaf_name, parent.st_dev, readable=include_digest or sys.platform == "darwin"
+    )
     try:
         revision = _observe_descriptor_revision(
             descriptor,
@@ -676,6 +751,9 @@ def _read_access_acl(descriptor: int) -> bytes | None:
 
 
 def _require_known_metadata(descriptor: int) -> set[str]:
+    if sys.platform == "darwin":
+        _metadata_call(require_plain_metadata, descriptor)
+        return set()
     names = set(_metadata_call(os.listxattr, descriptor))
     if names - {_ACCESS_ACL}:
         raise FilePublicationError(PublicationFailureKind.METADATA, PublicationPhase.METADATA)
@@ -753,25 +831,25 @@ def _observe_published(
 
 
 def _rename_noreplace(parent_fd: int, stage_name: str, leaf_name: str) -> None:
-    renameat2 = None
+    exclusive_rename = None
     try:
         libc = ctypes.CDLL(None, use_errno=True)
-        renameat2 = getattr(libc, "renameat2", None)
+        exclusive_rename = getattr(libc, "renameatx_np" if sys.platform == "darwin" else "renameat2", None)
     except OSError:
-        renameat2 = None
-    if renameat2 is None:
+        exclusive_rename = None
+    if exclusive_rename is None:
         raise FilePublicationError(PublicationFailureKind.UNSUPPORTED, PublicationPhase.PUBLICATION)
-    renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
-    renameat2.restype = ctypes.c_int
+    exclusive_rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    exclusive_rename.restype = ctypes.c_int
     ctypes.set_errno(0)
     failed = False
     try:
-        result = renameat2(
+        result = exclusive_rename(
             parent_fd,
             os.fsencode(stage_name),
             parent_fd,
             os.fsencode(leaf_name),
-            _RENAME_NOREPLACE,
+            _DARWIN_RENAME_EXCL if sys.platform == "darwin" else _RENAME_NOREPLACE,
         )
     except OSError:
         failed = True
@@ -831,6 +909,7 @@ def _cleanup_owned_stage(
             cleanup_publication_stage(stage.scratch_parent_fd, parent_fd, stage.publication)
         except PublicationReceiptError as error:
             assert error.cleanup_debt is not None
+            stage.publication = error.cleanup_debt
             return error.cleanup_debt
         except BaseException as interruption:
             receipt_error = _publication_receipt_control_fact(interruption)
@@ -839,8 +918,16 @@ def _cleanup_owned_stage(
                 cleanup_debt = receipt_error.cleanup_debt
             if isinstance(cleanup_debt, PublicationStageOwnership):
                 cleanup_debt = PublicationStageCleanupDebt(cleanup_debt, False)
+            if sys.platform == "darwin" and receipt_error is not None and prior is not None:
+                # Receipt cleanup reports current custody even if descriptor close failed.
+                prior = FilePublicationError(prior.kind, prior.phase, cleanup_debt=cleanup_debt)
+            stage.publication = cleanup_debt
+            if cleanup_debt is None:
+                stage.record_acquisition.identity = None
             _raise_control(interruption, prior=prior, cleanup_debt=cleanup_debt)
         stage.publication = None
+        stage.record_acquisition.identity = None
+        stage.name = None
         return None
     if stage.name is None:
         return None
@@ -855,20 +942,25 @@ def _close_publication_descriptors(
     replacement_fd: int | None,
     stage: _StageOwnership,
 ) -> BaseException | None:
+    """Close every handle, retaining Darwin's first non-I/O interruption."""
     interrupted: BaseException | None = None
+    close_descriptor = os.close if sys.platform == "darwin" else _close
     if replacement_fd is not None:
         try:
-            _close(replacement_fd)
+            close_descriptor(replacement_fd)
         except BaseException as control:
             interrupted = control
     if stage.descriptor is not None:
         try:
-            _close(stage.descriptor)
+            close_descriptor(stage.descriptor)
         except BaseException as control:
-            interrupted = control
+            if sys.platform != "darwin" or interrupted is None or isinstance(interrupted, OSError):
+                interrupted = control
     if stage.admission is not None:
         admission_control = stage.admission.close()
-        if admission_control is not None:
+        if admission_control is not None and (
+            sys.platform != "darwin" or interrupted is None or isinstance(interrupted, OSError)
+        ):
             interrupted = admission_control
     return interrupted
 

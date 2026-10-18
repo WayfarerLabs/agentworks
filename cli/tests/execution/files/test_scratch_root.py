@@ -116,9 +116,9 @@ def test_wrong_root_owner_is_unsafe(wrong_owner_root: Path) -> None:
     assert not tuple(wrong_owner_root.iterdir())
 
 
-def test_non_linux_host_is_unsupported_before_path_access(selected_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unsupported_host_refuses_before_path_access(selected_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     del selected_root
-    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(sys, "platform", "freebsd")
     monkeypatch.setattr(root_module, "open_linux_root", lambda _path: pytest.fail("path access attempted"))
 
     assert _failure().kind is ScratchRootFailureKind.UNSUPPORTED

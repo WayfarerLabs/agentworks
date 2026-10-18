@@ -5,6 +5,223 @@
 
 ## Findings
 
+### Consumer closure is distinct from a pipe fault
+
+The inspected CPython 3.12.13 `subprocess` implementation ignores broken input pipes during
+`communicate` and continues observing output and process completion. Decision: use the same ordinary
+consumer-close distinction for offered finite and live pipe input, without adding a required-input
+flag. Stop borrowing input on confirmed child exit or broken pipe, but retain bounded output
+collection and independent completion evidence. Complete helper requests are still validated by
+their receiver before effects. This is a design inference from finite-input prior art, not native
+proof of our live-source adapter or process owner. Do not copy CPython's status-loss fallback or
+infer safe handling of arbitrary Windows errors from its buffered-stdin special case.
+
+Source:
+[CPython 3.12.13 subprocess input handling](https://github.com/python/cpython/blob/v3.12.13/Lib/subprocess.py#L1037-L1059).
+
+### Lima delivery needs an observed account and an explicit bootstrap shell
+
+The 2026-10-18 source check uses [Lima v2.2.1](https://github.com/lima-vm/lima/releases/tag/v2.2.1),
+the latest published stable release at inspection. This selects research sources, not a new
+supported-version floor or native acceptance.
+
+The pinned shell implementation quotes command arguments but executes them through a login shell,
+even when a command and explicit `--shell` are supplied. It connects as the configured instance user
+and forwards its standard streams. Automatic start and reconnect are separate options. Decision:
+make the bootstrap shell intentional, keep application-shell policy above delivery, and disable
+implicit startup/reconnect in ordinary delivery. A successful local client status cannot by itself
+establish which guest bootstrap or application ran. These are source findings, not tested
+byte-stream, terminal or disconnect guarantees.
+
+Source:
+[v2.2.1 shell implementation](https://github.com/lima-vm/lima/blob/v2.2.1/cmd/limactl/shell.go).
+
+The instance JSON includes configuration, including `config.user.name`; the JSON listing uses the
+inspected instance model. This supplies a candidate bounded observation of the actual delivery
+account, distinct from Agentworks' separately provisioned admin. Decision: resolve and retain that
+observed account during explicit native preparation rather than infer it from the workstation user
+or admin row. Missing or invalid account facts must refuse, not fall back. Observation is not a
+durable provider incarnation identifier or a replacement for the recorded guest marker.
+
+Sources:
+[instance model](https://github.com/lima-vm/lima/blob/v2.2.1/pkg/limatype/lima_instance.go),
+[user configuration](https://github.com/lima-vm/lima/blob/v2.2.1/pkg/limatype/lima_yaml.go),
+[JSON listing](https://github.com/lima-vm/lima/blob/v2.2.1/cmd/limactl/list.go),
+[JSON printing](https://github.com/lima-vm/lima/blob/v2.2.1/pkg/store/instance.go).
+
+SSH placement-host endpoint/account/trust/runtime selection and platform-owned provisioning,
+rollback and availability still need independent implementation and native proof. The observation
+above does not provide those facts, migrate creation, or justify Lima-specific behavior in SSH.
+
+### Provider SDK invocation is not a dispatch boundary
+
+The 2026-10-09 locked-source audit finds that Azure compute 38.3.0 and network's default pipelines
+include automatic resource-provider registration. A failed GET can trigger registration POST,
+polling and another GET even with service retries disabled. Azure documents the registration policy
+and supports explicit pipeline policy lists. Decision: give only the new Azure read clients a policy
+boundary without registration and prove both actual SDK clients with scripted transports; leave
+legacy clients unchanged. The earlier local read fixtures did not cover this behavior.
+
+Sources:
+[registration policy](https://learn.microsoft.com/en-us/python/api/azure-mgmt-core/azure.mgmt.core.policies.armautoresourceproviderregistrationpolicy?view=azure-python),
+[explicit pipeline policies](https://learn.microsoft.com/en-us/python/api/azure-core/azure.core.pipelineclient?view=azure-python).
+
+The same audit finds that GCP's generated service-retry override does not disable its HTTP
+authentication refresh/resend or redirects. AWS's one-total-attempt configuration suppresses the
+locked ordinary EC2 retry path, but does not control arbitrary custom event handlers or credential
+provider requests. These are source findings, not observed one-shot mutation guarantees. Decision:
+prove actual provider transmissions before building each new activation producer; do not infer
+one-shot delivery from one SDK method call. Keep best-effort SDK timeouts distinct from hard total
+deadlines, and retain uncertainty rather than replaying an unknown mutation.
+
+### Azure and GCP mutation middleware proof
+
+The 2026-10-10 offline audit exercises locked Azure compute 38.3.0/core 1.38.3 and GCP compute
+1.52.0/auth 2.58.0 at their scripted HTTP transport boundaries. Its final 28 cases pass. GCP's
+generated start with service retries disabled still sends twice after a credential-refresh response
+or a redirect. Its generated transport does not expose the session controls needed to suppress those
+paths. A standalone public authorized session with refresh attempts and redirects disabled sends
+once in the tested cases; adopting that path still needs endpoint construction, bounded decoding and
+operation recovery. Do not patch private SDK session fields.
+
+Azure's ordinary pipeline also repeats sends on authentication challenges and redirects, and can
+submit a separate registration POST. An explicit policy list with zero retries, a public
+authentication challenge hook that declines resending, and no redirect or registration policy
+submits one POST in the tested cases. Disabling automatic polling is separately necessary. These
+counts describe the scripted service pipeline, not credential-provider requests, real socket
+delivery, server acceptance exactly once, request drain or native startup safety.
+
+Decision for the Azure producer: use the public compute client's streamed request method for the
+documented fixed start endpoint. The generated start method reads the initial response body before
+returning even with polling disabled. The public streamed path lets the adapter validate and retain
+only selected acknowledgment headers without reading a provider body or constructing a poller. The
+private producer now includes separate actual-SDK scripted transport tests for this path, covering
+one POST, zero GET and no response-body read, plus matching acknowledgment and returned-handle
+cleanup. The middleware audit alone did not establish those properties. Private producer review and
+scoped cleanup-entry/control regressions are complete; startup settlement and native proof remain
+separate. Scripted Python interruption cases do not establish atomic SDK-internal handoff or safety
+under arbitrary repeated signals.
+
+Sources:
+[public streamed request](https://learn.microsoft.com/en-us/python/api/azure-mgmt-compute/azure.mgmt.compute.computemanagementclient?view=azure-python),
+[authentication challenge hook](https://learn.microsoft.com/en-us/python/api/azure-core/azure.core.pipeline.policies.bearertokencredentialpolicy?view=azure-python),
+[Azure start endpoint](https://learn.microsoft.com/en-us/rest/api/compute/virtual-machines/start?view=rest-compute-2026-04-01).
+
+The 2026-10-18 completion research distinguishes the documented start endpoint's HTTP 200 success
+from HTTP 202 acceptance. ARM documents two monitor forms: prefer `Azure-AsyncOperation` and read
+its bounded status object; otherwise a Location monitor uses HTTP completion status. Decision: the
+new exact-incarnation producer records request-specific terminal evidence, not completion inferred
+from a running VM. A synchronous 200 without a monitor can establish success; any supplied monitor
+must be observed. Pending, malformed or missing evidence cannot settle an uncertain start. Old
+path-only payloads remain separate. This is a source-backed implementation decision, not observed
+native provider behavior or proof that a path-based selector atomically binds a UUID.
+
+Source:
+[ARM asynchronous operation tracking](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/async-operations).
+
+Azure documents power state separately from request provisioning state, including `Starting` and a
+brief `Stopped` observation while starting a deallocated VM. Decision: after known request success,
+observe supported startup transitions under the original finite budget before requiring running
+state. Do not submit another start or turn malformed/unknown power evidence into readiness.
+
+Source:
+[Azure VM power states](https://learn.microsoft.com/en-us/azure/virtual-machines/states-billing).
+
+Azure also documents case-insensitive resource/group names and permits response casing to differ
+from the requested name. Decision: new creation admission compares the validated selected identity
+components case-insensitively and records the exact returned path. This does not normalize stored
+paths, rewrite historical identity evidence or broaden the existing strict path parser.
+
+Source:
+[Azure resource naming rules](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules).
+
+### Azure temporary native SSH route
+
+The 2026-10-18 source research identifies separate evidence for the selected VM, its linked NIC and
+NSG, rule creation, rule removal and local SDK closure. NIC and NSG responses expose their resource
+GUIDs and forward/reverse associations. A shared `owner=agentworks` tag or a derived NSG name alone
+does not establish exclusive attachment to the selected VM. Decision: follow actual references,
+validate the selected VM back-reference and exclusive NIC-level NSG attachment, and refuse observed
+identity changes. Do not reject an otherwise matching linked resource just because its group or name
+differs from the original provisioning convention. GUID equality remains an observation, not an
+atomic mutation precondition.
+
+The opened rule PUT and DELETE documentation establishes the `2025-09-01` contract. PUT returns HTTP
+200/201, and an operation header can require further observation; DELETE documents HTTP 200/202/204
+and its examples include `Azure-AsyncOperation` even on HTTP 200. Some requested Learn versions
+redirect to other versions, and direct retrieval of the requested `2026-01-01` rule pages failed in
+this research. Decision: use the explicitly inspected stable rule version, not the view string of an
+unverified page. Keep header-aware request completion separate from fresh rule-state observation.
+Neither public rule contract inspected documents conditional create/delete support; an etag field is
+not evidence of a supported compare-and-swap operation.
+
+Microsoft also documents that a network resource whose provisioning failed can still function.
+Decision: any retained terminal PUT result permits cleanup of an exact matching owned leftover; only
+successful provisioning admits guest work. An already absent rule after a completed create needs no
+DELETE, but absence does not drain an unknown queued mutation. Removing an allow normally changes
+new-connection admission, not established SSH flows. Do not broaden cleanup into a whole NSG
+replacement or flow-reset mutation. Actual locked-SDK dispatch and native lifecycle proof remain
+separate acceptance work.
+
+Sources:
+[NIC GET](https://learn.microsoft.com/en-us/rest/api/virtualnetwork/network-interfaces/get?view=rest-virtualnetwork-2026-01-01),
+[NSG GET](https://learn.microsoft.com/en-us/rest/api/virtualnetwork/network-security-groups/get?view=rest-virtualnetwork-2026-01-01),
+[rule PUT](https://learn.microsoft.com/en-us/rest/api/virtualnetwork/security-rules/create-or-update?view=rest-virtualnetwork-2025-09-01),
+[rule DELETE](https://learn.microsoft.com/en-us/rest/api/virtualnetwork/security-rules/delete?view=rest-virtualnetwork-2025-09-01),
+[failed network provisioning](https://learn.microsoft.com/en-us/azure/networking/troubleshoot-failed-state),
+[NSG flow behavior](https://learn.microsoft.com/en-us/azure/virtual-network/network-security-groups-overview).
+
+### AWS start submission proof
+
+The 2026-10-09 offline proof uses locked boto3 1.43.92 and botocore 1.43.93 with ordinary query
+serialization, signing, parsing and retry handlers. Scripted final HTTP-send responses cover
+success, service failures, redirects, authorization failures and connection/read exceptions. With
+one total attempt, all twelve cases make one service send; three retry-enabled controls make two.
+All fifteen cases pass without network access, using isolated empty configuration and fake
+credentials. This proves the tested SDK dispatch path, not real credentials, socket delivery, server
+acceptance exactly once, request drain or native activation safety.
+
+The successful response identifies the selected instance's state change and includes a request ID;
+it is not a task-status handle. The public API has no caller-supplied start idempotency token. AWS
+documents pending as preparing to run, and a start can change the public IPv4 endpoint. Decision:
+retain exact acknowledgment without replay, keep startup settlement separate, and resolve the SSH
+endpoint again during later access preparation. A fresh running observation alone cannot settle a
+lost acknowledgment. The initial producer does not offer that inference.
+
+Sources:
+[StartInstances API](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_StartInstances.html),
+[instance state changes](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-lifecycle.html).
+The private factual report and scripted proof remain in the scoped SDK review environment; the
+durable finding above records the observed count and limits without depending on that scratch.
+
+AWS additionally documents that mutating requests can return before their asynchronous workflows
+complete and that later API reads are eventually consistent. Its default-idempotency list does not
+include `StartInstances`; the legacy start method's idempotency comment is not a request-recovery
+guarantee. The documented `LaunchTime` changes after stop/start and can supply progress evidence,
+but is neither an immutable instance identity nor a request-specific completion handle. Decision:
+keep the admission producer separate from successful-start settlement; do not infer request drain
+from acknowledgment, one changed timestamp or one running snapshot. The later access design still
+needs a reviewed provider-specific positive settlement rule and native evidence.
+
+Sources:
+[API idempotency](https://docs.aws.amazon.com/ec2/latest/devguide/ec2-api-idempotency.html),
+[eventual consistency](https://docs.aws.amazon.com/ec2/latest/devguide/eventual-consistency.html),
+[most recent launch time](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Stop_Start.html).
+
+The 2026-10-10 access design selects conventional observed-goal completion after a known matching
+successful acknowledgment, not request-specific drain. The official `InstanceRunning` waiter polls
+`DescribeInstances` by instance ID; it supplies resource-state observation, not a RequestId
+completion handle. The owned access uses bounded explicit reads and the exact selected identity,
+without that waiter or mutation replay. Running completes only an acknowledged start obligation;
+missing acknowledgment remains unknown. Eventual consistency and external lifecycle changes mean
+this rule cannot certify request termination or absence of later provider transitions. Guest
+readiness, endpoint trust, client closure, routes and other obligations remain separate. This
+supersedes the earlier deferred response decision, not the factual limits above; implementation and
+native proof remain open.
+
+Source:
+[official running waiter](https://docs.aws.amazon.com/boto3/latest/reference/services/ec2/waiter/InstanceRunning.html).
+
 ### Destination account discovery
 
 Python 3.11's Unix `pwd.getpwnam` supplies numeric UID and primary GID, with a missing account
@@ -453,6 +670,42 @@ demonstrate no secret reflection, preservation of the first interactive input, t
 and failure before application launch on malformed/truncated input. Client-side relay, real SSH,
 supported workstation coverage and honest application-start evidence remain open; none is
 established by studying this prior art.
+
+### Windows console preparation candidate
+
+The Windows OpenSSH source inspected at `e302fe1e` differs from the portable sizing path above:
+[`w32_ioctl(TIOCGWINSZ)`](https://github.com/PowerShell/openssh-portable/blob/e302fe1ed190e408573cf0139252e5db26eeba2f/contrib/win32/win32compat/misc.c#L484-L506)
+queries the child's standard output console handle. Giving the child console input while redirecting
+stdout to an ordinary pipe does not establish console geometry. Its
+[output worker](https://github.com/PowerShell/openssh-portable/blob/e302fe1ed190e408573cf0139252e5db26eeba2f/contrib/win32/win32compat/termio.c#L194-L220)
+handles console text differently from pipe bytes, so the NUL-containing setup frame is not presumed
+console-safe.
+
+Microsoft's [ConPTY contract](https://learn.microsoft.com/en-us/windows/console/createpseudoconsole)
+provides initial geometry and UTF-8 text with terminal sequences, not a byte-exact pipe. Decision:
+first prove one printable finite setup format and both existing handoff gates locally, then test
+that preparation through an owned native console child. This is an implementation candidate, not
+evidence that ConPTY preserves setup, exposes separate raw SSH diagnostics or delivers remote
+resize. Those observations and bounded process/console cleanup remain required before enabling
+Windows terminal delivery. No native Windows test was run for this source investigation.
+
+The current
+[pseudoconsole closure contract](https://learn.microsoft.com/en-us/windows/console/closepseudoconsole)
+allows closing the output pipe before releasing the pseudoconsole. Earlier Windows versions can wait
+indefinitely if that pipe is neither closed nor drained; starting with Windows 11 24H2, release
+returns immediately without proving that all clients disconnected. Decision: stop borrowers and
+close the output pipe before release, retain exact child observation separately, and prove native
+cleanup rather than introduce a separate teardown reader. This is a cleanup-order selection, not
+native acceptance or a descendant-containment claim.
+
+The
+[anonymous-pipe contract](https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-createpipe)
+leaves output parameters indeterminate on failure. Decision: record only confirmed acquisitions,
+never close a failed call's guessed handles, and retain previously acquired capabilities in one
+passive cell before attempting the next call. If a native acquisition returns no observed outcome,
+cleanup cannot report clean merely because no child was published. A local-child topology proof
+precedes integration of that cell into the existing process owner; fake API tests prove only the
+bookkeeping and failure boundaries.
 
 ## Early Python investigation, 2026-09-19
 
@@ -1108,6 +1361,85 @@ identity, so it is not itself proof of the transport's stale-reference guarantee
 Neither `--foreground` nor launchd establishes every MANAGED guarantee. The operator's subsequent
 coordination ruling keeps actual host resource lifecycle with the VM platform instead of requiring a
 generic macOS MANAGED supervisor; native platform recovery still needs proof.
+
+### Lima instance-generation evidence
+
+A follow-up audit pins Lima v2.2.1 to `27bc4c4b101e27994e01e36566a0f2091bbca507`. For Linux guests
+using VZ, the driver stores Apple's opaque machine-identifier bytes in the instance directory's
+`vz-identifier`. It reuses nonempty data and generates new data when the file is absent or empty.
+This is a concrete generation-evidence candidate, not an approved universal Lima locator: no
+equivalent QEMU generation identity or supported-version range has been proved. Source:
+[VZ identifier construction](https://github.com/lima-vm/lima/blob/27bc4c4b101e27994e01e36566a0f2091bbca507/pkg/driver/vz/vm_darwin.go#L810-L829).
+
+Clone handling empties `vz-identifier` explicitly. Other instance files are generally copied except
+the documented exclusions and temporary suffixes. Consequently, adding an arbitrary Agentworks nonce
+file under the instance directory would not by itself distinguish a clone: the clone could inherit
+it. Do not implement or approve a marker on the assumption that Lima discards unknown metadata.
+Sources:
+[clone exclusions](https://github.com/lima-vm/lima/blob/27bc4c4b101e27994e01e36566a0f2091bbca507/pkg/limatype/filenames/filenames.go#L104-L117),
+[clone implementation](https://github.com/lima-vm/lima/blob/27bc4c4b101e27994e01e36566a0f2091bbca507/pkg/instance/clone.go).
+
+Decision: use a versioned local locator over site/placement, pinned absolute Lima home, instance and
+the actual directory device/inode. Hold the original directory and compare the named path around
+observations and before effects. This detects ordinary replacement and separately materialized
+same-name clones; it is not a generation that cannot be copied or protection against engineered
+inode reuse. In-place restore continuity requires explicit workflow disposition. The random guest
+marker and complete boot/init identity remain independent checks; ordinary access never resets the
+marker. Driver-specific source facts do not require a new minimum version, driver restriction, host
+nonce or privileged setup. Remote placement-host identity still needs its own composition and proof.
+
+Lima's [list implementation](https://github.com/lima-vm/lima/blob/v2.2.1/cmd/limactl/list.go)
+supports a fixed JSON projection through `--yq`. Retain selected identity, status, driver and
+delivery user plus an inspection-error boolean; raw configuration and errors need not cross the
+boundary. [Store inspection](https://github.com/lima-vm/lima/blob/v2.2.1/pkg/store/instance.go) can
+retire stale PID files. The
+[WSL driver](https://github.com/lima-vm/lima/blob/v2.2.1/pkg/driver/wsl2/wsl_driver_windows.go) can
+invoke guest address commands while inspecting a running instance. Therefore ordinary `list` is not
+a universally guest-passive power observation. A non-waking path remains a gate for that driver, and
+QEMU/VZ runtime evidence cannot confer independent availability on every driver.
+
+For Windows directory custody, CPython's host minimum of 3.12 already supplies full native volume
+and file identity through `os.stat`; the guest-helper 3.11 minimum is separate. Compare the held
+native handle's full ID against that path snapshot, rather than acquiring Python-owned temporary
+observation handles. Sources:
+[native stat conversion](https://github.com/python/cpython/blob/v3.12.13/Python/fileutils.c#L1027-L1087)
+and
+[integer mapping](https://github.com/python/cpython/blob/v3.12.13/Modules/posixmodule.c#L1954-L2005).
+Synthetic Windows mappings and Linux fixtures do not supply native Windows or Lima evidence.
+
+### Lima non-waking Windows observation
+
+The private provider snapshot now uses host registration plus `wsl --list --verbose` for WSL,
+reserving Lima's guest-capable delivery-user inspection for authorized running availability. The
+[upstream WSL implementation](https://github.com/lima-vm/lima/blob/v2.2.1/pkg/driver/wsl2/vm_windows.go)
+names distributions `lima-<instance>` without the Lima home. Therefore selection also compares the
+registered installation directory, machine, account SID and registration GUID. Absence is a possible
+first import, not permission to adopt an unrelated existing registration. One natural successful
+start and fresh matching running evidence permit that transition; lost acknowledgment does not.
+
+Driver defaults cannot be inferred from the Python workstation architecture or one Lima release. The
+source audit distinguishes these Windows cases:
+
+| Lima family       | Implicit Windows driver                                                         | Source                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| 0.18 through 0.23 | QEMU; empty/default values resolve as implicit                                  | [0.23 defaults](https://github.com/lima-vm/lima/blob/v0.23.0/pkg/limayaml/defaults.go) |
+| 1.0 through 1.2   | QEMU; scan override, instance and default for an explicit non-placeholder value | [1.2 defaults](https://github.com/lima-vm/lima/blob/v1.2.1/pkg/limayaml/defaults.go)   |
+| 2.0               | WSL, including non-native architecture                                          | [2.0 resolver](https://github.com/lima-vm/lima/blob/v2.0.0/pkg/driverutil/vm.go)       |
+| 2.1               | WSL for native architecture, QEMU otherwise                                     | [2.1 resolver](https://github.com/lima-vm/lima/blob/v2.1.0/pkg/driverutil/vm.go)       |
+| 2.2               | QEMU; only an absent driver selects the implicit default                        | [2.2 resolver](https://github.com/lima-vm/lima/blob/v2.2.1/pkg/driverutil/vm.go)       |
+
+This adds no minimum version and does not extrapolate unknown defaults. Explicit built-in selections
+can avoid a version query. The ambiguous 2.1 architecture case reads the selected Windows client's
+bounded PE machine header, not the Python host architecture; emulation can make them differ. The
+[Microsoft PE specification](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format)
+defines the signature offset and machine field. Unknown wrappers or machine types remain unconfirmed
+rather than allowing a potentially guest-capable inspector. A full user/config merger is not needed:
+Lima resolves the native account, while later checks pin the three YAML inputs and the instance
+`lima-version` used by
+[upstream defaults](https://github.com/lima-vm/lima/blob/v2.2.1/pkg/limayaml/defaults.go).
+
+These are source and local fixture conclusions. They do not prove native Windows behavior or a WSL
+availability hold; observing running power cannot prevent subsequent idle shutdown.
 
 ### Darwin ownership feasibility
 

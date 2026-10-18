@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from agentworks.errors import ValidationError
 from agentworks.execution._file_download import FileDownloadOutcome, FileDownloadStatus
 
 if TYPE_CHECKING:
@@ -46,6 +47,8 @@ def read_file(
     operation: FileOperation,
 ) -> FileMemoryReadOutcome:
     """Materialize one complete verified download within the caller's bound."""
+    if max_bytes <= 0:
+        raise ValidationError("In-memory file reads require a positive byte bound")
     sink = _MemorySink()
     try:
         download = operation.download(

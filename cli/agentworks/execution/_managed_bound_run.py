@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 
 class ManagedDeadlineExpired(ValidationError):
-    """A bound managed read was refused before borrowing because time elapsed."""
+    """A bound managed observation refused its elapsed allowance before borrowing."""
 
 
 def preflight_bound_run(

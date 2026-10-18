@@ -53,7 +53,7 @@ class LocalCarrier:
 
     @property
     def features(self) -> ChannelFeatures:
-        return ChannelFeatures()
+        return ChannelFeatures(live_stdio=True)
 
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         pass
@@ -69,7 +69,12 @@ class LocalCarrier:
         self.validate(invocation, io=io)
         self.calls += 1
         result = run_fixture_process(
-            list(invocation.argv), io=io, deadline=deadline, custody=custody, standalone_custody=self.local_delivery
+            list(invocation.argv),
+            io=io,
+            deadline=deadline,
+            custody=custody,
+            standalone_custody=self.local_delivery,
+            live_stdio=True,
         )
         completion = None
         if result.exit_status is not None:
@@ -312,7 +317,7 @@ def test_capture_overflow_retains_limit_and_reports_truncation(plan: IdentityPla
     for stream, expected in ((observation.stdout, b"o"), (observation.stderr, b"e")):
         assert stream is not None
         assert stream.data == expected * 4_096
-        assert stream.retained == 4_096
+        assert stream.count == 4_096
         assert stream.truncated and not stream.complete
         assert stream.retention is StreamRetention.CAPTURED
     assert observation.trusted_terminal
@@ -375,7 +380,7 @@ def test_discard_reports_safe_stream_facts_without_data(plan: IdentityPlan) -> N
     assert observation is not None
     for stream in (observation.stdout, observation.stderr):
         assert stream is not None
-        assert stream.data == b"" and stream.retained == 0
+        assert stream.data == b"" and stream.count == 0
         assert stream.complete and not stream.truncated
         assert stream.retention is StreamRetention.DISCARDED
 

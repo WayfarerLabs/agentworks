@@ -277,9 +277,7 @@ class RecoveryVMSpan:
             if selected is None:
                 raise StateError("Recovery span native route is unavailable")
             binding = selected.binding
-            self._batch = RecoveryGuestPreparationBatch(
-                binding, self._owner, self._preparation_id, provider_custody=self._local_delivery
-            )
+            self._batch = RecoveryGuestPreparationBatch(binding, self._owner, self._preparation_id)
             _validate_inputs(
                 delivery_account=binding.delivery_account,
                 workload_account=self._workload_account,
@@ -299,11 +297,11 @@ class RecoveryVMSpan:
             preparation = self._batch.prepare(
                 current,
                 self._platform,
-                self._ctx,
                 selected._selected_locator,  # noqa: SLF001
                 workload_account=self._workload_account,
                 include_elevated=True,
                 deadline=deadline,
+                observe_locator=selected.observe_locator,
             )
             guest_preparation, identity = preparation.guest, preparation.identity
             if (

@@ -14,12 +14,14 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import VMRow
 from agentworks.errors import ConfigError, StateError, ValidationError
 from agentworks.execution._helper_launcher import IdentityMode
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution.binding import _IndependentJobAvailability
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier
 from agentworks.execution.carriers.wsl2 import WSL2Carrier
@@ -96,6 +98,7 @@ def test_wsl2_binding_is_passive_and_uses_recorded_distribution_and_admin(
         "wsl",
     )
     assert binding.delivery_account == "delivery-user"
+    assert binding._independent_availability is None
     assert binding.runtime_selection == RuntimeSelection(RuntimeTargetOS.LINUX)
     early = binding._early_guest_facts_route
     assert early is not None
@@ -189,6 +192,7 @@ def test_proxmox_binding_uses_scoped_secret_platform_metadata_and_verified_conne
     assert connection.token_secret == _SECRET
     assert connection.ca_bundle == Path("/trust/cluster-ca.pem")
     assert binding.delivery_account == "root"
+    assert binding._independent_availability is _IndependentJobAvailability.NO_IDLE_STOP
     assert binding.runtime_selection == RuntimeSelection(RuntimeTargetOS.LINUX)
     assert binding._early_guest_facts_route is None
     assert binding._new_managed_delivery is not None
@@ -295,7 +299,8 @@ def test_unimplemented_platform_hook_fails_without_making_old_subclass_abstract(
     platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
 
     with pytest.raises(StateError) as raised:
-        platform.resolve_native_execution_binding(
+        VMPlatform.resolve_native_execution_binding(
+            platform,
             _vm(metadata={"instance_name": "vm-one"}),
             RunContext(),
             deadline=Deadline(None),

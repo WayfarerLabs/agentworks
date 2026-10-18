@@ -49,11 +49,38 @@ direct-request envelope; `execute` repeats validation before effects. Readiness,
 connectivity and delivery remain with `execute`. The SSH implementation of this shared method is
 supplied by its separate owner handoff, not by the private managed-start slice.
 
-`Failure.INPUT` records failed or incomplete required input delivery; intentional consumer closure
-is not automatically a failure. `Failure.OUTPUT` records failed output collection, including a
-stream whose EOF cannot be established within the carrier's collection bound. `OUTPUT_LIMIT` is the
-distinct capture-limit outcome. These local failures preserve independently observed completion and
-partial-stream evidence; none establishes guest cancellation or permits replay.
+`Failure.INPUT` records source faults, invalid source results and input-pipe failures other than
+ordinary consumer closure. Offered input need not all be consumed. `Failure.OUTPUT` records failed
+output collection, including a stream whose EOF cannot be established within the carrier's
+collection bound. `OUTPUT_LIMIT` is the distinct capture-limit outcome. These local failures
+preserve independently observed completion and partial-stream evidence; none establishes guest
+cancellation or permits replay.
+
+`carriers/lima.py` provides private buffered delivery through an explicit host-local Lima client and
+instance. It uses the caller's existing delivery custody and original deadline. Automatic start,
+reconnect, terminal UI and host-environment propagation are disabled. The bootstrap shell is
+explicitly Bash; Lima still runs its outer login startup hooks. A fixed non-login Bash trampoline
+executes literal prepared argv, including executable names containing `=` or beginning with `-`,
+without confusing them with environment assignments or options. This does not select the
+application's shell or bypass the outer login hooks. Zero client completion is only an outer
+command-chain observation; nonzero status cannot distinguish a Lima refusal from a remote exit.
+Local process fixtures prove the trampoline and I/O mapping, not Lima's remote quoting or native
+macOS/Windows behavior. The owned local platform composition below selects the actual configured
+delivery account and activation; that source implementation is not native acceptance. Live and
+terminal I/O are unavailable in this private carrier.
+
+Local Lima selection separates provider observations from native delivery-user resolution. A bounded
+host-input classifier admits known built-in drivers before invoking inspection; version-sensitive
+defaults use observed client evidence. WSL power uses only host registration and
+`wsl --list --verbose` before availability, avoiding Lima inspection's guest address commands.
+Selection checks the registration's machine, SID, GUID, name and installation directory against the
+held instance. Only the existing one-shot successful start plus matching running evidence can adopt
+a first import's new GUID. Native user resolution then uses Lima and pins instance/global YAML and
+`lima-version` fingerprints for later checks. The private operation-length WSL hold follows
+activation/registration adoption and precedes user lookup or canonical guest preparation. It
+requires durable READY plus live native ownership, matches guest boot/init identity, and retains the
+exact hold and directory through uncertain cleanup. Native Windows/Lima acceptance remains open;
+this does not provide an independent-job hold or complete remote platform-host composition.
 
 The private managed-start exchange stages the five fixed protected request assets and invokes the
 first-party derived Linux service controller through one transient root systemd service. An
@@ -107,17 +134,19 @@ uncertain obligation keeps owner custody. Recovery, later job actions, native SS
 RunContext delivery remain open.
 
 `models.py` defines immutable literal commands and scripts with explicit `Shell.SH`, `Shell.BASH` or
-`Shell.USER_DEFAULT` selection and separate startup flags. It also defines finite `Input`, bounded
-capture or discard `Output`, and explicit operation or independent `Lifetime` values. `profiles.py`
-defines the requested DIRECT and MANAGED protection values without making either one available
-implicitly. `preparation.py` consumes command and script values with ordinary environment/cwd and
-finite input. Source, environment and input are encoded into stdin, not process arguments. The Linux
-bootstrap needs Bash 5.1 or newer, GNU base64/env and `/dev/fd`; destination account-shell lookup
-also needs getent/id. It uses no installed guest helper, Python or staging files. Login and
-interactive startup are explicitly refused by this proof subset. Preparation accepts at most 256 KiB
-of encoded input; carriers can impose smaller documented delivery limits. Bash's saved
-process-substitution waits require the 5.1 floor; local fault-injection evidence currently covers
-Bash 5.2.15, not every version at or above that floor.
+`Shell.USER_DEFAULT` selection and separate startup flags. It also defines finite or borrowed live
+`Input`, bounded capture, discard or borrowed live `Output`, and explicit operation or independent
+`Lifetime` values. Live endpoints use non-blocking `try_read` and `try_write`; construction performs
+no stream I/O and endpoint values have no diagnostic representation. `profiles.py` defines the
+requested DIRECT and MANAGED protection values without making either one available implicitly.
+`preparation.py` consumes command and script values with ordinary environment/cwd and finite input.
+Source, environment and input are encoded into stdin, not process arguments. The Linux bootstrap
+needs Bash 5.1 or newer, GNU base64/env and `/dev/fd`; destination account-shell lookup also needs
+getent/id. It uses no installed guest helper, Python or staging files. Login and interactive startup
+are explicitly refused by this proof subset. Preparation accepts at most 256 KiB of encoded input;
+carriers can impose smaller documented delivery limits. Bash's saved process-substitution waits
+require the 5.1 floor; local fault-injection evidence currently covers Bash 5.2.15, not every
+version at or above that floor.
 
 `result.py` defines immutable public outcome facts without wiring them into production execution.
 Application progress and status precision remain separate from carrier dispatch evidence. Output
@@ -142,13 +171,28 @@ these values, never carrier, account, command, path, provider, credential, outpu
 `access.py` contains a private, non-production `ExecutionAccess` increment. It binds an existing
 `ExecutionOperation`, carrier, runtime, ordinary and optional elevated identity plans, logical
 diagnostic identity, and deadline policy. Its `run(...)` accepts the intended stable foreground
-options for DIRECT inline execution and MANAGED launch followed by wait, initially with OPERATION
-lifetime only. Both preserve finite input, capture/discard/sensitivity policy and bound identity or
-elevation choices. Independent lifetime, non-Linux runtime, unsupported shell startup, unavailable
-elevation, invalid values and initially expired deadlines refuse before workload launch. DIRECT
-performs one preparation and dispatch attempt, then uses the contextual result reducer. It is not
-exported from the package root, placed in an `ExecutionTarget`, or supplied through RunContext. Its
-private `start(...)` now accepts explicit MANAGED protection and OPERATION lifetime for finite
+options for DIRECT inline execution and MANAGED launch followed by wait. MANAGED also accepts
+INDEPENDENT lifetime under an exact core RESOURCE namespace and an explicit no-idle-stop platform
+binding. OPERATION execution also accepts borrowed live input and explicit live output on a
+live-capable carrier. Both preserve input, capture/discard/sensitivity policy and bound identity or
+elevation choices. DIRECT independent lifetime, non-Linux runtime, unsupported shell startup,
+unavailable elevation, invalid values and initially expired deadlines refuse before workload launch.
+DIRECT performs one preparation and dispatch attempt, then uses the contextual result reducer. It is
+not exported from the package root or supplied through RunContext.
+
+Core may bind `_BoundEnvironment` to this view: a copied immutable final payload environment,
+separate core-protected values and explicit sensitivity provenance. Per-call `env` overrides
+ordinary values; a different protected value refuses before effects, while an equal value is
+permitted. Protection follows the core-supplied keys, not a guessed namespace.
+`with_env(env, sensitive=...)` returns a passive view over the exact same operation, carrier,
+identities and deadline policy. Neither caller mapping mutation nor later overrides can lower bound
+sensitivity. DIRECT and managed execution, both managed lifetimes and explicit elevation use the
+same composed values and effective sensitivity. Buffered sensitive output remains suppressed;
+explicit live output remains presentation without retained output. This layer resolves no config or
+secrets and never exports payload values into the helper or client environment. Production context
+population remains incomplete.
+
+Its private `start(...)` accepts explicit MANAGED protection and either admitted lifetime for finite
 commands or scripts with SH, BASH or USER_DEFAULT selection, including optional elevation.
 USER_DEFAULT freezes and validates the finite body before observing the selected workload account's
 supported shell through the operation's tracked helper lifetime. The shell is resolved before
@@ -174,45 +218,279 @@ describes the whole verified capture, not consumption of this returned slice; in
 suppression leaves it false without an output-limit failure. Wait returns the existing
 `ExecutionResult` with a safe managed reference and never stops the workload or drains renewal.
 MANAGED `run` composes that same launch and wait without requiring a separate caller-facing start
-step. It selects its finite observation budget once for both phases; acknowledgement that exhausts
-the budget still returns UNKNOWN application progress, DEADLINE, incomplete output with the
+step. Live work first validates the relay passively, before shell lookup or managed reservation.
+After settled launch and keeper admission, it borrows one foreground relay under the same owner. The
+controller owns one private socket and delays workload entry until the one-use attachment is bound;
+a fixed pre-entry window prevents an unattached setup child from living indefinitely. Pipe pressure
+cannot block lease observation or cleanup. The relay's remaining finite allowance bounds every guest
+wait, without cancelling the job when observation ends. Retained run state contains direction
+metadata, not caller endpoints. `start` and independent lifetime reject live endpoints. Explicit
+live output has no durable spool. Its foreground result requires actual stream delivery and drained
+sinks separately from durable application status and resource closure. A later successful wait
+cannot erase a pipe failure or reconstruct presentation from discarded output. Unsettled relay
+custody prevents another poll, and escaping controls retain their original identity and safe job
+reference.
+
+It selects its finite observation budget once for launch, relay and wait; acknowledgement that
+exhausts the budget still returns UNKNOWN application progress, DEADLINE, incomplete output with the
 effective retention policy, and its safe `JobRef`, without further I/O or cleanup. Checked MANAGED
 run and wait use the bound logical entity and existing contextual checker, preserving the exact
 result/reference; known application failures remain application-phase, while deadline and
-observation-collection failures retain observation phase. Start's existing overlap boundaries can
-retain a reservation and keeper-admission uncertainty when ownership is already borrowed, or
-admitted initial-clock keeper evidence when a later borrow refuses actual launch. Foreground
-composition does not bypass or erase either retained state. Stop first acquires the whole owner's
-ordinary serial borrow, then drains only the selected OPERATION keeper. RESOURCE stop owns no keeper
-and never adopts the independent job. Both deliver through the existing lifetime row and actual
-borrowed helper attempt, retaining unknown helper debt before any fresh observation. An overlapping
-file or other component's borrow refuses before drain or dispatch. Accepted intent is independent of
-proved termination; RESOURCE stop requires a fresh exact observation for closure and shares its
-original finite deadline. Its settled helpers reuse the same empty-payload lifetime row, while
-unknown helper custody blocks new work and observer finish. Observer finish never stops or cleans
-the independent job. OPERATION disposal observes terminal proof before draining; active or unproved
-work stays not ready without stopping it. RESOURCE disposal likewise requires fresh positive exact
-terminal proof before its first effect, but never owns a keeper or adopts the job. It uses a
-dedicated run-ID-only `managed-dispose` obligation in the same actual helper tracker. A pending
-disposal retains its exact receipt and positive terminal observation for later explicitly requested
-retries, including after guest artifacts have disappeared. Helper termination is not disposal
-settlement: only a known no-delivery result or a clean validated NOT_READY/DISPOSED response can
-resolve the action. A retry's no-delivery result cannot erase an earlier unresolved remote action.
-Uncertain stop or disposal remains distinct from a proved refusal. Unknown helper custody blocks
-ordinary admission and finish; bookkeeping retries and finish never dispatch disposal. A resolved
-prior action receipt permits a fresh attempt ID, not rearming or an inference that disposal
-succeeded. RESOURCE closure requires a reconciled reservation, authentic launch, both stream ends,
-positive boundary-empty and positive exact controller termination under a settled helper. A missing
-WAIT preserves UNKNOWN application precision without blocking proved resource closure; live or
-unknown controller state can still be polled within the original deadline. No RESOURCE terminal
-observation is cached on an owned run. These private controls do not establish independent launch,
-duration availability, session namespaces or a public RunContext surface.
+observation-collection failures retain observation phase. OPERATION start's existing overlap
+boundaries can retain a reservation and keeper-admission uncertainty when ownership is already
+borrowed, or admitted initial-clock keeper evidence when a later borrow refuses actual launch.
+Foreground composition does not bypass or erase either retained state. Stop first acquires the whole
+owner's ordinary serial borrow, then drains only the selected OPERATION keeper. RESOURCE stop owns
+no keeper and never adopts the independent job. Both deliver through the existing lifetime row and
+actual borrowed helper attempt, retaining unknown helper debt before any fresh observation. An
+overlapping file or other component's borrow refuses before drain or dispatch. Accepted intent is
+independent of proved termination; RESOURCE stop requires a fresh exact observation for closure and
+shares its original finite deadline. Its settled helpers reuse the same empty-payload lifetime row,
+while unknown helper custody blocks new work and observer finish. Observer finish never stops or
+cleans the independent job. OPERATION disposal observes terminal proof before draining; active or
+unproved work stays not ready without stopping it. RESOURCE disposal likewise requires fresh
+positive exact terminal proof before its first effect, but never owns a keeper or adopts the job. It
+uses a dedicated run-ID-only `managed-dispose` obligation in the same actual helper tracker. A
+pending disposal retains its exact receipt and positive terminal observation for later explicitly
+requested retries, including after guest artifacts have disappeared. Helper termination is not
+disposal settlement: only a known no-delivery result or a clean validated NOT_READY/DISPOSED
+response can resolve the action. A retry's no-delivery result cannot erase an earlier unresolved
+remote action. Uncertain stop or disposal remains distinct from a proved refusal. Unknown helper
+custody blocks ordinary admission and finish; bookkeeping retries and finish never dispatch
+disposal. A resolved prior action receipt permits a fresh attempt ID, not rearming or an inference
+that disposal succeeded. RESOURCE closure requires a reconciled reservation, authentic launch, both
+stream ends, positive boundary-empty and positive exact controller termination under a settled
+helper. A missing WAIT preserves UNKNOWN application precision without blocking proved resource
+closure; live or unknown controller state can still be polled within the original deadline. No
+RESOURCE terminal observation is cached on an owned run. RESOURCE start freezes the caller body
+before shell lookup, then retains its generated identity, planned receipt, output policy and actual
+helper/borrow before reservation. It uses a dedicated run-ID-only `managed-start` row in the
+existing tracker and the same dispatch kernel as originating OPERATION and standalone starts.
+Candidate publication precedes receipt reconciliation; a confirmed receipt cannot hide actual helper
+or local delivery debt. Interrupted reservation is inspected exactly without reserving or launching
+again. Exact real wrapper/owner/attempt proof of never entering delivery, or a supported NOT_SENT
+candidate with actual local settlement, can resolve only its START action, leaving a
+POSSIBLE_DISPATCH run unchanged and unacknowledged; neither fabricates receipt absence. Each
+ownership caller settles actual delivery separately and preserves observed launch precision if
+settlement is interrupted. Bookkeeping and finish never launch, and an acknowledged independent job
+has no operation keeper or aggregate job cleanup owner. Foreground RESOURCE run shares its original
+deadline with wait; a cause-free expiry before the first observation uses only its same-invocation
+acknowledgement and frozen output policy. Explicit wait receives no such acknowledgement. Proxmox,
+AWS, Azure and GCP currently supply the immutable no-idle-stop fact, separate from live operation
+and prepared guest admission. WSL2 leaves it absent and refuses independent launch, even with an
+operation command hold; a physical recoverable job-length availability hold remains future work.
+Explicit VM stop/reboot and host loss are outside that no-idle-stop fact. These private increments
+do not establish all-platform duration availability, session namespaces or a public RunContext
+surface.
 
-`ExecutionOperation` requires an explicit managed target matching its owner's scope. An optional
-numeric bootstrap must match that VM's derived boot identity; platform-host targets cannot select
-it. The operation forwards its immutable context before preparation and borrowing, while each call
-keeps its explicit body identity. The private native VM factory constructs the shared bootstrap from
-its prepared elevated plan and actual full guest for WSL2 and Proxmox VMs. WSL2 retains its actual
+The private VM composition acquires the exact VM owner and validates the selection, then retains the
+passive `VMPlatform.build_native_execution_access()` result before provider work. Native mode runs
+its optional pure `native_configuration_check` before the first power read. Canonical mode instead
+validates the stored literal `tailscale_host`, administrative account and operator SSH policy before
+retaining access, and skips native-only requirements. The same access, owner, local custody and
+original deadline cover power observation and preparation. Unsupported state, expired observation or
+operator-stopped intent refuses preparation without activation, holds, routes or guest work.
+
+`ensure_available(power, deadline)` retains platform activation/holds and returns the selected
+provider locator independently of native delivery. `prepare_native_route(deadline)` then selects the
+native binding and any route exposure. Core owns the shared guest preparation and its partial
+control facts before invoking an optional platform `guest_check`. WSL2 compares that guest against
+its retained hold's durable READY; it does not replace the physical hold with bookkeeping. GCP
+availability requires provider identity/power, not a public NAT endpoint. Proxmox activation,
+guest-agent readiness and QGA binding reuse the selected API connection, while fresh platform
+observers retain their existing separate read custody.
+
+Initial failures retain the same access for cleanup and, when retirement is uncertain, cleanup
+retry. The access keeps platform activation and hold custody; core retains shared guest/account
+preparation, closes child work and local delivery, checks the complete ledger, seals obligations and
+releases the aggregate owner. WSL2, Proxmox, AWS, Azure, GCP and local Lima supply these private
+stages. Canonical SSH uses that same availability without opening native public ingress or first
+probing through native guest delivery. Both routes bracket successful initial guest/admin/agent
+preparation with their selected route check. Complete platform coverage, native acceptance and the
+public RunContext surface remain pending.
+
+Local Lima pins the selected client, absolute `LIMA_HOME`, instance directory and configured
+delivery account. Its bounded `list --format=json --yq` projection retains selected facts and an
+error boolean, not raw configuration or diagnostics. The provider locator binds the site/local
+placement, home, instance and directory device/inode. Access holds the original directory and checks
+its named path around observations; Windows uses the existing native handle API and full file ID.
+Ordinary replacement is detected, but engineered inode reuse and in-place restore require explicit
+workflow disposition. The persisted guest marker and complete boot identity remain independent
+requirements.
+
+Startup registers one exact lifecycle obligation before possible dispatch, invokes ordinary
+`limactl start` once and requires both natural zero client completion and fresh exact running
+evidence to settle it. Lima retains its own continuing VM runtime; aggregate cleanup never stops
+that intended resource or repeats startup. Lost completion remains debt. `list` is not strictly
+read-only: upstream inspection can retire stale PID files, and the Windows WSL driver can issue
+guest address commands. A non-waking WSL-driver power path, native workstation tests and generalized
+SSH platform-host composition remain acceptance gates, not implicit support claims.
+
+`plugins/aws/_native_access.py` supplies private, passive `EC2OwnedAccess` for exact power, locator
+and public-endpoint observations and the AWS owned native access factory. The caller retains it
+before observing; configured credential selection remains explicit, without the legacy EC2 client
+cache or fallback to another mode. One original returned EC2 read client is retained before
+dispatch, with exact stored account/region/instance validation, deadline-derived SDK budgets and one
+total service attempt. Ordinary close failure preserves the earlier result or error and leaves
+`cleanup_incomplete` true. Cleanup retries only that original; a normal public close clears the
+slot. An occupied slot or closed access refuses further observations. An already escaping control
+exception remains primary if cleanup is interrupted.
+
+`plugins/aws/_owned_auth.py` retains configured-role STS clients separately from the EC2 read
+client. The SDK keeps its deferred refresh, cache and valid-credential advisory behavior. The helper
+binds the access's original deadline before construction/signing and closes each returned STS
+original after refresh. Failed closure retains that original. Post-signing send checks refuse
+expired work and unresolved STS custody even when the SDK suppresses an advisory refresh error.
+Teardown attempts both retained clients without refreshing credentials or replaying a request.
+
+`EC2Activation` accepts that same optional configured-role helper. Its caller serializes and admits
+the helper around startup; the retained EC2 client checks it before `StartInstances` sends. The
+producer's finite-deadline `close` makes later startup admission terminal and retries only its
+retained EC2 original. It neither retires STS nor observes or resolves the start obligation. Private
+producer SDK errors remain SDK errors; public access-layer translation is a separate boundary.
+
+These slots cover returned EC2/configured-role STS originals, not SDK constructor handoff or
+arbitrary ambient credential providers. Scripted actual-SDK tests use synthetic credentials; normal
+public close does not establish physical socket drain, request termination or native acceptance.
+Preparation retains one start submission when needed, observes supported pending/stopped transitions
+in the foreground under the original deadline, and resolves only an acknowledged start with fresh
+exact-running evidence. Cleanup can observe that existing start under a fresh finite cleanup
+deadline without admitting another start or reopening preparation. Missing acknowledgment remains
+unresolved even when the VM is running. Lost resolution replies reconcile the exact owned row.
+
+`plugins/aws/_native_route.py` owns temporary SSH ingress by exact returned rule ID and a per-rule
+nonce description. It verifies instance/group ownership, plans prefixes once, checks revoke
+permission before authorization and durably admits each effect before dispatch. Preexisting tuples
+are refused, not adopted. Cleanup validates owned rule identity and fresh absence; a missing or
+invalid authorization receipt retains possible effect. `DescribeSecurityGroupRules` is required. The
+access binds the fresh endpoint using independent SSH policy, supplies the same owned locator
+observer to shared guest preparation, and rechecks endpoint and route before later work. It settles
+its own clients and effects, never stops the VM merely because it started it, and never closes the
+outer operation owner.
+
+`vms/_ssh_native_exposure.py` provides per-access prefix discovery without a process cache. AWS
+retains it before discovery, bounds the response body to 64 bytes and uses a timeout no greater than
+five seconds or the original remaining budget. Failed public response closure retains the original,
+blocks route admission and permits cleanup-only retry. Explicit configured prefixes remain the
+fallback after ordinary discovery failure, but not after expiry or uncertain response retirement.
+Public close, including HTTPError wrapper behavior, is not proof of physical socket drain.
+Synchronous DNS, reads and close retain best-effort rather than hard-preemption limits. Native
+cloud/SSH acceptance, restart recovery factories, independent job availability and complete
+RunContext admission remain unproved.
+
+`plugins/azure/_native_access.py` stages private `AzureOwnedReadAccess` observations. Passive
+construction requires a recorded complete ARM path and unique VM ID; reads compare both, without
+adopting an existing VM or modifying its records. One read-client slot retains the original public
+handle through uncertain close. Compute must positively retire before linked network reads begin;
+the read client retires before the selected credential. Ambient browser fallback requires positive
+retirement of the failed default credential first. SDK failures expose class-only diagnostics
+without retaining secret-bearing exception chains; original core and control errors remain intact.
+This is not a native access factory or proof of SDK-internal drain, new-VM identity recording,
+startup settlement, routes, guest preparation or RunContext admission.
+
+`plugins/gcp/_native_access.py` supplies private `GCEOwnedRead` observations. Its small
+power/locator projection stays separate from the full native projection of the selected NIC,
+external NAT, tags and service-account emails. Both compare the recorded instance ID, name, project
+and zone without fetching unrestricted instance metadata. The full read requires the selected
+network, optional recorded subnet, tag and external access configuration. An unrecorded subnet
+permits a valid provider-selected subnet, not malformed or foreign input. Running preparation
+requires an actual canonical IPv4 endpoint. Authentication preserves stock ADC selection or the
+explicitly selected service-account document. The shared `plugins/gcp/_owned_auth.py` helper
+supplies an owned public Google-auth Request to the selected credential's public `before_request`
+for the actual method and fixed URL. Streamed Compute reads bound raw JSON ingestion. Service
+originals and attributable credential responses remain retained through uncertain closure; no new
+observation can bypass that uncertainty. Credential redirects keep public SDK behavior rather than
+imposing a new credential policy. The same helper is borrowed by start and route; only the access
+owner terminally closes shared authentication.
+
+`plugins/gcp/_native_execution_access.py` composes that reader with the retained start, prefix
+discovery, temporary route and shared guest preparation under the caller's exact existing VM owner.
+It requires explicit SSH trust and delivery settings before provider work. Stopped preparation
+submits once and explicitly observes its acknowledged Operation, then obtains fresh running and
+endpoint evidence. Running preparation submits no start. Fresh endpoint, instance and route checks
+precede guest preparation and subsequent route admission. Aggregate settlement bars body work,
+attempts dependent cleanup independently and keeps shared authentication until all dependent custody
+settles. It does not stop the VM or close the outer operation owner.
+
+`plugins/gcp/_native_route.py` owns one nonce-named classic firewall rule and one lifecycle row. It
+checks the exact recorded baseline deny, classic-first network and bounded complete firewall
+inventory, considering every freshly attached VM tag and service account. It refuses conflicting
+operator policy rather than repairing it. One durably admitted insert retains its matching global
+Operation receipt, including the firewall's numeric ID, before fallible cleanup or publication.
+Request completion and fresh rule realization remain distinct. Cleanup requires retained request
+evidence, fresh exact identity/contents and durable delete intent; unknown submissions are never
+replayed or adopted from a matching name. Name-addressed deletion is not an atomic numeric-ID
+reservation. Public close is not socket-drain proof. Scripted SDK and SQLite tests establish these
+adapter behaviors, not native GCP compatibility, real credential drain, restart recovery factories,
+independent job availability or production RunContext delivery.
+
+Public middleware preserves normal scopes, quota, auth mode and regional access boundary lookup,
+which the locked SDK enables by default for ordinary service-account credentials. Its concrete
+Request copy seam retains attributable copied Sessions, preserves unrelated hooks and public Session
+security settings, and binds each copy to its original finite operation deadline. Entry is barred
+before any fallible terminal cleanup, including reader service retirement; entered consumers must
+positively finish before their originals retire. A public middleware escape bars every retained
+copy, including copies that have not entered their Request. If an owned worker observation or public
+middleware escape leaves an entered copy's completion unconfirmed, retain that copy's originals and
+refuse new work. Later liveness from the same possibly corrupted Thread is not independent
+completion evidence. Ordinary join timeouts and original-close failures remain separately retryable.
+Never-entered copies may be barred and closed without claiming that the SDK's internal worker has
+finished. A finite retained-copy limit refuses additional work rather than disabling middleware or
+replacing the selected principal. SDK-internal acquisition, discovery processes, unsupported adapter
+copies and arbitrary worker drain are not covered by that custody seam.
+
+After public middleware, an unexpired token remains usable even when Google-auth marks it `STALE`
+because its remaining lifetime is inside the SDK's refresh window. Refuse `INVALID` credentials; do
+not impose a new minimum token lifetime or re-enter automatic request replay.
+
+The private cloud start producers in `plugins/aws/_activation.py`, `plugins/azure/_activation.py`
+and `plugins/gcp/_activation.py` admit one selected start under a retained exact VM owner. They keep
+bounded acknowledgment payloads and reconcile interrupted ledger replies without resubmission. They
+are not owned native access factories and do not settle startup from power observations. EC2 uses
+one fresh client with retries limited to one total attempt. It retains that original client before
+later bookkeeping and keeps `cleanup_incomplete` true until closure returns normally. Azure uses one
+fresh explicit-policy client and a body-free streamed POST to its fixed public ARM start endpoint,
+without response-body reads, authentication replay, redirects, provider registration or polling.
+Azure checks the exact submitted request, HTTP 200/202 and bounded selected acknowledgment headers
+before retention; 202 requires an admitted operation URL, which this producer does not follow. A
+valid late acknowledgment is retained before deadline rejection. Azure keeps original
+response/client objects in adapter custody before cleanup and exposes `cleanup_incomplete` while any
+original lacks confirmed closure. An interruption before or between closes retains the remaining
+originals; close attempts do not establish local retirement. GCE records a request UUID before one
+streamed POST to the fixed, name-addressed start endpoint. Its original public response hook refuses
+unsupported status or encoding before body consumption; finite raw reads without decoding bound a
+matching Operation acknowledgment. The producer retains its original response and service Session
+until confirmed local closure; its borrowed auth helper retains credential Request/Session copies
+for access-owner cleanup. Service cleanup, ending the auth borrow and releasing the producer lock
+preserve the original escaping control even when later cleanup is interrupted. It preserves a
+complete matching late receipt before deadline refusal, without interpreting Operation status or
+errors as startup completion. Recorded-name dispatch does not atomically reserve the selected
+incarnation; full cloud access must separately establish fresh identity and guest admission. This is
+not atomic SDK internal acquisition or arbitrary signal hard preemption. Neither local cleanup nor
+acknowledgment resolves remote possible effect. Actual-SDK scripted tests cover these
+service-dispatch paths, not socket delivery, real credentials, request drain or native startup
+acceptance. Complete cloud access and RunContext wiring remain pending.
+
+`target.py` supplies a private passive `ExecutionTarget` over already-bound execution and file
+interfaces. Accessors return those exact interfaces, or `None` when composition supplied none. The
+native aggregate supplies this view while retaining sole ownership of preparation and teardown;
+retaining the view does not keep the operation open. Its immutable feature description is the same
+object supplied by the selected carrier. Features describe channel support, not readiness,
+authorization or implemented consumer live/terminal methods. Its immutable `ExecutionIdentity`
+contains the prepared ordinary account, UID, GID and group-set snapshot; `ExecutionRoute`
+distinguishes native, canonical and platform-host composition without exposing a carrier or its
+credentials. These are bound facts, not a fresh readiness check or elevation grant. The native
+aggregate supplies exact admin and optional selected-agent identities with the native route. This
+wrapper does not construct RunContext, activate permissions or extend operation lifetime.
+
+`ExecutionOperation` requires an explicit managed target matching its owner's scope for VM and
+managed-job work. An owned platform-host operation can instead explicitly supply no managed target
+for ordinary DIRECT execution, without manufacturing a VM marker or boot identity. Managed actions
+then refuse before preparation or effects. An optional numeric bootstrap must match the actual VM
+target's derived boot identity; an unbound or platform-host operation cannot select it. VM and
+managed calls forward their bound context before preparation and borrowing, while each call keeps
+its explicit body identity. The private native VM factory constructs the shared bootstrap from its
+prepared elevated plan and actual full guest for WSL2 and Proxmox VMs. WSL2 retains its actual
 platform hold; Proxmox needs no idle-stop hold. For a stopped Proxmox VM without operator-stopped
 intent, the private factory retains the selected locator and root QGA binding before one activation
 attempt. Only successful ordinary request settlement permits a fresh running-power read and bounded
@@ -224,16 +502,50 @@ activation or preparation. Normal teardown leaves an activated VM running. Alrea
 activation and the new responsiveness wait. Both retain the same exact owner through preparation,
 file, DIRECT execution and private MANAGED OPERATION start, and aggregate cleanup. The same frozen
 native binding supplies a distinct passive WSL2 or Proxmox carrier for each managed keeper. WSL2
-rechecks the selected route at the armed start boundary; this is not broader provider-route or boot
-acceptance. Proxmox retains one selected QGA binding and checks its locator before and after target
-preparation. The bounded read-only account probe is not itself guest-fenced; account facts grant no
-body authority without the prepared full guest and numeric identity checks at each body helper.
-Per-dispatch provider-route freshness, complete availability, public RunContext composition and
-native acceptance remain unproved. The native operation module and shipped-plugin registration
-import without retired execution packages. Existing legacy operations import their dependencies only
-when invoked; this does not supply new cloud/Lima bindings or migrate provisioning. Identity
-preparation retains completed or partial account evidence and conservative custody on borrow-release
-failure, preserving original escaping control. No target or root identity is inferred as a fallback.
+binds its selected-route check as an optional `route_check` callable. Proxmox supplies a body-free
+current-config check through its retained provider custody and requires the same
+origin/VM/generation locator. Neither check establishes a fresh guest boot. Execution invokes it
+before DIRECT helper borrowing, before OPERATION or RESOURCE start reservations and clock helpers,
+and at managed reads, stop/disposal, shell observation and armed start checkpoints. Checks use the
+effective request deadline, including a shorter explicit execution budget. DIRECT and managed-start
+admission checks run outside the execution admission lock. Admission and expiry are checked again
+before DIRECT borrowing. FileAccess accepts the same core-bound callback after complete local
+request validation, including directory child calls. Already-expired file calls skip provider reads
+and retain ordinary DEADLINE result reduction. Deadline retrieval itself is passive except for
+refusing a closed view. Absence binds no additional route check beyond shared preparation; it
+supplies no route-freshness evidence. This is not broader provider-route or boot acceptance. Proxmox
+retains one selected QGA binding and checks its locator before and after target preparation. The
+bounded read-only account probe is not itself guest-fenced; account facts grant no body authority
+without the prepared full guest and numeric identity checks at each body helper. Per-dispatch
+provider-route freshness, complete availability, public RunContext composition and native acceptance
+remain unproved. The native operation module and shipped-plugin registration import without retired
+execution packages. Existing legacy operations import their dependencies only when invoked; this
+does not supply new cloud/Lima bindings or migrate provisioning. Identity preparation retains
+completed or partial account evidence and conservative custody on borrow-release failure, preserving
+original escaping control. No target or root identity is inferred as a fallback.
+
+The private `vm_execution_context` entry point requires an explicit `ExecutionRoute.NATIVE` or
+`ExecutionRoute.CANONICAL` and yields a normal RunContext inside one shared `VMOperation`.
+`PLATFORM_HOST` is invalid for this VM entry point; no route is a fallback for another. It acquires
+no second claim and adds no context-owned cleanup. The existing operation holds ownership before
+platform construction, power observation and activation, then binds its prepared admin and
+explicitly selected agent targets into the yielded context. Config, descriptive scope, scoped
+secrets and existing legacy handles pass through unchanged without resolution, inspection or
+fallback. Retaining the context cannot extend its target operations' lifetime. Context construction
+and body failures unwind the same aggregate; uncertain teardown retains the original cleanup fact. A
+SYSTEM or absent description does not create a broader database claim: the explicit VM argument
+still selects one exact VM claim. Same-VM workspace, agent and session descriptions are preserved
+rather than interpreted as target selection or grants. Existing production contexts and
+activation/rollback orchestrators remain unchanged.
+
+Canonical preparation uses only the independently configured SSH connection to the pinned literal
+Tailscale endpoint. It never enrolls trust, resolves an alias, prepares native ingress or probes the
+guest through a native carrier first. Fresh owned provider power/locator observations and exact
+database VM/account/agent selection guard construction and later canonical calls. The platform's
+selected independent-availability fact is copied separately from delivery and must not change.
+Returned file/execution interfaces reject closed admission before provider reads; body helpers keep
+their full guest and numeric identity checks. These private paths have no new permission or legacy
+cutover authority.
 
 One shared `ExecutionOperation` keeps one lazily registered empty carrier-dispatch row for its
 lifetime, rather than consuming a row per clean command. Every call still uses a fresh serial
@@ -250,6 +562,37 @@ and final resolution. Resolved rows are never reopened and the database bounds a
 native workflow finishes execution before availability and whole-ledger cleanup. A clean per-call
 outcome does not imply this lifetime row or the outer operation has already been released. These
 mechanics retain DIRECT's existing helper-evidence limits, not a new descendant-cleanup guarantee.
+
+The private Proxmox binding also selects one passive `ProxmoxHelperDelivery` for each inline DIRECT
+call or retained managed OBSERVE/READ_OUTPUT helper. It retains the original validated QGA PID and
+publishes terminal closure facts before output callbacks can interrupt delivery. Preparation
+supplies the original nonce and runtime expectations explicitly; retained cleanup drops caller
+input, collectors and application bytes. An acknowledged deadline or interrupted observation retains
+the actual call, original attempt and still-open borrow. Positive NOT_SENT evidence also survives
+payload detachment: an interrupted settlement of an invocation never dispatched requires only exact
+no-I/O bookkeeping, not runtime closure proof.
+
+`observe_inline_cleanup(fresh_finite_deadline)` requires a fresh finite budget only when unresolved
+observation or local cleanup remains. Plain calls and already-proved closure with settled local
+delivery can finish exact bookkeeping without a provider read or renewed observation budget. For
+unresolved closure, core settles that attempt's local delivery, fences original database ownership
+and selected binding, checks the retained provider route, then reads only the held PID's status with
+a bounded runtime-prefix reader and discard sink. An authentic original runtime READY or closed
+prerequisite refusal, paired with normal-zero completion, permits settlement of the same invocation.
+That does not change the returned application result, including UNKNOWN or NOT_STARTED. Native
+workflow close invokes this observation before `finish()`; bookkeeping retry and `finish()` remain
+no-I/O. A failed status exchange is never repeated: lost ACK, missing or consumed status, wrong
+nonce, nonzero exit, changed binding or pending local cleanup retains uncertainty. This is
+same-controller helper closure, not command replay, fresh guest readiness, managed terminal/disposal
+proof, descendant cleanup or controller-restart recovery. Native QGA acceptance remains open.
+
+Managed reads prepare their one-shot invocation and explicit closure expectations before admission.
+Escaping control flow retains `ManagedObserveControlFact` independently of payload detachment. Their
+cleanup state drops input, collectors and managed observations, including facts and output; plain
+delivery retains only the original non-payload candidate metadata needed for interrupted settlement.
+The caller's original result remains unchanged. Settling a timed-out RESOURCE disposal prerequisite
+read performs no disposal action. A subsequent explicit disposal request must obtain a fresh
+positive managed terminal observation before admitting its action.
 
 `_execution_result.py` reduces an operation-owned inline outcome into those public facts. The fixed
 inline helper accepts retrospective normal completion only on CPython 3.11 through 3.14, after its
@@ -271,30 +614,52 @@ remote effects or active permission grants.
 `access.py` composes a bound `FileAccess` from an already-acquired `FileOperation`, one carrier,
 trusted root, selected runtime, ordinary identity plan, optional elevated plan, safe logical
 diagnostic identity, and a composition-owned deadline factory. It provides bounded reads, stat,
-inventory, finite byte-value publication, caller-owned streaming upload, local-file download, JSON
-updates, directory convergence, metadata convergence and conditional removal through the retained
-private custody and result reducers. `UploadSource.read` receives a positive request no larger than
-the private stage chunk bound; `None` is retried under the original deadline, `b""` is EOF, and
-`FileAccess` never closes, seeks or retains the source. Exact uploads consume the declared size and
-perform one-byte excess detection. `sudo=True` selects only the already bound elevated plan and
-refuses before source validation or dispatch when absent. Every target is a normalized absolute
-POSIX path confined to the trusted root; the service rejects the filesystem root because the helper
-requires a nonempty leaf. The bound `download()` requires a concrete workstation `Path`, defaults to
-create-only `Create`, and permits explicit `Replace`. An optional positive byte limit bounds the
-held remote snapshot; `None` uses the snapshot protocol's representable size rather than a separate
+inventory, finite byte-value publication, caller-owned streaming upload, owned local-path upload,
+file/directory download, directory upload, JSON updates, create-only directories, directory/metadata
+convergence and conditional removal through the retained private custody and result reducers.
+`UploadSource.read` receives a positive request no larger than the private stage chunk bound; `None`
+is retried under the original deadline, `b""` is EOF, and `upload` never closes, seeks or retains
+the source. Exact uploads consume the declared size and perform one-byte excess detection.
+`sudo=True` selects only the already bound elevated plan and refuses before source validation or
+dispatch when absent. Every target is a normalized absolute POSIX path confined to the trusted root;
+the service rejects the filesystem root because the helper requires a nonempty leaf. The bound
+`download()` requires a concrete workstation `Path`, defaults to create-only `Create`, and permits
+explicit `Replace`. An optional nonnegative byte limit bounds the held remote snapshot; zero permits
+only an empty file. `None` uses the snapshot protocol's representable size rather than a separate
 source-stat race or an application file-size ceiling. Only a verified transfer with settled remote
 cleanup may publish locally. Success returns the verified source metadata; absence and failures use
 the shared typed file errors without exposing partial content or raw local exceptions. The view
-remains private: there is no directory transfer, production factory or RunContext accessor. This
-bound assembly does not activate recipient grants or the core allowlist during coexistence.
+remains private, without a production factory or RunContext delivery. This bound assembly does not
+activate recipient grants or the core allowlist during coexistence.
+
+`_local_file_io.py` supplies passive owners for a local source, bounded complete tree inventory and
+one-level destination directory creation. Core must retain each owner before I/O and close its
+original resources explicitly, including after failure. An uncertain close is never retried using
+the raw descriptor or handle number. Source EOF checks the admitted file observation before remote
+publication; inventories are bounded observations, not atomic snapshots. `upload_file` owns its
+source through typed reduction and cleanup; ordinary stream `upload` retains its borrowed-source
+contract. Native Windows/macOS acceptance remains pending.
+
+Directory upload/download merge structure through ordinary serial file calls under one original
+finite deadline. `ExistingFile.ERROR`, `PRESERVE` or `REPLACE` explicitly selects existing-file
+behavior; existing directories keep their metadata. A complete bounded manifest precedes mutation.
+`DirectoryTransferLimit` counts the root at depth zero and bounds entries, depth and actual
+transferred bytes; preserved files consume zero bytes. Links, special objects and observed aliases
+between distinct destination paths refuse. No archive extraction, pruning, rollback or replay is
+implicit. Success returns `DirectoryTransferProgress`; `directory_transfer_progress(error)` reads
+only earlier settled entries after failure, excluding the failing child's independently retained
+effect and cleanup facts. Cleanup cannot turn the earlier failed result into success.
 
 ## File-call custody
 
 `FileOperation` requires a `ManagedTargetIdentity` that exactly matches its `OperationOwner` VM or
-platform-host scope. Each logical public file call installs one adapter-owned `file-call` lifecycle
+platform-host scope. Each ordinary remote file call installs one adapter-owned `file-call` lifecycle
 obligation, replacing the generic carrier row rather than adding a second row. Upload and download
 bind their scratch token in the initial payload. JSON uses one parent row without a token, then
 publishes the child token and bounded attempt before nested upload dispatch.
+
+Directory transfers compose those ordinary children without a parent lifecycle row. Local-only
+inventory and destination probes retain local custody without fabricating a remote association.
 
 Completed calls leave immutable receipts, not pending debt, so serial ordinary calls do not consume
 the 128 unfinished-obligation capacity through their history. Exact current-owner absence after a
@@ -302,20 +667,46 @@ failed registration permits cleanup of its never-dispatched borrow; uncertain re
 custody remains attached. Managed starts use the same core rule for their keeper and start
 admission.
 
-The private `FileOperation.upload_package` path accepts 1 to 4,096 upload members under one serial
-borrow and one `file-call` row. The row carries only the current child's path, token, index and
-bounded recovery facts. It replaces that identity by expected-revision publication before the next
-child can dispatch. The caller's checkpoint callback must durably record each completed member
-before returning; a failed or uncertain checkpoint retains the current row and stops the batch.
-Incomplete upload and uncertain row publication also stop the batch without replaying a child. Each
-member is validated when reached; a later invalid member stops the batch after earlier members have
-already passed their checkpoints. The caller owns its original plan and partial progress. This
-originating path is not wired to artifact publication. A private package takeover adapter can now
-advance an exact bound guest gate for the retained child, but it does not reconcile or clean that
-child. Native mutation-path coverage, predecessor-controller and non-gated effect evidence, and
-application-checkpoint reconciliation remain necessary before package recovery can settle. The
-one-row package path provides serial checkpoint custody, not a workaround for completed-call
-history.
+Directory transfer uses ordinary file calls, not a separate package-upload producer. Persisted
+package formats and their recovery readers remain supported; they cannot start another member or
+resume a batch. Artifact publication still needs application-owned intent and completion records
+before the final resource row is committed. Ordinary file-call completion alone does not close that
+application crash window.
+
+Stat, inventory, removal and metadata calls share one execution/capture path after their explicit
+preparation and admission. It records returned or interrupted outcomes before removing the active
+call. A failed capture or borrow close leaves that exact record available; it is never removed in a
+finally block that would discard custody.
+
+Ordinary uploads and downloads do not admit transfer associations or publish durable success
+history. Each call retains its actual outcome and exact unfinished-debt publication intent until
+bookkeeping and borrow closure settle. Upload completion is not inferred from receipt resolution.
+Downloads admit the remote child before creating new workstation staging and retain remote/local
+facts through verified publication, cleanup and public reduction. Failed cleanup never becomes an
+original successful result after a later cleanup retry. Missing completion capture retains custody.
+Cleanup of a previously retained stage remains separate from admission of a new child.
+
+Local source, inventory and destination calls retain their actual owners before filesystem I/O. An
+owned upload uses the same serial borrow for local admission and its ordinary remote UPLOAD call,
+without a fabricated download association. Finalization closes originals before releasing that
+borrow, and native aggregate teardown includes this custody. Cleanup retries close known originals
+and settle captured remote bookkeeping independently; they never reread, scan again, recreate or
+republish a failed child. Incomplete capture or unproved original closure keeps aggregate ownership
+unsettled.
+
+Uncertain registration retains the original local call, prepared child and borrow even when no stage
+or helper was dispatched. Bookkeeping and aggregate closure refuse that unresolved admission; they
+do not reconstruct it or replay the call. Only confirmed admission or a proved-absent refusal allows
+the active entry to be released before dispatch.
+
+Interrupted debt publication retains the actual child, outcome and exact intended payload and
+revision. Bookkeeping settlement retries only that same publication and borrow closure, without
+reading the source or dispatching another helper. Confirmation checks the payload and the exact next
+revision. Native aggregate teardown invokes this settlement before checking its components. Pending
+bookkeeping holds the serial borrow; settled retained-effect handoff can leave remote debt without
+universally blocking other body calls. Aggregate teardown explicitly stops admission first.
+`OperationBorrow.closed` reports local terminal authority after closure or handoff, not successful
+copying, resolved effects or completed cleanup.
 
 Retained recovery facts and cleanup debt are published before the borrow is handed off; a clean,
 quiescent row resolves. Payloads carry lifecycle evidence only. They exclude file or JSON content,
@@ -323,19 +714,23 @@ credentials, commands, routes and connection objects. This is private, additive 
 not claim production orchestration, recovery takeover, RunContext adoption, permission enforcement
 or the future #377 lock hierarchy.
 
-The private file-call codec preserves version-one records byte-for-byte. Bootstrap-bound records use
-version two, retaining root-entry identity and the full guest separately from the body identity. It
-validates Linux system-Python selection, target boot and any gate's full guest before encoding or
-accepting persisted bytes. Each typed record exposes its actual payload version; installation and
-updates use that version rather than a global latest-version assumption. `FileOperation` accepts one
+New ordinary admissions use version-one or version-two records without transfer associations. The
+private codec also preserves supported persisted associated uploads in versions three/four and
+downloads in versions five/six, including their existing success fields. Retiring new association
+writers does not remove readers or authorize deleting existing data. Bootstrap-bound records retain
+root-entry identity and the full guest separately from the body identity. The codec validates Linux
+system-Python selection, target boot and any gate's full guest before encoding or accepting
+persisted bytes. Each typed record exposes its actual payload version; installation and updates use
+that version rather than a global latest-version assumption. `FileOperation` accepts one
 constructor-bound context, checks its selected VM boot, and gives each prepared binding that same
 context before registration or dispatch. Gate setup and bound promotion preserve it. JSON and
 package child publication, exact package retry and retained updates use the encoded record's
-version. Context-free private calls retain version-one semantics; bootstrap-bound calls use version
-two. Immutable bootstrap facts do not change the reserved recovery growth, and all records remain
-within the existing 8,192-byte envelope. Fresh recovery preparation and production VM composition
-are not yet connected. Existing private recovery adapters are not an accepted recovery path for
-bootstrap-bound records, and no old record is upgraded or granted execution authority.
+version. Unassociated context-free private calls retain version-one semantics; unassociated
+bootstrap-bound calls use version two. Immutable bootstrap and child association facts do not change
+the reserved recovery growth, and all records remain within the existing 8,192-byte envelope. Fresh
+recovery preparation and production VM composition are not yet connected. Existing private recovery
+adapters are not an accepted recovery path for bootstrap-bound records, and no old record is
+upgraded or granted execution authority.
 
 Core recovery can use `OperationOwner.admit_recovery_support_obligation` to retain a bounded new
 support effect under the exact sealed, unresolved recovery generation. It atomically creates a
@@ -437,6 +832,12 @@ helper composition. `carriers/_subprocess.py` maps carrier input, retention and 
 that core without changing its call signature. The core is compatible with Python 3.11 on POSIX;
 non-blocking Windows pipes require Python 3.12 or newer. Sharing this code does not itself implement
 guest delivery, framing or workload supervision.
+
+On Windows, owned stdin writes use the native pipe handle rather than the CRT write wrapper,
+preserving the originating broken-pipe error. A successful zero-byte write means no progress, not
+consumer closure. The writer retries only smaller unaccepted prefixes, bounded to 17 attempts per
+65,536-byte chunk, then reports temporary pipe pressure. Other native errors remain failures. POSIX
+uses `os.write` unchanged.
 
 The pump supports finite or explicitly enabled live input, separate bounded outputs, explicit
 environment binding and bounded local cleanup. Borrowed byte endpoints must return without waiting
@@ -766,27 +1167,30 @@ lease, output retention, application observation, cleanup, stop, disposal, produ
 wiring, public job reference or RunContext surface.
 
 `vms/target_preparation.py` also has a private selected-platform entry point. Given an existing
-exact-VM owner, bound platform, run context, finite deadline, locator observed before route
-resolution and caller-owned native binding, it refuses static prerequisites before platform I/O. One
-operation borrow covers a fresh locator observation, the guest attempt through that binding and
-post-probe locator confirmation; it never resolves another route. An unequal pre-probe locator
-refuses before guest dispatch, and an unequal post-probe locator suppresses the target. Unavailable
-or invalid confirmation is unconfirmed, not evidence of a changed locator. Release failure retains a
-target-suppressed custody fact. The resolving caller validates and retains the selected binding
-under the same deadline. WSL2 and Proxmox now supply positive private observation hooks when their
-required facts are available; SSH-backed cloud and Lima bindings remain future work. This seam has
-hermetic coverage only. A later use still needs a locator-bound platform hold and binding; malicious
-or engineered A-B-A host behavior is outside this checkpoint's threat scope. Production activation,
-hold, route and teardown, live WSL/SSH/QGA proof, recovery drain, adoption and public RunContext
-composition remain open.
+exact-VM owner, bound platform, finite deadline, locator observed before route resolution,
+caller-owned native binding and required retained-owner observation callback, it refuses static
+prerequisites before observation or guest I/O. One operation borrow covers that callback's fresh
+locator observation, the guest attempt through the binding and post-probe confirmation under the
+same original deadline; it never resolves another route or owns observation cleanup. An unequal
+pre-probe locator refuses before guest dispatch, and an unequal post-probe locator suppresses the
+target. Unavailable or invalid confirmation is unconfirmed, not evidence of a changed locator.
+Release failure retains a target-suppressed custody fact. The resolving caller validates and retains
+the selected binding under the same deadline. WSL2 and Proxmox pass their retained native owner's
+bound observer when their required facts are available; the private cloud and local Lima composition
+now use the same seam. This seam has hermetic coverage only. A later use still needs a locator-bound
+platform hold and binding; malicious or engineered A-B-A host behavior is outside this checkpoint's
+threat scope. Production activation, hold, route and teardown, live WSL/SSH/QGA proof, recovery
+drain, adoption and public RunContext composition remain open.
 
 `vms/_recovery_vm_span.py` supplies private caller-retained availability under an existing sealed
 recovery owner, without acquiring another VM claim. Its first factory explicitly supports only
 administrative WSL2 recovery. Construct and retain the span before opening; it checks fresh VM/site,
 marker, administrative account, intent, bounded power and copied native route before support
 admission. Its own hold must have exact durable READY before a separate serial guest/account
-preparation batch runs. Prepared full guest, target, numeric plans and runtime stay bound to that
-span and its pinned carrier. This does not provide predecessor drain evidence.
+preparation batch runs with the selected native owner's same bound locator observer. This sealed
+recovery path uses its existing support row rather than an ordinary-operation borrow. Prepared full
+guest, target, numeric plans and runtime stay bound to that span and its pinned carrier. This does
+not provide predecessor drain evidence.
 
 One finite action scope serializes with close and returns a guarded carrier bound to that action's
 thread and deadline; escaped carriers are inert after the action ends. Admission and execution
@@ -1025,18 +1429,17 @@ carrier dispatch; the helper rereads the protected marker, kernel boot and PID 1
 opening the managed store. A missing, unsafe or changed identity returns fixed refusal without
 publishing stop intent.
 
-`_managed_stop_access.py` privately binds one stop attempt to the exact persisted independent VM run
-and a caller-held VM operation owner. It requires a reconciled launch receipt, installs a
-`managed-stop` obligation containing only the run ID, and arms that obligation after pure carrier
-validation but before dispatch. Settled, validated acceptance resolves temporary stop-delivery
-custody without claiming termination; positively proved no delivery also resolves it. Unknown
-delivery or interrupted arming retains the exact obligation and owner for recovery. This adapter
-does not reconcile the row, release the owner's whole claim, prove a production provider route or
-implement recovery. The shared row preflight checks the supplied guest's derived boot against the
-persisted target, but cannot reconstruct its opaque incarnation fingerprint from those two values
-alone. Callers must compare the observed guest marker with the persisted VM marker, then compose
-that target from the selected provider locator and the same marker. Boot agreement alone is not
-production target proof.
+`ExecutionOperation._stop_managed` dispatches OPERATION and RESOURCE stop through the tracked
+ordinary helper and the operation-lifetime `carrier-dispatch` row. OPERATION stop drains only its
+selected keeper; RESOURCE stop requires the bound resource namespace and a confirmed persisted
+launch without adopting the run or a keeper. Both revalidate the selected route before delivery.
+Settled delivery releases the helper borrow; unknown delivery or interrupted bookkeeping retains
+ordinary operation custody. Accepted stop intent requires a fresh settled observation to establish
+termination. The exact run-ID lifecycle payload belongs to disposal, not ordinary stop. The shared
+row preflight checks the supplied guest's derived boot against the persisted target, but cannot
+reconstruct its opaque incarnation fingerprint from those two values alone. Callers must compare the
+observed guest marker with the persisted VM marker, then compose that target from the selected
+provider locator and the same marker. Boot agreement alone is not production target proof.
 
 `_managed_disposal_exchange.py` supplies a private fixed Linux root disposal attempt. The target
 requires the exact canonical launch, its bound boundary-empty and both stream-end facts. Wait is
@@ -1102,6 +1505,13 @@ and normalized groups. Demotion clears inheritable/ambient capabilities, not the
 permission to gain privileges later. Protection profiles are separate. Invalid plan combinations
 refuse before payload preparation; a failed wrapper never triggers fallback or replay.
 
+Private target preparation can bind an already-prepared numeric guest bootstrap to an explicitly
+selected non-root workload account. This permits admin delivery through fixed sudo root entry,
+followed by numeric demotion to the agent before its body loads. Without that binding, a different
+non-root delivery/workload pair refuses. Including the core bootstrap does not include an elevated
+API plan or root account lookup when elevated access was omitted. The identity modes and their
+persisted representation are unchanged.
+
 The fixed launcher gives Python a minimal environment. Trusted numeric identity metadata may appear
 in wrapper argv; workload source, paths, environment and input remain in stdin. Linux helpers verify
 real/effective/saved IDs and normalized groups before workload access. A non-Linux destination with
@@ -1132,16 +1542,26 @@ gate observations through the bound reader. Every family entry forwards the same
 reconciliation and cleanup. Private download, upload, JSON and single-call bindings retain this
 context through their exchanges and outcomes. JSON gives each independently prepared upload child
 the same context, including after a publication conflict. Existing context-free private candidates
-remain unchanged. Core file state binds this context once. The private WSL2 native factory
-constructs one context from the prepared elevated plan and actual full guest, requires both identity
-plans and shares it between file and buffered execution state. Missing preparation refuses before
-exposing views. Fresh recovery, outer managed helpers and other platform composition still need
-adoption. The fixed managed service entry separately validates bounded controller/guest argv data
-and reuses numeric admission with an INLINE two-phase loader before controller modules and store
-effects. Tests simulate its admission and observations; native controller and later workload-child
-guest admission remain unproved. Complete provider envelopes include the selected prefix and encoded
-request; even a valid request can refuse before QGA dispatch when their aggregate exceeds the
-carrier limit.
+remain unchanged. Core file state binds this context once. The private native factory constructs one
+context from the prepared elevated plan and actual full guest, requires both identity plans and
+shares it between file and buffered execution state. Missing preparation refuses before exposing
+views. Fresh recovery, outer managed helpers and other platform composition still need adoption. The
+fixed managed service entry separately validates bounded controller/guest argv data and reuses
+numeric admission with an INLINE two-phase loader before controller modules and store effects. Tests
+simulate its admission and observations; native controller and later workload-child guest admission
+remain unproved. Complete provider envelopes include the selected prefix and encoded request; even a
+valid request can refuse before QGA dispatch when their aggregate exceeds the carrier limit.
+
+Private paired native composition selects an agent from its recorded VM membership before platform
+effects. Its optional agent target and existing admin target share the same file and execution
+operations, owner, carrier, root bootstrap and deadline; per-call body plans remain distinct. Only
+the admin view includes an elevated plan. Aggregate cleanup retains both account preparations and
+closes the shared operations once. Managed user-default shell lookup on a numeric-bound operation
+uses that same bootstrap and verifies the selected body identity and full guest before reading its
+shell. These private views do not populate production RunContext instances or activate permissions.
+Existing-job actions bind to the shared operation/resource and VM target, not the view's account.
+Possession of an admin job reference is not isolated from an agent view by this private composition;
+recipient authority checks remain a prerequisite for permission activation.
 
 The separate private `build_named_guest_bootstrap_argv` handles early fixed guest operations before
 numeric account preparation. It resolves a core-bound account name through the system account
@@ -1163,6 +1583,17 @@ binds the destination OS and an optional sole interpreter path. Linux otherwise 
 first existing entry wins, including a broken link; an unusable selection never triggers fallback.
 Darwin rejects aliases of the system Python shim without executing it. Selection installs nothing
 and does not invoke developer-tools discovery. Native Darwin acceptance remains open.
+
+The private inline helper supports buffered DIRECT foreground execution on Darwin through the same
+manifest, framing and result interpretation as Linux. Its fixed fresh-exec entry checks real and
+effective account IDs and observed groups; this does not establish Linux group-drop containment.
+Darwin script source uses a separately owned `/dev/fd` pipe, leaving application stdin independent.
+The non-blocking writer has bounded cancellation and retains actual source custody if closure cannot
+be established. Such uncertainty preserves observed application bytes and wait facts but withholds
+the terminal helper record and successful helper exit. Linux retains its anonymous-memory source
+path and saved-ID checks. Darwin MANAGED and live foreground calls remain unavailable. Local fixture
+and packed Python 3.11 checks do not establish native macOS acceptance or complete platform-host
+identity, file, job or context composition.
 
 In that same invocation, an isolated Python trampoline checks version 3.11 or newer and the common
 bundle-loader imports before entering the account helper. One bounded nonce-bound prerequisite
@@ -1218,18 +1649,49 @@ packaged modules with standard-library `bz2` and ASCII-armors them to reduce car
 Only core-selected packaged code uses that loader; it does not select modules from request data or
 install guest files. The destination Python must provide `bz2`. Caller arguments, script source,
 environment, working directory and finite stdin travel in the bounded stdin manifest, not helper
-argv. On Linux, scripts use an inherited memory file separately from application stdin. The caller
-must bind the expected destination identity and an explicit `RuntimeSelection`. The identity
-transition encloses the shared selector, which checks Python 3.11 and common loader imports before
-the bundled helper runs. A bounded prerequisite record precedes helper framing without consuming
-application input or staging files.
+argv. One ASCII envelope prefixes the canonical JSON with `AGWI2` and eight lowercase hexadecimal
+length digits. The guest reads exactly that envelope; finite mode then requires EOF. Live mode reads
+application stdin from the remaining pipe without waiting for EOF before launch. The host-owned
+prefix source sends all setup bytes before borrowing the caller's application source. On Linux,
+scripts use an inherited memory file separately from application stdin. The caller must bind the
+expected destination identity and an explicit `RuntimeSelection`. The identity transition encloses
+the shared selector, which checks Python 3.11 and common loader imports before the bundled helper
+runs. A bounded prerequisite record precedes helper framing without consuming application input or
+staging files.
 
 The result separates prerequisite evidence, carrier facts and an optional helper observation.
 Without READY admission, the helper observation is absent; READY alone proves neither application
 entry nor success. The host validates bounded helper evidence and does not infer an eager start
 acknowledgment. Preparation remains single-use and clears the prerequisite parser after the attempt,
-including carrier exceptions. This candidate is not wired to production RunContext and does not yet
-supply staging, terminal I/O or managed lifetime.
+including carrier exceptions. DIRECT execution can explicitly borrow live application input and
+separate stdout/stderr sinks. Decoded presentation uses bounded evidence frames, rolling count/hash
+checks and caller flow control; raw carrier diagnostics never become application stderr. Sensitive
+live output is an explicit presentation choice, not permission to retain output. Capture/discard
+continues to suppress sensitive reflected output by default. Delivery results contain no application
+bytes, and the attempt releases borrowed endpoints and pending presentation on exit.
+
+Unsupported carrier I/O refuses through pure validation before operation borrowing. The current
+private `start` and INDEPENDENT lifetime reject borrowed live endpoints. OPERATION MANAGED `run`
+uses the separate supervised pipe path described above, without substituting capture or DIRECT
+execution. Inline preparation itself allocates neither a supervisor nor a terminal. Production
+RunContext, active managed output, terminal launch/attachment, production transfer limits and native
+live-platform acceptance remain incomplete.
+
+Finite and live pipe input offer bytes without requiring the consumer to read them all. Positively
+observed child exit or a broken input pipe stops borrowing the source, drops pending input, and
+closes only the owned stdin pipe. The supplied source is not closed. Output observation continues
+under its original deadline and post-exit bound, including when the consumer closes input before
+finishing its output. Source faults, invalid results, other pipe errors and failed owned closure
+retain their failure and custody semantics. Neither accepted input bytes nor consumer closure
+establishes guest consumption or application success; helper admission and completion still require
+their own evidence. Native Windows pipe-error mapping and joint SSH proof remain acceptance work.
+
+The guest uses non-blocking writes while pumping application streams and restores its owned pipe
+flags afterward. A partially written evidence frame gets at most 0.5 seconds to finish after the
+pump stops; failure aborts later control emission rather than corrupting framing or claiming
+completion. Existing post-exit pipe collection pauses for sink flow control but does not wait
+indefinitely for descendants to close their output. Local observation loss is not guest
+cancellation.
 
 Explicit numeric-bootstrap preparation uses the existing INLINE root program without adding a stdin
 prefix or changing the manifest. Its full guest checkpoint precedes remaining helper modules and
@@ -1278,34 +1740,72 @@ writing a local sink. Gate setup is separately admitted under the operation owne
 snapshot dispatch. A complete existing gate can be adopted, but an incomplete or replaced inode is
 not repaired during the same guest epoch.
 
-Private stage and publication requests can carry that same exact binding. The private upload and
-package-upload operation accepts an already proved binding for its selected Linux VM and stores it
-in the file-call row before dispatch. Every stage and publication attempt, including reconciliation
-and cleanup, carries that binding. The guest holds the gate through stage creation, chunk writes,
-scratch cleanup, publication, publication cleanup and reconciliation. Requests without a binding
-retain their legacy behavior. Upload destinations inside the gate control namespace are refused
-before filesystem access. A private single upload or package member zero may register a setup-only
-row and promote that same row to an exact binding before stage work or source reads. The token and
-borrow remain continuous across setup and upload; package members retain their durable child index
-and checkpoint protocol. Native carrier drain and package process-loss recovery remain separate
-work.
+Private stage and publication requests can carry that same exact binding. The private upload
+operation accepts an already proved binding for its selected Linux VM and stores it in the file-call
+row before dispatch. Every stage and publication attempt, including reconciliation and cleanup,
+carries that binding. The guest holds the gate through stage creation, chunk writes, scratch
+cleanup, publication, publication cleanup and reconciliation. Requests without a binding retain
+their unbound private behavior. Upload destinations inside the gate control namespace are refused
+before filesystem access. A private single upload may register a setup-only row and promote that
+same row to an exact binding before stage work or source reads. The token and borrow remain
+continuous across setup and upload. Native carrier drain and retained package process-loss recovery
+remain separate work.
 
-`_file_gate_setup_recovery.py` handles a lost download, single-upload or package-upload setup reply
-whose durable row remains setup-only after database generation takeover. It rechecks that exact row,
-dispatches non-creating gate inspection, and resolves only the setup obligation after a complete
-positive observation. The old controller cannot publish the gate binding after takeover and thus
-cannot start the snapshot or first upload member from that row. A bound row, missing gate, uncertain
-inspection, other obligation or non-gated local effect still needs its own recovery proof. The gate
-and its UID directory must remain intact for the guest epoch so a delayed setup cannot create a
-replacement. This is private local composition, not native route acceptance, a production recovery
-factory or whole-operation release.
+Metadata and directory convergence, conditional removal and JSON updates accept the same private
+gate binding or setup descriptor. Setup and binding promotion use the call's existing durable row
+before its mutation workflow runs. Metadata and removal hold the gate through their helper effects
+and cleanup. JSON preserves the binding through every upload child, conflict retry and retained-row
+rewrite; it publishes each child token before dispatch without persisting JSON contents. STAT and
+no-staging readiness do not create or require a gate.
 
-`_file_package_recovery.py` opens only the exact current bound package child after owner takeover.
-It publishes one proposed generation in that row, advances the same guest gate and publishes the
-confirmed binding without changing the child index, token, path or cleanup facts. A lost reply may
-be reconciled only against the same proposal. The row stays a possible effect: this fence does not
-prove helper exit, stop non-gated or predecessor-controller effects, replay the child, reconcile its
-application checkpoint, clean up, or release ownership.
+Ordinary mutations cannot target `/run/agentworks/file-gates-v1` or its descendants. Linux metadata
+convergence also refuses the two exact ancestor targets `/run` and `/run/agentworks`, whose
+ownership and modes are infrastructure prerequisites. This includes otherwise harmless convergence
+on those two directories, not unrelated descendants, reads, stat or inventory. Create-only directory
+operations still refuse existing ancestors without changing them. Darwin does not acquire the Linux
+ancestor restriction. These are control-state operation restrictions, not permission grants.
+
+`_file_gate_setup_recovery.py` handles a lost setup reply for a gated download, upload, package,
+JSON, removal or metadata/directory call whose durable row remains setup-only after database
+generation takeover. It rechecks that exact row, dispatches non-creating gate inspection, and
+resolves only the setup obligation after a complete positive observation. The old controller cannot
+publish the gate binding after takeover and thus cannot start the file workflow from that row. A
+bound row, missing gate, uncertain inspection, other obligation or non-gated local effect still
+needs its own recovery proof. The gate and its UID directory must remain intact for the guest epoch
+so a delayed setup cannot create a replacement. This is private local composition, not native route
+acceptance, a production recovery factory or whole-operation release.
+
+`_file_mutation_recovery.py` opens the exact current bound upload, package-child, JSON, removal or
+metadata/directory row after owner takeover. It publishes one proposed generation there, advances
+the same guest gate and publishes the confirmed binding without changing the family, child index,
+token, path or cleanup facts. A lost reply may be reconciled only against the same proposal. The row
+stays a possible effect: this fence does not prove helper exit, stop non-gated or
+predecessor-controller effects, replay a mutation, reconcile its application checkpoint, clean up,
+or release ownership. DOWNLOAD keeps its separate snapshot reconciliation and cleanup adapter.
+
+New-stack VM file operations bind the verified raw guest through their numeric bootstrap or the
+separately observed WSL guest at construction. They derive gate setup from that guest and each
+selected effective UID, including ordinary and elevated file calls. Effect-bearing calls register
+setup and publish the confirmed binding in the same durable row before file effects. Local downloads
+complete this admission before constructing their workstation writer; local transfers retain their
+original serial borrow. STAT, inventory and no-staging readiness do not create gates. Gate
+coordination failure reduces to an observation failure, not a claim of data-file mutation.
+
+For a selected managed agent, explicit VM operation preparation also prepares its UID gate directory
+and persistent per-UID boot rule before exposing file views. One namespace obligation precedes
+root-gate setup and publishes its exact binding before namespace effects. A separate fixed root
+helper holds that gate through direct filesystem work and owned temporary cleanup. It accepts exact
+existing entries, refuses unsafe metadata, links, ACLs or changed rule content, and publishes only a
+completely prepared new rule without replacing an existing one. It never launches a mutating child
+or creates missing root gate anchors. Passive context construction and readiness do not run this
+helper. Uncertain effects or cleanup retain the original workflow and ownership. Positive
+no-dispatch proof permits cleanup, not another preparation attempt.
+
+Historical private operations without verified guest facts and platform-host operations retain their
+separate contracts; they do not fabricate a VM identity. This wiring does not migrate legacy
+callers, activate permissions or complete production recovery. Managed-agent namespace lifecycle,
+predecessor-controller settlement and native route/recovery evidence remain required before claiming
+full file recovery support.
 
 The three private file-recovery adapters now distinguish the encoded record version from its
 database envelope and require an exact match. Version-two bootstrap-bound records require `context=`
@@ -1326,12 +1826,13 @@ native privilege transitions, predecessor drain or production recovery acceptanc
 
 ## Private inline file reads
 
-`_file_read.py` composes a bounded, identity-bound Linux file read through one carrier attempt. The
-core selects a trusted root and relative path; the helper checks the expected UID, GID and groups
-before opening the target. Absolute root traversal uses path-only descriptors and refuses links
-without requiring directory read permission. The existing snapshot reader also refuses descendant
-mount crossings and unsupported objects. Missing roots or files produce an absent observation, not
-an I/O success with empty bytes.
+`_file_read.py` composes a bounded, identity-bound Linux or Darwin file read through one carrier
+attempt. The core selects a trusted root and relative path; the helper checks the expected UID, GID
+and groups before opening the target. Linux absolute root traversal uses path-only descriptors and
+refuses links without requiring directory read permission; descendant mount crossings refuse. Darwin
+requires readable directory ancestry, uses no-follow descriptors and refuses descendant device
+changes, not same-filesystem mounts. Both refuse unsupported objects. Missing roots or files produce
+an absent observation, not an I/O success with empty bytes.
 
 Workload paths and request payload travel only in sensitive stdin. `_file_wire.py` supplies the
 shared bounded `AGWF1` record framing; the read schema remains concrete. A file-specific collector
@@ -1362,9 +1863,9 @@ must not render private frame locals. Snapshot bytes and metadata remain hidden 
 representations.
 
 This is not production FileAccess or native platform acceptance. This read helper does not provide
-mutation, macOS support or a hard elapsed-time bound for filesystem reads. Metadata-only stat uses
-the separate object exchange below. Both assume a cooperative execution identity, not hostile
-same-user isolation.
+mutation or a hard elapsed-time bound for filesystem reads. Metadata-only stat uses the separate
+object exchange below. Both assume a cooperative execution identity, not hostile same-user
+isolation.
 
 `_file_memory_read.py` supplies a separate private in-memory read over the owned snapshot/chunk
 download through the shared `FileOperation`. Core retains unfinished download facts before final
@@ -1425,14 +1926,22 @@ factory teardown and native macOS/Windows acceptance remain open.
 bootstrap attempt targeting the Linux `_terminal_guest.py`. It requires explicit `RuntimeSelection`
 and observes runtime readiness before accepting the helper's payload-ready marker. Only that second
 gate releases one bounded frame from the host byte source. That frame keeps literal byte argv,
-environment and source off helper argv. The guest reads it with echo and terminal input
-transformations disabled, installs source on a Linux memory descriptor separate from terminal stdin,
-restores the terminal, then emits a distinct nonce-bound interactive-ready marker. Only then does
-the host source end preparation and permit a future carrier adapter to borrow keyboard input. The
-paired host sink suppresses setup and readiness bytes, handles split and coalesced markers, and
-forwards only bytes after interactive readiness to an explicitly selected trusted presentation sink
-with short-write flow control. Before exec, the one-shot guest resets Python-ignored pipe and
-file-size signals to their operating-system defaults without changing unrelated signal dispositions.
+environment and source off helper argv. The host hex-encodes the complete frame as printable ASCII;
+the 32,768-byte decoded limit includes its 11-byte header, and the encoded limit is 65,536 bytes.
+The guest strictly decodes hex without whitespace or terminal-sequence normalization, preserving
+every decoded byte. It reads setup with echo and terminal input transformations disabled, installs
+source on a Linux memory descriptor separate from terminal stdin, restores the terminal, then emits
+a distinct nonce-bound interactive-ready marker. Only then does the host source end preparation and
+permit a future carrier adapter to borrow keyboard input. The paired host sink suppresses setup and
+readiness bytes, handles split and coalesced markers, and forwards only bytes after interactive
+readiness to an explicitly selected trusted presentation sink with short-write flow control. Before
+exec, the one-shot guest resets Python-ignored pipe and file-size signals to their operating-system
+defaults without changing unrelated signal dispositions.
+
+Readiness is printable fixed-width `AGW-TERMINAL/2:<32 uppercase hex nonce>:P` or `:I`, without a
+newline. After matching readiness magic, the collector requires the exact nonce, colon and phase;
+wrong nonce, malformed records and duplicate or out-of-order phases fail closed. Encoding does not
+replace no-echo setup or sensitive-output suppression.
 
 The initial terminal settings can transform the runtime record before the helper enters raw mode.
 The sink accepts only its nonce-bound canonical or entirely uppercase control record, with LF or
@@ -1452,11 +1961,13 @@ descriptors, UTF-8 terminal type and endpoint shape without reading a descriptor
 Terminal input cannot use capture or discard, and its bootstrap and terminal type stay out of
 diagnostic representations. These shared values do not enable terminal delivery: Proxmox, WSL2, the
 inherited buffered SSH path and the ordinary subprocess pump refuse before provider or client
-dispatch. SSH still owns native workstation PTY plumbing, terminal metadata, keyboard borrowing,
-resize, restoration and the joint acceptance proof before enablement. The future transport-owned
-execution wrapper must call the readiness sink's `finish()` when the carrier attempt ends. Neither
-the carrier nor the generic byte-sink protocol performs that finalization today; preparation-only
-tests are not production terminal acceptance.
+dispatch. SSH owns keyboard borrowing, terminal relay and input restoration. Shared transport owns
+native child launch, process custody, cleanup and resize; its existing borrowed-stdin mechanism does
+not provide Windows console launch or resize. Native workstation plumbing and joint acceptance
+remain required before enablement. The future transport-owned execution wrapper must call the
+readiness sink's `finish()` when the carrier attempt ends. Neither the carrier nor the generic
+byte-sink protocol performs that finalization today; preparation-only tests are not production
+terminal acceptance.
 
 ## Private JSON transformation
 
@@ -1490,16 +2001,26 @@ does not expose FileAccess, publication or permission enforcement.
 
 On Linux x86-64 and AArch64, every descendant open uses `openat2` beneath the borrowed root with
 symlink, magic-link and mount crossings forbidden. Unsupported kernels or architectures refuse
-without a weaker fallback. Other POSIX platforms retain the separate component walk and `st_dev`
-checks, which do not detect same-filesystem bind mounts. Neither path contains a malicious same-user
-process or supplies external-writer compare-and-swap. Regular-file reads can block in the
-filesystem, so this primitive provides no hard elapsed-time bound. Complete helper delivery,
-operation coordination, platform guarantees and production composition remain separate work.
+without a weaker fallback. Darwin uses a readable-descriptor component walk and `st_dev` checks,
+which do not detect same-filesystem bind mounts. Other platforms refuse rather than inherit a weaker
+generic POSIX path. Neither path contains a malicious same-user process or supplies external-writer
+compare-and-swap. Regular-file reads can block in the filesystem, so this primitive provides no hard
+elapsed-time bound. Complete helper delivery, operation coordination, platform guarantees and
+production composition remain separate work.
 
 `read_revision` can observe regular-file metadata without retaining content or can include a
 bounded-memory content digest. Linux metadata-only observation uses a path-only descriptor and does
 not require file-read authority. `FileSnapshot.revision` carries the content-bound observation; its
 `stat` and `digest` properties expose those same values without duplicating them.
+
+The ordinary fixed file bundles also admit Darwin fresh-exec credentials. Darwin traversal opens
+readable directories and regular files without following links, rejects unexpected object kinds and
+checks held/named identity. Once below the selected root, descendant device changes refuse.
+Read-only traversal admits deny-only ancestor ACLs; mutation refuses unsupported ACLs, extended
+attributes, BSD flags and privilege bits instead of stripping them. Descriptor metadata changes use
+`fchown` and `fchmod`, not the Linux procfs path-only bridge. These helpers do not provide a host
+identity, host recovery fence or production platform-host context. Linux numeric VM bootstrap stays
+Linux-specific; native Darwin filesystem and account proof remains open.
 
 `_file_spool.py` copies one held regular source into private scratch in bounded chunks, returning a
 verified ready reference and the source's content-bound revision. It checks source length, EOF,
@@ -1520,23 +2041,27 @@ interruption acceptance remain production gates.
 
 ## Private file publication
 
-`_file_publication.py` supplies Linux same-directory publication beneath a borrowed parent
-descriptor. It accepts bytes or a borrowed verified scratch source. `Create` requires absence,
-`Replace` requires an existing regular file, and `Match` requires the supplied revision. A revision
-binds metadata and optionally content; matching a content-bound revision hashes bounded chunks
-without retaining the old file. Create-only publication uses `renameat2(RENAME_NOREPLACE)` without a
-fallback. Replacement rechecks its observed condition before rename. The caller supplies
-confinement, operation serialization and scratch cleanup. This primitive is not FileAccess or a
-remote upload helper.
+`_file_publication.py` supplies Linux rename and Darwin held-file publication beneath a borrowed
+parent descriptor. It accepts bytes or a borrowed verified scratch source. `Create` requires
+absence, `Replace` requires an existing regular file, and `Match` requires the supplied revision. A
+revision binds metadata and optionally content; matching a content-bound revision hashes bounded
+chunks without retaining the old file. Create-only publication uses Linux
+`renameat2(RENAME_NOREPLACE)` or Darwin `renameatx_np(RENAME_EXCL)` without a fallback. Replacement
+rechecks its observed condition before mutation. The caller supplies confinement, operation
+serialization and scratch cleanup. This primitive is not FileAccess or a remote upload helper.
 
 An exclusive sibling receives the content and required metadata before publication. Byte-backed
 publication chooses a fresh random name; scratch-backed publication derives its name from the
 core-generated scratch token and records its exact identity before copying content. New files retain
 the directory's inherited ACL behavior with the requested owner, group and mode. Replacement
 requires ordinary destination write authority and preserves UID, GID, permission bits and the Linux
-access ACL. Read authority is additionally needed for a content-bound match, not unconditional
-replacement. Observed links, multiply linked files, special objects, set-ID state and other visible
-extended attributes refuse. Unsupported metadata is not silently dropped.
+access ACL on Linux. Linux additionally needs read authority for a content-bound match, not
+unconditional replacement. Darwin replacement requires readable and writable access to its held
+regular file, verifies all staged content before mutation, then copies, truncates and syncs in
+place. It preserves the admitted inode and access metadata without promising atomic visibility.
+Later write, truncate, sync, close or deadline failure reports uncertainty, including possible
+partial content. Observed links, multiply linked files, special objects, set-ID state and other
+visible extended attributes refuse. Unsupported metadata is not silently dropped.
 
 Scratch publication checks declared length and digest while copying bounded ranges, including
 validation of empty sources. The caller retains ownership of the scratch object. Hash/copy loops
@@ -1556,7 +2081,7 @@ exceptions can race Python bookkeeping, including recording a descriptor returne
 Repeated interruption has no bounded cleanup guarantee. Complete helper lifecycle and interruption
 acceptance remain open.
 
-Atomic visibility does not imply directory-entry crash durability, an external-writer
+Linux rename's atomic visibility does not imply directory-entry crash durability, an external-writer
 compare-and-swap guarantee or a hard filesystem deadline. Native-platform acceptance and the
 complete file service remain separate work.
 
@@ -1608,14 +2133,22 @@ Neither a caller crash nor a missing scratch receipt proves remote mutation has 
 operations. Core can arm the owner before an outer lifecycle effect without retaining a borrow; the
 first child attempt otherwise commits possible dispatch before returning permission to send work.
 Later attempts reuse the durable claim. A settled child attempt proves only that attempt is done.
-Core separately records whole-operation no-further-effects evidence after activation, workflow and
-teardown are quiescent. Explicit close stops admission and releases only a never-armed reservation
-or an explicitly resolved claim; it does not infer remote quiescence from local return or from the
-absence of an open child attempt.
+Core separately records aggregate completion after every owned obligation meets its adapter's
+reviewed completion condition and delivery, workflow and teardown are independently settled.
+Completion means the condition that the concrete adapter actually establishes, not an unconditional
+certificate about all future provider effects. Explicit close stops admission and releases only a
+never-armed reservation or an explicitly resolved claim; it does not infer remote completion from
+local return or from the absence of an open child attempt.
 
 `stop_admission()` publishes a monotonic close signal without waiting for the owner guard or a
 database transition. Already-admitted work can finish its transition afterward; the signal proves
 neither cancellation nor quiescence. Bookkeeping, settlement and release remain serialized.
+
+During native shutdown, `retire_unused_borrow()` can revoke a pristine local borrow after a strict
+current-ownership read. A started attempt, dispatch registration or armed effect excludes that
+borrow. Revocation performs no database mutation and resolves no adapter debt. Late use of the
+revoked handle refuses. Actual local delivery is drained before helper bookkeeping; that drain does
+not prove guest termination or aggregate completion.
 
 Recovery may construct a new owner only by rotating the persisted generation from an exact
 predecessor. That atomically seals the stable operation ledger and restores persisted reserved,
@@ -1700,13 +2233,14 @@ release the JSON operation's ownership between observation and conditional publi
 
 `_file_download.py` creates one private source snapshot and selects its transfer route once from the
 carrier's live-stdio feature. A live route streams the held READY copy in one helper attempt;
-buffered routes use verified bounded chunks. Both clean up the exact snapshot under the same owner.
-Sequenced live DATA records reach only the private sink before final transcript verification;
-length, digest, closed framing and independent normal-zero completion must all agree before the
-stream is verified. There is no chunk fallback or replay after possible stream dispatch. Short
-writes and temporary stalls consume the original deadline; the coordinator never closes its sink.
-The final byte count and digest match the source revision, including for empty files. Confirmed
-absence returns no bytes.
+buffered routes use verified ranges of at most 256 KiB. Each range declares a conservative complete
+stdout requirement before dispatch, including its runtime and terminal framing. Both routes clean up
+the exact snapshot under the same owner. Sequenced live DATA records reach only the private sink
+before final transcript verification; length, digest, closed framing and independent normal-zero
+completion must all agree before the stream is verified. There is no chunk fallback or replay after
+possible stream dispatch. Short writes and temporary stalls consume the original deadline; the
+coordinator never closes its sink. The final byte count and digest match the source revision,
+including for empty files. Confirmed absence returns no bytes.
 
 The outcome separates accepted bytes, whole-stream verification, remote cleanup debt and possible
 future effects. A verified stream is not complete while required cleanup remains unresolved. Sink
@@ -1721,12 +2255,13 @@ and native streaming performance acceptance remain open.
 
 ## Private object observation and removal
 
-`_file_objects.py` observes a supported Linux regular file, directory or Unix socket without
-requiring content-read permission. It uses confined path-only descriptors and checks named/held
-identity and metadata. Observed links, multiply linked regular files and other special objects
-refuse. Removal requires exact kind and revision; digest-bearing regular revisions also recheck
-content through the bounded revision reader. Only empty directories can be removed. Initial absence
-returns unchanged; interrupted or ambiguous mutation is not reported as unchanged.
+`_file_objects.py` observes supported objects and checks named/held identity and metadata. Linux
+uses confined path-only descriptors for regular files, directories and Unix sockets without
+requiring content-read permission. Darwin requires readable regular files or directories and
+readable ancestry; sockets refuse. Observed links, multiply linked regular files and other special
+objects refuse. Removal requires exact kind and revision; digest-bearing regular revisions also
+recheck content through the bounded revision reader. Only empty directories can be removed. Initial
+absence returns unchanged; interrupted or ambiguous mutation is not reported as unchanged.
 
 The caller owns the trusted parent and operation serialization. Removal neither checks tmux liveness
 nor provides atomic compare-and-remove against external writers. Session code must coordinate server
@@ -1750,12 +2285,13 @@ not establish privileged or cross-identity native acceptance or public FileAcces
 
 ## Private metadata convergence
 
-`_file_metadata.py` converges regular-file or directory ownership and mode on a held Linux inode. It
+`_file_metadata.py` converges regular-file or directory ownership and mode on a held inode. Linux
 verifies the fixed procfs descriptor bridge instead of reopening the caller's mutable path;
 unavailable or incompatible procfs refuses. Ordinary attributes remain in place, and access-ACL
-permissions are checked against the resulting mode. Directory modes can include set-group-ID and
-sticky bits; regular-file modes are ordinary permissions only. Socket metadata and set-user-ID
-requests are not supported.
+permissions are checked against the resulting mode. Darwin uses readable descriptors with `fchown`
+and `fchmod`, refusing unsupported ACLs, attributes, flags and regular-file privilege bits rather
+than removing them. Directory modes can include set-group-ID and sticky bits; regular-file modes are
+ordinary permissions only. Socket metadata and set-user-ID requests are not supported.
 
 `ensure_directory` creates only the final component, initially with mode 0700, then converges it. It
 does not remove a created public directory if a later step fails. Errors distinguish unchanged,
@@ -1763,21 +2299,28 @@ confirmed partial changes and uncertain attempts, retaining closed completed-ste
 owns path validation, the trusted parent and operation serialization. These private functions
 provide neither a public file service nor native or elevated acceptance.
 
-`_file_metadata_exchange.py` delivers `set_file_metadata` and `ensure_file_directory` through one
-sensitive finite-input carrier attempt. The fixed helper verifies execution identity, confines the
-parent and leaf, and emits its result after owned descriptor cleanup. Numeric metadata ownership is
-separate from execution identity. Missing parents refuse; directory creation does not create
-intermediate components. Complete failure records preserve known changes and uncertain attempts;
-lost observation after possible dispatch remains uncertain and never triggers replay. A control
-interruption carries a closed mutation-uncertainty marker.
+`create_directory` instead refuses an existing entry before metadata convergence, including a racing
+creator. It leaves existing directory ownership, mode and ACLs untouched. Confirmed creation
+followed by failure remains a changed or uncertain outcome, not permission to retry.
+
+`_file_metadata_exchange.py` delivers `set_file_metadata`, `ensure_file_directory` and the
+create-only `create_file_directory` through one sensitive finite-input carrier attempt. The fixed
+helper verifies execution identity, confines the parent and leaf, and emits its result after owned
+descriptor cleanup. Numeric metadata ownership is separate from execution identity. Missing parents
+refuse; directory creation does not create intermediate components. Complete failure records
+preserve known changes and uncertain attempts; lost observation after possible dispatch remains
+uncertain and never triggers replay. A control interruption carries a closed mutation-uncertainty
+marker.
 
 ## Private directory inventory
 
-`_file_inventory.py` reads a bounded Linux directory inventory beneath a borrowed trusted root and
-caller-owned operation serialization. It observes regular files, directories and sockets without
-reading file content, refusing links, multiply linked regular files, unsupported special objects and
-descendant mount crossings. Depth one returns immediate children; a directory at the requested depth
-is observed but its children are not enumerated.
+`_file_inventory.py` reads a bounded directory inventory beneath a borrowed trusted root and
+caller-owned operation serialization. Linux observes regular files, directories and sockets without
+reading file content and refuses descendant mount crossings. Darwin requires readable directories
+and regular-file descriptors, refuses sockets and checks descendant devices rather than Linux mount
+boundaries. Both refuse links, multiply linked regular files and unsupported special objects. Depth
+one returns immediate children; a directory at the requested depth is observed but its children are
+not enumerated.
 
 Results are sorted by relative UTF-8 path bytes. Entry, name and encoded-output limits fail rather
 than returning a truncated result. The shared encoder defines the exact compact JSON byte count,
@@ -1815,8 +2358,9 @@ search, replay, transfer registry or reboot-durability guarantee is supplied.
 
 Writes use bounded exact offsets and a chunk digest. An exact previously written range may be
 retried after comparing its bytes; gaps, conflicting duplicates and partially overlapping chunks
-refuse. Whole-object length and digest verification precedes bounded reads. The 24 KiB raw chunk
-limit is an internal candidate, not evidence that a complete encoded carrier request fits.
+refuse. Whole-object length and digest verification precedes bounded reads. Writes and internal
+streaming pieces retain the 24 KiB raw limit; exact verified range reads allow up to 256 KiB.
+Neither raw bound alone proves that a complete encoded carrier request or response fits.
 
 Cleanup removes the exact data object before its receipt, then the empty directory, never unknown
 neighboring objects or a recursive prefix match. Errors retain closed facts and unresolved
@@ -1863,22 +2407,105 @@ expiry after parent resolution and before its first deletion. Neither recovery n
 that an earlier unobserved request can no longer arrive; delayed chunk requests must still validate
 their receipt and cannot recreate a cleaned stage.
 
-The private stage chunk cap is 12 KiB, below the scratch primitive's 24 KiB range cap. The complete
-manifest is limited to 32 KiB, and Proxmox independently enforces its full serialized body limit.
-Local tests exercise the actual request serializer, a fake provider executing the real helper, and
-Windows SSH command-line sizing for explicit fixtures. Those measurements do not establish native
-platform acceptance or fit for every connection/identity prefix.
+Managed-start requests use a canonical version-two body followed by an exact 512-byte tail. The body
+contains the prepared assets without an operation lease; the tail contains the existing canonical
+lease JSON or literal `null`, padded with ASCII spaces. Complete decoding reconstructs the control
+asset and applies the full request validator, including lifetime and launch binding. Body
+preparation reserves full lease headroom but does not authorize dispatch. `ManagedStartPreparation`
+validates the immutable body and delivery limits without creating an executable attempt. It freezes
+one launch-bound lease/null tail and finalizes against the original carrier and deadline. The
+private OPERATION and INDEPENDENT parents use this path before reservation. When inline delivery
+does not fit, they stage the original prefix and body before activation. OPERATION samples its
+initial lease after that bulk transfer and appends the frozen lease tail; INDEPENDENT appends one
+null tail without clock sampling. Each activates the fixed loader once. Native acceptance remains
+incomplete.
+
+The private stage chunk cap is 12 KiB, below the scratch primitive's 24 KiB write-chunk cap. The
+complete manifest is limited to 32 KiB, and Proxmox independently enforces its full serialized body
+limit. Local tests exercise the actual request serializer, a fake provider executing the real
+helper, and Windows SSH command-line sizing for explicit fixtures. Those measurements do not
+establish native platform acceptance or fit for every connection/identity prefix.
 
 These entries are individual exchanges, not FileAccess operations. Private upload composition uses
 them through `_file_upload.py`; downloads use the separate snapshot exchanges below. The caller must
 retain the token, original binding and known references; an unavailable creation reply does not
 establish absence or quiescence.
 
-`_scratch_root.py` opens the fixed Linux `/tmp` directory without following symlinks and requires
-UID 0 and mode 01777. It creates and repairs nothing, ignores environment-selected temporary paths,
-and returns a caller-owned descriptor or a closed failure kind. Download snapshots can use this
-parent independently of read-only source authority. This private selection grants no access to
-arbitrary temporary-directory contents. macOS root selection is not implemented.
+Prepared helper inputs use the explicit private `fixed_scratch_root` stage variant. It requires a
+numeric guest bootstrap and selects a packaged root-only entry, rather than changing the request
+grammar. That entry refuses file-effect gates and caller-selected parents, and opens the same
+validated root-owned `01777` Linux `/tmp` as the staged loader before any scratch effect. Ordinary
+file-path staging retains its separate confined-parent behavior.
+
+`PreparedHelperStage` provides private serial ownership for opaque prepared input. Its parent must
+retain it before BEGIN. A separate `prepared-helper-stage` lifecycle row records the token, exact VM
+and guest/root/runtime binding before creation; it contains no payload, active reference or
+activation digest. Ordinary helper borrows keep their own dispatch custody. Acknowledged bounded
+chunks advance the offset only after helper settlement, and an interrupted append cannot replay.
+Preparing an activation control does not itself establish activation closure or permit cleanup.
+
+Cleanup accepts an explicit fresh finite budget without reopening preparation. It still requires
+actual helper and activation closure; token reconciliation supplies cleanup debt only, not an active
+load reference or absence proof. A failed or interrupted cleanup retires active reuse, and completed
+removal marks the stage cleaned before resolving its separate row. Unknown delivery, missing
+receipts and lost bookkeeping replies retain uncertainty. Same-process continuation retains the
+actual stage helper borrow, delivery and bounded candidate, observes exact closure under a fresh
+cleanup budget, and reconciles local bookkeeping without replaying preparation.
+
+Both private parents retain stage cleanup before effects. OPERATION uses `ManagedStartCustody`;
+INDEPENDENT retains activation custody on its exact resource-start binding. Activation closure is
+independent of launch acknowledgment. Native workflow cleanup is serialized by one non-blocking
+aggregate lock. Every close publishes stop intent before acquiring it; competing or reentrant
+cleanup refuses without dispatching helpers or changing retained custody. An escaping control
+releases the lock for an exact later retry. `PreparedStageCleanup` may remove the exact owned stage
+after ordinary operation admission stops; it cannot create, append or activate work. Unknown cleanup
+delivery blocks another helper until closure is proved. Later explicit idempotent removal still
+requires the original cleanup debt and positive removal evidence. An abandoned activation that never
+reached start admission uses an explicit no-dispatch proof, not a fabricated exit code. When a
+native closure delivery is selected, its proof governs helper closure; a generic zero exit cannot
+bypass missing native evidence. Before acquiring a stage helper borrow, the parent records its
+preparation phase. If the borrow reply is lost, core first revokes only a pristine orphan; exact
+no-entry bookkeeping can then resolve an unused BEGIN row without querying remote absence. An
+unentered CHUNK retains the prior stage's cleanup debt. Process-loss recovery and the remaining
+helper-owner integration audit stay open. These classes do not provide a public FileAccess
+operation.
+
+`PreparedHelperStageRecovery` is a private cleanup-only adapter for a recovered, sealed owner whose
+only pending predecessor row is the exact prepared stage. Open it before admitting a new recovery
+span's support rows. Every remote exchange and cleanup-resolution retry requires that span's fresh
+protected action, exact target and guest, numeric root authority and runtime. A historical receipt
+grants cleanup debt only; it cannot activate the input or prove missing scratch is absent. The
+adapter retains actual recovery dispatch, attempt and local delivery through interrupted replies.
+Before each helper it publishes a revision-fenced version-two in-flight wrapper on the same row.
+Only actual helper, local delivery and dispatch closure permit restoration of the original idle
+payload; positive closed CLEANED evidence instead permits resolving that exact row. A later
+controller refuses an unresolved wrapper even after recovery support rows have been disposed.
+Availability support closure is not predecessor helper termination. This adapter does not establish
+generic native drain or all-platform recovery support.
+
+`_scratch_root.py` opens Linux `/tmp` or Darwin `/private/tmp` without following symlinks and
+requires UID 0 and mode 01777. Darwin does not follow the `/tmp` symlink. Selection creates and
+repairs nothing, ignores environment-selected temporary paths, and returns a caller-owned descriptor
+or a closed failure kind. Download snapshots can use this parent independently of read-only source
+authority. This private selection grants no access to arbitrary temporary-directory contents. Native
+default-root acceptance remains open.
+
+## Private root staged-helper loader
+
+`_staged_helper_bundle.py` binds a first-party `FixedFileHelperBundle` bootstrap to the existing
+root/full-guest checkpoint. Its bounded canonical control names an active STAGE reference, not a
+caller executable or source selector. `_staged_helper_guest.py` verifies the whole owned prepared
+input, duplicates a held verified descriptor onto stdin and invokes that original bootstrap. The
+bootstrap independently verifies its fixed code prefix before loading modules; remaining request
+bytes stay data. Scratch descriptor borrowing reuses receipt, object identity, timestamp and
+cleanup-debt checks without copying the whole input into memory. Stdin and argv are restored;
+integer `SystemExit` returns through outer admission cleanup, while other controls propagate.
+
+Both private managed-start paths select this loader when the original inline delivery does not fit;
+FileAccess does not use it. Its remaining allowance bounds verification/admission cooperatively, not
+stalled envelope delivery or the invoked helper's complete lifetime. Envelope reading still requires
+EOF, and actual native helper closure remains separate evidence. Local packed-helper and scripted
+composition tests are not native acceptance.
 
 ## Private file snapshot exchanges
 
@@ -1888,7 +2515,7 @@ before opening either the source or the fixed scratch parent. It copies the held
 scratch once; later requests read that copy, not a changing source file. Source-read authority does
 not require write access to the source directory.
 
-Requests use sensitive stdin with a 32 KiB manifest bound. Chunk replies carry at most 12 KiB of
+Requests use sensitive stdin with a 32 KiB manifest bound. Chunk replies carry at most 256 KiB of
 binary data in `AGWF1` records, followed by range, length and digest evidence. The host releases
 typed results only after complete nonce-bound framing and delivered streams. A missing source root
 or file is distinct from an empty file; invalid, reflected or incomplete output does not establish

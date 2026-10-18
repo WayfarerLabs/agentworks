@@ -12,9 +12,11 @@ from agentworks.execution._runtime_prerequisite import (
     RuntimePrerequisiteObservation,
     RuntimePrerequisiteState,
     RuntimeSelection,
+    _NumericGuestBootstrap,
+    build_root_guest_bootstrap_argv,
     build_runtime_identity_helper_argv,
 )
-from agentworks.execution._workload_shell_bundle import FIXED_SOURCE
+from agentworks.execution._workload_shell_bundle import FIXED_SOURCE, ROOT_PROGRAM
 from agentworks.execution._workload_shell_protocol import (
     MAX_WORKLOAD_SHELL_RESPONSE_BYTES,
     WorkloadShellFailure,
@@ -147,6 +149,7 @@ def observe_workload_shell(
     plan: IdentityPlan,
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> WorkloadShellObservationResult:
     """Make one bounded read-only attempt; never infer a shell from carrier status."""
     nonce = secrets.token_hex(16)
@@ -160,9 +163,19 @@ def observe_workload_shell(
             RuntimePrerequisiteObservation(RuntimePrerequisiteState.UNKNOWN, None),
             None,
         )
-    argv, candidates, system_shim = build_runtime_identity_helper_argv(
-        plan, selection=runtime_selection, fixed_source=FIXED_SOURCE, nonce=nonce
-    )
+    if bootstrap is None:
+        argv, candidates, system_shim = build_runtime_identity_helper_argv(
+            plan, selection=runtime_selection, fixed_source=FIXED_SOURCE, nonce=nonce
+        )
+    else:
+        argv, candidates, system_shim = build_root_guest_bootstrap_argv(
+            bootstrap.root_entry,
+            plan.expected,
+            selection=runtime_selection,
+            program=ROOT_PROGRAM,
+            nonce=nonce,
+            expected_guest=bootstrap.guest,
+        )
     response = _BoundedResponseSink()
     runtime = RuntimePrefixSink(nonce, candidates, response, system_shim)
     stderr = _DiagnosticSink()

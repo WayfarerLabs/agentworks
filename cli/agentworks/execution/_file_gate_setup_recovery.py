@@ -14,7 +14,7 @@ from agentworks.execution._file_effect_gate_exchange import (
 )
 from agentworks.execution._file_effect_gate_protocol import GateControlOperation
 from agentworks.execution._file_obligation import (
-    FileCallFamily,
+    FILE_EFFECT_GATE_FAMILIES,
     FileCallObligation,
     decode_file_call_obligation,
 )
@@ -41,7 +41,7 @@ class FileGateSetupRecovery:
 
     A positive exact inspection proves the gate's creation completed. The
     predecessor cannot publish a binding after database generation takeover,
-    so this path cannot have started snapshot or upload work. It does not resolve other
+    so this path cannot have started file effects. It does not resolve other
     obligations or release the whole operation owner.
     """
 
@@ -77,7 +77,7 @@ class FileGateSetupRecovery:
             or type(target) is not ManagedTargetIdentity
             or target.kind.value != scope.resource_kind.value
             or target.name != scope.resource_name
-            or call.family not in {FileCallFamily.DOWNLOAD, FileCallFamily.UPLOAD, FileCallFamily.PACKAGE_UPLOAD}
+            or call.family not in FILE_EFFECT_GATE_FAMILIES
             or call.target != target
             or call.gate_setup is None
             or call.effect_gate is not None

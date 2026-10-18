@@ -119,7 +119,9 @@ def test_validation_refusal_preserves_lifetime_row_for_next_call(owned, monkeypa
 
     class RefusingCarrier(RecordingCarrier):
         def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
-            raise ValidationError("refused")
+            super().validate(invocation, io=io)
+            if self.validations > 1:
+                raise ValidationError("refused after preflight")
 
     refused = RefusingCarrier()
     with pytest.raises(ValidationError):
@@ -387,7 +389,9 @@ def test_terminal_capture_serializes_concurrent_bookkeeping(
 
         class RefusingCarrier(RecordingCarrier):
             def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
-                raise control
+                super().validate(invocation, io=io)
+                if self.validations > 1:
+                    raise control
 
         carrier = RefusingCarrier()
     else:
@@ -538,7 +542,9 @@ def test_predispatch_retry_refuses_successor_borrow(owned, monkeypatch: pytest.M
 
     class RefusingCarrier(RecordingCarrier):
         def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
-            raise ValidationError("refused")
+            super().validate(invocation, io=io)
+            if self.validations > 1:
+                raise ValidationError("refused after preflight")
 
     monkeypatch.setattr(OperationBorrow, "handoff_retained_effect", lost_reply)
     carrier = RefusingCarrier()

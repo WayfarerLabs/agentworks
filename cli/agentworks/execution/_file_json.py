@@ -52,6 +52,7 @@ from agentworks.operations import OperationBorrow
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from agentworks.execution._file_effect_gate import FileEffectGateBinding
     from agentworks.execution._file_object_protocol import FileObjectFailureControl
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._runtime_prerequisite import _NumericGuestBootstrap
@@ -108,6 +109,7 @@ class FileJsonBinding:
     identity_plan: IdentityPlan
     runtime_selection: RuntimeSelection
     bootstrap: _NumericGuestBootstrap | None = None
+    effect_gate: FileEffectGateBinding | None = None
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -254,6 +256,7 @@ def update_json_file(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     borrow: OperationBorrow,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> FileJsonOutcome:
     """Apply one bounded JSON strategy while holding one serial owner borrow."""
     return _prepare_json_update(
@@ -270,6 +273,7 @@ def update_json_file(
         deadline=deadline,
         runtime_selection=runtime_selection,
         borrow=borrow,
+        effect_gate=effect_gate,
     ).run()
 
 
@@ -289,6 +293,7 @@ def _prepare_json_update(
     runtime_selection: RuntimeSelection,
     borrow: OperationBorrow,
     bootstrap: _NumericGuestBootstrap | None = None,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> _PreparedJsonUpdate:
     """Prepare one validated JSON update without dispatching it."""
     inputs = _validate_json_inputs(
@@ -305,6 +310,7 @@ def _prepare_json_update(
         runtime_selection,
         borrow,
         bootstrap=bootstrap,
+        effect_gate=effect_gate,
     )
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     state = _State(inputs.binding, operation)
@@ -586,6 +592,7 @@ class _JsonWorkflow:
             self._state.binding.identity_plan,
             self._state.binding.runtime_selection,
             bootstrap=self._state.binding.bootstrap,
+            effect_gate=self._state.binding.effect_gate,
         )
         self._state.publication_attempts += 1
         upload = _prepare_upload_borrowed(
@@ -641,6 +648,7 @@ def _validate_json_inputs(
     borrow: object,
     *,
     bootstrap: _NumericGuestBootstrap | None = None,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> _Inputs:
     if type(source) is not bytes:
         raise ValidationError("JSON update requires source bytes")
@@ -665,6 +673,7 @@ def _validate_json_inputs(
         runtime_selection,
         borrow,
         bootstrap=bootstrap,
+        effect_gate=effect_gate,
     )
     json_binding = FileJsonBinding(
         binding.trusted_root_path,
@@ -676,6 +685,7 @@ def _validate_json_inputs(
         binding.identity_plan,
         binding.runtime_selection,
         bootstrap=bootstrap,
+        effect_gate=binding.effect_gate,
     )
     return _Inputs(json_binding, validated, canonical_metadata)
 

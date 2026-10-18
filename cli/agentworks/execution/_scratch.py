@@ -15,7 +15,7 @@ import hmac
 import os
 import stat
 import time
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, NoReturn
@@ -63,6 +63,7 @@ scratch_name = _scratch_name
 
 # Internal candidate pending whole-request carrier proof.
 _MAX_CHUNK_BYTES = 24 * 1024
+_MAX_READ_RANGE_BYTES = 256 * 1024
 _MAX_OFFSET = (1 << 63) - 1
 _HASH_READ_BYTES = 64 * 1024
 
@@ -469,6 +470,36 @@ def ready_scratch_contract(ready: ReadyScratchReference) -> tuple[int, bytes]:
     return reference._ownership._length, bytes(ready._digest)
 
 
+@contextmanager
+def borrow_ready_scratch(
+    parent_fd: int,
+    ready: ReadyScratchReference,
+    *,
+    expires_at: float | None = None,
+) -> Iterator[int]:
+    """Borrow one held verified descriptor; the caller must not close it."""
+    reference = ready._reference
+    _check_reference_deadline(reference, expires_at, ScratchPhase.READ)
+    opened: _OpenedScratch | None = None
+    failure: ScratchTransferError | None = None
+    control: BaseException | None = None
+    close_control: BaseException | None = None
+    try:
+        opened = _open_scratch(parent_fd, reference, writable=False, phase=ScratchPhase.READ, expires_at=expires_at)
+        _require_ready_stat(opened.object_stat, ready)
+        _check_reference_deadline(reference, expires_at, ScratchPhase.READ)
+        yield opened.object_fd
+        _require_ready_stat(_fstat(opened.object_fd, ScratchPhase.READ), ready)
+    except ScratchTransferError as error:
+        failure = error
+    except BaseException as error:
+        control = error
+    finally:
+        if opened is not None:
+            close_control = opened.close()
+    _finish_operation(reference, ScratchPhase.READ, failure, control, close_control, expires_at)
+
+
 def iter_ready_scratch(
     parent_fd: int,
     ready: ReadyScratchReference,
@@ -804,7 +835,7 @@ def _validate_range(reference: ScratchReference, offset: int, length: int) -> No
         offset < 0
         or offset > _MAX_OFFSET
         or length < 0
-        or length > _MAX_CHUNK_BYTES
+        or length > _MAX_READ_RANGE_BYTES
         or offset > expected_length
         or length > expected_length - offset
     ):

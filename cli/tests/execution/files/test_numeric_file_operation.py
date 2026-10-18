@@ -38,7 +38,7 @@ from agentworks.execution._file_object_exchange import (
 )
 from agentworks.execution._file_objects import FileKind
 from agentworks.execution._file_obligation import FileCallObligation, decode_file_call_obligation
-from agentworks.execution._file_operation import FileOperation, PackageUploadMember, PackageUploadStopped
+from agentworks.execution._file_operation import FileOperation
 from agentworks.execution._file_publication import PublicationFailureKind, PublicationPhase, Replace
 from agentworks.execution._file_publication_protocol import FilePublicationFailureCode, FilePublicationFailureControl
 from agentworks.execution._file_read import FileReadCandidateResult, FileReadObservation, FileReadObservationState
@@ -66,7 +66,7 @@ from agentworks.execution.carrier import (
     ExitStatus,
     PreparedInvocation,
 )
-from agentworks.operations import LifecycleObligation, OperationOwner
+from agentworks.operations import LifecycleObligation, OperationBorrow, OperationOwner
 from tests.execution.files._file_download_support import BytesSink
 from tests.execution.files._file_upload_support import BytesSource, new_metadata
 from tests.execution.files._target_support import target_for_owner
@@ -105,6 +105,41 @@ class EvidenceCarrier:
         if self.control:
             raise RuntimeError("dispatch reply lost")
         return CarrierReport(Dispatch.SENT, completion=self.completion)
+
+
+@pytest.fixture(autouse=True)
+def acknowledged_setup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Model the distinct successful control exchange before body fault vectors."""
+
+    def setup(op: BorrowedFixedHelperCarrier, **kwargs: Any) -> GateControlCandidateResult:
+        carrier = op._carrier
+        assert isinstance(carrier, EvidenceCarrier)
+        old_control, old_completion = carrier.control, carrier.completion
+        carrier.control, carrier.completion = False, ExitStatus(code=0)
+        try:
+            report = _dispatch(op, kwargs["deadline"])
+        finally:
+            carrier.control, carrier.completion = old_control, old_completion
+        gate = FileEffectGateBinding(
+            kwargs["path"],
+            b"a" * 16,
+            b"b" * 16,
+            kwargs["guest"],
+            kwargs["plan"].expected.euid,
+            kwargs["scope_name"],
+            1,
+            2,
+        )
+        return GateControlCandidateResult(
+            report.dispatch,
+            report.completion,
+            None,
+            None,
+            _READY,
+            GateControlObservation(GateControlObservationState.RESOLVED, gate),
+        )
+
+    monkeypatch.setattr(_file_operation, "exchange_file_effect_gate", setup)
 
 
 def _context(tmp_path: Path, *, numeric: bool = True) -> tuple[Database, OperationOwner, FileOperation]:
@@ -159,14 +194,6 @@ def _call(operation: FileOperation, carrier: EvidenceCarrier, family: str, **ext
         return operation.upload(
             carrier, source=BytesSource(b""), size=0, condition=Replace(), create_metadata=new_metadata(), **common
         )
-    if family == "package":
-        common.pop("relative_path")
-        return operation.upload_package(
-            carrier,
-            members=(PackageUploadMember("file", BytesSource(b""), 0, Replace(), new_metadata()),),
-            checkpoint=lambda *_: None,
-            **common,
-        )
     if family == "json":
         return operation.update_json(
             carrier,
@@ -189,7 +216,7 @@ def _call(operation: FileOperation, carrier: EvidenceCarrier, family: str, **ext
 
 
 @pytest.mark.parametrize(
-    "family", ["download", "upload", "package", "json", "stat", "inventory", "remove", "metadata", "directory"]
+    "family", ["download", "upload", "json", "stat", "inventory", "remove", "metadata", "directory"]
 )
 @pytest.mark.parametrize("control", [False, True])
 def test_real_workflows_retain_context_and_envelope(
@@ -207,7 +234,6 @@ def test_real_workflows_retain_context_and_envelope(
         result_type = {
             "download": FileSnapshotCandidateResult,
             "upload": FileStageCandidateResult,
-            "package": FileStageCandidateResult,
             "json": FileObjectCandidateResult,
             "stat": FileObjectCandidateResult,
             "inventory": FileInventoryCandidateResult,
@@ -234,7 +260,6 @@ def test_real_workflows_retain_context_and_envelope(
     module, name = {
         "download": (_file_download, "snapshot_begin"),
         "upload": (_file_upload, "stage_begin"),
-        "package": (_file_upload, "stage_begin"),
         "json": (_file_json, "stat_file"),
         "stat": (_file_operations, "exchange_stat_file"),
         "inventory": (_file_operations, "exchange_list_directory"),
@@ -256,10 +281,6 @@ def test_real_workflows_retain_context_and_envelope(
             | _file_operations.OwnedFileControlFact,
         )
         outcome = fact.outcome
-    elif family == "package":
-        with pytest.raises(PackageUploadStopped) as caught_package:
-            _call(operation, carrier, family)
-        outcome = caught_package.value.outcome
     else:
         outcome = _call(operation, carrier, family)
     assert outcome.binding.bootstrap is _BOOTSTRAP
@@ -282,7 +303,22 @@ def test_constructor_refuses_inapplicable_context_without_obligations(
     owner.close()
 
 
-@pytest.mark.parametrize("family", ["download", "upload", "package"])
+@pytest.mark.parametrize("field", ["instance_marker", "boot_id", "init_start_ticks"])
+def test_constructor_refuses_disagreeing_raw_guest(tmp_path: Path, field: str) -> None:
+    database, owner, _ = _context(tmp_path)
+    guest = {
+        "instance_marker": replace(_GUEST, instance_marker="b" * 32),
+        "boot_id": replace(_GUEST, boot_id="123e4567-e89b-12d3-a456-426614174001"),
+        "init_start_ticks": replace(_GUEST, init_start_ticks=11),
+    }[field]
+    target = replace(target_for_owner(owner), boot_id=vm_guest_boot_id(_GUEST))
+    with pytest.raises(ValidationError):
+        FileOperation(owner, target, bootstrap=_BOOTSTRAP, guest=guest)
+    assert not database.operations.list_pending_lifecycle_obligations(owner.ownership)
+    owner.close()
+
+
+@pytest.mark.parametrize("family", ["download", "upload"])
 def test_gate_setup_and_promotion_keep_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, family: str) -> None:
     database, owner, operation = _context(tmp_path)
     target = replace(target_for_owner(owner), boot_id=vm_guest_boot_id(_GUEST))
@@ -318,12 +354,7 @@ def test_gate_setup_and_promotion_keep_context(tmp_path: Path, monkeypatch: pyte
     monkeypatch.setattr(_file_operation, "exchange_file_effect_gate", setup_exchange)
     monkeypatch.setattr(_file_download, "snapshot_begin", body_exchange)
     monkeypatch.setattr(_file_upload, "stage_begin", body_exchange)
-    if family == "package":
-        with pytest.raises(PackageUploadStopped):
-            _call(operation, EvidenceCarrier(), family, gate_setup=setup)
-        binding = operation.unfinished_package_uploads[0].binding
-    else:
-        binding = _call(operation, EvidenceCarrier(), family, gate_setup=setup).binding
+    binding = _call(operation, EvidenceCarrier(), family, gate_setup=setup).binding
     assert binding.bootstrap is _BOOTSTRAP and binding.effect_gate == gate
     assert seen == ["setup", "body"]
     _row(database, owner)
@@ -358,69 +389,6 @@ def test_invalid_aggregate_refuses_before_registration_and_source(tmp_path: Path
     assert source.calls == carrier.calls == 0
     assert not database.operations.list_pending_lifecycle_obligations(owner.ownership)
     owner.close()
-
-
-@pytest.mark.parametrize("numeric", [False, True])
-@pytest.mark.parametrize("lost_reply", [False, True])
-def test_package_consecutive_children_exact_publication_and_checkpoint(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, numeric: bool, lost_reply: bool
-) -> None:
-    database, owner, operation = _context(tmp_path, numeric=numeric)
-    version = 2 if numeric else 1
-    checkpoints: list[int] = []
-    publications: list[tuple[int, int, bytes]] = []
-    original_publish = LifecycleObligation.publish_payload
-
-    def publish(self: LifecycleObligation, *, expected_revision: int, payload_version: int, payload: bytes):
-        publications.append((expected_revision, payload_version, payload))
-        result = original_publish(
-            self, expected_revision=expected_revision, payload_version=payload_version, payload=payload
-        )
-        if lost_reply and len(publications) == 1:
-            raise RuntimeError("publication committed but reply lost")
-        return result
-
-    def run(self: _PreparedUpload) -> FileUploadOutcome:
-        record = _row(database, owner, version=version)
-        assert record.batch_index == len(checkpoints)
-        assert record.token == self.state.token
-        assert self.binding is self.state.binding
-        assert self.binding.bootstrap is (_BOOTSTRAP if numeric else None)
-        _dispatch(self.state.operation, Deadline.after(30))
-        assert self.state.operation.settle(Dispatch.SENT, ExitStatus(code=0))
-        return FileUploadOutcome(
-            FileUploadStatus.COMPLETE, self.binding, self.state.token, 0, 0, publication_confirmed=True
-        )
-
-    def checkpoint(index: int, _outcome: FileUploadOutcome) -> None:
-        assert _row(database, owner, version=version).batch_index == index
-        checkpoints.append(index)
-        if index == 2:
-            raise RuntimeError("checkpoint committed but reply lost")
-
-    monkeypatch.setattr(LifecycleObligation, "publish_payload", publish)
-    monkeypatch.setattr(_PreparedUpload, "run", run)
-    with pytest.raises(RuntimeError):
-        operation.upload_package(
-            EvidenceCarrier(completion=ExitStatus(code=0)),
-            trusted_root_path="/data",
-            members=tuple(
-                PackageUploadMember(f"file-{i}", BytesSource(b""), 0, Replace(), new_metadata()) for i in range(3)
-            ),
-            checkpoint=checkpoint,
-            plan=_BODY,
-            deadline=Deadline.after(30),
-            runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX),
-        )
-    assert checkpoints == [0, 1, 2]
-    assert len(publications) == (3 if lost_reply else 2)
-    assert all(publication[1] == version for publication in publications)
-    if lost_reply:
-        assert publications[0] == publications[1]
-    assert _row(database, owner, version=version).batch_index == 2
-    retained = operation.unfinished_package_uploads[0]
-    assert retained.index == 2 and retained.checkpoint_pending
-    assert retained.binding.bootstrap is (_BOOTSTRAP if numeric else None)
 
 
 def test_json_child_conflict_retry_and_retained_update_keep_context(
@@ -496,53 +464,6 @@ def test_configured_root_body_is_separate_from_root_entry(tmp_path: Path, monkey
     _row(database, owner, body=body)
 
 
-def test_package_unconfirmed_publication_retains_next_child_before_dispatch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    database, owner, operation = _context(tmp_path)
-    publications: list[tuple[int, int, bytes]] = []
-    sources = [BytesSource(b""), BytesSource(b"")]
-    original_publish = LifecycleObligation.publish_payload
-
-    def publish(self: LifecycleObligation, *, expected_revision: int, payload_version: int, payload: bytes):
-        publications.append((expected_revision, payload_version, payload))
-        original_publish(self, expected_revision=expected_revision, payload_version=payload_version, payload=payload)
-        raise RuntimeError("both publication replies lost")
-
-    def run(self: _PreparedUpload) -> FileUploadOutcome:
-        assert _row(database, owner).batch_index == 0
-        _dispatch(self.state.operation, Deadline.after(30))
-        assert self.state.operation.settle(Dispatch.SENT, ExitStatus(code=0))
-        return FileUploadOutcome(
-            FileUploadStatus.COMPLETE, self.binding, self.state.token, 0, 0, publication_confirmed=True
-        )
-
-    monkeypatch.setattr(LifecycleObligation, "publish_payload", publish)
-    monkeypatch.setattr(_PreparedUpload, "run", run)
-    with pytest.raises(RuntimeError):
-        operation.upload_package(
-            EvidenceCarrier(completion=ExitStatus(code=0)),
-            trusted_root_path="/data",
-            members=tuple(
-                PackageUploadMember(f"file-{index}", source, 0, Replace(), new_metadata())
-                for index, source in enumerate(sources)
-            ),
-            checkpoint=lambda *_: None,
-            plan=_BODY,
-            deadline=Deadline.after(30),
-            runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX),
-        )
-    assert len(publications) == 2 and publications[0] == publications[1]
-    (active,) = operation.active_package_uploads
-    assert active.binding.bootstrap is _BOOTSTRAP
-    assert isinstance(active.prepared, _PreparedUpload)
-    assert active.prepared.binding is active.binding
-    assert _row(database, owner).batch_index == 1
-    assert all(source.calls == 0 for source in sources)
-    with pytest.raises(StateError):
-        owner.close()
-
-
 def test_json_lost_child_publication_retains_exact_child_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -563,7 +484,8 @@ def test_json_lost_child_publication_retains_exact_child_context(
 
     def publish(self: LifecycleObligation, *, expected_revision: int, payload_version: int, payload: bytes):
         original_publish(self, expected_revision=expected_revision, payload_version=payload_version, payload=payload)
-        raise RuntimeError("child publication committed but reply lost")
+        if decode_file_call_obligation(payload).token is not None:
+            raise RuntimeError("child publication committed but reply lost")
 
     monkeypatch.setattr(_file_json, "stat_file", stat)
     monkeypatch.setattr(LifecycleObligation, "publish_payload", publish)
@@ -578,6 +500,74 @@ def test_json_lost_child_publication_retains_exact_child_context(
     assert child.binding is child.state.binding
     record = _row(database, owner)
     assert record.attempt == 1 and record.token == child.state.token
-    assert carrier.calls == 1
+    assert carrier.calls == 2
     with pytest.raises(StateError):
         owner.close()
+
+
+@pytest.mark.parametrize("family", ["stat", "inventory", "remove", "metadata", "directory"])
+@pytest.mark.parametrize("interrupted", [False, True])
+@pytest.mark.parametrize("failure_point", ["publication", "borrow_close"])
+def test_owned_capture_failure_preserves_actual_active_call(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    family: str,
+    interrupted: bool,
+    failure_point: str,
+) -> None:
+    database, owner, operation = _context(tmp_path)
+    prepared_type: Any
+    original_publish = LifecycleObligation.publish_payload
+    records: Any
+    prepared_type, records = {
+        "stat": (_file_operations._PreparedStat, operation._active_stats),
+        "inventory": (_file_operations._PreparedInventory, operation._active_inventories),
+        "remove": (_file_operations._PreparedRemove, operation._active_removals),
+        "metadata": (_file_operations._PreparedMetadata, operation._active_metadata),
+        "directory": (_file_operations._PreparedMetadata, operation._active_metadata),
+    }[family]
+    control = KeyboardInterrupt("owned call interrupted")
+    outcomes: list[Any] = []
+
+    def run(prepared: Any) -> Any:
+        (active,) = records.values()
+        assert active.prepared is prepared and active.obligation is not None
+        assert active.outcome is None
+        _row(database, owner)
+        report = _dispatch(prepared.state.operation, Deadline.after(30))
+        assert prepared.state.operation.settle(report.dispatch, report.completion)
+        outcome: _file_operations.OwnedFileOutcome[Any] = _file_operations.OwnedFileOutcome(
+            prepared.binding,
+            coordination_uncertain=failure_point == "publication",
+            requires_owner_retention=failure_point == "publication",
+        )
+        outcomes.append(outcome)
+        if interrupted:
+            raise control from _file_operations.OwnedFileControlFact(outcome)
+        return outcome
+
+    def fail_capture(*args: Any, **kwargs: Any) -> None:
+        if not outcomes:
+            original_publish(*args, **kwargs)
+            return
+        (active,) = records.values()
+        assert active.outcome is outcomes[0]
+        raise MemoryError("capture failed")
+
+    monkeypatch.setattr(prepared_type, "run", run)
+    if failure_point == "publication":
+        monkeypatch.setattr(LifecycleObligation, "publish_payload", fail_capture)
+    else:
+        monkeypatch.setattr(OperationBorrow, "close", fail_capture)
+    with pytest.raises(KeyboardInterrupt if interrupted else MemoryError) as caught:
+        _call(operation, EvidenceCarrier(completion=ExitStatus(code=0)), family)
+    (active,) = records.values()
+    assert active.outcome is outcomes[0]
+    assert not active.borrow.closed
+    if interrupted:
+        assert caught.value is control
+        fact = control.__cause__
+        assert isinstance(fact, _file_operations.OwnedFileControlFact)
+        assert fact.outcome is outcomes[0]
+    with pytest.raises(StateError):
+        owner.borrow()

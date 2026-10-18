@@ -93,9 +93,13 @@ does not prove remote observation or grant authority.
 
 Every in-memory read has a positive caller-selected byte bound; a product default may be offered,
 but there is no universal total-file ceiling. Streaming upload declares its exact finite size, and
-download obtains a finite size from the held source snapshot before transferring. Chunk buffers
-remain bounded. Directory inventory defaults to 1,024 entries, depth 1, and 1 MiB encoded; reviewed
-callers may request up to 4,096 entries, depth 8, and 4 MiB encoded.
+download obtains a finite size from the held source snapshot before transferring. An explicit
+download byte limit may be zero: only a verified empty snapshot may publish under that bound. This
+allows ordinary directory copying to retain empty files after exhausting its aggregate byte budget,
+without a directory-only transfer path or an extra-byte allowance. Negative, Boolean and
+unrepresentable limits remain invalid. Chunk buffers remain bounded. Directory inventory defaults to
+1,024 entries, depth 1, and 1 MiB encoded; reviewed callers may request up to 4,096 entries, depth
+8, and 4 MiB encoded.
 
 Inventory retains one traversal and one canonical response. At its maximum encoded size, the current
 protocol emits at most 5,650,717 stdout bytes including data/control records and runtime prefix.
@@ -299,15 +303,15 @@ dispatch. No implicit macOS installation is allowed. This delivery revision rema
 implementation review, all-family regression coverage and native acceptance.
 
 Data staging and snapshot spools still reuse preparation's exact-offset, length/digest-verified
-scratch mechanics. The shared 24 KiB raw chunk is a candidate pending complete SSH/QGA request
-proof, not a file-layer constant. The private stage exchange uses a smaller 12 KiB raw chunk and a
-32 KiB complete-manifest limit. Its fixed bundle and complete provider serialization are measured by
-local fixtures; native acceptance and every supported connection/identity prefix remain separate
-proof obligations. Close removes only recorded objects; uncertain cleanup is owner debt and never
-hides the primary outcome. Shared same-invocation admission must establish interpreter prerequisites
-without installing anything; platform/ABI-dependent operations retain their own feature checks. No
-separate probe, installed helper version or executable-digest handshake is needed when the
-executable source travels with each invocation.
+scratch mechanics. Scratch writes and internal streaming pieces retain the 24 KiB raw bound;
+snapshot range reads have a separate 256 KiB bound. The private stage exchange uses a smaller 12 KiB
+raw chunk and a 32 KiB complete-manifest limit. Its fixed bundle and complete provider serialization
+are measured by local fixtures; native acceptance and every supported connection/identity prefix
+remain separate proof obligations. Close removes only recorded objects; uncertain cleanup is owner
+debt and never hides the primary outcome. Shared same-invocation admission must establish
+interpreter prerequisites without installing anything; platform/ABI-dependent operations retain
+their own feature checks. No separate probe, installed helper version or executable-digest handshake
+is needed when the executable source travels with each invocation.
 
 Upload consumes its declared finite source once. The unverified scratch reference binds exact object
 identity and expected length, not a whole-file digest that a streaming source cannot yet supply.
@@ -331,11 +335,12 @@ native carrier acceptance remain open.
 
 Snapshot storage is independent of source authority. Download must work when the selected identity
 can read the approved source but cannot write its parent. The Linux candidate uses the existing
-fixed `/tmp` directory as a core-selected scratch parent, opened without symlinks and validated as a
-root-owned directory with mode 01777. It does not trust `TMPDIR`, application environment, the
-source path, an account-home convention or a caller-selected staging path. Missing or unsafe state
-refuses; runtime neither creates nor repairs the parent. This selection is private helper machinery,
-not a grant to read or write arbitrary `/tmp` children.
+fixed `/tmp` directory as a core-selected scratch parent; Darwin selects the existing `/private/tmp`
+directory, not the `/tmp` symlink. Both are opened without following links and validated as
+root-owned directories with mode 01777. Selection does not trust `TMPDIR`, application environment,
+the source path, an account-home convention or a caller-selected staging path. Missing or unsafe
+state refuses; runtime neither creates nor repairs the parent. This is private helper machinery, not
+a grant to read or write arbitrary children of either directory.
 
 The existing token-derived 0700 directory, 0600 data and immutable receipt own each operation's
 objects. Linux [sticky-parent semantics](https://man7.org/linux/man-pages/man2/rename.2.html)
@@ -346,8 +351,9 @@ completion. Operation coordination belongs to the database-backed caller, not th
 directory. Root selection creates no object and is not part of readiness. The private
 `_scratch_root.py` selector implements this admission. Local fixtures cover a non-root caller with a
 read-only source parent, unsafe/missing scratch roots, deadline and descriptor cleanup, and
-independence from payload environment. These fixtures do not establish native default-root
-acceptance or select the macOS host root.
+independence from payload environment. Darwin uses its conservative readable-directory admission
+rather than pretending Linux path-only descriptors are portable. These fixtures do not establish
+native default-root acceptance on either platform or complete platform-host composition.
 
 The first creation acknowledgment remains a transfer-delivery gate. The helper derives the scratch
 name from core's fresh token and records its inode identities before returning them; losing that
@@ -457,12 +463,21 @@ initial absence or a ready scratch reference plus the content-bound source revis
 check that the ready length and digest agree with the source revision and requested bound. Source
 absence does not bypass prerequisite or final deadline checks.
 
-`snapshot_chunk` carries that ready reference and one exact offset/length, initially bounded to 12
-KiB. It uses the fixed scratch parent and existing unlocked range checks, never the original source
-path. The complete typed response binds the requested range, byte count and chunk digest; only then
-may its bounded bytes reach the private download composition. The host also checks whole download
-length and digest. Zero-byte snapshots require no nonempty range. Raw carrier output, truncated
-framing or conflicting ready facts cannot become file bytes or a successful download.
+`snapshot_chunk` carries that ready reference and one exact offset/length, bounded to 256 KiB. It
+uses the fixed scratch parent and existing unlocked range checks, never the original source path.
+The complete typed response binds the requested range, byte count and chunk digest; only then may
+its bounded bytes reach the private download composition. The host also checks whole download length
+and digest. Zero-byte snapshots require no nonempty range. Raw carrier output, truncated framing or
+conflicting ready facts cannot become file bytes or a successful download.
+
+Before dispatch, each chunk declares its required complete stdout capacity: one bounded runtime
+record, the maximum number of 4 KiB DATA records for the requested length, and two bounded records
+for RESULT and FINISHED. Using the existing 8 KiB wire-record ceiling gives a conservative 540,800
+byte requirement for a full 256 KiB chunk, below the QGA carrier's 1 MiB declared capacity. This
+reduces a 3 MiB buffered download to twelve chunk invocations plus begin and cleanup, without
+changing upload manifests or adding reusable guest helper installation. A capacity refusal cannot
+trigger a smaller-chunk replay after possible dispatch. Native complete-response and throughput
+measurements remain required; a smaller invocation count is not a measured speedup.
 
 For a carrier advertising live stdio, `snapshot_stream` instead carries the same already-READY
 reference and emits bounded sequenced DATA records, an exact length/digest result and FINISHED over
@@ -696,18 +711,26 @@ uncertainty.
   devices, FIFOs, and unexpected sockets when observed. Revalidate the held destination and staging
   objects before publication. This is safe object handling for the stated cooperative boundary, not
   protection from a malicious same-user process adding a hard link in the next system-call window.
-- Publication creates one unpredictable, operation-owned sibling in the destination directory,
-  writes and verifies all bytes, establishes the required metadata, syncs the staged file,
-  revalidates the destination condition, and uses descriptor-relative rename. Create-only uses Linux
-  `renameat2(RENAME_NOREPLACE)` and macOS `renameatx_np(RENAME_EXCL)`; lack of filesystem support is
-  a refusal. Replacement uses the platform's atomic same-directory rename. Replacement requires the
-  selected identity to have ordinary write authority for the existing file as well as sibling
-  creation/rename authority in its parent; atomic replacement must not bypass an otherwise
-  unwritable destination. Either missing authority is a refusal under that identity, with no
-  fallback or elevation retry. There is no cross-filesystem copy, direct-write, non-atomic fallback,
-  or retry with a different identity/elevation. Atomic visibility is promised; crash durability of
-  the directory entry is not yet promised. Replacement normally changes inode identity, so callers
-  cannot rely on same-inode equivalence or on already-open handles observing the new bytes.
+- Publication first writes and verifies an unpredictable, operation-owned sibling in the destination
+  directory, establishes the required metadata, syncs the staged file and revalidates the
+  destination condition. Create-only uses descriptor-relative Linux `renameat2(RENAME_NOREPLACE)` or
+  macOS `renameatx_np(RENAME_EXCL)`; lack of filesystem support is a refusal, not check-then-rename.
+- Linux replacement uses same-directory rename after proving ordinary write authority for the held
+  existing file as well as sibling creation/rename authority. It must not bypass an unwritable
+  destination. It changes inode identity and supplies atomic visibility, not promised
+  directory-entry crash durability or an update to already-open handles.
+- Darwin replacement explicitly selects in-place copying into the held, single-link regular file.
+  The helper verifies the complete staged content before the first destination mutation, rechecks
+  the requested condition and metadata, then copies, truncates and syncs under the same identity.
+  This preserves the admitted inode and its access metadata without promising atomic visibility.
+  Once mutation may have begun, any write, truncate, sync, close or deadline failure reports partial
+  or uncertain publication and retains exact cleanup custody. It must not report an unchanged file
+  or a successful write from an incomplete transfer. Unsupported ACLs, attributes, flags or other
+  metadata are refused rather than stripped or reconstructed speculatively. Native proof remains
+  required before public exposure.
+- These are explicit selected platform semantics, not runtime fallbacks from a failed rename.
+  Neither platform retries with a different identity/elevation, silently crosses filesystems, or
+  bypasses ordinary destination authority. There is no cross-platform atomic-replace guarantee.
 - Cleanup names and recorded inode identity belong to the operation. Cleanup never scans a prefix or
   removes a name whose identity changed. A cleanup failure leaves bounded debt for the owner; it
   does not authorize broader deletion.
@@ -939,51 +962,75 @@ must be published before in-memory custody is released, and leaves the row in `p
 payload never contains file bytes, JSON values, source or sink objects, raw helper responses,
 commands, credentials or unrestricted paths.
 
-### Serial package capacity candidate
+### Artifact application checkpoints
 
-The private total-history limit originally motivated a separate logical batch call for directory and
-artifact-package workflows. It counts resolved preflight, read, publication and cleanup rows against
-128, while supported captures can contain 4,096 files. The selected core unfinished-debt rule in the
-[lifecycle LLD](execution-lifecycle-lld.md#durable-lifecycle-obligation-ledger) removes that
-ordinary sequential-call limit. A batch must therefore justify its own ownership and
-application-checkpoint scope, not exist only to bypass capacity. Reassess that need before public
-directory-transfer composition; the existing implementation remains private.
+The [lifecycle ledger](execution-lifecycle-lld.md#durable-lifecycle-obligation-ledger) bounds
+unfinished debt, not successful sequential calls. Directory movement therefore composes ordinary
+calls without a package producer, rotating row or durable callback.
 
-The candidate batch design retains one serial borrow and one adapter-owned row, with the current
-child's bounded recovery identity and cleanup facts in the payload. Admit a distinct child before
-its effect. Generic directory copying is non-atomic and leaves confirmed destinations in place: core
-checkpoints bounded transfer progress only after that child's required remote and local work
-settles. Artifact workflows additionally require their application's durable per-file ownership
-checkpoint before advancing; a progress ordinal cannot establish which artifacts the application
-owns for later reconciliation or retirement.
+Artifact publication has a separate application obligation: durable per-file ownership intent and
+completion before the final resource row exists. A transfer progress ordinal cannot establish which
+artifacts that application owns for later reconciliation or retirement. Design and prove those
+records with the actual artifact consumer during migration; ordinary upload success does not close
+the crash window between publication and application recording.
 
-Advance by expected-revision payload replacement, reconciling a lost reply against that same child
-and revision. Retain exact current-child identity and outstanding cleanup facts until its checkpoint
-and any next-child admission are confirmed; an ordinal or confirmed bit alone is insufficient. On
-takeover, recover only the retained child and stop; do not reconstruct or resume the remaining plan
-or undo confirmed prior destinations. Core progress is not application ownership, and the generic
-copy contract does not reconstruct a complete per-entry result after process loss. Keep completed
-artifact ownership in the application checkpoint, not a growing row payload.
+Keep persisted package formats, codecs and recovery readers until their explicit compatibility
+disposition. Recovery is limited to the retained current child: never reconstruct or resume a plan,
+dispatch another member, or undo confirmed prior destinations. Parsing a record or advancing its
+gate alone does not settle that child. No new package originator is needed to preserve
+compatibility. Native drain and application-checkpoint reconciliation remain open.
 
-For downloads, remote snapshot completion is not local publication. Core checkpoints progress only
-after the requested local Create or Replace publication has succeeded and local custody has settled.
-The recovery row does not persist workstation destination paths and promises no post-crash local
-repair or reconstruction of local completion from remote evidence.
+### Generic directory-transfer child checkpoints
 
-This requires an actual post-child checkpoint gate in core file custody and a package-aware recovery
-adapter. The private `FileOperation.upload_package` increment implements the originating upload gate
-and one-row child admission, including exact-payload CAS retry after a lost reply. It does not yet
-supply an upload-wide helper-drain producer or process-loss takeover, cover per-member preflight
-reads and retirement, or wire artifact publication to a durable application checkpoint. A second
-peer that duplicates `FileOperation` admission and capture would not satisfy the intended shared
-boundary merely by reusing the generic borrow. Preserve the current bounds and exact retry semantics
-until the complete workflow is proved at the largest supported package size and interruption
-boundaries.
+The [directory/local-path response design](directory-transfer-lld.md) specifies the public facade,
+bounded complete traversal, host primitives and concrete local-file custody needed to implement this
+ordinary-call contract.
 
-The existing `upload_package` requires the real durable application checkpoint. Generic directory
-support must supply its core progress checkpoint explicitly; it cannot reuse that callback contract
-with a no-op or in-memory acknowledgment. Directory transfer and its checkpoint implementation are
-still open, not delivered by this clarification.
+The former generic positive-history checkpoint design is superseded by ordinary-call composition.
+Its completed private kernel work remains historical evidence in the plan. Ordinary-call admission
+no longer produces those associations or positive-history writes; real custody safeguards remain.
+Keep all supported persisted-format readers until their separate compatibility disposition, without
+inspecting or discarding operator databases to justify deletion.
+
+Generic directory copying composes ordinary owned file calls. The 128 limit applies to unfinished
+obligations, not completed history. It needs no parent coordinator, rotating row, transfer ordinal
+or durable success-history record. Generic progress does not replace the application's separate
+durable ownership checkpoint.
+
+The aggregate owns the resource claim and availability. Each child holds the ordinary serial borrow.
+Copying is non-atomic; other calls belonging to the same operation may run between settled children.
+Select one original finite deadline for the invocation, without refreshing it for each child. This
+is neither a directory snapshot nor a transaction against other writers.
+
+Advance only after an actual successful typed child result and all required remote and local custody
+settlement. Never infer success from a resolved receipt, closed borrow, remote snapshot, publication
+flag or later cleanup retry. For a download, success requires verified transfer, requested local
+publication, successful result reduction and settled local custody. A cleanup failure remains an
+unsuccessful child even if its exact cleanup later succeeds.
+
+Ordinary obligations retain the actual target, identity, path and unfinished effect or cleanup
+responsibility. Keep admission before local staging, exact uncertain-admission custody, original
+exception priority, capture before exception-fact allocation, and refusal to finalize incomplete
+capture. Interrupted debt publication or borrow closure must retain the exact outcome and
+bookkeeping intent. Aggregate teardown may retry only that bookkeeping; it must not repeat helper
+effects, local publication or source reads. A local handoff may close a borrow while leaving an
+unresolved row, which still prevents aggregate release.
+
+Remote directory convergence uses its ordinary metadata obligation. Local directory creation also
+needs truthful partial-failure reporting and conservative object checks, not a fabricated upload or
+download association. Do not add a success-history format merely to label `mkdir`.
+
+Maintain bounded same-controller progress in memory and stop on the first failed, uncertain or
+interrupted child. Report already completed entries separately from the current child's partial or
+uncertain effects. Leave confirmed destinations in place; do not replay automatically, roll the tree
+back or remove unmentioned entries. Copying merges directory structure with an explicit conflict
+choice for existing regular files, not implicit tree pruning.
+
+After process loss, recovery handles exact retained obligations only. It does not reconstruct prior
+success, local destinations, the remaining manifest or a resumable plan. A crash between fully
+settled children loses only progress history that this contract does not promise to recover.
+Directory facade options, bounded complete traversal, local creation/publication and native proof
+remain required before complete R7 or public RunContext acceptance.
 
 ### DOWNLOAD recovery dispatch
 
@@ -1043,30 +1090,30 @@ machine-wide file-object lock, a platform-host administrator prerequisite, or a 
 malicious target-user process. Arbitrary commands, jobs, VM power operations and WSL lifetime holds
 retain their separate recovery obligations.
 
-Package-upload takeover needs this fence too. Its upload workflow makes separate ownership, stage,
-chunk, publication, reconciliation and cleanup requests. The private stage/publication request
-codecs accept an optional exact gate, and their fixed guest handlers hold it across the operation.
-The private pre-bound `FileOperation.upload()` and `upload_package()` paths validate a supplied gate
-against the Linux VM scope, effective UID, deterministic path and derived guest boot, persist it in
-the current child row before dispatch, and pass it through stage and publication requests including
-cleanup. Their legacy path without a gate still exists; production composition must explicitly
-require a gate, match the verified raw guest marker and selected provider locator, and never
-downgrade a bound request. Read-only preflight is not an effect. An acknowledged generation advance
-under the same gate flock would wait for admitted old effects to leave and make delayed
-old-generation requests refuse before effects. That can replace a controller-side enumeration of
-queued SSH, QGA or WSL helpers **only after** complete mutation-path coverage, one stable gate
-across routes, and native delayed-delivery proof. The current local DOWNLOAD journal is not such
-proof for upload. Recovery must keep the current package child and its cleanup facts durable through
-advance, then reconcile only that child; it cannot infer or replay remaining package members. No
-adapter may manufacture drain evidence from a retained token alone.
+Retained package-upload takeover needs this fence too. Its upload workflow made separate ownership,
+stage, chunk, publication, reconciliation and cleanup requests. The private stage/publication
+request codecs accept an optional exact gate, and their fixed guest handlers hold it across the
+operation. The private pre-bound `FileOperation.upload()` path validates a supplied gate against the
+Linux VM scope, effective UID, deterministic path and derived guest boot, persist it in the current
+child row before dispatch, and pass it through stage and publication requests including cleanup. Its
+private path without a gate still exists; production composition must explicitly require a gate,
+match the verified raw guest marker and selected provider locator, and never downgrade a bound
+request. Read-only preflight is not an effect. An acknowledged generation advance under the same
+gate flock would wait for admitted old effects to leave and make delayed old-generation requests
+refuse before effects. That can replace a controller-side enumeration of queued SSH, QGA or WSL
+helpers **only after** complete mutation-path coverage, one stable gate across routes, and native
+delayed-delivery proof. The current local DOWNLOAD journal is not such proof for upload. Recovery
+must keep the current package child and its cleanup facts durable through advance, then reconcile
+only that child; it cannot infer or replay remaining package members. No adapter may manufacture
+drain evidence from a retained token alone.
 
-The private `FilePackageFenceRecovery` now implements only the first durable takeover step for a
-bound current child. It rebinds the exact possible-effect row after database-owner takeover,
-publishes and reuses one proposed generation, advances the same gate, and records the confirmed
-binding without changing child identity or cleanup facts. The row remains possible-effect. Local
-tests cover delayed stale effects, interruption and reply loss, but this does not establish native
-path coverage, predecessor-controller custody, package checkpoint reconciliation or a safe child
-replay/cleanup decision.
+The private `FileMutationFenceRecovery` implements the first durable takeover step for bound upload,
+JSON, metadata, directory convergence and conditional-removal calls. It rebinds the exact
+possible-effect row after database-owner takeover, publishes and reuses one proposed generation,
+advances the same gate, and records the confirmed binding without changing child identity or cleanup
+facts. The row remains possible-effect. Local tests cover delayed stale effects, interruption and
+reply loss, but this does not establish native path coverage, predecessor-controller custody,
+package checkpoint reconciliation or a safe child replay/cleanup decision.
 
 The smallest candidate uses one stable SQLite gate database per effective helper identity, managed
 target scope and verified guest epoch. Core derives one deterministic path under the selected local
@@ -1164,6 +1211,29 @@ deletion and UID reuse must share the VM ownership boundary with file effects an
 rule while an old gate helper or obligation can still act. Numeric UID reuse is the relevant
 identity hazard even when agent names differ.
 
+The private implementation prepares a managed UID namespace inside the explicit new-stack VM
+operation after identity preparation, before constructing its file view. This is stateful core
+preparation, not an effect hidden in a passive constructor, account lookup or readiness probe. It
+uses the verified root bootstrap to set up the already bootstrapped root-UID gate in one retained
+row, publishes that binding, then runs one fixed root helper under its fence. An absent root
+namespace refuses; preparing an agent namespace must not recursively bootstrap its own protection.
+
+The helper creates/checks the selected UID directory and installs a separate persistent per-UID
+`systemd-tmpfiles` rule directly, without launching a mutating child. It accepts exact existing
+entries and refuses unexpected ownership, mode, links, ACLs or content. It never rewrites or removes
+gate databases. A new rule is prepared under a conflict-free, non-configuration temporary name and
+published create-only after its complete content and metadata are ready; boot must not consume a
+partial rule. The same root gate remains held through namespace effects and owned temporary cleanup;
+after release the helper may report results but perform no further filesystem effects. Lost replies,
+partial preparation and cleanup uncertainty retain the exact obligation, not permission to replay.
+
+This ordering provides a private implementation consumer, not account-lifecycle exclusion. Before
+production agent adoption, account creation/reinit must share this primitive and account deletion or
+UID reuse must exclude old namespace work through the root gate, old file work through the agent
+gate, and other retained work through the whole VM owner. Correct numeric ownership alone cannot
+distinguish a replacement account in the same guest epoch. Do not add an account-generation
+registry, permissive fallback or new recipient grant to hide that remaining lifecycle requirement.
+
 The private guest gate now validates a canonical `/<euid>/<64-lowercase-hex>.db` path under that
 namespace and walks each ancestor without following symlinks before setup, inspection, advance or
 hold. `/run` and both Agentworks anchors must be root-owned and not group/other writable; the UID
@@ -1199,7 +1269,8 @@ itself prove that a snapshot ran; recovery must still retain uncertainty conserv
 route setup-only work through snapshot recovery that assumes no gate. The private codec now uses a
 108-byte maximum canonical path, retains older version-1 payloads byte-for-byte, reserves the full
 synthetic binding/proposal plus DOWNLOAD recovery growth, and refuses setup-only snapshot recovery.
-Whole-call custody, selected-route dispatch and the guest-to-target proof remain unimplemented.
+Production whole-call custody, selected-route dispatch and guest-to-target proof remain acceptance
+gates beyond the private composition.
 
 The production control path uses one private fixed-helper family for setup, non-creating inspection
 and generation advance. It follows the file-object family's closed, bounded request and sequenced
@@ -1226,18 +1297,21 @@ acceptance invariants. One selected helper cannot prove what the other routes se
 ordinary-user `/dev/shm` contents at logout. The `/run` choice is a Linux guest candidate, not
 proved WSL2/SSH/QGA mount or boot-lifetime behavior and not a macOS host setup requirement.
 
-The first concrete binding is Linux VM-specific. Target preparation already observes a
-`VMGuestIdentity` containing the raw instance marker, kernel boot ID and PID 1 start time and
-retains it inside its `guest_result`. It also projects those facts into `ManagedTargetIdentity`'s
-provider-bound incarnation hash and derived boot UUID. That projection cannot be reversed inside
-`FileOperation`; the current private constructor receives only the projected identity. When
-production composition is built, carry the verified raw triple from the prepared result into file
-custody and the exact durable gate binding, without adding an otherwise unused field first. The
-helper must independently observe the _current_ guest triple before trusting the gate. Do not accept
-a request-to-record comparison as a guest identity check. No production caller currently constructs
-`FileOperation`, so this handoff and the provider locator proof are still open. SSH-accessed macOS
-platform hosts need their own concrete host identity/epoch proof, not the VM marker protocol; file
-recovery there remains unavailable until that proof exists.
+The concrete guest binding is Linux VM-specific. Target preparation observes a `VMGuestIdentity`
+containing the raw instance marker, kernel boot ID and PID 1 start time and retains it inside its
+`guest_result`. It also projects those facts into `ManagedTargetIdentity`'s provider-bound
+incarnation hash and derived boot UUID. That projection cannot be reversed. The private VM operation
+composition therefore supplies the raw identity through the numeric bootstrap to `FileOperation`;
+the owned WSL2 download path supplies its separately observed raw guest at construction. The
+operation derives setup from those bound facts and the selected effective UID, rather than asking
+the public file caller to supply it. Local transfers reuse their original borrow; download setup and
+durable binding publication precede workstation writer construction. STAT, inventory and no-staging
+readiness remain non-creating observations. File custody and the durable gate binding retain the
+actual triple, not just its projection. The helper independently observes the _current_ guest triple
+before trusting the gate. A request-to-record comparison is not a guest identity check. These
+composition paths do not establish native route, provider-locator or recovery acceptance.
+SSH-accessed macOS platform hosts still need their own concrete host identity/epoch proof, not the
+VM marker protocol; file recovery there remains unavailable until that proof exists.
 
 Every effect-bearing fixed helper opens the _existing_ gate without following its final symlink,
 validates its exact bound inode and acquires an exclusive Linux `flock` within the request's
@@ -1281,19 +1355,28 @@ observation, helper and advance paths acquire the same flock before gate-row acc
 SQLite-only path may participate. Use ordinary rollback journal mode for transactional storage,
 close connections before effect work and avoid WAL, pooling or a custom persistence log. Its
 transient journal and the gate itself are reserved control state, not file-helper mutation targets;
-an authorized read of the gate inode must not release the effect lock. Native acceptance must prove
-namespace lifetime and local-mount semantics. The original private
-SQLite-transaction-through-effects attempt failed review because closing another descriptor for the
-database inode releases its POSIX locks, allowing a concurrent advance while an old helper still
-works. The replacement local proof must reproduce that same-inode read case, deadline expiry and
-retained flock exclusion. First prove the shared gate with the DOWNLOAD snapshot family under local
-spawned-controller failure, using one binding format in the existing `file-call` obligation and one
-guest gate implementation. That proof does not certify other helper families or production carriers.
-This remains a design candidate, not shipped recovery. Native acceptance must cover a helper active
-across takeover, a delayed old request, lost advance acknowledgment, recovery of recovery, stale
-advance, missing/replaced state, guest restart and both target-user/elevated identities. The exact
-guest epoch and provider locator still need platform-specific proof. Until those tests pass, the
-`_DownloadDrainEvidence` production producer remains absent and DOWNLOAD recovery stays private.
+an authorized read of the gate inode must not release the effect lock. Ordinary mutating APIs refuse
+the namespace itself and its descendants. On Linux, `set_metadata` and `ensure_directory`
+additionally refuse the two exact ancestor targets `/run` and `/run/agentworks`, whose ownership and
+writable modes are prerequisites of the namespace. This conservative operation restriction also
+excludes harmless metadata changes to those two directories; infrastructure provisioning owns them.
+It is not a ban on other `/run` descendants, read/stat/inventory operations, or a permission grant.
+Create-only directory creation already refuses existing ancestors without changing them, and
+non-recursive removal cannot remove an ancestor containing the live namespace. Enforce the
+restriction before ordinary dispatch and at the actual Linux helper boundary, without changing
+Darwin's ancestor semantics. Native acceptance must prove namespace lifetime and local-mount
+semantics. The original private SQLite-transaction-through-effects attempt failed review because
+closing another descriptor for the database inode releases its POSIX locks, allowing a concurrent
+advance while an old helper still works. The replacement local proof must reproduce that same-inode
+read case, deadline expiry and retained flock exclusion. First prove the shared gate with the
+DOWNLOAD snapshot family under local spawned-controller failure, using one binding format in the
+existing `file-call` obligation and one guest gate implementation. That proof does not certify other
+helper families or production carriers. This remains a design candidate, not shipped recovery.
+Native acceptance must cover a helper active across takeover, a delayed old request, lost advance
+acknowledgment, recovery of recovery, stale advance, missing/replaced state, guest restart and both
+target-user/elevated identities. The exact guest epoch and provider locator still need
+platform-specific proof. Until those tests pass, the `_DownloadDrainEvidence` production producer
+remains absent and DOWNLOAD recovery stays private.
 
 The private download, upload and JSON custody slice attaches validated prepared workflows to
 `FileOperation` before running them. This preserves original carrier, binding and token through
@@ -1428,9 +1511,9 @@ contains old bytes, a diff, a hash, attributes, helper paths, or carrier diagnos
 `LimitExceededError`, `ConflictError`, `PartialMutationError`, and `UncertainOutcomeError` are new
 kind-based `AgentworksError` subclasses shared by execution operations rather than file-entity
 subclasses. Provider exception text and raw errno values remain internal. Core directory transfer
-checkpoints settled progress; artifact callers additionally checkpoint each confirmed ownership
-effect. This slice supplies no transaction and never reports a partial or uncertain operation as
-unchanged.
+records bounded settled progress in memory; artifact callers durably checkpoint each confirmed
+ownership effect. This slice supplies no transaction and never reports a partial or uncertain
+operation as unchanged.
 
 Public reduction follows core custody, never replaces it. Existing error `entity_kind` and
 `entity_name` fields carry a core-supplied safe logical target, not filesystem paths or account

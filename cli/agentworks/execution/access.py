@@ -3,22 +3,26 @@
 from __future__ import annotations
 
 import json
-from contextlib import suppress
+import secrets
+from contextlib import contextmanager, suppress
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, cast
 
 from agentworks.errors import StateError, ValidationError
 
-from . import _file_memory_read
+from . import _directory_transfer, _file_memory_read
+from ._bound_environment import _BoundEnvironment
 from ._diagnostic_values import validate_logical_entity_value
-from ._execution_operation import ExecutionOperation, ManagedExecutionControlFact
+from ._execution_operation import ExecutionOperation, ManagedExecutionControlFact, OwnedInlineOutcome
 from ._execution_result import check_owned_inline_result, reduce_owned_inline_result
+from ._file_local_custody import LocalFileCall, local_failure, owned_local_call
 from ._file_local_download import FileLocalDownloadControlFact, FileLocalDownloadOutcome, download_to_local_file
-from ._file_operation import FileOperation
+from ._file_operation import FileGateSetupControlFact, FileOperation
 from ._file_paths import normalized_relative_path, normalized_root
 from ._file_result import (
     _raise_reason,
+    _runtime_reason,
     reduce_file_inventory,
     reduce_file_metadata,
     reduce_file_remove,
@@ -32,18 +36,31 @@ from ._file_result_transfer import (
 )
 from ._helper_launcher import IdentityPlan
 from ._json import serialize_json_source, validate_json_object
+from ._local_file_io import LocalFileLimitError, LocalFileSource, LocalIdentity
+from ._managed_bound_run import ManagedDeadlineExpired
 from ._managed_job_protocol import StreamDisposition, WorkloadWaitFact
+from ._managed_job_request import ManagedLiveIO
 from ._managed_job_store import FactName, Stream
+from ._managed_live_result import compose_managed_live_result
 from ._managed_observation_exchange import ManagedObservationState
 from ._managed_result import _fact
-from ._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
-from .carrier import Deadline, Failure, Retention
+from ._managed_runs import ManagedOutputMode
+from ._runtime_prerequisite import (
+    RuntimePrerequisiteObservation,
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+    RuntimeTargetOS,
+)
+from .carrier import Deadline, Dispatch, Failure, Retention
 from .diagnostics import ExecutionPhase, check_execution_result
 from .files import (
     Change,
     Create,
     DirectoryEntry,
     DirectoryLimit,
+    DirectoryTransferLimit,
+    DirectoryTransferProgress,
+    ExistingFile,
     FileFailureReason,
     FileKind,
     FileMetadata,
@@ -61,18 +78,19 @@ from .files import (
     _private_file_kind,
     _private_json_strategy,
     _private_write_condition,
+    _validate_creation_metadata,
 )
 from .jobs import JobDisposal, JobOutput, JobStatus, JobStop, JobStream
 from .models import Command, Input, JobRef, Lifetime, Output, Script
 from .profiles import Protection
-from .result import ApplicationState, ExecutionFailure, ExitCode, Signal
+from .result import ApplicationState, ExecutionFailure, ExecutionOutput, ExecutionResult, ExitCode, Signal
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Iterator, Mapping
     from typing import Never
 
+    from ._managed_resource_start import ResourceStartAcknowledgement
     from .carrier import Carrier
-    from .result import ExecutionResult
 
 _DEFAULT_JSON_MAX_BYTES = 64 * 1_024
 _DEFAULT_JSON_MAX_DEPTH = 64
@@ -99,6 +117,7 @@ class ExecutionAccess:
         entity_kind: str,
         entity_name: str,
         deadline: Callable[[], Deadline],
+        bound_environment: _BoundEnvironment | None = None,
     ) -> None:
         if type(operation) is not ExecutionOperation:
             raise ValidationError("Execution access requires an acquired execution operation")
@@ -112,6 +131,8 @@ class ExecutionAccess:
         validate_logical_entity_value(entity_name, "name", subject="Execution access")
         if not callable(deadline):
             raise ValidationError("Execution access requires a composition-owned deadline policy")
+        if bound_environment is not None and type(bound_environment) is not _BoundEnvironment:
+            raise ValidationError("Execution access requires a core-composed bound environment")
         self._operation = operation
         self._carrier = carrier
         self._runtime_selection = runtime_selection
@@ -120,6 +141,21 @@ class ExecutionAccess:
         self._entity_kind = entity_kind
         self._entity_name = entity_name
         self._deadline = deadline
+        self._environment = _BoundEnvironment() if bound_environment is None else bound_environment
+
+    def with_env(self, env: Mapping[str, str], *, sensitive: bool = False) -> ExecutionAccess:
+        """Derive a passive environment view with the same authority and custody."""
+        return ExecutionAccess(
+            self._operation,
+            self._carrier,
+            runtime_selection=self._runtime_selection,
+            ordinary_plan=self._ordinary_plan,
+            elevated_plan=self._elevated_plan,
+            entity_kind=self._entity_kind,
+            entity_name=self._entity_name,
+            deadline=self._deadline,
+            bound_environment=self._environment.with_env(env, sensitive=sensitive),
+        )
 
     def _job_deadline(self, deadline: Deadline | None) -> Deadline:
         self._operation.require_job_binding(self._carrier, self._runtime_selection)
@@ -242,13 +278,42 @@ class ExecutionAccess:
         selected = self._job_deadline(deadline)
         return self._wait_managed(job, selected, check=check)
 
-    def _wait_managed(self, job: JobRef, selected: Deadline, *, check: bool) -> ExecutionResult:
+    def _wait_managed(
+        self,
+        job: JobRef,
+        selected: Deadline,
+        *,
+        check: bool,
+        acknowledgement: ResourceStartAcknowledgement | None = None,
+    ) -> ExecutionResult:
         """Compose managed observation under an already selected finite budget."""
         try:
             outcome = self._operation.wait_job(job, self._carrier, selected)
+        except ManagedDeadlineExpired as control:
+            if acknowledgement is None or acknowledgement.reference != job or control.__cause__ is not None:
+                self._raise_job_control(control, job)
+            retention = {
+                ManagedOutputMode.CAPTURE: Retention.CAPTURED,
+                ManagedOutputMode.DISCARD: Retention.DISCARDED,
+                ManagedOutputMode.SENSITIVITY_SUPPRESSED: Retention.SUPPRESSED,
+            }[acknowledgement.output_policy.mode]
+            missing = ExecutionOutput(retention=retention)
+            result = ExecutionResult(
+                Dispatch.UNKNOWN,
+                ApplicationState.UNKNOWN,
+                stdout=missing,
+                stderr=missing,
+                failure=ExecutionFailure.DEADLINE,
+                deadline_exceeded=True,
+                job=job,
+            )
         except BaseException as control:
             self._raise_job_control(control, job)
-        result = replace(outcome.result, job=job)
+        else:
+            result = replace(outcome.result, job=job)
+        return self._check_managed_result(result, check=check)
+
+    def _check_managed_result(self, result: ExecutionResult, *, check: bool) -> ExecutionResult:
         if not check:
             return result
         return check_execution_result(
@@ -259,6 +324,55 @@ class ExecutionAccess:
             if result.failure in {ExecutionFailure.DEADLINE, ExecutionFailure.OBSERVATION}
             else None,
         )
+
+    def _wait_managed_live(
+        self,
+        job: JobRef,
+        live_io: ManagedLiveIO,
+        selected: Deadline,
+        *,
+        stdin: Input,
+        output: Output,
+        sensitive: bool,
+        check: bool,
+    ) -> ExecutionResult:
+        """Relay once, then combine independent presentation and job evidence."""
+        candidate = None
+        expired = selected.expired
+        custody = OwnedInlineOutcome(deadline_exceeded=expired)
+        if not expired:
+            try:
+                candidate, custody = self._operation.relay_managed(
+                    job,
+                    self._carrier,
+                    deadline=selected,
+                    source=stdin.source,
+                    stdout=output.stdout,
+                    stderr=output.stderr,
+                    sensitive=sensitive,
+                )
+            except ManagedDeadlineExpired as control:
+                if control.__cause__ is not None:
+                    self._raise_job_control(control, job)
+                custody = OwnedInlineOutcome(deadline_exceeded=True)
+            except BaseException as control:
+                self._raise_job_control(control, job)
+        if custody.pending_remote_effects or custody.coordination_uncertain or custody.requires_owner_retention:
+            # The ordinary helper borrow is still unresolved. Do not overlap
+            # it with a new poll or replace its original observation budget.
+            missing = self._operation.unobserved_managed_output(job)
+            result = ExecutionResult(
+                Dispatch.UNKNOWN,
+                ApplicationState.UNKNOWN,
+                stdout=missing,
+                stderr=missing,
+                failure=ExecutionFailure.OBSERVATION,
+                job=job,
+            )
+        else:
+            result = self._wait_managed(job, selected, check=False)
+        result = compose_managed_live_result(result, live_io=live_io, candidate=candidate, custody=custody)
+        return self._check_managed_result(result, check=check)
 
     def stop(self, job: JobRef, *, deadline: Deadline | None = None) -> JobStop:
         """Request permanent stop and report separate positive workload closure."""
@@ -290,13 +404,15 @@ class ExecutionAccess:
         sensitive: bool = False,
         deadline: Deadline | None = None,
     ) -> JobRef:
-        """Start one private operation-lifetime managed command or explicit script."""
-        if profile is not Protection.MANAGED or lifetime is not Lifetime.OPERATION:
-            raise ValidationError("Managed start requires explicit MANAGED and OPERATION choices")
+        """Start one exact managed job under operation or resource custody."""
+        if profile is not Protection.MANAGED or type(lifetime) is not Lifetime:
+            raise ValidationError("Managed start requires explicit MANAGED and lifetime choices")
         if self._runtime_selection.target_os is not RuntimeTargetOS.LINUX:
             raise StateError("Managed execution is unavailable on this runtime")
         if type(request) not in {Command, Script} or type(stdin) is not Input or type(output) is not Output:
             raise ValidationError("Managed start requires finite invocation, input and output values")
+        if stdin.source is not None or output.stdout is not None:
+            raise StateError("Live pipes are unavailable for managed start")
         if type(sudo) is not bool or type(sensitive) is not bool:
             raise ValidationError("Managed execution flags must be booleans")
         if sudo and self._elevated_plan is None:
@@ -311,6 +427,20 @@ class ExecutionAccess:
                 selected = deadline
         plan = self._elevated_plan if sudo else self._ordinary_plan
         assert plan is not None
+        environment = self._environment.with_env({} if env is None else env, sensitive=sensitive or stdin.is_sensitive)
+        if lifetime is Lifetime.INDEPENDENT:
+            return self._operation.start_resource_managed(
+                self._carrier,
+                request,
+                plan=plan,
+                runtime_selection=self._runtime_selection,
+                deadline=selected,
+                input=stdin,
+                output=output,
+                env=environment.values,
+                cwd=cwd,
+                sensitive=environment.sensitive,
+            ).reference
         return self._operation.start_managed(
             self._carrier,
             request,
@@ -319,9 +449,9 @@ class ExecutionAccess:
             deadline=selected,
             input=stdin,
             output=output,
-            env=env,
+            env=environment.values,
             cwd=cwd,
-            sensitive=sensitive or stdin.is_sensitive,
+            sensitive=environment.sensitive,
         )
 
     def run(
@@ -339,17 +469,22 @@ class ExecutionAccess:
         deadline: Deadline | None = None,
         check: bool = False,
     ) -> ExecutionResult:
-        """Run DIRECT inline or launch then observe MANAGED OPERATION work."""
+        """Run DIRECT inline or launch then observe exact MANAGED work."""
         if type(profile) is not Protection or type(lifetime) is not Lifetime:
             raise ValidationError("Foreground execution requires explicit profile and lifetime values")
-        if lifetime is Lifetime.INDEPENDENT:
+        if lifetime is Lifetime.INDEPENDENT and profile is Protection.DIRECT:
             raise StateError("INDEPENDENT execution lifetime is unavailable")
-        if self._runtime_selection.target_os is not RuntimeTargetOS.LINUX:
+        if self._runtime_selection.target_os is RuntimeTargetOS.DARWIN and profile is Protection.MANAGED:
             raise StateError("Foreground execution is unavailable on this runtime")
         if type(request) not in {Command, Script}:
             raise ValidationError("Foreground execution requires a command or script")
         if type(stdin) is not Input or type(output) is not Output:
-            raise ValidationError("Foreground execution requires finite input and bounded output")
+            raise ValidationError("Foreground execution requires explicit input and output values")
+        live = stdin.source is not None or output.stdout is not None
+        if self._runtime_selection.target_os is RuntimeTargetOS.DARWIN and live:
+            raise StateError("Live foreground execution is unavailable on this runtime")
+        if live and lifetime is not Lifetime.OPERATION:
+            raise StateError("Live pipes require operation execution lifetime")
         if type(sudo) is not bool or type(sensitive) is not bool or type(check) is not bool:
             raise ValidationError("Foreground execution flags must be booleans")
         if sudo and self._elevated_plan is None:
@@ -369,9 +504,34 @@ class ExecutionAccess:
             raise ValidationError("Managed execution requires a finite deadline")
         plan = self._elevated_plan if sudo else self._ordinary_plan
         assert plan is not None
-        effective_sensitive = sensitive or stdin.is_sensitive
+        environment = self._environment.with_env({} if env is None else env, sensitive=sensitive or stdin.is_sensitive)
+        effective_sensitive = environment.sensitive
 
         if profile is Protection.MANAGED:
+            if lifetime is Lifetime.INDEPENDENT:
+                acknowledgement = self._operation.start_resource_managed(
+                    self._carrier,
+                    request,
+                    plan=plan,
+                    runtime_selection=self._runtime_selection,
+                    deadline=selected_deadline,
+                    input=stdin,
+                    output=output,
+                    env=environment.values,
+                    cwd=cwd,
+                    sensitive=effective_sensitive,
+                )
+                return self._wait_managed(
+                    acknowledgement.reference,
+                    selected_deadline,
+                    check=check,
+                    acknowledgement=acknowledgement,
+                )
+            live_io = (
+                ManagedLiveIO(secrets.token_hex(16), stdin.source is not None, output.stdout is not None)
+                if live
+                else None
+            )
             job = self._operation.start_managed(
                 self._carrier,
                 request,
@@ -380,10 +540,21 @@ class ExecutionAccess:
                 deadline=selected_deadline,
                 input=stdin,
                 output=output,
-                env=env,
+                env=environment.values,
                 cwd=cwd,
                 sensitive=effective_sensitive,
+                live_io=live_io,
             )
+            if live_io is not None:
+                return self._wait_managed_live(
+                    job,
+                    live_io,
+                    selected_deadline,
+                    stdin=stdin,
+                    output=output,
+                    sensitive=effective_sensitive,
+                    check=check,
+                )
             return self._wait_managed(job, selected_deadline, check=check)
 
         outcome = self._operation.run_inline(
@@ -392,8 +563,11 @@ class ExecutionAccess:
             plan=plan,
             deadline=selected_deadline,
             runtime_selection=self._runtime_selection,
-            stdin=stdin.data,
-            env=env,
+            stdin=stdin.data if stdin.data is not None else b"",
+            source=stdin.source,
+            stdout=output.stdout,
+            stderr=output.stderr,
+            env=environment.values,
             cwd=cwd,
             capture_limit=output.max_bytes,
             sensitive=effective_sensitive,
@@ -429,6 +603,21 @@ class _UploadSourceAdapter:
         return self._source.read(limit)
 
 
+class _OwnedUploadSourceAdapter(_UploadSourceAdapter):
+    """Retain a local read refusal until the ordinary upload captures cleanup."""
+
+    def __init__(self, source: LocalFileSource) -> None:
+        super().__init__(source)
+        self.failure: OSError | None = None
+
+    def try_read(self, limit: int) -> bytes | None:
+        try:
+            return super().try_read(limit)
+        except OSError as error:
+            self.failure = error
+            raise
+
+
 class FileAccess:
     """One non-production, bound view of the supplied file-operation custody."""
 
@@ -444,6 +633,7 @@ class FileAccess:
         entity_kind: str,
         entity_name: str,
         deadline: Callable[[], Deadline],
+        route_check: Callable[[Deadline], None] | None = None,
     ) -> None:
         if type(operation) is not FileOperation:
             raise ValidationError("File access requires an acquired file operation")
@@ -459,6 +649,8 @@ class FileAccess:
         validate_logical_entity_value(entity_name, "name", subject="File access")
         if not callable(deadline):
             raise ValidationError("File access requires a composition-owned deadline policy")
+        if route_check is not None and not callable(route_check):
+            raise ValidationError("File access requires a core-bound route check")
 
         self._operation = operation
         self._carrier = carrier
@@ -469,27 +661,57 @@ class FileAccess:
         self._entity_kind = entity_kind
         self._entity_name = entity_name
         self._deadline = deadline
+        self._route_check = route_check
+
+    def _raise_setup_error(self, control: Exception) -> None:
+        """Reduce gate-control custody without claiming a data-file mutation."""
+        fact = control.__cause__
+        if isinstance(fact, FileLocalDownloadControlFact):
+            fact = fact.__cause__
+        if isinstance(fact, FileGateSetupControlFact):
+            reason = (
+                _runtime_reason(RuntimePrerequisiteObservation(fact.runtime_state, None))
+                if fact.runtime_state is not None and fact.runtime_state is not RuntimePrerequisiteState.UNKNOWN
+                else None
+            )
+            _raise_reason(
+                FileOperationPhase.OBSERVATION,
+                reason or FileFailureReason.COORDINATION,
+                entity_kind=self._entity_kind,
+                entity_name=self._entity_name,
+            )
+
+    @contextmanager
+    def _setup_errors(self) -> Iterator[None]:
+        try:
+            yield
+        except Exception as control:
+            self._raise_setup_error(control)
+            raise
 
     def read_file(self, path: PurePosixPath, *, max_bytes: int, sudo: bool = False) -> ReadResult | None:
         """Read one bounded regular-file snapshot."""
-        if type(max_bytes) is not int or max_bytes <= 0:
-            raise ValidationError("File read requires a positive byte bound")
+        if type(max_bytes) is not int or not 0 < max_bytes <= _MAX_DOWNLOAD_SIZE:
+            raise ValidationError("File read requires a positive representable byte bound")
         root, leaf, plan, deadline = self._request(path, sudo)
-        outcome = _file_memory_read.read_file(
-            self._carrier,
-            trusted_root_path=root,
-            relative_path=leaf,
-            max_bytes=max_bytes,
-            plan=plan,
-            deadline=deadline,
-            runtime_selection=self._runtime_selection,
-            operation=self._operation,
-        )
+        self._admit_request(deadline)
+        with self._setup_errors():
+            outcome = _file_memory_read.read_file(
+                self._carrier,
+                trusted_root_path=root,
+                relative_path=leaf,
+                max_bytes=max_bytes,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=self._runtime_selection,
+                operation=self._operation,
+            )
         return reduce_file_memory_read(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
 
     def stat(self, path: PurePosixPath, *, sudo: bool = False) -> FileMetadata | None:
         """Observe one supported filesystem object."""
         root, leaf, plan, deadline = self._request(path, sudo)
+        self._admit_request(deadline)
         outcome = self._operation.stat(
             self._carrier,
             trusted_root_path=root,
@@ -511,6 +733,7 @@ class FileAccess:
         if type(limit) is not DirectoryLimit:
             raise ValidationError("File inventory requires exact directory limits")
         root, leaf, plan, deadline = self._request(path, sudo)
+        self._admit_request(deadline)
         outcome = self._operation.list_directory(
             self._carrier,
             trusted_root_path=root,
@@ -560,22 +783,174 @@ class FileAccess:
         source = _validate_upload_source(source)
         if type(size) is not int or not 0 <= size <= _MAX_UPLOAD_SIZE:
             raise ValidationError("File upload size must be a nonnegative bounded integer")
-        if type(create_metadata) is not NewMetadata:
-            raise ValidationError("File upload requires exact creation metadata")
+        _validate_creation_metadata(create_metadata, kind=FileKind.REGULAR)
         private_condition = _private_write_condition(condition)
-        outcome = self._operation.upload(
-            self._carrier,
-            trusted_root_path=root,
-            relative_path=leaf,
-            source=_UploadSourceAdapter(source),
-            size=size,
-            condition=private_condition,
-            create_metadata=create_metadata,
-            plan=plan,
-            deadline=deadline,
-            runtime_selection=self._runtime_selection,
-        )
+        self._admit_request(deadline)
+        with self._setup_errors():
+            outcome = self._operation.upload(
+                self._carrier,
+                trusted_root_path=root,
+                relative_path=leaf,
+                source=_UploadSourceAdapter(source),
+                size=size,
+                condition=private_condition,
+                create_metadata=create_metadata,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=self._runtime_selection,
+            )
         return reduce_file_upload(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
+
+    def upload_file(
+        self,
+        path: PurePosixPath,
+        source: Path,
+        *,
+        condition: WriteCondition,
+        create_metadata: NewMetadata,
+        sudo: bool = False,
+    ) -> MutationResult:
+        """Own one admitted workstation source through publication and cleanup."""
+        return self._upload_file(path, source, condition=condition, create_metadata=create_metadata, sudo=sudo)
+
+    def _upload_file(
+        self,
+        path: PurePosixPath,
+        source: Path,
+        *,
+        condition: WriteCondition,
+        create_metadata: NewMetadata,
+        sudo: bool,
+        expected: LocalIdentity | None = None,
+        max_bytes: int = _MAX_UPLOAD_SIZE,
+    ) -> MutationResult:
+        if not isinstance(source, Path):
+            raise ValidationError("Path upload requires a local path")
+        _validate_creation_metadata(create_metadata, kind=FileKind.REGULAR)
+        private_condition = _private_write_condition(condition)
+        root, leaf, plan, deadline = self._request(path, sudo)
+        if deadline.expires_at is None:
+            raise ValidationError("Path upload requires a finite composition deadline")
+        self._admit_request(deadline)
+
+        def publish(call: LocalFileCall) -> MutationResult:
+            local = LocalFileSource(source, expected=expected)
+            call.resource = local
+            size = local.open(deadline)
+            if size > max_bytes:
+                raise LocalFileLimitError()
+            call.phase = FileOperationPhase.TRANSFER
+            adapter = _OwnedUploadSourceAdapter(local)
+            with self._setup_errors():
+                outcome = self._operation.upload(
+                    self._carrier,
+                    trusted_root_path=root,
+                    relative_path=leaf,
+                    source=adapter,
+                    size=size,
+                    condition=private_condition,
+                    create_metadata=create_metadata,
+                    plan=plan,
+                    deadline=deadline,
+                    runtime_selection=self._runtime_selection,
+                    local_call=call,
+                )
+            if (
+                adapter.failure is not None
+                and not outcome.requires_owner_retention
+                and not outcome.publication_confirmed
+                and not outcome.publication_uncertain
+            ):
+                local_failure(
+                    adapter.failure,
+                    entity_kind=self._entity_kind,
+                    entity_name=self._entity_name,
+                    phase=FileOperationPhase.TRANSFER,
+                )
+            return reduce_file_upload(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
+
+        return owned_local_call(
+            self._operation, deadline, publish, entity_kind=self._entity_kind, entity_name=self._entity_name
+        )
+
+    def _directory_view(
+        self,
+        path: PurePosixPath,
+        local: Path,
+        limit: DirectoryTransferLimit,
+        existing_files: ExistingFile,
+        sudo: bool,
+    ) -> tuple[FileAccess, Deadline]:
+        if (
+            not isinstance(local, Path)
+            or type(limit) is not DirectoryTransferLimit
+            or type(existing_files) is not ExistingFile
+        ):
+            raise ValidationError("Directory transfer requires a local path, limits, and conflict choice")
+        _, _, _, deadline = self._request(path, sudo)
+        if deadline.expires_at is None:
+            raise ValidationError("Directory transfer requires one finite composition deadline")
+        self._admit_request(deadline)
+        return FileAccess(
+            self._operation,
+            self._carrier,
+            trusted_root=self._trusted_root,
+            runtime_selection=self._runtime_selection,
+            ordinary_plan=self._ordinary_plan,
+            elevated_plan=self._elevated_plan,
+            entity_kind=self._entity_kind,
+            entity_name=self._entity_name,
+            deadline=lambda: deadline,
+            route_check=self._route_check,
+        ), deadline
+
+    def upload_directory(
+        self,
+        path: PurePosixPath,
+        source: Path,
+        *,
+        limit: DirectoryTransferLimit,
+        existing_files: ExistingFile,
+        file_metadata: NewMetadata,
+        directory_metadata: NewMetadata,
+        sudo: bool = False,
+    ) -> DirectoryTransferProgress:
+        """Merge a bounded local tree through serial ordinary owned file calls."""
+        _validate_creation_metadata(file_metadata, kind=FileKind.REGULAR)
+        _validate_creation_metadata(directory_metadata, kind=FileKind.DIRECTORY)
+        view, deadline = self._directory_view(path, source, limit, existing_files, sudo)
+        return _directory_transfer.upload_directory(
+            view,
+            path,
+            source,
+            deadline=deadline,
+            limit=limit,
+            existing_files=existing_files,
+            file_metadata=file_metadata,
+            directory_metadata=directory_metadata,
+            sudo=sudo,
+        )
+
+    def download_directory(
+        self,
+        path: PurePosixPath,
+        destination: Path,
+        *,
+        limit: DirectoryTransferLimit,
+        existing_files: ExistingFile,
+        sudo: bool = False,
+    ) -> DirectoryTransferProgress:
+        """Merge a bounded remote tree using ordinary local download publishers."""
+        view, deadline = self._directory_view(path, destination, limit, existing_files, sudo)
+        return _directory_transfer.download_directory(
+            view,
+            path,
+            destination,
+            deadline=deadline,
+            limit=limit,
+            existing_files=existing_files,
+            sudo=sudo,
+        )
 
     def download(
         self,
@@ -586,14 +961,15 @@ class FileAccess:
         max_bytes: int | None = None,
         sudo: bool = False,
     ) -> FileMetadata:
-        """Publish one verified remote snapshot to a local regular file."""
+        """Publish one verified remote snapshot; a zero bound permits only empty files."""
         if not isinstance(destination, Path):
             raise ValidationError("File download requires a concrete local path")
         if type(local_condition) not in (Create, Replace):
             raise ValidationError("File download requires Create or Replace")
-        if max_bytes is not None and (type(max_bytes) is not int or not 0 < max_bytes <= _MAX_DOWNLOAD_SIZE):
-            raise ValidationError("File download requires a positive representable byte bound")
+        if max_bytes is not None and (type(max_bytes) is not int or not 0 <= max_bytes <= _MAX_DOWNLOAD_SIZE):
+            raise ValidationError("File download requires a nonnegative representable byte bound")
         root, leaf, plan, deadline = self._request(path, sudo)
+        self._admit_request(deadline)
         if deadline.expired:
             return reduce_file_local_download(
                 FileLocalDownloadOutcome(None, deadline_exceeded=True),
@@ -633,6 +1009,8 @@ class FileAccess:
                         local_call=call,
                     )
                 except BaseException as control:
+                    if isinstance(control, Exception):
+                        self._raise_setup_error(control)
                     fact = control.__cause__
                     if not isinstance(fact, FileLocalDownloadControlFact):
                         raise
@@ -649,11 +1027,21 @@ class FileAccess:
                     result = reduce_file_local_download(
                         outcome, entity_kind=self._entity_kind, entity_name=self._entity_name
                     )
+            if deadline.expired:
+                _raise_reason(
+                    FileOperationPhase.PUBLICATION,
+                    FileFailureReason.DEADLINE,
+                    entity_kind=self._entity_kind,
+                    entity_name=self._entity_name,
+                    effect=Change.CHANGED if outcome is not None and outcome.published else None,
+                )
         except BaseException:
             # Core keeps the call and its borrow on failed finalization.
+            self._operation.mark_download_reduction_complete(call)
             with suppress(BaseException):
                 self._operation.finish_local_download(call)
             raise
+        self._operation.mark_download_reduction_complete(call)
         try:
             self._operation.finish_local_download(call)
         except Exception:
@@ -694,24 +1082,53 @@ class FileAccess:
     ) -> MutationResult:
         """Validate and apply one bounded JSON-object update."""
         root, leaf, plan, deadline = self._request(path, sudo)
-        if type(document) is not dict or type(create) is not bool or type(create_metadata) is not NewMetadata:
+        if type(document) is not dict or type(create) is not bool:
             raise ValidationError("JSON update requires an object, creation choice, and creation metadata")
+        _validate_creation_metadata(create_metadata, kind=FileKind.REGULAR)
         source = _json_source(document, max_bytes=max_bytes, max_depth=max_depth)
-        outcome = self._operation.update_json(
-            self._carrier,
-            trusted_root_path=root,
-            relative_path=leaf,
-            source=source,
-            strategy=cast("_JsonFileStrategy", _private_json_strategy(strategy)),
-            create=create,
-            create_metadata=create_metadata,
-            max_bytes=max_bytes,
-            max_depth=max_depth,
-            plan=plan,
-            deadline=deadline,
-            runtime_selection=self._runtime_selection,
-        )
+        private_strategy = cast("_JsonFileStrategy", _private_json_strategy(strategy))
+        self._admit_request(deadline)
+        with self._setup_errors():
+            outcome = self._operation.update_json(
+                self._carrier,
+                trusted_root_path=root,
+                relative_path=leaf,
+                source=source,
+                strategy=private_strategy,
+                create=create,
+                create_metadata=create_metadata,
+                max_bytes=max_bytes,
+                max_depth=max_depth,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=self._runtime_selection,
+            )
         return reduce_file_json(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
+
+    def create_directory(
+        self,
+        path: PurePosixPath,
+        *,
+        metadata: NewMetadata,
+        sudo: bool = False,
+    ) -> MutationResult:
+        """Create exactly one absent directory without converging an existing entry."""
+        _validate_creation_metadata(metadata, kind=FileKind.DIRECTORY)
+        root, leaf, plan, deadline = self._request(path, sudo)
+        self._admit_request(deadline)
+        with self._setup_errors():
+            outcome = self._operation.create_directory(
+                self._carrier,
+                trusted_root_path=root,
+                relative_path=leaf,
+                trusted_owner=metadata.owner,
+                trusted_group=metadata.group,
+                mode=metadata.mode,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=self._runtime_selection,
+            )
+        return reduce_file_metadata(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
 
     def ensure_directory(
         self,
@@ -721,20 +1138,21 @@ class FileAccess:
         sudo: bool = False,
     ) -> MutationResult:
         """Create or converge exactly one directory and its metadata."""
+        _validate_creation_metadata(metadata, kind=FileKind.DIRECTORY)
         root, leaf, plan, deadline = self._request(path, sudo)
-        if type(metadata) is not NewMetadata:
-            raise ValidationError("Directory creation requires exact metadata")
-        outcome = self._operation.ensure_directory(
-            self._carrier,
-            trusted_root_path=root,
-            relative_path=leaf,
-            trusted_owner=metadata.owner,
-            trusted_group=metadata.group,
-            mode=metadata.mode,
-            plan=plan,
-            deadline=deadline,
-            runtime_selection=self._runtime_selection,
-        )
+        self._admit_request(deadline)
+        with self._setup_errors():
+            outcome = self._operation.ensure_directory(
+                self._carrier,
+                trusted_root_path=root,
+                relative_path=leaf,
+                trusted_owner=metadata.owner,
+                trusted_group=metadata.group,
+                mode=metadata.mode,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=self._runtime_selection,
+            )
         return reduce_file_metadata(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
 
     def set_metadata(
@@ -749,17 +1167,19 @@ class FileAccess:
         """Converge ownership and mode for one existing supported object."""
         root, leaf, plan, deadline = self._request(path, sudo)
         metadata = NewMetadata(owner, group, mode)
-        outcome = self._operation.set_metadata(
-            self._carrier,
-            trusted_root_path=root,
-            relative_path=leaf,
-            trusted_owner=metadata.owner,
-            trusted_group=metadata.group,
-            mode=metadata.mode,
-            plan=plan,
-            deadline=deadline,
-            runtime_selection=self._runtime_selection,
-        )
+        self._admit_request(deadline)
+        with self._setup_errors():
+            outcome = self._operation.set_metadata(
+                self._carrier,
+                trusted_root_path=root,
+                relative_path=leaf,
+                trusted_owner=metadata.owner,
+                trusted_group=metadata.group,
+                mode=metadata.mode,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=self._runtime_selection,
+            )
         return reduce_file_metadata(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
 
     def remove(
@@ -774,16 +1194,20 @@ class FileAccess:
         root, leaf, plan, deadline = self._request(path, sudo)
         if type(expected) is not Revision:
             raise ValidationError("File removal requires an exact revision")
-        outcome = self._operation.remove(
-            self._carrier,
-            trusted_root_path=root,
-            relative_path=leaf,
-            expected_kind=_private_file_kind(expected_kind),
-            expected_revision=_file_revision_from_revision(expected),
-            plan=plan,
-            deadline=deadline,
-            runtime_selection=self._runtime_selection,
-        )
+        private_kind = _private_file_kind(expected_kind)
+        private_revision = _file_revision_from_revision(expected)
+        self._admit_request(deadline)
+        with self._setup_errors():
+            outcome = self._operation.remove(
+                self._carrier,
+                trusted_root_path=root,
+                relative_path=leaf,
+                expected_kind=private_kind,
+                expected_revision=private_revision,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=self._runtime_selection,
+            )
         return reduce_file_remove(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
 
     def _request(self, path: PurePosixPath, sudo: bool) -> tuple[str, str, IdentityPlan, Deadline]:
@@ -793,6 +1217,11 @@ class FileAccess:
         if type(deadline) is not Deadline:
             raise ValidationError("File access deadline policy must return one deadline")
         return root, leaf, plan, deadline
+
+    def _admit_request(self, deadline: Deadline) -> None:
+        """Check the selected route only after local request validation."""
+        if not deadline.expired and self._route_check is not None:
+            self._route_check(deadline)
 
     def _select_plan(self, sudo: bool) -> IdentityPlan:
         if type(sudo) is not bool:

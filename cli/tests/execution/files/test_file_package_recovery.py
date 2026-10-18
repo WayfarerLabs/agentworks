@@ -16,7 +16,7 @@ from agentworks.execution import (
     _file_effect_gate,
     _file_effect_gate_exchange,
     _file_gate_setup,
-    _file_package_recovery,
+    _file_mutation_recovery,
     _process,
 )
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
@@ -25,6 +25,7 @@ from agentworks.execution._file_effect_gate_bundle import _MODULE_NAMES, _PACKAG
 from agentworks.execution._file_effect_gate_exchange import exchange_file_effect_gate
 from agentworks.execution._file_gate_control import setup_file_effect_gate
 from agentworks.execution._file_gate_setup import file_effect_gate_path
+from agentworks.execution._file_mutation_recovery import FileMutationFenceRecovery
 from agentworks.execution._file_obligation import (
     FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
     FileCallFamily,
@@ -33,7 +34,6 @@ from agentworks.execution._file_obligation import (
     encode_file_call_admission,
     encode_file_call_obligation,
 )
-from agentworks.execution._file_package_recovery import FilePackageFenceRecovery
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
@@ -86,17 +86,20 @@ def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         database.close()
 
 
-def _admit(context, index: int):
+def _admit(context, index: int, family: FileCallFamily = FileCallFamily.PACKAGE_UPLOAD):
     database, owner, target, plan, gate = context
     call = FileCallObligation(
-        family=FileCallFamily.PACKAGE_UPLOAD,
+        family=family,
         target=target,
         root="/srv/package",
         relative_path=f"member-{index}",
         identity_plan=plan,
         runtime_selection=runtime_selection(sys.executable),
-        token=b"t" * 16,
-        batch_index=index,
+        token=b"t" * 16
+        if family in {FileCallFamily.UPLOAD, FileCallFamily.PACKAGE_UPLOAD, FileCallFamily.JSON_UPDATE}
+        else None,
+        attempt=1 if family is FileCallFamily.JSON_UPDATE else None,
+        batch_index=index if family is FileCallFamily.PACKAGE_UPLOAD else None,
         effect_gate=gate,
     )
     obligation = owner.register_lifecycle_obligation(
@@ -117,10 +120,10 @@ def held_recovery_owner(context, request: pytest.FixtureRequest):
 
 def _recover(
     context, row, generation: str, *, hold_owner: Callable[[OperationOwner], OperationOwner]
-) -> tuple[OperationOwner, FilePackageFenceRecovery]:
+) -> tuple[OperationOwner, FileMutationFenceRecovery]:
     database, owner, target, _, _ = context
     recovered = hold_owner(OperationOwner.recover(database.operations, owner.ownership, generation))
-    return recovered, FilePackageFenceRecovery.open(recovered, target, row)
+    return recovered, FileMutationFenceRecovery.open(recovered, target, row)
 
 
 def test_recovery_holder_receives_original_owner_before_open_and_retains_actual_worker(
@@ -128,7 +131,7 @@ def test_recovery_holder_receives_original_owner_before_open_and_retains_actual_
 ) -> None:
     _, row = _admit(context, 3)
     held_owner: OperationOwner | None = None
-    original_open = FilePackageFenceRecovery.open
+    original_open = FileMutationFenceRecovery.open
 
     def hold(owner: OperationOwner) -> OperationOwner:
         nonlocal held_owner
@@ -140,7 +143,7 @@ def test_recovery_holder_receives_original_owner_before_open_and_retains_actual_
         assert owner is held_owner
         return original_open(owner, target, retained)
 
-    monkeypatch.setattr(FilePackageFenceRecovery, "open", open_held)
+    monkeypatch.setattr(FileMutationFenceRecovery, "open", open_held)
     recovered, fence = _recover(context, row, "b" * 32, hold_owner=hold)
     assert held_owner is not None
     assert recovered is held_owner
@@ -155,9 +158,15 @@ def test_recovery_holder_receives_original_owner_before_open_and_retains_actual_
 
 
 @pytest.mark.parametrize("index", [0, 7])
-def test_advance_fences_old_guest_effect_and_preserves_child(context, held_recovery_owner, index: int) -> None:
+@pytest.mark.parametrize(
+    "family",
+    [f for f in FileCallFamily if f not in {FileCallFamily.DOWNLOAD, FileCallFamily.STAT, FileCallFamily.INVENTORY}],
+)
+def test_advance_fences_old_guest_effect_and_preserves_child(
+    context, held_recovery_owner, index: int, family: FileCallFamily
+) -> None:
     database, owner, _, _, gate = context
-    call, row = _admit(context, index)
+    call, row = _admit(context, index, family)
     recovered, fence = _recover(context, row, "b" * 32, hold_owner=held_recovery_owner)
     result = fence.advance(LocalCarrier(), deadline=Deadline.after(30))
     assert result.observation is not None and result.observation.binding is not None
@@ -175,9 +184,19 @@ def test_advance_fences_old_guest_effect_and_preserves_child(context, held_recov
         recovered.close()
 
 
-def test_lost_advance_reply_reuses_durable_proposal(held_recovery_owner, context) -> None:
+@pytest.mark.parametrize(
+    "family",
+    [
+        FileCallFamily.PACKAGE_UPLOAD,
+        FileCallFamily.JSON_UPDATE,
+        FileCallFamily.REMOVE,
+        FileCallFamily.SET_METADATA,
+        FileCallFamily.ENSURE_DIRECTORY,
+    ],
+)
+def test_lost_advance_reply_reuses_durable_proposal(held_recovery_owner, context, family: FileCallFamily) -> None:
     database, owner, target, _, gate = context
-    _, row = _admit(context, 3)
+    _, row = _admit(context, 3, family)
     recovered, fence = _recover(context, row, "b" * 32, hold_owner=held_recovery_owner)
 
     class LostReply(LocalCarrier):
@@ -199,7 +218,7 @@ def test_lost_advance_reply_reuses_durable_proposal(held_recovery_owner, context
     assert proposed is not None and proposed.proposed_generation is not None
     again = held_recovery_owner(OperationOwner.recover(database.operations, recovered.ownership, "c" * 32))
     (current,) = database.operations.list_pending_lifecycle_obligations(again.ownership)
-    result = FilePackageFenceRecovery.open(again, target, current).advance(LocalCarrier(), deadline=Deadline.after(30))
+    result = FileMutationFenceRecovery.open(again, target, current).advance(LocalCarrier(), deadline=Deadline.after(30))
     assert result.observation is not None
     assert result.observation.binding == replace(
         proposed, generation=proposed.proposed_generation, proposed_generation=None
@@ -210,11 +229,21 @@ def test_lost_advance_reply_reuses_durable_proposal(held_recovery_owner, context
     assert current.state is LifecycleObligationState.POSSIBLE_EFFECT
 
 
+@pytest.mark.parametrize(
+    "family",
+    [
+        FileCallFamily.PACKAGE_UPLOAD,
+        FileCallFamily.JSON_UPDATE,
+        FileCallFamily.REMOVE,
+        FileCallFamily.SET_METADATA,
+        FileCallFamily.ENSURE_DIRECTORY,
+    ],
+)
 def test_lost_proposal_publication_reply_does_not_choose_another_generation(
-    held_recovery_owner, context, monkeypatch: pytest.MonkeyPatch
+    held_recovery_owner, context, monkeypatch: pytest.MonkeyPatch, family: FileCallFamily
 ) -> None:
     database, owner, target, _, _ = context
-    _, row = _admit(context, 1)
+    _, row = _admit(context, 1, family)
     recovered, fence = _recover(context, row, "b" * 32, hold_owner=held_recovery_owner)
     original = type(database.operations).publish_lifecycle_obligation_payload
 
@@ -238,7 +267,7 @@ def test_lost_proposal_publication_reply_does_not_choose_another_generation(
     monkeypatch.setattr(type(database.operations), "publish_lifecycle_obligation_payload", original)
     again = held_recovery_owner(OperationOwner.recover(database.operations, recovered.ownership, "c" * 32))
     (current,) = database.operations.list_pending_lifecycle_obligations(again.ownership)
-    FilePackageFenceRecovery.open(again, target, current).advance(LocalCarrier(), deadline=Deadline.after(30))
+    FileMutationFenceRecovery.open(again, target, current).advance(LocalCarrier(), deadline=Deadline.after(30))
     (current,) = database.operations.list_pending_lifecycle_obligations(again.ownership)
     confirmed = decode_file_call_obligation(current.payload).effect_gate
     assert confirmed is not None and confirmed.generation == proposed.proposed_generation
@@ -257,9 +286,9 @@ def test_stale_row_and_missing_gate_refuse_without_resolution(held_recovery_owne
         payload=encode_file_call_obligation(replace(call, relative_path="changed")),
     )
     with pytest.raises(StateError):
-        FilePackageFenceRecovery.open(recovered, target, row)
+        FileMutationFenceRecovery.open(recovered, target, row)
     (current,) = database.operations.list_pending_lifecycle_obligations(recovered.ownership)
-    fence = FilePackageFenceRecovery.open(recovered, target, current)
+    fence = FileMutationFenceRecovery.open(recovered, target, current)
     Path(gate.path).unlink()
     result = fence.advance(LocalCarrier(), deadline=Deadline.after(30))
     assert result.observation is None or result.observation.binding is None
@@ -275,8 +304,8 @@ def test_wrong_guest_and_replaced_gate_refuse(held_recovery_owner, context) -> N
     recovered = held_recovery_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
     wrong_target = replace(target, boot_id="123e4567-e89b-12d3-a456-426614174001")
     with pytest.raises(StateError):
-        FilePackageFenceRecovery.open(recovered, wrong_target, row)
-    fence = FilePackageFenceRecovery.open(recovered, target, row)
+        FileMutationFenceRecovery.open(recovered, wrong_target, row)
+    fence = FileMutationFenceRecovery.open(recovered, target, row)
     Path(gate.path).unlink()
     setup_file_effect_gate(gate.path, _GUEST, os.geteuid(), target.name, lambda: _GUEST)
     result = fence.advance(LocalCarrier(), deadline=Deadline.after(30))
@@ -301,7 +330,7 @@ def test_ungated_package_row_is_not_a_fence_candidate(held_recovery_owner, conte
     )
     (current,) = database.operations.list_pending_lifecycle_obligations(recovered.ownership)
     with pytest.raises(StateError):
-        FilePackageFenceRecovery.open(recovered, target, current)
+        FileMutationFenceRecovery.open(recovered, target, current)
 
 
 def test_control_stop_after_proposal_reuses_it_on_next_takeover(
@@ -315,16 +344,16 @@ def test_control_stop_after_proposal_reuses_it_on_next_takeover(
         raise KeyboardInterrupt("interrupted after proposal")
 
     original = exchange_file_effect_gate
-    monkeypatch.setattr(_file_package_recovery, "exchange_file_effect_gate", interrupted)
+    monkeypatch.setattr(_file_mutation_recovery, "exchange_file_effect_gate", interrupted)
     with pytest.raises(KeyboardInterrupt, match="interrupted after proposal"):
         fence.advance(LocalCarrier(), deadline=Deadline.after(30))
     (current,) = database.operations.list_pending_lifecycle_obligations(recovered.ownership)
     proposed = decode_file_call_obligation(current.payload).effect_gate
     assert proposed is not None and proposed.proposed_generation is not None
-    monkeypatch.setattr(_file_package_recovery, "exchange_file_effect_gate", original)
+    monkeypatch.setattr(_file_mutation_recovery, "exchange_file_effect_gate", original)
     again = held_recovery_owner(OperationOwner.recover(database.operations, recovered.ownership, "c" * 32))
     (current,) = database.operations.list_pending_lifecycle_obligations(again.ownership)
-    FilePackageFenceRecovery.open(again, target, current).advance(LocalCarrier(), deadline=Deadline.after(30))
+    FileMutationFenceRecovery.open(again, target, current).advance(LocalCarrier(), deadline=Deadline.after(30))
     (current,) = database.operations.list_pending_lifecycle_obligations(again.ownership)
     confirmed = decode_file_call_obligation(current.payload).effect_gate
     assert confirmed is not None and confirmed.generation == proposed.proposed_generation

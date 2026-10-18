@@ -15,7 +15,7 @@ import time
 import urllib.parse
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._process import SinkWriteError, try_write_to_sink
@@ -126,6 +126,14 @@ class _ResponseBuffer:
 class _DiscardResponse:
     def try_write(self, data: memoryview) -> int:
         return len(data)
+
+
+class _HelperStatusObserver(Protocol):
+    def acknowledge(self, pid: int) -> None: ...
+
+    def before_status(self) -> None: ...
+
+    def record_status(self, status: dict[str, object]) -> None: ...
 
 
 class _ProxmoxWire:
@@ -248,10 +256,11 @@ class ProxmoxCarrier:
 
     def __init__(self, connection: ProxmoxConnection) -> None:
         self._wire = _ProxmoxWire(connection)
+        self._channel_features = ChannelFeatures()
 
     @property
     def features(self) -> ChannelFeatures:
-        return ChannelFeatures()
+        return self._channel_features
 
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         """Check the exact ASCII request envelope before any provider access."""
@@ -282,6 +291,17 @@ class ProxmoxCarrier:
     def execute(
         self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody
     ) -> CarrierReport:
+        return self._execute(invocation, io=io, deadline=deadline, custody=custody)
+
+    def _execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody,
+        observer: _HelperStatusObserver | None = None,
+    ) -> CarrierReport:
         if not custody.settled:
             raise StateError("Previous local delivery cleanup remains unsettled")
         body = self._request_body(invocation, io)
@@ -294,13 +314,19 @@ class ProxmoxCarrier:
         pid = response.get("pid")
         if type(pid) is not int or pid <= 0:
             return _incomplete(Dispatch.UNKNOWN, io, Failure.INVALID_RESPONSE)
+        if observer is not None:
+            observer.acknowledge(pid)
         while not deadline.expired:
+            if observer is not None:
+                observer.before_status()
             try:
                 status = self._wire.request(
                     "GET", f"exec-status?pid={pid}", custody=custody, timeout=deadline.remaining()
                 )
             except Exception:
                 return _incomplete(Dispatch.SENT, io, Failure.DEADLINE if deadline.expired else Failure.OBSERVATION)
+            if observer is not None:
+                observer.record_status(status)
             report = _status_report(status, io, deadline)
             if report is not None:
                 if deadline.expired:

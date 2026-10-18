@@ -730,6 +730,7 @@ def test_http_limit_refuses_oversized_argv_or_escaped_input(
 
 def test_optional_features_are_passively_absent(wire: MagicMock) -> None:
     carrier = ProxmoxCarrier(connection())
+    assert carrier.features is carrier.features
     assert not carrier.features.live_stdio
     assert not carrier.features.terminal
     wire.assert_not_called()

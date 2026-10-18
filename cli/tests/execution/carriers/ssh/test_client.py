@@ -289,27 +289,43 @@ def test_unretained_output_never_enters_capture(
 
 
 def test_short_input_writes_advance_without_replay(synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch) -> None:
-    original = os.write
+    original = _process._write_owned_stdin
+    writes: list[int] = []
 
     def write(fd, data):
-        return original(fd, data[:7])
+        written = original(fd, data[:7])
+        writes.append(written)
+        return written
 
-    monkeypatch.setattr(os, "write", write)
+    monkeypatch.setattr(_process, "_write_owned_stdin", write)
     data = b"binary\x00\xff\n" * 50
     synthetic.command = "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())"
     report = synthetic.execute(CarrierIO(input=FiniteInput(data)))
+    assert len(writes) > 1
+    assert all(0 < written <= 7 for written in writes)
+    assert sum(writes) == len(data)
     assert report.stdout.data == data
+    assert report.stderr.data == b""
+    assert report.stdout.complete and report.stderr.complete
+    assert report.completion == ExitStatus(code=0)
+    assert report.dispatch == Dispatch.SENT
     assert report.failure is None
+    assert len(synthetic.calls) == 2
     synthetic.assert_closed()
 
 
 def test_failed_input_is_safe_and_never_replayed(synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch) -> None:
+    writes = 0
+
     def write(fd, data):
+        nonlocal writes
+        writes += 1
         raise OSError("secret-canary")
 
-    monkeypatch.setattr(os, "write", write)
+    monkeypatch.setattr(_process, "_write_owned_stdin", write)
     synthetic.command = "import time; time.sleep(30)"
     report = synthetic.execute(CarrierIO(input=FiniteInput(b"secret-canary")))
+    assert writes == 1
     assert report.failure == Failure.INPUT
     assert report.dispatch == Dispatch.UNKNOWN
     assert report.completion is None
@@ -671,9 +687,7 @@ def test_descendant_output_handles_do_not_block_cleanup(
         assert done.exists()
 
 
-def test_natural_exit_with_descendant_holding_stdin_reports_unsent_input(
-    synthetic: SyntheticSSH, tmp_path: Path
-) -> None:
+def test_natural_exit_with_descendant_holding_stdin_completes_consumer(synthetic: SyntheticSSH, tmp_path: Path) -> None:
     release = tmp_path / "release"
     done = tmp_path / "done"
     descendant = (
@@ -693,9 +707,12 @@ def test_natural_exit_with_descendant_holding_stdin_reports_unsent_input(
         started = time.monotonic()
         report = synthetic.execute(CarrierIO(input=FiniteInput(b"x" * 2_000_000)), seconds=None)
         assert time.monotonic() - started < 2
-        assert report.failure == Failure.INPUT
+        assert report.failure is None
+        assert report.dispatch == Dispatch.SENT
         assert report.completion == ExitStatus(code=23)
         assert report.stdout.data == b"parent"
+        assert report.stderr.data == b""
+        assert report.stdout.complete and report.stderr.complete
         assert report.local_status == 23
         synthetic.assert_closed()
     finally:

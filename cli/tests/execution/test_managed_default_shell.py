@@ -7,19 +7,25 @@ import subprocess
 import sys
 import threading
 from dataclasses import replace
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _execution_operation as operation_module
+from agentworks.execution import _workload_shell as shell_module
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_job_access import ManagedJobShellRefusal
 from agentworks.execution._managed_job_protocol import encode_managed_job_fact
 from agentworks.execution._managed_observe_access import ManagedObserveControlFact
-from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution._runtime_prerequisite import (
+    RuntimeSelection,
+    RuntimeTargetOS,
+    _NumericGuestBootstrap,
+    build_root_guest_bootstrap_argv,
+)
+from agentworks.execution._workload_shell import observe_workload_shell
 from agentworks.execution._workload_shell_protocol import (
     WorkloadShellFailure,
     WorkloadShellResponse,
@@ -40,6 +46,7 @@ from agentworks.execution.models import Command, Input, JobRef, Lifetime, Output
 from agentworks.execution.profiles import Protection
 from agentworks.operations import OperationAttempt, OperationBorrow
 
+from .test_delivery_custody import Cleanup
 from .test_managed_execution_access import bound as bound
 from .test_managed_execution_access import view as view
 from .test_workload_shell import NONCE, CarrierStub
@@ -81,6 +88,40 @@ def no_run(view: Any) -> None:
     assert not workflow.views.execution_operation.managed_runs
     assert main.start.calls == keeper.clock.calls == 0
     assert database._conn.execute("SELECT COUNT(*) FROM execution_runs").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("bootstrap_bound", [False, True])
+def test_owned_shell_lookup_forwards_exact_operation_bootstrap(view, lookup, monkeypatch, bootstrap_bound):
+    _, workflow, _, carrier, _ = view
+    operation = workflow.views.execution_operation
+    original_bootstrap = operation._bootstrap
+    bootstrap = (
+        _NumericGuestBootstrap(
+            IdentityPlan(original_bootstrap.root_entry.expected, IdentityMode.SUDO_ROOT), original_bootstrap.guest
+        )
+        if bootstrap_bound
+        else None
+    )
+    operation._bootstrap = bootstrap
+    ordinary = IdentityPlan(IdentityExpectation(1001, 1002, (1002, 1003)), IdentityMode.DEMOTE)
+    received = []
+
+    def record(root_entry, target_identity, **kwargs):
+        received.append((root_entry, target_identity, kwargs["expected_guest"]))
+        return build_root_guest_bootstrap_argv(root_entry, target_identity, **kwargs)
+
+    monkeypatch.setattr(shell_module, "build_root_guest_bootstrap_argv", record)
+
+    def observe(*args, **kwargs):
+        assert kwargs["bootstrap"] is bootstrap
+        return observe_workload_shell(*args, **kwargs)
+
+    monkeypatch.setattr(operation_module, "observe_workload_shell", observe)
+    operation._observe_workload_shell(carrier, ordinary, RuntimeSelection(RuntimeTargetOS.LINUX), Deadline.after(5))
+
+    assert lookup[1][0].identity == ordinary.expected
+    assert received == ([(bootstrap.root_entry, ordinary.expected, bootstrap.guest)] if bootstrap is not None else [])
+    workflow.close(cleanup_deadline=Deadline.after(5))
 
 
 @pytest.mark.parametrize("sudo", [False, True])
@@ -366,12 +407,17 @@ def test_aggregate_close_during_lookup_permanently_blocks_body_admission(view, l
 def test_successful_helper_reply_without_local_cleanup_retains_exact_delivery(view, lookup, monkeypatch):
     _, workflow, access, _, _ = view
     retained = []
+    cleanups = []
     original = lookup[0].execute
 
     def unsettled(*args, **kwargs):
         custody = kwargs["custody"]
         retained.append(custody)
-        custody.begin_process()
+        owner = custody.begin_process()
+        cleanup = Cleanup(owner)
+        cleanup.restore_ready = False
+        custody.retain_cleanup(owner, cleanup)
+        cleanups.append(cleanup)
         return original(*args, **kwargs)
 
     monkeypatch.setattr(lookup[0], "execute", unsettled)
@@ -383,8 +429,16 @@ def test_successful_helper_reply_without_local_cleanup_retains_exact_delivery(vi
             workflow.close(cleanup_deadline=Deadline.after(2))
         assert workflow.owner._outstanding_attempt.local_delivery is retained[0]
         assert not retained[0].settled
+        assert cleanups[0].events == ["borrowers-stopped", "process-cleaned"]
     finally:
-        assert retained[0].close(Deadline.after(2))
+        cleanups[0].restore_ready = True
+        assert workflow.owner.close_local_delivery(Deadline.after(2))
+    assert cleanups[0].settled and retained[0].settled
+    assert workflow.owner._outstanding_attempt.local_delivery is retained[0]
+    with pytest.raises(StateError):
+        start(access)
+    assert lookup[0].calls == 1
+    no_run(view)
 
 
 @pytest.mark.parametrize("invocation", [Command(["/bin/true"]), Script("true", Shell.SH), Script("true", Shell.BASH)])
@@ -396,26 +450,43 @@ def test_literal_and_explicit_shell_skip_lookup(view, lookup, invocation):
 
 
 @pytest.mark.parametrize("refuse", [False, True])
-def test_selected_route_is_rechecked_before_lookup_and_start(view, lookup, refuse):
-    _, workflow, access, _, _ = view
+def test_selected_route_is_rechecked_before_lookup_and_start(view, lookup, refuse, monkeypatch):
+    _, workflow, access, main, _ = view
+    operation = workflow.views.execution_operation
     calls = []
+    checkpoints = []
+    budget = Deadline.after(5)
 
     def require(deadline):
         calls.append(deadline)
+        checkpoint = "start" if operation.managed_runs else "lookup" if operation.active_inline_calls else "entry"
+        checkpoints.append(checkpoint)
         if refuse:
             raise StateError("changed route")
 
-    workflow.views.execution_operation._wsl2_route = SimpleNamespace(require_selected_route=require)
-    budget = Deadline.after(5)
+    original_lookup, original_start = lookup[0].execute, main.start.execute
+
+    def execute_lookup(*args, **kwargs):
+        assert checkpoints[-1] == "lookup" and kwargs["deadline"] is budget
+        return original_lookup(*args, **kwargs)
+
+    def execute_start(*args, **kwargs):
+        assert checkpoints[-1] == "start" and kwargs["deadline"] is budget
+        return original_start(*args, **kwargs)
+
+    monkeypatch.setattr(lookup[0], "execute", execute_lookup)
+    monkeypatch.setattr(main.start, "execute", execute_start)
+    operation._route_check = require
     if refuse:
         with pytest.raises(StateError):
             start(access, deadline=budget)
         no_run(view)
-        assert lookup[0].calls == 0 and calls == [budget]
+        assert lookup[0].calls == 0 and checkpoints == ["entry"]
     else:
         start(access, deadline=budget)
-        assert calls == [budget, budget]
-    workflow.views.execution_operation._wsl2_route = None
+        assert checkpoints[0] == "entry" and lookup[0].calls == main.start.calls == 1
+    assert calls and all(actual is budget for actual in calls)
+    operation._route_check = None
     workflow.close(cleanup_deadline=Deadline.after(5))
 
 
@@ -424,16 +495,14 @@ def test_real_fixed_lookup_under_current_numeric_identity(view, lookup, monkeypa
     import pwd
 
     configured = pwd.getpwuid(os.geteuid()).pw_shell
-    _, workflow, access, _, _ = view
+    _, workflow, _, carrier, _ = view
     plan = IdentityPlan(
         IdentityExpectation(os.geteuid(), os.getegid(), tuple(sorted(set(os.getgroups()) | {os.getegid()}))),
         IdentityMode.DIRECT,
     )
     runtime = RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)
-    access._ordinary_plan = plan
-    access._runtime_selection = runtime
     operation = workflow.views.execution_operation
-    operation._native_binding = replace(operation._native_binding, runtime_selection=runtime)
+    operation._bootstrap = None
 
     def execute(invocation, *, io, deadline, custody):
         completed = subprocess.run(invocation.argv, input=io.input.data, capture_output=True, timeout=5, check=False)
@@ -446,13 +515,10 @@ def test_real_fixed_lookup_under_current_numeric_identity(view, lookup, monkeypa
 
     monkeypatch.setattr(lookup[0], "execute", execute)
     if configured in {"/bin/sh", "/usr/bin/sh", "/bin/bash", "/usr/bin/bash"}:
-        start(access)
-        (run,) = operation.managed_runs
-        assert run.receipt.spec.workload == plan.expected
-        assert run.receipt.spec.shell.resolved_executable == configured
+        assert operation._observe_workload_shell(carrier, plan, runtime, Deadline.after(5)) == configured
     else:
         with pytest.raises(ManagedJobShellRefusal) as caught:
-            start(access)
+            operation._observe_workload_shell(carrier, plan, runtime, Deadline.after(5))
         result = caught.value.fact.observation
         assert result is not None and result.observation is not None
         assert result.observation.failure is WorkloadShellFailure.UNSUPPORTED

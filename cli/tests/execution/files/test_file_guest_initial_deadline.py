@@ -152,9 +152,9 @@ def test_expired_budget_refuses_before_root_access(
         return 0
 
     monkeypatch.setattr(guest, "_read_request", lambda: decoded)
-    monkeypatch.setattr(guest, "matches_current_identity", lambda _expected: True)
+    monkeypatch.setattr(guest, "matches_file_helper_identity", lambda _expected: True)
     monkeypatch.setattr(f"{guest.__name__}.time.monotonic", lambda: 10.0)
-    monkeypatch.setattr(guest, "open_linux_root", forbid_root_access)
+    monkeypatch.setattr(guest, "open_file_root", forbid_root_access)
     monkeypatch.setattr(guest, "_finish_failure", finish_failure)
     main = cast("Callable[[str], int]", guest.main)
 

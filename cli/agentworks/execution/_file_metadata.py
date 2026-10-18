@@ -1,8 +1,8 @@
-"""Private Linux metadata convergence beneath a borrowed parent descriptor.
+"""Private metadata convergence beneath a borrowed parent descriptor.
 
 The caller owns validated numeric inputs, the protected parent descriptor, and
 operation serialization. Mutations target only a verified path-only handle
-through procfs, never the mutable caller path.
+through procfs on Linux or a readable Darwin descriptor, never the mutable path.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 from typing import NoReturn
 
+from ._darwin_metadata import require_plain_metadata
 from ._file_objects import (
     FileKind,
     FileObjectError,
@@ -145,6 +146,19 @@ def ensure_directory(
     return _run_metadata(parent_fd, leaf_name, uid, gid, mode, expires_at, create=True)
 
 
+def create_directory(
+    parent_fd: int,
+    leaf_name: str,
+    *,
+    uid: int,
+    gid: int,
+    mode: int,
+    expires_at: float | None,
+) -> MetadataResult:
+    """Create only the final directory, refusing any existing entry unchanged."""
+    return _run_metadata(parent_fd, leaf_name, uid, gid, mode, expires_at, create=True, create_only=True)
+
+
 def _run_metadata(
     parent_fd: int,
     leaf_name: str,
@@ -154,6 +168,7 @@ def _run_metadata(
     expires_at: float | None,
     *,
     create: bool,
+    create_only: bool = False,
 ) -> MetadataResult:
     state = _MutationState()
     observed: _ObservedObject | None = None
@@ -164,7 +179,7 @@ def _run_metadata(
     result: MetadataResult | None = None
     try:
         try:
-            _require_linux(state)
+            _require_platform(state)
             _check_deadline(expires_at, state)
             if create:
                 _require_metadata_kind(FileKind.DIRECTORY, mode, state)
@@ -176,6 +191,8 @@ def _run_metadata(
                 observed = _open_observed(parent_fd, leaf_name, FileObjectPhase.CONDITION, expires_at)
                 if observed is None or observed.revision.stat != created_revision.stat:
                     raise _error(MetadataFailureKind.CONFLICT, state)
+            elif create_only:
+                raise _error(MetadataFailureKind.CONFLICT, state)
             elif create and observed.kind is not FileKind.DIRECTORY:
                 kind = (
                     MetadataFailureKind.UNSUPPORTED
@@ -265,7 +282,10 @@ def _converge(
         _check_deadline(expires_at, state)
         state.attempted_step = MetadataStep.OWNERSHIP
         try:
-            os.chown(bridge, uid, gid)
+            if isinstance(bridge, int):
+                os.fchown(bridge, uid, gid)
+            else:
+                os.chown(bridge, uid, gid)
         except OSError:
             raise _error(MetadataFailureKind.METADATA, state) from None
         state.completed_steps.append(MetadataStep.OWNERSHIP)
@@ -281,7 +301,10 @@ def _converge(
         _check_deadline(expires_at, state)
         state.attempted_step = MetadataStep.MODE
         try:
-            os.chmod(bridge, mode)
+            if isinstance(bridge, int):
+                os.fchmod(bridge, mode)
+            else:
+                os.chmod(bridge, mode)
         except OSError:
             raise _error(MetadataFailureKind.METADATA, state) from None
         state.completed_steps.append(MetadataStep.MODE)
@@ -311,7 +334,7 @@ def _verify_target(
     observed: _ObservedObject,
     expires_at: float | None,
     state: _MutationState,
-) -> tuple[FileRevision, str]:
+) -> tuple[FileRevision, str | int]:
     revision = _verify_observed(
         parent_fd,
         leaf_name,
@@ -319,6 +342,8 @@ def _verify_target(
         FileObjectPhase.CONDITION,
         expires_at,
     )
+    if sys.platform == "darwin":
+        return revision, observed.descriptor
     bridge = f"/proc/self/fd/{observed.descriptor}"
     try:
         bridged = os.stat(bridge)
@@ -335,10 +360,16 @@ def _verify_target(
 
 
 def _verify_access_acl(
-    bridge: str,
+    bridge: str | int,
     revision: FileRevision,
     state: _MutationState,
 ) -> None:
+    if isinstance(bridge, int):
+        try:
+            require_plain_metadata(bridge)
+        except OSError:
+            raise _error(MetadataFailureKind.UNSUPPORTED, state) from None
+        return
     try:
         access_acl = os.getxattr(bridge, _ACCESS_ACL)
     except OSError as error:
@@ -400,8 +431,8 @@ def _error(kind: MetadataFailureKind, state: _MutationState) -> MetadataError:
     )
 
 
-def _require_linux(state: _MutationState) -> None:
-    if sys.platform != "linux":
+def _require_platform(state: _MutationState) -> None:
+    if sys.platform not in {"linux", "darwin"}:
         raise _error(MetadataFailureKind.UNSUPPORTED, state)
 
 

@@ -6,9 +6,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from agentworks.db import OperationResourceKind
-from agentworks.errors import ValidationError
-from agentworks.operations import _is_pre_registration_refusal, release_borrow_after_custody
+from agentworks.errors import StateError, ValidationError
+from agentworks.operations import OperationAttempt, _is_pre_registration_refusal, release_borrow_after_custody
 
+from ._delivery_custody import LocalDeliveryCustody
 from ._fixed_helper_operation import BorrowedFixedHelperCarrier
 from ._managed_run_obligation import decode_managed_run_obligation, encode_managed_run_obligation
 from ._managed_runs import (
@@ -18,15 +19,17 @@ from ._managed_runs import (
     ManagedRunRecord,
     ManagedTargetKind,
 )
-from ._managed_start_exchange import ManagedStartAttempt, _PreparedAttempt, start_managed_run
-from .carrier import Deadline
+from ._managed_start_exchange import ManagedStartAttempt, ManagedStartCandidate, _PreparedAttempt, start_managed_run
+from .carrier import Deadline, Dispatch, ExitStatus
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from agentworks.operations import OperationOwner
+    from agentworks.operations import OperationBorrow, OperationOwner
 
+    from ._helper_closure import HelperClosureDelivery
     from ._managed_runs import ManagedRunIdentity, ManagedRunRepository
+    from ._runtime_prerequisite import HelperClosureExpectation
     from .carrier import Carrier
 
 
@@ -64,6 +67,163 @@ class ManagedStartControlFact(Exception):
         super().__init__("managed start stopped with retained operation state")
 
 
+class ManagedStartCustody:
+    """Same-process custody of one actual START helper, independent of its receipt.
+
+    The parent publishes this inert object before admission. Continuation retains
+    only exact handles and bounded dispatch facts, never preparation or output.
+    """
+
+    def __init__(
+        self,
+        repository: ManagedRunRepository,
+        reserved: ManagedRunRecord,
+        owner: OperationOwner,
+        obligation_id: str,
+        route_check: Callable[[Deadline], None] | None,
+    ) -> None:
+        self._repository = repository
+        self._reserved = reserved
+        self._owner = owner
+        self._ownership = owner.ownership
+        self._obligation_id = obligation_id
+        self._route_check = route_check
+        self._borrow: OperationBorrow | None = None
+        self._operation: BorrowedFixedHelperCarrier | None = None
+        self._delivery: HelperClosureDelivery | None = None
+        self._local = LocalDeliveryCustody()
+        self._dispatch = Dispatch.UNKNOWN
+        self._completion: ExitStatus | None = None
+        self._active = True
+
+    def _capture(self, candidate: ManagedStartCandidate) -> None:
+        self._dispatch = candidate.dispatch
+        self._completion = candidate.carrier_completion
+        operation = self._operation
+        if operation is not None and operation.outstanding_attempt is not None:
+            self._local = operation.outstanding_attempt.local_delivery
+
+    @property
+    def completion_view(self) -> tuple[Dispatch, ExitStatus | None, LocalDeliveryCustody] | None:
+        """Original dispatch facts, available only after positive helper closure."""
+        operation = self._operation
+        if operation is not None and operation.outstanding_attempt is not None:
+            self._local = operation.outstanding_attempt.local_delivery
+        if self._active or not self._local.settled or not self._closed_helper:
+            return None
+        dispatch = Dispatch.NOT_SENT if operation is None or not operation.delivery_started else self._dispatch
+        return dispatch, self._completion, self._local
+
+    @property
+    def _closed_helper(self) -> bool:
+        operation = self._operation
+        return operation is None or (
+            not operation.delivery_started
+            or self._dispatch is Dispatch.NOT_SENT
+            or (
+                self._delivery.closure_proven
+                if self._delivery is not None
+                else self._dispatch is Dispatch.SENT and self._completion == ExitStatus(0)
+            )
+        )
+
+    def _validate(self) -> None:
+        """Fence continuation to the original borrow, row, run and generation."""
+        owner, borrow, operation = self._owner, self._borrow, self._operation
+        if self._active or borrow is None or owner.ownership != self._ownership:
+            raise StateError("Managed start continuation has no inactive exact custody")
+        with owner._guard:  # noqa: SLF001
+            owner._reconcile_transition_locked()  # noqa: SLF001
+            if borrow._closed or owner._active_borrow is not borrow:  # noqa: SLF001
+                raise StateError("Managed start continuation no longer owns its borrow")
+            attempt = owner._outstanding_attempt  # noqa: SLF001
+            if attempt is not None and (
+                not isinstance(attempt, OperationAttempt) or attempt._borrow is not borrow  # noqa: SLF001
+            ):
+                raise StateError("Managed start continuation no longer owns its attempt")
+            if (
+                operation is not None
+                and operation.outstanding_attempt is not None
+                and attempt is not None
+                and attempt is not operation.outstanding_attempt
+            ):
+                raise StateError("Managed start continuation attempt changed")
+            # A lost begin reply precedes entry into the actual delivery.
+            if attempt is not None and (operation is None or operation.outstanding_attempt is None):
+                if operation is None or operation.delivery_started:
+                    raise StateError("Managed start continuation lost its delivery attempt")
+                operation.outstanding_attempt = attempt
+            if operation is not None and operation.outstanding_attempt is not None:
+                self._local = operation.outstanding_attempt.local_delivery
+            row = owner._repository.inspect_lifecycle_obligation(self._ownership, self._obligation_id)  # noqa: SLF001
+            if row is None:
+                if borrow._dispatch_obligation is not None or attempt is not None:  # noqa: SLF001
+                    raise StateError("Managed start obligation disappeared")
+            else:
+                if (
+                    row.obligation_kind != MANAGED_START_OBLIGATION_KIND
+                    or row.payload_version != MANAGED_START_PAYLOAD_VERSION
+                    or row.payload != encode_managed_start_obligation(self._reserved.identity.run_id)
+                    or row.payload_revision != 0
+                ):
+                    raise StateError("Managed start obligation identity changed")
+                borrow._dispatch_obligation = row  # noqa: SLF001
+        record = self._repository.inspect(self._reserved.identity)
+        if record is None or (
+            record.spec != self._reserved.spec
+            or record.output_policy != self._reserved.output_policy
+            or record.created_at != self._reserved.created_at
+        ):
+            raise StateError("Managed start reservation identity changed")
+
+    def observe_cleanup(self, deadline: Deadline) -> None:
+        """Retire local delivery and observe this helper under a fresh route budget."""
+        if self._borrow is None and self.completion_view is not None:
+            return
+        if self._borrow is not None and self._borrow.closed and self.completion_view is not None:
+            return
+        self._validate()
+        if self._closed_helper and self._local.settled:
+            return
+        if deadline.expires_at is None or deadline.expired:
+            raise ValidationError("Managed start cleanup requires a fresh finite deadline")
+        if not self._local.close(deadline):
+            raise StateError("Managed start local delivery remains unsettled")
+        self._validate()
+        if not self._closed_helper:
+            delivery = self._delivery
+            if delivery is None:
+                raise StateError("Managed start helper closure remains unknown")
+            if self._route_check is not None:
+                self._route_check(deadline)
+            self._validate()
+            if not delivery.observe_closure(deadline=deadline, custody=self._local):
+                raise StateError("Managed start helper closure remains unknown")
+            self._validate()
+
+    def retry_bookkeeping(self) -> None:
+        """Settle exact already-closed custody without replaying START or BEGIN."""
+        borrow = self._borrow
+        if borrow is None and self.completion_view is not None:
+            return
+        if borrow is not None and borrow.closed:
+            return
+        self._validate()
+        operation = self._operation
+        assert borrow is not None
+        if not self._closed_helper or not self._local.settled:
+            raise StateError("Managed start retains unresolved helper custody")
+        if operation is not None and operation.outstanding_attempt is not None:
+            operation.settle_helper_closure()
+        record = self._repository.inspect(self._reserved.identity)
+        assert record is not None
+        release_borrow_after_custody(
+            borrow,
+            retain_effect=borrow.dispatch_obligation_may_be_armed
+            and record.launch_state is not ManagedLaunchState.RECEIPT_CONFIRMED,
+        )
+
+
 def start_owned_managed_run(
     repository: ManagedRunRepository,
     reserved: ManagedRunRecord,
@@ -74,6 +234,10 @@ def start_owned_managed_run(
     owner: OperationOwner,
     obligation_id: str,
     before_dispatch: Callable[[], None] | None = None,
+    retain_custody: Callable[[ManagedStartCustody], None] | None = None,
+    closure_expectation: HelperClosureExpectation | None = None,
+    new_helper_delivery: Callable[[HelperClosureExpectation], HelperClosureDelivery] | None = None,
+    route_check: Callable[[Deadline], None] | None = None,
 ) -> ManagedStartOutcome:
     """Start once under an already held exact-VM owner; never close that owner.
 
@@ -103,14 +267,34 @@ def start_owned_managed_run(
         raise ValidationError("Managed start requires an exact VM and matching run owner")
     if type(prepared) is not _PreparedAttempt:
         raise ValidationError("Managed start requires exact preparation")
-    payload = encode_managed_start_obligation(reserved.identity.run_id)
-    prepared.claim(reserved, carrier, deadline)
+    if new_helper_delivery is not None and (retain_custody is None or closure_expectation is None):
+        raise ValidationError("Managed start closure delivery requires retained exact custody")
+    custody = ManagedStartCustody(repository, reserved, owner, obligation_id, route_check)
     try:
+        if retain_custody is not None:
+            retain_custody(custody)
+        if new_helper_delivery is not None and closure_expectation is not None:
+            custody._delivery = new_helper_delivery(closure_expectation)
+        payload = encode_managed_start_obligation(reserved.identity.run_id)
+        prepared.claim(reserved, carrier, deadline)
         borrow = owner.borrow()
+        custody._borrow = borrow
     except BaseException:
-        prepared.discard()
+        custody._active = False
+        if retain_custody is not None or prepared._claimed:
+            prepared.discard()
         raise
-    operation = BorrowedFixedHelperCarrier(carrier, borrow)
+    try:
+        operation = BorrowedFixedHelperCarrier(carrier, borrow, delivery=custody._delivery)
+        custody._operation = operation
+    except BaseException as control:
+        custody._active = False
+        prepared.discard()
+        try:
+            borrow.close()
+        except BaseException:
+            raise control from control.__cause__
+        raise
     attempt: ManagedStartAttempt | None = None
     registration_started = False
     retained = False
@@ -127,6 +311,8 @@ def start_owned_managed_run(
             borrow.arm_dispatch_obligation()
             if before_dispatch is not None:
                 before_dispatch()
+            if route_check is not None:
+                route_check(deadline)
 
         attempt = start_managed_run(
             repository,
@@ -135,8 +321,12 @@ def start_owned_managed_run(
             prepared=prepared,
             deadline=deadline,
             before_possible_dispatch=before_possible_dispatch,
+            publish_candidate=custody._capture,
         )
-        operation.settle(attempt.candidate.dispatch, attempt.candidate.carrier_completion)
+        if custody._delivery is None or custody._closed_helper:
+            operation.settle(attempt.candidate.dispatch, attempt.candidate.carrier_completion)
+        else:
+            operation.pending_remote_effects = True
         confirmed = (
             attempt.record.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
             and not operation.has_outstanding_attempt
@@ -150,12 +340,19 @@ def start_owned_managed_run(
             operation.coordination_uncertain,
             retained,
         )
-        release_borrow_after_custody(borrow, retain_effect=retained)
+        if retain_custody is None:
+            release_borrow_after_custody(borrow, retain_effect=retained)
+        elif custody._closed_helper and custody._local.settled:
+            custody._active = False
+            custody.retry_bookkeeping()
         return outcome
     except BaseException as control:
         if _is_pre_registration_refusal(control):
             prepared.discard()
-            borrow.close()
+            try:
+                borrow.close()
+            except BaseException:
+                raise control from control.__cause__
             raise
         prepared.discard()
         armed_effect = borrow.dispatch_obligation_may_be_armed
@@ -163,7 +360,10 @@ def start_owned_managed_run(
         retained = armed_effect or operation.requires_owner_retention or registration_uncertain
         release_failed = False
         try:
-            release_borrow_after_custody(borrow, retain_effect=armed_effect)
+            if retain_custody is None:
+                release_borrow_after_custody(borrow, retain_effect=armed_effect)
+            else:
+                retained = True
         except BaseException:
             release_failed = True
         fact = ManagedStartControlFact(
@@ -179,4 +379,7 @@ def start_owned_managed_run(
                 retained or release_failed,
             )
         )
+        fact.__cause__ = control.__cause__
         raise control from fact
+    finally:
+        custody._active = False

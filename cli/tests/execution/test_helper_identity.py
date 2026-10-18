@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
@@ -154,7 +155,7 @@ def test_invalid_identity_plan_is_rejected_before_payload_encoding(
         raise AssertionError("payload encoder reached")
 
     if kind == "inline":
-        monkeypatch.setattr("agentworks.execution._inline.encode_manifest", unexpected)
+        monkeypatch.setattr("agentworks.execution._inline.encode_request_envelope", unexpected)
     else:
         monkeypatch.setattr("agentworks.execution._file_read.encode_file_read_request", unexpected)
 
@@ -206,7 +207,7 @@ def test_guest_identity_requires_real_effective_saved_and_exact_groups(
 @pytest.mark.parametrize(
     ("platform", "implementation", "version"),
     [
-        ("darwin", "cpython", (3, 12)),
+        ("freebsd", "cpython", (3, 12)),
         ("linux", "pypy", (3, 12)),
         ("linux", "cpython", (3, 10)),
         ("linux", "cpython", (3, 15)),
@@ -224,12 +225,11 @@ def test_inline_guest_refuses_unsupported_runtime_before_identity_or_workload_ac
         runtime_selection=_FIXED_LINUX_RUNTIME,
     )
     assert isinstance(prepared.io.input, FiniteInput)
-    manifest = prepared.io.input.data
-    reads = [manifest, b""]
+    request = BytesIO(prepared.io.input.data)
     output = bytearray()
 
-    def read(_descriptor: int, _maximum: int) -> bytes:
-        return reads.pop(0)
+    def read(_descriptor: int, maximum: int) -> bytes:
+        return request.read(maximum)
 
     def write(_descriptor: int, data: bytes) -> int:
         output.extend(data)
@@ -244,12 +244,15 @@ def test_inline_guest_refuses_unsupported_runtime_before_identity_or_workload_ac
     monkeypatch.setattr(sys, "implementation", SimpleNamespace(name=implementation))
     monkeypatch.setattr(sys, "version_info", version)
     monkeypatch.setattr(_inline_guest, "matches_current_identity", unexpected)
+    monkeypatch.setattr(_inline_guest, "matches_fresh_exec_identity", unexpected)
     monkeypatch.setattr(_inline_guest, "run_owned_process", unexpected)
 
     assert _inline_guest.main(prepared.nonce) == 0
     frames: list[Frame] = []
     reader = FrameReader(prepared.nonce, frames.append)
-    reader.try_write(memoryview(output))
+    pending = memoryview(output)
+    while pending:
+        pending = pending[reader.try_write(pending) :]
     reader.finish()
 
     assert reader.error is None

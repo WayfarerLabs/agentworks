@@ -16,6 +16,7 @@ from agentworks.capabilities.vm_platform.base import (
     ProvisionRequest,
     ProvisionResult,
     VMPlatform,
+    execution_power_remaining,
     provider_locator_remaining,
 )
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
@@ -27,6 +28,7 @@ from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs,
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import AgentworksError, ConnectivityError, NotFoundError, StateError
+from agentworks.execution.binding import _IndependentJobAvailability
 from agentworks.plugins.gcp.auth import GcpClientCache
 from agentworks.plugins.gcp.bootstrap import (
     GCE_READINESS_COMMAND,
@@ -90,8 +92,11 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
+    from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
+    from agentworks.operations import OperationOwner
     from agentworks.transports import Transport
+    from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 
 _OPERATION_TIMEOUT_SECONDS = 300.0
@@ -582,6 +587,44 @@ class GCEPlatform(VMPlatform):
         identity = _VMIdentity.from_row(vm)
         return f"{identity.instance_name}@{identity.zone}"
 
+    def build_native_execution_access(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
+    ) -> OwnedNativePlatformAccess:
+        """Build passive GCE access under the selected VM operation owner."""
+        from agentworks.plugins.gcp._native_execution_access import GCEOwnedAccess
+
+        return GCEOwnedAccess(vm, self, ctx, owner=owner)
+
+    def resolve_native_execution_binding(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+        config: Config | None = None,
+    ) -> NativeExecutionBinding:
+        """Read the exact owned endpoint and construct passive SSH delivery."""
+        from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_execution_binding
+
+        settings = require_ssh_settings(vm, ctx, config)
+        identity = _VMIdentity.from_row(vm)
+        locator = self._locator_metadata(vm)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        current = self._read_exact_instance(vm, ctx, locator, deadline=deadline)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        verify_instance_network(current, network_url=identity.network_url, subnet_url=identity.subnet_url)
+        endpoint = live_external_ipv4(current, access_config_name=identity.access_config_name)
+        binding = ssh_execution_binding(
+            vm, endpoint, settings, independent_availability=_IndependentJobAvailability.NO_IDLE_STOP
+        )
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        return binding
+
     def observe_provider_locator(
         self,
         vm: VMRow,
@@ -591,6 +634,33 @@ class GCEPlatform(VMPlatform):
         custody: LocalDeliveryCustody,
     ) -> ProviderLocatorObservation:
         """Read one owned GCE incarnation and return its provider namespace."""
+        project_id, zone, instance_name, instance_id = self._locator_metadata(vm)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        self._read_exact_instance(vm, ctx, (project_id, zone, instance_name, instance_id), deadline=deadline)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        return ProviderLocator(f"gcp-gce:{project_id}:{zone}:{instance_id}")
+
+    def observe_execution_power(
+        self, vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody: LocalDeliveryCustody
+    ) -> VMStatus:
+        """Read one owned GCE incarnation's stable power without activating it."""
+        identity = self._locator_metadata(vm)
+        execution_power_remaining(deadline, vm_name=vm.name)
+        current = self._read_exact_instance(vm, ctx, identity, deadline=deadline)
+        execution_power_remaining(deadline, vm_name=vm.name)
+        state = getattr(current, "status", None)
+        if type(state) is not str:
+            return VMStatus.UNKNOWN
+        # GCE TERMINATED is a stopped, existing instance, unlike EC2 terminated.
+        return {
+            "RUNNING": VMStatus.RUNNING,
+            "TERMINATED": VMStatus.STOPPED,
+            "STOPPED": VMStatus.STOPPED,
+        }.get(state, VMStatus.UNKNOWN)
+
+    @staticmethod
+    def _locator_metadata(vm: VMRow) -> tuple[str, str, str, str]:
+        """Validate persisted GCE identity at the provider boundary."""
         metadata = vm.platform_metadata
         project_id = metadata.get("project_id")
         zone = metadata.get("zone")
@@ -612,8 +682,20 @@ class GCEPlatform(VMPlatform):
                 entity_name=vm.name,
                 hint="restore the persisted GCE project, zone, and instance identities before retrying",
             )
-        remaining = provider_locator_remaining(deadline, vm_name=vm.name)
+        return project_id, zone, instance_name, instance_id
+
+    def _read_exact_instance(
+        self, vm: VMRow, ctx: RunContext, identity: tuple[str, str, str, str], *, deadline: Deadline
+    ) -> Any:
+        """Invoke one SDK read of the persisted GCE provider incarnation.
+
+        Request budgets use the remaining deadline at dispatch. Disabled service
+        retries do not prevent SDK authentication resends; callers reject late
+        success against the original deadline and never manually replay reads.
+        """
+        project_id, zone, instance_name, instance_id = identity
         instances = self._clients.client("instances", ctx)
+        remaining = provider_locator_remaining(deadline, vm_name=vm.name)
         current = read_owned_instance(
             instances,
             project_id=project_id,
@@ -628,8 +710,7 @@ class GCEPlatform(VMPlatform):
                 entity_kind="vm",
                 entity_name=vm.name,
             )
-        provider_locator_remaining(deadline, vm_name=vm.name)
-        return ProviderLocator(f"gcp-gce:{project_id}:{zone}:{instance_id}")
+        return current
 
     def native_transport(
         self,

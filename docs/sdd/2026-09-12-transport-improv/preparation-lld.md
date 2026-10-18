@@ -156,10 +156,11 @@ remain independent choices.
 Core prepares a mandatory ordinary identity plan and, when composition explicitly includes
 elevation, an optional elevated plan before constructing a passive execution or file view. Its
 inputs are the carrier, delivery account, bound workload account, elevation-inclusion choice,
-runtime selection, deadline and already-acquired operation owner. These are private composition
-inputs, not public request fields or enforcement of the future permission model. Canonical admin and
-agent targets normally use separate direct-login routes; native provisioning and recovery prepare
-the admin target.
+runtime selection, deadline and already-acquired operation owner. An optional numeric guest
+bootstrap binds an already-prepared root entry and full observed guest for body admission. These are
+private composition inputs, not public request fields or enforcement of the future permission model.
+Separate direct-login routes remain possible. Native composition can instead prepare an explicitly
+selected agent account over the admin delivery route without exposing an elevated agent API.
 
 The composer resolves delivery and workload accounts and must produce the ordinary plan before it
 considers elevation. An unsupported ordinary transition fails without a root lookup. When elevation
@@ -176,9 +177,24 @@ deadline facts separately from whether preparation succeeded.
 The ordinary plan selects direct entry when delivery already uses the bound identity, or exact
 demotion when delivery has UID zero and the workload does not. An included elevated plan selects
 direct entry from root delivery or fixed sudo entry from the bound non-root workload identity.
-Non-root delivery through a different workload identity is refused by this initial composer, never
-silently elevated or treated as direct. Account lookup is not proof that sudo or demotion will
-succeed; the final helper still verifies its actual identity before accessing workload data.
+Non-root delivery through a different non-root workload identity requires the explicitly supplied
+numeric guest bootstrap with a usable fixed sudo root entry. Without it, the transition refuses;
+there is no inferred sudo authority or fallback. That body's plan remains demotion, while the
+bootstrap supplies root entry and drops to the exact body credentials before loading workload code.
+This adds no persisted identity mode. Omitting elevated access still omits its root lookup and
+elevated plan, even when the core bootstrap uses root for admission. Account lookup is not proof
+that sudo or demotion will succeed; the final helper still verifies its actual identity before
+accessing workload data.
+
+Paired native views share one operation owner, file operation, execution operation, carrier, numeric
+guest bootstrap and deadline. Core selects the agent from its recorded row and checks VM membership
+before platform effects; descriptive context scope does not select the agent. Both identity
+preparations remain in aggregate custody. Failed or uncertain agent preparation cannot publish a
+partial pair. Sharing operation state avoids a second cleanup lifecycle; each view still supplies
+its own body plan, and only the admin view includes an elevated plan. Job observation/control in
+this private composition is operation/resource- and VM-bound, not recipient-account authorization.
+Recipient checks on existing job references remain required at permission activation; paired views
+do not supply that isolation during coexistence.
 
 The existing carrier admission adapter is shared by account preparation and file workflows. It owns
 dispatch and termination evidence only; callers own their protocol facts. A lookup without
@@ -188,8 +204,9 @@ activates a route, retries a lookup, launches a workload or constructs a legacy 
 
 The sessions/console migration must separately disposition the existing admin-owned multi-console
 pane that enters an agent account with sudo. It is a real cross-user consumer, not a reason to infer
-agent authority for every native admin target. This remains required migration work; the initial
-three-mode composer does not claim to have migrated it.
+agent authority for every native admin target. The explicit bootstrap-bound preparation path is
+available to that migration, but does not itself migrate the consumer or prove native credential
+transitions.
 
 ### Sudo bootstrap
 
@@ -204,7 +221,10 @@ password prompt or fallback to non-elevated execution.
 database. It therefore selects root's shell for an elevated request and the demoted user's shell for
 provider-root delivery. The resolved absolute path is recorded in the private invocation plan before
 application start. Only the supported sh/bash paths are accepted initially; a configured zsh, fish,
-missing path, or non-executable object is an explicit interpreter refusal, not substitution.
+missing path, or non-executable object is an explicit interpreter refusal, not substitution. Managed
+shell lookup on a numeric-bound operation uses the same root entry, exact body credentials and full
+guest checkpoint as other fixed helpers. A bootstrap-bound agent lookup must not attempt ordinary
+demotion directly from the admin delivery account.
 
 The bootstrap emits its identity-verified frame only after the transition and checks succeed. That
 frame proves what the trusted helper observed, not hostile same-user isolation. Guest root and a
@@ -592,9 +612,12 @@ and a new no-staging proof. Readiness never installs it.
 
 If the manifest or requested capture exceeds the inline bound, normal execution allocates an
 operation-owned 0700 scratch directory under a core-selected root. The caller cannot name or retain
-it. Source, stdin, manifest, and ordinary captured streams are distinct 0600 objects. Sensitive
-objects may exist only for the active operation and are removed on every observed terminal path;
-uncertain cleanup is reported and remains owner debt rather than being declared absent.
+it. Source and stdin remain separate fields of the canonical request. A staged fixed helper may
+store its exact packaged prefix and canonical request together as one prepared input stream in a
+0600 object. Its trusted bootstrap independently verifies the code-prefix length and hash before
+loading modules; request bytes are never code. Ordinary captured streams use separate 0600 objects.
+Sensitive objects may exist only for the active operation and are removed on every observed terminal
+path; uncertain cleanup is reported and remains owner debt rather than being declared absent.
 
 The private transfer substrate is below both public execution and FileAccess. It supports only
 create-owned-scratch, write-at-known-offset, verify length/digest, read-bounded-range, and
@@ -606,21 +629,79 @@ also reuse the substrate without exposing command access. Neither use grants the
 
 The private `_scratch.py` increment implements these destination-side object operations beneath a
 borrowed parent descriptor, including exact duplicate comparison, whole-object verification and
-identity-bound cleanup debt. It does not yet carry requests over a carrier, validate reconstructed
-wire references, deploy helpers or integrate execution preparation. Its fresh-interpreter fixture
-reconstructs scalar facts only in test code; it is not a production serializer. Known acquisition
-facts survive handled creation interruptions, but Python bookkeeping is not signal-atomic and
-filesystem calls have no hard interruption bound. Native macOS, concurrency composition and
+identity-bound cleanup debt. `_scratch_wire.py` carries strict active references, verified
+references and cleanup debt. The private stage family already carries begin, exact-offset chunk,
+ownership reconciliation and cleanup over a carrier. Its file adapter also binds destination
+context; generic helper preparation must use core-fixed parent selection and existing execution
+custody rather than construct a public FileAccess or file-call obligation. Known acquisition facts
+survive handled creation interruptions, but Python bookkeeping is not signal-atomic and filesystem
+calls have no hard interruption bound. Native macOS, complete execution composition and
 whole-request QGA bounds remain separate gates.
 
-Chunks use a conservative 24 KiB raw bound, an exact offset, total expected length, chunk SHA-256,
-and whole-object SHA-256. A lost chunk acknowledgement permits another control request only after
-the owned scratch identity and fixed range make the write demonstrably idempotent. Blind append,
-application relaunch, or fallback to another carrier is forbidden. Final whole-object verification
-precedes `LAUNCHING` or execution of a delivered file-helper asset. This shared delivery mechanism
-does not establish runtime availability: the approved early guest Python prerequisite still needs
-implementation and phase-specific proof. macOS hosts must supply the separately approved
-preinstalled compatible interpreter.
+The current stage wire uses a conservative 12 KiB raw chunk bound, below the scratch primitive's 24
+KiB ceiling, with an exact offset, total expected length, chunk SHA-256 and whole-object SHA-256. A
+lost chunk acknowledgement permits another control request only after the owned scratch identity and
+fixed range make the write demonstrably idempotent. Blind append, application relaunch, or fallback
+to another carrier is forbidden. Final whole-object verification precedes `LAUNCHING` or execution
+of a delivered file-helper asset. This shared delivery mechanism does not establish runtime
+availability: the approved early guest Python prerequisite still needs implementation and
+phase-specific proof. macOS hosts must supply the separately approved preinstalled compatible
+interpreter.
+
+### Late managed-start control
+
+Bulk transfer must precede the initial OPERATION lease sample. Source and stdin can each be 16 MiB;
+thousands of bounded transfer requests cannot consume that 60-second admission window. Do not
+increase the lease, renew it before settled start, lower the input limits or authorize a stale
+sample. The generic staged loader remains opaque to managed leases.
+
+The private managed-start codec uses one version-two format for both inline and staged delivery: an
+immutable canonical body followed by a fixed 512-byte dispatch-control slot, using the existing
+`MAX_LEASE_BYTES`. The slot contains the existing canonical lease JSON padded with ASCII spaces, or
+padded literal `null` for independent lifetime. It needs no extra wrapper, version or base64 layer.
+The lease's closed schema has fixed quoting/escaping within one bound operation; space padding makes
+its total and complete HTTP-input length independent of clock digit count. Lifetime is fixed before
+preparation; the two lifetime modes need not have identical quote counts.
+
+The body contains the ordinary exact request assets without a lease. Reuse body-only validation and
+the existing complete-control lease headroom before any staging effect; a near-limit lease-free
+control alone does not prove that the reconstructed full control fits. Recalculate the outer request
+bound too. A body-only representation never authorizes dispatch. The complete decoder rejects any
+lease already in the body, separates the exact final slot, validates canonical lease or null,
+reconstructs the control asset and uses the existing full request validator. There is no second
+staged grammar or compatibility decoder for the unreleased version-one start wire. This codec is
+implemented; staging orchestration and actual late sampling remain to be connected.
+
+Declare scratch length as packaged prefix plus immutable body plus that fixed slot. Transfer only
+the prefix/body before initial keeper sampling, stopping exactly at the slot offset without writing
+placeholder padding. After sampling, freeze one actual tail and append it in one existing bounded
+range. Hash it exactly once. No previously written range changes; a partial or uncertain append
+retains debt rather than permitting overwrite, resampling or activation replay. The small activation
+then uses the same whole-object loader and original bootstrap. Guest lease checks before and after
+request publication remain required: tail delivery, verification, decoding and service admission
+still consume the post-sample window.
+
+This ordering is unfinished implementation work. Prove stable body/total/envelope sizes, maximum
+control headroom, a real transfer lasting beyond one lease window followed by a fresh sample, wrong
+or missing tails, expired admission, exact launch binding, independent null control and uncertain
+append/activation/cleanup. Tokens precede creation, and owner/debt lifetime remains independent of
+lease validity and helper observation. Neither a timeout nor the loader's remaining allowance proves
+remote closure.
+
+The private stage owner uses a separate token-only cleanup row, registered and marked possible
+before BEGIN. It does not overload the immutable managed-start/run obligation or retain payloads,
+active references or activation digests in that row. Settling an ordinary helper borrow does not
+resolve scratch debt. Chunk progress and active loading remain same-process facts; process-loss
+reconciliation may recover only historical cleanup authority. Missing or invalid acquisition
+receipts remain uncertainty, not absence or permission to recreate a stage.
+
+Production composition must retain the stage before effects and preserve actual helper delivery
+custody for drain. A cleanup-only continuation may use a fresh finite deadline after preparation
+expires, but routing must receive that fresh budget too. Interrupted bookkeeping needs exact local
+reconciliation without another helper effect. These parent and recovery continuations remain open;
+the stage primitive alone does not complete late-lease ordering or native activation.
+
+### Captured output retrieval
 
 Captured stdout and stderr spool separately. Each spool keeps at most `max_bytes + 1`; helper
 readers drain the remainder so a caller retention bound does not send SIGPIPE to the workload. The
@@ -634,6 +715,39 @@ provider maximum. A caller can deliberately choose a larger finite bound. The im
 spool locally to avoid holding the selected bound during transfer, but constructing the final public
 `bytes` allocates at most that caller-selected amount. Workflows expecting unbounded data use
 FileAccess rather than stdout.
+
+#### Closed MANAGED capture ranges
+
+Use the existing managed run store and observation owner for closed captures, not a second scratch
+store or file-access grant. One `READ_OUTPUT` helper retrieves one explicit byte range, capped at
+256 KiB. The helper checks the protected spool's complete length and digest while retaining only the
+requested intersection of bounded read chunks. It emits no successful result until that whole check
+passes. The response includes the original launch and stream-end facts plus the returned offset,
+length and range digest. The collector checks those bindings and retains no more than the requested
+page. Its complete encoded stdout requirement includes framing, facts and the runtime prefix; the
+provider's capacity must be sufficient before dispatch.
+
+`read_output` may return fewer bytes than its positive `max_bytes` bound when a page reaches this
+transport ceiling. Its next cursor is the requested cursor plus the returned byte count;
+retained-prefix EOF is true when that next cursor equals the verified total retained length. An
+exact EOF cursor succeeds with empty data; a cursor beyond the verified prefix remains a validation
+error. Discarded and suppressed streams remain distinct from empty captured streams and retain no
+output payload.
+
+Full result collection reads successive pages under the original deadline. Each page has its own
+ordinary helper borrow and outcome, matched against the exact stream-end fact first observed. Record
+every attempt before reducing its output; stop on failure, unresolved custody or expiry. Keep
+independently established application completion and any verified prefix in a normally returned
+result when later retrieval fails. Escaping controls keep their original propagation and custody
+cause; this does not introduce payload-carrying exceptions. A successful page alone never
+establishes complete output. There is no paging wrapper that claims several dispatches as one,
+renewed deadline, uncertain replay or new persistent read session.
+
+Repeated whole-spool hashing deliberately avoids indexes or caches. At the private 16 MiB retained
+ceiling, full retrieval needs 64 pages and scans 1 GiB per stream; a 1 MiB capture needs four pages
+and scans 4 MiB. Native usable completion within the caller's budget still requires proof. This
+closed-output work does not finish DIRECT spooling, the production capture default, active job
+output, helper staging or readiness's no-staging guarantee.
 
 ## Readiness and minimal substrate
 
@@ -672,6 +786,17 @@ The current Linux bootstrap cannot be relabeled Darwin-compatible: account looku
 metadata, and process APIs differ. The Darwin helper must prove the supported platform mechanics
 without creating a circular bootstrap dependency. Until that proof passes, production platform-host
 scripts and managed jobs remain blocked rather than downgraded.
+
+The private buffered DIRECT inline candidate now has a Darwin implementation. It keeps the common
+manifest, framed evidence and result interpreter, but checks identity at fixed fresh-exec entry and
+uses an independently owned `/dev/fd` source pipe rather than Linux anonymous-memory descriptors.
+The non-blocking writer supports bounded cancellation; uncertain thread or descriptor closure
+retains actual custody, preserves application stream/wait facts and withholds `FINISHED` and
+successful helper exit. Linux saved-ID and source checks remain unchanged. Worker `c9bd8f1dd`
+reports 96 focused and 546 adjacent passes, including packed current/Python 3.11 checks, plus strict
+typing across 1,507 sources. These are local fixtures, not native Darwin evidence. Independent
+combined review, native macOS proof and broader platform-host identity/files/context composition
+remain open; Darwin MANAGED and live foreground calls are still refused.
 
 ### Darwin inline prerequisite candidate
 

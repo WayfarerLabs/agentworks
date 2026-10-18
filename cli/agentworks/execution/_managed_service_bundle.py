@@ -5,13 +5,19 @@ from __future__ import annotations
 from ._helper_bundle import RootGuestDelivery, build_helper_modules, build_root_guest_program
 
 _MODULES = (
+    "_vm_guest_identity_protocol",
+    "_vm_guest_identity_guest",
     "_helper_identity",
+    "_evidence_wire",
+    "_inline_control",
     "_managed_job_wire",
     "_managed_lease_wire",
     "_managed_job_request",
     "_managed_job_store",
     "_managed_lease_store",
     "_managed_lease_controller",
+    "_managed_live_protocol",
+    "_managed_live_io",
     "_managed_service_guest",
 )
 

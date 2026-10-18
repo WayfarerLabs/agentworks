@@ -8,7 +8,7 @@ import time
 from contextlib import suppress
 
 from ._file_effect_gate import FileEffectGateError, hold_file_effect_gate
-from ._file_paths import ConfinedOpenError, open_linux_confined, open_linux_root
+from ._file_paths import ConfinedOpenError, directory_path_flags, open_file_confined, open_file_root
 from ._file_stage_protocol import (
     MAX_REQUEST_BYTES,
     FileStageBeginRequest,
@@ -29,7 +29,7 @@ from ._file_stage_protocol import (
     stage_context,
 )
 from ._file_wire import FileRecordKind, FileRecordWriter
-from ._helper_identity import matches_current_identity
+from ._helper_identity import matches_file_helper_identity
 from ._scratch import (
     ScratchFailureKind,
     ScratchPhase,
@@ -42,6 +42,7 @@ from ._scratch import (
     write_scratch_chunk,
 )
 from ._scratch_receipt import ScratchHistoricalOwnership, ScratchOwnershipUncertainty
+from ._scratch_root import ScratchRootError, open_scratch_root
 from ._vm_guest_identity_guest import _GuestRefusal, _identity
 
 _OperationResult = ScratchReference | ScratchHistoricalOwnership | ScratchOwnershipUncertainty | None
@@ -82,9 +83,18 @@ def _scratch_failure(error: ScratchTransferError) -> FileStageFailureControl:
     )
 
 
-def _open_parent(request: FileStageRequest) -> tuple[int, int | None]:
+def _open_parent(
+    request: FileStageRequest, expires_at: float | None, *, fixed_scratch_root: bool
+) -> tuple[int, int | None]:
+    if fixed_scratch_root:
+        if request.root_path != "/tmp" or "/" in request.relative_path or request.identity.euid != 0:
+            raise _SafeFailure(FileStageFailureControl(FileStageFailureCode.ROOT_REFUSED))
+        try:
+            return open_scratch_root(expires_at=expires_at), None
+        except ScratchRootError:
+            raise _SafeFailure(FileStageFailureControl(FileStageFailureCode.ROOT_REFUSED)) from None
     try:
-        root_fd = open_linux_root(request.root_path)
+        root_fd = open_file_root(request.root_path)
     except ConfinedOpenError:
         raise _SafeFailure(FileStageFailureControl(FileStageFailureCode.ROOT_REFUSED)) from None
     if root_fd is None:
@@ -94,9 +104,9 @@ def _open_parent(request: FileStageRequest) -> tuple[int, int | None]:
         components = request.relative_path.split("/")
         if len(components) > 1:
             parent_path = "/".join(components[:-1])
-            flags = os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+            flags = directory_path_flags()
             try:
-                parent_fd = open_linux_confined(root_fd, parent_path, flags)
+                parent_fd = open_file_confined(root_fd, parent_path, flags)
             except ConfinedOpenError:
                 raise _SafeFailure(FileStageFailureControl(FileStageFailureCode.PARENT_REFUSED)) from None
             if parent_fd is None:
@@ -108,8 +118,10 @@ def _open_parent(request: FileStageRequest) -> tuple[int, int | None]:
         raise
 
 
-def _operate(request: FileStageRequest, expires_at: float | None) -> _OperationResult:
-    root_fd, parent_fd = _open_parent(request)
+def _operate(
+    request: FileStageRequest, expires_at: float | None, *, fixed_scratch_root: bool = False
+) -> _OperationResult:
+    root_fd, parent_fd = _open_parent(request, expires_at, fixed_scratch_root=fixed_scratch_root)
     selected_fd = root_fd if parent_fd is None else parent_fd
     try:
         context = stage_context(request.identity)
@@ -193,7 +205,7 @@ def _deadline_failure(request: FileStageRequest, result: _OperationResult) -> Fi
     return FileStageFailureControl(FileStageFailureCode.SCRATCH, ScratchFailureKind.DEADLINE, phase, debt)
 
 
-def main(nonce: str) -> int:
+def main(nonce: str, *, fixed_scratch_root: bool = False) -> int:
     """Execute one request after nonce, runtime, and exact identity checks."""
     writer = FileRecordWriter(nonce)
     try:
@@ -202,10 +214,12 @@ def main(nonce: str) -> int:
         return _finish_failure(writer, FileStageFailureControl(error.failure))
     if request.nonce != nonce:
         return _finish_failure(writer, FileStageFailureControl(FileStageFailureCode.NONCE_MISMATCH))
-    if sys.platform != "linux":
+    if sys.platform not in {"linux", "darwin"} or (fixed_scratch_root and sys.platform != "linux"):
         return _finish_failure(writer, FileStageFailureControl(FileStageFailureCode.UNSUPPORTED_RUNTIME))
-    if not matches_current_identity(request.identity):
+    if not matches_file_helper_identity(request.identity):
         return _finish_failure(writer, FileStageFailureControl(FileStageFailureCode.IDENTITY_MISMATCH))
+    if fixed_scratch_root and request.effect_gate is not None:
+        return _finish_failure(writer, FileStageFailureControl(FileStageFailureCode.INVALID_REQUEST))
     expires_at = _expires_at(request.remaining_seconds)
     if _expired(expires_at):
         return _finish_failure(writer, _deadline_failure(request, None))
@@ -213,10 +227,10 @@ def main(nonce: str) -> int:
     result: _OperationResult = None
     try:
         if request.effect_gate is None:
-            result = _operate(request, expires_at)
+            result = _operate(request, expires_at, fixed_scratch_root=fixed_scratch_root)
         else:
             with hold_file_effect_gate(request.effect_gate, _identity, expires_at=expires_at):
-                result = _operate(request, expires_at)
+                result = _operate(request, expires_at, fixed_scratch_root=fixed_scratch_root)
     except _SafeFailure as error:
         failure = error.failure
     except (FileEffectGateError, _GuestRefusal):

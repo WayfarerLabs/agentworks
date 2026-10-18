@@ -2,26 +2,38 @@
 
 from __future__ import annotations
 
+import builtins
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
 from unittest.mock import patch
 
 import pytest
 
+from agentworks.execution import _guest_bootstrap as guest_bootstrap
+from agentworks.execution import _workload_shell as observation
 from agentworks.execution import _workload_shell_guest as guest
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
-from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState, RuntimeSelection, RuntimeTargetOS
+from agentworks.execution._runtime_prerequisite import (
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+    RuntimeTargetOS,
+    _NumericGuestBootstrap,
+    build_root_guest_bootstrap_argv,
+    build_runtime_identity_helper_argv,
+)
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 from agentworks.execution._workload_shell import (
     WorkloadShellObservationError,
     WorkloadShellObservationState,
     _BoundedResponseSink,
     observe_workload_shell,
 )
-from agentworks.execution._workload_shell_bundle import FIXED_SOURCE
+from agentworks.execution._workload_shell_bundle import FIXED_SOURCE, ROOT_PROGRAM
 from agentworks.execution._workload_shell_protocol import (
     MAX_WORKLOAD_SHELL_REQUEST_BYTES,
     MAX_WORKLOAD_SHELL_RESPONSE_BYTES,
@@ -50,6 +62,7 @@ from agentworks.execution.carrier import (
 )
 
 NONCE = "a" * 32
+GUEST = VMGuestIdentity("a" * 32, "123e4567-e89b-12d3-a456-426614174000", 1234)
 
 
 def _plan() -> IdentityPlan:
@@ -118,6 +131,123 @@ def test_host_accepts_fixed_supported_shell(shell: str) -> None:
     assert result.observation.state is WorkloadShellObservationState.RESOLVED
     assert result.observation.shell == shell
     assert carrier.calls == 1
+
+
+@pytest.mark.parametrize("bootstrap_bound", [False, True])
+def test_host_selects_exact_numeric_bootstrap_or_existing_identity_path(bootstrap_bound: bool) -> None:
+    plan = IdentityPlan(IdentityExpectation(1001, 1002, (1002, 1003)), IdentityMode.DEMOTE)
+    bootstrap = _NumericGuestBootstrap(IdentityPlan(IdentityExpectation(0, 0, (0,)), IdentityMode.SUDO_ROOT), GUEST)
+    selection = RuntimeSelection(RuntimeTargetOS.LINUX)
+    deadline = Deadline.after(5)
+    carrier = CarrierStub(encode_workload_shell_response(NONCE, WorkloadShellResponse(shell="/bin/sh")))
+    original = carrier.execute
+
+    def record(invocation, *, io, deadline, custody=None):
+        assert io.sensitive and isinstance(io.input, FiniteInput) and io.input.sensitive
+        assert decode_workload_shell_request(io.input.data).identity == plan.expected
+        if bootstrap_bound:
+            assert invocation.argv[:4] == ("/usr/bin/sudo", "-n", "--user=#0", "--")
+        else:
+            assert invocation.argv[0] == "/usr/bin/setpriv"
+        return original(invocation, io=io, deadline=deadline, custody=custody)
+
+    with (
+        patch.object(carrier, "execute", side_effect=record),
+        patch.object(observation, "build_root_guest_bootstrap_argv", wraps=build_root_guest_bootstrap_argv) as numeric,
+        patch.object(
+            observation, "build_runtime_identity_helper_argv", wraps=build_runtime_identity_helper_argv
+        ) as ordinary,
+    ):
+        result = observe_workload_shell(
+            carrier,
+            plan=plan,
+            runtime_selection=selection,
+            deadline=deadline,
+            bootstrap=bootstrap if bootstrap_bound else None,
+        )
+
+    assert result.observation is not None and result.observation.shell == "/bin/sh"
+    if bootstrap_bound:
+        numeric.assert_called_once_with(
+            bootstrap.root_entry,
+            plan.expected,
+            selection=selection,
+            program=ROOT_PROGRAM,
+            nonce=numeric.call_args.kwargs["nonce"],
+            expected_guest=bootstrap.guest,
+        )
+        ordinary.assert_not_called()
+    else:
+        ordinary.assert_called_once_with(
+            plan, selection=selection, fixed_source=FIXED_SOURCE, nonce=ordinary.call_args.kwargs["nonce"]
+        )
+        numeric.assert_not_called()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux numeric guest bootstrap")
+@pytest.mark.parametrize("fault", [None, "guest", "identity"])
+def test_numeric_shell_bundle_fences_guest_and_identity_before_shell_lookup(monkeypatch, fault) -> None:
+    target = IdentityExpectation(1001, 1002, (1002, 1003))
+    request = encode_workload_shell_request(WorkloadShellRequest(NONCE, target))
+    events: list[object] = []
+    responses: list[bytes] = []
+    monkeypatch.setattr(builtins, "_agw_shell_events", events, raising=False)
+    monkeypatch.setattr(builtins, "_agw_shell_responses", responses, raising=False)
+    monkeypatch.setattr(sys, "argv", ["helper", NONCE])
+    monkeypatch.setattr(os, "getresuid", lambda: (2001, 2001, 2001) if fault == "identity" else (1001, 1001, 1001))
+    monkeypatch.setattr(os, "getresgid", lambda: (1002, 1002, 1002))
+    monkeypatch.setattr(os, "getegid", lambda: 1002)
+    monkeypatch.setattr(os, "getgroups", lambda: [1002, 1003])
+    for name in (
+        "agentworks.execution",
+        "agentworks.execution._vm_guest_identity_protocol",
+        "agentworks.execution._vm_guest_identity_guest",
+        "agentworks.execution._helper_identity",
+        "agentworks.execution._workload_shell_protocol",
+        "agentworks.execution._workload_shell_guest",
+    ):
+        monkeypatch.setitem(sys.modules, name, sys.modules.get(name))
+
+    @contextmanager
+    def admit(uid, gid, groups):
+        events.append(("drop", uid, gid, groups))
+        yield lambda: b"held-init"
+
+    monkeypatch.setattr(guest_bootstrap, "_admit", admit)
+    loader = ROOT_PROGRAM.loader_source + (
+        "import builtins\n"
+        "_load_identity=_agw_load_identity\n"
+        "def _agw_load_identity():\n"
+        " _load_identity()\n"
+        " sys.modules[_agw_guest_module]._identity=lambda:types.SimpleNamespace("
+        f"instance_marker={GUEST.instance_marker!r},"
+        f"boot_id={GUEST.boot_id!r},init_start_ticks={GUEST.init_start_ticks + (fault == 'guest')!r})\n"
+        "_load_remaining=_agw_load_remaining\n"
+        "def _agw_load_remaining():\n"
+        " builtins._agw_shell_events.append('remaining')\n"
+        " _load_remaining()\n"
+        " m=sys.modules['agentworks.execution._workload_shell_guest']\n"
+        f" m._read_request=lambda:{request!r}\n"
+        " m._write=builtins._agw_shell_responses.append\n"
+        " def shell():\n"
+        "  builtins._agw_shell_events.append('shell')\n"
+        "  return m.WorkloadShellResponse(shell='/bin/sh')\n"
+        " m._shell=shell\n"
+    )
+    expected = (GUEST.instance_marker, GUEST.boot_id, GUEST.init_start_ticks)
+
+    status = guest_bootstrap.main(target.euid, target.egid, target.groups, loader, expected)
+
+    assert events[0] == ("drop", target.euid, target.egid, target.groups)
+    if fault == "guest":
+        assert status == 125 and events == [events[0]] and responses == []
+    else:
+        assert status == 0
+        response = decode_workload_shell_response(responses[0], NONCE)
+        if fault == "identity":
+            assert response.failure is WorkloadShellFailure.IDENTITY and events == [events[0], "remaining"]
+        else:
+            assert response.shell == "/bin/sh" and events == [events[0], "remaining", "shell"]
 
 
 def test_guest_refuses_unsupported_and_missing_shell() -> None:

@@ -1010,6 +1010,18 @@ associated pending acceptance gates are superseded by this ruling.
       and shared platform-host resources without splitting ownership by transport route or identity.
       Retire superseded local harness coordination during consumer migration, not through a second
       competing new-stack lock.
+- [x] Remove the unused standalone host-bound stop adapter, its dedicated dispatch constants and
+      codec wrappers. Keep the outcome next to the actual tracked stop consumer and retain useful
+      behavioral coverage through OPERATION and RESOURCE controls. Preserve the fixed guest stop
+      protocol, accepted-intent versus termination distinction, historical records and operator
+      data; this deletion does not settle earlier obligations or complete deadline recovery.
+
+      Private completion at `d23cd792`: project, complexity and generic reviews cleared the bounded unit
+      after correcting helper-settlement wording and removing unused outcome fields. The implementer
+      passed 1,620 related tests; lead and independent checks passed actual stop regressions and
+      scoped Python gates. Lead canonical file-quality checks passed. Native and whole-PR acceptance
+      remain open.
+
 - [ ] Establish one platform-neutral VM availability boundary around every authorized new-stack VM
       operation that can perform guest work, entered after core admits the operation but before
       activation and retained through route, body and teardown. Prove no-op platforms and stateful
@@ -1025,6 +1037,527 @@ associated pending acceptance gates are superseded by this ruling.
       unknown provider states explicitly rather than assuming they are stopped. Implement this
       boundary with its concrete activation producer and selected platform hold; a freely
       constructible active-now token or test-only no-op adapter does not prove availability.
+- [x] Extract WSL2 and Proxmox owned native access behind one passive platform factory, retaining
+      actual preparation/activation/hold progress before effects. Keep one core owner and aggregate
+      close, passive native bindings, optional bound route checks at all existing managed
+      checkpoints and the shared guest-preparation helper. Preserve durable WSL READY matching,
+      refusal to release a hold with unrelated debt, exact native/guest release evidence, single
+      Proxmox POST/UPID interpretation, lost replies and HA uncertainty. Do not add dummy holds,
+      duplicate guest-identity fields, a generic task registry or whole-owner closure by adapters.
+      Prove fresh import behavior and unchanged legacy hooks; cloud/Lima access and complete
+      RunContext/native acceptance remain separate requirements.
+- [x] Implement and privately review the provider-owned AWS start admission/acknowledgment producer
+      described in the
+      [lifecycle LLD](execution-lifecycle-lld.md#aws-activation-admission-and-acknowledgment). Prove
+      exact VM ownership and locator matching, durable admission before one SDK call, bounded
+      canonical payloads, late acknowledgment retention, interrupted registration/publication and
+      fenced bookkeeping-only reconciliation. Include actual locked-SDK dispatch tests with retries
+      disabled, original-deadline checks and owned client closure. No waiter, replay, legacy client
+      reuse or power-based settlement. Keep this a private developer increment inside #833, not a
+      new partial PR or a claim that stopped AWS access is usable.
+
+The admission producer at `b86c48803` clears all three independent private lanes and the lead's
+460-case related selection without skips. Scoped Ruff, formatting and typing and full file quality
+pass. Actual locked-SDK tests cover one-send SDK dispatch, not server acceptance or request drain.
+Review corrected stored-client interruption cleanup and removed an unreachable encoder bound.
+Successful startup settlement, complete AWS access, native proof and whole-PR acceptance remain open
+below.
+
+The 2026-10-10 response selects the lifecycle LLD's known-acknowledgment/exact-running completion
+rule for full AWS access. It is observational goal completion, not request-specific termination or
+all-backend quiescence. Missing acknowledgment stays unresolved. Implementation, interrupted exact
+resolution, separate cleanup/guest admission and native evidence remain unfinished.
+
+- [x] Correct AWS activation's uncertain-client-close custody before owned access integration. The
+      private Azure review found that `EC2Activation.start()` suppresses an ordinary close exception
+      while retaining the client only in a local variable. Retain the actual original until closure
+      is confirmed, including interrupted cleanup, and expose incomplete local cleanup to aggregate
+      release. Preserve the acknowledged result, original control precedence, one-shot admission and
+      unresolved remote possible effect. Add actual-SDK closure fault tests; this correction does
+      not alter the earlier completed producer record.
+- [ ] Implement the concrete AWS access's original EC2 read-client slot and shared power/locator/
+      endpoint read body under the
+      [provider read custody design](execution-lifecycle-lld.md#aws-provider-read-custody). Retain
+      the returned original before dispatch, preserve deadline/identity/one-attempt behavior and
+      late refusal, block new reads or active preparation while occupied, and clear only after
+      normal public close. Prove ordinary/control/cleanup failures, exact callback/deadline
+      forwarding, same-original cleanup without request replay and closed-access refusal. Include
+      locked actual-SDK scripted-service evidence and a delayed-retention negative control. This
+      completes only direct-client public-close custody, not SDK-wide socket/credential drain,
+      activation, route settlement, full AWS access or native acceptance.
+- [ ] Characterize the configured explicit AWS role credential path and implement its selected
+      concrete resource responsibility before full access exposure. Preserve configured mode and no
+      ambient fallback; do not reuse legacy client custody or treat static-credential tests as proof
+      of ambient/deferred providers. Record SDK-internal handoff and credential work's hard-deadline
+      limits honestly. Do not add a universal credential-client registry or hard-drain guarantee.
+      This item remains separate from direct EC2 read-client retirement.
+
+The private read-client staging increment at `8c36a3117` clears all three independent source-review
+lanes. Its author passed 100 local cases: 98 permanent application/scripted-SDK cases and two
+private delayed-retention counterfactual variants. That run predates one test-only annotation; final
+scoped lint/format and full strict typing across 1,372 sources pass on the composed pin, but no
+final-pin 100-case replay or native acceptance is claimed. Permanent documentation identifies the
+unexposed object's limits. The read-client item remains unchecked pending concrete access and
+preparation integration; this increment supplies no factory, activation settlement or RunContext.
+
+The subsequent source-only credential audit selects the
+[configured role custody design](execution-lifecycle-lld.md#configured-aws-role-credential-custody):
+one retained original STS slot, supported creator/refresh callbacks and concrete pre-send checks
+preserving configured deferred-refresh semantics. All three independent private source reviews found
+no production custody defect. The project review identified inherited AWS settings in the offline
+fixture; the complexity review identified a forwarding builder, redundant control handling and
+duplicate helper terminal state. The corrected implementation at `5d1aefdc8` passes 147 local
+application/actual-SDK cases, including inherited-setting, guard and delayed-retention controls.
+That run predates only a test's direct import of the same helper class to satisfy strict export
+checking; no final-pin test replay is claimed. Final scoped lint/format and full strict typing
+across 1,375 sources pass. All three independent correction-review lanes are clear. Keep both items
+open; no ambient-provider cleanup guarantee, credential hard deadline, native proof or whole-access
+completion follows from this increment.
+
+The next private activation unit passes the same retained configured-role helper into
+`EC2Activation`, registers its post-signing guard before the possible-effect boundary, and adds
+finite-deadline original-only EC2 cleanup with terminal startup admission. This cleanup neither
+settles the start obligation nor retires the separate STS original. Author `863f49ca` passes all 84
+selected actual-SDK cases, full strict typing over 1,388 sources, and two-file lint/format. The new
+test initially expected public access error translation at the private producer boundary; the
+corrected oracle checks the SDK rejection code, zero EC2 sends, retired clients and retained
+possible effect. Test helper annotations address the subsequent strict-typing failures without
+changing production behavior or assertions. Failed setup, interrupted and failed verification
+evidence remains preserved. All three independent paired source-review lanes clear `dfa22fca`; these
+earlier-base measurements do not establish whole-composition, native or complete AWS access
+acceptance.
+
+The subsequent private owned-access implementation composes the passive factory, retained read/
+activation/configured-role clients, exact endpoint binding, shared guest preparation and temporary
+SSH routes under the same owner. Source inspection corrected single-sample asynchronous startup and
+cleanup tied to an expired original deadline: preparation now foreground-observes supported
+transitions, while fresh-budget cleanup may settle the existing acknowledged start without reopening
+admission. Missing acknowledgments remain unresolved. Author `f11ae51b` passes 316 selected offline
+actual-SDK cases, full strict typing across 1,391 sources and five-file Ruff lint/format. These are
+author-base measurements, not whole-composition or native acceptance. Independent paired source
+reviews were pending at that checkpoint.
+
+The initial verification launcher reused its new pytest temporary directory, replacing the first two
+failed runs' generated fixture databases; their logs and final-run fixtures remain. No
+pre-task/operator database was selected. This custody deviation is not recoverable from the green
+result. Both later correction runs use distinct fresh temporary directories and retain their
+fixtures and logs. The current prefix discovery helper still had separate timeout, body-size and
+response-lifetime limits at that pin.
+
+All three subsequent source reviews identify required corrections rather than clearing that unit:
+never-admitted activation cleanup, final-close retry after settled effects, fresh running state,
+typed active SDK errors and inherited offline configuration. The corrected author `7079af98` passes
+351 selected cases and full strict typing across 1,391 sources; its final fixture-local rename is
+runtime-neutral and follows the test run. Main separately integrates a passive owned prefix detector
+with 56 focused cases and scoped strict typing. It retains the HTTP original, bounds discovery and
+blocks fallback on expiry or uncertain closure. Joint integration tests and all three independent
+paired re-reviews remain required before claiming this complete private unit accepted.
+
+Joint pin `e5a8a42f` passes all 743 selected cases; full typing identifies one test-only
+`BytesIO.read` annotation mismatch, not a production failure. Source re-review finds one additional
+admission gap: the final route callback could return after an uncertain EC2 client close. Author
+`4d1acde1` adds post-close custody/deadline checks and six actual-SDK cases, including the real
+execution consumer's helper-entry seam and a positive entry control; all 358 selected cases and
+scoped strict typing pass. The proposed additional final-STS-close scenario is refuted by the
+existing refresh/send ordering, so no fabricated case is added. The annotation is corrected in the
+same unit. The unused prefix result copy and download success flags are also removed while keeping
+actual outcome/capture/cleanup facts. Final combined validation and paired re-review remain open.
+
+The complete private unit is locally accepted at `f30e519c`: all three independent source re-reviews
+are clear, all 781 joint selected cases pass without skips, and full strict typing passes over 1,393
+sources. Sixteen changed Python files pass lint/format without caches; paired documentation quality
+and whitespace checks pass. The two main test runs retain 2,896 verified regular fixture files,
+including their databases, in workspace evidence; recorded permissions/ownership and file hashes
+match. Separate bind mounts required copying during archival, so neither inode continuity nor atomic
+relocation is claimed. No fixture data was discarded; only the empty temporary parent was removed.
+This accepts the private owned AWS/prefix and ordinary-bookkeeping source unit, not native cloud/SSH
+behavior, complete platform coverage, independent-job availability, directory transfer, public
+RunContext or whole-PR acceptance.
+
+- [ ] Complete owned AWS access with a reviewed successful-start settlement rule, fresh power and
+      exact guest preparation, endpoint trust and selected firewall-route lifetime. Obtain native
+      startup/uncertainty/cleanup evidence before admission through RunContext. Missing start
+      acknowledgment remains unknown; ordinary power observations cannot invent a receipt. Keep
+      whole-workflow release and independent-job availability separate from submission
+      acknowledgment.
+- [x] Implement and privately review the provider-owned Azure start admission/acknowledgment
+      producer in the
+      [lifecycle LLD](execution-lifecycle-lld.md#azure-activation-admission-and-acknowledgment).
+      Prove exact VM ownership, one admitted streamed POST, no middleware replay, registration,
+      redirect, response-body read or polling, bounded matching acknowledgment, late retention,
+      interrupted ledger replies and actual response/client cleanup. Keep the offline middleware
+      audit distinct from proof of this new submission path. This is a private #833 work unit;
+      successful-start settlement, full Azure access, native proof and RunContext admission remain
+      open, including after the producer's private review.
+
+The composed admission corrections at `80de3c47` clear all three independent private lanes. AWS
+retains the actual original client through uncertain closure; Azure retains actual response and
+client originals and preserves primary control plus lock release through the tested cleanup-entry
+boundary. Lead guarded actual-SDK selections passed 138 AWS cases (one unchanged subprocess proof
+deselected, no skips) and 167 Azure cases (no deselection or skips); full strict typing passed 1,364
+sources. The final Azure complexity selection passed 36 cases with 47 explicitly deselected and no
+failures or skips. Final project and complementary generic reviews were source-only, not additional
+runtime verification. Earlier failed diagnostic and regression runs remain preserved; these final
+results do not erase them. SDK-internal acquisition, arbitrary repeated signals, real credential
+delivery/drain, startup settlement, complete cloud access and whole-PR acceptance remain unproved.
+
+- [x] Implement and privately review the provider-owned GCP start admission/acknowledgment producer
+      in the
+      [lifecycle LLD](execution-lifecycle-lld.md#gcp-activation-admission-and-acknowledgment). Prove
+      owner/recorded locator matching, persisted UUID before one body-free POST, public pre-body
+      response refusal, identity-only bounded raw reads, matching minimal Operation ACK, late
+      retention, ledger lost replies/fencing, actual session/response/wrapper custody and
+      original-control cleanup-entry/lock regressions against the locked public SDK pipeline. Keep
+      this a private #833 increment, not complete stopped access or public RunContext delivery.
+
+The GCP producer and its correction at `b359c7f4` clear all three independent private lanes. Lead
+verification passed all 150 cases with warnings as errors, no skipped or deselected cases, full
+strict typing over 1,368 sources, and scoped Python/permanent-documentation gates. The complexity
+lane independently passed 150 cases and proved that a wrong `/start` suffix now fails the three
+selected transport-boundary cases; exact restoration passed those same cases, with 147 explicitly
+deselected in each control. Project and complementary generic re-reviews were source-only. Strict
+JSON refusal and actual fixed-length HTTP framing now cover the reported parser and
+nonempty-final-read gaps. Earlier failed diagnostics, warnings and intentional controls remain
+preserved. These results prove neither native receipt compatibility, sockets/credentials, request
+drain nor complete cloud access; the next item remains unfinished.
+
+- [ ] Reconcile the GCP producer's real-credential authentication boundary before full access.
+      Existing scripted producer evidence does not exercise real service-account background request
+      copies used by the locked SDK's authentication middleware. Preserve public SDK middleware,
+      selected security behavior, scopes, quota and auth mode. Token refresh/apply alone is not
+      equivalent: ordinary default-universe service accounts enable regional access boundary lookup
+      independently of Agentworks configuration. Investigate the smallest supported transport-copy
+      custody seam and account for concurrent SDK work and cleanup honestly. Keep ADC acquisition
+      and SDK retry/process limits explicit; no private blocking toggle, forced copy failure,
+      generic credential framework or silently weakened security policy. Add real-class scripted
+      proof without rewriting the completed producer evidence above.
+
+The private `GCEOwnedRead` staging implementation supplies passive exact-instance power/locator
+reads and selected owned credentials. Its fixed six-field Compute projection avoids downloading
+unrelated startup-script metadata under the raw-body bound. Credential redirect responses retain
+their actual originals until SDK consumption returns; public redirect behavior is preserved rather
+than restricted. Initial private review found that a successfully refreshed short-lived token can
+remain usable while the SDK marks it `STALE`; the corrected reader preserves that public behavior
+and still refuses `INVALID`. Author-checkout verification now passes all 99 application/actual-SDK
+cases without skips or deselection, including a real service-account short-lifetime regression,
+scoped lint/format and full strict typing across 1,379 sources. Earlier guard, style,
+test-annotation and initial private-review findings remain recorded. These results cover the final
+four source files on the author's earlier base, not whole-composition typing or native acceptance.
+All three independent private source-review lanes clear the paired correction at `0cb8bcdb`; the
+initial token-state finding and same-unit redundant interior checks are resolved. That staged
+refresh/apply boundary is superseded by the shared public-middleware implementation below; the
+earlier proof did not reconcile the start producer's authentication.
+
+The replacement private implementation shares selected credentials and public `before_request`
+between exact-instance GETs and the single start POST. Its concrete Request copy seam retains
+attributable originals and the original finite deadline, preserves public middleware and Session
+security behavior, and separates borrower cleanup from access-owner retirement. It neither disables
+the default regional access boundary nor substitutes a different principal. The source owner's
+earlier-base verification passes 112 reader/copy cases and all 153 producer cases, including the six
+historical strict-JSON/framed-late-acknowledgment cases and meaningful cleanup-entry interruption
+coverage. The initial producer run failed three cases and two teardown checks; the correction
+preserves the assertions, original control and physical producer-lock release, and uses the actual
+public Session class for response-hook fault injection. Failed diagnostics and database fixtures
+remain preserved. Full strict typing initially found 19 test-annotation errors in four files; the
+narrow fixture refinements preserve production code and existing assertions. Final verification
+passes all 265 cases without skips or deselection, full strict typing across 1,380 sources, and
+nine-file lint/format checks on the author's earlier base. Three independent paired source-review
+lanes found two material cleanup gaps: terminal admission could remain open after retirement-helper
+entry was interrupted, and interrupted worker observation could corrupt the same Thread's later
+completion evidence. The correction makes admission terminal before fallible cleanup and retains
+copies whose completion witness became unconfirmed, including observations inside public middleware.
+Ordinary timeout and original-close retries remain distinct. Corrected verification passes all 275
+cases (153 producer and 122 reader/copy, including ten new regressions), full strict typing over
+1,380 sources and scoped lint/format on the author's earlier base. One producer run timed out after
+151 cases in the private runner's repeated import-path resolution, without a final completion
+certificate. Resolving each path once per unchanged checkpoint removes redundant work; fresh
+complete runs pass in 88.63 and 68.81 seconds under the unchanged 120-second limit. The failed run
+and all data remain preserved; production assertions and deadlines are unchanged. All three
+corrected paired source re-reviews found two remaining ordering gaps: an SDK worker could suffer an
+interrupted observation before its copied Request first entered, and successful late service
+retirement could exhaust reader-close admission before the auth owner became terminal. The current
+partial source checkpoint bars all copies on middleware escape and shares terminal admission before
+reader service retirement, preserving one terminal fact and the existing cleanup order. It adds four
+focused regression cases, for 126 reader/copy and 153 producer cases enumerated in source, without
+removing earlier cases. All three independent paired source re-reviews clear that correction at
+`3a478785`. Fresh verification on author `985085e6` passes all 279 cases without skips or
+deselection: 153 producer cases in 106.41 seconds and 126 reader/copy cases in 89.98 seconds. Full
+strict typing passes 1,380 sources, and nine-file lint and formatting checks pass. The nine verified
+source files match the composed checkpoint byte for byte; whole-composition typing and tests are not
+established by the earlier-base runs. An earlier producer verification stopped at the private
+allocation guard after 146 starts, without a completion certificate or a reported assertion failure.
+Independent source review proves that subtracting two overlapping allocation walks can misclassify
+test-directory growth as outside growth, but that run's failing numeric samples and actual cause
+remain unknown. The corrected accounting uses one partitioned traversal. After the operator restored
+disk capacity, a reader run was interrupted with the worker session after 96 starts; the fresh
+complete run above replaces neither its evidence nor its starts. All failed and interrupted evidence
+remains preserved. This is not native acceptance, SDK-wide drain or completed cloud access: startup
+settlement, endpoints, routes, guest preparation and RunContext admission remain unfinished. Keep
+both GCP items unchecked until their respective acceptance gates are met.
+
+- [x] Implement and privately review the retained GCP
+      [start completion observer](execution-lifecycle-lld.md#gcp-start-completion-observation).
+      Preserve canonical version-1 payload compatibility; prove one fixed matching operation GET per
+      explicit observation, strict bounded status/error selection, terminal evidence retention
+      before late refusal, original cleanup and control priority, no-ACK/expired-record uncertainty,
+      lost publication/resolution replies and no-provider-I/O settlement. Do not mark complete GCP
+      access, startup readiness, recovery or native acceptance from this increment.
+
+The paired private checkpoint at `a730e5d3` clears all three independent source-review lanes.
+Project review found an interruption between acknowledgment retention and a separate pending-state
+write; pending knowledge now derives directly from the retained acknowledgment, with two recovery
+regressions. The complexity pass removed a redundant post-GET ledger check while preserving pre-GET
+fencing/acknowledgment repair and settlement fencing. Developer verification passes all 629 GCP
+cases in bounded module batches. Lead composition verification passes 706 GCP, context and native
+operation cases without skips or deselection, full strict typing over 1,412 sources and scoped
+Python style checks. The source reviews executed no runtime. Earlier failed diagnostics and fixtures
+remain preserved. This proves neither native API compatibility nor completed GCP access or
+RunContext delivery; the next item and the complete additive-surface gate remain open.
+
+- [x] Implement and privately review GCP full-instance observations, nonce firewall-route ownership
+      and aggregate access preparation under the existing VM owner. Keep small power reads separate;
+      retain all fresh tags/accounts, valid provider-selected subnets and actual IPv4 endpoint
+      facts. Preserve one-shot start/insert/delete, exact request receipts, unknown-outcome
+      retention, fenced publication/resolution and dependent cleanup before final shared-auth
+      retirement. The corrected source `c13deee5a` clears all three private source-review lanes;
+      lead verification passes 1,028 focused cases without skips and strict typing over 1,425 files.
+      Actual SDK/SQLite unified cases use an explicit guest-preparation stub, not native GCP or
+      guest-delivery proof. Project review corrected a retryable credential-cleanup/route-settlement
+      cycle; the complexity pass removed unused absence publication and repeated interior payload
+      validation. Native compatibility, operation retention/recovery, complete availability and
+      production RunContext delivery remain required by the following item and the complete
+      additive-surface gate.
+- [ ] Complete owned GCP access under the [native access LLD](gcp-native-access-lld.md) with its
+      observational identity guarantee: a fresh exact provider observation refuses known
+      stale-target admission, matching receipt and subsequent fresh identity/trust/preparation admit
+      guest work, and changed or unconfirmed identity refuses it while retaining uncertainty. Do not
+      adopt a replacement or claim an atomic start selector; external same-name replacement may
+      receive the start before detection. Prove supported native receipt compatibility, startup
+      settlement and operation retention/recovery, exact guest preparation, fresh endpoint trust,
+      selected firewall-route lifetime and aggregate release. A preceding read, database lock, UUID
+      or post-response targetId cannot prevent that external race. Preserve required native
+      capabilities and honest operational failures.
+- [ ] Implement private owned Azure credential and exact-incarnation reads following the
+      [owned credential/incarnation design](execution-lifecycle-lld.md#owned-azure-credentials-and-incarnation).
+      Retain credentials before token work, preserve selected ambient fallback only after positive
+      retirement of its default original, and close read dependents before the credential. Prove the
+      real SDK closure/fallback boundary and path plus recorded unique VM-ID matching. Existing-VM
+      explicit adoption awaits operator disposition; no silent backfill or replacement adoption.
+      Keep old activation cleanup references intact and full access/native gates open.
+
+The private `AzureOwnedReadAccess` stages passive recorded path/unique-ID matching, power/locator
+and linked public-endpoint reads with original compute/network and credential custody. A local
+adapter detaches SDK authentication/provider failure diagnostics while preserving original
+core/control errors. Author-checkout verification passes all 92 application/actual-SDK cases without
+skips or deselection and scoped lint/format. Isolated-runner bootstrap and evidence-size failures
+remain preserved; the successful run uses a synthetic SDK user-agent host label, not native host
+metadata proof. Final annotation-only corrections pass the same 92 cases and full strict typing
+across 1,382 sources; no typing setting or assertion is weakened. Three independent private source
+reviews of the paired increment identify one simplification: retain a single read client, since
+compute must positively close before network construction. They also identify a test-isolation
+question about the SDK's host user-agent probe. Correction `fc360d59` retains one sequential client,
+preserves lock/cleanup proof through a real failed-close observation and uses a fixture-local
+deterministic public host label. It passes all 92 cases and full strict typing over 1,382 sources,
+plus scoped lint/format. All three independent correction source-review lanes clear paired pin
+`274986ad`; none replays the recorded gates or claims native/full access. These results cover eight
+source/test files on the author's earlier base, not whole-composition or native acceptance. No
+historical identity adoption, new-VM recording or complete access is implied; keep this item open.
+
+The earlier private path-only Azure producer is superseded by one exact-incarnation producer; its
+completed implementation record remains historical, while its persisted codec and acknowledgment
+helpers remain supported.
+
+- [x] Implement and privately review the
+      [exact-incarnation Azure start boundary](execution-lifecycle-lld.md#exact-incarnation-azure-start-completion).
+      Preserve path-only version-one obligations, bind new version-two admission to recorded UUID
+      and path, and distinguish documented synchronous success from exact monitor completion. Prove
+      bounded one-observation GETs, no mutation replay, terminal-before-cleanup retention and exact
+      bookkeeping-only settlement through lost replies and uncertain original closure. Record newly
+      created VM identity inside the rollback-covered provisioning interval, without silently
+      adopting historical records. This does not close complete access or native acceptance.
+
+Private paired pin `d7977cf6` clears all three independent source re-reviews. The combined selection
+passes all 747 cases without skips; full strict typing passes over 1,397 sources and all 20 changed
+Python files pass lint and format checks. The one exact-incarnation producer retains the old
+persisted codec and all 167 old-module regression cases, migrated to the appropriate boundary.
+Native provider behavior, full access and RunContext acceptance remain open.
+
+- [x] Implement and privately review the owned Azure native route and passive access factory under
+      the existing VM operation owner. Compose recorded incarnation reads, one start request,
+      source-prefix discovery, exclusive linked NIC/NSG selection, nonce-only rule lifetime and
+      partial guest-preparation custody. Prove unified offline public-SDK/SQLite composition,
+      credential-last closure and one fresh cleanup attempt after a known terminal deletion failure,
+      without replaying an unknown request. This records the private implementation boundary, not
+      native guest delivery, historical identity adoption or public RunContext acceptance.
+
+Paired pin `fccaa1dd` clears all three independent source re-reviews, including the cleanup-retry
+correction and removal of a redundant state flag and running-VM read. The combined Azure/native-core
+selection passes all 996 cases without skips; full strict typing passes over 1,409 sources and all
+19 changed Python files pass lint and format checks. Four unified tests compose the actual access,
+reader, start and route implementations with public SDK policies/model parsing and fresh SQLite;
+HTTP transports, credentials and source responses are synthetic, and guest preparation is explicitly
+stubbed. The tests prove dependent retirement before credential closure while the outer owner is
+still held, then no provider/token/ledger work on settled retries after its explicit release. Native
+provider/guest behavior, physical drain, full platform recovery and complete RunContext admission
+remain unproved. The following full-access acceptance item stays open.
+
+- [ ] Complete owned Azure access with reviewed request-specific startup settlement, fresh endpoint
+      trust,
+      [selected route lifetime and access composition](execution-lifecycle-lld.md#owned-azure-native-route-and-access-composition),
+      exact guest preparation and aggregate release. Prove actual locked-network-SDK one-shot
+      transmission, exclusive linked NIC/NSG selection, case-varied observed identities without
+      locator rewriting, terminal failed-create leftover cleanup, uncertain mutation retention,
+      unrelated-rule preservation and credential-last retirement. Account explicitly for provider
+      incarnation: compose newly recorded VM UUID/path evidence with the owned reader and complete
+      native access. Historical records still lack unique-ID evidence; their acquisition/adoption
+      needs explicit disposition, not silent backfill. The existing string metadata map needs no
+      schema migration but cannot supply historical identity proof. A cloned guest marker does not
+      turn the ARM path into an immutable incarnation. Keep the acknowledged producer separate from
+      these unfinished integration and native-proof gates.
+- [ ] Establish explicit custody for provider and linked-endpoint read clients in the owned cloud
+      composition, including preliminary power reads before activation. Existing AWS/Azure reads
+      suppress ordinary close errors without retaining uncertain originals; GCP uses cached
+      generated clients without per-operation retirement accounting. Their completed passive-read
+      and binding tests prove request/observation behavior, not aggregate local cleanup. Preserve
+      actual originals through uncertain closure and refuse aggregate release without positive
+      retirement; choose the small ownership seam before public RunContext wiring, not a generic
+      provider-handle registry or an expansion of native process custody into unrelated SDK state.
+- [x] Implement and privately review passive exact-instance power observations for AWS, Azure and
+      GCP using their provider-owned locator reads. Cover stable/transitional/malformed states,
+      identity/account mismatch, setup expiry, actual SDK request serialization and successful
+      late-result refusal. SDK timeouts are best-effort: AWS construction can consume configured
+      timeout budget and Azure/GCP authentication can resend despite disabled service retries. Do
+      not introduce private SDK timeout mutation or a transport framework to imply hard preemption.
+      Keep activation, selected execution routes and whole-workflow native evidence open; these
+      observations alone cannot supply usable cloud RunContext targets.
+- [x] Compose independent native SSH bindings for AWS, Azure and GCP from exact provider reads and
+      explicit new operator SSH settings. Use current valid public IPv4 endpoints and endpoint-keyed
+      admitted trust, preserving provider identity/network checks and the original deadline through
+      Azure's additional linked NIC/public-IP reads. Prove no retired execution imports or
+      binding-time process/file admission, no enrollment or ambient aliases, explicit root-to-named
+      Linux probing and fresh managed delivery. Keep activation, firewall routes, independent-job
+      availability, full RunContext and native acceptance separate and unfinished.
+
+- [x] Remove automatic provider registration from the new Azure compute and network read clients,
+      without changing the legacy clients. Use an explicit public SDK pipeline policy boundary,
+      preserving credential selection, TLS verification, exact identities and deadline-derived
+      request budgets. Prove against both real SDK clients that a registration-required GET cannot
+      issue POST, start polling or resend. Cover authentication, redirects and ordinary decoding;
+      successful local response fixtures alone do not establish read-only delivery.
+
+The 2026-10-09 SDK source audit finds that both Azure SDK default pipelines include automatic
+resource-provider registration: a registration-required GET can trigger POST, polling and replay.
+The audited new reads used those clients. The two preceding completion boxes had not merged and were
+corrected to unfinished pending the missing passive-read proof. The new reads now own separate
+clients with explicit disabled-retry and ARM-authentication policies, without registration or
+redirect following. Three independent private lanes at `696a2095d` each observe 321 adjacent passes,
+with nine additional project probes and 13 generic probes. Complexity review proves that removing
+the unused content-decoding policy preserves all 321 passes; that deletion is incorporated. These
+results establish the bounded correction, not live native acceptance. The earlier reviews and test
+counts below remain accurate, but did not cover this SDK behavior. No live provider mutation was
+performed during the audit.
+
+- [x] Privately review the common core power gate admitting `RUNNING`, `STOPPED` and `DEALLOCATED`.
+      Both inactive states respect operator-stopped intent; an already-running VM remains usable.
+      Pass the unchanged observation, original deadline, owner and custody to the retained access.
+      Prove no factory, preparation or wake on denial, and reject unknown or non-status
+      observations. This common gate does not implement cloud activation or advertise complete
+      availability.
+
+The bounded gate implementation at `725c6061d` changes only the two shared admission conditions. A
+generic 16-case matrix verifies intent, power, unchanged deadline, owner/custody continuity and
+cleanup. Its adjacent native-operation and target-preparation selection passes 160 cases without
+skips, with scoped lint, formatting and typing passing. The initial run found an obsolete Proxmox
+test expecting the old common refusal of `DEALLOCATED` without stop intent; only that parameter row
+is removed. Proxmox's native observer does not produce that state and no platform adapter changes.
+This is not provider activation or native acceptance.
+
+The owned preliminary-observation correction below supersedes only the preceding historical
+no-factory-on-denial ordering proof. Retaining an inert factory before the read establishes custody;
+denial still allows no preparation, activation, hold, route or guest work.
+
+- [x] Retain the passive owned native access before its initial power observation. Add required
+      `observe_power(deadline)` to the private access protocol and both actual WSL2/Proxmox
+      adapters, preserving the original deadline, owner and native custody. Keep the common
+      supported-state and operator-stopped-intent gate before preparation. Prove same-access cleanup
+      after ordinary and control-exception read failures, settled and uncertain retirement, cleanup
+      refusal/retry, late observations and all state/intent combinations without active work on
+      denial. Update permanent contract collateral alongside code. This correction does not
+      implement cloud SDK read-client slots, provider incarnation/adoption, activation settlement or
+      native acceptance.
+
+The bounded ownership correction at `875e434b3` clears all three independent private lanes. Project
+review is source-only; generic review passes 78 focused cases in its assigned worktree. Complexity
+review passes 31 baseline cases, observes nine expected missing-cleanup failures after moving access
+retention past the read, then passes those nine after restoration. Lead verification passes 78 cases
+and full strict typing across 1,369 sources, with scoped lint, formatting and documentation gates.
+An earlier generic run misplaced its scratch namespace; those preserved results are excluded from
+lane completion, and the conforming rerun supplies the independent proof. These are local inert
+custody and provider fixtures, not native startup or SDK-client retirement evidence. Full cloud
+access, guest-preparation observer replacement and whole-PR readiness remained open at that
+checkpoint.
+
+- [x] Replace shared guest preparation's direct platform locator reads with one required
+      caller-retained `observe_locator(Deadline)` callable, removing obsolete context and
+      provider-custody forwarding without a default fallback or second entry point. Preserve the
+      selected-platform site refusal before observation or borrow. Adapt ordinary WSL2, Proxmox, the
+      recovery batch and its actual span caller, plus all direct test callers in one increment.
+      Prove same-observer/original-deadline forwarding, zero-read/zero-borrow refusal, malformed,
+      unavailable, changed and late locator classification, post-guest control facts and exact
+      helper-release behavior. Preserve recovery's separate support-row lifecycle and no ordinary
+      borrow. Update permanent helper collateral with the implementation. This replacement does not
+      implement concrete cloud SDK read-client custody, activation or route settlement, provider
+      incarnation/adoption, native acceptance or additive RunContext delivery.
+
+The required-observer increment at `132d73521` clears all three independent private code lanes.
+Their original implementation and final test-only correction reviews are source-only, with no
+independent execution claim. The author passes all 75 selected locator/recovery cases. Lead
+verification passes the one revised ordering/borrow case after removing an unreachable mock, plus
+full strict typing across 1,369 sources and scoped Python/documentation gates. Other runtime source
+is unchanged by that correction; this is not a claim of a final full-suite rerun. Earlier failed and
+partial fixtures remain preserved. These results close only the required-observer leaf. Concrete
+cloud read-client custody, activation and route settlement, provider incarnation/adoption, native
+acceptance and complete additive RunContext remain open.
+
+The final combined correction and shared gate at `9e89fe3c3` clear all three independent private
+lanes against `829e4a72f`. Each observes 481 adjacent passes without skips. Project review also
+observes nine independent probes and clean nine-file lint, formatting and typing; generic review
+observes 37 independent probes. Complexity review confirms the decoder deletion and the simple core
+conditions. The lead retains two optional `None` fields in the deliberately halted access stub to
+show the shared protocol shape; no production machinery is added. These results close only the four
+bounded leaves above. Cloud/Lima activation and routes, job-length availability, complete additive
+RunContext, native acceptance and whole-PR merge readiness remain open.
+
+The bounded cloud-binding increment at `f6e1ed645` clears all three corrected private lanes against
+original base `2d7e32d633`. Project review observes 233 passes, generic review 268 passes and 30
+independent probes, and complexity review 87 passes, all without skips. Removing only the Azure
+subscription guard causes two expected no-dispatch assertion failures; restoring it passes all eight
+linked-identity cases. The worker's wider selection passes 292 cases. These are local SDK fixtures
+and fresh-process import proofs, not live provider evidence. The reviewed increment is integrated at
+`e731a278d`; all 17,211 CI-selected tests pass with 50 skips using short, private fixtures. Ruff,
+file-quality, Rulesync, locked-SDD, CLI-isolation and website gates pass; the three known SSH
+enrollment typing errors remain. The Azure SDK correction and independent proof above supplement
+that earlier evidence; activation, firewall routes, independent-job availability, complete
+RunContext and native acceptance remain open.
+
+The bounded owned-native extraction at `df6ab210a` clears all three independent private lanes
+against `c1c1e14c6`, including the corrected stopped-Proxmox tests and all managed route-check
+callbacks. Project review observes 689 adjacent passes; complexity review observes 437 passes;
+generic review exercises 681 cases, with six fixture-environment failures passing on a corrected
+private fixture parent. A fresh-process probe of both actual platform factories blocks all six
+retired execution roots and process/network I/O while preserving caller ownership and passive
+construction. At combined source `f4ce1b9b7`, all 17,157 CI-selected tests pass with 50 skips using
+short, private fixtures; three SSH enrollment typing errors remain. This records only the
+extraction, not cloud/Lima availability, complete RunContext, native acceptance or merge readiness.
+
+The bounded cloud power unit at `58a27b550` clears all three independent private lanes against
+`ad471c8a0`. Project review observes 372 focused/adjacent passes; generic review observes 307
+related passes plus six independent SDK probes; complexity review observes 113 focused passes and
+proves that removing the late-result checks admits expired SDK responses. Real SDK serialization and
+authentication-resend probes establish successful late-result refusal, not hard preemption. This
+records only the passive power/locator increment, not cloud activation, routes, RunContext or native
+acceptance.
+
 - [ ] Add fixed bounded Proxmox start/task-status wire primitives, preserving scalar acknowledgment
       and object observation as separate envelopes. Prove exact body-free routes, literal task-ID
       encoding, verified authority, finite local worker custody and unchanged guest/power/config
@@ -1043,13 +1576,14 @@ associated pending acceptance gates are superseded by this ruling.
       core-owned operation when migrated. Adding a field to RunContext alone is insufficient. The
       [2026-09-21 integration inventory](migration-strategy.md#owned-boundary-integration-inventory-2026-09-21)
       identifies common boundaries, bypassing activation roots and retained teardown paths.
-- [ ] Require typed aggregate no-further-effects evidence before releasing production ownership.
-      Activation, power hold, route/repair, workflow and nested teardown contribute facts to one
-      whole-operation decision; no individual component releases the claim. Ordinary success or an
-      exception from the legacy `start`, `vm_active`, transient-route or Tailscale-repair APIs does
-      not prove quiescence. An uncertain hold exit or cleanup retains the claim. Build this as a
-      parallel new-stack lifecycle contract and keep legacy callers unchanged until their migration
-      batch supplies the required evidence.
+- [ ] Require each obligation's reviewed completion condition and independently settled cleanup
+      before releasing production ownership. Activation, power hold, route/repair, workflow and
+      nested teardown contribute facts to one aggregate decision; AWS's known-acknowledgment/running
+      rule is observational, not a request-terminal certificate. No individual component releases
+      the claim. Ordinary success or an exception from the legacy `start`, `vm_active`,
+      transient-route or Tailscale-repair APIs does not prove quiescence. An uncertain hold exit or
+      cleanup retains the claim. Build this as a parallel new-stack lifecycle contract and keep
+      legacy callers unchanged until their migration batch supplies the required evidence.
 - [x] Implement the bounded durable lifecycle-obligation ledger. Permit several independently
       identified obligations of the same registered kind; commit `possible-effect` before each
       effect; publish bounded, versioned, non-secret adapter-owned recovery identity when observed;
@@ -1057,34 +1591,61 @@ associated pending acceptance gates are superseded by this ruling.
       when every obligation has typed no-further-effects evidence and no in-memory custody remains.
       Keep managed runs specialized and do not add a workflow engine, scheduler, automatic expiry or
       generic payload interpreter.
+
+The reviewed per-obligation completion refinement supersedes only the historical universal
+no-further-effects assurance in the completed ownership/ledger records above. Their fenced mechanics
+remain completed history; AWS's narrower known-acknowledgment/running condition does not relax
+another adapter's dispatch-drain, fencing, workload or cleanup requirements.
+
 - [ ] Complete and prove recovery after takeover before any restarted controller acts on an old
       obligation. The generic database takeover kernel already retains one stable logical operation
       identifier, rotates a separate caller-chosen generation, seals the ledger atomically and
       fences stale predecessors. Its exact retries share one local recovery owner and serial guard;
       handled failures retain uncertain dispatch custody. The takeover neither moves obligation rows
       nor proves that an admitted request is drained or remote work has stopped. For every admitted
-      obligation, prove that earlier dispatches have drained or cannot cause further effects,
-      including work already active, using carrier-proved non-dispatch plus exact absence, an
-      operation-specific remote fence, or equally strong synchronous-substrate evidence. Otherwise
-      retain the obligation and report incomplete recovery. For WSL2, persist a versioned,
-      domain-separated digest of its opaque provider locator, expected VM marker, distribution and
-      account plus exact Windows controller identity before dispatch, publish exact guest
-      boot/init/PID/start-time after `READY`, and give each `vm_active()` lifetime an independent
-      obligation. Replace the legacy hold only after nested lifetimes, delayed delivery, every crash
-      window, controller/locator/marker/boot mismatch and production recovery pass live validation.
-- [ ] Select shared platform-host resource keys before enabling their admission. Canonical VM names
-      are available before create dispatch; site names and authored SSH routes are not canonical
-      host identities. Do not silently treat different aliases or users as independent hosts.
+      obligation, establish its reviewed completion condition across all predecessors, including
+      AWS's narrower known-acknowledgment/running rule. Preserve required dispatch-drain/fence
+      evidence for other adapters and work already active, using carrier-proved non-dispatch plus
+      exact absence, an operation-specific remote fence, or equally strong synchronous-substrate
+      evidence. Otherwise retain the obligation and report incomplete recovery. For WSL2, persist a
+      versioned, domain-separated digest of its opaque provider locator, expected VM marker,
+      distribution and account plus exact Windows controller identity before dispatch, publish exact
+      guest boot/init/PID/start-time after `READY`, and give each `vm_active()` lifetime an
+      independent obligation. Replace the legacy hold only after nested lifetimes, delayed delivery,
+      every crash window, controller/locator/marker/boot mismatch and production recovery pass live
+      validation.
+- [ ] Bind explicit core-selected configured platform-host resource keys before enabling their
+      admission. Conflicting work across aliases, users and VMs refers to the same configured
+      resource; do not derive independent claims from site names or SSH endpoint spelling. Keep this
+      cooperative ownership key separate from freshly observed host continuity for durable file
+      recovery. Implement that observation's real producer and recovery consumer without a
+      fabricated VM marker, a physical-host alias-discovery framework or a machine-wide lock.
+
+The private DIRECT host prerequisite at worker `3d95879c8` removes the internal managed-target
+requirement only for an explicitly owned PLATFORM_HOST operation with no guest bootstrap. VM
+operations retain their exact managed identity and boot fence. Managed/job actions require the
+actual target before preparation, borrowing, reservation, route checks or dispatch; the existing
+supplied-target consistency checks remain. No fabricated VM marker, production compatibility setter,
+host discovery or identity provider is introduced. Worker checks pass 453 focused execution cases,
+476 managed-action cases, 173 VM composition cases and strict typing across 1,513 sources. The
+combined prerequisite and passive host-context checkpoint at `a0db5e20d` clears project and
+complexity reviews at Astra/high and a generic correctness review. Lead validation passes 2,378
+platform/composition cases with ten native/platform skips, strict typing across 1,513 sources and
+changed-file quality checks. This enables private host DIRECT composition, not a complete host
+factory, durable host-file recovery, native host acceptance or production host delivery.
+
 - [ ] Prove additive ownership without silently migrating legacy callers: enter the new workflow's
       core operation boundary before activation, carry the claim through nested contexts and
       retained teardown nodes, and validate new-only workflows there. Keep old boundary calls and
       passive accessor construction unchanged. Consumer migration explicitly adopts the new
       operation boundary; neither first accessor use after activation nor a generic legacy exit
-      substitutes for acquisition or no-further-effects evidence.
+      substitutes for acquisition or aggregate completion evidence.
 - [ ] Prove crash, disconnect and deadline handling retain unresolved ownership. Recovery must
-      establish that prior remote work cannot still mutate before admitting conflicting work, and
-      must not replay uncertain mutation or silently expire a claim. Report incomplete recovery
-      rather than deleting ownership or inventing remote fencing from a database row.
+      establish each prior obligation's reviewed completion condition and independent cleanup before
+      admitting conflicting work; this is not an unconditional certificate of all future provider
+      effects. Preserve concrete dispatch-drain/fence requirements, never replay uncertain mutation
+      or silently expire a claim. Report incomplete recovery rather than deleting ownership or
+      inventing remote fencing from a database row.
 - [ ] Keep VM-host lifecycle platform-owned. Prove actual Lima readiness, stop, rollback and
       disconnected-operation recovery without requiring a generic macOS MANAGED supervisor or an
       administrator-installed file lock. Keep Linux guest MANAGED guarantees unchanged.
@@ -1343,6 +1904,45 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       local PTY settings without relaxing pipe parsing or releasing payload before raw-mode
       readiness. All three private lanes accept this terminal slice at `02e8498a`. Carrier terminal
       integration, transport-owned finalization and native proof remain separate acceptance gates.
+- [x] Prove printable same-terminal preparation before the Windows launch/resize unit: one strict
+      hex-encoded finite frame, printable fixed-width nonce readiness and unchanged runtime framing.
+      Preserve the complete 32,768-byte decoded allowance with a 65,536-byte encoded bound, both
+      handoff gates, source/keyboard separation, literal byte values and same-PTY no-echo/restore
+      behavior. Cover split/coalesced records, partial writes, queued early input, wrong nonce,
+      malformed/truncated frames and phase/order errors. Run all three independent private lanes
+      against the combined implementation and collateral. These local tests do not establish ConPTY
+      preservation, native Windows geometry, separate client diagnostics, SSH delivery or complete
+      terminal capability; keep those native gates open.
+
+The corrected combined implementation and collateral are privately clear at `ce71650a5`, from
+reviewed coordination parent `2a283d37`. All three final independent reports were read: project and
+complexity each pass the 124-case required selection without skips; generic passes those cases plus
+61 independent probes. The lead's final seven-module selection passes 155 cases without skips;
+five-file lint/format, typing across 1,348 application/test files and canonical file quality pass.
+The literal 32,768-byte allowance test fails under a halved-limit mutation, and source is restored.
+The local same-PTY helper uses Bookworm Python 3.11. The finite format rejects inserted control
+bytes rather than normalizing them, and the LLD separates SSH relay/resize forwarding from shared
+native process/resize mechanisms. Native Windows/SSH capability remains unproved.
+
+- [ ] Prove the private Windows pseudoconsole topology with a local native child: explicit initial
+      and changed dimensions, usable child console handles, separate raw stderr, exact printable
+      readiness and finite setup input, narrow-console wrapping observations and finite/idle
+      teardown. Retain the passive capability cell before acquisition and every confirmed partial
+      acquisition through failure. Failed-call output garbage is never closed; unobserved native
+      acquisition is not clean. Portable fake tests establish only bookkeeping. Do not enable
+      terminal delivery or publish an accepted SSH API pin from that evidence alone.
+- [ ] Integrate the proved native cell into the existing local process owner, including no-child
+      partial-acquisition cleanup, exact retained retry custody, explicit initial/resize dimensions
+      and separate exit/closure evidence. Keep native lifetime effects serialized on the owner's
+      existing worker and stop all pipe borrowers before closing console output and releasing the
+      pseudoconsole. No second production owner or teardown-drainer framework. Review the complete
+      combined seam privately before giving SSH an adoption pin.
+- [ ] Prove the adopted mechanism with installed Windows OpenSSH, including remote initial and
+      changed geometry, strict setup records, raw client diagnostics, physical keyboard handoff,
+      narrow-geometry control records and resize during setup, console presentation and bounded
+      retained cleanup. Consume the complete native report and resolve material findings before
+      enabling the terminal capability.
+
 - [x] Implement private revision-aware publication with explicit Create/Replace/Match conditions,
       bounded streaming from verified scratch, stat-only observations without old-content reads, and
       a content-bound post-publication revision. At `75aaaa5e`, all three private lanes are clean
@@ -1364,10 +1964,12 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       distinguish local fixture evidence from privileged native bootstrap and ordinary/admin
       contention. All three private lanes are clean at `876355c7`; the file/Proxmox suite passes 305
       tests.
-- [ ] Compose fixed inline file-operation bundles with one-stream compression and data-only scratch.
-      Prove every final envelope against both complete Proxmox HTTP-body and workstation
-      process-command bounds; no executable-helper staging fallback. The Proxmox compatibility floor
-      remains 64 KiB even on providers accepting larger requests.
+- [ ] Compose fixed inline file-operation bundles with one-stream compression and shared owned
+      scratch delivery where their complete envelope requires it. Select inline or staged delivery
+      before effects; never retry uncertain inline dispatch through staging. Prove every final
+      envelope against complete Proxmox HTTP-body and workstation process-command bounds. The
+      Proxmox compatibility floor remains 64 KiB even on providers accepting larger requests;
+      readiness remains file-free.
 - [x] Review and integrate private held-object metadata, bounded inventory, search-only root
       traversal and read-only fixed lock-namespace composition. Preserve explicit partial/uncertain
       mutation facts and requested-depth completeness without claiming public FileAccess or native
@@ -1399,7 +2001,9 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       serialization produce 33,108 Windows command characters, exceeding 32,767. Dropping the unused
       read-protocol module while retaining framing reduces that fixture to 31,076; its dispatcher is
       still a test, not the production exchange. Select only actual family dependencies and prove
-      complete Windows and Proxmox request bounds without an implicit executable-staging fallback.
+      complete Windows and Proxmox request bounds. Where fixed assets require staging, use the same
+      operation-owned transfer and verified activation as execution, selected before dispatch rather
+      than as an uncertain-delivery fallback.
 - [x] Deliver private stage creation and exact-offset chunk exchanges using sensitive input,
       complete typed observations, original destination binding and the fixed transaction lock. All
       three private lanes are clean at `85d27904`, including post-cleanup expiry and exact chunk
@@ -2153,6 +2757,22 @@ batches may land independently against its pinned contract. Temporary released c
 explicitly authorized; final removal remains this effort's responsibility. Refresh the inventory at
 each integration boundary and prohibit new legacy consumers.
 
+The final implementation dependency is the complete new SSH contribution and shared foundation in
+[PR #832](https://github.com/WayfarerLabs/agentworks/pull/832), followed by transport-owned platform
+factories and the additive RunContext in #833. Build those factories against the pinned new SSH
+connection and trust API, without dual-version construction or fallback to legacy policy. Missing
+explicit configuration or admitted trust is a prerequisite, not permission to use ambient SSH state.
+Remote Lima is one SSH-backed platform-access consumer; both the placement-host and guest hops need
+their own explicit delivery facts. Before either merge-intent handoff, validate the complete
+combined candidate with both usable old and new RunContext paths, full gates, native evidence and
+whole-PR reviews. Shared code remains transport owned regardless of which PR carries its commits.
+Restack the two PRs only after complete current integration reports and stable shared/carrier
+implementation, preserve reviewed provenance, and land the SSH PR before the transport PR. There is
+no third foundation PR or compatibility bridge. The initial private composition `ad471c8a0` combines
+transport `fa20e5a95` and SSH `642dd8af4` without changing either public head or dependency; it is
+development state, not joint acceptance. This ordering does not decide operator-held SSH resource
+APIs, waive carrier requirements or start migration and deletion.
+
 ## 1. Specify the small contract and proof charter
 
 - [ ] Specify `PreparedInvocation`, the single input choice in `CarrierIO`, stream ownership,
@@ -2507,14 +3127,11 @@ run row or release the caller's owner. Route freshness, job-state reconciliation
 and disposal, recovery, live SSH/QGA proof and public JobAccess remain open. Focused hermetic tests
 pass, not native integration.
 
-The next host-side stop slice will use an adapter-owned `managed-stop` lifecycle obligation under
-the same exact VM claim. It will admit only a reconciled launch receipt, arm the obligation before
-the one carrier attempt, and resolve temporary dispatch custody on positively proved no delivery
-with settled coordination, or a complete, validated `ACCEPTED` or `TERMINATED` response with settled
-delivery. `ACCEPTED` proves durable target intent, not job termination; only `boundary-empty` proves
-the latter. Unknown or interrupted delivery retains the claim and exact-run recovery identity. This
-does not add a mutable database stop state or make an uncertain stop retry safe before old-dispatch
-drain is proved. Host-bound disposal and recovery are separate later gates.
+The standalone host-bound stop direction recorded in the following private checkpoints is superseded
+by the actual OPERATION/RESOURCE tracked helper and operation-lifetime dispatch row. Remove its
+unused adapter and wrapper-only tests while retaining meaningful production stop coverage. The fixed
+guest protocol and historical evidence remain; no operator data is deleted and no earlier obligation
+is implicitly settled.
 
 At private checkpoint `617295760`, the owned stop adapter implements that one-attempt ruling. It
 shares exact independent-VM row preflight with observe/read-output, requires `RECEIPT_CONFIRMED`,
@@ -3360,24 +3977,84 @@ after terminal completion; no operator database is modified or deleted. Independ
 job-length availability, active output, remaining factories, full RunContext and native acceptance
 remain open. This closes only the private disposal leaf, with no merge intent or public review edge.
 
-- [ ] Integrate private MANAGED RESOURCE start and foreground wait through the same ExecutionAccess
+- [x] Integrate private MANAGED RESOURCE start and foreground wait through the same ExecutionAccess
       on a core-selected proved no-idle-stop native binding. Reject unsupported independent
       availability and foreign/stale context before shell lookup or reservation; never infer
       authority from a request or reference. Freeze the body once, then retain generated identity,
       planned receipt/output policy and actual temporary launch custody before reservation. Reuse
       the start v1 obligation, existing one-shot exchange and monotonic repository transitions;
-      factor supplied tracked custody from the existing allocating start wrapper without a second
-      borrow or executor. Publish the actual candidate before receipt reconciliation can lose its
-      reply. Recover exact reservation, registration and receipt bookkeeping without another
-      dispatch, and require actual helper/local settlement as well as confirmed receipt for a
-      dispatched start. Preserve original controls and discard ended preparation references. Never
-      adopt the independent run into OPERATION keeper/cleanup state; start plus wait shares one
-      deadline and context close does not stop the job. Prove source/finite-input separation, lookup
-      ordering, reserve and reconcile commit/reply loss, setup/publication failures, late helper
-      uncertainty, bounded action accounting, lost acknowledgement and retained OPERATION behavior.
-      Complete all three private lanes and lead gates. This initial no-op-backed increment does not
-      close recoverable WSL2/job-length holds, all-platform factories, production RunContext or
-      native acceptance.
+      reuse that exchange with supplied tracked custody and preserve the allocating caller's actual
+      attempt before fallible settlement or outcome construction, without a second borrow or
+      executor. Publish the actual candidate before receipt reconciliation can lose its reply.
+      Recover exact reservation, registration and receipt bookkeeping without another dispatch, and
+      require actual helper/local settlement as well as confirmed receipt for a dispatched start.
+      Recheck admission after possible-dispatch publication immediately before delivery. Supported
+      NOT_SENT plus actual custody closure may settle only the exact temporary START action; leave
+      POSSIBLE_DISPATCH unchanged and unacknowledged. Preserve original controls and discard ended
+      preparation references. Never adopt the independent run into OPERATION keeper/cleanup state;
+      start plus wait shares one deadline and context close does not stop the job. Prove
+      source/finite-input separation, lookup ordering, reserve and reconcile commit/reply loss,
+      setup/publication failures, late helper uncertainty, bounded action accounting, lost
+      acknowledgement and retained OPERATION behavior. Complete all three private lanes and lead
+      gates. This initial no-op-backed increment does not close recoverable WSL2/job-length holds,
+      all-platform factories, production RunContext or native acceptance.
+
+The initial private candidate at `0b8778c7e` passes 16,628 non-integration tests, but all three
+independent review lanes identify two material defects. A pure pre-entry deadline can leave a proven
+no-delivery START action retained forever, and an extra settlement wrapper can discard already known
+allocating launch precision when settlement or outcome construction is interrupted. Correction
+`b176d8f7a` removes that wrapper and retains the actual attempt before either step. Action-only
+settlement accepts supported NOT_SENT only with actual custody closure and matching ownership and
+reservation; uncertain run state remains unchanged, and no acknowledgement or replay follows. The
+correction also removes two dormant RESOURCE WSL route checks: unsupported independent availability
+already refuses before admission, while real WSL job-length holds remain required work.
+
+All three independent lanes clear the corrected complete unit at `fa20e5a95`. Project passes 545
+focused/adjacent cases and twelve independent custody/control probes; generic correctness passes 683
+distinct cases including eleven independent probes. Complexity passes 410 focused/adjacent cases,
+then independently removes each retained proof: omitting NOT_SENT recovery causes three failures,
+omitting the receipt-confirmation return guard causes two failures, and assigning the allocating
+attempt only after settlement causes six failures. Restoring the source passes the ten targeted
+regressions. Each lane reviews the complete source, tests, README, lifecycle LLD and open plan leaf;
+none reports a remaining material finding. These are private increment reviews, not whole-product or
+native acceptance.
+
+Final lead gates at that exact head pass 16,637 non-integration tests, 49 explicit
+platform/capability skips and 29 fork warnings in 340.31 seconds, exit 0. The package-fingerprint
+comparison uses verified main `cea5e8523`. Ruff/format (1,323 files), strict mypy (1,287 sources),
+exact CI Typer isolation, file quality (475 Markdown and 448 spelling inputs), locked-SDD, Rulesync
+and whitespace pass. Website passes 160 Python cases in 54.659 seconds and 103 Node cases in 11.956
+seconds, four builds and both deterministic comparisons. Owned fixture roots are removed after
+terminal completion; operator databases are untouched. Only this private no-idle-stop-backed start
+leaf closes. Job-length availability, active output, remaining factories, full RunContext and native
+acceptance remain required. Public testing head `dd10ebbee` stays fixed while complete native
+reports are awaited, with no new public fix round; round 1 of 3 remains open.
+
+The separate combined SSH hosted run `37583088687` fails a shared Windows success fixture at
+`test_managed_operation_run.py:110`, with start custody retained unexpectedly. Its shared fixture
+and start/run source match transport `dd10ebbee`; the trace does not establish a unique cause. Two
+controlled probes against that exact transport source show that freezing local monotonic time lets
+the unchanged success/renewal fixture pass, while expiry after the real possible-dispatch mark
+produces retained NOT_SENT/DEADLINE custody with zero delivery. Test-only candidate `907ca2343`
+removes that success fixture's host-throughput coupling without changing production deadlines,
+custody assertions, real SQLite, real threads or bounded Event handshakes. All three independent
+lanes clear the complete three-line correction. Project passes 125 affected/adjacent cases and an
+independent reservation-latency probe beyond the original two-second budget. Generic correctness
+passes 178 affected/adjacent cases plus three sensitivity probes: removing acknowledgement or the
+renewal handshake still fails the corrected fixture. Complexity independently verifies that frozen
+monotonic time leaves Event waits bounded by real time and selects the existing three-line pattern
+without another clock framework.
+
+Final integrated source `a8fbe36e0` passes 16,637 non-integration tests, 49 explicit
+platform/capability skips and 29 fork warnings in 283.82 seconds, exit 0. Ruff/format (1,323 files),
+full mypy (1,287 sources), exact CI Typer isolation, locked-SDD, Rulesync and whitespace pass.
+Website passes 160 Python cases in 44.541 seconds and 103 Node cases in 8.078 seconds, four builds
+and both deterministic comparisons. The first file-quality run finds two Markdown heading errors
+caused by wrapped PR numbers; the formatting-only correction passes the complete file-quality
+recheck (475 Markdown and 448 spell-checked files), exit 0. Owned disposable fixtures are removed
+only after terminal completion, with operator data preserved. These are local transport gates, not a
+unique diagnosis of the hosted failure or a green combined hosted run. The published testing head
+remains unchanged pending complete native reports.
 
 The lead's read-only completion inventory at `ed3603c23` confirms that this next foreground unit is
 not the rest of the execution surface. Required work still includes unified independent launch and
@@ -3487,6 +4164,13 @@ edge follows.
       construction, kill/reap failure, explicit cleanup retry, natural exit, external-reaper
       uncertainty, all temporary Proxmox consumers and aggregate owner-release refusal. Do not
       silently add bounded return to guest source-descriptor or unmigrated terminal consumers.
+- [ ] Retain one ordered local cleanup coordinator alongside the exact existing native process owner
+      for delivery resources such as terminal relay, acquisition and restoration. Require passive
+      settlement of both before another exchange; retry the same retained coordinator under a fresh
+      finite deadline without closing pipes around an unfinished borrower. Keep plain delivery
+      unchanged and reports passive. Prove exact-owner binding, refused replacement, interrupted
+      cleanup and process-cleaned-but-restoration-pending cases; SSH separately supplies its
+      terminal coordinator and native acceptance.
 - [ ] Implement the
       [shared local retirement](execution-lifecycle-lld.md#shared-local-process-retirement)
       correction under the existing native owner. Share original one-shot pipe-close evidence
@@ -3512,6 +4196,62 @@ edge follows.
       local results do not close this leaf: independent correction review, final SSH composition and
       native held, restoration and shutdown evidence remain owed. Unknown execution and remote
       effects stay independent of local retirement.
+
+- [ ] Increase buffered snapshot download batches to 256 KiB with a separate scratch range-read
+      ceiling, leaving upload writes and internal streaming pieces unchanged. Declare conservative
+      complete-response capacity before dispatch; preserve digest, framing, identity, metadata and
+      exact cleanup checks. Prove the boundaries and twelve-chunk 3 MiB shape locally, then measure
+      complete output and throughput on both QGA majors and native WSL. Live SSH remains its
+      existing single-stream path; no replay, helper-installation cache or weaker file semantics
+      follows.
+- [ ] Implement the private per-call acknowledged-QGA helper delivery/observer and explicit
+      non-payload preparation expectations. Retain the actual inline DIRECT call, original attempt
+      and borrow that can still settle it; perform only exact-PID GET observation under a fresh
+      finite cleanup budget before aggregate finish. Fresh budgets gate unresolved observation or
+      local cleanup, not already-sufficient no-I/O bookkeeping; provider reads gate new status
+      observation, not reconciliation of stored positive closure. Preserve original UNKNOWN or
+      NOT_STARTED application results and separate local/remote custody; do not replay after
+      uncertain status loss. Prove authentic closed runtime refusals with normal zero, deadline
+      recovery, ACK/terminal-publication and final-handoff interruptions, detached caller payload,
+      wrong nonce, changed binding and unsettled local delivery before native acceptance on both QGA
+      majors.
+- [ ] Extend the same retained helper-closure seam to managed read preparation and timed-out
+      RESOURCE disposal prerequisites. Cleanup settles the prior observer only; a subsequent
+      explicitly requested read must still supply positive terminal proof before disposal. Closure,
+      readiness and guest/action proof remain distinct. Prepare explicit non-payload expectations
+      before admission, keep each prepared read single-dispatch, preserve managed control facts
+      after payload detachment and retain no application observation/output in cleanup state. Prove
+      OBSERVE/READ_OUTPUT deadline continuation, interruption and exact original-attempt settlement,
+      plus prerequisite cleanup causing no disposal action before a separately requested positive
+      terminal read. Lost ACK, consumed status, controller restart and other-carrier recovery remain
+      separate open gates, not implicit completion of the general recovery work.
+
+The inline source candidate at `1381f4c3`, integrated at `3086c213`, supplies the actual per-call
+observer, retained original attempt, owned provider-route fence and native-close observation. Worker
+and lead each passed the same 518 distinct scoped cases without skips, and the integrated source
+passed scoped static and canonical file checks. Three independent private lanes found final-handoff
+payload retention, unnecessary fresh-observation prerequisites and retained closed runtime refusal
+debt. The corrective source candidate at `199c7bc3` passes 550 distinct scoped cases with no skips
+and six-file static checks: the 517 retained original cases and 33 new cases, after removing one
+private wire-mutation test with its redundant guard. Project re-review also found interrupted
+settlement of a definitive NOT_SENT result retaining debt without any provider request. Candidate
+`70a2442a` retains that non-payload fact for exact no-I/O reconciliation; its 26 bounded cases pass
+without skips, including seven new cases, with two-file static checks. At the integrated final pin
+`ed03dabf`, all three independent private re-review lanes cleared the bounded inline unit. Lead
+reran the same seven modules: 557 cases passed, zero skips, with thirteen-file Ruff/format/mypy and
+canonical file quality passing. Overlapping runs are not summed as distinct coverage. Both native
+QGA-major measurements and managed-read continuation remain pending, so neither leaf above is
+complete. The next separately delegated unit extends managed-read preparation and the existing
+retained call; it does not introduce another recovery mechanism or broaden disposal proof.
+
+Managed-read source candidate `1443777e` supplies single-dispatch preparation before admission,
+explicit call origin, the existing per-call closure factory and detached managed observations. Its
+57 new offline cases passed before a broader 370-case run exposed two inline-origin classification
+failures. The corrected explicit-origin boundary passes a 73-case selection containing both failed
+cases and managed deadline/control paths, plus three-file static gates. A full combined rerun and
+the three independent private reviews remain required; overlapping runs are not summed. RESOURCE
+tests distinguish cleanup of the prior observer from a fresh positive read authorizing disposal.
+This is not native QGA, complete managed recovery or whole-PR acceptance, and both leaves stay open.
 
 - [ ] Reconcile #770's historical escape/relaunch proposal against the later exclusion of malicious
       target-user containment. Deliver DIRECT/MANAGED without a CONTAINED profile or
@@ -3869,13 +4609,76 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       exact-operation path confinement and safe target/phase diagnostics. Complete production
       ownership, local download publication, directory transfer and native acceptance remain
       required; these private building blocks do not close those gates.
+- [x] Implement the private upload-child core checkpoint selected in the
+      [directory composition boundary](file-operations-lld.md#generic-directory-transfer-child-checkpoints).
+      Admit bounded transfer association with the exact ordinary file-call child before effects;
+      persist positive settled success before immutable receipt closure. Preserve failure and
+      uncertainty without a success claim, retain interrupted checkpoint/closure custody, and settle
+      only that bookkeeping during aggregate teardown without replay. Prove exact lost-reply
+      reconciliation and next-child refusal against actual SQLite and helper calls. This is not a
+      directory facade, download-side checkpoint, application artifact ownership, native acceptance
+      or complete public FileAccess delivery.
+- [x] Implement the corresponding private download-child checkpoint under the existing whole-call
+      local download borrow. Admit the exact ordinary child before new workstation staging, retain
+      remote and local completion evidence through successful publication, cleanup and reduction,
+      and publish success before immutable closure. Preserve false completion for failures and
+      controls before positive completion capture, including later-settled cleanup debt; retain the
+      exact positive checkpoint intent across subsequent publication or closure interruption. Prove
+      exact bookkeeping-only CAS and closure retry without repeating transfer or local publication.
+      Preserve versions one through four and prove the new DOWNLOAD-only versions five and six,
+      their recovery envelope, original-row retention and aggregate teardown. This does not deliver
+      a directory facade, post-crash local repair, native acceptance or complete public FileAccess.
+
+#### Ordinary directory composition
+
+The two completed private child-checkpoint kernels above are superseded by ordinary-call directory
+composition; their historical completion records do not establish the simpler implementation below.
+The private ordinary-bookkeeping implementation at `e8f5caaf` removes association admission and
+positive-history writes while retaining exact debt/closure retry and supported codec versions one
+through six. Its 335 selected cases and full strict typing over 1,391 sources pass. Initial fixture
+failures came from unsafe inherited workspace permissions/ACLs; a fresh private temporary fixture
+root passes without weakening guards. Both failed and successful fixtures remain preserved, with
+successful fixtures moved into workspace evidence after terminal-use and byte/metadata checks. The
+final private acceptance above includes all three source re-reviews and the 781-case joint selection
+covering these changes. This closes only ordinary bookkeeping and association-writer retirement, not
+the directory facade, native proof or complete R7 delivery.
+
+- [x] Retire unused generic transfer-association writers and success-history publication while
+      preserving ordinary-call custody and exact bookkeeping-only retry. Keep admission before local
+      staging, uncertain registration, actual retained outcomes and cleanup debt, control precedence
+      and incomplete-capture refusal. Prove debt-publication and borrow-close recovery without
+      helper/source/publication replay. Retain readers for persisted versions three through six
+      until their compatibility disposition is explicit; do not inspect or discard operator data to
+      justify deletion. Preserve the distinct durable artifact ownership callback.
+- [x] Allow an explicit zero-byte maximum throughout the ordinary download/snapshot path. Prove
+      verified empty-file publication, nonempty-source refusal before publication and unchanged
+      custody, including an empty source that grows after inventory. Keep in-memory read bounds
+      positive. This is a directory-composition prerequisite, not delivery of that facade.
+- [ ] Deliver bounded directory upload/download by composing ordinary successful child results under
+      one original deadline under the [directory/local-path response](directory-transfer-lld.md).
+      Define explicit existing-file conflict selection and bounded partial progress, including
+      failed/uncertain current-child effects. Merge directory structure without pruning or rolling
+      back confirmed entries. Prove complete traversal rather than interpreting a depth-limited
+      inventory as a whole tree. Cover conservative local traversal, directory creation and
+      publication on supported workstation systems before public exposure.
+- [x] Implement the private ordinary-call directory facade and owned local-path primitives,
+      including create-only remote directories, complete bounded manifests, explicit conflict
+      choices, actual transferred-byte budgets, one original deadline and bounded partial progress.
+      Retain local originals before I/O, share the ordinary upload borrow and include their exact
+      cleanup in native aggregate settlement without a parent transfer coordinator. At `6c5769293`,
+      the lead's file/native/context selection passes 2,374 tests with 25 skips, and strict typing
+      passes across 1,436 sources. Project and complexity reviewers at gpt-6-astra/high and generic
+      correctness at gpt-6.1-sol/medium independently clear the corrective source diff. Their
+      findings led to retiring replaced destination identities, validating all composed local paths
+      before mutation and checking creation modes before borrowing or opening sources. These are
+      Linux-local and deterministic branch proofs, not native Windows/macOS acceptance, complete
+      RunContext delivery or completion of the broader directory checkbox above.
 - [ ] Resolve lifecycle-ledger capacity before migrating high-volume artifact publication. Apply the
       selected core 128-unfinished-obligation bound and preserve commit-without-reply evidence and
       immutable completed receipts, rather than pruning, reusing IDs or increasing the limit.
       Per-file public calls must not make a supported artifact package fail only because its owning
-      command accumulated resolved rows. Reassess the serial-package candidate against actual
-      directory-transfer and application-checkpoint consumers once the core bound removes its
-      capacity-only justification; retain only mechanisms those consumers need.
+      command accumulated resolved rows. Prove actual directory-transfer and artifact consumers
+      retain exact unfinished child custody without accumulating successful-call debt.
 
 The 2026-09-24 inventory found a generic capture ceiling of 4,096 regular-file members in
 `package_sources.py`, while the native harness inventory probe caps 512 entries including implied
@@ -3884,16 +4687,21 @@ integrations. Current artifact publication iterates files and checkpoints each c
 mapping those calls one-for-one to retained lifecycle rows would exhaust the 128-row bound for a
 supported large package.
 
-The [serial package candidate](file-operations-lld.md#serial-package-capacity-candidate) uses one
-row for the current child across preflight and mutation. A private originating-path
-`FileOperation.upload_package` increment now uses one borrow and row for up to 4,096 upload members,
-persists each child index and token before dispatch, and waits for a caller-supplied durable
-checkpoint before preparing the next child. A real 129-member test stops after a checkpoint commits
-but loses its reply; a synthetic 4,096-member test exercises the ledger bound without claiming 4,096
-native file writes. The tests also cover a lost child-CAS reply, an unconfirmed CAS, a later invalid
-member and control-flow interruption. This is not yet a process-loss recovery proof or a complete
-package API: upload-wide helper drain, takeover, preflight reads, retirement, application checkpoint
-integration and production artifact callers remain open. The capacity checkbox stays unchecked.
+The private serial-package producer is superseded by ordinary file calls on 2026-10-18; the
+completed checkboxes below preserve its historical work. The separate
+[artifact application checkpoint](file-operations-lld.md#artifact-application-checkpoints) remains a
+consumer-migration gate, not an implication of directory-transfer progress.
+
+- [x] Retire the unused private package-upload producer and its runtime collections, retaining
+      persisted formats, codecs and recovery readers. Share the five owned-call completion blocks
+      without changing explicit preparation/admission, capture-before-removal, retained active
+      custody on failed capture, or original control-exception precedence. The lead's broad
+      file/native/context selection at `4e6e61539` passes 2,375 tests with 25 skips. After the final
+      dead producer-branch removal, `55d1e2e45` passes 301 focused gate, codec, retained-package and
+      native cases plus strict typing across 1,437 sources. All three independent source-review
+      lanes clear the final unit. Net removal is 369 production lines and 704 test lines, with
+      twenty capture-ordering cases added. This is private simplification, not native recovery,
+      artifact application checkpoints or complete RunContext acceptance.
 
 - [x] Extend the private upload helpers and pre-bound `FileOperation` upload/package paths to carry
       one exact existing gate through stage, publication, reconciliation and cleanup. Validate its
@@ -3928,6 +4736,20 @@ integration and production artifact callers remain open. The capacity checkbox s
       mutation across WSL, SSH and QGA; then bind package-child recovery and application checkpoint
       reconciliation. Neither the local DOWNLOAD helper journal nor a caller-asserted drain value
       proves upload takeover.
+
+The new-stack automatic admission implementation binds verified raw guest facts at construction and
+derives setup for each selected effective UID. Snapshots, uploads, JSON, removal and directory or
+metadata effects retain one pending-to-bound row; local transfers reuse their original borrow and
+downloads admit before workstation writer creation. STAT, inventory and no-staging readiness stay
+non-creating. The developer's local checks pass 2,557 file cases with 25 skips, 1,303 VM adapter
+fixtures and 260 bounds/Python 3.11 cases. All three independent source-review lanes clear the
+private checkpoint at `72b940067`. The lead's combined selection passes 2,793 cases with 25 skips at
+`c4e0c916c`; the final cleanup-control correction and method simplification pass 280 focused cases,
+strict typing across 1,525 sources and file-quality checks. The correction preserves a cleanup
+interrupt over an earlier ordinary publication error without replacing an already recorded control
+or losing exact local-stage custody. These are synthetic local results, not native delivery,
+managed-agent namespace lifecycle, predecessor settlement or complete recovery acceptance; the
+broader checkbox stays open.
 
 The production artifact publisher currently preflights destinations, then retires and publishes
 members with a per-file ownership callback. Agent and workspace creation can call that publisher in
@@ -4118,6 +4940,30 @@ and a production drain-evidence producer remain unproved.
       Keep the public FileAccess and ownership release gates open until this and the concrete
       recovery handoff are proved.
 
+- [x] Extend the private shared effect fence to metadata, directory convergence, conditional removal
+      and JSON's existing upload child. Carry the gate through canonical requests, helper effects
+      and cleanup, every durable row rewrite, and exact setup/proposal recovery without retaining
+      contents or replaying mutations. Generalize the existing package fence consumer rather than
+      adding per-family copies. Preserve historical bytes without gates, no-state stat/readiness and
+      Darwin behavior. Prove stale-request refusal, active-effect exclusion, lost setup/advance
+      replies, exact retained outcomes and complete provider envelopes. Reserve the control
+      namespace from ordinary mutations and the two exact Linux ancestor metadata targets from
+      convergence. This private family coverage does not complete production FileAccess admission,
+      namespace lifecycle, predecessor-controller settlement, native evidence or whole-operation
+      recovery.
+
+The private family extension at `8fd874a4b` and settled non-dispatch correction at `bf9a12142` now
+carry the exact gate through these requests and retained rows. The shared
+`FileMutationFenceRecovery` reuses the previous package consumer's proposal/advance/adopt algorithm
+without replay or whole-owner release. Real decoder tests cover the reserved namespace; Linux
+metadata also refuses the two exact ancestor targets. Five entry-point regressions prove that known
+non-dispatch resolves only its own row and permits owner completion, while unknown delivery,
+unsettled local resources and lost publication keep custody. The integrated file/native-context
+selection passes 2,691 tests with 25 skips; strict typing checks 1,522 files. Independent project,
+correctness and complexity reviews clear this private family implementation. Production automatic
+admission, namespace lifecycle, predecessor-controller fencing, native proof and whole-operation
+recovery remain open below; these local results do not establish them.
+
 The reviewed setup design selects one deterministic, epoch-bound path and exclusive creation per
 managed scope/effective identity. A lost setup reply is reconciled by non-creating inspection of the
 complete gate under flock, not by replacing it or trusting the request's guest identity. Setup and
@@ -4254,15 +5100,59 @@ RunContext factory, native delivery drain and recovery remain open.
       evidence of that `OperationOwner` exclusion. Cover interrupted provisioning, repeated reinit,
       retained work, deletion and numeric UID reuse without repairing or replacing a live gate file.
 
+The private namespace candidate prepares it inside the explicit new-stack VM operation, after
+verifying the selected agent's numeric identity and guest epoch and before exposing its file view.
+This uses an existing owned consumer without first duplicating account orchestration. It does not
+enable production agent use: account creation, deletion and UID reuse must still join that same
+owner boundary before the broader lifecycle gate can close.
+
+Owner candidate `c489acc5f` adds the separate fixed helper, bounded custody codec and retained
+preparation wrapper, with explicit VM workflow integration. Local isolated checks cover direct
+filesystem behavior, Bookworm Python, complete QGA request bounds and 274 selected helper/workflow
+cases; 54 focused checks follow test-only typing corrections, and strict typing covers 1,534
+sources. A broader VM run was deliberately interrupted for fixture capacity and is not a pass; its
+original view is retained. At that checkpoint independent reviews and lead composition gates were
+pending; those worker results alone completed neither the unit below nor the broader lifecycle gate.
+
+Private review then identified no-effect interruption/refusal custody leaks and a mismatch between
+the codec limit and the database's 8,192-byte lifecycle envelope. Owner correction `29a2843c2`
+reproduces those failures, recognizes only existing positive no-registration proof, and supports
+cleanup after fenced unused-borrow retirement without weakening uncertain registration retention.
+Admission now reserves the largest binding-added record before borrowing or root SETUP. The two
+derived persisted fields are removed. Its 67 focused cases, exact payload-boundary publication
+checks and strict typing pass locally. Those owner results still required final lead composition and
+independent re-review before completing the private unit below.
+
+- [x] Bind managed-UID namespace preparation into the new-stack VM operation. Reuse one exact owner,
+      selected route, verified root bootstrap and finite deadline. Register one durable row before
+      root-gate SETUP, publish its exact binding before namespace effects, and retain the original
+      borrow and cleanup custody on uncertainty. The fixed helper creates or verifies the UID
+      directory and a separate persistent per-UID rule while holding the existing root-UID gate
+      through all effects and cleanup. Require the bootstrapped root namespace; never bootstrap it
+      implicitly, repair an unexpected entry, replace a live gate file or invoke a mutating child
+      outside that fence. Keep passive construction and no-staging readiness non-creating. Prove
+      exact existing-state reuse, wrong-entry refusal, interrupted preparation, stale-generation
+      refusal, whole-workflow retention, Bookworm Python and complete provider-body bounds. This
+      private unit does not settle account deletion, numeric UID reuse, native boot reconstruction
+      or whole-owner recovery.
+
+The final private composition at `e30147620` clears independent project, complexity and generic
+correctness source reviews. Lead validation passes 287 namespace/helper/context cases, the complete
+1,293-case VM selection, strict typing across 1,534 sources and changed-file quality checks. The
+earlier interrupted broad worker run remains incomplete, not substituted for that completed lead
+run. This closes only the scoped private preparation unit; account lifecycle, UID reuse, native boot
+and credential proof, production adoption and whole-owner recovery remain open.
+
 The account lifecycle audit found the shared create/reinit seam in `create_agent_on_vm`, after
 `useradd` or account convergence and before agent-level SSH. Standalone deletion currently continues
-after a best-effort remote cleanup failure and cannot establish safe UID retirement. Complete the
-owned VM lifecycle boundary first, then provision and retire the gate namespace with those callers;
-do not add an unused standalone ensure/retire API. Use a separate persistent `systemd-tmpfiles` rule
-per managed UID rather than rewriting bootstrap's root/admin rule file, which bootstrap replaces on
-replay. Retire the rule and directory only after the old helper and gate obligations are proved
-quiescent, before freeing the numeric UID. Neither the existing local mutation guard nor `pkill`
-alone provides that proof.
+after a best-effort remote cleanup failure and cannot establish safe UID retirement. Complete that
+owned lifecycle and reuse the preparation primitive there before production adoption; do not expose
+a standalone ensure/retire API. Use a separate persistent `systemd-tmpfiles` rule per managed UID
+rather than rewriting bootstrap's root/admin rule file, which bootstrap replaces on replay. Retire
+the rule and directory only after namespace predecessors are fenced through the root gate, file
+predecessors through the agent gate, and all other retained work is proved quiescent, before freeing
+the numeric UID. Neither the existing local mutation guard, either gate alone nor `pkill` provides
+whole-owner proof.
 
 The private bound-row correction now checks the deterministic VM/UID/guest gate path at the
 `file-call` codec boundary as well as the setup-only path. A substituted but syntactically valid
@@ -4550,23 +5440,418 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
 
 ## 5. Add the complete new RunContext surface
 
+- [x] Connect non-terminal live input/output to DIRECT execution through the existing inline helper
+      and process pump. Use one bounded length-delimited request for finite and live input, keep
+      script source separate, and deliver decoded stdout/stderr incrementally without retaining
+      presentation bytes. Prove duplex progress before input EOF, binary separation, nonzero exits,
+      explicit sensitive presentation, bounded short/stalled/faulting endpoints, pre-borrow refusal
+      on unsupported routes, original control-flow preservation and endpoint release. Update the
+      older private systemd producer to the same request format; do not keep a legacy decoder for
+      this unreleased exchange. This is a private prerequisite, not a partial public API handoff.
+- [x] Implement and privately prove ordinary pipe-consumer completion in the shared process pump and
+      packed DIRECT helper. Offered finite/live bytes need not all be consumed. On pump-observed
+      original-child exit or actual broken input pipe, release pending input, stop borrowing the
+      source and close only owned stdin through the original record. Continue bounded output
+      collection. Cover no-read/prefix consumers, open sources, delayed output, exits 0/1/255,
+      buffered final records, real faults, original controls and endpoint lifetime. Notify SSH
+      before changing shared semantics; leave its code and policy untouched. This local proof does
+      not establish native Windows mapping, joint SSH acceptance or complete live-I/O support.
+- [ ] Complete native and joint SSH input-completion proof before public live-I/O acceptance.
+      Distinguish offered finite bytes, live source EOF and a consumer that finishes or closes input
+      early. Cover commands that do not read stdin, prefix consumers, sources that remain open, real
+      source faults and output/control facts buffered when input ends. Preserve independently
+      observed completion, original controls, bounded collection and endpoint release; never infer
+      termination from missing observation. Coordinate any shared pump semantic change with the SSH
+      lane before integration. Local core and packed-helper tests alone do not satisfy this
+      native/joint gate.
+
+The private Windows writer candidate adopts owner commit `8bae107ce` without changing SSH-owned
+code. Native CPython 3.13.16 probes established closed-reader native `BrokenPipeError`/Win32 232
+versus CRT `EINVAL`, temporary native zero-byte writes, and invalid-handle errors. The shared pump
+now writes through the native handle on Windows, retries only smaller unaccepted prefixes with a
+fixed bound, and preserves other errors. Local process, carrier and helper-bound suites pass;
+Windows-only cases skip on Linux. Temporary diagnostic warnings are removed. Independent review,
+composed validation and fresh native verification of this writer remain required; the native/joint
+checkbox stays open.
+
+- [ ] Complete the remaining live/terminal integration before additive RunContext acceptance:
+      MANAGED foreground live I/O, active managed output and attachment, shared terminal preparation
+      plus SSH-owned native relay adoption, supported workstation/backend proof and production
+      capture/spooling limits. Preserve requested profile, identity and sensitivity; never
+      downgrade, substitute capture, or infer guest termination from observation loss. The DIRECT
+      pipe prerequisite above does not narrow these requirements.
+- [ ] Replace whole-response closed MANAGED output retrieval with the
+      [bounded range design](preparation-lld.md#closed-managed-capture-ranges). Keep the existing
+      protected run store, whole-spool length and digest checks, exact launch/end facts and one
+      helper borrow per page. Bound encoded provider responses and collector memory; propagate
+      public cursors and preserve exact-EOF, beyond-EOF and suppression semantics. Collect full
+      results with every page's custody under the original deadline, retaining known application
+      completion and verified partial output after a later failure. Privately review and prove
+      multi-page binary output, corruption outside the selected range, end-fact mismatch, partial
+      retrieval and no replay. This does not complete DIRECT spooling, active output, the production
+      capture default, staging or native acceptance.
+- [ ] Obtain native root/cgroup/SSH acceptance for the implemented private
+      [managed foreground pipe design](managed-live-io-lld.md): settled buffered launch and keeper
+      admission, protected live-direction metadata, one controller-owned per-run socket and one
+      foreground relay under the original owner. Prove bounded admission, independent directions,
+      lease/stop progress under pipe pressure, no retained live output, exact socket disposal and
+      actual presentation in the foreground result. The implementation checkpoint below is not
+      native acceptance; this item does not call for a second relay or controller.
+- [x] Compose private MANAGED OPERATION live execution through the existing ordinary helper owner,
+      settled launch and dedicated keeper. Validate before start effects, admit one relay attempt,
+      release endpoints and combine actual presentation with independent durable status before
+      checking. Privately review and prove pipe-failure preservation, retained custody without
+      overlapping polls, admission expiry and original output policy. This is a local prerequisite,
+      not native acceptance, active durable output or a complete additive RunContext handoff.
+- [x] Implement and privately review the root-only fixed staged-helper loader foundation. Validate
+      active receipt control and whole-object integrity, borrow its held verified descriptor and
+      enter the original independently prefix-checked bootstrap without compiling request bytes or
+      copying the whole input. Prove local packed Python 3.11 behavior, status/control preservation
+      and descriptor cleanup. Host orchestration, token obligations, lease ordering and native
+      acceptance remain separate gates.
+- [ ] Connect the planned chunked helper/request staging before public managed acceptance. Preserve
+      the existing Proxmox 65,536-byte whole-POST floor and its 10,000-byte stdin regression test.
+      Expanded inline helper source already exceeds that envelope in the local constructor proof;
+      lowering the fixture, increasing the provider ceiling or merely rejecting required large
+      inputs would not complete this work. Reuse operation-owned scratch transfer, exact
+      range/whole-object verification and attributable cleanup for helper code and payloads. Stage
+      the original prepared helper input, including its fixed packaged prefix, rather than embed a
+      second service loader in the start bundle or attempt unproved descriptor transfer across
+      systemd. A small generic root/guest loader verifies the owned whole object, gives its held
+      descriptor to the original trusted bootstrap, and never compiles request bytes. Record tokens
+      before creation, retain uncertain stage/activation debt and preserve the original one-shot
+      launch. Bulk preparation must not silently extend or reuse an expired operation lease; keep
+      that ordering gate open until the complete orchestration is proved.
+- [ ] Implement and prove the
+      [late managed-start control](preparation-lld.md#late-managed-start-control) ordering: one
+      version-two body plus an existing-width lease/null tail, full control headroom before effects,
+      bulk transfer before initial sampling and one frozen small append afterward. Keep inline and
+      staged request grammar identical; preserve original lease freshness checks, bounds,
+      first-effect token ownership, partial-append debt and no replay. The codec alone does not
+      complete staged execution.
+- [x] Implement and privately review the managed-start version-two codec: one immutable body without
+      a lease plus an exact 512-byte canonical lease/null tail. Reuse complete-control headroom and
+      the existing full request validator on reconstruction; refuse malformed tails, embedded leases
+      and lifetime or launch mismatches. Prove packed Python 3.11 decoding and stable
+      complete-envelope length across clock digit changes. This codec prerequisite does not complete
+      host staging, actual late sampling, recovery or native acceptance.
+
+- [x] Implement and privately review the prepared-input stage ownership prerequisite. Select the
+      fixed root/full-guest entry without changing the file-stage grammar; record a token-only exact
+      cleanup binding before BEGIN and keep scratch debt separate from ordinary helper custody.
+      Prove bounded acknowledged offsets, interrupted-append refusal, cleanup-only historical
+      reconciliation, activation-closure gating and fresh finite cleanup-only continuation. This
+      private primitive does not connect production launch, actual late sampling or recovery.
+- [ ] Complete prepared-input ownership continuations with the parent integration. Retain the actual
+      stage before any effect and the actual delivery handles needed for same-process drain, never
+      only a claim of quiescence. Reconcile lost bookkeeping replies without replaying helper
+      effects. Route cleanup with its actual fresh deadline, not a callback closing over expired
+      preparation time. Add exact process-loss recovery for the token-only row; historical or
+      missing receipts never grant activation or prove absence, and unresolved receipt-acquisition
+      gaps remain explicit debt. Prove these together with the complete staging/late-lease gates
+      above, not as a substitute for them.
+- [x] Complete the pre-entry borrow-publication interruption seam across helper owners. A control
+      that escapes after core admits a borrow but before its parent retains the returned handle must
+      not strand same-process cleanup. Use a general exact admission or core-owned unused borrow
+      drain, not adoption of an unidentified borrow by a particular stage. Process-loss recovery
+      alone does not satisfy this continuation gate.
+- [x] Add conservative token-only prepared-stage process-loss recovery. Establish an exact current
+      recovered, sealed owner and a pending ledger containing only this stage row before a new
+      recovery span admits support. Other pending predecessor helper/activation rows refuse this
+      path; neither caller booleans nor receipt presence substitutes for their closure. Every
+      exchange and resolution retry requires its exact fresh protected action. Historical receipt
+      reconciliation supplies cleanup debt only; missing or invalid receipts remain debt. Resolve
+      only this row after positively closed CLEANED evidence, retain actual recovery delivery on
+      interruption, and keep all-platform availability and general predecessor-drain gates open.
+      Before every recovery helper, publish an exact revision-fenced version-two in-flight wrapper
+      on this same row. A later recovery refuses that marker even after its availability support
+      rows have been disposed: support closure does not prove this helper terminated. Restore the
+      original version-one payload only after actual helper, local delivery and dispatch closure, or
+      resolve the marker directly after positively closed cleanup. Retain and reconcile exact lost
+      publication replies without replaying a helper.
+
+The private pipe checkpoint at `6b8fe8128` passes 1,318 scoped tests with one skip and strict typing
+across 1,442 sources. Changed-file Python and Markdown quality checks pass. Project, complexity and
+generic correctness source reviews are clear after removing an unnecessary writer alias and reusing
+the existing sink-result validator. The tests exercise actual local packed helpers, including Python
+3.11, not native SSH or platform workflows. A prior overly broad selection also ran the separately
+owned SSH suite inside a network namespace with loopback down; its errors and failures are not SSH
+validation, and that suite is excluded from this private unit's final selection rather than reported
+green.
+
+The prior bounded probes established the baseline defect: an early-exiting command with an open live
+source returned INPUT failure, sometimes before all final records were collected. The shared
+consumer-completion increment at `0d9c193bb` corrects it without an input-policy flag. The lead's
+combined local selection passes 1,396 tests with one existing skip; strict typing covers 1,443
+sources, and changed-file quality checks pass. Core and packed-helper worker suites separately pass
+195 and 629 tests, each with one existing skip; these totals overlap rather than add to the lead's
+run. Project, complexity and generic correctness source reviews are clear. Exit observation remains
+sampled: no further source call starts after the pump's positive observation, not a promise of zero
+race with physical exit between samples. SSH was notified before implementation, but joint native
+acceptance is still owed. MANAGED live I/O, active output, terminal/native proof, production capture
+limits, complete RunContext and production ownership remain required and unfinished.
+
+The private managed pipe prerequisites through `29faed41f` add protected direction metadata, the
+one-use controller socket, bounded fixed relay and host presentation observation. All three private
+source-review lanes are clear for that head, including the corrected output-starvation and stalled
+relay lifetime findings. The lead's combined selection passes 800 tests and fails two unchanged
+Proxmox managed-envelope tests; strict typing passes across 1,456 sources. This is not a green
+checkpoint or native acceptance. The later private custody increment uses the same ordinary helper
+borrow, optional native closure delivery and retained run. Foreground result composition then keeps
+live presentation separate from durable application status, checks after composition, preserves safe
+job/control facts and prevents polling over unsettled relay custody. Its focused local selection
+passes 158 tests; strict typing passes across 1,460 sources. Those fixtures do not prove native
+systemd, root identity, cgroups or SSH. Staging, active durable output, terminal preparation,
+platform composition and the complete additive RunContext gate remain open.
+
+The private foreground-composition review reproduced eight failing cases around expiry inside relay
+admission and retention after unsettled input-only observation. The correction uses one entry expiry
+sample and the existing cause-free pre-borrow deadline exception, without swallowing borrowed
+control facts. Unobserved outputs use the acknowledged run's retained policy without another poll.
+The corrected selection passes 167 tests and strict typing across 1,460 sources; the earlier broad
+regression selection passes 1,396 tests with one existing skip. These remain local results, not
+resolution of the native envelope, staging or complete-surface gates.
+
+The staged-loader foundation at `9b4979081` clears all three private source-review lanes. Worker
+tests pass 152 cases with one skip, including actual packed Python 3.11. After composition at
+`24f3fcec9`, the lead's file/staging/managed selection passes 2,316 tests with 25 skips, strict
+typing passes across 1,465 sources, and changed-file quality gates pass. The representative complete
+Proxmox activation request measures 24,003 bytes, not a worst-case or native guarantee. The ordinary
+managed-start path still has its two unchanged envelope failures because host staging is not yet
+connected. Remaining allowance is not proof of bounded EOF delivery or complete helper lifetime;
+native closure custody, first-effect tokens, stage cleanup and the late-lease ordering remain owed.
+
+The late-control codec at `6405d91b8` clears project, complexity and generic correctness source
+reviews. The lead's managed-start, operation and independent-start regression selection passes 531
+tests and retains exactly the two known Proxmox envelope failures. Strict typing passes across 1,466
+sources. These are local codec and regression results, not a green public handoff. The next step
+connects operation-owned staging before actual initial lease sampling; neither the codec nor its
+constant-size tail establishes that ordering on its own.
+
+The prepared-input staging prerequisite at `d6a6e869f` clears project, complexity and generic
+correctness source review. The lead's combined file, staging, codec and managed composition
+selection passes 2,501 tests with 25 skips; strict typing passes across 1,472 sources and
+changed-file quality gates pass. The separate fixed-root selection passes 238 cases, including
+packed Python 3.11 refusals and a complete Proxmox request carrying the maximum 12 KiB wire chunk.
+Those are local measurements, not native or worst-case connection proof. The stage owner is not yet
+retained by production launch paths. Actual activation/late sampling, same-process and process-loss
+recovery, and the two known managed inline-envelope failures remain open. The unused registration
+flag found by complexity review is removed; no recovery engine or new host lock is introduced.
+
+The private composition through `e150a7886` connects OPERATION launch to body preparation, owned
+staging and one late tail. Its corrected local scripted selection passes 448 cases and strict typing
+covers 1,479 sources. The 10,000-byte staged workload is reconstructed unchanged while every actual
+helper request passes the existing complete Proxmox serializer limit. A final-preparation refusal
+proves no activation entry and permits exact stage cleanup without fabricated delivery evidence. The
+parent retains actual START helper custody for same-process continuation, and closing stage cleanup
+uses only its already admitted token binding. The duplicated stage uncertainty flag found by
+complexity review is replaced by the retained active-call state. All three private review lanes
+clear the corrected unit, including the native closure fence: a generic zero carrier exit cannot
+bypass false selected native proof. The broader file/staging selection passes 2,501 tests with 25
+skips at `bb83b77eb`, before that narrow correction, not an exact-head broad result. Changed-file
+quality gates pass at the corrected head. These are private implementation and local-test facts, not
+whole-PR or native acceptance. INDEPENDENT staging, process-loss recovery, the pre-entry
+borrow-publication seam and the two old inline-envelope fixtures remain open, along with the
+complete-surface gates above.
+
+The next private unit adds INDEPENDENT staging with one null tail and no clock sample. It retains
+the full original input and actual activation custody before effects; unknown launch debt stops
+ordinary owner admission while exact scratch cleanup remains possible. The general core shutdown
+primitive revokes only a strictly fenced pristine local borrow, without changing durable debt.
+Prepared-stage acquisition records no-entry proof before requesting that borrow. Root's combined
+260-case selection passes, including lost BEGIN/CHUNK acquisition replies, exact local row retry and
+native aggregate close. The review found that generic known helper completion with unsettled local
+delivery required manual child cleanup; the correction drains actual local delivery before helper
+bookkeeping, and normal workflow close now owns the entire path. The two old envelope fixtures use
+the selected delivery constructor while preserving their names, complete 65,536-byte serializer
+limit and exact 10,000/8,192-byte workloads. Worker tests pass both fixtures and all 46 cases in
+their module; this is constructor evidence, not native proof. Combined broad gates and the three
+private source-review lanes initially remained pending. The combined selection at `8f16ab4dc` passes
+3,154 tests with 25 skips; strict typing passes across 1,483 sources and changed-file quality checks
+pass. Project and complexity source reviews clear that head. Generic correctness review finds a
+reachable concurrent aggregate-cleanup race that can dispatch an untracked closing helper. Serialize
+the entire native workflow cleanup with a non-blocking per-workflow lock, publish stop intent before
+acquisition, and prove competing cleanup refuses without helper entry or early owner release. The
+private correction adds one aggregate lock and four deterministic concurrent, reentrant and
+interrupted-route regressions; its worker selection passes those four cases and 231 adjacent cases.
+Conservative stage recovery now retains a revision-fenced in-flight marker before helpers and actual
+dispatch/local custody through interrupted replies. Its worker selection passes 68 focused and 420
+adjacent cases, with strict typing across 1,486 sources. Combined exact-head gates and independent
+review of both corrections remain pending. No full helper-owner audit, all-platform process-loss
+recovery, complete RunContext surface or PR acceptance is claimed.
+
+The conservative recovery and aggregate cleanup unit through `e425dcb46` clears project (Astra),
+complexity and generic correctness source review. The root combined selection at `4a39ea446` passes
+3,424 cases with 25 skips; final strict typing covers 1,487 sources and corrected changed-file
+quality checks pass. The final source delta removes three unused candidate-storage lines. These
+facts close the bounded conservative-recovery prerequisite, not generic native predecessor drain.
+
+The borrow-publication audit classifies all 21 acquisition sites. Thirty actual native-workflow
+composition cases inject a lost reply after core admission and before the returned handle reaches
+the helper owner. DIRECT, ordinary files, local upload/download, managed start/shell/observe/dispose
+and guest/admin/paired-agent preparation preserve original control and prove no selected helper
+entry. Each also exercises explicit aggregate retry with a retained platform hold. Existing stage
+BEGIN/CHUNK acquisition cases and core retirement tests cover their distinct mechanisms. Private
+gate-setup and standalone target/shell/read alternatives receive structural ordering review, not a
+new native-facade acceptance claim. The worker's corrected broad selection passes 2,755 cases with
+25 skips; clearing inherited setgid on its synthetic sandbox corrects the earlier environment
+failures without a production change. Root composition at `5efc5fd15` passes 229 cases and strict
+typing across 1,490 sources. This closes the specific pre-borrow-publication gate, not arbitrary
+bytecode interruption or loss after a complete parent call returns. Independent review of the new
+test-only audit and full-suite fixture corrections remains pending.
+
+The broader non-integration run at `e425dcb46` records 20,514 passes, 55 skips, 30 failures and six
+collection errors. It is not a green handoff. Provider module collisions are corrected with test
+package markers; all 2,797 provider tests then pass. Three outdated transport fixture modules are
+adapted without changing production behavior; their worker selection passes 702 cases with one skip.
+Reusing an existing environment refreshed to this checkout resolves missing installed CLI entry
+points; the corrected harness selection passes 121 cases with one skip, leaving only its offline
+packaging case. That packaging test separately passes with its real build dependencies. The
+shared-pump consumer-completion fixture request is posted on SSH #832. Two other SSH failures come
+from older carried fixtures already corrected in SSH's current head, not new #832 defects. Full
+joint exact-head validation remains required after composition, along with the native and
+complete-surface gates.
+
+- [x] Bind the owning operation's copied, immutable final environment and sensitivity provenance to
+      execution views. Preserve core-protected values under per-call overrides and passive
+      `with_env` derivation, retain the exact identity/carrier/owner/deadline and combine
+      sensitivity monotonically across DIRECT/MANAGED and both lifetimes. Resolve no config or
+      secrets in this layer. Prove suppression versus explicit live presentation, value-free
+      diagnostics, pre-effect refusal and unchanged lifetime; keep production context population and
+      grant activation with their existing gates.
+
+The private bound-environment worker implements that shape with one immutable copied value and
+`ExecutionAccess.with_env`, without a resolver, namespace-specific permission service or new carrier
+contract. Its 59 focused and 433 adjacent cases pass, including actual DIRECT/managed preparation,
+protected collisions, inherited sensitivity and explicit live presentation. Root composition at
+`ec34ca120` passes 3,609 cases with 25 skips, strict typing across 1,492 sources and changed-file
+quality checks. Project (Astra), complexity and generic correctness source reviews clear the
+environment, audit, fixture and package-marker unit. A pre-existing README paragraph incorrectly
+claimed all MANAGED paths reject live endpoints; its correction distinguishes inline preparation
+from OPERATION managed pipe execution. These results close the private environment-view increment,
+not production context population, native acceptance or the complete-surface gate. The full joint
+non-integration suite must still be rerun after its disclosed fixture/composition corrections.
+
+- [x] Compose explicit no-idle-stop independent-job availability in both passive and owned
+      AWS/Azure/GCP binding paths. Keep the shared SSH helper conservative by default and prove
+      unsupported default, generic SSH and WSL2 bindings refuse before shell lookup, reservation or
+      dispatch. This is a platform fact, not a claim against explicit stop, reboot, host loss or
+      external policy, and not WSL2's still-required recoverable job-length hold.
+- [x] Complete and privately review immutable ordinary identity and semantic route metadata on the
+      existing target, plus independent unavailable/withheld absence reasons on the existing
+      RunContext. Bind native admin/selected-agent metadata from their exact prepared ordinary
+      plans, normalize reasons to absent targets and preserve incoming absent-agent reasons during
+      native reconstruction. Add no discovery, carrier access, lifetime extension, public package
+      export, recipient enforcement or migration.
+
+The combined private checkpoint at `6f3cec86c` clears independent project (Astra), complexity and
+generic correctness source reviews. Cloud worker selections pass 174 focused and 396 adjacent cases;
+metadata selections pass 119 focused and 2,465 adjacent cases with 25 skips. Root strict typing
+passes across 1,493 sources, and changed-file quality passes for 103 Python and ten Markdown files
+(spelling checks cover the Markdown files selected by repository configuration).
+
+The corrected full local non-integration run at that same head records 20,989 passes, 55 skips and
+four failures in 344.17 seconds, without collection errors. Three failures are the disclosed carried
+SSH expectations: two already corrected in the SSH owner's head, and the offered-input fixture
+adaptation requested on #832. The fourth is the packaging test's intentionally empty build cache in
+the offline test namespace. That exact packaging test separately passes with package-download access
+at the same head. This is not a green full joint gate; owner-authored SSH composition and native
+acceptance remain outstanding. Source fingerprints and unchanged heads are recorded for both root
+runs. Terminal synthetic views are retired after retaining logs, exits and source evidence; the
+failed suite's files are archived and compared before removing its uncompressed view.
+
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
 one all-callers cutover. PR #830 publishes this design only. The following implementation PR adds
 the new surface; migration and removal follow in their own PRs. Permissions are groundwork until
 removal: do not enforce new recipient grants or the successor core file ceiling, or rely on their
 isolation, in coexistence releases. Operational safety and selected profile guarantees still apply.
 
-The first checkbox below describes this section's delivery outcome, not the next construction step.
-Complete target identity, execution/jobs, FileAccess, platform composition and whole-workflow
+The additive PR supplies explicit new operation-context entry points yielding the existing
+RunContext type. It proves complete new-only workflows through those entry points; it does not
+populate the 24 legacy context builders or acquire claims in their existing workflows. Consumer
+migration batches adopt those entry points later, before their activation and rollback effects.
+
+The RunContext-accessor checkbox below describes the delivery outcome, not the next construction
+step. Complete target identity, execution/jobs, FileAccess, platform composition and whole-workflow
 validation first through private composition seams. Only then expose the two passive RunContext
 accessors as one complete additive surface. An accessor-only or run-only target is not an acceptable
 intermediate public API.
 
+- [x] Introduce the private passive `ExecutionTarget` over already-prepared execution and file
+      views, without acquiring ownership or adding forwarding, cleanup or authorization behavior.
+      The native aggregate retains its custody and supplies this target over its exact existing
+      views. WSL2 and Proxmox carriers bind one immutable channel description, shared by repeated
+      feature reads and the target. Focused composition tests exercise file and command operations
+      through these same views and prove that retaining the target does not extend the closed
+      operation's lifetime. Package exports, new RunContext accessors, derived environment views,
+      remaining file/I/O methods, broader platform composition and native acceptance are not
+      completed by this private increment; the complete additive-surface gate remains open.
+- [x] Implement and privately review the passive constructor bindings for `admin_execution_target()`
+      and `agent_execution_target()` alongside unchanged legacy targets. Store exactly the supplied
+      independent views without inspection, activation, fallback, authority manufacture or cleanup
+      ownership. The paired checkpoint at `a730e5d3` clears all three source-review lanes; twenty
+      focused context/capability cases and the lead's 706-case composition selection pass. This
+      private construction increment does not populate production contexts, prove whole-workflow
+      lifetime or legacy-import independence, activate permissions, or constitute an accessor-only
+      public handoff. Deliver the complete surface under the next checkbox, not these bindings
+      alone.
 - [ ] Add `admin_execution_target()` and `agent_execution_target()` to the existing RunContext,
       returning the new target without changing legacy accessors or callers. Use permanent names, no
       union target type, stack selector or forwarding adapter. Prove passive construction/access and
       composition-owned lifetime, no new effects on existing callers, and independent new-stack
       usability with legacy modules unavailable. Do not claim restricted recipient authority.
+- [x] Add the independent passive `platform_host_execution_target()` constructor binding and its
+      supplied absence reason for platform-operation stages. Keep guest and legacy views separate,
+      preserve immutable pass-through behavior, and prove a host can be supplied before any guest
+      exists without inspection, activation or ownership manufacture. This is private construction
+      groundwork; complete host execution/files, ownership, provisioning/recovery and native
+      acceptance before a production platform-host handoff. Existing context builders remain
+      unchanged, and this introduces neither active recipient enforcement nor a new transport.
+
+The passive host binding is integrated from worker `0e601f4c9` at `a768a3dc9`, with final reviewed
+code at `a0db5e20d`. All three private source-review lanes are clear. The worker's 114 focused and
+adjacent context cases and the lead's 2,378-case platform/composition selection pass, as do complete
+strict typing and changed-file quality checks. Ordinary host execution does not require a fabricated
+managed VM identity; managed jobs retain their actual target requirement. This closes the private
+constructor checkbox only. Complete additive context delivery, host files and recovery, native
+acceptance and permission activation remain separate open gates.
+
+- [x] Complete and privately review paired native admin/agent preparation using an explicit
+      core-selected agent row on the same VM. Reuse one file operation, execution operation, numeric
+      guest bootstrap, carrier, owner and deadline; retain both account preparations and publish no
+      partial pair on requested-agent failure. The agent view has its own ordinary body plan and no
+      elevated API. Bind managed user-default shell lookup to that same guest/bootstrap, including
+      the independent-start seam. Preserve no-bootstrap refusal, original control/cause and
+      uncertain custody without introducing a persisted identity mode. Scoped tests and source
+      reviews establish this private unit only; native cross-user proof, production context wiring
+      and complete additive RunContext remain under the broader unchecked gate above.
+
+The paired private checkpoint at `9d490df01` passes 645 scoped cases, including both existing
+recovery preparation suites, plus strict typing across 1,438 sources and changed-file quality
+checks. Project, complexity and generic correctness source reviews are clear after correcting the
+optional validator argument for recovery callers. Existing-job actions remain operation/resource-
+and VM-bound, not recipient-account authorization; permission activation retains that separate gate.
+These results do not establish native credential transitions or close the broader additive
+RunContext gate.
+
+- [x] Implement and privately review the native RunContext entry boundary over the existing native
+      operation. Acquire one exact VM claim before platform work and yield an ordinary context with
+      its prepared admin and optional explicitly selected agent targets. Preserve config,
+      descriptive scope, scoped secret reader and legacy handles without invoking or falling back to
+      them. Support same-VM descendant scopes and SYSTEM descriptions without deriving grants or
+      changing claim scope. Prove command/file use through the context, construction/body/control
+      cleanup, conflict-before-effects and retained-view refusal after close. Keep canonical SSH,
+      production activation/creation/rollback propagation, full platform and public-surface
+      acceptance under their broader unchecked gates; this private entry point does not complete
+      them.
+
+The native-context private checkpoint at `29089e229` passes 696 scoped cases and strict typing
+across 1,439 sources. Changed-file Ruff/format and Markdown quality checks pass. Independent
+project, complexity and generic correctness source reviews are clear. Actual packed helper command
+and file write/read tests use simulated guest admission; native credential transitions and complete
+backend workflows remain unproved. Existing production callers and their activation/rollback
+ownership are unchanged, so the broader additive RunContext and migration gates remain open.
+
 - [ ] Add platform-owned new-stack connection/provisioning composition without decoding opaque VM
       metadata in core or constructing legacy targets. Apply the
       [2026-09-21 factory inventory](migration-strategy.md#new-target-composition-inventory-2026-09-21):
@@ -4574,11 +5859,12 @@ intermediate public API.
       WSL2 distribution/user binding, independent Lima delivery and explicit SSH placement-host
       endpoint/account/trust/OS facts. Preserve unchanged legacy hooks during coexistence; new
       factories cannot obtain their inputs through those hooks.
-- [ ] Implement and prove the first independent native-binding hooks for Proxmox and WSL2 under the
-      [core binding contract](execution-contract.md#core-native-binding). Preserve passive
-      construction, actual delivery-account facts, explicit runtime selection and old-hook behavior.
-      Proxmox uses the configured CA for both platform API and new QGA delivery, without accepting
-      legacy verification bypass. Other platforms, provisioning-result integration and complete
+- [ ] Obtain native acceptance for the implemented first independent native-binding hooks for
+      Proxmox and WSL2 under the [core binding contract](execution-contract.md#core-native-binding).
+      Preserve passive construction, actual delivery-account facts, explicit runtime selection and
+      old-hook behavior. Proxmox uses the configured CA for both platform API and new QGA delivery,
+      without accepting legacy verification bypass. Existing private implementation checkpoints do
+      not supply native evidence. Other platforms, provisioning-result integration and complete
       target identity composition remain part of the required gate above.
 - [ ] Expose native binding resolution as an explicit preparation operation with a deadline, before
       passive target/RunContext construction. The remaining-platform inventory shows that cloud
@@ -4591,6 +5877,179 @@ intermediate public API.
       and permanent developer teaching without adding an alias or claiming cloud/provider and
       create-time adoption. All three private lanes accept this correction at `4a53c39a`; the
       broader native composition gate above remains open.
+- [x] Implement and privately review buffered host-local Lima carrier delivery using the existing
+      process owner, original deadline and explicit bootstrap shell. Disable implicit start,
+      reconnect, UI and host-environment propagation; preserve literal prepared argv through a fixed
+      Bash trampoline and keep nonzero client completion ambiguous. At `c99d37651`, the lead's
+      carrier/native/context selection passes 254 cases with one skip and strict typing passes
+      across 1,438 sources. Project, complexity and generic correctness source reviews are clear.
+      Actual local process regressions cover assignment-looking and option-looking executables,
+      binary I/O and sensitivity. These are not native Lima quoting or workstation proofs.
+      Delivery-account observation, provider identity, activation, SSH placement-host composition,
+      provisioning, rollback and complete RunContext delivery remain required and unfinished under
+      the broader factory gate.
+- [x] Separate private owned availability from native route selection across WSL2, Proxmox, AWS,
+      Azure and GCP, with common guest preparation/control facts retained by core. Preserve native
+      configuration refusal before provider effects, including persisted AWS route metadata, while
+      availability-only paths need no native public endpoint, ingress or guest probe. Worker
+      `9033ce786` and the combined source checkpoint `7031b933e` retain real WSL hold READY checks,
+      Proxmox's selected API connection and one original deadline. This establishes private source
+      composition, not a complete canonical context, creation/recovery or native acceptance.
+- [x] Complete the private local Lima owned-composition checkpoint and its combined review. Retain
+      directory identity/custody, bounded private observations, separate availability/native stages
+      and one-shot startup reconciliation under the original owner/deadline. Validate combined
+      stage/context/provider behavior and matching permanent/design documentation. Worker
+      `980f04c38` adds fresh selected QEMU/VZ-only independent availability without native route
+      construction; unknown or WSL drivers receive no such guarantee. It reports 158 focused passes
+      with one native-Windows skip, 262 earlier adjacent passes and strict typing across 1,502
+      sources. Lead integration and the three independent source lanes clear `7031b933e` below. Keep
+      native Windows mapping, the WSL driver's non-waking power path, remote SSH platform-host
+      composition, create/rollback and installed-platform acceptance open.
+
+The combined availability/local Lima checkpoint at `7031b933e` passes 1,534 VM, stage, provider,
+binding, context and Lima tests with one native-Windows skip; strict typing covers 1,502 sources.
+Changed-file Ruff/format, Markdown formatting/lint, spelling and source fingerprints pass across 131
+Python and 11 Markdown files. Independent project and complexity reviews at `gpt-6-astra` and a
+generic correctness source review are clear after correcting early AWS native metadata validation.
+Reviewers did not execute native tests. The optional GCP duplicate-response-decoding simplification
+was not taken; no correctness failure was established. The full-suite result remains the earlier
+20,989 passes and four failures recorded above, not a green combined acceptance result. Complete
+canonical context, preparation-time route checks, generalized SSH host access, creation/recovery,
+live/terminal integration and all native evidence gates remain open. No new public review signal,
+permission enforcement, legacy migration or merge readiness follows from these private checks.
+
+- [ ] Complete and independently review the private shared native/canonical context checkpoint.
+      Worker `6cbb94112` supplies required-route `vm_execution_context`, shared `VMOperation` and
+      aggregate cleanup, canonical passive endpoint/account/SSH validation before provider effects,
+      native-free availability/guest composition, selected availability continuity and route checks
+      around successful guest/admin/agent preparation. It reports 375 focused passes, 1,031 adjacent
+      passes and strict typing across 1,498 sources before root Lima integration. Validate combined
+      actual platform adapters, including Lima's repeatable fresh power observations, shared
+      command/file helpers and managed job paths; retain matching collateral and all broader gates.
+
+Private review identified an effective-deadline admission defect in that checkpoint. Worker
+`4b32d3840` makes deadline selection passive, checks the selected route before DIRECT borrowing and
+file requests, and checks both OPERATION and RESOURCE starts before initial clock/reservation
+effects. Directory children retain the same file callback; expired file budgets preserve normal
+DEADLINE reduction without provider I/O. The unused native forwarding wrapper is removed rather than
+retained as a compatibility surface. Worker gates report 380 focused and 601 adjacent passes, strict
+typing across 1,507 sources and clean changed-file lint/format. Lead combined validation and
+independent re-review remain required; the checkbox above is still open.
+
+The combined private source at `db5da5eb6` passes 1,985 scoped tests with one native-Windows skip
+and strict typing across 1,508 sources; matching file-quality checks pass after documentation-only
+formatting corrections. All three review lanes then identified remaining validation ordering: known
+unavailable MANAGED live I/O and invalid file/job arguments could reach provider admission first.
+Worker `708c00e0d` moves existing body, feature and file validation before that callback, without
+adding a validation framework. OPERATION and RESOURCE still check the route before their first
+effect. It reports 434 focused and 684 adjacent passes, strict typing across 1,509 sources and clean
+changed-file lint/format. Combined revalidation and independent re-review remain open; neither this
+checkpoint nor the earlier scoped counts establish native or full-suite acceptance.
+
+The lead's full non-integration run at `63a105a4b` returned 21,199 passes, 56 skips and 52 failures
+in 479.34 seconds. It is not a green suite. Most cloud failures still invoke the removed provider
+`prepare()` method; those tests must use the current staged composition without restoring a
+production compatibility wrapper. Three managed-admission failures need contract/fixture review, and
+Azure's concurrent credential cleanup needs diagnosis before changing its assertions. Three carried
+SSH fixtures and the isolated offline packaging failure remain separately recorded. The scoped run
+at that same pin passes 2,003 tests with one native-Windows skip, strict typing across 1,509 sources
+and file quality, but cannot replace the full result. The final read-bound correction `3b584c6ec`
+clears all three source-review lanes and 55 worker tests; combined regression correction and
+full-suite revalidation remain open. No completion checkbox or public handoff follows.
+
+Private corrections now include worker `dd548b472` for the three cloud regression modules and
+`145b9e046` for managed admission. The former retains actual staged startup/authentication fault
+reachability and makes Azure's after-cleanup refusal deterministic without weakening borrowed
+credential protection; 221 worker tests pass. The latter restores StateError for known unavailable
+managed binding, preserves ValidationError for mismatched supplied bindings, and replaces brittle
+route-read counts with actual lookup/clock/start ordering; 252 worker tests pass. Both report strict
+typing across 1,509 sources and clean changed-file quality. Combined review and full-suite
+revalidation remain required.
+
+- [ ] Complete private combined review and validation of Lima's provider/native observation split
+      (`43a0ed94a`, test portability follow-up `328440dda`). Preserve host-only WSL observations,
+      audited version-sensitive defaults, exact registration/directory checks, native account
+      resolution after availability, four input fingerprints and one-shot first import. Worker
+      evidence reports 1,597 broad adjacent passes with one native-Windows skip, 177 passes at the
+      production commit and 54 provider cases at the final tip, plus strict typing across 1,511
+      sources. These are fixture/source checks, not native Windows acceptance.
+
+The combined checkpoint at `088059e22` passes 2,225 targeted tests with one native-Windows skip,
+strict typing across 1,512 sources and changed-file quality. Project and complexity reviews are
+clear, but correctness review identified a stale Lima version cache across ordinary executable
+upgrades. Worker `b98d5a6a9` removes that cache: each ambiguous provider observation obtains fresh,
+bounded version evidence before choosing an inspector. Its two-observation regression changes 2.2 to
+2.1 at the same executable path and proves registration/BasePath checks precede guest-capable
+inspection; mismatched BasePath also refuses before WSL power listing. Worker validation passes 179
+tests with one native-Windows skip and strict typing across 1,512 sources. Combined revalidation and
+re-review remain required. Controlled package-build and installed-wheel proof at `088059e22` passes
+separately; it does not turn the earlier offline full-suite failure into a pass. No native or
+complete additive acceptance follows.
+
+All three independent source lanes clear the fresh-version correction at `b12b7ba9a`. The full
+non-integration run at that pin returns 21,312 passes, 56 skips and two failures in 393.39 seconds:
+the SSH-owned natural-exit input fixture already routed to its owner, and the isolated offline
+package-build test. The prior cloud and managed-admission regressions no longer fail. Separate
+controlled-dependency package-build and installed-wheel proof passes at the same pin, as do
+changed-file quality and source fingerprints. The full result remains a failure, not a green
+combined acceptance claim; SSH fixture adaptation, native evidence and the broader additive gates
+remain open.
+
+- [ ] Bind an actual operation-length availability hold for Lima's WSL driver before complete
+      additive acceptance. Reuse the existing WSL ownership/lifetime machinery where applicable;
+      host-only running snapshots do not prevent idle shutdown. Independent-job hold adoption
+      remains separately required before that lifetime can be exposed.
+
+Worker `36e487400` implements that private operation hold using the existing physical WSL owner,
+without changing lower WSL machinery or Lima's eventual delivery account. Durable READY and live
+native ownership precede user lookup and canonical preparation; guest boot/init checks and retained
+cleanup cover lost acknowledgments, unrelated debt and explicit release retries. It passes 234
+focused tests and strict typing across 1,513 sources. Two broader runs each return 1,817 passes, 12
+skips and one failure. A two-test diagnostic traces that failure to the existing port-forward
+command leaving its SIGINT handler installed, not to WSL hold behavior. A separate bounded
+restoration fix is in progress; combined validation, independent review and native Windows/Lima
+proof remain required. Independent-job survival and recovery remain separate gates.
+
+The separate correction `e5cd575bb` restores port-forward signal handlers on return, wait failure
+and partial installation failure, preserving forwarding while the tunnel is active. Nine
+Windows-selected regressions cover prior default/custom handlers, exact return/exception behavior
+and actual signal forwarding. Worker checks pass the 28-case owning module, the exact two-test order
+reproducer and the Windows-owner module (14 passes, nine skips), with scoped strict typing and
+style. This is a narrow existing signal-state bug fix, not a legacy transport migration or a change
+to the WSL interrupt test. Combined validation and independent review remain required.
+
+- [x] Implement and privately validate the Lima WSL operation-length hold adapter and the separately
+      diagnosed port-forward signal restoration. At `8919ccaf0`, the combined single-process
+      selection passes 2,342 tests with ten native/platform skips; strict typing covers 1,513
+      sources and changed-file quality passes across 159 Python and 12 Markdown files. Project and
+      generic correctness reviews find no material issue; complexity review requires the stale
+      execution README's no-hold claim to match the implemented operation hold, corrected alongside
+      this record. These are private implementation checks, not native Windows/Lima proof,
+      independent-job availability, recovery, complete host composition or additive acceptance.
+
+- [ ] Complete combined validation and independent review of the private Darwin buffered DIRECT
+      helper (`c9bd8f1dd`), then obtain native macOS proof with the approved interpreter
+      prerequisite. Preserve source/input separation, fixed fresh-exec identity and honest
+      source-cleanup uncertainty. This does not complete platform-host identity/files/context
+      composition, live foreground execution or any MANAGED host guarantee.
+
+- [x] Pin fresh-process independence tests to the reviewed checkout explicitly. Isolated Python
+      ignores `PYTHONPATH`, so a shared tooling environment's editable installation is not proof of
+      candidate source. Install retirement guards before any first-party import, reject preloaded
+      first-party modules, and validate package origins and search locations. Exercise an actual new
+      RunContext workflow with command bytes/status, files, JSON, claim release, exact cleanup and
+      post-close refusal. Keep this synthetic Linux proof distinct from native/platform and
+      supervised-job acceptance.
+
+The private fresh-process correction is integrated at `8843cbb4f`. Both subprocess suites now pass
+the reviewed checkout explicitly, reject preloaded first-party modules before installing retirement
+guards, and check each loaded package's origin and search locations. The Linux workflow drives
+ordinary new RunContext composition, literal arguments, binary input and separate output, exit 23,
+file and JSON operations, claim release, cleanup and post-close refusal. Four focused cases pass at
+that head; the combined file/context selection at `3abd73849` passes 2,561 tests with 25 skips.
+Project, complexity and generic correctness reviews clear this bounded test correction. It is not
+native platform, complete production recovery or supervised-job acceptance.
+
 - [ ] Prove fresh-process platform composition without retirement dependencies, not only calls to
       already-imported native hooks. The first-binding audit at `6149cf06` found that VM-platform
       package initialization imports Lima's legacy dependencies, while plugin initialization imports
@@ -4657,10 +6116,10 @@ complete additive RunContext remain open, so the broader factory checkbox is not
       certify legacy detached descendants by moving only a surviving parent into a new cgroup.
 
 - [ ] During sessions/console migration, replace the admin-owned multi-console agent-pane sudo path
-      with an explicitly bound and proved cross-user execution path. The current three-plan identity
-      composer does not support non-root delivery into a different non-root workload identity. Do
-      not hide this gap with ambient sudo or expose native agent authority merely to make this
-      consumer fit.
+      with an explicitly bound and proved cross-user execution path. Private numeric-bootstrap-bound
+      preparation supplies a non-root delivery-to-agent path, but does not migrate this consumer or
+      establish its native credential transitions. Do not substitute ambient sudo or infer an agent
+      target from the existence of an admin target.
 
 ## 7. Remove legacy and activate permissions
 
@@ -4674,9 +6133,10 @@ complete additive RunContext remain open, so the broader factory checkbox is not
 - [ ] Activate explicit core recipient grants and the successor file allowlist only with legacy
       absent. Inventory all approved workflow actions/paths before activation, then prove restricted
       file-only, observe-only, elevation and exact-profile views, denial before effects and no
-      indirect bypass. Keep operational failure, channel support and permission denial distinct.
-      This is not registration/consent or an in-process plugin sandbox. If either removal or
-      enforcement evidence fails, do not claim permission isolation or close the effort.
+      indirect bypass, including existing job references across admin and agent views. Keep
+      operational failure, channel support and permission denial distinct. This is not
+      registration/consent or an in-process plugin sandbox. If either removal or enforcement
+      evidence fails, do not claim permission isolation or close the effort.
 
 Each stage is independently green and updates permanent collateral to the behavior it actually
 ships. Temporary coexistence has an explicit final removal owner and gate, not indefinite support

@@ -14,6 +14,7 @@ from agentworks.capabilities.vm_platform.base import (
     ProvisionRequest,
     ProvisionResult,
     VMPlatform,
+    execution_power_remaining,
     provider_locator_remaining,
 )
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
@@ -23,7 +24,9 @@ from agentworks.capabilities.vm_platform.debian_release import (
 )
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
-from agentworks.errors import NotFoundError, StateError
+from agentworks.errors import LimitExceededError, NotFoundError, StateError
+from agentworks.execution.binding import _IndependentJobAvailability
+from agentworks.plugins.azure._identity import canonical_vm_id, parse_resource_id
 from agentworks.plugins.azure.auth import (
     _build_ambient_credential,
     _build_service_principal_credential,
@@ -71,8 +74,11 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
+    from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
+    from agentworks.operations import OperationOwner
     from agentworks.transports import Transport
+    from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 
 class _HasSubscriptionId(Protocol):
@@ -624,7 +630,6 @@ class AzureVMPlatform(VMPlatform):
                     ),
                 )
                 vm_result = vm_poller.result()
-                resource_id = vm_result.id or ""
 
             except Exception as exc:
                 output.detail("Cleaning up resources...")
@@ -647,6 +652,12 @@ class AzureVMPlatform(VMPlatform):
             # that repeat is safe because every teardown step is
             # idempotent or best-effort.
             try:
+                resource_id = vm_result.id or ""
+                created_identity = tuple(component.lower() for component in parse_resource_id(resource_id))
+                if created_identity != (az.subscription_id.lower(), az.resource_group.lower(), vm_name.lower()):
+                    raise StateError("Azure created VM resource identity does not match the requested VM")
+                vm_id = canonical_vm_id(vm_result.vm_id)
+
                 output.detail(f"Azure VM '{vm_name}' provisioned (IP: {public_ip})")
 
                 from agentworks.transports import SSHTransport
@@ -680,7 +691,7 @@ class AzureVMPlatform(VMPlatform):
             rollback_create_on_interrupt(compute, network, az.resource_group, vm_name)
             raise
 
-        metadata = {"resource_id": resource_id} if resource_id else {}
+        metadata = {"resource_id": resource_id, "vm_id": vm_id}
         return ProvisionResult(
             native_transport=prov_transport,
             platform_metadata=metadata,
@@ -800,6 +811,52 @@ class AzureVMPlatform(VMPlatform):
         _rg, name, _cfg = _parse_resource_id(resource_id)
         return name
 
+    def build_native_execution_access(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
+    ) -> OwnedNativePlatformAccess:
+        """Build passive Azure access under the selected VM operation owner."""
+        from agentworks.plugins.azure._native_execution_access import AzureOwnedAccess
+
+        return AzureOwnedAccess(vm, self, ctx, owner=owner)
+
+    def resolve_native_execution_binding(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+        config: Config | None = None,
+    ) -> NativeExecutionBinding:
+        """Read the exact owned endpoint and construct passive SSH delivery."""
+        from agentworks.plugins.azure.network import read_native_public_ipv4
+        from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_execution_binding
+
+        settings = require_ssh_settings(vm, ctx, config)
+        resource_id = _resource_id(vm)
+        identity = _parse_locator_resource_id(resource_id, vm_name=vm.name)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        current = self._read_exact_vm(vm, ctx, resource_id, identity, deadline=deadline)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        network = self._native_network_client(identity[2], ctx)
+        try:
+            provider_locator_remaining(deadline, vm_name=vm.name)
+            endpoint = read_native_public_ipv4(
+                network, current, subscription_id=identity[2].subscription_id, vm_name=vm.name, deadline=deadline
+            )
+        finally:
+            with contextlib.suppress(Exception):
+                network.close()
+        binding = ssh_execution_binding(
+            vm, endpoint, settings, independent_availability=_IndependentJobAvailability.NO_IDLE_STOP
+        )
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        return binding
+
     def observe_provider_locator(
         self,
         vm: VMRow,
@@ -808,15 +865,65 @@ class AzureVMPlatform(VMPlatform):
         deadline: Deadline,
         custody: LocalDeliveryCustody,
     ) -> ProviderLocatorObservation:
-        """Read the persisted ARM resource once and require its exact identity."""
+        """Observe the persisted ARM identity through one SDK read invocation."""
         resource_id = _resource_id(vm)
         resource_group, vm_name, config = _parse_locator_resource_id(resource_id, vm_name=vm.name)
-        remaining = provider_locator_remaining(deadline, vm_name=vm.name)
-        compute = self._compute_client(config, ctx)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        self._read_exact_vm(vm, ctx, resource_id, (resource_group, vm_name, config), deadline=deadline)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        return ProviderLocator(f"azure-vm:{resource_id}")
+
+    def observe_execution_power(
+        self, vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody: LocalDeliveryCustody
+    ) -> VMStatus:
+        """Passively read ARM identity and power, rejecting successful late results."""
+        resource_id = _resource_id(vm)
+        identity = _parse_locator_resource_id(resource_id, vm_name=vm.name)
+        execution_power_remaining(deadline, vm_name=vm.name)
+        observed = self._read_exact_vm(vm, ctx, resource_id, identity, deadline=deadline, expand="instanceView")
+        execution_power_remaining(deadline, vm_name=vm.name)
+        statuses = getattr(getattr(observed, "instance_view", None), "statuses", None)
+        if not isinstance(statuses, list):
+            return VMStatus.UNKNOWN
+        power_codes = []
+        for status in statuses:
+            code = getattr(status, "code", None)
+            if type(code) is not str:
+                return VMStatus.UNKNOWN
+            if code.startswith("PowerState/"):
+                power_codes.append(code)
+        if len(power_codes) != 1:
+            return VMStatus.UNKNOWN
+        return {
+            "PowerState/running": VMStatus.RUNNING,
+            "PowerState/stopped": VMStatus.STOPPED,
+            "PowerState/deallocated": VMStatus.DEALLOCATED,
+        }.get(power_codes[0], VMStatus.UNKNOWN)
+
+    def _read_exact_vm(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        resource_id: str,
+        identity: tuple[str, str, _MinimalAzureConfig],
+        *,
+        deadline: Deadline,
+        expand: str | None = None,
+    ) -> Any:
+        """Invoke one SDK read and reject a different persisted ARM identity.
+
+        Request budgets use the remaining deadline at dispatch. Disabled service
+        retries do not prevent SDK authentication resends; callers reject late
+        success against the original deadline and never manually replay reads.
+        """
+        resource_group, vm_name, config = identity
+        compute = self._native_compute_client(config, ctx)
         try:
+            remaining = provider_locator_remaining(deadline, vm_name=vm.name)
             observed = compute.virtual_machines.get(
                 resource_group,
                 vm_name,
+                expand=expand,
                 timeout=remaining,
                 connection_timeout=remaining,
                 read_timeout=remaining,
@@ -825,6 +932,8 @@ class AzureVMPlatform(VMPlatform):
                 retry_read=0,
                 retry_status=0,
             )
+        except LimitExceededError:
+            raise
         except Exception as exc:
             from azure.core.exceptions import ResourceNotFoundError
 
@@ -835,6 +944,9 @@ class AzureVMPlatform(VMPlatform):
                     entity_name=vm.name,
                 ) from exc
             raise wrap_azure_error(exc) from exc
+        finally:
+            with contextlib.suppress(Exception):
+                compute.close()
         observed_id = getattr(observed, "id", None)
         if not isinstance(observed_id, str) or observed_id != resource_id:
             raise StateError(
@@ -843,8 +955,19 @@ class AzureVMPlatform(VMPlatform):
                 entity_name=vm.name,
                 hint="do not target the same-name Azure VM; restore the persisted resource identity before retrying",
             )
-        provider_locator_remaining(deadline, vm_name=vm.name)
-        return ProviderLocator(f"azure-vm:{observed_id}")
+        return observed
+
+    def _native_compute_client(self, az: _HasSubscriptionId, ctx: RunContext) -> ComputeManagementClient:
+        """Construct an owned passive client using the site's explicit credential."""
+        from agentworks.plugins.azure._passive_clients import compute_read_client
+
+        return compute_read_client(self._get_credential(ctx), az.subscription_id)
+
+    def _native_network_client(self, az: _HasSubscriptionId, ctx: RunContext) -> NetworkManagementClient:
+        """Construct an owned passive client for linked endpoint reads."""
+        from agentworks.plugins.azure._passive_clients import network_read_client
+
+        return network_read_client(self._get_credential(ctx), az.subscription_id)
 
     def native_transport(
         self,

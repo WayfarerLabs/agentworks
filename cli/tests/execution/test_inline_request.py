@@ -19,6 +19,8 @@ from agentworks.execution._inline_bundle import FIXED_SOURCE
 from agentworks.execution._inline_control import ControlError, FailureCode, FailurePhase, parse_failure, parse_wait
 from agentworks.execution._inline_request import (
     MAX_MANIFEST_BYTES,
+    REQUEST_HEADER_BYTES,
+    REQUEST_MARKER,
     ManifestError,
     ManifestErrorCode,
     decode_manifest,
@@ -70,7 +72,10 @@ def test_canonical_manifest_is_closed_ascii_and_keeps_payload_out_of_helper_argv
     )
 
     assert isinstance(prepared.io.input, FiniteInput)
-    encoded = prepared.io.input.data
+    envelope = prepared.io.input.data
+    assert envelope.startswith(REQUEST_MARKER)
+    encoded = envelope[REQUEST_HEADER_BYTES:]
+    assert int(envelope[len(REQUEST_MARKER) : REQUEST_HEADER_BYTES], 16) == len(encoded)
     value = json.loads(encoded)
     assert encoded == json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
     assert set(value) == {
@@ -320,8 +325,8 @@ def test_host_refuses_oversized_manifest_without_dispatch(plan: IdentityPlan) ->
 @pytest.mark.parametrize(
     ("manifest", "code"),
     [
-        (b'{"version":1,"version":1}', FailureCode.INVALID),
-        (b"x" * (MAX_MANIFEST_BYTES + 1), FailureCode.OVERSIZED),
+        (REQUEST_MARKER + b"00000019" + b'{"version":1,"version":1}', FailureCode.INVALID),
+        (REQUEST_MARKER + b"00008001", FailureCode.OVERSIZED),
     ],
 )
 def test_actual_guest_revalidates_untrusted_manifest(manifest: bytes, code: FailureCode) -> None:
@@ -330,7 +335,9 @@ def test_actual_guest_revalidates_untrusted_manifest(manifest: bytes, code: Fail
     completed = subprocess.run(invocation, input=manifest, capture_output=True, timeout=10, check=True)
     frames: list[Frame] = []
     reader = FrameReader(NONCE, frames.append)
-    reader.try_write(memoryview(completed.stdout))
+    pending = memoryview(completed.stdout)
+    while pending:
+        pending = pending[reader.try_write(pending) :]
     reader.finish()
 
     assert completed.stderr == b""

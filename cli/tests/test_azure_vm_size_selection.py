@@ -164,7 +164,12 @@ class TestCreateProvisioningOutput:
             network_interfaces=_collection(SimpleNamespace(id="/nic")),
         )
         fake_compute = SimpleNamespace(
-            virtual_machines=_collection(SimpleNamespace(id="/vm-id")),
+            virtual_machines=_collection(
+                SimpleNamespace(
+                    id="/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/dev",
+                    vm_id="01234567-89ab-cdef-0123-456789abcdef",
+                )
+            ),
         )
 
         # The SDK clients are per-instance cached accessors (keyed by
@@ -269,7 +274,12 @@ class TestCreateOSDiskClamp:
             os_disk = params.storage_profile.os_disk  # type: ignore[attr-defined]
             self.disk_gib = os_disk.disk_size_gb
             self.delete_option = os_disk.delete_option
-            return SimpleNamespace(result=lambda: SimpleNamespace(id="/vm-id"))
+            return SimpleNamespace(
+                result=lambda: SimpleNamespace(
+                    id=f"/subscriptions/sub/resourceGroups/{rg}/providers/Microsoft.Compute/virtualMachines/{name}",
+                    vm_id="01234567-89ab-cdef-0123-456789abcdef",
+                )
+            )
 
     @staticmethod
     def _fake_network() -> SimpleNamespace:

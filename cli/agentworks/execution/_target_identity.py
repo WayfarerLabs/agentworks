@@ -18,6 +18,8 @@ from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import (
     RuntimePrerequisiteState,
     RuntimeSelection,
+    RuntimeTargetOS,
+    _NumericGuestBootstrap,
 )
 from agentworks.execution.carrier import Deadline, Dispatch
 from agentworks.operations import OperationOwner, release_borrow_after_custody
@@ -122,6 +124,7 @@ class _Composer:
         runtime_selection: RuntimeSelection,
         deadline: Deadline,
         state: _State,
+        bootstrap: _NumericGuestBootstrap | None,
     ) -> None:
         self._operation = operation
         self._delivery_account = delivery_account
@@ -130,6 +133,7 @@ class _Composer:
         self._runtime_selection = runtime_selection
         self._deadline = deadline
         self._state = state
+        self._bootstrap = bootstrap
         self._results: dict[str, tuple[AccountResolutionResult, IdentityExpectation]] = {}
 
     def run(self) -> TargetIdentityPreparation:
@@ -166,9 +170,18 @@ class _Composer:
         delivery: IdentityExpectation,
         workload: IdentityExpectation,
     ) -> IdentityPlan | None:
+        if (
+            delivery.euid != 0
+            and self._bootstrap is not None
+            and self._bootstrap.root_entry.mode is not IdentityMode.SUDO_ROOT
+        ):
+            self._state.fail(TargetIdentityFailure.IDENTITY_PATH)
+            return None
         if delivery == workload:
             return IdentityPlan(workload, IdentityMode.DIRECT)
         if delivery.euid == 0 and workload.euid != 0:
+            return IdentityPlan(workload, IdentityMode.DEMOTE)
+        if workload.euid != 0 and self._bootstrap is not None:
             return IdentityPlan(workload, IdentityMode.DEMOTE)
         self._state.fail(TargetIdentityFailure.IDENTITY_PATH)
         return None
@@ -250,6 +263,7 @@ def prepare_target_identity(
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> TargetIdentityPreparation:
     """Prepare ordinary and explicitly included elevated identity under one borrow."""
     _validate_inputs(
@@ -259,6 +273,7 @@ def prepare_target_identity(
         runtime_selection=runtime_selection,
         deadline=deadline,
         owner=owner,
+        bootstrap=bootstrap,
     )
     if deadline.expired:
         return TargetIdentityPreparation(
@@ -282,6 +297,7 @@ def prepare_target_identity(
             include_elevated=include_elevated,
             runtime_selection=runtime_selection,
             deadline=deadline,
+            bootstrap=bootstrap,
         )
     except BaseException as control:
         source = control.__cause__.preparation if isinstance(control.__cause__, TargetIdentityControlFact) else None
@@ -322,6 +338,7 @@ def _prepare_target_identity_observations(
     include_elevated: bool,
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> TargetIdentityPreparation:
     """Compose numeric plans using one caller-owned fixed observation boundary."""
     state = _State(operation)
@@ -333,6 +350,7 @@ def _prepare_target_identity_observations(
         runtime_selection=runtime_selection,
         deadline=deadline,
         state=state,
+        bootstrap=bootstrap,
     )
     try:
         return composer.run()
@@ -340,7 +358,9 @@ def _prepare_target_identity_observations(
         state.deadline_exceeded = state.deadline_exceeded or deadline.expired
         if state.deadline_exceeded:
             state.fail(TargetIdentityFailure.DEADLINE)
-        raise control from TargetIdentityControlFact(state.finish())
+        fact = TargetIdentityControlFact(state.finish())
+        fact.__cause__ = control.__cause__
+        raise control from fact
 
 
 def _validate_inputs(
@@ -351,6 +371,7 @@ def _validate_inputs(
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> None:
     for account in (delivery_account, workload_account):
         valid = True
@@ -368,3 +389,8 @@ def _validate_inputs(
         raise ValidationError("Target identity preparation requires one deadline")
     if not isinstance(owner, OperationOwner):
         raise ValidationError("Target identity preparation requires an operation owner")
+    if bootstrap is not None and (
+        runtime_selection.target_os is not RuntimeTargetOS.LINUX
+        or runtime_selection.explicit_path not in (None, "/usr/bin/python3")
+    ):
+        raise ValidationError("Numeric target identity preparation requires bound Linux system Python and bootstrap")

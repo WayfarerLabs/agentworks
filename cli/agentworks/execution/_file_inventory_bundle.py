@@ -1,4 +1,4 @@
-"""Build the fixed no-install bundle for bounded Linux directory inventory."""
+"""Build the fixed no-install bundle for bounded directory inventory."""
 
 from __future__ import annotations
 
@@ -7,8 +7,10 @@ from agentworks.execution._helper_bundle import RootGuestDelivery, build_file_he
 _PACKAGE = "_agw_file_inventory"
 _MODULE_NAMES = (
     "_helper_identity",
+    "_darwin_descriptors",
     "_file_stat",
     "_file_paths",
+    "_file_paths_darwin",
     "_file_snapshot",
     "_file_snapshot_read",
     "_file_objects",

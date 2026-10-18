@@ -11,11 +11,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import cast
 
 from . import _managed_job_wire as wire
-from ._managed_lease_wire import LeaseError, OperationLease, checked_lease, decode_lease, encode_lease
+from ._managed_lease_wire import MAX_LEASE_BYTES, LeaseError, OperationLease, checked_lease, decode_lease, encode_lease
 
 VERSION = 1
 MAX_LAUNCH_BYTES = wire.MAX_MANAGED_JOB_FACT_BYTES
@@ -27,6 +27,7 @@ MAX_CAPTURE_PREFIX_BYTES = wire.MAX_CAPTURE_PREFIX_BYTES_V1
 MAX_TEXT_BYTES = 4096
 MAX_ARGV = 256
 MAX_ENVIRONMENT_ENTRIES = 256
+OPERATION_LEASE_CONTROL_HEADROOM = MAX_LEASE_BYTES + len(b',"operation_lease":')
 
 _NAME = re.compile(r"[A-Za-z_][A-Za-z_0-9]*\Z")
 _RUN = re.compile(r"[0-9a-f]{32}\Z")
@@ -41,6 +42,26 @@ class RequestError(ValueError):
     """A request is unsupported, malformed, or incomplete."""
 
 
+@dataclass(frozen=True, slots=True)
+class ManagedLiveIO:
+    """Live direction correlation, carrying neither endpoints nor permission."""
+
+    nonce: str = field(repr=False)
+    input: bool
+    output: bool
+
+    def __post_init__(self) -> None:
+        """Validate live metadata supplied by callers or decoded control bytes."""
+        if (
+            type(self.nonce) is not str
+            or _RUN.fullmatch(self.nonce) is None
+            or type(self.input) is not bool
+            or type(self.output) is not bool
+            or not (self.input or self.output)
+        ):
+            raise RequestError("invalid live I/O metadata")
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class ManagedJobRequest:
     launch: bytes
@@ -53,6 +74,7 @@ class ManagedJobRequest:
     source: bytes
     stdin: bytes
     operation_lease: OperationLease | None = None
+    live_io: ManagedLiveIO | None = field(default=None, kw_only=True)
 
 
 def _json(value: object) -> bytes:
@@ -127,6 +149,20 @@ def _checked_metadata(value: object, maximum: int, *, allow_empty: bool) -> None
         raise RequestError("invalid empty request metadata")
 
 
+def _decode_live_io(value: object) -> ManagedLiveIO:
+    if type(value) is not dict or set(value) != {"nonce", "input", "output"}:
+        raise RequestError("invalid live I/O shape")
+    return ManagedLiveIO(value["nonce"], value["input"], value["output"])
+
+
+def _live_directions(live_io: ManagedLiveIO, *, stdin_empty: bool, output_mode: str) -> None:
+    """Check caller or decoded control directions against buffered asset policy."""
+    if live_io.input and not stdin_empty:
+        raise RequestError("live input requires empty buffered stdin")
+    if live_io.output and output_mode != "discard":
+        raise RequestError("live output requires no durable output retention")
+
+
 def decode_request_launch(data: bytes) -> dict[str, object]:
     """Validate the canonical launch and its exact lifetime/owner pair."""
     try:
@@ -146,7 +182,7 @@ def decode_control(data: bytes) -> dict[str, object]:
     value = _decode(data, MAX_CONTROL_BYTES)
     run_id = value.get("run_id")
     if (
-        set(value) - {"operation_lease"}
+        set(value) - {"operation_lease", "live_io"}
         != {"version", "run_id", "kind", "argv", "cwd", "output", "environment", "source", "stdin"}
         or type(value["version"]) is not int
         or value["version"] != VERSION
@@ -162,7 +198,7 @@ def decode_control(data: bytes) -> dict[str, object]:
     output = value["output"]
     if type(output) is not dict or set(output) != {"mode", "prefix_bytes"}:
         raise RequestError("invalid output shape")
-    _output(output["mode"], output["prefix_bytes"])
+    mode, _ = _output(output["mode"], output["prefix_bytes"])
     for name, maximum in (
         ("environment", MAX_ENVIRONMENT_BYTES),
         ("source", MAX_SOURCE_BYTES),
@@ -171,6 +207,10 @@ def decode_control(data: bytes) -> dict[str, object]:
         _checked_metadata(value[name], maximum, allow_empty=name != "environment")
     if kind == "command" and value["source"] != _metadata(b""):
         raise RequestError("command source must be empty")
+    if "live_io" in value:
+        _live_directions(
+            _decode_live_io(value["live_io"]), stdin_empty=value["stdin"] == _metadata(b""), output_mode=mode
+        )
     if "operation_lease" in value:
         try:
             decode_lease(_json(value["operation_lease"]))
@@ -225,11 +265,16 @@ def _encode_request_assets(request: ManagedJobRequest, *, body_only: bool) -> di
     if type(request) is not ManagedJobRequest:
         raise RequestError("invalid request")
     launch = decode_request_launch(request.launch)
+    live_io = request.live_io
+    if live_io is not None and (type(live_io) is not ManagedLiveIO or launch["lifetime"] != "operation"):
+        raise RequestError("live I/O requires operation lifetime and live metadata")
     try:
         if launch["lifetime"] == "operation":
             if request.operation_lease is None:
                 if not body_only:
                     raise RequestError("operation lease required")
+            elif type(request.operation_lease) is not OperationLease:
+                raise RequestError("invalid operation lease")
             else:
                 checked_lease(request.operation_lease, request.launch)
         elif request.operation_lease is not None:
@@ -265,6 +310,8 @@ def _encode_request_assets(request: ManagedJobRequest, *, body_only: bool) -> di
     for data, maximum in ((request.source, MAX_SOURCE_BYTES), (request.stdin, MAX_STDIN_BYTES)):
         if type(data) is not bytes or len(data) > maximum:
             raise RequestError("raw request asset exceeds bound")
+    if live_io is not None:
+        _live_directions(live_io, stdin_empty=request.stdin == b"", output_mode=mode)
     if kind == "script":
         try:
             source_text = request.source.decode("utf-8")
@@ -283,6 +330,11 @@ def _encode_request_assets(request: ManagedJobRequest, *, body_only: bool) -> di
             "environment": _metadata(environment),
             "source": _metadata(request.source),
             "stdin": _metadata(request.stdin),
+            **(
+                {"live_io": {"nonce": live_io.nonce, "input": live_io.input, "output": live_io.output}}
+                if live_io is not None
+                else {}
+            ),
             **(
                 {"operation_lease": json.loads(encode_lease(request.operation_lease))}
                 if request.operation_lease is not None
@@ -321,6 +373,7 @@ def decode_request(assets: dict[str, bytes]) -> ManagedJobRequest:
         assets["request-source"],
         assets["request-stdin"],
         decode_lease(_json(control["operation_lease"])) if "operation_lease" in control else None,
+        live_io=_decode_live_io(control["live_io"]) if "live_io" in control else None,
     )
     if encode_request(request) != assets:
         raise RequestError("noncanonical request")

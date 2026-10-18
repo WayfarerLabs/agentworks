@@ -14,12 +14,14 @@ Python modules, with no target/access/file/job/profile implementation or product
 24 production `RunContext(` construction sites and no new execution-target accessors. These counts
 came from a source search, not runtime coverage.
 
-The additive composition work owns `capabilities/base.py` and these context-producing families: VM
-manager boundaries/lifecycle/nodes, agent lifecycle, session create/roll/lifecycle/scope, workspace
-create, VM inspection/power/status and doctor. They continue passing through the old targets
-unchanged while gaining separately supplied new targets. Composition binds the new targets from
-resolved connection/identity facts, never by wrapping a legacy target. Absent targets remain absent
-at preflight; adding accessors cannot activate a route or discover authority.
+The context-producing families are VM manager boundaries/lifecycle/nodes, agent lifecycle, session
+create/roll/lifecycle/scope, workspace create, VM inspection/power/status and doctor. The additive
+PR owns `capabilities/base.py` and explicit new operation-context entry points returning that same
+RunContext type. It does not populate the 24 existing context-construction sites or acquire new
+claims in legacy workflows. Those sites adopt the new entry points in their consumer-migration
+batches. New-only workflows bind independently prepared targets from resolved connection/identity
+facts, never by wrapping a legacy target; supplied legacy handles can pass through unchanged. Absent
+targets remain absent at preflight. Adding accessors cannot activate a route or discover authority.
 
 The adapter inventory is local Lima, remote Lima's guest hop, WSL2, and Proxmox QGA, plus the
 separately owned SSH carrier used for canonical access, cloud-native access and placement hosts. The
@@ -70,6 +72,21 @@ custody, and replace platform-specific legacy ownership only where the new mecha
 lifetime have been proved. Public target and RunContext delivery follows those gates as one complete
 additive surface, not as an accessor-only or run-only intermediate API.
 
+### Private target composition checkpoint, 2026-10-10
+
+The earlier checkpoints above record their inspected states, not today's complete source inventory.
+The native administrative aggregate now prepares existing execution and file views under one VM
+owner acquired before activation. `ExecutionTarget` passively references those exact views and the
+selected channel's immutable feature description. WSL2 and Proxmox bind that description once; the
+target neither acquires ownership nor forwards operations or closes resources. Retaining it does not
+extend the underlying operation's lifetime. Its features describe the channel, not permission,
+readiness or completion of the consumer-facing live/terminal API.
+
+This remains private composition, with no execution-package export, new RunContext accessor,
+production consumer or activated permission enforcement. Complete required file and execution/job
+operations, optional I/O, account/platform composition and whole-workflow native validation remain
+the additive delivery gate. The small target wrapper does not substitute for that gate.
+
 ### Owned-boundary integration inventory, 2026-09-21
 
 The read-only audit at `faf99365` locates admission before effects without moving legacy commands
@@ -97,6 +114,15 @@ repository. Explicit resource admission and later hierarchy remain distinct from
 scope. Finalization also remains explicit: returning from a legacy helper or leaving an ExitStack
 does not prove that remote effects stopped. This inventory locates the integration work, not
 implemented production ownership or accepted recovery.
+
+Private native-context composition reuses the existing owned native operation instead of creating
+another owner or embedding cleanup in RunContext. It yields a normal context only after native
+preparation and binds the prepared admin and explicitly selected agent views. Config, descriptive
+scope, scoped secrets and legacy handles retain their supplied identity. Same-VM descendant scopes
+and SYSTEM descriptions do not change the exact VM claim or choose an agent. Construction/body
+failures unwind the retained native aggregate. This provides a new-only context entry point, not
+adoption of the existing gate, creation or rollback roots listed above. Those migration seams and
+the canonical SSH context path remain required; this leaf supplies no whole-platform acceptance.
 
 The follow-up activation audit confirms that acquisition can precede the existing gate, but safe
 release cannot be inferred from that gate's current return path. `platform.start` may take effect

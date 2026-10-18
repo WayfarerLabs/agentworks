@@ -33,19 +33,23 @@ from agentworks.errors import ExternalError, StateError, ValidationError
 from agentworks.execution import _target_identity
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._inline_observer import InlineObserver
+from agentworks.execution._proxmox_activation import ProxmoxActivation
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution.binding import NativeExecutionBinding
-from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, FiniteInput, PreparedInvocation
+from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, FiniteInput, PreparedInvocation, SinkOutput
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection, _ProxmoxWire
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
-from agentworks.execution.result import CheckedExecutionError
+from agentworks.execution.result import ApplicationState, CheckedExecutionError
+from agentworks.execution.target import ExecutionRoute
 from agentworks.operations import OperationAttempt, OperationOwner, release_borrow_after_custody
+from agentworks.plugins.proxmox._native_access import ProxmoxOwnedNativePlatformAccess
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.vms._native_operation import NativeVMOperationControlFact, native_vm_operation
+from agentworks.vms._native_operation import VMOperationControlFact, _vm_operation
 from tests.execution.test_target_identity import SyntheticCarrier
 from tests.execution.test_wsl2_owned_download import GuestThenFileCarrier
-from tests.vms.test_native_operation import _PackedCarrier
+from tests.vms.test_native_operation import _install_gate_namespace, _PackedCarrier
 from tests.vms.test_target_preparation import _MARKER
 
 if TYPE_CHECKING:
@@ -111,8 +115,10 @@ class _Route:
 def _install(database: Database, monkeypatch: pytest.MonkeyPatch) -> tuple[ProxmoxPlatform, _Route]:
     platform = ProxmoxPlatform("pve", {"api_url": "https://pve.test", "node": "node", "token_id": "token"})
     route = _Route(database)
+    _install_gate_namespace(database, route.local, monkeypatch)
+    connection = ProxmoxConnection("https://pve.test", "node", 101, "token", "secret")
     binding = NativeExecutionBinding(
-        ProxmoxCarrier(ProxmoxConnection("https://pve.test", "node", 101, "token", "secret")),
+        ProxmoxCarrier(connection),
         "root",
         RuntimeSelection(RuntimeTargetOS.LINUX),
     )
@@ -121,14 +127,16 @@ def _install(database: Database, monkeypatch: pytest.MonkeyPatch) -> tuple[Proxm
         assert database.operations.inspect(_scope()) is not None
         return route.locators.pop(0) if route.locators else ProviderLocator("pve:generation")
 
-    def resolve(vm, ctx, *, deadline, config, custody=None):
+    def resolve(selected):
         assert database.operations.inspect(_scope()) is not None
+        assert selected is connection
         route.resolutions += 1
         return binding
 
     monkeypatch.setattr(platform, "observe_execution_power", lambda *args, **kwargs: VMStatus.RUNNING)
+    monkeypatch.setattr(platform, "_execution_connection", lambda *args: connection)
     monkeypatch.setattr(platform, "observe_provider_locator", locator)
-    monkeypatch.setattr(platform, "resolve_native_execution_binding", resolve)
+    monkeypatch.setattr("agentworks.plugins.proxmox._native_access.proxmox_native_binding", resolve)
     monkeypatch.setattr(
         ProxmoxCarrier,
         "execute",
@@ -137,6 +145,44 @@ def _install(database: Database, monkeypatch: pytest.MonkeyPatch) -> tuple[Proxm
         ),
     )
     return platform, route
+
+
+def test_native_route_reuses_exact_available_api_connection(database, tmp_path, monkeypatch):
+    from agentworks.execution._runtime_prerequisite import HelperClosureExpectation
+    from agentworks.plugins.proxmox._native_binding import proxmox_native_binding
+
+    platform, _ = _install(database, monkeypatch)
+    connection = ProxmoxConnection("https://pve.test", "node", 101, "token", "secret", tmp_path / "ca.pem")
+    selections = []
+
+    def select(*args):
+        selections.append(connection)
+        assert len(selections) == 1
+        return connection
+
+    monkeypatch.setattr(platform, "_execution_connection", select)
+    monkeypatch.setattr("agentworks.plugins.proxmox._native_access.proxmox_native_binding", proxmox_native_binding)
+    owner = OperationOwner.acquire(database.operations, _scope(), "same-connection")
+    deadline = Deadline.after(10)
+    access = platform.build_native_execution_access(
+        database.get_vm("box"), RunContext(), owner=owner, custody=LocalDeliveryCustody()
+    )
+    access.ensure_available(VMStatus.RUNNING, deadline)
+    binding = access.prepare_native_route(deadline)
+    assert binding.delivery_account == "root"
+    assert isinstance(binding.carrier, ProxmoxCarrier) and binding.carrier._wire._connection is connection
+    assert binding._new_managed_delivery is not None and binding._new_helper_delivery is not None
+    first, second = binding._new_managed_delivery(), binding._new_managed_delivery()
+    assert first is not second
+    assert isinstance(first, ProxmoxCarrier) and isinstance(second, ProxmoxCarrier)
+    assert first._wire._connection is second._wire._connection is connection
+    expectation = HelperClosureExpectation("0" * 32, ("/usr/bin/python3",), None, None)
+    helper = binding._new_helper_delivery(expectation)
+    assert isinstance(helper, ProxmoxCarrier) and helper._wire._connection is connection
+    assert selections == [connection] and access.settle(deadline)
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
 
 
 def test_running_views_share_owner_bootstrap_and_settle(database, tmp_path, monkeypatch):
@@ -177,12 +223,15 @@ def test_running_views_share_owner_bootstrap_and_settle(database, tmp_path, monk
         parent, _, leaf = retired.rpartition(".")
         with pytest.raises(AssertionError):
             __import__(parent, fromlist=(leaf,))
-    with native_vm_operation(
-        database, "box", platform, ctx, deadline=deadline, trusted_root=PurePosixPath(root)
+    with _vm_operation(
+        database, "box", platform, ctx, route=ExecutionRoute.NATIVE, deadline=deadline, trusted_root=PurePosixPath(root)
     ) as views:
         assert views.file_operation._owner is views.execution_operation._owner is views.owner
         assert views.file_operation._bootstrap is views.execution_operation._bootstrap
         assert views.files._carrier is views.execution._carrier
+        assert views.target.execution() is views.execution
+        assert views.target.files() is views.files
+        assert views.target.features is views.execution._carrier.features
         metadata = views.files.stat(PurePosixPath(source))
         assert metadata is not None
         views.files.remove(PurePosixPath(source), expected_kind=metadata.kind, expected=metadata.revision)
@@ -190,9 +239,276 @@ def test_running_views_share_owner_bootstrap_and_settle(database, tmp_path, monk
         assert views.execution.run(Command(["/usr/bin/touch", str(effect)]), profile=Protection.DIRECT, check=True).ok
         assert effect.exists() and not source.exists()
         assert route.ownership == views.owner.ownership
-    assert route.resolutions == 1 and route.local.calls == 3
+    assert route.resolutions == 1 and route.local.calls == 4
     assert all(value is deadline for value in route.deadlines)
     assert database.operations.inspect(_scope()) is None
+
+
+@pytest.mark.parametrize(
+    ("route_fault", "known_closure"),
+    [(None, False), ("changed", False), ("failure", False), ("guest", False), (None, True)],
+)
+def test_native_direct_selects_closure_factory_and_finite_cleanup_before_finish(
+    database, tmp_path, monkeypatch, route_fault, known_closure
+):
+    platform, route = _install(database, monkeypatch)
+    connection = ProxmoxConnection("https://pve.test", "node", 101, "token", "secret")
+    monkeypatch.setattr(platform, "_execution_connection", lambda *_args: connection)
+    # Invoke the real composition factory rather than the scripted preparation binding.
+    from agentworks.plugins.proxmox._native_binding import proxmox_native_binding
+
+    monkeypatch.setattr("agentworks.plugins.proxmox._native_access.proxmox_native_binding", proxmox_native_binding)
+    deadline = Deadline.after(30)
+    calls: list[tuple[str, str]] = []
+    terminal: dict[str, object] = {}
+
+    class Collector:
+        def __init__(self) -> None:
+            self.data = bytearray()
+
+        def try_write(self, data: memoryview) -> int:
+            self.data.extend(data)
+            return len(data)
+
+    def request(_wire, method, suffix, *, custody, timeout, body=None):
+        calls.append((method, suffix))
+        if method == "POST":
+            assert suffix == "exec" and body is not None
+            value = json.loads(body)
+            stdout, stderr = Collector(), Collector()
+            report = route.local.execute(
+                PreparedInvocation(tuple(value["command"])),
+                io=CarrierIO(input=FiniteInput(value["input-data"].encode("ascii")), output=SinkOutput(stdout, stderr)),
+                deadline=Deadline.after(15),
+                custody=custody,
+            )
+            assert report.completion is not None and report.completion.code == 0
+            terminal.update(exited=True, exitcode=0, **{"out-data": stdout.data.decode("ascii")})
+            return {"pid": 81}
+        assert suffix == "exec-status?pid=81"
+        if len(calls) == 2 and not known_closure:
+            object.__setattr__(deadline, "expires_at", 0.0)
+            return {"exited": False}
+        return terminal
+
+    monkeypatch.setattr(_ProxmoxWire, "request", request)
+    if known_closure:
+        control = KeyboardInterrupt("application output callback")
+
+        def interrupt(*_args):
+            raise control
+
+        with _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=deadline,
+            trusted_root=PurePosixPath(tmp_path),
+        ) as views:
+            monkeypatch.setattr(InlineObserver, "accept", interrupt)
+            with pytest.raises(KeyboardInterrupt) as callback_control:
+                views.execution.run(Command(["/bin/echo", "private-output"]), profile=Protection.DIRECT)
+            assert callback_control.value is control
+            (active,) = views.execution_operation.active_inline_calls
+            assert active.closure_delivery is not None and active.closure_delivery.closure_proven
+            attempt = active.operation.outstanding_attempt
+            assert attempt is not None and attempt.local_delivery.settled
+            object.__setattr__(deadline, "expires_at", 0.0)
+            monkeypatch.setattr(
+                platform, "observe_provider_locator", lambda *_args, **_kwargs: pytest.fail("provider unavailable")
+            )
+        assert not active.borrow.has_outstanding_attempt and not views.execution_operation.active_inline_calls
+        assert calls == [("POST", "exec"), ("GET", "exec-status?pid=81")]
+        assert database.operations.inspect(_scope()) is None
+        return
+    with (
+        pytest.raises(ValidationError) as caught,
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=deadline,
+            trusted_root=PurePosixPath(tmp_path),
+        ) as views,
+    ):
+        result = views.execution.run(Command(["/bin/echo", "private-output"]), profile=Protection.DIRECT)
+        assert result.application_state is ApplicationState.UNKNOWN
+        (active,) = views.execution_operation.active_inline_calls
+        assert active.closure_delivery is not None and active.closure_expectation is not None
+        assert views.execution_operation._bootstrap is not None
+        assert active.closure_expectation.guest == views.execution_operation._bootstrap.guest
+        assert active.prepared is None and active.candidate is None
+    fact = caught.value.__cause__
+    assert isinstance(fact, VMOperationControlFact)
+    access = fact._workflow.access
+    assert isinstance(access, ProxmoxOwnedNativePlatformAccess) and access.route_check is not None
+    provider_calls = []
+
+    def locator(vm, ctx, *, deadline, custody):
+        assert custody is access.custody and deadline.expires_at is not None and not deadline.expired
+        provider_calls.append("current-config")
+        if route_fault == "failure":
+            raise ExternalError("provider lookup failed")
+        return ProviderLocator("changed" if route_fault else "pve:generation")
+
+    monkeypatch.setattr(platform, "observe_provider_locator", locator)
+    if route_fault == "guest":
+        operation = views.execution_operation
+        operation._managed_target = replace(operation._target, boot_id="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+    if route_fault:
+        attempt = active.operation.outstanding_attempt
+        for _ in range(2):
+            with pytest.raises(ExternalError if route_fault == "failure" else StateError):
+                fact.retry_cleanup(Deadline.after(15))
+            assert views.execution_operation.active_inline_calls == (active,)
+            assert active.operation.outstanding_attempt is attempt and active.borrow.has_outstanding_attempt
+        assert calls == [("POST", "exec"), ("GET", "exec-status?pid=81")]
+        assert database.operations.inspect(_scope()) is not None and views.execution_operation.active_inline_calls
+    else:
+        fact.retry_cleanup(Deadline.after(15))
+        fact.retry_cleanup(Deadline.after(15))
+        assert calls == [("POST", "exec"), ("GET", "exec-status?pid=81"), ("GET", "exec-status?pid=81")]
+        assert database.operations.inspect(_scope()) is None
+        assert result.application_state is ApplicationState.UNKNOWN
+    assert provider_calls == ([] if route_fault == "guest" else ["current-config"] * (2 if route_fault else 1))
+
+
+def test_plain_completed_helper_lost_settle_reply_closes_with_expired_budget(database, tmp_path, monkeypatch):
+    platform, route = _install(database, monkeypatch)
+    deadline = Deadline.after(30)
+    control = KeyboardInterrupt("settlement reply lost")
+    original = OperationAttempt.settle
+
+    def settle_then_interrupt(self):
+        original(self)
+        raise control
+
+    with _vm_operation(
+        database,
+        "box",
+        platform,
+        RunContext(),
+        route=ExecutionRoute.NATIVE,
+        deadline=deadline,
+        trusted_root=PurePosixPath(tmp_path),
+    ) as views:
+        monkeypatch.setattr(OperationAttempt, "settle", settle_then_interrupt)
+        with pytest.raises(KeyboardInterrupt) as caught:
+            views.execution.run(Command(["/bin/echo", "ordinary-output"]), profile=Protection.DIRECT)
+        assert caught.value is control
+        (active,) = views.execution_operation.active_inline_calls
+        assert active.closure_delivery is None and not active.borrow.has_outstanding_attempt
+        calls = route.local.calls
+        monkeypatch.setattr(OperationAttempt, "settle", original)
+        object.__setattr__(deadline, "expires_at", 0.0)
+        monkeypatch.setattr(
+            platform, "observe_provider_locator", lambda *_args, **_kwargs: pytest.fail("provider observation")
+        )
+    assert not views.execution_operation.active_inline_calls and route.local.calls == calls
+    assert database.operations.inspect(_scope()) is None
+
+
+@pytest.mark.parametrize("mode", ["success", "lost_ack", "ha", "interrupt"])
+def test_stopped_access_retains_single_activation_without_replay(database, tmp_path, monkeypatch, mode):
+    platform, route = _install(database, monkeypatch)
+    monkeypatch.setattr(platform, "observe_execution_power", lambda *args, **kwargs: VMStatus.STOPPED)
+    upid = "UPID:node:000000AB:000000CD:000000EF:qmstart:101:token:"
+    if mode == "ha":
+        upid = upid.replace("qmstart", "hastart")
+    calls = []
+    selected = []
+    original_factory = platform.build_native_execution_access
+
+    def factory(*args, **kwargs):
+        access = original_factory(*args, **kwargs)
+        assert isinstance(access, ProxmoxOwnedNativePlatformAccess)
+        assert access.activation is None and access.guest_check is None and access.binding is None
+        selected.append(access)
+        return access
+
+    def start(wire, *, timeout, custody):
+        access = selected[0]
+        assert isinstance(access.activation, ProxmoxActivation)
+        assert access.custody is custody and database.operations.inspect(_scope()) is not None
+        assert access.owner.list_pending_lifecycle_obligations()
+        calls.append("start")
+        if mode == "lost_ack":
+            raise ExternalError("injected lost receipt")
+        if mode == "interrupt":
+            raise KeyboardInterrupt()
+        return upid
+
+    def poll(wire, receipt, *, timeout, custody):
+        assert receipt == upid and selected[0].custody is custody
+        calls.append("poll")
+        return {
+            "upid": upid,
+            "node": "node",
+            "pid": 0xAB,
+            "pstart": 0xCD,
+            "starttime": 0xEF,
+            "type": "hastart" if mode == "ha" else "qmstart",
+            "id": "101",
+            "user": "token",
+            "status": "stopped",
+            "exitstatus": "OK",
+        }
+
+    monkeypatch.setattr(platform, "build_native_execution_access", factory)
+    monkeypatch.setattr(_ProxmoxWire, "request_vm_start", start)
+    monkeypatch.setattr(_ProxmoxWire, "request_task_status", poll)
+    monkeypatch.setattr(_ProxmoxWire, "request_power", lambda *args, **kwargs: {"status": "running"})
+    monkeypatch.setattr(
+        _ProxmoxWire,
+        "request_guest_info",
+        lambda *args, **kwargs: {"result": {"version": "1", "supported_commands": []}},
+    )
+    monkeypatch.setattr(platform, "stop", lambda *args, **kwargs: pytest.fail("activated VM stopped at teardown"))
+    if mode == "success":
+        with _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=PurePosixPath(tmp_path),
+        ):
+            assert selected[0].binding is not None
+            with pytest.raises(StateError):
+                selected[0].ensure_available(VMStatus.STOPPED, Deadline.after(10))
+        assert calls == ["start", "poll"]
+        assert database.operations.inspect(_scope()) is None
+        return
+    with (
+        pytest.raises(KeyboardInterrupt if mode == "interrupt" else StateError) as caught,
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=PurePosixPath(tmp_path),
+        ),
+    ):
+        pytest.fail("unsettled activation admitted body")
+    fact = caught.value.__cause__
+    assert isinstance(fact, VMOperationControlFact)
+    assert fact._workflow.access is selected[0]
+    assert selected[0].activation is not None and fact._workflow.preparation is None
+    with pytest.raises(StateError):
+        selected[0].ensure_available(VMStatus.STOPPED, Deadline.after(10))
+    assert database.operations.inspect(_scope()) is not None and route.guest.calls == 0
+    for _ in range(2):
+        with pytest.raises(StateError):
+            fact.retry_cleanup(Deadline.after(10))
+    assert calls.count("start") == 1
+    assert selected[0].activation.payload.upid == (upid if mode == "ha" else None)
 
 
 @pytest.mark.parametrize(
@@ -201,7 +517,6 @@ def test_running_views_share_owner_bootstrap_and_settle(database, tmp_path, monk
         (VMStatus.STOPPED, True),
         (VMStatus.UNKNOWN, False),
         (VMStatus.UNKNOWN, True),
-        (VMStatus.DEALLOCATED, False),
         (VMStatus.DEALLOCATED, True),
         ("starting", False),
         ("starting", True),
@@ -213,8 +528,14 @@ def test_nonrunning_refuses_before_route(database, tmp_path, monkeypatch, power,
     monkeypatch.setattr(platform, "observe_execution_power", lambda *args, **kwargs: power)
     with (
         pytest.raises(StateError),
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=PurePosixPath(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=PurePosixPath(tmp_path),
         ),
     ):
         pytest.fail("nonrunning VM admitted")
@@ -235,8 +556,14 @@ def test_bad_persisted_selection_refuses_before_observation(database, tmp_path, 
     )
     with (
         pytest.raises(ValidationError),
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=PurePosixPath(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=PurePosixPath(tmp_path),
         ),
     ):
         pytest.fail("invalid marker admitted")
@@ -248,12 +575,18 @@ def test_changed_locator_suppresses_body(database, tmp_path, monkeypatch, after_
     platform, route = _install(database, monkeypatch)
     route.locators = [ProviderLocator("initial")]
     if after_guest:
-        route.locators.append(ProviderLocator("initial"))
+        route.locators.extend([ProviderLocator("initial")] * 2)
     route.locators.append(ProviderLocator("changed"))
     with (
         pytest.raises(StateError),
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=PurePosixPath(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=PurePosixPath(tmp_path),
         ),
     ):
         pytest.fail("changed route admitted")
@@ -268,8 +601,14 @@ def test_changed_guest_after_plausible_accounts_blocks_body(database, tmp_path, 
     effect = tmp_path / "effect"
     with (
         pytest.raises(StateError) as retained,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=PurePosixPath(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(30),
+            trusted_root=PurePosixPath(tmp_path),
         ) as views,
     ):
         assert route.accounts.calls
@@ -289,7 +628,7 @@ def test_changed_guest_after_plausible_accounts_blocks_body(database, tmp_path, 
             else:
                 views.execution.run(Command(["/usr/bin/touch", str(effect)]), profile=Protection.DIRECT, check=True)
     assert not effect.exists() and database.operations.inspect(_scope()) is not None
-    assert isinstance(retained.value.__cause__, NativeVMOperationControlFact)
+    assert isinstance(retained.value.__cause__, VMOperationControlFact)
     assert retained.value.__cause__._workflow.views is views
 
 
@@ -304,20 +643,27 @@ def test_preparation_control_retains_exact_facts(database, tmp_path, monkeypatch
     monkeypatch.setattr(route.guest if phase == "guest" else route.accounts, "execute", interrupted)
     with (
         pytest.raises(type(control)) as caught,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=PurePosixPath(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=PurePosixPath(tmp_path),
         ),
     ):
         pytest.fail("interrupted preparation admitted")
     assert caught.value is control
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     workflow = fact._workflow
-    assert workflow.selected_locator == ProviderLocator("pve:generation")
-    assert workflow.selected_binding is not None
-    assert workflow.preparation_fact is not None
+    assert isinstance(workflow.access, ProxmoxOwnedNativePlatformAccess)
+    assert workflow.access.locator == ProviderLocator("pve:generation")
+    assert workflow.access.binding is not None
+    assert workflow.preparation is not None
     if phase == "guest":
-        assert workflow.preparation_fact.requires_owner_retention
+        assert workflow.preparation.requires_owner_retention
     else:
         assert workflow.identity is not None and workflow.identity.requires_owner_retention
     assert database.operations.inspect(_scope()) is not None
@@ -340,15 +686,22 @@ def test_unsettled_preparation_reply_retains_owner(database, tmp_path, monkeypat
         )
     with (
         pytest.raises(StateError) as caught,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=PurePosixPath(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=PurePosixPath(tmp_path),
         ),
     ):
         pytest.fail("uncertain account preparation admitted")
     assert database.operations.inspect(_scope()) is not None
     fact = caught.value.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
-    preparation = fact._workflow.identity if phase == "accounts" else fact._workflow.preparation_fact
+    assert isinstance(fact, VMOperationControlFact)
+    assert isinstance(fact._workflow.access, ProxmoxOwnedNativePlatformAccess)
+    preparation = fact._workflow.identity if phase == "accounts" else fact._workflow.preparation
     assert preparation is not None and preparation.pending_remote_effects
     assert route.local.calls == 0
 
@@ -358,8 +711,14 @@ def test_body_failure_and_closed_view_release_settled_owner(database, tmp_path, 
     effect = tmp_path / "partial-effect"
     with (
         pytest.raises(CheckedExecutionError),
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=PurePosixPath(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(30),
+            trusted_root=PurePosixPath(tmp_path),
         ) as views,
     ):
         views.execution.run(
@@ -387,8 +746,14 @@ def test_claim_conflict_precedes_passive_observation(database, tmp_path, monkeyp
     monkeypatch.setattr(platform, "observe_execution_power", lambda *args, **kwargs: pytest.fail("observed conflict"))
     with (
         pytest.raises(StateError),
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=PurePosixPath(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=PurePosixPath(tmp_path),
         ),
     ):
         pytest.fail("conflict admitted")
@@ -412,21 +777,28 @@ def test_settlement_failure_retains_observed_preparation_facts(database, tmp_pat
     monkeypatch.setattr(OperationAttempt, "settle", interrupted)
     with (
         pytest.raises(KeyboardInterrupt) as caught,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=PurePosixPath(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=PurePosixPath(tmp_path),
         ),
     ):
         pytest.fail("unsettled observation admitted")
     assert caught.value is control
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     workflow = fact._workflow
-    assert workflow.preparation_fact is not None and workflow.preparation_fact.guest_result is not None
+    assert isinstance(workflow.access, ProxmoxOwnedNativePlatformAccess)
+    assert workflow.preparation is not None and workflow.preparation.guest_result is not None
     if phase == "accounts":
         assert workflow.identity is not None and workflow.identity.delivery_result is not None
         assert workflow.identity.coordination_uncertain
     else:
-        assert workflow.preparation_fact.coordination_uncertain
+        assert workflow.preparation.coordination_uncertain
     assert database.operations.inspect(_scope()) is not None
 
 
@@ -449,14 +821,20 @@ def test_interrupted_owner_release_retries_exact_cleanup(database, tmp_path, mon
     monkeypatch.setattr(OperationRepository, "release_resolved", interrupted)
     with (
         pytest.raises(KeyboardInterrupt) as caught,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=PurePosixPath(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=PurePosixPath(tmp_path),
         ) as views,
     ):
         pass
     assert caught.value is control
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
+    assert isinstance(fact, VMOperationControlFact)
     assert (database.operations.inspect(_scope()) is None) is committed
     fact.retry_cleanup(Deadline.after(10))
     assert database.operations.inspect(_scope()) is None
@@ -478,7 +856,7 @@ def test_locator_control_survives_borrow_release_failure(database, tmp_path, mon
     def locator(*args, **kwargs):
         nonlocal observations
         observations += 1
-        if observations == 3:
+        if observations == 4:
             raise control
         return ProviderLocator("pve:generation")
 
@@ -493,15 +871,22 @@ def test_locator_control_survives_borrow_release_failure(database, tmp_path, mon
     monkeypatch.setattr(OperationRepository, "resolve_lifecycle_obligation", interrupted_release)
     with (
         pytest.raises(control_type) as caught,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=PurePosixPath(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=PurePosixPath(tmp_path),
         ),
     ):
         pytest.fail("uncertain preparation admitted body")
     assert caught.value is control
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
-    preparation = fact._workflow.preparation_fact
+    assert isinstance(fact, VMOperationControlFact)
+    assert isinstance(fact._workflow.access, ProxmoxOwnedNativePlatformAccess)
+    preparation = fact._workflow.preparation
     assert preparation is not None and preparation.requires_owner_retention
     assert preparation.guest_result is not None and preparation.guest_result.observation is not None
     assert preparation.guest_result.observation.identity == route.local.observed
@@ -527,15 +912,22 @@ def test_identity_borrow_release_failure_cannot_release_owner(database, tmp_path
     monkeypatch.setattr(_target_identity, "release_borrow_after_custody", interrupted)
     with (
         pytest.raises(KeyboardInterrupt) as caught,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=PurePosixPath(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=PurePosixPath(tmp_path),
         ),
     ):
         pytest.fail("unreleased identity borrow admitted")
     assert caught.value is control and retained_borrow is not None
     fact = control.__cause__
-    assert isinstance(fact, NativeVMOperationControlFact)
-    assert fact._workflow.preparation_fact is not None
+    assert isinstance(fact, VMOperationControlFact)
+    assert isinstance(fact._workflow.access, ProxmoxOwnedNativePlatformAccess)
+    assert fact._workflow.preparation is not None
     assert fact._workflow.identity is not None and fact._workflow.identity.delivery_result is not None
     assert fact._workflow.identity.coordination_uncertain
     assert database.operations.inspect(_scope()) is not None and route.local.calls == 0
@@ -566,7 +958,8 @@ from agentworks.capabilities.base import RunContext
 from agentworks.db import Database, VMStatus
 from agentworks.errors import StateError
 from agentworks.execution.carrier import Deadline
-from agentworks.vms._native_operation import native_vm_operation
+from agentworks.execution.target import ExecutionRoute
+from agentworks.vms._native_operation import _vm_operation
 assert not any(name == root or name.startswith(root + '.') for name in sys.modules for root in roots)
 sys.meta_path.pop(0)
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
@@ -583,8 +976,8 @@ platform.observe_execution_power = lambda *args, **kwargs: VMStatus.UNKNOWN
 with closing(Database(Path(sys.argv[2]) / 'state.db')) as db:
     db.insert_vm('box', 'pve', '101', admin_username='admin', instance_marker='a'*32)
     try:
-        with native_vm_operation(db, 'box', platform, RunContext(),
-             deadline=Deadline.after(10), trusted_root=PurePosixPath(sys.argv[2])):
+        with _vm_operation(db, 'box', platform, RunContext(),
+             route=ExecutionRoute.NATIVE, deadline=Deadline.after(10), trusted_root=PurePosixPath(sys.argv[2])):
             raise AssertionError('stopped operation admitted')
     except StateError:
         pass

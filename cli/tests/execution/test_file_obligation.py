@@ -18,6 +18,7 @@ from agentworks.execution._file_obligation import (
     FileCallObligation,
     FileCallObligationCodecError,
     FileCallUncertainty,
+    UploadChildAssociation,
     decode_file_call_obligation,
     encode_file_call_admission,
     encode_file_call_obligation,
@@ -321,6 +322,129 @@ def test_admission_reserves_the_actual_largest_recovery_payload_for_every_family
         assert encode_file_call_admission(initial) == encode_file_call_obligation(initial)
 
 
+@pytest.mark.parametrize("numeric", [False, True])
+def test_download_child_format_and_exact_recovery_headroom(numeric: bool) -> None:
+    from agentworks.execution._file_obligation import DownloadChildAssociation
+    from tests.execution.test_numeric_file_obligation import _numeric
+
+    child = DownloadChildAssociation(b"d" * 16, 4095)
+    baseline = _numeric(FileCallFamily.DOWNLOAD) if numeric else _obligation(FileCallFamily.DOWNLOAD)
+    initial = replace(baseline, download_child=child)
+    recovery = replace(
+        _maximum_recovery_obligation(FileCallFamily.DOWNLOAD),
+        target=initial.target,
+        bootstrap=initial.bootstrap,
+        download_child=child,
+    )
+    encoded = encode_file_call_admission(initial)
+    assert initial.payload_version == (6 if numeric else 5)
+    assert decode_file_call_obligation(encoded) == initial
+    assert len(encode_file_call_obligation(recovery)) - len(encoded) == 814
+    complete = replace(initial, download_child_complete=True)
+    assert decode_file_call_obligation(encode_file_call_obligation(complete)) == complete
+    assert len(encode_file_call_obligation(complete)) <= len(encoded) + 814
+    baseline = replace(initial, root="/", relative_path="a")
+    padding = MAX_LIFECYCLE_PAYLOAD_BYTES - 814 - len(encode_file_call_obligation(baseline))
+    admitted = replace(baseline, root="/" + "a" * (padding - 4095), relative_path="a" * 4096)
+    retained = replace(recovery, root=admitted.root, relative_path=admitted.relative_path)
+    assert len(encode_file_call_admission(admitted)) == MAX_LIFECYCLE_PAYLOAD_BYTES - 814
+    assert len(encode_file_call_obligation(retained)) == MAX_LIFECYCLE_PAYLOAD_BYTES
+    with pytest.raises(FileCallObligationCodecError):
+        encode_file_call_admission(replace(admitted, root=admitted.root + "a"))
+    for changes in (
+        {"version": 1},
+        {"version": 2},
+        {"version": 3},
+        {"version": 4},
+        {"family": "upload"},
+        {"download_child_complete": 1},
+        {"download_child": {"transfer_id": "D" * 32, "member_ordinal": 0}},
+        {"download_child": {"transfer_id": "d" * 32, "member_ordinal": 4096}},
+        {"download_child_complete": True, "uncertainty": ["coordination-uncertainty"]},
+    ):
+        value = json.loads(encoded) | changes
+        with pytest.raises(FileCallObligationCodecError):
+            decode_file_call_obligation(json.dumps(value, separators=(",", ":"), sort_keys=True).encode())
+
+
+def test_upload_child_format_and_exact_recovery_headroom() -> None:
+    child = UploadChildAssociation.fresh()
+    initial = replace(_obligation(FileCallFamily.UPLOAD), upload_child=child)
+    recovery = replace(_maximum_recovery_obligation(FileCallFamily.UPLOAD), upload_child=child)
+    encoded = encode_file_call_admission(initial)
+    assert initial.payload_version == 3
+    assert decode_file_call_obligation(encoded) == initial
+    assert len(encode_file_call_obligation(recovery)) - len(encoded) == 1150
+    completed = replace(
+        initial, scratch_reference=_maximum_reference(FileCallFamily.UPLOAD), upload_child_complete=True
+    )
+    assert len(encode_file_call_obligation(completed)) < len(encoded) + 1150
+    assert decode_file_call_obligation(encode_file_call_obligation(completed)) == completed
+    value = json.loads(encoded)
+    for version in (1, 2):
+        value["version"] = version
+        with pytest.raises(FileCallObligationCodecError):
+            decode_file_call_obligation(json.dumps(value, separators=(",", ":"), sort_keys=True).encode())
+
+
+def test_upload_child_admission_exact_envelope_boundary() -> None:
+    child = UploadChildAssociation(b"t" * 16, 4095)
+    baseline = replace(_obligation(FileCallFamily.UPLOAD), root="/", relative_path="a", upload_child=child)
+    padding = MAX_LIFECYCLE_PAYLOAD_BYTES - 1150 - len(encode_file_call_obligation(baseline))
+    admitted = replace(baseline, root="/" + "a" * (padding - 4095), relative_path="a" * 4096)
+    recovery = replace(
+        _maximum_recovery_obligation(FileCallFamily.UPLOAD),
+        root=admitted.root,
+        relative_path=admitted.relative_path,
+        upload_child=child,
+    )
+    assert len(encode_file_call_admission(admitted)) == MAX_LIFECYCLE_PAYLOAD_BYTES - 1150
+    assert len(encode_file_call_obligation(recovery)) == MAX_LIFECYCLE_PAYLOAD_BYTES
+    with pytest.raises(FileCallObligationCodecError):
+        encode_file_call_admission(replace(admitted, root=admitted.root + "a"))
+
+
+@pytest.mark.parametrize("ordinal", [-1, 4096, True, 0.5])
+def test_upload_child_rejects_unbounded_member_identity(ordinal) -> None:
+    with pytest.raises(FileCallObligationCodecError):
+        UploadChildAssociation(b"t" * 16, ordinal)
+
+
+def test_upload_child_success_requires_exact_clean_upload_identity() -> None:
+    child = UploadChildAssociation.fresh()
+    upload = replace(_obligation(FileCallFamily.UPLOAD), upload_child=child)
+    for changes in (
+        {"family": FileCallFamily.DOWNLOAD},
+        {"upload_child_complete": True},
+        {"upload_child": None, "upload_child_complete": True},
+        {"upload_child_complete": 1},
+        {
+            "upload_child_complete": True,
+            "scratch_reference": _reference(FileCallFamily.UPLOAD),
+            "uncertainty": frozenset({FileCallUncertainty.COORDINATION_UNCERTAINTY}),
+        },
+    ):
+        with pytest.raises(FileCallObligationCodecError):
+            replace(upload, **changes)
+
+
+def test_numeric_upload_child_uses_separate_version_without_changing_bootstrap() -> None:
+    from tests.execution.test_numeric_file_obligation import _numeric
+
+    ordinary = _numeric(FileCallFamily.UPLOAD)
+    associated = replace(ordinary, upload_child=UploadChildAssociation.fresh())
+    assert ordinary.payload_version == 2 and associated.payload_version == 4
+    decoded = decode_file_call_obligation(encode_file_call_admission(associated))
+    assert decoded == associated and decoded.bootstrap == ordinary.bootstrap
+    recovery = replace(
+        _maximum_recovery_obligation(FileCallFamily.UPLOAD),
+        target=ordinary.target,
+        bootstrap=ordinary.bootstrap,
+        upload_child=associated.upload_child,
+    )
+    assert len(encode_file_call_obligation(recovery)) - len(encode_file_call_admission(associated)) == 1150
+
+
 def _obligation_with_encoded_length(family: FileCallFamily, length: int) -> FileCallObligation:
     baseline = replace(_obligation(family), root="/", relative_path="a")
     remaining = length - len(encode_file_call_obligation(baseline))
@@ -526,7 +650,7 @@ def test_gate_setup_is_closed_to_unsupported_family_identity_path_and_bound_stat
     descriptor = setup.gate_setup
     assert descriptor is not None
     with pytest.raises(FileCallObligationCodecError):
-        replace(setup, family=FileCallFamily.JSON_UPDATE)
+        replace(setup, family=FileCallFamily.STAT, token=None)
     with pytest.raises(FileCallObligationCodecError):
         replace(setup, target=replace(setup.target, name="other-vm"))
     other_uid = setup.identity_plan.expected.euid - 1
@@ -561,12 +685,21 @@ def test_bound_gate_obligation_refuses_another_canonical_gate_name() -> None:
         decode_file_call_obligation(payload)
 
 
-def test_gate_setup_admission_reserves_maximum_bound_proposal_and_download_growth() -> None:
-    baseline = _setup_download()
+@pytest.mark.parametrize("associated", [False, True])
+def test_gate_setup_admission_reserves_maximum_bound_proposal_and_download_growth(associated: bool) -> None:
+    from agentworks.execution._file_obligation import DownloadChildAssociation
+
+    child = DownloadChildAssociation.fresh() if associated else None
+    baseline = replace(_setup_download(), download_child=child)
     maximum = _maximum_bound_download(baseline)
     growth = len(encode_file_call_obligation(maximum)) - len(encode_file_call_obligation(baseline))
-    admitted = _setup_with_encoded_length(MAX_LIFECYCLE_PAYLOAD_BYTES - growth)
-    refused = _setup_with_encoded_length(MAX_LIFECYCLE_PAYLOAD_BYTES - growth + 1)
+    overhead = len(encode_file_call_obligation(baseline)) - len(encode_file_call_obligation(_setup_download()))
+    admitted = replace(
+        _setup_with_encoded_length(MAX_LIFECYCLE_PAYLOAD_BYTES - growth - overhead), download_child=child
+    )
+    refused = replace(
+        _setup_with_encoded_length(MAX_LIFECYCLE_PAYLOAD_BYTES - growth - overhead + 1), download_child=child
+    )
 
     assert maximum.effect_gate is not None
     assert maximum.effect_gate.device == maximum.effect_gate.inode == _MAXIMUM
@@ -578,6 +711,47 @@ def test_gate_setup_admission_reserves_maximum_bound_proposal_and_download_growt
         encode_file_call_admission(refused)
     with pytest.raises(FileCallObligationCodecError):
         encode_file_call_obligation(_maximum_bound_download(refused))
+
+
+@pytest.mark.parametrize(
+    "family",
+    [FileCallFamily.JSON_UPDATE, FileCallFamily.REMOVE, FileCallFamily.SET_METADATA, FileCallFamily.ENSURE_DIRECTORY],
+)
+@pytest.mark.parametrize("phase", ["setup", "bound"])
+def test_new_mutation_admission_reserves_exact_maximum_gate_child_and_proposal(
+    family: FileCallFamily, phase: str
+) -> None:
+    setup = replace(_setup_download(), family=family, token=None)
+    maximum_gate = _maximum_bound_download(_setup_download()).effect_gate
+    assert maximum_gate is not None
+    baseline = (
+        setup
+        if phase == "setup"
+        else replace(setup, gate_setup=None, effect_gate=replace(maximum_gate, proposed_generation=None))
+    )
+    maximum = _maximum_recovery_obligation(family, initial=replace(baseline, gate_setup=None, effect_gate=maximum_gate))
+    padding = MAX_LIFECYCLE_PAYLOAD_BYTES - len(encode_file_call_obligation(maximum))
+    relative_padding = min(padding, 4096 - len(baseline.relative_path.encode()))
+    admitted = replace(
+        baseline,
+        root=baseline.root + "a" * (padding - relative_padding),
+        relative_path=baseline.relative_path + "a" * relative_padding,
+    )
+    retained = _maximum_recovery_obligation(
+        family, initial=replace(admitted, gate_setup=None, effect_gate=maximum_gate)
+    )
+    assert decode_file_call_obligation(encode_file_call_admission(admitted)) == admitted
+    assert len(encode_file_call_obligation(retained)) == MAX_LIFECYCLE_PAYLOAD_BYTES
+    assert retained.effect_gate == maximum_gate
+    if family is FileCallFamily.JSON_UPDATE:
+        assert retained.token is not None and retained.attempt == 8
+        assert retained.scratch_cleanup_debt is not None and retained.publication_cleanup_debt is not None
+    else:
+        assert retained.token is None and retained.attempt is None
+    with pytest.raises(FileCallObligationCodecError):
+        encode_file_call_admission(replace(admitted, root=admitted.root + "a"))
+    with pytest.raises(FileCallObligationCodecError):
+        encode_file_call_obligation(replace(retained, root=retained.root + "a"))
 
 
 def test_decoder_normalizes_python_integer_digit_refusal() -> None:

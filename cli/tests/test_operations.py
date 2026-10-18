@@ -34,6 +34,31 @@ from agentworks.operations import (
 pytestmark = pytest.mark.windows
 
 
+@pytest.mark.parametrize("terminal", ["close", "retained-effect", "unresolved"])
+def test_borrow_closed_reports_local_terminal_authority_only(db: Database, terminal: str) -> None:
+    owner = OperationOwner.acquire(db.operations, _scope(), "borrow-terminal")
+    borrow = owner.borrow()
+    assert not borrow.closed
+    obligation = borrow.install_dispatch_obligation("a" * 32, "fixture", payload_version=1, payload=b"{}")
+    attempt = borrow.begin_attempt()
+    assert not borrow.closed
+    if terminal == "unresolved":
+        borrow.handoff_unresolved()
+    else:
+        attempt.settle()
+        if terminal == "close":
+            borrow.close()
+        else:
+            borrow.handoff_retained_effect()
+    assert borrow.closed
+    row = owner.inspect_lifecycle_obligation(obligation.obligation_id)
+    assert row is not None
+    assert row.state is (
+        LifecycleObligationState.RESOLVED if terminal == "close" else LifecycleObligationState.POSSIBLE_EFFECT
+    )
+    assert borrow.has_outstanding_attempt is (terminal == "unresolved")
+
+
 def _scope() -> OperationScope:
     return OperationScope(OperationResourceKind.VM, "owned-upload-vm")
 

@@ -27,6 +27,12 @@ separate PRs, then physically delete legacy. New code never calls old execution 
 accessors. Existing `admin_target()` and `agent_target()` keep their legacy types and behavior until
 deletion; there is no union return type, runtime stack selector or fallback between stacks.
 
+Platform-operation contexts additionally use `platform_host_execution_target()` for an already-bound
+host target, with `platform_host_execution_target_absence()` carrying its supplied absence reason.
+It is independent of both guest identities and may exist before the VM does. Core supplies it only
+to the relevant stage; neither a guest target nor a host target fills in for the other. This adds no
+host lookup, connection, ownership acquisition or cleanup to RunContext itself.
+
 Permission/grant language below specifies the **post-removal contract**. During coexistence, do not
 withhold interfaces, reject calls or advertise isolation on the basis of new recipient grants,
 including the new core file ceiling. Record intended actions, paths, elevation and profiles during
@@ -113,15 +119,15 @@ execution identity, not the workstation SSH process. A deadline is one monotonic
 preparation and observation; omission follows the explicitly bound operation policy, not a
 carrier-selected timeout or retry default.
 
-| Surface                                                                       | Proposed behavior                                                                                                                                           |
-| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `features`, identity/route metadata                                           | Passive values from the bound target; no connection or authority discovery.                                                                                 |
-| `read_file`, `stat`, `write_file`, `upload`, `download`                       | Bounded bytes or explicit paths, metadata and publication policy; download has explicit local create/replace choice, and file reads are separately granted. |
-| `upload_directory`, `download_directory`                                      | Explicit merge/replace choice, confined paths and extraction; no implicit recursive deletion.                                                               |
-| `update_json`, `list_directory`, `ensure_directory`, `set_metadata`, `remove` | Structured updates, bounded inventory and filesystem lifecycle under core-approved paths/actions; no command grant required.                                |
-| `observe`, `read_output`, `wait`                                              | Separate status, bounded cursor-based output reads, and waiting for a known job; observing never deletes its records.                                       |
-| `stop`, `dispose`                                                             | Request owned-workload termination with truthful confirmation, or dispose terminal-job artifacts; neither guesses authority from a PID.                     |
-| Terminal I/O and `attach(job, terminal=...)`                                  | Optional terminal launch/attachment, distinct from lifetime, shell startup and authorization to launch additional work.                                     |
+| Surface                                                                                           | Proposed behavior                                                                                                                                                                |
+| ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `features`, identity/route metadata                                                               | Passive values from the bound target; no connection or authority discovery.                                                                                                      |
+| `read_file`, `stat`, `write_file`, `upload`, `upload_file`, `download`                            | Bounded bytes, borrowed streams or owned local paths, metadata and publication policy; download has explicit local create/replace choice, and file reads are separately granted. |
+| `upload_directory`, `download_directory`                                                          | Directory merge with an explicit existing-file conflict choice and bounded partial progress; confined paths, no implicit extraction or recursive deletion.                       |
+| `update_json`, `list_directory`, `create_directory`, `ensure_directory`, `set_metadata`, `remove` | Structured updates, bounded inventory and filesystem lifecycle under core-approved paths/actions; create-only directory creation is distinct from metadata convergence.          |
+| `observe`, `read_output`, `wait`                                                                  | Separate status, bounded cursor-based output reads, and waiting for a known job; observing never deletes its records.                                                            |
+| `stop`, `dispose`                                                                                 | Request owned-workload termination with truthful confirmation, or dispose terminal-job artifacts; neither guesses authority from a PID.                                          |
+| Terminal I/O and `attach(job, terminal=...)`                                                      | Optional terminal launch/attachment, distinct from lifetime, shell startup and authorization to launch additional work.                                                          |
 
 `ExecutionResult` carries available guest exit status, byte output and completeness, and the outcome
 facts needed to distinguish failure, timeout, and uncertainty. A typed execution error carries the
@@ -246,11 +252,24 @@ The public surface does not expose SSH credentials, provider task IDs, or a carr
 `RunContext.admin_execution_target()` and `.agent_execution_target()` return
 `ExecutionTarget | None`, with each supplied view scoped to that recipient after activation. Context
 composition retains a non-sensitive absence reason distinguishing unavailable lifecycle state from
-withheld authority; the LLD specifies its representation. An absent interface is not a claim that
-the carrier cannot implement it. `RunContext` stays in `capabilities/base.py`; it is not cloned into
-the execution package. During coexistence, the new accessors sit beside unchanged legacy accessors.
-The composition root owns target/resource closure; retaining a target cannot extend its authorized
-lifetime. A later job observer receives a newly authorized target.
+withheld authority. The paired `admin_execution_target_absence()` and
+`agent_execution_target_absence()` accessors return `TargetAbsence.UNAVAILABLE` or
+`TargetAbsence.WITHHELD` for an absent binding, and `None` when a target is supplied. Constructor
+reasons default to unavailable and are normalized away for supplied targets without inspecting them.
+The native context prepares its admin target, optionally prepares an explicitly selected agent
+target, and preserves an incoming absent-agent reason when no new agent target is requested. An
+incoming supplied target's identity does not become an absence reason. No production recipient
+permission check or withheld selection is activated by this representation.
+
+Each target also carries immutable `ExecutionIdentity` metadata (the prepared ordinary account, UID,
+GID and groups) and `ExecutionRoute` (`NATIVE`, `CANONICAL` or `PLATFORM_HOST`). Route is a
+composition choice, not the carrier technology: a native cloud route can use SSH. Metadata reads do
+not resolve accounts, recheck readiness, grant elevation or expose credentials/provider handles. An
+absent interface is not a claim that the carrier cannot implement it. `RunContext` stays in
+`capabilities/base.py`; it is not cloned into the execution package. During coexistence, the new
+accessors sit beside unchanged legacy accessors. The composition root owns target/resource closure;
+retaining a target cannot extend its authorized lifetime. A later job observer receives a newly
+authorized target.
 
 ## Carrier contract
 
@@ -318,6 +337,16 @@ live cleanup capabilities through result reducers or exception causes. Local set
 completion and dispatch evidence remain independent facts. Neither `not_sent` nor remote exit zero
 alone clears an attempt with unsettled local custody.
 
+Terminal delivery can additionally retain one inert `LocalDeliveryCleanup` coordinator through
+`custody.retain_cleanup(owner, cleanup)`, bound to that same held native owner before descriptor,
+thread or process admission. Its passive `settled` observation and bounded `close(Deadline)` account
+for relay shutdown, pending acquisition and restoration. Custody closes through the coordinator,
+which stops pipe borrowers before native closure and preserves descriptors until pending
+construction can no longer inherit them. Both native cleanup and coordinator settlement must be
+proved before reuse. A failed or interrupted close retains the same coordinator for a fresh finite
+retry. This adds neither another process owner nor a collection of cleanup hooks; plain delivery
+keeps its existing path. SSH owns the actual terminal coordinator and its native proof.
+
 The owning aggregate retains this storage after an ordinary borrow hands back unresolved work. Its
 non-dispatch cleanup path can settle local custody without reopening that borrow, admitting more
 work or resolving unknown remote effects. Provider hooks receive storage held by the enclosing
@@ -356,6 +385,15 @@ The shared preparation layer owns its temporary finite sources. A borrowed nativ
 admitted but unfinished constructor can still inherit must remain held, with any associated terminal
 state, until that local custody settles. Returning pending cleanup is not permission to close, reuse
 or restore such resources. There is no hidden rewind, reuse, or retry of a consumed input source.
+
+Pipe input offers bytes rather than obligating the consumer to read them all. Finite input offers
+its bytes and then EOF; live input can remain open until the consumer finishes. A positively
+observed child exit or broken input pipe ends input pumping without closing the supplied source or
+itself becoming an input failure. Output observation continues within its existing bounds. This
+establishes neither complete guest consumption nor application success. Required helper setup is
+validated completely by the receiver before effects, not inferred from local pipe acceptance. Other
+source/pipe errors remain failures. Native proof of this shared completion rule remains an
+acceptance gate; terminal handoff has its separate input semantics.
 
 Input pumping and output draining are concurrent where the carrier requires it. Flow control must
 bound buffering without deadlocking duplex commands. Supplied live sources and sinks must satisfy a
@@ -448,6 +486,22 @@ evidence from the inner delivery. Shared host files/jobs use actual host identit
 userspace. Reuse this composition rather than introducing another SSH runner or a generic
 virtualization framework.
 
+Host coordination uses one explicit, core-selected configured resource key for work that can
+conflict. Aliases and accounts referring to that shared resource use the same key; neither an SSH
+username nor a different endpoint spelling creates independent ownership. This is cooperative
+configuration, not automatic discovery of every alias of a physical machine. A machine identifier is
+not a substitute for representing shared resources consistently.
+
+Keep that ownership key separate from observed host continuity. Ordinary DIRECT execution needs the
+selected carrier, trust/account policy, runtime, deadline and operation ownership; it must not
+manufacture a VM marker or boot UUID to satisfy an internal managed-job type. Durable host file
+recovery additionally needs freshly observed host continuity, the recorded account/root/objects and
+proof that earlier requests cannot race reconciliation. A recorded identifier alone establishes none
+of those observations. A reboot does not imply that durable files or a platform-owned VM
+disappeared, and an unchanged boot does not prove an old helper has stopped. Implement the concrete
+producer and recovery consumer together; host replacement or storage migration must not silently
+adopt old effects or discard their unresolved ownership.
+
 ### Core native binding
 
 Add `VMPlatform.resolve_native_execution_binding(vm, ctx, *, deadline, config=None)` alongside the
@@ -494,6 +548,25 @@ same CA choice to platform API access and the new QGA connection; never reinterp
 `verify_ssl=False` as acceptable new-stack trust. That legacy setting retains its old meaning only
 for unmigrated calls, and the new binding rejects it with migration guidance. Loading the selected
 trust material belongs to delivery/readiness, not passive carrier or binding-value construction.
+
+### Host-local Lima delivery
+
+The independent local carrier invokes an explicit `limactl` executable and instance, with automatic
+start, reconnect, terminal UI and host-environment propagation disabled. Bootstrap delivery selects
+`/bin/bash` and `/` explicitly rather than inheriting the guest's default shell or a host directory.
+Lima's outer login startup hooks still run; the carrier does not promise to suppress them or infer
+application entry from client completion.
+
+Use a fixed non-login Bash trampoline to execute the literal prepared argv. A GNU `env --` prefix
+does not suffice: it still consumes assignment-looking operands. The trampoline's `exec -- "$@"`
+preserves those operands and option-looking executable names without another parser for workload
+source. This is bootstrap mechanics, separate from application-shell selection. Retain the original
+deadline and actual local process owner; never reconnect or replay an uncertain invocation.
+
+Only naturally observed zero client completion supplies a candidate outer command-chain completion.
+Nonzero status can also be a local Lima refusal, so preserve uncertainty and raw stream provenance.
+Account observation, provider selection, activation, placement-host SSH composition, provisioning
+and rollback remain required platform work; this carrier alone completes none of those gates.
 
 ## Filesystem and package layout
 

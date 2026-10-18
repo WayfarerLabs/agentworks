@@ -19,10 +19,12 @@ from agentworks.execution._file_metadata_protocol import (
     FileMetadataRequest,
     FileMetadataRequestError,
     FileMetadataResultControl,
+    FileMetadataResultKind,
     encode_file_metadata_request,
     parse_empty_file_metadata_body,
     parse_file_metadata_failure,
     parse_file_metadata_result,
+    targets_metadata_gate_ancestor,
 )
 from agentworks.execution._file_wire import FileRecord, FileRecordKind
 from agentworks.execution._file_wire_reader import FileRecordReader, FileWireError
@@ -46,6 +48,7 @@ from agentworks.execution.carrier import (
 )
 
 if TYPE_CHECKING:
+    from agentworks.execution._file_effect_gate import FileEffectGateBinding
     from agentworks.execution._file_stat import FileRevision
     from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
     from agentworks.execution._helper_launcher import IdentityPlan
@@ -133,8 +136,12 @@ class _FileMetadataCollector:
                     self._fail(FileMetadataObservationError.ORDER)
                 else:
                     result = parse_file_metadata_result(record.body)
-                    if self._operation is FileMetadataOperation.ENSURE_DIRECTORY and not stat.S_ISDIR(
-                        result.revision.stat.mode
+                    if (
+                        self._operation is not FileMetadataOperation.SET_METADATA
+                        and not stat.S_ISDIR(result.revision.stat.mode)
+                    ) or (
+                        self._operation is FileMetadataOperation.CREATE_DIRECTORY
+                        and result.kind is not FileMetadataResultKind.CHANGED
                     ):
                         self._fail(FileMetadataObservationError.CONTROL)
                     else:
@@ -253,7 +260,18 @@ def _exchange(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     bootstrap: _NumericGuestBootstrap | None = None,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> FileMetadataCandidateResult:
+    if (
+        runtime_selection.target_os.value == "linux"
+        and operation is not FileMetadataOperation.CREATE_DIRECTORY
+        and targets_metadata_gate_ancestor(trusted_root_path, relative_path)
+    ):
+        raise ValidationError("Linux metadata cannot alter a file-effect gate namespace ancestor")
+    if effect_gate is not None and (
+        runtime_selection.target_os.value != "linux" or (bootstrap is not None and effect_gate.guest != bootstrap.guest)
+    ):
+        raise ValidationError("File effect gate must match the selected Linux guest")
     nonce = secrets.token_hex(16)
     if bootstrap is None:
         fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
@@ -286,6 +304,7 @@ def _exchange(
                 mode,
                 deadline.remaining(),
                 plan.expected,
+                effect_gate,
             )
         )
     except FileMetadataRequestError as error:
@@ -358,6 +377,7 @@ def set_file_metadata(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     bootstrap: _NumericGuestBootstrap | None = None,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> FileMetadataCandidateResult:
     """Converge one object's metadata through one fresh non-replayed attempt."""
     return _exchange(
@@ -372,6 +392,7 @@ def set_file_metadata(
         deadline=deadline,
         runtime_selection=runtime_selection,
         bootstrap=bootstrap,
+        effect_gate=effect_gate,
     )
 
 
@@ -387,6 +408,7 @@ def ensure_file_directory(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     bootstrap: _NumericGuestBootstrap | None = None,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> FileMetadataCandidateResult:
     """Create or converge one final directory through one fresh attempt."""
     return _exchange(
@@ -401,4 +423,36 @@ def ensure_file_directory(
         deadline=deadline,
         runtime_selection=runtime_selection,
         bootstrap=bootstrap,
+        effect_gate=effect_gate,
+    )
+
+
+def create_file_directory(
+    carrier: BoundHelperCarrier,
+    *,
+    trusted_root_path: str,
+    relative_path: str,
+    uid: int,
+    gid: int,
+    mode: int,
+    plan: IdentityPlan,
+    deadline: Deadline,
+    runtime_selection: RuntimeSelection,
+    bootstrap: _NumericGuestBootstrap | None = None,
+    effect_gate: FileEffectGateBinding | None = None,
+) -> FileMetadataCandidateResult:
+    """Create one final directory through one fresh attempt, refusing existing entries."""
+    return _exchange(
+        carrier,
+        operation=FileMetadataOperation.CREATE_DIRECTORY,
+        trusted_root_path=trusted_root_path,
+        relative_path=relative_path,
+        uid=uid,
+        gid=gid,
+        mode=mode,
+        plan=plan,
+        deadline=deadline,
+        runtime_selection=runtime_selection,
+        bootstrap=bootstrap,
+        effect_gate=effect_gate,
     )

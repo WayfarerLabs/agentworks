@@ -6,11 +6,9 @@ import contextlib
 import json
 import os
 import platform
-import re
 import subprocess
 import sys
 import urllib.request
-import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
@@ -22,12 +20,13 @@ from agentworks.capabilities.vm_platform.base import (
     ProvisionResult,
     VMPlatform,
     execution_power_remaining,
-    provider_locator_remaining,
 )
 from agentworks.capabilities.vm_platform.debian_release import code_owned_release_value
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConnectivityError, LimitExceededError, StateError
+from agentworks.execution._wsl2_registration import execution_power_from_listing as _execution_power_from_listing
+from agentworks.execution._wsl2_registration import observe_registration
 from agentworks.execution.carrier import Capture, CarrierIO, Failure
 from agentworks.execution.carriers._subprocess import run_process
 from agentworks.schema import AgwModel
@@ -43,80 +42,12 @@ if TYPE_CHECKING:
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
+    from agentworks.operations import OperationOwner
     from agentworks.resources.graph import Readiness
     from agentworks.transports import Transport
+    from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 _STATUS_TIMEOUT_SECONDS = 10
-_WSL2_LOCATOR_SID = re.compile(r"S-\d+(?:-\d+)+", re.ASCII)
-_WSL2_LOCATOR_KEYS = frozenset({"machine_guid", "registration_guid", "user_sid"})
-_WSL2_LOCATOR_REGISTRATION_MISMATCH_EXIT = 3
-
-
-def _parse_wsl2_locator_payload(raw: str, *, vm_name: str) -> tuple[str, str, str]:
-    """Validate the one PowerShell locator observation at its process boundary."""
-
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as error:
-        raise StateError(
-            f"WSL2 provider locator observation returned invalid JSON for VM '{vm_name}'",
-            entity_kind="vm",
-            entity_name=vm_name,
-        ) from error
-    if not isinstance(payload, dict) or set(payload) != _WSL2_LOCATOR_KEYS:
-        raise StateError(
-            f"WSL2 provider locator observation returned an invalid shape for VM '{vm_name}'",
-            entity_kind="vm",
-            entity_name=vm_name,
-        )
-    machine_guid = payload["machine_guid"]
-    registration_guid = payload["registration_guid"]
-    user_sid = payload["user_sid"]
-    if not all(type(value) is str for value in (machine_guid, registration_guid, user_sid)):
-        raise StateError(
-            f"WSL2 provider locator observation returned invalid value types for VM '{vm_name}'",
-            entity_kind="vm",
-            entity_name=vm_name,
-        )
-    try:
-        parsed_machine_guid = str(uuid.UUID(machine_guid))
-        parsed_registration_guid = str(uuid.UUID(registration_guid))
-    except ValueError as error:
-        raise StateError(
-            f"WSL2 provider locator observation returned an invalid GUID for VM '{vm_name}'",
-            entity_kind="vm",
-            entity_name=vm_name,
-        ) from error
-    if _WSL2_LOCATOR_SID.fullmatch(user_sid) is None:
-        raise StateError(
-            f"WSL2 provider locator observation returned an invalid SID for VM '{vm_name}'",
-            entity_kind="vm",
-            entity_name=vm_name,
-        )
-    return parsed_machine_guid, user_sid, parsed_registration_guid
-
-
-_WSL2_LOCATOR_SCRIPT = r"""
-$ErrorActionPreference = 'Stop'
-$distro = $env:AGENTWORKS_WSL_DISTRO
-$root = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss'
-$registrations = @(
-    Get-ChildItem -LiteralPath $root | ForEach-Object {
-        $properties = Get-ItemProperty -LiteralPath $_.PSPath
-        if ($properties.DistributionName -ceq $distro) {
-            [pscustomobject]@{ registration_guid = $_.PSChildName }
-        }
-    }
-)
-if ($registrations.Count -ne 1) { exit 3 }
-[pscustomobject]@{
-    machine_guid = Get-ItemPropertyValue -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name MachineGuid
-    user_sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-    registration_guid = $registrations[0].registration_guid
-} | ConvertTo-Json -Compress
-"""
-
-
 # -- Win32 job-object machinery for orphan-proof subprocess cleanup ----------
 #
 # Without this, an `agw` process that gets hard-killed (SIGKILL, console
@@ -332,34 +263,6 @@ def _wsl(args: list[str], *, check: bool = True, timeout: int = 300) -> str:
         stderr = result.stderr.replace("\x00", "").strip()
         raise RuntimeError(f"wsl command failed: {stderr}")
     return result.stdout.replace("\x00", "")
-
-
-def _decode_execution_power_listing(raw: bytes) -> str | None:
-    """Decode WSL's redirected UTF-16 or UTF-8 output without losing names."""
-    if len(raw) > 65_536:
-        return None
-    try:
-        if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
-            return raw.decode("utf-16")
-        return raw.decode("utf-16-le") if b"\x00" in raw else raw.decode("utf-8")
-    except UnicodeDecodeError:
-        return None
-
-
-def _execution_power_from_listing(raw: bytes, distro_name: str) -> VMStatus:
-    listing = _decode_execution_power_listing(raw)
-    if listing is None:
-        return VMStatus.UNKNOWN
-    for line in listing.splitlines():
-        parts = line.strip().removeprefix("*").strip().rsplit(None, 2)
-        if len(parts) != 3 or parts[0] != distro_name or not parts[2].isdigit():
-            continue
-        if parts[1].casefold() == "running":
-            return VMStatus.RUNNING
-        if parts[1].casefold() == "stopped":
-            return VMStatus.STOPPED
-        return VMStatus.UNKNOWN
-    return VMStatus.UNKNOWN
 
 
 def _powershell(script: str, *, check: bool = True, timeout: int = 120) -> str:
@@ -1024,43 +927,23 @@ class WSL2Platform(VMPlatform):
         """Observe the exact local WSL registration without touching the guest."""
         del ctx
         distro_name = self._distro_name(vm)
-        provider_locator_remaining(deadline, vm_name=vm.name)
-        result = run_process(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", _WSL2_LOCATOR_SCRIPT],
-            io=CarrierIO(output=Capture(65_536)),
-            deadline=deadline,
-            custody=custody,
-            env={**os.environ, "AGENTWORKS_WSL_DISTRO": distro_name},
-        )
-        if result.failure is Failure.DEADLINE:
-            raise LimitExceededError(
-                f"WSL2 provider locator observation timed out for VM '{vm.name}'",
-                entity_kind="vm",
-                entity_name=vm.name,
-            )
-        if result.failure is not None or not result.stdout.complete or not custody.settled:
-            raise ConnectivityError(
-                f"Could not observe WSL2 provider locator for VM '{vm.name}'",
-                entity_kind="vm",
-                entity_name=vm.name,
-            )
-        if result.exit_status == _WSL2_LOCATOR_REGISTRATION_MISMATCH_EXIT:
-            raise StateError(
-                f"WSL2 registration for VM '{vm.name}' is missing or ambiguous",
-                entity_kind="vm",
-                entity_name=vm.name,
-            )
-        if result.exit_status != 0:
-            raise ConnectivityError(
-                f"Could not observe WSL2 provider locator for VM '{vm.name}'",
-                entity_kind="vm",
-                entity_name=vm.name,
-            )
-        provider_locator_remaining(deadline, vm_name=vm.name)
-        machine_guid, user_sid, registration_guid = _parse_wsl2_locator_payload(
-            result.stdout.data.decode("utf-8", errors="replace"), vm_name=vm.name
-        )
-        return ProviderLocator(f"wsl2:{machine_guid}:{user_sid}:{registration_guid}")
+        registration = observe_registration(distro_name, vm.name, deadline, custody)
+        if registration.guid is None:
+            raise StateError("WSL2 provider registration is missing", entity_kind="vm", entity_name=vm.name)
+        return ProviderLocator(f"wsl2:{registration.machine}:{registration.sid}:{registration.guid}")
+
+    def build_native_execution_access(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
+    ) -> OwnedNativePlatformAccess:
+        """Construct passive access for core to retain before preparation effects."""
+        from agentworks.vms._wsl2_native_access import WSL2OwnedNativePlatformAccess
+
+        return WSL2OwnedNativePlatformAccess(vm, self, ctx, owner, custody)
 
     def resolve_native_execution_binding(
         self,

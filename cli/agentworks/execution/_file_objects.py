@@ -1,8 +1,9 @@
-"""Private Linux filesystem-object observation and conditional removal.
+"""Private filesystem-object observation and conditional removal.
 
 The caller owns the trusted parent descriptor and operation serialization,
 and supplies an already-validated single leaf name.
 Linux ``openat2`` confines the exact leaf without requiring read authority.
+Darwin requires readable regular files or directories; sockets refuse.
 External writers can still race the final check and removal syscall; this
 module makes no adversarial compare-and-swap claim.
 """
@@ -19,7 +20,7 @@ from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import NoReturn
 
-from ._file_paths import ConfinedOpenError, ConfinedOpenFailure, open_linux_confined
+from ._file_paths import ConfinedOpenError, ConfinedOpenFailure, open_file_confined
 from ._file_snapshot import (
     SnapshotFailureKind,
     SnapshotReadError,
@@ -78,7 +79,7 @@ def stat_file_object(
     expires_at: float | None,
 ) -> FileRevision | None:
     """Return metadata-only revision evidence for one supported exact leaf."""
-    _require_linux(FileObjectPhase.OBSERVATION)
+    _require_platform(FileObjectPhase.OBSERVATION)
     _raise_if_expired(expires_at, FileObjectPhase.OBSERVATION)
     observed = _open_observed(parent_fd, leaf_name, FileObjectPhase.OBSERVATION, expires_at)
     if observed is None:
@@ -103,7 +104,7 @@ def remove_file_object(
     expires_at: float | None,
 ) -> bool:
     """Remove the exact matching leaf, or return ``False`` when initially absent."""
-    _require_linux(FileObjectPhase.CONDITION)
+    _require_platform(FileObjectPhase.CONDITION)
     _raise_if_expired(expires_at, FileObjectPhase.CONDITION)
 
     observed = _open_observed(parent_fd, leaf_name, FileObjectPhase.CONDITION, expires_at)
@@ -254,7 +255,7 @@ def _kind_from_mode(mode: int, phase: FileObjectPhase) -> FileKind:
         return FileKind.REGULAR
     if stat.S_ISDIR(mode):
         return FileKind.DIRECTORY
-    if stat.S_ISSOCK(mode):
+    if stat.S_ISSOCK(mode) and sys.platform == "linux":
         return FileKind.SOCKET
     raise FileObjectError(FileObjectFailureKind.UNSUPPORTED, phase)
 
@@ -262,11 +263,12 @@ def _kind_from_mode(mode: int, phase: FileObjectPhase) -> FileKind:
 def _open_path(parent_fd: int, leaf_name: str, phase: FileObjectPhase) -> int | None:
     path_only = getattr(os, "O_PATH", 0)
     no_follow = getattr(os, "O_NOFOLLOW", 0)
-    if not path_only or not no_follow:
+    if (sys.platform == "linux" and not path_only) or not no_follow:
         raise FileObjectError(FileObjectFailureKind.UNSUPPORTED, phase)
-    flags = path_only | no_follow | getattr(os, "O_CLOEXEC", 0)
+    access = path_only if sys.platform == "linux" else os.O_RDONLY | os.O_NONBLOCK
+    flags = access | no_follow | getattr(os, "O_CLOEXEC", 0)
     try:
-        return open_linux_confined(parent_fd, leaf_name, flags)
+        return open_file_confined(parent_fd, leaf_name, flags)
     except ConfinedOpenError as error:
         if error.kind is ConfinedOpenFailure.UNSUPPORTED_OBJECT:
             kind = FileObjectFailureKind.UNSUPPORTED
@@ -318,8 +320,8 @@ def _fstat(descriptor: int, phase: FileObjectPhase) -> os.stat_result:
     return observed
 
 
-def _require_linux(phase: FileObjectPhase) -> None:
-    if sys.platform != "linux":
+def _require_platform(phase: FileObjectPhase) -> None:
+    if sys.platform not in {"linux", "darwin"}:
         raise FileObjectError(FileObjectFailureKind.UNSUPPORTED, phase)
 
 

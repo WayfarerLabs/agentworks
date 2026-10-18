@@ -1,4 +1,4 @@
-"""Linux path opens confined beneath a caller-owned directory descriptor."""
+"""Platform-specific path opens beneath a caller-owned directory descriptor."""
 
 from __future__ import annotations
 
@@ -55,6 +55,45 @@ def normalized_relative_path(path: str) -> bool:
     )
 
 
+def directory_path_flags() -> int:
+    """Select Linux search-only or Darwin readable directory handles."""
+    access = getattr(os, "O_PATH", 0) if sys.platform == "linux" else os.O_RDONLY
+    return access | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def open_file_root(path: str) -> int | None:
+    """Open an explicit root, permitting mount crossings while reaching it."""
+    if sys.platform == "darwin" and normalized_root(path):
+        from ._file_paths_darwin import open_darwin_root
+
+        return open_darwin_root(path)
+    return open_linux_root(path)
+
+
+def open_file_confined(root_fd: int, relative_path: str, flags: int) -> int | None:
+    """Open a normalized descendant without links or a different device.
+
+    Darwin uses readable directory handles and checks each held/named component.
+    This is a cooperative descriptor walk, not Linux openat2 or protection from
+    malicious same-user ancestry moves. Search-only directories refuse on Darwin.
+    """
+    if sys.platform == "darwin":
+        if not normalized_relative_path(relative_path):
+            raise ConfinedOpenError(ConfinedOpenFailure.IO)
+        from ._file_paths_darwin import open_darwin_confined
+
+        return open_darwin_confined(root_fd, relative_path, flags)
+    return open_linux_confined(root_fd, relative_path, flags)
+
+
+def _open_failure(error_number: int | None) -> ConfinedOpenFailure:
+    if error_number in {errno.ENOENT, errno.EAGAIN}:
+        return ConfinedOpenFailure.CONFLICT
+    if error_number in {errno.ELOOP, errno.ENOTDIR, errno.ENXIO, errno.ENODEV, errno.EXDEV}:
+        return ConfinedOpenFailure.UNSUPPORTED_OBJECT
+    return ConfinedOpenFailure.IO
+
+
 def open_linux_root(path: str) -> int | None:
     """Open a validated absolute Linux path without links or read permission.
 
@@ -89,17 +128,7 @@ def open_linux_root(path: str) -> int | None:
     except (OSError, UnicodeEncodeError, ValueError) as error:
         if isinstance(error, OSError) and error.errno == errno.ENOENT:
             return None
-        if isinstance(error, OSError) and error.errno == errno.EAGAIN:
-            raise ConfinedOpenError(ConfinedOpenFailure.CONFLICT) from None
-        if isinstance(error, OSError) and error.errno in {
-            errno.ELOOP,
-            errno.ENOTDIR,
-            errno.ENXIO,
-            errno.ENODEV,
-            errno.EXDEV,
-        }:
-            raise ConfinedOpenError(ConfinedOpenFailure.UNSUPPORTED_OBJECT) from None
-        raise ConfinedOpenError(ConfinedOpenFailure.IO) from None
+        raise ConfinedOpenError(_open_failure(error.errno if isinstance(error, OSError) else None)) from None
     finally:
         if not return_descriptor and descriptor is not None:
             with suppress(OSError):
@@ -130,11 +159,7 @@ def open_linux_confined(root_fd: int, relative_path: str, flags: int) -> int | N
         return descriptor
     if error_number == errno.ENOENT:
         return None
-    if error_number == errno.EAGAIN:
-        raise ConfinedOpenError(ConfinedOpenFailure.CONFLICT)
-    if error_number in {errno.ELOOP, errno.ENOTDIR, errno.ENXIO, errno.ENODEV, errno.EXDEV}:
-        raise ConfinedOpenError(ConfinedOpenFailure.UNSUPPORTED_OBJECT)
-    raise ConfinedOpenError(ConfinedOpenFailure.IO)
+    raise ConfinedOpenError(_open_failure(error_number))
 
 
 def _linux_syscall(

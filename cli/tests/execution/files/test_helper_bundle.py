@@ -30,13 +30,17 @@ _LINUX_ONLY = pytest.mark.skipif(sys.platform != "linux", reason="Linux file hel
 _PACKAGE = "_agw_file"
 _MODULE_NAMES = (
     "_helper_identity",
+    "_darwin_descriptors",
+    "_darwin_metadata",
     "_file_stat",
     "_file_paths",
+    "_file_paths_darwin",
     "_file_snapshot",
     "_file_snapshot_read",
     "_scratch_receipt",
     "_scratch",
     "_publication_receipt",
+    "_file_publication_darwin",
     "_file_publication",
     "_file_wire",
     "_file_read_protocol",
@@ -80,8 +84,10 @@ _FIXED_SOURCE = build_helper_modules(_PACKAGE, _MODULE_NAMES) + _DISPATCHER
 _SNAPSHOT_PACKAGE = "_agw_snapshot"
 _SNAPSHOT_MODULE_NAMES = (
     "_helper_identity",
+    "_darwin_descriptors",
     "_file_stat",
     "_file_paths",
+    "_file_paths_darwin",
     "_file_snapshot",
     "_scratch_receipt",
     "_scratch",

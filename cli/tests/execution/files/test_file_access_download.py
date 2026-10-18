@@ -10,7 +10,14 @@ from threading import Event, Thread, current_thread
 import pytest
 
 from agentworks.db import Database
-from agentworks.errors import ConflictError, ExternalError, StateError, UncertainOutcomeError
+from agentworks.errors import (
+    ConflictError,
+    ExternalError,
+    LimitExceededError,
+    StateError,
+    UncertainOutcomeError,
+    ValidationError,
+)
 from agentworks.execution import _file_local_download as local_download_module
 from agentworks.execution import _file_operation as file_operation_module
 from agentworks.execution import access as access_module
@@ -23,6 +30,7 @@ from agentworks.execution._file_local_download import (
 )
 from agentworks.execution._file_operation import FileOperation
 from agentworks.execution._file_result_transfer import reduce_file_local_download
+from agentworks.execution._file_snapshot_bundle import _PACKAGE
 from agentworks.execution._local_download_publication import LocalDownloadPublication
 from agentworks.execution._local_download_stage import (
     LocalDownloadCleanupUncertainError,
@@ -35,8 +43,92 @@ from agentworks.operations import OperationBorrow, OperationOwner, release_borro
 from tests.execution.files._file_access_support import bound_access as bound_access
 from tests.execution.files._file_access_support import plan as plan
 from tests.execution.files._file_snapshot_support import LocalCarrier as SnapshotLocalCarrier
+from tests.execution.files._file_snapshot_support import install_fixture_bundle
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the fixed file helpers require Linux")
+
+
+@pytest.mark.parametrize("replace_existing", [False, True])
+def test_zero_bound_download_publishes_verified_empty_file_and_closes_custody(
+    bound_access: tuple[FileAccess, Path, OperationOwner, Database],
+    monkeypatch: pytest.MonkeyPatch,
+    replace_existing: bool,
+) -> None:
+    access, root, _owner, _database = bound_access
+    source = root / "source"
+    source.write_bytes(b"")
+    destination = root.parent / "local-download"
+    if replace_existing:
+        destination.write_bytes(b"previous content")
+    outcomes: list[FileLocalDownloadOutcome] = []
+    original = download_to_local_file
+
+    def recording_download(*args: object, **kwargs: object):
+        outcome = original(*args, **kwargs)  # type: ignore[arg-type]
+        outcomes.append(outcome)
+        return outcome
+
+    monkeypatch.setattr(access_module, "download_to_local_file", recording_download)
+    metadata = access.download(
+        PurePosixPath(source), destination, max_bytes=0, local_condition=Replace() if replace_existing else Create()
+    )
+    assert metadata.size == 0 and destination.read_bytes() == b""
+    assert len(outcomes) == 1 and outcomes[0].published
+    remote = outcomes[0].download
+    assert remote is not None and remote.stream_verified and remote.accepted_bytes == 0
+    assert not remote.requires_owner_retention and remote.cleanup_debt is None
+    assert not access._operation.active_downloads and not access._operation.unfinished_downloads
+    assert access._operation.retained_local_download_stage is None
+    assert access._operation._local_download_call is None
+    assert not tuple((root.parent / "scratch").iterdir())
+
+
+@pytest.mark.parametrize("grows", [False, True])
+def test_zero_bound_download_refuses_nonempty_or_growing_source_before_publication(
+    bound_access: tuple[FileAccess, Path, OperationOwner, Database],
+    monkeypatch: pytest.MonkeyPatch,
+    grows: bool,
+) -> None:
+    access, root, _owner, _database = bound_access
+    source = root / "source"
+    source.write_bytes(b"" if grows else b"x")
+    destination = root.parent / "local-download"
+    destination.write_bytes(b"previous content")
+    if grows:
+        install_fixture_bundle(
+            monkeypatch,
+            root.parent / "scratch",
+            f"""
+snapshot = sys.modules[{(_PACKAGE + "._file_snapshot")!r}]
+original_read = snapshot._read
+def growing_read(descriptor, maximum):
+    with open({str(source)!r}, 'ab') as stream:
+        stream.write(b'x')
+    return original_read(descriptor, maximum)
+snapshot._read = growing_read
+""",
+        )
+    with pytest.raises(ConflictError if grows else LimitExceededError) as raised:
+        access.download(PurePosixPath(source), destination, max_bytes=0, local_condition=Replace())
+    assert raised.value.details is not None
+    assert raised.value.details.reason is (FileFailureReason.CONFLICT if grows else FileFailureReason.LIMIT)
+    assert destination.read_bytes() == b"previous content"
+    assert source.read_bytes() == b"x"
+    assert not access._operation.active_downloads and not access._operation.unfinished_downloads
+    assert access._operation.retained_local_download_stage is None
+    assert access._operation._local_download_call is None
+    assert not tuple((root.parent / "scratch").iterdir())
+
+
+@pytest.mark.parametrize("max_bytes", [-1, True, False, 1 << 63, 1.0])
+def test_download_refuses_invalid_bounds_before_publication(
+    bound_access: tuple[FileAccess, Path, OperationOwner, Database], max_bytes: object
+) -> None:
+    access, root, _owner, _database = bound_access
+    destination = root.parent / "local-download"
+    with pytest.raises(ValidationError):
+        access.download(PurePosixPath(root / "source"), destination, max_bytes=max_bytes)  # type: ignore[arg-type]
+    assert not destination.exists() and access._operation._local_download_call is None
 
 
 @pytest.mark.parametrize("method", ["memory", "local"])

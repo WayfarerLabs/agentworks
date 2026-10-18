@@ -20,7 +20,7 @@ from agentworks.execution._execution_result import reduce_owned_inline_result
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._inline_bundle import ROOT_PROGRAM
-from agentworks.execution._inline_request import decode_manifest
+from agentworks.execution._inline_request import REQUEST_HEADER_BYTES, decode_manifest
 from agentworks.execution._managed_runs import ManagedTargetKind
 from agentworks.execution._runtime_prerequisite import (
     RuntimeSelection,
@@ -85,13 +85,16 @@ def test_constructor_refuses_mismatch_before_borrow(
     operation_owner.close()
 
 
-def test_platform_host_accepts_context_free_operation_and_refuses_bootstrap(tmp_path: Path) -> None:
+@pytest.mark.parametrize("managed_target", [False, True])
+def test_platform_host_accepts_context_free_operation_and_refuses_bootstrap(
+    tmp_path: Path, managed_target: bool
+) -> None:
     database = Database(tmp_path / "state.db")
     try:
         operation_owner = OperationOwner.acquire(
             database.operations, OperationScope(OperationResourceKind.PLATFORM_HOST, "native-host"), "execution"
         )
-        target = target_for_owner(operation_owner)
+        target = target_for_owner(operation_owner) if managed_target else None
         ExecutionOperation(operation_owner, target)
         with pytest.raises(ValidationError):
             ExecutionOperation(operation_owner, target, bootstrap=_CONTEXT)
@@ -99,6 +102,17 @@ def test_platform_host_accepts_context_free_operation_and_refuses_bootstrap(tmp_
         operation_owner.close()
     finally:
         database.close()
+
+
+@pytest.mark.parametrize("bootstrap", [None, _CONTEXT])
+def test_vm_refuses_missing_managed_target(owner: tuple[Database, OperationOwner], bootstrap) -> None:
+    database, operation_owner = owner
+    with pytest.raises(ValidationError):
+        ExecutionOperation(operation_owner, None, bootstrap=bootstrap)
+    claim = database.operations.inspect(operation_owner.ownership.scope)
+    assert claim is not None and claim.state is OperationClaimState.RESERVED
+    assert database.operations.list_pending_lifecycle_obligations(operation_owner.ownership) == ()
+    operation_owner.close()
 
 
 class PreparedCarrier(RecordingCarrier):
@@ -112,7 +126,7 @@ class PreparedCarrier(RecordingCarrier):
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         super().validate(invocation, io=io)
         assert isinstance(io.input, FiniteInput)
-        manifest = decode_manifest(io.input.data)
+        manifest = decode_manifest(io.input.data[REQUEST_HEADER_BYTES:])
         assert manifest.identity == self.body.expected
         expected, _, _ = build_root_guest_bootstrap_argv(
             self.bootstrap.root_entry,

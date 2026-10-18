@@ -45,8 +45,9 @@ from agentworks.execution.jobs import JobStream
 from agentworks.execution.models import Command, Input, JobRef, Lifetime, Output
 from agentworks.execution.profiles import Protection
 from agentworks.execution.result import ApplicationState, ExecutionFailure
+from agentworks.execution.target import ExecutionIdentity, ExecutionRoute, ExecutionTarget
 from agentworks.operations import OperationOwner
-from agentworks.vms._native_operation import NativeVMOperation, _Workflow
+from agentworks.vms._native_operation import VMOperation, _Workflow
 
 from .test_managed_execution_access import Delivery, fact
 from .test_managed_job_access import RUN, _call
@@ -152,8 +153,16 @@ def observer(tmp_path):
         entity_name="vm-one",
         deadline=lambda: Deadline.after(5),
     )
+    expected = PLAN.expected
+    target = ExecutionTarget(
+        access,
+        file_access,
+        main.features,
+        ExecutionIdentity("root", expected.euid, expected.egid, expected.groups),
+        ExecutionRoute.NATIVE,
+    )
     workflow = _Workflow(
-        owner, Deadline.after(5), views=NativeVMOperation(owner, file_access, access, files, operation)
+        owner, Deadline.after(5), views=VMOperation(owner, file_access, access, files, operation, target)
     )
     try:
         yield database, repository, operation, access, main, workflow
@@ -404,7 +413,7 @@ def test_selected_route_refusal_fences_resource_helper_delivery(observer):
     route = Mock(spec=WSL2OwnedOperation)
     refusal = StateError("selected route changed")
     route.require_selected_route.side_effect = refusal
-    operation._wsl2_route = route
+    operation._route_check = route.require_selected_route
     with pytest.raises(StateError) as raised:
         access.observe(JobRef(RUN.run_id))
     assert raised.value is refusal

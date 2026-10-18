@@ -51,7 +51,9 @@ if TYPE_CHECKING:
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
     from agentworks.execution.carriers.proxmox import ProxmoxConnection
+    from agentworks.operations import OperationOwner
     from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
+    from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 
 def _warn_bootstrap_file_residue() -> None:
@@ -623,6 +625,19 @@ class ProxmoxPlatform(VMPlatform):
         provider_locator_remaining(deadline, vm_name=vm.name)
         return locator
 
+    def build_native_execution_access(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
+    ) -> OwnedNativePlatformAccess:
+        """Construct passive access for core to retain before preparation effects."""
+        from agentworks.plugins.proxmox._native_access import ProxmoxOwnedNativePlatformAccess
+
+        return ProxmoxOwnedNativePlatformAccess(vm, self, ctx, owner, custody)
+
     def resolve_native_execution_binding(
         self,
         vm: VMRow,
@@ -632,18 +647,10 @@ class ProxmoxPlatform(VMPlatform):
         config: Config | None = None,
     ) -> NativeExecutionBinding:
         """Bind verified QGA delivery without probing or constructing legacy execution."""
-        from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
-        from agentworks.execution.binding import NativeExecutionBinding
-        from agentworks.execution.carriers.proxmox import ProxmoxCarrier
+        from agentworks.plugins.proxmox._native_binding import proxmox_native_binding
 
         del deadline, config
-        connection = self._execution_connection(vm, ctx)
-        return NativeExecutionBinding(
-            ProxmoxCarrier(connection),
-            "root",
-            RuntimeSelection(RuntimeTargetOS.LINUX),
-            _new_managed_delivery=lambda: ProxmoxCarrier(connection),
-        )
+        return proxmox_native_binding(self._execution_connection(vm, ctx))
 
     def observe_execution_power(
         self, vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody: LocalDeliveryCustody

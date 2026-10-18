@@ -50,12 +50,12 @@ clock=[guest.time.monotonic()]
 def controlled_monotonic():
  return clock[0]
 guest.time.monotonic=controlled_monotonic
-real_open_root=guest.open_linux_root
+real_open_root=guest.open_file_root
 def advancing_open_root(path):
  result=real_open_root(path)
  clock[0]+=10.0
  return result
-guest.open_linux_root=advancing_open_root
+guest.open_file_root=advancing_open_root
 """
 
 _ADVANCE_AFTER_OPERATE = """
@@ -747,7 +747,7 @@ def test_reconcile_closes_owned_descriptors_on_control_interrupt(
         1.0,
     )
 
-    monkeypatch.setattr(_file_stage_guest, "_open_parent", lambda _request: (root_fd, parent_fd))
+    monkeypatch.setattr(_file_stage_guest, "_open_parent", lambda *_args, **_kwargs: (root_fd, parent_fd))
 
     def interrupt(*_args, **_kwargs):
         raise KeyboardInterrupt

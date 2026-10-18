@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Iterator
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -47,7 +48,7 @@ class LocalCarrier:
 
     @property
     def features(self) -> ChannelFeatures:
-        return ChannelFeatures()
+        return ChannelFeatures(live_stdio=True)
 
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         pass
@@ -69,6 +70,7 @@ class LocalCarrier:
             deadline=deadline,
             custody=custody,
             standalone_custody=self.local_delivery,
+            live_stdio=True,
         )
         completion = None
         if result.exit_status is not None:
@@ -156,6 +158,60 @@ def test_command_runs_with_exact_default_deadline_and_exit_status(bound: Bound, 
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
+
+
+@pytest.mark.parametrize("status", [0, 17])
+@_LINUX_ONLY
+def test_platform_host_direct_needs_no_managed_identity(tmp_path: Path, status: int) -> None:
+    with closing(Database(tmp_path / "host.db")) as database:
+        owner = OperationOwner.acquire(
+            database.operations,
+            OperationScope(OperationResourceKind.PLATFORM_HOST, "shared-platform-host"),
+            "host-inline",
+        )
+        carrier = LocalCarrier()
+        deadline = Deadline.after(30)
+        checks: list[Deadline] = []
+        operation = ExecutionOperation(owner, None, route_check=checks.append)
+        groups = tuple(sorted(set(os.getgroups()) | {os.getegid()}))
+        access = ExecutionAccess(
+            operation,
+            carrier,
+            runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable),
+            ordinary_plan=IdentityPlan(IdentityExpectation(os.geteuid(), os.getegid(), groups), IdentityMode.DIRECT),
+            elevated_plan=None,
+            entity_kind="platform-host",
+            entity_name="shared-platform-host",
+            deadline=lambda: deadline,
+        )
+        payload = b"\x00\xffhost input\n"
+        literal = "literal ; $(false) ' \" *"
+        command = Command(
+            (
+                sys.executable,
+                "-c",
+                "import sys; sys.stdout.buffer.write(sys.argv[1].encode() + sys.stdin.buffer.read()); "
+                "sys.stderr.buffer.write(b'host error'); sys.exit(int(sys.argv[2]))",
+                literal,
+                str(status),
+            )
+        )
+        try:
+            result = access.run(command, profile=Protection.DIRECT, stdin=Input.bytes(payload))
+            assert result.status == ExitCode(status)
+            assert result.stdout.data == literal.encode() + payload
+            assert result.stderr.data == b"host error"
+            assert carrier.calls == 1 and carrier.deadlines == [deadline]
+            assert checks == [deadline]
+            assert operation.active_inline_calls == () and operation.unfinished_inline_executions == ()
+            operation.finish()
+            assert owner.list_pending_lifecycle_obligations() == ()
+            owner.seal_lifecycle_obligations()
+            owner.record_effects_resolved()
+            owner.close()
+            assert database.operations.inspect(owner.ownership.scope) is None
+        finally:
+            assert owner.close_local_delivery(Deadline.after(3))
 
 
 @_LINUX_ONLY
@@ -309,7 +365,7 @@ def test_known_refusals_do_not_borrow_or_dispatch(
 
 
 @_LINUX_ONLY
-def test_script_startup_and_non_linux_refuse_before_dispatch(
+def test_script_startup_and_darwin_managed_refuse_before_dispatch(
     bound: Bound,
 ) -> None:
     _, owner, operation, carrier, access, deadline = bound
@@ -317,9 +373,42 @@ def test_script_startup_and_non_linux_refuse_before_dispatch(
         access.run(Script("true", Shell.SH, login=True), profile=Protection.DIRECT)
     non_linux = _access(operation, carrier, deadline, target_os=RuntimeTargetOS.DARWIN)
     with pytest.raises(StateError):
-        non_linux.run(Command(("/bin/true",)), profile=Protection.DIRECT)
+        non_linux.run(Command(("/bin/true",)), profile=Protection.MANAGED)
     assert carrier.calls == 0 and operation.active_inline_calls == ()
     assert deadline is not None
+    owner.close()
+
+
+def test_darwin_buffered_direct_reaches_carrier(bound: Bound) -> None:
+    _, _, operation, _, _, deadline = bound
+    carrier = UnknownCarrier()
+    access = _access(operation, carrier, deadline, target_os=RuntimeTargetOS.DARWIN)
+    result = access.run(Command(("/bin/true",)), profile=Protection.DIRECT)
+    assert carrier.calls == 1
+    assert result.dispatch is Dispatch.UNKNOWN
+    assert len(operation.unfinished_inline_executions) == 1
+
+
+@pytest.mark.parametrize("endpoint", ["input", "output"])
+def test_darwin_live_refuses_without_borrowing_endpoints(bound: Bound, endpoint: str) -> None:
+    class Source:
+        def try_read(self, limit: int) -> bytes | None:
+            pytest.fail("refused Darwin source was read")
+
+    class Sink:
+        def try_write(self, data: memoryview) -> int | None:
+            pytest.fail("refused Darwin sink was written")
+
+    _, owner, operation, carrier, _, deadline = bound
+    access = _access(operation, carrier, deadline, target_os=RuntimeTargetOS.DARWIN)
+    with pytest.raises(StateError):
+        access.run(
+            Command(("/bin/true",)),
+            profile=Protection.DIRECT,
+            stdin=Input.live(Source()) if endpoint == "input" else Input.eof(),
+            output=Output.live(Sink(), Sink()) if endpoint == "output" else Output.capture(),
+        )
+    assert carrier.calls == 0 and operation.active_inline_calls == ()
     owner.close()
 
 

@@ -21,10 +21,12 @@ becomes observable.
 from __future__ import annotations
 
 import _thread
+import errno
 import math
 import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 from contextlib import suppress
@@ -40,6 +42,26 @@ _CHUNK = 65_536
 _POLL_SECONDS = 0.01
 _CLEANUP_SECONDS = 0.5
 _EXIT_DRAIN_SECONDS = 0.1
+
+
+def _write_owned_stdin(fd: int, data: memoryview) -> int:
+    """Offer one nonempty bounded chunk, preserving native pipe errors."""
+    if sys.platform != "win32":
+        return os.write(fd, data)
+    import _winapi
+    import msvcrt
+
+    handle = msvcrt.get_osfhandle(fd)
+    size = len(data)
+    while True:
+        written, _ = _winapi.WriteFile(handle, data[:size])
+        if written:
+            return written
+        # A nonblocking Windows pipe can reject a large offer with zero bytes
+        # even when a smaller prefix fits. No prefix was accepted on this path.
+        if size == 1:
+            raise BlockingIOError(errno.EAGAIN, "owned stdin pipe is full")
+        size = max(1, size // 2)
 
 
 class ByteSource(Protocol):
@@ -200,27 +222,27 @@ class _Output:
 class _Input:
     source: ByteSource | None = field(default=None, repr=False)
     pending: memoryview | None = field(default=None, repr=False)
-    eof: bool = False
 
     @classmethod
     def from_spec(cls, input_spec: ProcessInput) -> _Input:
         if input_spec.data is not None:
-            return cls(pending=memoryview(input_spec.data), eof=True)
+            return cls(pending=memoryview(input_spec.data) if input_spec.data else None)
         if input_spec.source is not None:
             return cls(source=input_spec.source)
-        return cls(eof=True)
+        return cls()
 
-    @property
-    def complete(self) -> bool:
-        return self.eof and (self.pending is None or not self.pending)
+    def finish(self, pipes: LocalProcessPipes) -> None:
+        """Stop offering input and close its owned pipe through the original record."""
+        self.source = None
+        self.pending = None
+        pipes.close_stdin()
 
     def advance(self, pipes: LocalProcessPipes) -> tuple[bool, bool]:
         """Advance bounded input I/O and request EOF through the original records."""
         pipe = pipes.stdin
         assert pipe is not None
         progressed = False
-        if self.pending is None and not self.eof:
-            assert self.source is not None
+        if self.pending is None and self.source is not None:
             try:
                 chunk = self.source.try_read(_CHUNK)
             except Exception:
@@ -231,14 +253,20 @@ class _Input:
                 return False, True
             progressed = True
             if not chunk:
-                self.eof = True
+                self.source = None
             else:
                 self.pending = memoryview(chunk)
         if self.pending:
             try:
-                written = os.write(pipe.fileno(), self.pending[:_CHUNK])
+                written = _write_owned_stdin(pipe.fileno(), self.pending[:_CHUNK])
             except BlockingIOError:
                 return progressed, False
+            except BrokenPipeError:
+                try:
+                    self.finish(pipes)
+                except Exception:
+                    return progressed, True
+                return True, False
             except OSError:
                 return progressed, True
             if written <= 0 or written > min(len(self.pending), _CHUNK):
@@ -248,9 +276,9 @@ class _Input:
                 self.pending = None
             else:
                 self.pending = self.pending[written:]
-        if self.complete:
+        if self.source is None and self.pending is None:
             try:
-                pipes.close_stdin()
+                self.finish(pipes)
             except Exception:
                 return progressed, True
             progressed = True
@@ -1065,6 +1093,12 @@ def _pump_owned_pipes(
         if deadline.expired:
             failure = ProcessFailure.DEADLINE
             break
+        if exit_status is not None and pipes.stdin is not None and not pipes._stdin_close_attempted:
+            try:
+                input_state.finish(pipes)
+            except Exception:
+                failure = ProcessFailure.INPUT
+                break
         pending_delivery = stdout.pending is not None or stderr.pending is not None
         if exit_status is not None:
             if post_exit_drain is None:
@@ -1103,18 +1137,12 @@ def _pump_owned_pipes(
         if failure is not None:
             break
         if pipes.stdin is not None and not pipes._stdin_close_attempted:
-            if exit_status is not None and not input_state.complete:
-                failure = ProcessFailure.INPUT
-                break
             input_progressed, input_failed = input_state.advance(pipes)
             progressed = input_progressed or progressed
             if input_failed:
                 failure = ProcessFailure.INPUT
                 break
         if exit_status is not None:
-            if not input_state.complete:
-                failure = ProcessFailure.INPUT
-                break
             if stdout.eof and stderr.eof:
                 break
             assert post_exit_drain is not None

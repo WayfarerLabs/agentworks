@@ -21,16 +21,12 @@ from agentworks.execution._managed_observe_access import (
 )
 from agentworks.execution._managed_result import collect_bound_managed_result, wait_bound_managed_result
 from agentworks.execution._managed_runs import ManagedRunLifetime, ManagedRunOwner, ManagedRunOwnerKind
-from agentworks.execution._managed_stop_access import stop_bound_managed_run
-from agentworks.execution._managed_stop_exchange import ManagedStopState
 from agentworks.operations import OperationOwner
 
 from .test_managed_disposal import ExchangeCarrier, _disposed
 from .test_managed_observation import ScriptedCarrier
 from .test_managed_observe_access import RESOURCE_OWNER, RUN, _options, _reserved
 from .test_managed_result import _confirmed, _reply
-from .test_managed_stop import Carrier as StopCarrier
-from .test_managed_stop_access import _response
 
 CONTROLS: tuple[Callable[..., object], ...] = (
     observe_bound_managed_run,
@@ -38,7 +34,6 @@ CONTROLS: tuple[Callable[..., object], ...] = (
     read_bound_managed_output,
     collect_bound_managed_result,
     wait_bound_managed_result,
-    stop_bound_managed_run,
     dispose_bound_managed_run,
 )
 
@@ -46,7 +41,7 @@ CONTROLS: tuple[Callable[..., object], ...] = (
 def _arguments(control: Callable[..., object]) -> dict[str, object]:
     if control is read_bound_managed_output:
         return {"stream": Stream.STDOUT}
-    if control in (stop_bound_managed_run, dispose_bound_managed_run):
+    if control is dispose_bound_managed_run:
         return {"obligation_id": "e" * 32}
     return {}
 
@@ -176,14 +171,6 @@ def test_resource_binding_reconnects_from_new_operation_without_launch(tmp_path:
         record = repository.inspect(RUN)
         assert record is not None and record.spec.owner == RESOURCE_OWNER
         assert carrier.calls == 9
-        stop_carrier = StopCarrier(_response)
-        stopped = stop_bound_managed_run(
-            repository,
-            RUN,
-            obligation_id="e" * 32,
-            **_options(reconnect, stop_carrier),  # type: ignore[arg-type]
-        )
-        assert stopped.state is ManagedStopState.ACCEPTED
         disposal_carrier = ExchangeCarrier(_disposed)
         disposed = dispose_bound_managed_run(
             repository,
@@ -192,7 +179,7 @@ def test_resource_binding_reconnects_from_new_operation_without_launch(tmp_path:
             **_options(reconnect, disposal_carrier),  # type: ignore[arg-type]
         )
         assert disposed.state is DisposalState.DISPOSED
-        assert stop_carrier.calls == disposal_carrier.calls == 1
+        assert disposal_carrier.calls == 1
         assert reconnect.list_pending_lifecycle_obligations() == ()
         reconnect.seal_lifecycle_obligations()
         reconnect.record_effects_resolved()

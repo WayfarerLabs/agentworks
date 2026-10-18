@@ -1,4 +1,4 @@
-"""Destination entry point for one bounded Linux directory inventory."""
+"""Destination entry point for one bounded directory inventory."""
 
 from __future__ import annotations
 
@@ -20,9 +20,9 @@ from ._file_inventory_protocol import (
     encode_file_inventory_failure,
     encode_file_inventory_result,
 )
-from ._file_paths import ConfinedOpenError, open_linux_confined, open_linux_root
+from ._file_paths import ConfinedOpenError, open_file_confined, open_file_root
 from ._file_wire import MAX_RECORD_BODY_BYTES, FileRecordKind, FileRecordWriter
-from ._helper_identity import matches_current_identity
+from ._helper_identity import matches_file_helper_identity
 
 _DIRECTORY_FLAGS = (
     os.O_RDONLY
@@ -72,7 +72,7 @@ def _raise_if_expired(expires_at: float | None) -> None:
 
 def _snapshot(request: FileInventoryRequest, expires_at: float | None) -> bytes | None:
     try:
-        root_fd = open_linux_root(request.root_path)
+        root_fd = open_file_root(request.root_path)
     except ConfinedOpenError:
         raise _SafeFailure(FileInventoryFailureCode.ROOT_REFUSED) from None
     if root_fd is None:
@@ -80,7 +80,7 @@ def _snapshot(request: FileInventoryRequest, expires_at: float | None) -> bytes 
     target_fd: int | None = None
     try:
         try:
-            target_fd = open_linux_confined(root_fd, request.relative_path, _DIRECTORY_FLAGS)
+            target_fd = open_file_confined(root_fd, request.relative_path, _DIRECTORY_FLAGS)
         except ConfinedOpenError:
             raise _SafeFailure(FileInventoryFailureCode.TARGET_REFUSED) from None
         if target_fd is None:
@@ -129,9 +129,9 @@ def main(nonce: str) -> int:
         return _finish_failure(writer, error.failure)
     if request.nonce != nonce:
         return _finish_failure(writer, FileInventoryFailureCode.NONCE_MISMATCH)
-    if sys.platform != "linux":
+    if sys.platform not in {"linux", "darwin"}:
         return _finish_failure(writer, FileInventoryFailureCode.UNSUPPORTED_RUNTIME)
-    if not matches_current_identity(request.identity):
+    if not matches_file_helper_identity(request.identity):
         return _finish_failure(writer, FileInventoryFailureCode.IDENTITY_MISMATCH)
     try:
         expires_at = _expires_at(request.remaining_seconds)

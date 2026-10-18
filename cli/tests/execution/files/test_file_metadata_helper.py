@@ -14,10 +14,12 @@ from unittest.mock import patch
 import pytest
 
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
+from agentworks.execution._file_metadata import MetadataStep
 from agentworks.execution._file_metadata_bundle import _MODULE_NAMES, _PACKAGE, FIXED_BUNDLE
 from agentworks.execution._file_metadata_exchange import (
     FileMetadataCandidateResult,
     FileMetadataObservationState,
+    create_file_directory,
     ensure_file_directory,
     set_file_metadata,
 )
@@ -145,10 +147,12 @@ def _ensure(
     mode: int,
     runtime: Path = Path(sys.executable),
     deadline: float = 15,
+    create_only: bool = False,
 ) -> tuple[LocalCarrier, FileMetadataCandidateResult]:
     carrier = LocalCarrier()
     with patch("agentworks.execution._file_metadata_exchange.FIXED_BUNDLE", source):
-        result = ensure_file_directory(
+        function = create_file_directory if create_only else ensure_file_directory
+        result = function(
             carrier,
             trusted_root_path=str(root),
             relative_path=relative,
@@ -160,6 +164,104 @@ def _ensure(
             runtime_selection=runtime_selection(str(runtime)),
         )
     return carrier, result
+
+
+@pytest.mark.parametrize("runtime", [Path(sys.executable), Path("/usr/bin/python3.11")])
+def test_create_only_fixed_bundle_refuses_existing_and_missing_parent(
+    tmp_path: Path, plan: IdentityPlan, runtime: Path
+) -> None:
+    if not runtime.is_file():
+        pytest.skip(f"compatibility interpreter is unavailable: {runtime}")
+    source = _fixture_source()
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    _, created = _ensure(tmp_path, "parent/created", plan, source, mode=0o3770, runtime=runtime, create_only=True)
+    observed = (parent / "created").stat()
+    assert created.observation is not None
+    assert created.observation.state is FileMetadataObservationState.CHANGED
+    assert (observed.st_uid, observed.st_gid) == (os.geteuid(), os.getegid())
+    assert stat.S_IMODE(observed.st_mode) == 0o3770
+    (parent / "file").write_bytes(b"content")
+    (parent / "link").symlink_to(parent / "created")
+    for name in ["parent/created", "parent/file", "parent/link", "missing/child"]:
+        before = (tmp_path / name).lstat() if name != "missing/child" else None
+        carrier, refused = _ensure(tmp_path, name, plan, source, mode=0o755, runtime=runtime, create_only=True)
+        assert carrier.calls == 1
+        assert refused.observation is not None
+        assert refused.observation.state is FileMetadataObservationState.REFUSED
+        if before is not None:
+            assert (tmp_path / name).lstat() == before
+    assert not (tmp_path / "missing").exists()
+    assert (parent / "created").stat() == observed
+
+
+def test_create_only_helper_reports_partial_deadline(tmp_path: Path, plan: IdentityPlan) -> None:
+    source = _fixture_source(
+        "original=m._create_directory\n"
+        "def expired(*args):\n"
+        " result=original(*args)\n"
+        " m.time.monotonic=lambda:float('inf')\n"
+        " return result\n"
+        "m._create_directory=expired\n"
+    )
+    carrier, result = _ensure(tmp_path, "created", plan, source, mode=0o755, create_only=True)
+    assert carrier.calls == 1
+    assert result.observation is not None
+    assert result.observation.state is FileMetadataObservationState.PARTIAL
+    assert stat.S_IMODE((tmp_path / "created").stat().st_mode) == 0o700
+
+
+def test_create_only_helper_refuses_racing_creator(tmp_path: Path, plan: IdentityPlan) -> None:
+    source = _fixture_source(
+        "original=os.mkdir\n"
+        "def race(path,mode,*,dir_fd):\n"
+        " original(path,0o700,dir_fd=dir_fd)\n"
+        " original(path,mode,dir_fd=dir_fd)\n"
+        "os.mkdir=race\n"
+    )
+    carrier, result = _ensure(tmp_path, "created", plan, source, mode=0o755, create_only=True)
+    assert carrier.calls == 1
+    assert result.observation is not None
+    assert result.observation.state is FileMetadataObservationState.REFUSED
+    assert stat.S_IMODE((tmp_path / "created").stat().st_mode) == 0o700
+
+
+@pytest.mark.parametrize("step", ["ownership", "mode"])
+def test_create_only_helper_preserves_uncertain_mutation_facts(tmp_path: Path, plan: IdentityPlan, step: str) -> None:
+    # Make ownership necessary without requiring privilege for a real chown.
+    injection = f"def fail(*args):raise PermissionError()\nos.{'chown' if step == 'ownership' else 'chmod'}=fail\n"
+    if step == "ownership":
+        injection += (
+            "original=g.create_directory\n"
+            "def create(*args,**kwargs):\n"
+            " kwargs['uid']+=1\n"
+            " return original(*args,**kwargs)\n"
+            "g.create_directory=create\n"
+        )
+    carrier, result = _ensure(tmp_path, "created", plan, _fixture_source(injection), mode=0o755, create_only=True)
+    assert carrier.calls == 1
+    assert result.observation is not None
+    assert result.observation.state is FileMetadataObservationState.UNCERTAIN
+    failure = result.observation.failure
+    assert failure is not None
+    assert failure.completed_steps == (MetadataStep.CREATION,)
+    assert failure.attempted_step is MetadataStep(step)
+    assert stat.S_IMODE((tmp_path / "created").stat().st_mode) == 0o700
+
+
+def test_create_only_parent_link_is_confined(tmp_path: Path, plan: IdentityPlan) -> None:
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (root / "link").symlink_to(outside, target_is_directory=True)
+    carrier, result = _ensure(root, "link/created", plan, _fixture_source(), mode=0o755, create_only=True)
+    assert carrier.calls == 1
+    assert result.observation is not None
+    assert result.observation.state is FileMetadataObservationState.REFUSED
+    assert result.observation.failure is not None
+    assert result.observation.failure.code is FileMetadataFailureCode.PARENT_REFUSED
+    assert list(outside.iterdir()) == []
 
 
 def test_missing_runtime_yields_no_metadata_observation(tmp_path: Path, plan: IdentityPlan) -> None:
@@ -249,13 +351,15 @@ def test_ensure_creates_only_final_component_and_preserves_children(tmp_path: Pa
 def test_missing_root_conflicting_file_socket_and_unsupported_modes_refuse(
     tmp_path: Path,
     plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = tmp_path / "root"
     root.mkdir()
     regular = root / "regular"
     regular.write_bytes(b"content")
     listener = socket.socket(socket.AF_UNIX)
-    listener.bind(str(root / "socket"))
+    monkeypatch.chdir(root)
+    listener.bind("socket")
     source = _fixture_source()
     try:
         _, missing_root = _set(tmp_path / "missing", "leaf", plan, source, mode=0o600)
@@ -281,14 +385,16 @@ def test_missing_root_conflicting_file_socket_and_unsupported_modes_refuse(
     assert regular.read_bytes() == b"content"
 
 
-def test_identity_mismatch_precedes_target_access(tmp_path: Path, plan: IdentityPlan) -> None:
+@pytest.mark.parametrize("create_only", [False, True])
+def test_identity_mismatch_precedes_target_access(tmp_path: Path, plan: IdentityPlan, create_only: bool) -> None:
     carrier = LocalCarrier()
     mismatched = IdentityPlan(
         IdentityExpectation((plan.expected.euid + 1) % (2**32), plan.expected.egid, plan.expected.groups),
         IdentityMode.DIRECT,
     )
     with patch("agentworks.execution._file_metadata_exchange.FIXED_BUNDLE", _fixture_source()):
-        result = set_file_metadata(
+        function = create_file_directory if create_only else set_file_metadata
+        result = function(
             carrier,
             trusted_root_path=str(tmp_path / "absent-target"),
             relative_path="leaf",

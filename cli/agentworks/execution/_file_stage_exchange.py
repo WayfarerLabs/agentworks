@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
-from agentworks.execution._file_stage_bundle import FIXED_BUNDLE, ROOT_PROGRAM
+from agentworks.execution._file_stage_bundle import FIXED_BUNDLE, ROOT_PROGRAM, ROOT_SCRATCH_PROGRAM
 from agentworks.execution._file_stage_protocol import (
     FileStageBeginRequest,
     FileStageChunkRequest,
@@ -32,6 +32,7 @@ from agentworks.execution._file_stage_protocol import (
 from agentworks.execution._file_wire import FileRecord, FileRecordKind
 from agentworks.execution._file_wire_reader import FileRecordReader, FileWireError
 from agentworks.execution._runtime_prerequisite import (
+    HelperClosureExpectation,
     RuntimePrefixSink,
     RuntimePrerequisiteObservation,
     RuntimePrerequisiteState,
@@ -52,6 +53,8 @@ from agentworks.execution.carrier import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.execution._file_effect_gate import FileEffectGateBinding
     from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
     from agentworks.execution._helper_launcher import IdentityPlan
@@ -353,24 +356,29 @@ def _exchange(
     runtime_selection: RuntimeSelection,
     *,
     bootstrap: _NumericGuestBootstrap | None = None,
+    fixed_scratch_root: bool = False,
+    prepare_delivery: Callable[[HelperClosureExpectation], BoundHelperCarrier] | None = None,
 ) -> FileStageCandidateResult:
+    if fixed_scratch_root and bootstrap is None:
+        raise ValidationError("Fixed scratch staging requires a numeric guest bootstrap")
     if bootstrap is None:
         fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
             plan, selection=runtime_selection, fixed_source=FIXED_BUNDLE.bootstrap, nonce=request.nonce
         )
         prefix = FIXED_BUNDLE.prefix
     else:
+        program = ROOT_SCRATCH_PROGRAM if fixed_scratch_root else ROOT_PROGRAM
         if request.effect_gate is not None and request.effect_gate.guest != bootstrap.guest:
             raise ValidationError("File-stage effect-gate guest does not match its numeric bootstrap")
         fixed_argv, candidates, system_shim = build_root_guest_bootstrap_argv(
             bootstrap.root_entry,
             plan.expected,
             selection=runtime_selection,
-            program=ROOT_PROGRAM,
+            program=program,
             nonce=request.nonce,
             expected_guest=bootstrap.guest,
         )
-        prefix = ROOT_PROGRAM.prefix
+        prefix = program.prefix
     data = _request_data(request)
     collector = _FileStageCollector(request)
     reader = FileRecordReader(request.nonce, collector.accept)
@@ -383,6 +391,10 @@ def _exchange(
     )
     dispatch = Dispatch.UNKNOWN
     try:
+        if prepare_delivery is not None:
+            carrier = prepare_delivery(
+                HelperClosureExpectation(request.nonce, candidates, system_shim, bootstrap.guest if bootstrap else None)
+            )
         report = carrier.execute(PreparedInvocation(fixed_argv), io=io, deadline=deadline)
         dispatch = report.dispatch
         runtime_prerequisite = runtime.observation
@@ -431,6 +443,8 @@ def stage_begin(
     runtime_selection: RuntimeSelection,
     effect_gate: FileEffectGateBinding | None = None,
     bootstrap: _NumericGuestBootstrap | None = None,
+    fixed_scratch_root: bool = False,
+    prepare_delivery: Callable[[HelperClosureExpectation], BoundHelperCarrier] | None = None,
 ) -> FileStageCandidateResult:
     """Create one private stage through one fresh non-replayed attempt."""
     request = FileStageBeginRequest(
@@ -443,7 +457,16 @@ def stage_begin(
         deadline.remaining(),
         effect_gate,
     )
-    return _exchange(carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap)
+    return _exchange(
+        carrier,
+        request,
+        plan,
+        deadline,
+        runtime_selection,
+        bootstrap=bootstrap,
+        fixed_scratch_root=fixed_scratch_root,
+        prepare_delivery=prepare_delivery,
+    )
 
 
 def stage_chunk(
@@ -461,6 +484,8 @@ def stage_chunk(
     runtime_selection: RuntimeSelection,
     effect_gate: FileEffectGateBinding | None = None,
     bootstrap: _NumericGuestBootstrap | None = None,
+    fixed_scratch_root: bool = False,
+    prepare_delivery: Callable[[HelperClosureExpectation], BoundHelperCarrier] | None = None,
 ) -> FileStageCandidateResult:
     """Write one bounded stage chunk through one fresh non-replayed attempt."""
     request = FileStageChunkRequest(
@@ -476,7 +501,16 @@ def stage_chunk(
         deadline.remaining(),
         effect_gate,
     )
-    return _exchange(carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap)
+    return _exchange(
+        carrier,
+        request,
+        plan,
+        deadline,
+        runtime_selection,
+        bootstrap=bootstrap,
+        fixed_scratch_root=fixed_scratch_root,
+        prepare_delivery=prepare_delivery,
+    )
 
 
 def stage_reconcile(
@@ -490,6 +524,8 @@ def stage_reconcile(
     runtime_selection: RuntimeSelection,
     effect_gate: FileEffectGateBinding | None = None,
     bootstrap: _NumericGuestBootstrap | None = None,
+    fixed_scratch_root: bool = False,
+    prepare_delivery: Callable[[HelperClosureExpectation], BoundHelperCarrier] | None = None,
 ) -> FileStageCandidateResult:
     """Read one exact stage receipt without replaying creation or promoting it."""
     request = FileStageReconcileRequest(
@@ -501,7 +537,16 @@ def stage_reconcile(
         deadline.remaining(),
         effect_gate,
     )
-    return _exchange(carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap)
+    return _exchange(
+        carrier,
+        request,
+        plan,
+        deadline,
+        runtime_selection,
+        bootstrap=bootstrap,
+        fixed_scratch_root=fixed_scratch_root,
+        prepare_delivery=prepare_delivery,
+    )
 
 
 def stage_cleanup(
@@ -516,6 +561,8 @@ def stage_cleanup(
     runtime_selection: RuntimeSelection,
     effect_gate: FileEffectGateBinding | None = None,
     bootstrap: _NumericGuestBootstrap | None = None,
+    fixed_scratch_root: bool = False,
+    prepare_delivery: Callable[[HelperClosureExpectation], BoundHelperCarrier] | None = None,
 ) -> FileStageCandidateResult:
     """Attempt exact cleanup once without inferring terminal quiescence."""
     request = FileStageCleanupRequest(
@@ -528,4 +575,13 @@ def stage_cleanup(
         deadline.remaining(),
         effect_gate,
     )
-    return _exchange(carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap)
+    return _exchange(
+        carrier,
+        request,
+        plan,
+        deadline,
+        runtime_selection,
+        bootstrap=bootstrap,
+        fixed_scratch_root=fixed_scratch_root,
+        prepare_delivery=prepare_delivery,
+    )

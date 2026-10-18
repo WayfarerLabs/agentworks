@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Self
 from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorUnavailable
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import LifecycleObligationState, OperationResourceKind
-from agentworks.errors import ValidationError
+from agentworks.errors import StateError, ValidationError
 from agentworks.execution._runtime_prerequisite import RuntimeSelection
 from agentworks.execution._vm_guest_identity import VMGuestIdentityObservationState
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
@@ -36,6 +36,7 @@ from agentworks.vms.target_preparation import (
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.vm_platform.base import ProviderLocatorObservation
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
@@ -216,26 +217,36 @@ class WSL2OwnedOperation:
 
     def start_and_prepare(self, deadline: Deadline) -> VMGuestIdentity | None:
         """Start once and prepare only under a durable READY claim."""
+        if not self.start_available(deadline):
+            return None
+        self.preparation = prepare_managed_vm_target_from_platform(
+            self._vm,
+            self._platform,
+            self._locator,
+            self._binding,
+            deadline=deadline,
+            owner=self.owner,
+            observe_locator=self.observe_locator,
+        )
+        if self.preparation.status is not VMTargetPreparationStatus.PREPARED:
+            return None
+        assert self.ready is not None
+        return self._matching_ready_guest(self.ready, self.preparation)
+
+    def start_available(self, deadline: Deadline) -> bool:
+        """Acquire the actual platform hold and prove its durable READY claim."""
         if self._used:
             raise ValidationError(f"WSL2 owned {self._purpose} is single use")
         self._used = True
         ready = self.hold.start(deadline)
         self.ready = ready
-        if not self._ready_is_durable(ready):
-            return None
-        self.preparation = prepare_managed_vm_target_from_platform(
-            self._vm,
-            self._platform,
-            self._ctx,
-            self._locator,
-            self._binding,
-            deadline=deadline,
-            owner=self.owner,
-            provider_custody=self._provider_custody,
-        )
-        if self.preparation.status is not VMTargetPreparationStatus.PREPARED:
-            return None
-        return self._matching_ready_guest(ready, self.preparation)
+        return self._ready_is_durable(ready)
+
+    def require_ready_guest(self, guest: VMGuestIdentity) -> None:
+        """Compare the common guest observation with the retained actual hold."""
+        anchor = self.ready.identity if self.ready is not None else None
+        if anchor is None or guest.boot_id != anchor.boot_id or guest.init_start_ticks != anchor.init_start_ticks:
+            raise StateError("WSL2 prepared guest does not match the held READY identity")
 
     def _ready_is_durable(self, ready: WSL2AnchorEvidence) -> bool:
         obligation = self.hold.obligation
@@ -275,11 +286,15 @@ class WSL2OwnedOperation:
             return None
         return identity
 
-    def revalidate_selected_route(self, deadline: Deadline) -> WSL2RouteStatus:
-        """Classify fresh route facts; propagate exceptional observations unchanged."""
-        locator = self._platform.observe_provider_locator(
+    def observe_locator(self, deadline: Deadline) -> ProviderLocatorObservation:
+        """Observe the retained selection under the caller's native custody."""
+        return self._platform.observe_provider_locator(
             self._vm, self._ctx, deadline=deadline, custody=self._provider_custody
         )
+
+    def revalidate_selected_route(self, deadline: Deadline) -> WSL2RouteStatus:
+        """Classify fresh route facts; propagate exceptional observations unchanged."""
+        locator = self.observe_locator(deadline)
         if deadline.expired:
             return WSL2RouteStatus.UNCONFIRMED
         if type(locator) is not ProviderLocator:
@@ -309,9 +324,7 @@ class WSL2OwnedOperation:
             return WSL2RouteStatus.UNCONFIRMED
         if runtime != self._runtime:
             return WSL2RouteStatus.CHANGED
-        confirmation = self._platform.observe_provider_locator(
-            self._vm, self._ctx, deadline=deadline, custody=self._provider_custody
-        )
+        confirmation = self.observe_locator(deadline)
         if deadline.expired:
             return WSL2RouteStatus.UNCONFIRMED
         if type(confirmation) is not ProviderLocator:

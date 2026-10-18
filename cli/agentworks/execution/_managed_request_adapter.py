@@ -15,17 +15,19 @@ from ._managed_job_request import (
     MAX_CONTROL_BYTES,
     MAX_ENVIRONMENT_ENTRIES,
     MAX_SOURCE_BYTES,
+    OPERATION_LEASE_CONTROL_HEADROOM,
     ManagedJobRequest,
+    ManagedLiveIO,
     RequestError,
     _encode_request_assets,
     decode_request_launch,
     encode_request,
 )
-from ._managed_lease_wire import MAX_LEASE_BYTES
 from ._managed_runs import (
     ManagedOutputMode,
     ManagedOutputPolicy,
     ManagedRunIdentity,
+    ManagedRunLifetime,
     ManagedRunReceipt,
     ManagedRunSpec,
 )
@@ -33,8 +35,6 @@ from .models import Command, Input, Output, Script
 
 if TYPE_CHECKING:
     from ._managed_lease_wire import OperationLease
-
-OPERATION_LEASE_CONTROL_HEADROOM = MAX_LEASE_BYTES + len(b',"operation_lease":')
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -63,6 +63,7 @@ def compose_managed_body(
     sensitive: bool,
     identity: ManagedRunIdentity,
     spec: ManagedRunSpec,
+    live_io: ManagedLiveIO | None = None,
 ) -> _ManagedBody:
     """Snapshot and validate caller input before reservation or clock effects."""
     if (
@@ -73,6 +74,17 @@ def compose_managed_body(
         or type(spec) is not ManagedRunSpec
     ):
         raise ValidationError("Invalid managed body")
+    live_input, live_output = input.source is not None, output.stdout is not None
+    if live_io is None:
+        if live_input or live_output:
+            raise ValidationError("Managed live pipes require explicit foreground composition")
+    elif (
+        type(live_io) is not ManagedLiveIO
+        or spec.lifetime is not ManagedRunLifetime.OPERATION
+        or live_io.input != live_input
+        or live_io.output != live_output
+    ):
+        raise ValidationError("Managed live directions do not match the operation request")
 
     if isinstance(invocation, Command):
         kind, argv, source = "command", invocation.argv, b""
@@ -110,7 +122,10 @@ def compose_managed_body(
 
     if output.max_bytes is not None and output.max_bytes > MAX_CAPTURE_PREFIX_BYTES:
         raise ValidationError("Managed capture exceeds byte bound")
-    if sensitive or input.is_sensitive:
+    if live_output:
+        # Durable retention and this call's explicit presentation are distinct.
+        policy = ManagedOutputPolicy(ManagedOutputMode.DISCARD)
+    elif sensitive or input.is_sensitive:
         policy = ManagedOutputPolicy(ManagedOutputMode.SENSITIVITY_SUPPRESSED)
     elif output.max_bytes is None:
         policy = ManagedOutputPolicy(ManagedOutputMode.DISCARD)
@@ -127,7 +142,8 @@ def compose_managed_body(
             policy.capture_prefix_bytes,
             environment,
             source,
-            input.data,
+            input.data if input.data is not None else b"",
+            live_io=live_io,
         )
         return _ManagedBody(request, policy)
     except (ManagedJobFactError, RequestError):
@@ -145,6 +161,7 @@ def compose_managed_request(
     identity: ManagedRunIdentity,
     spec: ManagedRunSpec,
     operation_lease: OperationLease | None = None,
+    live_io: ManagedLiveIO | None = None,
 ) -> tuple[ManagedJobRequest, ManagedOutputPolicy]:
     """Validate one complete request before its caller reserves a durable run."""
     body = compose_managed_body(
@@ -156,6 +173,7 @@ def compose_managed_request(
         sensitive=sensitive,
         identity=identity,
         spec=spec,
+        live_io=live_io,
     )
     request = replace(body.request, operation_lease=operation_lease)
     try:

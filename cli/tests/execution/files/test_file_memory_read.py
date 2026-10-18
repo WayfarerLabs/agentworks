@@ -323,7 +323,8 @@ def test_original_control_and_download_fact_escape_unchanged(
         database.close()
 
 
-def test_invalid_caller_bound_releases_borrow_and_never_dispatches(tmp_path: Path) -> None:
+@pytest.mark.parametrize("max_bytes", [0, -1])
+def test_nonpositive_caller_bound_refuses_before_dispatch(tmp_path: Path, max_bytes: int) -> None:
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
     operation = FileOperation(operation_owner, target_for_owner(operation_owner))
@@ -334,7 +335,7 @@ def test_invalid_caller_bound_releases_borrow_and_never_dispatches(tmp_path: Pat
                 carrier,
                 trusted_root_path="/approved",
                 relative_path="target",
-                max_bytes=0,
+                max_bytes=max_bytes,
                 plan=_PLAN,
                 deadline=Deadline.after(30),
                 runtime_selection=_RUNTIME,

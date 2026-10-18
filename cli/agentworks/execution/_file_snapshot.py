@@ -1,7 +1,7 @@
 """Cooperative POSIX regular-file snapshots from a caller-owned root descriptor.
 
-Linux lookup uses ``openat2`` confinement. Other POSIX platforms retain a
-separate component walk and do not claim equivalent mount-boundary enforcement.
+Linux lookup uses ``openat2`` confinement. Darwin uses a separate readable
+component walk with device checks, without claiming equivalent kernel enforcement.
 This does not provide malicious same-user protection or hard cancellation of a
 blocked filesystem call.
 Callers own their root and writer lock.
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 from ._file_paths import (
     ConfinedOpenError,
     ConfinedOpenFailure,
-    open_linux_confined,
+    open_file_confined,
 )
 from ._file_stat import FileStat
 
@@ -164,8 +164,8 @@ def _validate_inputs(relative_path: str, max_bytes: int, expires_at: float | Non
         encoding_failed = False
     if encoding_failed:
         raise ValueError("Snapshot path is not encodable")
-    if type(max_bytes) is not int or max_bytes <= 0:
-        raise ValueError("Snapshot byte bound must be a positive integer")
+    if type(max_bytes) is not int or not 0 <= max_bytes <= (1 << 63) - 1:
+        raise ValueError("Snapshot byte bound must be a nonnegative representable integer")
     if expires_at is not None and (type(expires_at) not in {int, float} or expires_at != expires_at):
         raise ValueError("Snapshot deadline must be a monotonic timestamp or None")
     return components
@@ -184,26 +184,14 @@ def _open_at(parent_fd: int, name: str, *, directory: bool, stat_only: bool = Fa
     else:
         flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
 
-    if sys.platform == "linux":
-        try:
-            return open_linux_confined(parent_fd, name, flags)
-        except ConfinedOpenError as error:
-            if error.kind is ConfinedOpenFailure.CONFLICT:
-                raise SnapshotReadError(SnapshotFailureKind.CONFLICT) from None
-            if error.kind is ConfinedOpenFailure.UNSUPPORTED_OBJECT:
-                raise SnapshotReadError(SnapshotFailureKind.UNSUPPORTED_OBJECT) from None
-            raise SnapshotReadError(SnapshotFailureKind.IO) from None
-
-    error_number: int | None = None
     try:
-        return os.open(name, flags, dir_fd=parent_fd)
-    except OSError as error:
-        error_number = error.errno
-    if error_number == errno.ENOENT:
-        return None
-    if error_number in {errno.ELOOP, errno.ENOTDIR, errno.ENXIO, errno.ENODEV, errno.EXDEV}:
-        raise SnapshotReadError(SnapshotFailureKind.UNSUPPORTED_OBJECT)
-    raise SnapshotReadError(SnapshotFailureKind.IO)
+        return open_file_confined(parent_fd, name, flags)
+    except ConfinedOpenError as error:
+        if error.kind is ConfinedOpenFailure.CONFLICT:
+            raise SnapshotReadError(SnapshotFailureKind.CONFLICT) from None
+        if error.kind is ConfinedOpenFailure.UNSUPPORTED_OBJECT:
+            raise SnapshotReadError(SnapshotFailureKind.UNSUPPORTED_OBJECT) from None
+        raise SnapshotReadError(SnapshotFailureKind.IO) from None
 
 
 def _check_deadline(expires_at: float | None) -> None:

@@ -66,6 +66,130 @@ handles support the same mechanism. The
 are constraints for the endpoint proof, not an assertion that cancellation or terminal support is
 already solved. A core adapter that cannot establish bounded use must refuse before dispatch.
 
+## Non-terminal live execution composition
+
+The next shared implementation connects the byte endpoints to decoded application I/O, not raw
+carrier streams. It uses the existing inline helper, numeric guest bootstrap, process pump and
+application evidence grammar. No carrier type, SSH policy or durable job/file record changes are
+needed. The private inline request is delivered with its fixed first-party helper code, not stored
+for later replay; its unreleased format can change without a legacy decoder.
+
+### Request framing and application input
+
+Use one ASCII request envelope for finite and live inline calls: the five bytes `AGWI2`, exactly
+eight lowercase hexadecimal manifest-length digits, then exactly that many canonical ASCII JSON
+bytes. This preserves the existing native carrier's ASCII-armored input contract without adding
+provider-specific byte conversions. The existing 32,768-byte private manifest bound remains; reject
+a bad marker, incorrectly encoded or invalid length, incomplete request or invalid manifest before
+application launch. The manifest version is two. The canonical JSON encoder/decoder remains separate
+from envelope encoding so codec checks do not depend on reading a descriptor. The older private
+systemd proof producer adopts the same envelope rather than retaining another inline input format.
+
+The manifest's `stdin` is finite bytes or null. Finite bytes retain their existing meaning; after
+reading that envelope the guest requires carrier EOF, rejecting trailing bytes before effects. Null
+selects live application input from the remaining carrier stream and does not wait for EOF before
+launch. A host-owned prefix source delivers the complete envelope before reading the borrowed live
+source. It has bounded pending bytes and neither closes nor changes the source. There is still only
+one `CarrierIO.input`. Script source remains in its own manifest field and guest descriptor, never
+mixed with application stdin. Numeric root entry, body credentials and the full guest checkpoint are
+unchanged and precede operation code.
+
+The guest's live stdin adapter belongs to its pipe helper, not a borrowed terminal. It must satisfy
+the existing non-blocking source contract, preserve any flags it changes and stop using the endpoint
+before return. There is no keyboard, terminal mode, background pump or cancellation behavior in this
+path.
+
+### Incremental decoded output
+
+Add an explicit delivery mode to the private inline output policy and `DELIVERED` stream retention.
+Guest output uses the existing process sink path. Each application chunk becomes one ordinary
+nonce-bound stdout/stderr evidence frame; raw carrier stderr stays private diagnostics. The frame
+writer uses bounded pending storage and non-blocking writes while the process pump runs. It cannot
+block the pump in an ordinary write loop or allocate output proportional to job duration. Control
+records remain ordered with data, and final stream facts include the count and rolling digest of the
+represented bytes. Name the common private stream count `count`, not captured-only `retained`;
+capture stays bounded and discard/suppression represent no retained bytes. Delivery counts use a
+bounded integer, without imposing a capture-sized total-stream ceiling.
+
+The evidence decoder consumes at most one complete matching record per write. A host live collector
+drains its one bounded decoded data chunk into the selected application sink before accepting
+another record. Decoder callbacks only update trusted state; they do not call an external sink.
+Positive short writes drain that chunk until completion or an actual stall. Its 4,096-byte bound
+bounds that work. If the sink stalls, the collector withholds the final encoded frame byte's
+acknowledgment so the existing carrier pump keeps polling even when the guest is waiting for input.
+Stalled writes propagate flow control through that same pump. Stream count/digest, record order,
+completion and carrier/runtime facts are still validated. Delivery does not place application bytes
+in results or retained helper facts. Release borrowed source/sink references and pending
+presentation bytes when observation ends; bookkeeping/cleanup retries retain facts, not endpoints or
+a payload that could be replayed. Invalid endpoint results and exceptions remain safe input/output
+failures, preserving independently known facts and original control flow.
+
+After the application pump stops, an unfinished guest frame gets at most 0.5 seconds of non-blocking
+flush attempts. Failure aborts later evidence rather than appending controls to a partial record or
+counting an uncompleted body. Control writes outside the pump retain their existing behavior. The
+process pump's existing post-exit collection allowance pauses for sink flow control; it does not
+promise indefinite observation of descendants that retain output descriptors. None of these bounds
+establishes guest cancellation or stronger local cleanup evidence.
+
+### Caller choices and scope of the first increment
+
+`Input.live(source, sensitive=False)` selects a borrowed non-blocking application byte source.
+`Output.live(stdout, stderr)` explicitly selects borrowed non-blocking application sinks. Finite
+input with live output and live input with capture/discard are both valid pipe choices. Selecting
+live output is the FRD R4 presentation choice: it may reflect sensitive data without enabling
+retained output, logging or guest artifacts. Default capture/discard remains suppressed for
+effective sensitivity, and the carrier still receives that sensitivity marker.
+
+The first private implementation proves DIRECT `run` with these choices. Unsupported channels refuse
+through pure carrier validation before operation borrowing or request dispatch. `start`, independent
+lifetime and the not-yet-integrated MANAGED live path refuse before effects rather than dropping a
+live endpoint, capturing instead or downgrading protection. That MANAGED combination, active managed
+output, terminal launch/attachment, native workstation/SSH proof and production capture/spooling
+limits remain separate required additive-surface gates. The first pipe increment does not narrow
+their requirements or constitute a public handoff.
+
+The [managed foreground pipe response](managed-live-io-lld.md) retains the existing settled buffered
+launch and lease keeper, then uses one private controller-owned I/O connection. It does not extend
+the carrier contract or infer durable delivery from a guest write. Implementation and native
+acceptance remain open.
+
+### Pipe-input completion candidate
+
+Pipe input offers bytes; it does not require the consumer to read every offered byte. Finite input
+offers its bounded bytes and then EOF. A live source may remain open until the consumer finishes.
+Neither a successful local pipe write nor consumer closure proves guest consumption. Required helper
+setup instead relies on the existing complete receiver-side envelope and identity checks before
+application effects. Do not introduce a required-input flag to confuse those two facts.
+
+The private shared pump treats positively observed child exit or a positively identified broken
+input pipe as the end of input pumping, not an INPUT failure. It drops its own pending input and
+source reference, closes only its owned input pipe, and makes no further source call. It then
+continues output collection under the original deadline and post-exit allowance. A consumer may
+close input while continuing to produce output; EOF from the supplied source is not required then.
+Do not wait for descendants to close an inherited input descriptor after the owned child exits.
+
+Source exceptions and invalid results, other pipe errors, failed owned closure, output failures,
+status loss and control interruption retain their existing failure and custody semantics. Do not
+swallow generic errors as consumer closure or upgrade status first observed during cleanup. A broken
+pipe is not an application-success fact; success still needs validated helper completion, normal
+wait and settled custody. The terminal relay is a distinct path and is unchanged.
+
+The prior cooperative-EOF checkpoint does not prove this behavior. Core and packed-helper tests now
+cover no-read commands, prefix consumers, explicit early closure, open sources, nonzero exits,
+buffered completion records, real faults and endpoint lifetime. Combined validation and independent
+review are required before publishing this increment. Native Windows pipe-error mapping and
+Linux/macOS/Windows SSH proof remain explicit acceptance work. The transport lead has notified the
+SSH lane before implementation; no SSH source or policy change is implied by this candidate.
+
+The Windows owned-stdin candidate now uses synchronous native `WriteFile` on the existing
+non-blocking pipe handle. Controlled native probes distinguished a closed reader's `BrokenPipeError`
+(Win32 232) from the CRT wrapper's generic `EINVAL`, live pipe pressure with a successful zero-byte
+native write, and an invalid handle. Only positively accepted bytes advance the pending suffix. A
+zero-byte offer shrinks within that suffix, at most 17 attempts for the bounded chunk, then yields
+temporary pipe pressure. Original native errors propagate; there is no generic `EINVAL` suppression
+or CRT fallback. The production writer still needs fresh native proof, including byte-exact
+resumption and the complete process-completion cases.
+
 ## Transient collection and sensitive control evidence
 
 A carrier stream sink receives raw carrier bytes, not supposedly separated application streams.
@@ -240,13 +364,64 @@ Payload completion is length-delimited, not EOF, and the reader must not consume
 interactive use. Source and application input remain separate. These are experimental acceptance
 conditions, not a production wire format or a claimed implementation.
 
+The next private preparation proof uses one printable ASCII wire format: hex-encode the entire
+bounded frame and use printable, nonce-bound fixed-width payload-ready and interactive-ready
+records. Keep the existing 32,768-byte decoded-frame allowance, including its header; the encoded
+frame is bounded at 65,536 bytes. Decode strictly, without whitespace removal, terminal-sequence
+normalization, optional codecs or an older-format fallback. Keep the shared runtime record and its
+bounded terminal prefix parser unchanged. Encoding is not encryption; both no-echo gates and
+sensitive setup suppression remain required. The Linux guest still restores its PTY and replaces
+itself with the workload, rather than remaining as a remote resize controller.
+
 Shared preparation owns the handshake, framing and transition to application presentation. The SSH
-carrier owns local input-terminal handles, client invocation, resize and input restoration; it must
-not interpret application frames. The experiment must cover the remote bootstrap and the local
-OpenSSH endpoint separately. Replacing OpenSSH stdin with a pipe is not a complete terminal adapter:
-OpenSSH 8.5 reads terminal setup and window dimensions from its input descriptor. An owned local
-PTY/console relay is one candidate, not an accepted dependency. No terminal type is frozen until
-that ownership and supported-platform behavior are proved with the SSH lane.
+carrier owns client selection and arguments, local input-terminal handles, keyboard acquisition,
+relay, resize forwarding and input restoration; it must not interpret application frames. Shared
+transport owns the native child launch, process/handle custody, status, cleanup and resize
+mechanism. The experiment must cover the remote bootstrap and the local OpenSSH endpoint separately.
+Replacing OpenSSH stdin with a pipe is not a complete terminal adapter: portable OpenSSH 8.5 reads
+terminal setup and window dimensions from its input descriptor. Windows OpenSSH instead queries its
+standard output console handle for geometry; a borrowed stdin console with ordinary stdout pipes
+does not establish that path. An owned local PTY/console relay is one candidate, not an accepted
+dependency. No terminal type is frozen until that ownership and supported-platform behavior are
+proved with the SSH lane.
+
+For the Windows candidate, transport owns native child launch, process/handle custody, status,
+cleanup and resize; SSH owns keyboard acquisition, relay and adoption. ConPTY is a mechanism to
+prove, not an enabled capability. Printable setup removes the requirement to carry NUL-containing
+frames through console presentation, but does not prove that ConPTY preserves the new setup and
+readiness records. Prove initial and changed geometry, console wrapping and VT presentation,
+separate raw client stderr, early keyboard preservation and bounded cleanup with installed native
+OpenSSH. Do not add a speculative terminal emulator, a second SSH channel or a resident guest
+controller to substitute for those observations.
+
+Prove the native topology with a local child before integrating it into the existing process owner.
+That proof is not a second production owner: the candidate is a passive capability cell retained
+before acquisition, with borrowed pipe endpoints and serialized launch, status, resize and cleanup
+on one non-main worker. Hold confirmed partial acquisitions even when no child was created. Failed
+calls do not authorize closing indeterminate output handles; an acquisition whose return was not
+observed remains uncertain rather than clean. Production adoption must keep those facts in the
+existing owner's custody and cleanup-retry path, not infer resource closure from child exit alone.
+Initial and changed dimensions are explicit rows and columns.
+
+The local proof separates sensitive setup observation from resize and wrapping. Observe the complete
+payload-ready record and its line ending before sending the frame, then require the entire new
+presentation to be exactly the interactive-ready record and its line ending. An absent frame
+substring is not suppression evidence. Hold subsequent presentation behind one probe-only release
+byte; preserve raw, no-echo input through that read. Unexpected presentation or terminal sequences
+refuse this strict observation rather than being normalized. This release is local test machinery,
+not a third production handoff gate. The same observer checks currently queued setup chunks within
+its original byte/time bounds before sending it. A currently unavailable read is not EOF or proof
+that future bytes cannot arrive. Resize and ordinary wrapping follow that measured window;
+narrow-geometry control records and resizing during setup remain separate native acceptance gates.
+
+The idle case must observe a live child before teardown. A pending or unclean worker remains
+non-daemon; the standalone probe flushes its report and awaits its explicitly required outer
+supervisor. Returning a pending report does not authorize interpreter shutdown to discard custody.
+
+After all borrowers stop, close the console output pipe before releasing the pseudoconsole.
+Pseudoconsole release is not evidence that every client has disconnected. Prove exact child exit and
+confirmed resource closure separately; do not add another drainer solely to work around a cleanup
+order that the native API already supports.
 
 The [prior-art investigation](prior-art-research.md#terminal-bootstrap-prior-art) records the
 relevant implementations and their limitations. A local synthetic PTY proves only that fixture; it

@@ -17,6 +17,7 @@ SSH/subprocess transports are the fakes.
 
 from __future__ import annotations
 
+import signal
 from typing import TYPE_CHECKING
 
 import pytest
@@ -532,6 +533,95 @@ def test_port_forward_stopped_vm_gates_then_forwards(
     assert events == ["status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
     assert len(tunnel.argv) == 1
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("custom_handlers", [False, True])
+@pytest.mark.parametrize("failure", [None, RuntimeError("wait failed"), KeyboardInterrupt(), OSError("wait failed")])
+def test_port_forward_restores_signal_handlers_after_wait(
+    db: Database,
+    make_config,  # noqa: ANN001
+    tunnel: _FakeTunnel,
+    monkeypatch: pytest.MonkeyPatch,
+    custom_handlers: bool,
+    failure: BaseException | None,
+) -> None:
+    """Host signal handlers forward only during the foreground tunnel's wait."""
+    from agentworks.errors import ConnectivityError
+
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    forwarded: list[bool] = []
+    monkeypatch.setattr(tunnel, "terminate", lambda: forwarded.append(True))
+
+    def previous_handler(sig: int, frame: object) -> None:
+        raise AssertionError("prior handler called during tunnel wait")
+
+    def wait() -> int:
+        signal.raise_signal(signal.SIGINT)
+        signal.raise_signal(signal.SIGTERM)
+        assert len(forwarded) == 2
+        if failure is not None:
+            raise failure
+        return 23
+
+    monkeypatch.setattr(tunnel, "wait", wait)
+    previous_int = previous_handler if custom_handlers else signal.default_int_handler
+    previous_term = previous_handler if custom_handlers else signal.SIG_DFL
+    original_int = signal.signal(signal.SIGINT, previous_int)
+    original_term = signal.signal(signal.SIGTERM, previous_term)
+    try:
+        if failure is None:
+            assert (
+                vm_manager.port_forward_vm(db, config, "box", ["8080"], interaction=TtyInteractionPolicy.REFUSE) == 23
+            )
+        else:
+            expected = ConnectivityError if isinstance(failure, OSError) else type(failure)
+            with pytest.raises(expected) as caught:
+                vm_manager.port_forward_vm(db, config, "box", ["8080"], interaction=TtyInteractionPolicy.REFUSE)
+            if isinstance(failure, OSError):
+                assert caught.value.__cause__ is failure
+            else:
+                assert caught.value is failure
+        assert signal.getsignal(signal.SIGINT) is previous_int
+        assert signal.getsignal(signal.SIGTERM) is previous_term
+    finally:
+        signal.signal(signal.SIGTERM, original_term)
+        signal.signal(signal.SIGINT, original_int)
+
+
+@pytest.mark.windows
+def test_port_forward_restores_sigint_when_sigterm_installation_fails(
+    db: Database,
+    make_config,  # noqa: ANN001
+    tunnel: _FakeTunnel,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    original_int = signal.getsignal(signal.SIGINT)
+    original_term = signal.getsignal(signal.SIGTERM)
+    real_signal = signal.signal
+    failure = ValueError("handler installation failed")
+
+    def install(sig, handler):  # noqa: ANN001, ANN202
+        if sig == signal.SIGTERM:
+            raise failure
+        return real_signal(sig, handler)
+
+    monkeypatch.setattr(signal, "signal", install)
+    monkeypatch.setattr(tunnel, "wait", lambda: pytest.fail("wait reached after failed handler installation"))
+    try:
+        with pytest.raises(ValueError) as caught:
+            vm_manager.port_forward_vm(db, config, "box", ["8080"], interaction=TtyInteractionPolicy.REFUSE)
+        assert caught.value is failure
+        assert signal.getsignal(signal.SIGINT) is original_int
+        assert signal.getsignal(signal.SIGTERM) is original_term
+    finally:
+        real_signal(signal.SIGINT, original_int)
+        real_signal(signal.SIGTERM, original_term)
 
 
 def test_port_forward_bad_spec_fails_with_zero_resolves_and_zero_gate(

@@ -6,7 +6,6 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.execution._file_download import FileDownloadOutcome, FileDownloadStatus
-from agentworks.execution._file_gate_setup import FileEffectGateSetup
 from agentworks.execution._file_operation import FileOperation
 from agentworks.execution._wsl2_owned_operation import WSL2OwnedOperation
 from agentworks.vms.target_preparation import VMTargetPreparationStatus
@@ -50,8 +49,7 @@ class WSL2OwnedDownload(WSL2OwnedOperation):
 
         target = self.preparation.target
         assert target is not None
-        gate_setup = FileEffectGateSetup.for_target(target, plan.expected.euid, guest)
-        self.file_operation = FileOperation(self.owner, target)
+        self.file_operation = FileOperation(self.owner, target, guest=guest)
         self.outcome = self.file_operation.download(
             self._carrier,
             trusted_root_path=trusted_root_path,
@@ -61,7 +59,6 @@ class WSL2OwnedDownload(WSL2OwnedOperation):
             plan=plan,
             deadline=deadline,
             runtime_selection=self._runtime,
-            gate_setup=gate_setup,
         )
         file_settled = (
             not self.outcome.requires_owner_retention

@@ -8,7 +8,7 @@ import time
 from contextlib import suppress
 
 from ._file_effect_gate import FileEffectGateError, hold_file_effect_gate
-from ._file_paths import ConfinedOpenError, open_linux_confined, open_linux_root
+from ._file_paths import ConfinedOpenError, directory_path_flags, open_file_confined, open_file_root
 from ._file_publication import (
     FilePublicationError,
     PublicationCleanupDebt,
@@ -44,7 +44,7 @@ from ._file_publication_wire import (
     bind_publication_cleanup_debt,
 )
 from ._file_wire import FileRecordKind, FileRecordWriter
-from ._helper_identity import matches_current_identity
+from ._helper_identity import matches_file_helper_identity
 from ._publication_receipt import (
     PublicationReceiptError,
     PublicationReceiptFailureKind,
@@ -89,7 +89,7 @@ def _expired(expires_at: float | None) -> bool:
 
 def _open_parent(request: FilePublicationRequest) -> tuple[int, int | None, str]:
     try:
-        root_fd = open_linux_root(request.root_path)
+        root_fd = open_file_root(request.root_path)
     except ConfinedOpenError:
         raise _SafeFailure(FilePublicationFailureControl(FilePublicationFailureCode.ROOT_REFUSED)) from None
     if root_fd is None:
@@ -98,9 +98,9 @@ def _open_parent(request: FilePublicationRequest) -> tuple[int, int | None, str]
     try:
         components = request.relative_path.split("/")
         if len(components) > 1:
-            flags = os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+            flags = directory_path_flags()
             try:
-                parent_fd = open_linux_confined(root_fd, "/".join(components[:-1]), flags)
+                parent_fd = open_file_confined(root_fd, "/".join(components[:-1]), flags)
             except ConfinedOpenError:
                 raise _SafeFailure(FilePublicationFailureControl(FilePublicationFailureCode.PARENT_REFUSED)) from None
             if parent_fd is None:
@@ -319,9 +319,9 @@ def main(nonce: str) -> int:
         return _finish_failure(writer, FilePublicationFailureControl(error.failure))
     if request.nonce != nonce:
         return _finish_failure(writer, FilePublicationFailureControl(FilePublicationFailureCode.NONCE_MISMATCH))
-    if sys.platform != "linux":
+    if sys.platform not in {"linux", "darwin"}:
         return _finish_failure(writer, FilePublicationFailureControl(FilePublicationFailureCode.UNSUPPORTED_RUNTIME))
-    if not matches_current_identity(request.identity):
+    if not matches_file_helper_identity(request.identity):
         return _finish_failure(writer, FilePublicationFailureControl(FilePublicationFailureCode.IDENTITY_MISMATCH))
     expires_at = _expires_at(request.remaining_seconds)
     if _expired(expires_at):

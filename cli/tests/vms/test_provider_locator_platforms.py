@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorUnavailable
+from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.errors import ConfigError, ConnectivityError, LimitExceededError, StateError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
-from agentworks.execution.carrier import Capture, CapturedOutput, CarrierIO, Deadline, Failure
+from agentworks.execution.carrier import CapturedOutput, CarrierIO, Deadline, Failure, SinkOutput
 from agentworks.execution.carriers._subprocess import ProcessResult
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
@@ -29,6 +30,18 @@ def _process_result(status: int = 0, stdout: bytes | str = b"", failure: Failure
         CapturedOutput(complete=True),
         failure,
     )
+
+
+def _registration_run(
+    status: int = 0, stdout: str = "", failure: Failure | None = None
+) -> Callable[..., ProcessResult]:
+    def run(*args, **kwargs) -> ProcessResult:
+        output = kwargs["io"].output
+        assert isinstance(output, SinkOutput)
+        output.stdout.try_write(memoryview(stdout.encode()))
+        return _process_result(status=status, failure=failure)
+
+    return run
 
 
 def _vm(*, metadata: dict[str, str] | None = None) -> SimpleNamespace:
@@ -50,15 +63,13 @@ def _proxmox() -> ProxmoxPlatform:
     )
 
 
-def test_lima_locator_is_unavailable_without_provider_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_remote_lima_locator_refuses_without_provider_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
     local_delivery = LocalDeliveryCustody()
-    platform = LimaPlatform("lima", {})
+    platform = LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "remote"}})
     monkeypatch.setattr(platform, "_run_lima", lambda *_args, **_kwargs: pytest.fail("unexpected lookup"))
 
-    assert (
+    with pytest.raises(StateError):
         platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10), custody=local_delivery)
-        == ProviderLocatorUnavailable()
-    )
 
 
 def test_proxmox_locator_requires_scoped_configuration_without_legacy_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -78,18 +89,22 @@ def test_wsl2_locator_uses_one_bounded_registration_probe(monkeypatch: pytest.Mo
 
     def run(*args: object, **kwargs: object) -> ProcessResult:
         calls.append({"args": args, "kwargs": kwargs})
-        return _process_result(
+        return _registration_run(
             status=0,
             stdout=json.dumps(
                 {
                     "machine_guid": "2f1b1ed8-a629-4fc5-93ef-504e9a780a37",
                     "user_sid": "S-1-5-21-100-200-300-1001",
-                    "registration_guid": "613ea898-8445-4e6e-82c7-f6e9ae8d7235",
+                    "registration": {
+                        "guid": "613ea898-8445-4e6e-82c7-f6e9ae8d7235",
+                        "name": "test-distro",
+                        "base_path": "C:\\distros\\test-distro",
+                    },
                 }
             ),
-        )
+        )(*args, **kwargs)
 
-    monkeypatch.setattr("agentworks.capabilities.vm_platform.wsl2.run_process", run)
+    monkeypatch.setattr("agentworks.execution._wsl2_registration.run_process", run)
 
     result = WSL2Platform("wsl2", {}).observe_provider_locator(
         _vm(metadata={"distro_name": "test-distro"}),
@@ -106,7 +121,7 @@ def test_wsl2_locator_uses_one_bounded_registration_probe(monkeypatch: pytest.Mo
     kwargs = cast(dict[str, object], calls[0]["kwargs"])
     env = cast(dict[str, str], kwargs["env"])
     command = cast(list[str], args[0])
-    assert isinstance(cast(CarrierIO, kwargs["io"]).output, Capture)
+    assert isinstance(cast(CarrierIO, kwargs["io"]).output, SinkOutput)
     assert kwargs["custody"] is local_delivery
     remaining = cast(Deadline, kwargs["deadline"]).remaining()
     assert remaining is not None and remaining > 0
@@ -117,8 +132,8 @@ def test_wsl2_locator_uses_one_bounded_registration_probe(monkeypatch: pytest.Mo
 def test_wsl2_locator_rejects_invalid_provider_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     local_delivery = LocalDeliveryCustody()
     monkeypatch.setattr(
-        "agentworks.capabilities.vm_platform.wsl2.run_process",
-        lambda *_args, **_kwargs: _process_result(status=0, stdout='{"machine_guid":"not-guid"}'),
+        "agentworks.execution._wsl2_registration.run_process",
+        _registration_run(stdout='{"machine_guid":"not-guid"}'),
     )
 
     with pytest.raises(StateError):
@@ -130,8 +145,8 @@ def test_wsl2_locator_rejects_invalid_provider_payload(monkeypatch: pytest.Monke
 def test_wsl2_locator_maps_process_failure_to_connectivity(monkeypatch: pytest.MonkeyPatch) -> None:
     local_delivery = LocalDeliveryCustody()
     monkeypatch.setattr(
-        "agentworks.capabilities.vm_platform.wsl2.run_process",
-        lambda *_args, **_kwargs: _process_result(status=1, stdout=""),
+        "agentworks.execution._wsl2_registration.run_process",
+        _registration_run(status=1),
     )
 
     with pytest.raises(ConnectivityError):
@@ -142,14 +157,9 @@ def test_wsl2_locator_maps_process_failure_to_connectivity(monkeypatch: pytest.M
 
 def test_wsl2_locator_maps_missing_or_duplicate_registration_to_state(monkeypatch: pytest.MonkeyPatch) -> None:
     local_delivery = LocalDeliveryCustody()
-    from agentworks.capabilities.vm_platform import wsl2
-
     monkeypatch.setattr(
-        "agentworks.capabilities.vm_platform.wsl2.run_process",
-        lambda *_args, **_kwargs: _process_result(
-            status=wsl2._WSL2_LOCATOR_REGISTRATION_MISMATCH_EXIT,
-            stdout="",
-        ),
+        "agentworks.execution._wsl2_registration.run_process",
+        _registration_run(status=3),
     )
 
     with pytest.raises(StateError):
@@ -164,7 +174,7 @@ def test_wsl2_locator_maps_process_timeout_to_limit(monkeypatch: pytest.MonkeyPa
     def timeout(*_args: object, **_kwargs: object) -> ProcessResult:
         return _process_result(failure=Failure.DEADLINE)
 
-    monkeypatch.setattr("agentworks.capabilities.vm_platform.wsl2.run_process", timeout)
+    monkeypatch.setattr("agentworks.execution._wsl2_registration.run_process", timeout)
 
     with pytest.raises(LimitExceededError):
         WSL2Platform("wsl2", {}).observe_provider_locator(
@@ -174,7 +184,7 @@ def test_wsl2_locator_maps_process_timeout_to_limit(monkeypatch: pytest.MonkeyPa
 
 def test_wsl2_locator_rejects_a_late_provider_result(monkeypatch: pytest.MonkeyPatch) -> None:
     local_delivery = LocalDeliveryCustody()
-    from agentworks.capabilities.vm_platform import wsl2
+    from agentworks.execution import _wsl2_registration
 
     calls = 0
 
@@ -185,10 +195,10 @@ def test_wsl2_locator_rejects_a_late_provider_result(monkeypatch: pytest.MonkeyP
             raise LimitExceededError("expired", entity_kind="vm", entity_name=vm_name)
         return 1
 
-    monkeypatch.setattr(wsl2, "provider_locator_remaining", remaining)
+    monkeypatch.setattr(_wsl2_registration, "provider_locator_remaining", remaining)
     monkeypatch.setattr(
-        "agentworks.capabilities.vm_platform.wsl2.run_process",
-        lambda *_args, **_kwargs: _process_result(status=0, stdout="{}"),
+        "agentworks.execution._wsl2_registration.run_process",
+        _registration_run(stdout="{}"),
     )
 
     with pytest.raises(LimitExceededError):
@@ -201,7 +211,7 @@ def test_wsl2_locator_rejects_a_late_provider_result(monkeypatch: pytest.MonkeyP
 
 def test_wsl2_locator_keeps_observed_process_failure_over_late_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     local_delivery = LocalDeliveryCustody()
-    from agentworks.capabilities.vm_platform import wsl2
+    from agentworks.execution import _wsl2_registration
 
     calls = 0
 
@@ -212,10 +222,10 @@ def test_wsl2_locator_keeps_observed_process_failure_over_late_deadline(monkeypa
             raise LimitExceededError("expired")
         return 1
 
-    monkeypatch.setattr(wsl2, "provider_locator_remaining", remaining)
+    monkeypatch.setattr(_wsl2_registration, "provider_locator_remaining", remaining)
     monkeypatch.setattr(
-        "agentworks.capabilities.vm_platform.wsl2.run_process",
-        lambda *_args, **_kwargs: _process_result(status=1, stdout=""),
+        "agentworks.execution._wsl2_registration.run_process",
+        _registration_run(status=1),
     )
 
     with pytest.raises(ConnectivityError):

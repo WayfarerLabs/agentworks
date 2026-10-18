@@ -21,7 +21,6 @@ from pydantic import Field
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import (
     ProviderLocatorObservation,
-    ProviderLocatorUnavailable,
     ProvisionRequest,
     ProvisionResult,
     VMPlatform,
@@ -49,10 +48,13 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
+    from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
+    from agentworks.operations import OperationOwner
     from agentworks.resources.graph import Readiness
     from agentworks.ssh import SSHLogger, SSHTarget
     from agentworks.transports import SSHTransport, Transport
+    from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 # Markers the restart-sentinel probe echoes on stdout. The probe exits 0
 # either way, so an absent sentinel stays a normal result, not an exception.
@@ -852,9 +854,49 @@ class LimaPlatform(VMPlatform):
         deadline: Deadline,
         custody: LocalDeliveryCustody,
     ) -> ProviderLocatorObservation:
-        """Lima names lack a provider namespace stable across placements."""
-        del vm, ctx, deadline
-        return ProviderLocatorUnavailable()
+        """Observe local placement without invoking the selected guest."""
+        from agentworks.execution._lima_selection import observe_lima_once
+
+        del ctx
+        self._require_local_native()
+        return observe_lima_once(self.site_name, self._instance_name(vm), vm.name, deadline, custody).locator
+
+    def _require_local_native(self) -> None:
+        if self.is_remote:
+            raise StateError("Remote Lima native execution requires an explicit owned platform-host route")
+
+    def build_native_execution_access(
+        self, vm: VMRow, ctx: RunContext, *, owner: OperationOwner, custody: LocalDeliveryCustody
+    ) -> OwnedNativePlatformAccess:
+        """Build passive access for retention before any local discovery or effect."""
+        from agentworks.vms._lima_native_access import LimaOwnedNativePlatformAccess
+
+        return LimaOwnedNativePlatformAccess(vm, self, ctx, owner, custody)
+
+    def resolve_native_execution_binding(
+        self, vm: VMRow, ctx: RunContext, *, deadline: Deadline, config: Config | None = None
+    ) -> NativeExecutionBinding:
+        """Observe a pinned local delivery route under a finite budget, never start."""
+        from agentworks.execution._delivery_custody import LocalDeliveryCustody
+        from agentworks.execution._lima_binding import lima_native_binding
+        from agentworks.execution._lima_selection import observe_lima_once
+
+        del ctx, config
+        self._require_local_native()
+        selected = observe_lima_once(
+            self.site_name, self._instance_name(vm), vm.name, deadline, LocalDeliveryCustody(), native=True
+        )
+        return lima_native_binding(selected)
+
+    def observe_execution_power(
+        self, vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody: LocalDeliveryCustody
+    ) -> VMStatus:
+        """Observe host-side power without driver plugins or WSL guest probes."""
+        from agentworks.execution._lima_selection import observe_lima_once
+
+        del ctx
+        self._require_local_native()
+        return observe_lima_once(self.site_name, self._instance_name(vm), vm.name, deadline, custody).power
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         from agentworks.ssh import SSHError

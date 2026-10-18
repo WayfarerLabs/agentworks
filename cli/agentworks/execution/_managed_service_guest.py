@@ -22,9 +22,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from . import _helper_identity, _managed_job_request, _managed_job_wire
+from ._evidence_wire import FrameKind
+from ._inline_control import StreamName
 from ._managed_job_store import FactName, ManagedJobStore, Stream
 from ._managed_lease_controller import LeaseControl
 from ._managed_lease_wire import boottime_ns, checked_lease
+from ._managed_live_io import LiveIO
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -266,6 +269,7 @@ def _serve(
     if lease is not None:
         checked_lease(lease, request.launch, boottime_ns())
         control = LeaseControl(request.launch, lease.expires_ns)
+    live = LiveIO(store, request.live_io, request.launch) if request.live_io is not None else None
     placed_r, placed_w = os.pipe()
     release_r, release_w = os.pipe()
     ready_r, ready_w = os.pipe()
@@ -275,6 +279,8 @@ def _serve(
     exec_r, exec_w = os.pipe2(os.O_CLOEXEC)
     pid = os.fork()
     if pid == 0:
+        if live is not None:
+            live.close_child()
         for fd in (placed_w, release_w, ready_r, input_w, output_r, error_r, exec_r):
             _close(fd)
         _child(request, launch, placed_r, release_r, ready_w, input_r, output_w, error_w, exec_w, apply_identity)
@@ -302,7 +308,10 @@ def _serve(
             states.append(_StreamState(stream, fd, writer))
         store.publish_fact(FactName.LAUNCH, request.launch)
         notify()
-        if store.read_stop_request():
+        if live is not None:
+            live.take_gate(release_w)
+            release_w = -1
+        elif store.read_stop_request():
             _close(release_w)
             release_w = -1
         else:
@@ -310,8 +319,10 @@ def _serve(
                 checked_lease(lease, request.launch, boottime_ns())
             os.write(release_w, b"1")
         launched = True
-        _observe(run_id, digest, request, store, boundary, pid, input_w, exec_r, states, control)
+        _observe(run_id, digest, request, store, boundary, pid, input_w, exec_r, states, control, live)
     finally:
+        if live is not None:
+            live.close()
         for fd in (placed_w, release_w, ready_r, input_w, output_r, error_r, exec_r):
             _close(fd)
         for writer in writers:
@@ -335,6 +346,7 @@ def _observe(
     exec_fd: int,
     states: list[_StreamState],
     lease_control: LeaseControl | None = None,
+    live: LiveIO | None = None,
 ) -> None:
     selector = selectors.DefaultSelector()
     os.set_blocking(exec_fd, False)
@@ -343,10 +355,12 @@ def _observe(
         os.set_blocking(state.fd, False)
         selector.register(state.fd, selectors.EVENT_READ, state)
     offset = 0
-    input_open = bool(request.stdin)
-    if request.stdin:
+    live_input = live is not None and live.metadata.input
+    input_open = bool(request.stdin) or live_input
+    if input_open:
         os.set_blocking(input_fd, False)
-        selector.register(input_fd, selectors.EVENT_WRITE, None)
+        if request.stdin:
+            selector.register(input_fd, selectors.EVENT_WRITE, None)
     else:
         _close(input_fd)
     status: int | None = None
@@ -356,6 +370,8 @@ def _observe(
     deadline: float | None = None
     stop_deadline: float | None = None
     boundary_done = False
+    open_streams = {state.fd for state in states}
+    output_turn = Stream.STDOUT
     try:
         while True:
             if status is None:
@@ -371,6 +387,9 @@ def _observe(
             ):
                 if lease_control is not None:
                     lease_control.closed = True
+                if live is not None:
+                    live.refuse()
+                    live.stop_input()
                 if input_open:
                     if input_fd in selector.get_map():
                         selector.unregister(input_fd)
@@ -382,6 +401,39 @@ def _observe(
                     stop_deadline = time.monotonic() + _STOP_GRACE_SECONDS
                 else:
                     stop_deadline = time.monotonic()
+            if live is not None:
+                if not live.admitted and time.monotonic() >= live.deadline:
+                    live.refuse()
+                if status is not None:
+                    live.refuse()
+                    live.stop_input()
+                if not live.refused:
+                    live.admit_if_bound()
+                if live_input and input_open:
+                    if status is not None or (live.input_eof and not live.input_pending):
+                        if input_fd in selector.get_map():
+                            selector.unregister(input_fd)
+                        _close(input_fd)
+                        input_open = False
+                    elif live.input_pending and input_fd not in selector.get_map():
+                        selector.register(input_fd, selectors.EVENT_WRITE, None)
+                # Presentation pressure suspends pipe reads, while every loop
+                # still observes stop, lease, child status and cleanup bounds.
+                for state in states:
+                    if state.fd not in open_streams:
+                        continue
+                    enabled = not live.metadata.output or live.connection is None or live.output_ready
+                    if enabled and state.fd not in selector.get_map():
+                        selector.register(state.fd, selectors.EVENT_READ, state)
+                    elif not enabled and state.fd in selector.get_map():
+                        selector.unregister(state.fd)
+                if live.output_ready:
+                    for state in states:
+                        stream_name = StreamName(state.stream.value)
+                        if state.fd not in open_streams and not live.stream_ended(stream_name):
+                            live.end_stream(stream_name)
+                            break
+                live.sync(selector)
             if status is None and stop_deadline is not None and deadline is None and time.monotonic() >= stop_deadline:
                 with suppress(OSError):
                     boundary.kill()
@@ -400,14 +452,30 @@ def _observe(
                 if empty:
                     store.publish_fact(FactName.BOUNDARY_EMPTY, _fact(run_id, digest, "boundary-empty"))
                     boundary_done = True
-            if status is not None and not selector.get_map() and boundary_done:
-                return
+            workload_done = not open_streams and exec_result is not None and not input_open
+            if status is not None and workload_done and boundary_done:
+                if live is None or live.connection is None:
+                    return
+                if not live.metadata.output or all(live.stream_ended(name) for name in StreamName):
+                    live.finish()
+                    live.sync(selector)
             if deadline is not None and time.monotonic() >= deadline:
                 return
             next_deadline = deadline if deadline is not None else stop_deadline
             timeout = 0.05 if next_deadline is None else min(0.05, max(0.0, next_deadline - time.monotonic()))
-            for key, _ in selector.select(timeout):
-                if key.data == "exec":
+            ready = selector.select(timeout)
+            if live is not None and live.output_ready:
+                # Only one data frame fits. Prefer the other ready stream on
+                # each turn regardless of selector or descriptor ordering.
+                ready.sort(
+                    key=lambda event: (
+                        isinstance(event[0].data, _StreamState) and event[0].data.stream is not output_turn
+                    )
+                )
+            for key, events in ready:
+                if key.data is live and live is not None:
+                    live.progress(key.fd, events)
+                elif key.data == "exec":
                     chunk = os.read(exec_fd, 4096)
                     if chunk:
                         exec_failed = True
@@ -415,23 +483,53 @@ def _observe(
                         selector.unregister(exec_fd)
                         exec_result = not exec_failed
                 elif key.data is None:
-                    chunk = request.stdin[offset : offset + 65536]
+                    chunk = (
+                        live.input_pending
+                        if live_input and live is not None
+                        else request.stdin[offset : offset + 65536]
+                    )
                     try:
-                        offset += os.write(input_fd, chunk)
+                        sent = os.write(input_fd, chunk)
                     except BrokenPipeError:
+                        sent = len(chunk)
                         offset = len(request.stdin)
-                    if offset == len(request.stdin):
-                        selector.unregister(input_fd)
+                        if live_input and live is not None:
+                            live.stop_input()
+                    except BlockingIOError:
+                        continue
+                    if live_input and live is not None:
+                        live.input_pending = live.input_pending[sent:]
+                        if not live.input_pending:
+                            selector.unregister(input_fd)
+                        finished_input = live.input_eof and not live.input_pending
+                    else:
+                        offset += sent
+                        finished_input = offset >= len(request.stdin)
+                    if finished_input:
+                        if input_fd in selector.get_map():
+                            selector.unregister(input_fd)
                         _close(input_fd)
                         input_open = False
                 else:
                     state = cast("_StreamState", key.data)
-                    chunk = os.read(state.fd, 65536)
+                    if (
+                        live is not None
+                        and live.metadata.output
+                        and live.connection is not None
+                        and not live.output_ready
+                    ):
+                        continue
+                    chunk = os.read(state.fd, 4096 if live is not None and live.output_ready else 65536)
                     if chunk:
                         if state.writer is not None:
                             state.writer.write(chunk)
+                        if live is not None and live.output_ready:
+                            kind = FrameKind.STDOUT if state.stream is Stream.STDOUT else FrameKind.STDERR
+                            live.queue(kind, chunk)
+                            output_turn = Stream.STDERR if state.stream is Stream.STDOUT else Stream.STDOUT
                     else:
                         selector.unregister(state.fd)
+                        open_streams.remove(state.fd)
                         _close(state.fd)
                         if state.writer is not None:
                             capture = state.writer.finish()

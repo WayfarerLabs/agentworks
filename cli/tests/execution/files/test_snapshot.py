@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 import agentworks.execution._file_snapshot as snapshot_module
-from agentworks.execution._file_paths import open_linux_confined
+from agentworks.execution._file_paths import open_file_confined
 from agentworks.execution._file_snapshot import SnapshotFailureKind, SnapshotReadError
 from agentworks.execution._file_snapshot_read import (
     FileSnapshot,
@@ -73,6 +73,26 @@ def test_stat_only_revision_does_not_read_content(tmp_path: Path, monkeypatch: p
     assert revision.stat.size == target.stat().st_size
 
 
+@pytest.mark.parametrize("operation", ["snapshot", "revision", "stat"])
+def test_unsupported_runtime_refuses_before_open_or_content_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    (tmp_path / "file").write_bytes(b"content")
+    root_fd = _open_root(tmp_path)
+    try:
+        monkeypatch.setattr(sys, "platform", "freebsd")
+        monkeypatch.setattr(os, "open", lambda *_args, **_kwargs: pytest.fail("unsupported runtime opened a path"))
+        monkeypatch.setattr(snapshot_module, "_read", lambda *_args: pytest.fail("unsupported runtime read content"))
+        with pytest.raises(SnapshotReadError) as raised:
+            if operation == "snapshot":
+                read_snapshot(root_fd, "file", 1024)
+            else:
+                read_revision(root_fd, "file", include_digest=operation == "revision")
+        assert raised.value.kind is SnapshotFailureKind.IO
+    finally:
+        os.close(root_fd)
+
+
 @pytest.mark.skipif(sys.platform != "linux", reason="O_PATH is Linux-specific")
 def test_stat_only_revision_uses_path_only_access_for_unreadable_leaf(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -81,14 +101,14 @@ def test_stat_only_revision_uses_path_only_access_for_unreadable_leaf(
     target.write_bytes(b"content")
     target.chmod(0)
     root_fd = _open_root(tmp_path)
-    original_open = open_linux_confined
+    original_open = open_file_confined
     leaf_flags: list[int] = []
 
     def recording_open(parent_fd: int, path: str, flags: int) -> int | None:
         leaf_flags.append(flags)
         return original_open(parent_fd, path, flags)
 
-    monkeypatch.setattr(snapshot_module, "open_linux_confined", recording_open)
+    monkeypatch.setattr(snapshot_module, "open_file_confined", recording_open)
     monkeypatch.setattr(snapshot_module, "_read", lambda *_args: pytest.fail("content was read"))
     try:
         revision = read_revision(root_fd, "file", include_digest=False)
@@ -156,12 +176,27 @@ def test_malformed_relative_path_never_reaches_confined_open(tmp_path: Path, mon
         os.close(root_fd)
 
 
-@pytest.mark.parametrize("max_bytes", [0, -1, True, 1.0, float("inf")])
-def test_byte_bound_must_be_a_positive_integer(tmp_path: Path, max_bytes: object) -> None:
+@pytest.mark.parametrize("max_bytes", [-1, True, False, 1.0, float("inf"), 1 << 63])
+def test_byte_bound_must_be_a_nonnegative_representable_integer(tmp_path: Path, max_bytes: object) -> None:
     root_fd = _open_root(tmp_path)
     os.close(root_fd)
     with pytest.raises(ValueError):
         read_snapshot(root_fd, "file", max_bytes)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("content", [b"", b"x"])
+def test_zero_bound_verifies_only_empty_snapshots(tmp_path: Path, content: bytes) -> None:
+    (tmp_path / "file").write_bytes(content)
+    root_fd = _open_root(tmp_path)
+    try:
+        if content:
+            assert _failure_kind(root_fd, "file", 0) is SnapshotFailureKind.LIMIT
+        else:
+            result = read_snapshot(root_fd, "file", 0)
+            assert result is not None and result.data == b""
+            assert result.stat.size == 0 and result.digest == hashlib.sha256(b"").digest()
+    finally:
+        os.close(root_fd)
 
 
 def test_ancestor_and_leaf_links_are_refused(tmp_path: Path) -> None:
@@ -231,9 +266,9 @@ def test_regular_leaf_open_uses_nonblocking_nofollow_noctty_flags(
 
         def recording_confined_open(root_fd: int, path: str, flags: int) -> int | None:
             observed_flags.append(flags)
-            return open_linux_confined(root_fd, path, flags)
+            return open_file_confined(root_fd, path, flags)
 
-        monkeypatch.setattr("agentworks.execution._file_snapshot.open_linux_confined", recording_confined_open)
+        monkeypatch.setattr("agentworks.execution._file_snapshot.open_file_confined", recording_confined_open)
     else:
         original_open = os.open
 

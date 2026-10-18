@@ -147,6 +147,16 @@ class RuntimePrerequisiteObservation:
     selected_path: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class HelperClosureExpectation:
+    """Non-payload identity of one prepared helper, not application evidence."""
+
+    nonce: str
+    candidates: tuple[str, ...]
+    system_shim: str | None
+    guest: VMGuestIdentity | None
+
+
 def _validate_path(path: str) -> None:
     failed = type(path) is not str or "\0" in path
     if not failed:

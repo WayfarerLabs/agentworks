@@ -245,7 +245,7 @@ def test_local_refusal_closes_predispatch_borrow_without_retained_state(
                 trusted_root_path="/approved",
                 relative_path="source",
                 sink=BytesSink(),
-                max_bytes=0,
+                max_bytes=-1,
                 plan=plan,
                 deadline=Deadline.after(30),
                 runtime_selection=runtime_selection(sys.executable),
