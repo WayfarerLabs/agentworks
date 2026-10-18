@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -23,7 +24,7 @@ from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_job_protocol import encode_managed_job_fact
 from agentworks.execution._managed_job_request import ManagedJobRequest
 from agentworks.execution._managed_job_store import FactName, ManagedJobStore, RequestAsset
-from agentworks.execution._managed_lease_wire import sampled_lease
+from agentworks.execution._managed_lease_wire import MAX_LEASE_BYTES, sampled_lease
 from agentworks.execution._managed_runs import (
     ManagedLaunchState,
     ManagedOutputMode,
@@ -43,6 +44,7 @@ from agentworks.execution._managed_runs import (
 from agentworks.execution._managed_service_bundle import FIXED_SOURCE
 from agentworks.execution._managed_start_bundle import FIXED_BUNDLE
 from agentworks.execution._managed_start_exchange import ManagedStartState, prepare_managed_start, start_managed_run
+from agentworks.execution._managed_start_preparation import prepare_managed_start_body
 from agentworks.execution._managed_start_protocol import (
     MAX_REQUEST_BYTES,
     ManagedStartError,
@@ -54,6 +56,12 @@ from agentworks.execution._managed_start_protocol import (
     encode_result,
 )
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution._scratch import ScratchReference
+from agentworks.execution._scratch_receipt import ScratchOperation, ScratchOwnership, ScratchReceiptContext
+from agentworks.execution._scratch_receipt import _Identity as ScratchIdentity
+from agentworks.execution._staged_helper_bundle import build_staged_helper_program
+from agentworks.execution._staged_helper_protocol import MAX_REMAINING_NS, StagedHelperRequest
+from agentworks.execution._staged_helper_protocol import decode_request as decode_staged_request
 from agentworks.execution._vm_guest_identity_guest import _GuestRefusal
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, VMGuestIdentityFailure, vm_guest_boot_id
 from agentworks.execution.carrier import (
@@ -696,46 +704,24 @@ def test_proxmox_structural_refusal_precedes_possible_dispatch(
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
 
 
-def test_proxmox_complete_service_envelope_fits_with_bounded_workload_input(
-    reserved: tuple[ManagedRunRepository, ManagedRunRecord],
+def _assert_proxmox_constructor_envelope(
+    record: ManagedRunRecord,
+    request: ManagedJobRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    lease_sample_ns: int | None = None,
 ) -> None:
-    repository, record = reserved
+    """Measure constructors only; synthetic references authorize no real load."""
     carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.example", "node", 101, "operator!token", "secret"))
-    prepared = prepare_managed_start(
+
+    def unexpected_dispatch(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("constructor measurement dispatched a carrier")
+
+    monkeypatch.setattr(carrier, "execute", unexpected_dispatch)
+    prepared = prepare_managed_start_body(
         carrier,
         record.identity,
         record.spec,
-        record.output_policy,
-        replace(_request(record), stdin=b"x" * 10_000),
-        IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
-        Deadline.after(10),
-        RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
-        GUEST,
-    )
-    try:
-        assert isinstance(prepared.io, CarrierIO)
-        carrier.validate(prepared.invocation, io=prepared.io)
-        assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
-    finally:
-        prepared.discard()
-
-
-def test_proxmox_real_leased_service_envelope_fits_with_bounded_workload_input(reserved) -> None:
-    repository, original = reserved
-    spec = replace(
-        original.spec,
-        owner=ManagedRunOwner(ManagedRunOwnerKind.OPERATION, "f" * 32),
-        lifetime=ManagedRunLifetime.OPERATION,
-    )
-    identity = ManagedRunIdentity("e" * 32)
-    record = repository.reserve(spec, output_policy=original.output_policy, identity=identity)
-    request = _request(record)
-    request = replace(request, stdin=b"x" * 8192, operation_lease=sampled_lease(request.launch, 1000))
-    carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.example", "node", 101, "operator!token", "secret"))
-    prepared = prepare_managed_start(
-        carrier,
-        identity,
-        spec,
         record.output_policy,
         request,
         IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
@@ -744,10 +730,77 @@ def test_proxmox_real_leased_service_envelope_fits_with_bounded_workload_input(r
         GUEST,
     )
     try:
-        carrier.validate(prepared.invocation, io=prepared.io)
-        assert repository.inspect(identity) == record
+        lease = sampled_lease(request.launch, lease_sample_ns) if lease_sample_ns is not None else None
+        tail = prepared.freeze_tail(lease)
+        assert len(tail) == MAX_LEASE_BYTES == 512
+        prefix, body = prepared.parts
+        assert prefix == FIXED_BUNDLE.prefix
+        whole_input = prefix + body + tail
+        assert len(whole_input) == prepared.expected_length
+        assert prepared.digest == hashlib.sha256(whole_input).digest()
+        decoded = decode_request(whole_input[len(prefix) :])
+        assert decoded.nonce == prepared.nonce and decoded.identity == ROOT and decoded.guest == GUEST
+        assert decoded.job == replace(request, operation_lease=lease)
+
+        control = None
+        if prepared.staged:
+            # Maximum-width syntax measures the activation envelope. No scratch
+            # objects exist, and this reference is never loaded or dispatched.
+            token = bytes(range(16))
+            maximum = ScratchIdentity(2**64 - 1, 2**64 - 1)
+            reference = ScratchReference(
+                ScratchOwnership(
+                    token,
+                    ScratchReceiptContext(ScratchOperation.STAGE, ROOT),
+                    maximum,
+                    maximum,
+                    maximum,
+                    2**64 - 1,
+                    len(whole_input),
+                    maximum,
+                )
+            )
+            control = StagedHelperRequest(prepared.nonce, ROOT, token, reference, prepared.digest, MAX_REMAINING_NS)
+        attempt = prepared.finish(control)
+        try:
+            assert attempt.io is not None and isinstance(attempt.io.input, FiniteInput)
+            if control is not None:
+                loader_prefix = build_staged_helper_program(FIXED_BUNDLE).prefix
+                assert attempt.io.input.data.startswith(loader_prefix)
+                assert decode_staged_request(attempt.io.input.data[len(loader_prefix) :]) == control
+            else:
+                assert attempt.io.input.data == whole_input
+            carrier.validate(attempt.invocation, io=attempt.io)
+            assert len(ProxmoxCarrier._request_body(attempt.invocation, attempt.io)) <= 65_536
+        finally:
+            attempt.discard()
     finally:
-        prepared.discard()
+        prepared.clear()
+
+
+def test_proxmox_complete_service_envelope_fits_with_bounded_workload_input(
+    reserved: tuple[ManagedRunRepository, ManagedRunRecord], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository, record = reserved
+    request = replace(_request(record), stdin=b"x" * 10_000)
+    _assert_proxmox_constructor_envelope(record, request, monkeypatch)
+    assert repository.inspect(RUN) == record
+
+
+def test_proxmox_real_leased_service_envelope_fits_with_bounded_workload_input(
+    reserved, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository, original = reserved
+    spec = replace(
+        original.spec,
+        owner=ManagedRunOwner(ManagedRunOwnerKind.OPERATION, "f" * 32),
+        lifetime=ManagedRunLifetime.OPERATION,
+    )
+    identity = ManagedRunIdentity("e" * 32)
+    record = repository.reserve(spec, output_policy=original.output_policy, identity=identity)
+    request = replace(_request(record), stdin=b"x" * 8192)
+    _assert_proxmox_constructor_envelope(record, request, monkeypatch, lease_sample_ns=1000)
+    assert repository.inspect(identity) == record
 
 
 def test_unexpected_carrier_exception_propagates_after_possible_dispatch(
