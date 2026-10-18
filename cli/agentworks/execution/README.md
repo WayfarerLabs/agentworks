@@ -496,18 +496,17 @@ execution admission lock across provider I/O. Admission and expiry are checked a
 borrowing. FileAccess accepts the same core-bound callback after local path/elevation validation,
 including directory child calls. Already-expired file calls skip provider reads and retain ordinary
 DEADLINE result reduction. Deadline retrieval itself is passive except for refusing a closed view.
-Absence
-binds no additional route check beyond shared preparation; it supplies no route-freshness evidence.
-This is not broader provider-route or boot acceptance. Proxmox retains one selected QGA binding and
-checks its locator before and after target preparation. The bounded read-only account probe is not
-itself guest-fenced; account facts grant no body authority without the prepared full guest and
-numeric identity checks at each body helper. Per-dispatch provider-route freshness, complete
-availability, public RunContext composition and native acceptance remain unproved. The native
-operation module and shipped-plugin registration import without retired execution packages. Existing
-legacy operations import their dependencies only when invoked; this does not supply new cloud/Lima
-bindings or migrate provisioning. Identity preparation retains completed or partial account evidence
-and conservative custody on borrow-release failure, preserving original escaping control. No target
-or root identity is inferred as a fallback.
+Absence binds no additional route check beyond shared preparation; it supplies no route-freshness
+evidence. This is not broader provider-route or boot acceptance. Proxmox retains one selected QGA
+binding and checks its locator before and after target preparation. The bounded read-only account
+probe is not itself guest-fenced; account facts grant no body authority without the prepared full
+guest and numeric identity checks at each body helper. Per-dispatch provider-route freshness,
+complete availability, public RunContext composition and native acceptance remain unproved. The
+native operation module and shipped-plugin registration import without retired execution packages.
+Existing legacy operations import their dependencies only when invoked; this does not supply new
+cloud/Lima bindings or migrate provisioning. Identity preparation retains completed or partial
+account evidence and conservative custody on borrow-release failure, preserving original escaping
+control. No target or root identity is inferred as a fallback.
 
 The private `vm_execution_context` entry point requires an explicit `ExecutionRoute.NATIVE` or
 `ExecutionRoute.CANONICAL` and yields a normal RunContext inside one shared `VMOperation`.
@@ -1567,11 +1566,11 @@ The private inline helper supports buffered DIRECT foreground execution on Darwi
 manifest, framing and result interpretation as Linux. Its fixed fresh-exec entry checks real and
 effective account IDs and observed groups; this does not establish Linux group-drop containment.
 Darwin script source uses a separately owned `/dev/fd` pipe, leaving application stdin independent.
-The nonblocking writer has bounded cancellation and retains actual source custody if closure cannot
+The non-blocking writer has bounded cancellation and retains actual source custody if closure cannot
 be established. Such uncertainty preserves observed application bytes and wait facts but withholds
-the terminal helper record and successful helper exit. Linux retains its memfd source path and
-saved-ID checks. Darwin MANAGED and live foreground calls remain unavailable. Local fixture and
-packed Python 3.11 checks do not establish native macOS acceptance or complete platform-host
+the terminal helper record and successful helper exit. Linux retains its anonymous-memory source
+path and saved-ID checks. Darwin MANAGED and live foreground calls remain unavailable. Local fixture
+and packed Python 3.11 checks do not establish native macOS acceptance or complete platform-host
 identity, file, job or context composition.
 
 In that same invocation, an isolated Python trampoline checks version 3.11 or newer and the common

@@ -5796,16 +5796,16 @@ Private review identified an effective-deadline admission defect in that checkpo
 `4b32d3840` makes deadline selection passive, checks the selected route before DIRECT borrowing and
 file requests, and checks both OPERATION and RESOURCE starts before initial clock/reservation
 effects. Directory children retain the same file callback; expired file budgets preserve normal
-DEADLINE reduction without provider I/O. The unused native forwarding wrapper is removed rather
-than retained as a compatibility surface. Worker gates report 380 focused and 601 adjacent passes,
-strict typing across 1,507 sources and clean changed-file lint/format. Lead combined validation and
+DEADLINE reduction without provider I/O. The unused native forwarding wrapper is removed rather than
+retained as a compatibility surface. Worker gates report 380 focused and 601 adjacent passes, strict
+typing across 1,507 sources and clean changed-file lint/format. Lead combined validation and
 independent re-review remain required; the checkbox above is still open.
 
 - [ ] Complete combined validation and independent review of the private Darwin buffered DIRECT
-      helper (`c9bd8f1dd`), then obtain native macOS proof with the approved interpreter prerequisite.
-      Preserve source/input separation, fixed fresh-exec identity and honest source-cleanup
-      uncertainty. This does not complete platform-host identity/files/context composition, live
-      foreground execution or any MANAGED host guarantee.
+      helper (`c9bd8f1dd`), then obtain native macOS proof with the approved interpreter
+      prerequisite. Preserve source/input separation, fixed fresh-exec identity and honest
+      source-cleanup uncertainty. This does not complete platform-host identity/files/context
+      composition, live foreground execution or any MANAGED host guarantee.
 
 - [ ] Prove fresh-process platform composition without retirement dependencies, not only calls to
       already-imported native hooks. The first-binding audit at `6149cf06` found that VM-platform

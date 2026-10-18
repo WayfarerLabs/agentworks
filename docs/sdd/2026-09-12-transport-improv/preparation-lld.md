@@ -756,14 +756,14 @@ scripts and managed jobs remain blocked rather than downgraded.
 
 The private buffered DIRECT inline candidate now has a Darwin implementation. It keeps the common
 manifest, framed evidence and result interpreter, but checks identity at fixed fresh-exec entry and
-uses an independently owned `/dev/fd` source pipe rather than Linux memfd/proc descriptors. The
-nonblocking writer supports bounded cancellation; uncertain thread or descriptor closure retains
-actual custody, preserves application stream/wait facts and withholds `FINISHED` and successful
-helper exit. Linux saved-ID and memfd checks remain unchanged. Worker `c9bd8f1dd` reports 96 focused
-and 546 adjacent passes, including packed current/Python 3.11 checks, plus strict typing across
-1,507 sources. These are local fixtures, not native Darwin evidence. Independent combined review,
-native macOS proof and broader platform-host identity/files/context composition remain open; Darwin
-MANAGED and live foreground calls are still refused.
+uses an independently owned `/dev/fd` source pipe rather than Linux anonymous-memory descriptors.
+The non-blocking writer supports bounded cancellation; uncertain thread or descriptor closure
+retains actual custody, preserves application stream/wait facts and withholds `FINISHED` and
+successful helper exit. Linux saved-ID and source checks remain unchanged. Worker `c9bd8f1dd`
+reports 96 focused and 546 adjacent passes, including packed current/Python 3.11 checks, plus strict
+typing across 1,507 sources. These are local fixtures, not native Darwin evidence. Independent
+combined review, native macOS proof and broader platform-host identity/files/context composition
+remain open; Darwin MANAGED and live foreground calls are still refused.
 
 ### Darwin inline prerequisite candidate
 
