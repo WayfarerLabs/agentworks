@@ -1270,6 +1270,15 @@ without embedding request values. The existing helper builder compacts trusted m
 removing docstrings; service admission opts into that same derivation. Portable codecs retain their
 canonical bytes. This controller has no live systemd proof.
 
+The parent and observer share one ownership set for their stdin/stdout/stderr pipe ends. An early
+stdin close or output EOF consumes that ownership before attempting close; final cleanup closes only
+remaining owned ends, never a descriptor number already released and possibly reused. The
+exec-status pipe and launch gates keep their separate parent ownership. Observation initialization
+closes a created selector on failure without replacing the original exception with an ordinary
+selector-close error. This changes no child kill/reap policy: native manager fallback after
+controller death still requires its separate acceptance evidence, and missing workload facts remain
+unknown.
+
 The private operation-lease guest path uses one mode-0400 `operation-lease` leaf and conflict-free
 `.lease-stage-<id>` files in the existing protected run directory. A bounded record binds the exact
 launch digest and boot identity to a guest `CLOCK_BOOTTIME` sample plus a fixed 60-second window.

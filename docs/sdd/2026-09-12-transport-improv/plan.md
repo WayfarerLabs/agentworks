@@ -5493,10 +5493,12 @@ checkbox stays open.
 - [ ] Correct managed-service pipe ownership across observation and final cleanup. Early stdin
       closure and output EOF must consume the same close-once ownership state that final cleanup
       uses, so a reused descriptor number is never closed again. Preserve pre-observation and
-      observation-initialization cleanup, original controls and stream/wait facts. Prove actual
-      descriptor reuse with unchanged fairness assertions and packed Python 3.11 execution before
-      claiming this correction; do not identify it as the spontaneous CI failure's exact operation
-      without that evidence.
+      observation-initialization descriptor/selector cleanup, original controls and stream/wait
+      facts. Keep child kill/reap policy unchanged; native manager fallback remains within the
+      existing native acceptance gate, not a guarantee of a standalone injected test boundary. Prove
+      actual descriptor reuse with unchanged fairness assertions and packed Python 3.11 execution
+      before claiming this correction; do not identify it as the spontaneous CI failure's exact
+      operation without that evidence.
 - [ ] Obtain native root/cgroup/SSH acceptance for the implemented private
       [managed foreground pipe design](managed-live-io-lld.md): settled buffered launch and keeper
       admission, protected live-direction metadata, one controller-owned per-run socket and one
