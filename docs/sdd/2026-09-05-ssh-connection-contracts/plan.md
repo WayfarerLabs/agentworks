@@ -283,11 +283,11 @@ and supported-workstation gates below are unchanged.
       acceleration must use the same connection policy and obey shared file semantics. Adopt the
       concrete shared caller-held delivery custody at actual SSH delivery, with no temporary
       adapter-local storage. Prove bounded pending construction/cleanup, serialized settlement,
-      refusal while ownership is pending/lost, native descriptor/terminal retention and aggregate
-      drain after borrow handoff. Retain immutable evidence and original interruption; local cleanup
-      establishes no remote cancellation or dispatch-debt resolution. Enrollment must retain its
-      same acquired candidate writer lock alongside native custody until settlement; its enclosing
-      creation/maintenance resource consumer remains unresolved as recorded in the
+      refusal while local retirement remains unproved, native descriptor/terminal retention and
+      aggregate drain after borrow handoff. Retain immutable evidence and original interruption;
+      local cleanup establishes no remote cancellation or dispatch-debt resolution. Enrollment must
+      retain its same acquired candidate writer lock alongside native custody until settlement; its
+      enclosing creation/maintenance resource consumer remains unresolved as recorded in the
       [enrollment LLD](enrollment-lld.md#caller-held-delivery-custody-adoption). Forwarding must
       retain its native lifetime before admission, including failed startup, and expose bounded
       cleanup retries through that same retained lifetime; the
