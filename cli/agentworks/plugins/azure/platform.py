@@ -650,7 +650,8 @@ class AzureVMPlatform(VMPlatform):
             # idempotent or best-effort.
             try:
                 resource_id = vm_result.id or ""
-                if parse_resource_id(resource_id) != (az.subscription_id, az.resource_group, vm_name):
+                created_identity = tuple(component.lower() for component in parse_resource_id(resource_id))
+                if created_identity != (az.subscription_id.lower(), az.resource_group.lower(), vm_name.lower()):
                     raise StateError("Azure created VM resource identity does not match the requested VM")
                 vm_id = canonical_vm_id(vm_result.vm_id)
 

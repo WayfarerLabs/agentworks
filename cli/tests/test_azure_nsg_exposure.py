@@ -238,13 +238,23 @@ class TestCreate:
         ],
     )
     @pytest.mark.parametrize("system_slug", [None, "team"])
+    @pytest.mark.parametrize(
+        "resource_id",
+        [
+            _RESOURCE_ID,
+            _RESOURCE_ID.replace("sub-A", "sub-a"),
+            _RESOURCE_ID.replace("rg1", "RG1"),
+            _RESOURCE_ID.replace("vm1", "VM1"),
+        ],
+    )
     def test_records_creation_response_incarnation(
-        self, monkeypatch: pytest.MonkeyPatch, vm_id: str, system_slug: str | None
+        self, monkeypatch: pytest.MonkeyPatch, vm_id: str, system_slug: str | None, resource_id: str
     ) -> None:
         from azure.mgmt.compute.models import VirtualMachine
 
         fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
-        resource_id = _RESOURCE_ID.replace("/vm1", "/team-vm1") if system_slug else _RESOURCE_ID
+        if system_slug:
+            resource_id = resource_id.replace("/vm1", "/team-vm1").replace("/VM1", "/TEAM-VM1")
         fakes.compute.virtual_machines.create_result = VirtualMachine(
             {"id": resource_id, "properties": {"vmId": vm_id}}
         )
@@ -263,7 +273,6 @@ class TestCreate:
             (_RESOURCE_ID.replace("sub-A", "sub-B"), _VM_ID),
             (_RESOURCE_ID.replace("rg1", "rg2"), _VM_ID),
             (_RESOURCE_ID.replace("vm1", "vm2"), _VM_ID),
-            (_RESOURCE_ID.replace("sub-A", "sub-a"), _VM_ID),
             (_RESOURCE_ID, None),
             (_RESOURCE_ID, ""),
             (_RESOURCE_ID, "not-a-uuid"),
