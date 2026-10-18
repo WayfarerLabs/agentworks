@@ -1620,6 +1620,17 @@ another adapter's dispatch-drain, fencing, workload or cleanup requirements.
       cooperative ownership key separate from freshly observed host continuity for durable file
       recovery. Implement that observation's real producer and recovery consumer without a
       fabricated VM marker, a physical-host alias-discovery framework or a machine-wide lock.
+
+The private DIRECT host prerequisite at worker `3d95879c8` removes the internal managed-target
+requirement only for an explicitly owned PLATFORM_HOST operation with no guest bootstrap. VM
+operations retain their exact managed identity and boot fence. Managed/job actions require the
+actual target before preparation, borrowing, reservation, route checks or dispatch; the existing
+supplied-target consistency checks remain. No fabricated VM marker, production compatibility setter,
+host discovery or identity provider is introduced. Worker checks pass 453 focused execution cases,
+476 managed-action cases, 173 VM composition cases and strict typing across 1,513 sources. Combined
+review remains required. This enables private host DIRECT composition, not a complete host factory,
+durable host-file recovery, native host acceptance or production host delivery.
+
 - [ ] Prove additive ownership without silently migrating legacy callers: enter the new workflow's
       core operation boundary before activation, carry the claim through nested contexts and
       retained teardown nodes, and validate new-only workflows there. Keep old boundary calls and
