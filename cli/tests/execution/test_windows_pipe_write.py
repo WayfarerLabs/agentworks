@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import time
+import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -48,12 +49,15 @@ if not closed:
 
 
 def _report(stage: str, count: int, error: OSError | None = None) -> None:
-    print(
+    observation = (
         f"interpreter={sys.implementation.name}-{sys.version.split()[0]} stage={stage} "
         f"class={type(error).__name__ if error is not None else 'success'} "
         f"errno={error.errno if error is not None else None} "
         f"winerror={getattr(error, 'winerror', None)} count={count}"
     )
+    print(observation)
+    # Temporary native diagnosis through CI's unchanged warnings summary.
+    warnings.warn(observation, stacklevel=2)
 
 
 def _write(api: str, fd: int, data: memoryview) -> int:
