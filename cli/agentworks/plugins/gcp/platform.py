@@ -93,7 +93,9 @@ if TYPE_CHECKING:
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
+    from agentworks.operations import OperationOwner
     from agentworks.transports import Transport
+    from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 
 _OPERATION_TIMEOUT_SECONDS = 300.0
@@ -583,6 +585,19 @@ class GCEPlatform(VMPlatform):
     def display_backend_name(self, vm: VMRow) -> str:
         identity = _VMIdentity.from_row(vm)
         return f"{identity.instance_name}@{identity.zone}"
+
+    def build_native_execution_access(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
+    ) -> OwnedNativePlatformAccess:
+        """Build passive GCE access under the selected VM operation owner."""
+        from agentworks.plugins.gcp._native_execution_access import GCEOwnedAccess
+
+        return GCEOwnedAccess(vm, self, ctx, owner=owner)
 
     def resolve_native_execution_binding(
         self,
