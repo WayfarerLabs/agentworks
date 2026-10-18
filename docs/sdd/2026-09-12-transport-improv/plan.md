@@ -4671,6 +4671,17 @@ completed checkboxes below preserve its historical work. The separate
 [artifact application checkpoint](file-operations-lld.md#artifact-application-checkpoints) remains a
 consumer-migration gate, not an implication of directory-transfer progress.
 
+- [x] Retire the unused private package-upload producer and its runtime collections, retaining
+      persisted formats, codecs and recovery readers. Share the five owned-call completion blocks
+      without changing explicit preparation/admission, capture-before-removal, retained active
+      custody on failed capture, or original control-exception precedence. The lead's broad
+      file/native/context selection at `4e6e61539` passes 2,375 tests with 25 skips. After the final
+      dead producer-branch removal, `55d1e2e45` passes 301 focused gate, codec, retained-package and
+      native cases plus strict typing across 1,437 sources. All three independent source-review
+      lanes clear the final unit. Net removal is 369 production lines and 704 test lines, with
+      twenty capture-ordering cases added. This is private simplification, not native recovery,
+      artifact application checkpoints or complete RunContext acceptance.
+
 - [x] Extend the private upload helpers and pre-bound `FileOperation` upload/package paths to carry
       one exact existing gate through stage, publication, reconciliation and cleanup. Validate its
       Linux VM scope, effective UID, deterministic path and derived boot; persist it in the current
