@@ -1,7 +1,7 @@
-"""Fence the retained package child after process-loss takeover.
+"""Fence a retained file mutation after process-loss takeover.
 
 This adapter advances only its durable file-effect gate. It neither replays
-the child nor settles its lifecycle or application checkpoint.
+file work nor settles its lifecycle or an application checkpoint.
 """
 
 from __future__ import annotations
@@ -44,8 +44,8 @@ if TYPE_CHECKING:
 
 
 @dataclass(slots=True, repr=False)
-class FilePackageFenceRecovery:
-    """One exact current package child, retained through gate advancement."""
+class FileMutationFenceRecovery:
+    """One exact current mutation row, retained through gate advancement."""
 
     _owner: OperationOwner
     _persisted: LifecycleObligation
@@ -63,13 +63,13 @@ class FilePackageFenceRecovery:
         obligation: LifecycleObligation,
         *,
         context: RecoveryVMPreparedContext | None = None,
-    ) -> FilePackageFenceRecovery:
-        """Bind only an exact possible-effect package row with a durable gate."""
+    ) -> FileMutationFenceRecovery:
+        """Bind an exact possible-effect mutation row with a durable gate."""
         scope = owner.ownership.scope
         try:
             call = decode_file_call_obligation(obligation.payload)
         except ValueError:
-            raise StateError("package fence obligation payload is invalid") from None
+            raise StateError("mutation fence obligation payload is invalid") from None
         require_record_version(call, obligation)
         require_recovery_context(owner, call, context)
         if (
@@ -81,12 +81,20 @@ class FilePackageFenceRecovery:
             or target.kind.value != scope.resource_kind.value
             or target.name != scope.resource_name
             or call.target != target
-            or call.family is not FileCallFamily.PACKAGE_UPLOAD
+            or call.family
+            not in {
+                FileCallFamily.UPLOAD,
+                FileCallFamily.PACKAGE_UPLOAD,
+                FileCallFamily.JSON_UPDATE,
+                FileCallFamily.REMOVE,
+                FileCallFamily.SET_METADATA,
+                FileCallFamily.ENSURE_DIRECTORY,
+            }
             or call.effect_gate is None
             or call.gate_setup is not None
             or call.runtime_selection.target_os is not RuntimeTargetOS.LINUX
         ):
-            raise StateError("package fence requires the current bound package child")
+            raise StateError("mutation fence requires the current bound file call")
         bound = owner.rebind_possible_effect_lifecycle_obligation(
             obligation.obligation_id,
             "file-call",
@@ -97,7 +105,7 @@ class FilePackageFenceRecovery:
         return cls(owner, obligation, call, bound, context)
 
     def advance(self, carrier: Carrier | None = None, *, deadline: Deadline) -> GateControlCandidateResult:
-        """Fence old guest effects; retain the package child for separate recovery."""
+        """Fence old guest effects; retain the mutation for separate recovery."""
         delivery, plan, bootstrap = recovery_delivery(self._owner, self._call, self._context, carrier, deadline)
         self._ensure_proposal()
         gate = self._call.effect_gate
@@ -150,16 +158,16 @@ class FilePackageFenceRecovery:
 
     def _ensure_proposal(self) -> None:
         if self._fenced:
-            raise StateError("package child fence is already confirmed by this recovery")
+            raise StateError("mutation fence is already confirmed by this recovery")
         if self._pending_publication is not None:
             call, payload = self._pending_publication
             if self._try_adopt(call, payload):
                 if self._fenced:
-                    raise StateError("package child fence is already confirmed by this recovery")
+                    raise StateError("mutation fence is already confirmed by this recovery")
                 return
             self._publish(call, payload=payload)
             if self._fenced:
-                raise StateError("package child fence is already confirmed by this recovery")
+                raise StateError("mutation fence is already confirmed by this recovery")
             return
         gate = self._call.effect_gate
         assert gate is not None
@@ -210,7 +218,7 @@ class FilePackageFenceRecovery:
             or persisted.payload != payload
             or persisted.payload_revision != self._persisted.payload_revision + (payload != self._persisted.payload)
         ):
-            raise StateError("package fence publication did not advance exactly once")
+            raise StateError("mutation fence publication did not advance exactly once")
         self._persisted = persisted
         self._call = call
         self._bound = RecoveredLifecycleObligation(self._owner, persisted)

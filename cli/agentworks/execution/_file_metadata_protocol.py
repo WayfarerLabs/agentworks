@@ -6,11 +6,19 @@ import base64
 import binascii
 import json
 import math
+import posixpath
 import stat
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from ._file_effect_gate import (
+    FileEffectGateBinding,
+    FileEffectGateError,
+    decode_file_effect_gate,
+    encode_file_effect_gate,
+    targets_file_effect_gate_namespace,
+)
 from ._file_metadata import (
     MetadataEffect,
     MetadataFailureKind,
@@ -37,6 +45,11 @@ _REVISION_FIELDS = frozenset(
 _STEP_ORDER = {step: index for index, step in enumerate(MetadataStep)}
 
 
+def targets_metadata_gate_ancestor(root: str, relative_path: str) -> bool:
+    """Whether metadata convergence names a gate namespace ancestor."""
+    return posixpath.join(root, relative_path) in {"/run", "/run/agentworks"}
+
+
 class FileMetadataOperation(StrEnum):
     SET_METADATA = "set_metadata"
     ENSURE_DIRECTORY = "ensure_directory"
@@ -53,6 +66,7 @@ class FileMetadataFailureCode(StrEnum):
     OVERSIZED_REQUEST = "oversized_request"
     NONCE_MISMATCH = "nonce_mismatch"
     IDENTITY_MISMATCH = "identity_mismatch"
+    EFFECT_GATE_REFUSED = "effect_gate_refused"
     UNSUPPORTED_RUNTIME = "unsupported_runtime"
     ROOT_REFUSED = "root_refused"
     PARENT_REFUSED = "parent_refused"
@@ -85,6 +99,7 @@ class FileMetadataRequest:
     mode: int
     remaining_seconds: float | None
     identity: IdentityExpectation
+    effect_gate: FileEffectGateBinding | None = None
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -231,7 +246,7 @@ def encode_file_metadata_request(request: FileMetadataRequest) -> bytes:
     failed = False
     encoded = b""
     try:
-        value = {
+        value: dict[str, object] = {
             "gid": request.gid,
             "identity": {
                 "egid": request.identity.egid,
@@ -247,6 +262,8 @@ def encode_file_metadata_request(request: FileMetadataRequest) -> bytes:
             "uid": request.uid,
             "version": 1,
         }
+        if request.effect_gate is not None:
+            value["effect_gate"] = encode_file_effect_gate(request.effect_gate)
         encoded = _json_bytes(value)
     except (AttributeError, TypeError, UnicodeEncodeError, ValueError):
         failed = True
@@ -271,7 +288,7 @@ def decode_file_metadata_request(data: bytes) -> FileMetadataRequest:
         canonical = _json_bytes(value)
     except (TypeError, ValueError, RecursionError):
         failed = True
-    if failed or canonical != data or set(value) != _REQUEST_FIELDS:
+    if failed or canonical != data or set(value) not in (_REQUEST_FIELDS, _REQUEST_FIELDS | {"effect_gate"}):
         raise _invalid_request()
     failed = False
     operation = FileMetadataOperation.SET_METADATA
@@ -291,6 +308,17 @@ def decode_file_metadata_request(data: bytes) -> FileMetadataRequest:
     relative_path = _decode_base64_text(value["path"])
     if not normalized_root(root_path) or not normalized_relative_path(relative_path):
         raise _invalid_request()
+    if targets_file_effect_gate_namespace(root_path, relative_path):
+        raise _invalid_request()
+    identity = _identity(value["identity"])
+    effect_gate = None
+    if "effect_gate" in value:
+        try:
+            effect_gate = decode_file_effect_gate(value["effect_gate"])
+        except FileEffectGateError:
+            raise _invalid_request() from None
+        if effect_gate.proposed_generation is not None or effect_gate.euid != identity.euid:
+            raise _invalid_request()
     return FileMetadataRequest(
         nonce=nonce,
         operation=operation,
@@ -300,7 +328,8 @@ def decode_file_metadata_request(data: bytes) -> FileMetadataRequest:
         gid=_bounded_integer(value["gid"], 0, _MAX_ID, request=True),
         mode=_bounded_integer(value["mode"], 0, 0o7777, request=True),
         remaining_seconds=None if remaining is None else float(remaining),
-        identity=_identity(value["identity"]),
+        identity=identity,
+        effect_gate=effect_gate,
     )
 
 

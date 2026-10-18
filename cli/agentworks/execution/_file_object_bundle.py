@@ -7,6 +7,9 @@ from agentworks.execution._helper_bundle import RootGuestDelivery, build_file_he
 _PACKAGE = "_agw_file_object"
 _MODULE_NAMES = (
     "_helper_identity",
+    "_vm_guest_identity_protocol",
+    "_vm_guest_identity_guest",
+    "_file_effect_gate",
     "_darwin_descriptors",
     "_file_stat",
     "_file_revision_wire",

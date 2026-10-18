@@ -7,6 +7,7 @@ import sys
 import time
 from contextlib import suppress
 
+from ._file_effect_gate import FileEffectGateError, hold_file_effect_gate, targets_file_effect_gate_namespace
 from ._file_object_protocol import (
     MAX_REQUEST_BYTES,
     FileObjectFailureCode,
@@ -32,6 +33,7 @@ from ._file_objects import (
 from ._file_paths import ConfinedOpenError, directory_path_flags, open_file_confined, open_file_root
 from ._file_wire import FileRecordKind, FileRecordWriter
 from ._helper_identity import matches_file_helper_identity
+from ._vm_guest_identity_guest import _GuestRefusal, _identity
 
 
 class _SafeFailure(Exception):
@@ -87,6 +89,10 @@ def _absence(request: FileObjectRequest, expires_at: float | None) -> FileObject
 
 
 def _operate(request: FileObjectRequest, expires_at: float | None) -> FileObjectResultControl:
+    if request.operation is FileObjectOperation.REMOVE and targets_file_effect_gate_namespace(
+        request.root_path, request.relative_path
+    ):
+        raise _SafeFailure(FileObjectFailureControl(FileObjectFailureCode.EFFECT_GATE_REFUSED))
     root_fd, parent_fd, leaf = _parent(request)
     if root_fd is None:
         return _absence(request, expires_at)
@@ -150,9 +156,15 @@ def main(nonce: str) -> int:
             FileObjectFailureControl(FileObjectFailureCode.OBJECT, FileObjectFailureKind.DEADLINE, phase),
         )
     try:
-        result = _operate(request, expires_at)
+        if request.effect_gate is None:
+            result = _operate(request, expires_at)
+        else:
+            with hold_file_effect_gate(request.effect_gate, _identity, expires_at=expires_at):
+                result = _operate(request, expires_at)
     except _SafeFailure as error:
         return _finish_failure(writer, error.failure)
+    except (FileEffectGateError, _GuestRefusal):
+        return _finish_failure(writer, FileObjectFailureControl(FileObjectFailureCode.EFFECT_GATE_REFUSED))
     writer.write(FileRecordKind.RESULT, encode_file_object_result(result))
     writer.write(FileRecordKind.FINISHED, empty_file_object_body())
     return 0

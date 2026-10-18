@@ -50,6 +50,8 @@ if TYPE_CHECKING:
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution.carrier import Deadline, ExitStatus
 
+    from ._file_effect_gate import FileEffectGateBinding
+
 
 class FileObjectObservationState(StrEnum):
     PRESENT = "present"
@@ -240,7 +242,12 @@ def _exchange(
     expected_kind: FileKind | None = None,
     expected_revision: FileRevision | None = None,
     bootstrap: _NumericGuestBootstrap | None = None,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> FileObjectCandidateResult:
+    if effect_gate is not None and (
+        runtime_selection.target_os.value != "linux" or (bootstrap is not None and effect_gate.guest != bootstrap.guest)
+    ):
+        raise ValidationError("File effect gate must match the selected Linux guest")
     nonce = secrets.token_hex(16)
     if bootstrap is None:
         fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
@@ -272,6 +279,7 @@ def _exchange(
                 plan.expected,
                 expected_kind,
                 expected_revision,
+                effect_gate,
             )
         )
     except FileObjectRequestError as error:
@@ -365,6 +373,7 @@ def remove_file(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     bootstrap: _NumericGuestBootstrap | None = None,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> FileObjectCandidateResult:
     """Conditionally remove one object through one fresh non-replayed attempt."""
     return _exchange(
@@ -378,4 +387,5 @@ def remove_file(
         expected_kind=expected_kind,
         expected_revision=expected_revision,
         bootstrap=bootstrap,
+        effect_gate=effect_gate,
     )

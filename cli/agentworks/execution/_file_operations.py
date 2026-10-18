@@ -34,6 +34,7 @@ from agentworks.execution._file_metadata_protocol import (
     FileMetadataRequest,
     FileMetadataRequestError,
     encode_file_metadata_request,
+    targets_metadata_gate_ancestor,
 )
 from agentworks.execution._file_object_exchange import (
     FileObjectCandidateResult,
@@ -44,12 +45,19 @@ from agentworks.execution._file_object_exchange import (
 from agentworks.execution._file_object_exchange import (
     stat_file as exchange_stat_file,
 )
+from agentworks.execution._file_object_protocol import (
+    FileObjectOperation,
+    FileObjectRequest,
+    FileObjectRequestError,
+    encode_file_object_request,
+)
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from agentworks.execution._file_effect_gate import FileEffectGateBinding
     from agentworks.execution._file_objects import FileKind
     from agentworks.execution._file_stat import FileRevision
     from agentworks.execution._helper_launcher import IdentityPlan
@@ -98,6 +106,7 @@ class FileRemoveBinding:
     identity_plan: IdentityPlan
     runtime_selection: RuntimeSelection
     bootstrap: _NumericGuestBootstrap | None = None
+    effect_gate: FileEffectGateBinding | None = None
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -111,6 +120,7 @@ class FileMetadataBinding:
     identity_plan: IdentityPlan
     runtime_selection: RuntimeSelection
     bootstrap: _NumericGuestBootstrap | None = None
+    effect_gate: FileEffectGateBinding | None = None
 
 
 type OwnedFileBinding = FileStatBinding | FileInventoryBinding | FileRemoveBinding | FileMetadataBinding
@@ -243,6 +253,7 @@ class _PreparedRemove:
                 deadline=self.state.deadline,
                 runtime_selection=binding.runtime_selection,
                 bootstrap=binding.bootstrap,
+                effect_gate=binding.effect_gate,
             )
         )
 
@@ -299,6 +310,7 @@ class _PreparedMetadata:
             deadline=self.state.deadline,
             runtime_selection=binding.runtime_selection,
             bootstrap=binding.bootstrap,
+            effect_gate=binding.effect_gate,
         )
         self.state.operation.settle(self.state.result.dispatch, self.state.result.carrier_completion)
         self.state.note_deadline()
@@ -361,7 +373,24 @@ def _prepare_remove(
     runtime_selection: RuntimeSelection,
     borrow: OperationBorrow,
     bootstrap: _NumericGuestBootstrap | None = None,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> _PreparedRemove:
+    try:
+        encode_file_object_request(
+            FileObjectRequest(
+                _VALIDATION_NONCE,
+                FileObjectOperation.REMOVE,
+                trusted_root_path,
+                relative_path,
+                deadline.remaining(),
+                plan.expected,
+                expected_kind,
+                expected_revision,
+                effect_gate,
+            )
+        )
+    except FileObjectRequestError:
+        raise ValidationError("File removal request contains an invalid field") from None
     binding = FileRemoveBinding(
         trusted_root_path,
         relative_path,
@@ -370,6 +399,7 @@ def _prepare_remove(
         plan,
         runtime_selection,
         bootstrap,
+        effect_gate,
     )
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     return _PreparedRemove(binding, _State(binding, operation, deadline))
@@ -389,7 +419,14 @@ def _prepare_metadata(
     runtime_selection: RuntimeSelection,
     borrow: OperationBorrow,
     bootstrap: _NumericGuestBootstrap | None = None,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> _PreparedMetadata:
+    if (
+        runtime_selection.target_os.value == "linux"
+        and operation is not FileMetadataOperation.CREATE_DIRECTORY
+        and targets_metadata_gate_ancestor(trusted_root_path, relative_path)
+    ):
+        raise ValidationError("Linux metadata cannot alter a file-effect gate namespace ancestor")
     _validate_metadata_inputs(
         operation,
         trusted_root_path,
@@ -399,6 +436,7 @@ def _prepare_metadata(
         mode,
         plan,
         deadline,
+        effect_gate,
     )
     binding = FileMetadataBinding(
         operation,
@@ -410,6 +448,7 @@ def _prepare_metadata(
         plan,
         runtime_selection,
         bootstrap,
+        effect_gate,
     )
     borrowed = BorrowedFixedHelperCarrier(carrier, borrow)
     return _PreparedMetadata(binding, _State(binding, borrowed, deadline))
@@ -424,6 +463,7 @@ def _validate_metadata_inputs(
     mode: int,
     plan: IdentityPlan,
     deadline: Deadline,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> None:
     ownership_failed = False
     try:
@@ -445,6 +485,7 @@ def _validate_metadata_inputs(
                 mode,
                 deadline.remaining(),
                 plan.expected,
+                effect_gate,
             )
         )
     except FileMetadataRequestError as error:

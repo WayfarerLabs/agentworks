@@ -650,7 +650,7 @@ def test_gate_setup_is_closed_to_unsupported_family_identity_path_and_bound_stat
     descriptor = setup.gate_setup
     assert descriptor is not None
     with pytest.raises(FileCallObligationCodecError):
-        replace(setup, family=FileCallFamily.JSON_UPDATE)
+        replace(setup, family=FileCallFamily.STAT, token=None)
     with pytest.raises(FileCallObligationCodecError):
         replace(setup, target=replace(setup.target, name="other-vm"))
     other_uid = setup.identity_plan.expected.euid - 1
@@ -711,6 +711,47 @@ def test_gate_setup_admission_reserves_maximum_bound_proposal_and_download_growt
         encode_file_call_admission(refused)
     with pytest.raises(FileCallObligationCodecError):
         encode_file_call_obligation(_maximum_bound_download(refused))
+
+
+@pytest.mark.parametrize(
+    "family",
+    [FileCallFamily.JSON_UPDATE, FileCallFamily.REMOVE, FileCallFamily.SET_METADATA, FileCallFamily.ENSURE_DIRECTORY],
+)
+@pytest.mark.parametrize("phase", ["setup", "bound"])
+def test_new_mutation_admission_reserves_exact_maximum_gate_child_and_proposal(
+    family: FileCallFamily, phase: str
+) -> None:
+    setup = replace(_setup_download(), family=family, token=None)
+    maximum_gate = _maximum_bound_download(_setup_download()).effect_gate
+    assert maximum_gate is not None
+    baseline = (
+        setup
+        if phase == "setup"
+        else replace(setup, gate_setup=None, effect_gate=replace(maximum_gate, proposed_generation=None))
+    )
+    maximum = _maximum_recovery_obligation(family, initial=replace(baseline, gate_setup=None, effect_gate=maximum_gate))
+    padding = MAX_LIFECYCLE_PAYLOAD_BYTES - len(encode_file_call_obligation(maximum))
+    relative_padding = min(padding, 4096 - len(baseline.relative_path.encode()))
+    admitted = replace(
+        baseline,
+        root=baseline.root + "a" * (padding - relative_padding),
+        relative_path=baseline.relative_path + "a" * relative_padding,
+    )
+    retained = _maximum_recovery_obligation(
+        family, initial=replace(admitted, gate_setup=None, effect_gate=maximum_gate)
+    )
+    assert decode_file_call_obligation(encode_file_call_admission(admitted)) == admitted
+    assert len(encode_file_call_obligation(retained)) == MAX_LIFECYCLE_PAYLOAD_BYTES
+    assert retained.effect_gate == maximum_gate
+    if family is FileCallFamily.JSON_UPDATE:
+        assert retained.token is not None and retained.attempt == 8
+        assert retained.scratch_cleanup_debt is not None and retained.publication_cleanup_debt is not None
+    else:
+        assert retained.token is None and retained.attempt is None
+    with pytest.raises(FileCallObligationCodecError):
+        encode_file_call_admission(replace(admitted, root=admitted.root + "a"))
+    with pytest.raises(FileCallObligationCodecError):
+        encode_file_call_obligation(replace(retained, root=retained.root + "a"))
 
 
 def test_decoder_normalizes_python_integer_digit_refusal() -> None:

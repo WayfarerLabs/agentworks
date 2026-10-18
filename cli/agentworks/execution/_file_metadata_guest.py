@@ -7,6 +7,11 @@ import sys
 import time
 from contextlib import suppress
 
+from ._file_effect_gate import (
+    FileEffectGateError,
+    hold_file_effect_gate,
+    targets_file_effect_gate_namespace,
+)
 from ._file_metadata import (
     MetadataError,
     MetadataFailureKind,
@@ -29,10 +34,12 @@ from ._file_metadata_protocol import (
     empty_file_metadata_body,
     encode_file_metadata_failure,
     encode_file_metadata_result,
+    targets_metadata_gate_ancestor,
 )
 from ._file_paths import ConfinedOpenError, directory_path_flags, open_file_confined, open_file_root
 from ._file_wire import FileRecordKind, FileRecordWriter
 from ._helper_identity import matches_file_helper_identity
+from ._vm_guest_identity_guest import _GuestRefusal, _identity
 
 
 class _SafeFailure(Exception):
@@ -89,6 +96,14 @@ def _metadata_failure(error: MetadataError) -> FileMetadataFailureControl:
 
 
 def _operate(request: FileMetadataRequest, expires_at: float | None) -> FileMetadataResultControl:
+    if targets_file_effect_gate_namespace(request.root_path, request.relative_path):
+        raise _SafeFailure(FileMetadataFailureControl(FileMetadataFailureCode.EFFECT_GATE_REFUSED))
+    if (
+        sys.platform == "linux"
+        and request.operation is not FileMetadataOperation.CREATE_DIRECTORY
+        and targets_metadata_gate_ancestor(request.root_path, request.relative_path)
+    ):
+        raise _SafeFailure(FileMetadataFailureControl(FileMetadataFailureCode.EFFECT_GATE_REFUSED))
     root_fd, parent_fd, leaf = _parent(request)
     descriptor = root_fd if parent_fd is None else parent_fd
     try:
@@ -152,9 +167,15 @@ def main(nonce: str) -> int:
     failure: FileMetadataFailureControl | None = None
     result: FileMetadataResultControl | None = None
     try:
-        result = _operate(request, expires_at)
+        if request.effect_gate is None:
+            result = _operate(request, expires_at)
+        else:
+            with hold_file_effect_gate(request.effect_gate, _identity, expires_at=expires_at):
+                result = _operate(request, expires_at)
     except _SafeFailure as error:
         failure = error.failure
+    except (FileEffectGateError, _GuestRefusal):
+        return _finish_failure(writer, FileMetadataFailureControl(FileMetadataFailureCode.EFFECT_GATE_REFUSED))
     if failure is not None:
         return _finish_failure(writer, failure)
     assert result is not None

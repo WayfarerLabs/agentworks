@@ -771,7 +771,7 @@ class FileOperation:
                 bootstrap=self._bootstrap,
                 effect_gate=effect_gate,
             )
-            self._validate_upload_gate(prepared.binding)
+            self._validate_effect_gate(prepared.binding)
             admission = self._prepare_admission(FileCallFamily.UPLOAD, prepared.binding, token=prepared.state.token)
             active: _ActiveFileUpload = _ActiveFileCall(
                 carrier, prepared.binding, borrow, prepared, admission.obligation_id
@@ -902,7 +902,9 @@ class FileOperation:
         self._capture_upload(active, outcome)
         return outcome
 
-    def _validate_upload_gate(self, binding: FileUploadBinding) -> None:
+    def _validate_effect_gate(
+        self, binding: FileUploadBinding | FileJsonBinding | FileRemoveBinding | FileMetadataBinding
+    ) -> None:
         """Match a caller-supplied gate to this selected managed VM."""
         effect_gate = binding.effect_gate
         if effect_gate is None:
@@ -910,12 +912,15 @@ class FileOperation:
         if (
             self._target.kind is not ManagedTargetKind.VM
             or binding.runtime_selection.target_os is not RuntimeTargetOS.LINUX
+            or effect_gate.euid != binding.identity_plan.expected.euid
+            or effect_gate.proposed_generation is not None
+            or (binding.bootstrap is not None and effect_gate.guest != binding.bootstrap.guest)
             or vm_guest_boot_id(effect_gate.guest) != self._target.boot_id
             or effect_gate.scope_name != self._target.name
             or effect_gate.path
             != file_effect_gate_path(self._target, binding.identity_plan.expected.euid, effect_gate.guest)
         ):
-            raise ValidationError("Upload effect gate must match the selected Linux VM and identity")
+            raise ValidationError("File effect gate must match the selected Linux VM and identity")
 
     def update_json(
         self,
@@ -932,6 +937,8 @@ class FileOperation:
         plan: IdentityPlan,
         deadline: Deadline,
         runtime_selection: RuntimeSelection,
+        effect_gate: FileEffectGateBinding | None = None,
+        gate_setup: FileEffectGateSetup | None = None,
     ) -> FileJsonOutcome:
         """Run and capture one JSON update under a whole-call borrow."""
         borrow = self._owner.borrow()
@@ -951,8 +958,10 @@ class FileOperation:
                 runtime_selection=runtime_selection,
                 borrow=borrow,
                 bootstrap=self._bootstrap,
+                effect_gate=effect_gate,
             )
-            admission = self._prepare_admission(FileCallFamily.JSON_UPDATE, prepared.binding)
+            self._validate_effect_gate(prepared.binding)
+            admission = self._prepare_admission(FileCallFamily.JSON_UPDATE, prepared.binding, gate_setup=gate_setup)
             active: _ActiveFileJsonUpdate = _ActiveFileCall(
                 carrier, prepared.binding, borrow, prepared, admission.obligation_id
             )
@@ -966,6 +975,11 @@ class FileOperation:
             borrow.close()
             raise
         self._install(active, admission, self._active_json_updates)
+        if gate_setup is not None:
+            gate = self._setup_mutation_gate(active, FileCallFamily.JSON_UPDATE, gate_setup, deadline)
+            prepared.binding = replace(prepared.binding, effect_gate=gate)
+            prepared.state.binding = prepared.binding
+            active.binding = prepared.binding
         prepared.set_child_upload_callback(lambda child, attempt: self._publish_json_child(active, child, attempt))
 
         try:
@@ -1075,6 +1089,8 @@ class FileOperation:
         plan: IdentityPlan,
         deadline: Deadline,
         runtime_selection: RuntimeSelection,
+        effect_gate: FileEffectGateBinding | None = None,
+        gate_setup: FileEffectGateSetup | None = None,
     ) -> OwnedFileOutcome[FileObjectCandidateResult]:
         """Run and capture one conditional removal under a whole-call borrow."""
         borrow = self._owner.borrow()
@@ -1090,8 +1106,10 @@ class FileOperation:
                 runtime_selection=runtime_selection,
                 borrow=borrow,
                 bootstrap=self._bootstrap,
+                effect_gate=effect_gate,
             )
-            admission = self._prepare_admission(FileCallFamily.REMOVE, prepared.binding)
+            self._validate_effect_gate(prepared.binding)
+            admission = self._prepare_admission(FileCallFamily.REMOVE, prepared.binding, gate_setup=gate_setup)
             active: _ActiveFileRemove = _ActiveFileCall(
                 carrier, prepared.binding, borrow, prepared, admission.obligation_id
             )
@@ -1104,6 +1122,11 @@ class FileOperation:
             borrow.close()
             raise
         self._install(active, admission, self._active_removals)
+        if gate_setup is not None:
+            gate = self._setup_mutation_gate(active, FileCallFamily.REMOVE, gate_setup, deadline)
+            prepared.binding = replace(prepared.binding, effect_gate=gate)
+            prepared.state.binding = prepared.binding
+            active.binding = prepared.binding
         return self._run_owned(active, FileCallFamily.REMOVE, self._active_removals, prepared.run)
 
     def set_metadata(
@@ -1118,6 +1141,8 @@ class FileOperation:
         plan: IdentityPlan,
         deadline: Deadline,
         runtime_selection: RuntimeSelection,
+        effect_gate: FileEffectGateBinding | None = None,
+        gate_setup: FileEffectGateSetup | None = None,
     ) -> OwnedFileOutcome[FileMetadataCandidateResult]:
         """Resolve and capture one metadata convergence under one borrow."""
         borrow = self._owner.borrow()
@@ -1135,8 +1160,10 @@ class FileOperation:
                 runtime_selection=runtime_selection,
                 borrow=borrow,
                 bootstrap=self._bootstrap,
+                effect_gate=effect_gate,
             )
-            admission = self._prepare_admission(FileCallFamily.SET_METADATA, prepared.binding)
+            self._validate_effect_gate(prepared.binding)
+            admission = self._prepare_admission(FileCallFamily.SET_METADATA, prepared.binding, gate_setup=gate_setup)
             active: _ActiveFileMetadata = _ActiveFileCall(
                 carrier, prepared.binding, borrow, prepared, admission.obligation_id
             )
@@ -1149,6 +1176,11 @@ class FileOperation:
             borrow.close()
             raise
         self._install(active, admission, self._active_metadata)
+        if gate_setup is not None:
+            gate = self._setup_mutation_gate(active, FileCallFamily.SET_METADATA, gate_setup, deadline)
+            prepared.binding = replace(prepared.binding, effect_gate=gate)
+            prepared.state.binding = prepared.binding
+            active.binding = prepared.binding
         return self._run_owned(active, FileCallFamily.SET_METADATA, self._active_metadata, prepared.run)
 
     def ensure_directory(
@@ -1163,6 +1195,8 @@ class FileOperation:
         plan: IdentityPlan,
         deadline: Deadline,
         runtime_selection: RuntimeSelection,
+        effect_gate: FileEffectGateBinding | None = None,
+        gate_setup: FileEffectGateSetup | None = None,
         _operation: FileMetadataOperation = FileMetadataOperation.ENSURE_DIRECTORY,
     ) -> OwnedFileOutcome[FileMetadataCandidateResult]:
         """Resolve and capture one directory convergence under one borrow."""
@@ -1181,8 +1215,12 @@ class FileOperation:
                 runtime_selection=runtime_selection,
                 borrow=borrow,
                 bootstrap=self._bootstrap,
+                effect_gate=effect_gate,
             )
-            admission = self._prepare_admission(FileCallFamily.ENSURE_DIRECTORY, prepared.binding)
+            self._validate_effect_gate(prepared.binding)
+            admission = self._prepare_admission(
+                FileCallFamily.ENSURE_DIRECTORY, prepared.binding, gate_setup=gate_setup
+            )
             active: _ActiveFileMetadata = _ActiveFileCall(
                 carrier, prepared.binding, borrow, prepared, admission.obligation_id
             )
@@ -1195,6 +1233,11 @@ class FileOperation:
             borrow.close()
             raise
         self._install(active, admission, self._active_metadata)
+        if gate_setup is not None:
+            gate = self._setup_mutation_gate(active, FileCallFamily.ENSURE_DIRECTORY, gate_setup, deadline)
+            prepared.binding = replace(prepared.binding, effect_gate=gate)
+            prepared.state.binding = prepared.binding
+            active.binding = prepared.binding
         return self._run_owned(active, FileCallFamily.ENSURE_DIRECTORY, self._active_metadata, prepared.run)
 
     def create_directory(
@@ -1209,6 +1252,8 @@ class FileOperation:
         plan: IdentityPlan,
         deadline: Deadline,
         runtime_selection: RuntimeSelection,
+        effect_gate: FileEffectGateBinding | None = None,
+        gate_setup: FileEffectGateSetup | None = None,
     ) -> OwnedFileOutcome[FileMetadataCandidateResult]:
         """Create one absent directory through ordinary metadata admission."""
         return self.ensure_directory(
@@ -1222,7 +1267,52 @@ class FileOperation:
             deadline=deadline,
             runtime_selection=runtime_selection,
             _operation=FileMetadataOperation.CREATE_DIRECTORY,
+            effect_gate=effect_gate,
+            gate_setup=gate_setup,
         )
+
+    def _setup_mutation_gate(
+        self,
+        active: _ActiveFileJsonUpdate | _ActiveFileRemove | _ActiveFileMetadata,
+        family: FileCallFamily,
+        setup: FileEffectGateSetup,
+        deadline: Deadline,
+    ) -> FileEffectGateBinding:
+        """Promote the admitted setup row before any mutation workflow runs."""
+        binding = active.binding
+        operation = active.prepared.state.operation
+        result = exchange_file_effect_gate(
+            operation,
+            operation=GateControlOperation.SETUP,
+            path=setup.path,
+            guest=setup.guest,
+            scope_name=self._target.name,
+            plan=binding.identity_plan,
+            deadline=deadline,
+            runtime_selection=binding.runtime_selection,
+            bootstrap=binding.bootstrap,
+        )
+        normal = operation.settle(result.dispatch, result.carrier_completion)
+        observed = result.observation
+        if (
+            not normal
+            or result.runtime_prerequisite.state is not RuntimePrerequisiteState.READY
+            or observed is None
+            or observed.state is not GateControlObservationState.RESOLVED
+            or observed.binding is None
+        ):
+            raise GateControlMutationUncertain("file-effect gate setup was not acknowledged")
+        bound = replace(binding, effect_gate=observed.binding)
+        self._validate_effect_gate(bound)
+        record = self._obligation(family, bound)
+        obligation = active.obligation
+        assert obligation is not None
+        obligation.publish_payload(
+            expected_revision=obligation.payload_revision,
+            payload_version=record.payload_version,
+            payload=encode_file_call_obligation(record),
+        )
+        return observed.binding
 
     def _install[BindingT: _FileCallBinding, PreparedT, OutcomeT](
         self,
@@ -1315,8 +1405,16 @@ class FileOperation:
             effect_gate=(
                 binding.effect_gate
                 if (
-                    (family is FileCallFamily.DOWNLOAD and isinstance(binding, FileDownloadBinding))
-                    or (family is FileCallFamily.UPLOAD and isinstance(binding, FileUploadBinding))
+                    isinstance(
+                        binding,
+                        (
+                            FileDownloadBinding,
+                            FileUploadBinding,
+                            FileJsonBinding,
+                            FileRemoveBinding,
+                            FileMetadataBinding,
+                        ),
+                    )
                 )
                 else None
             ),

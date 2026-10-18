@@ -11,6 +11,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from ._file_effect_gate import (
+    FileEffectGateBinding,
+    FileEffectGateError,
+    decode_file_effect_gate,
+    encode_file_effect_gate,
+    targets_file_effect_gate_namespace,
+)
 from ._file_objects import FileKind, FileObjectFailureKind, FileObjectPhase
 from ._file_paths import normalized_relative_path, normalized_root
 from ._file_revision_wire import (
@@ -46,6 +53,7 @@ class FileObjectFailureCode(StrEnum):
     OVERSIZED_REQUEST = "oversized_request"
     NONCE_MISMATCH = "nonce_mismatch"
     IDENTITY_MISMATCH = "identity_mismatch"
+    EFFECT_GATE_REFUSED = "effect_gate_refused"
     UNSUPPORTED_RUNTIME = "unsupported_runtime"
     ROOT_REFUSED = "root_refused"
     PARENT_REFUSED = "parent_refused"
@@ -77,6 +85,7 @@ class FileObjectRequest:
     identity: IdentityExpectation
     expected_kind: FileKind | None = None
     expected_revision: FileRevision | None = None
+    effect_gate: FileEffectGateBinding | None = None
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -199,6 +208,8 @@ def encode_file_object_request(request: FileObjectRequest) -> bytes:
     failed = False
     encoded = b""
     try:
+        if request.effect_gate is not None:
+            value["effect_gate"] = encode_file_effect_gate(request.effect_gate)
         encoded = _json_bytes(value)
     except (AttributeError, TypeError, UnicodeEncodeError, ValueError):
         failed = True
@@ -236,7 +247,8 @@ def decode_file_object_request(data: bytes) -> FileObjectRequest:
     fields = _COMMON_REQUEST_FIELDS
     if operation is FileObjectOperation.REMOVE:
         fields |= {"expected_kind", "expected_revision"}
-    if set(value) != fields or value["version"] != 1 or type(value["version"]) is not int:
+    allowed = (fields, fields | {"effect_gate"}) if operation is FileObjectOperation.REMOVE else (fields,)
+    if frozenset(value) not in allowed or value["version"] != 1 or type(value["version"]) is not int:
         raise _invalid_request()
     nonce = value["nonce"]
     remaining = value["remaining_seconds"]
@@ -262,13 +274,25 @@ def decode_file_object_request(data: bytes) -> FileObjectRequest:
         expected_revision = _decode_revision(value["expected_revision"], request=True)
         if _kind_for_mode(expected_revision.stat.mode, request=True) is not expected_kind:
             raise _invalid_request()
+    if operation is FileObjectOperation.REMOVE and targets_file_effect_gate_namespace(root_path, relative_path):
+        raise _invalid_request()
+    identity = _identity(value["identity"])
+    effect_gate = None
+    if "effect_gate" in value:
+        try:
+            effect_gate = decode_file_effect_gate(value["effect_gate"])
+        except FileEffectGateError:
+            raise _invalid_request() from None
+        if effect_gate.proposed_generation is not None or effect_gate.euid != identity.euid:
+            raise _invalid_request()
     return FileObjectRequest(
         nonce=nonce,
         operation=operation,
         root_path=root_path,
         relative_path=relative_path,
         remaining_seconds=None if remaining is None else float(remaining),
-        identity=_identity(value["identity"]),
+        identity=identity,
+        effect_gate=effect_gate,
         expected_kind=expected_kind,
         expected_revision=expected_revision,
     )

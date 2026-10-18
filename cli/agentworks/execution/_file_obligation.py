@@ -84,6 +84,19 @@ class FileCallFamily(StrEnum):
     ENSURE_DIRECTORY = "ensure-directory"
 
 
+FILE_EFFECT_GATE_FAMILIES = frozenset(
+    {
+        FileCallFamily.DOWNLOAD,
+        FileCallFamily.UPLOAD,
+        FileCallFamily.PACKAGE_UPLOAD,
+        FileCallFamily.JSON_UPDATE,
+        FileCallFamily.REMOVE,
+        FileCallFamily.SET_METADATA,
+        FileCallFamily.ENSURE_DIRECTORY,
+    }
+)
+
+
 class FileCallUncertainty(StrEnum):
     """Recovery facts that remain unproved after a file-call attempt."""
 
@@ -348,7 +361,7 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
         raise FileCallObligationCodecError
     if obligation.effect_gate is not None:
         if (
-            obligation.family not in {FileCallFamily.DOWNLOAD, FileCallFamily.UPLOAD, FileCallFamily.PACKAGE_UPLOAD}
+            obligation.family not in FILE_EFFECT_GATE_FAMILIES
             or obligation.target.kind is not ManagedTargetKind.VM
             or obligation.runtime_selection.target_os is not RuntimeTargetOS.LINUX
             or type(obligation.effect_gate) is not FileEffectGateBinding
@@ -371,7 +384,7 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
     if obligation.gate_setup is not None:
         setup = obligation.gate_setup
         if (
-            obligation.family not in {FileCallFamily.DOWNLOAD, FileCallFamily.UPLOAD, FileCallFamily.PACKAGE_UPLOAD}
+            obligation.family not in FILE_EFFECT_GATE_FAMILIES
             or (obligation.family is FileCallFamily.PACKAGE_UPLOAD and obligation.batch_index != 0)
             or obligation.target.kind is not ManagedTargetKind.VM
             or obligation.runtime_selection.target_os is not RuntimeTargetOS.LINUX
