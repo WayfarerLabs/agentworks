@@ -148,6 +148,11 @@ output, terminal launch/attachment, native workstation/SSH proof and production 
 limits remain separate required additive-surface gates. The first pipe increment does not narrow
 their requirements or constitute a public handoff.
 
+The [managed foreground pipe response](managed-live-io-lld.md) retains the existing settled buffered
+launch and lease keeper, then uses one private controller-owned I/O connection. It does not extend
+the carrier contract or infer durable delivery from a guest write. Implementation and native
+acceptance remain open.
+
 ### Pipe-input completion candidate
 
 Pipe input offers bytes; it does not require the consumer to read every offered byte. Finite input

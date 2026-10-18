@@ -694,6 +694,13 @@ controller stops waiting at its bound and leaves boundary state unknown rather t
 emptiness. Cleanup or controller failure may likewise leave a stream-end fact unknown even when
 other terminal facts are present.
 
+That completed private producer uses finite input and capture/discard output. The planned
+[managed foreground pipe extension](managed-live-io-lld.md) keeps its settled start acknowledgment
+and lease admission, but delays the final workload release gate for explicitly live requests until
+one bounded I/O admission succeeds. Its socket acceptance runs inside the same observation loop;
+stop, lease expiry and cleanup never wait behind a blocking attachment. This extension is not yet
+implemented or native-accepted.
+
 `KillMode=control-group` is a manager-owned fallback if the controller dies, but it cannot publish
 positive facts after that death. Therefore an abrupt controller exit leaves any unrecorded wait,
 stream-end or boundary fact unknown even when systemd later removes every process. The initial
