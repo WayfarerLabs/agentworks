@@ -1745,22 +1745,42 @@ same row to an exact binding before stage work or source reads. The token and bo
 continuous across setup and upload. Native carrier drain and retained package process-loss recovery
 remain separate work.
 
-`_file_gate_setup_recovery.py` handles a lost download, single-upload or package-upload setup reply
-whose durable row remains setup-only after database generation takeover. It rechecks that exact row,
-dispatches non-creating gate inspection, and resolves only the setup obligation after a complete
-positive observation. The old controller cannot publish the gate binding after takeover and thus
-cannot start the snapshot or first upload member from that row. A bound row, missing gate, uncertain
-inspection, other obligation or non-gated local effect still needs its own recovery proof. The gate
-and its UID directory must remain intact for the guest epoch so a delayed setup cannot create a
-replacement. This is private local composition, not native route acceptance, a production recovery
-factory or whole-operation release.
+Metadata and directory convergence, conditional removal and JSON updates accept the same private
+gate binding or setup descriptor. Setup and binding promotion use the call's existing durable row
+before its mutation workflow runs. Metadata and removal hold the gate through their helper effects
+and cleanup. JSON preserves the binding through every upload child, conflict retry and retained-row
+rewrite; it publishes each child token before dispatch without persisting JSON contents. STAT and
+no-staging readiness do not create or require a gate.
 
-`_file_package_recovery.py` opens only the exact current bound package child after owner takeover.
-It publishes one proposed generation in that row, advances the same guest gate and publishes the
-confirmed binding without changing the child index, token, path or cleanup facts. A lost reply may
-be reconciled only against the same proposal. The row stays a possible effect: this fence does not
-prove helper exit, stop non-gated or predecessor-controller effects, replay the child, reconcile its
-application checkpoint, clean up, or release ownership.
+Ordinary mutations cannot target `/run/agentworks/file-gates-v1` or its descendants. Linux metadata
+convergence also refuses the two exact ancestor targets `/run` and `/run/agentworks`, whose
+ownership and modes are infrastructure prerequisites. This includes otherwise harmless convergence
+on those two directories, not unrelated descendants, reads, stat or inventory. Create-only directory
+operations still refuse existing ancestors without changing them. Darwin does not acquire the Linux
+ancestor restriction. These are control-state operation restrictions, not permission grants.
+
+`_file_gate_setup_recovery.py` handles a lost setup reply for a gated download, upload, package,
+JSON, removal or metadata/directory call whose durable row remains setup-only after database
+generation takeover. It rechecks that exact row, dispatches non-creating gate inspection, and
+resolves only the setup obligation after a complete positive observation. The old controller cannot
+publish the gate binding after takeover and thus cannot start the file workflow from that row. A
+bound row, missing gate, uncertain inspection, other obligation or non-gated local effect still
+needs its own recovery proof. The gate and its UID directory must remain intact for the guest epoch
+so a delayed setup cannot create a replacement. This is private local composition, not native route
+acceptance, a production recovery factory or whole-operation release.
+
+`_file_mutation_recovery.py` opens the exact current bound upload, package-child, JSON, removal or
+metadata/directory row after owner takeover. It publishes one proposed generation there, advances
+the same guest gate and publishes the confirmed binding without changing the family, child index,
+token, path or cleanup facts. A lost reply may be reconciled only against the same proposal. The row
+stays a possible effect: this fence does not prove helper exit, stop non-gated or
+predecessor-controller effects, replay a mutation, reconcile its application checkpoint, clean up,
+or release ownership. DOWNLOAD keeps its separate snapshot reconciliation and cleanup adapter.
+
+These bindings remain optional private plumbing. Ordinary VM FileAccess composition does not yet
+supply them automatically. Complete production admission, managed-agent namespace lifecycle,
+predecessor-controller settlement and native route/recovery evidence remain required before claiming
+full file recovery support.
 
 The three private file-recovery adapters now distinguish the encoded record version from its
 database envelope and require an exact match. Version-two bootstrap-bound records require `context=`
