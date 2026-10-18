@@ -1728,12 +1728,12 @@ unproved.
 For Linux VM calls with finite input and a finite deadline, `ExecutionOperation.run_inline` selects
 prepared delivery when the complete small inline request does not fit. A separate fixed entry
 accepts a canonical request up to 64 MiB; the ordinary inline entry retains its 32 KiB bound.
-Preparation validates the complete activation and maximum-width chunk envelopes against the
-selected carrier before effects. It retains the existing `PreparedHelperStage` and token-only
-cleanup row before BEGIN, transfers the packaged prefix and request in bounded chunks, then
-activates once under the original deadline. The verified loader re-enters the numeric workload
-credential and full-guest checkpoint before loading application modules. Source and stdin remain
-separate fields. This selection happens before application dispatch and never replays a launch.
+Preparation validates the complete activation and maximum-width chunk envelopes against the selected
+carrier before effects. It retains the existing `PreparedHelperStage` and token-only cleanup row
+before BEGIN, transfers the packaged prefix and request in bounded chunks, then activates once under
+the original deadline. The verified loader re-enters the numeric workload credential and full-guest
+checkpoint before loading application modules. Source and stdin remain separate fields. This
+selection happens before application dispatch and never replays a launch.
 
 An operation-local admission reservation spans preparation and transfers into the actual helper
 borrow. Actual activation delivery is retained before settlement; application completion alone
