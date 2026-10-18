@@ -30,13 +30,17 @@ _CHUNK_BYTES = 65536
 _REFUSAL = 125
 
 
-def _ready(fd: int, event: int, deadline: float) -> None:
-    remaining = deadline - time.monotonic()
+def _remaining(expires: float) -> float:
+    remaining = expires - time.monotonic()
     if remaining <= 0:
-        raise ManagedLiveError("managed relay setup expired")
+        raise ManagedLiveError("managed relay observation expired")
+    return remaining
+
+
+def _ready(fd: int, event: int, deadline: float) -> None:
     with selectors.PollSelector() as selector:
         selector.register(fd, event)
-        if not selector.select(remaining):
+        if not selector.select(_remaining(deadline)):
             raise ManagedLiveError("managed relay setup expired")
 
 
@@ -59,18 +63,12 @@ def _read_request() -> ManagedLiveRequest:
     os.set_blocking(0, False)
     deadline = time.monotonic() + _SETUP_SECONDS
     length = decode_header(_read_exact(0, ENVELOPE_HEADER_BYTES, deadline))
-    request = decode_request(_read_exact(0, length, deadline))
-    if not request.live_io.input:
-        _ready(0, selectors.EVENT_READ, deadline)
-        if os.read(0, 1):
-            raise ManagedLiveError("unexpected managed relay input")
-    return request
+    return decode_request(_read_exact(0, length, deadline))
 
 
 def _prepare(request: ManagedLiveRequest, store: ManagedJobStore) -> int:
     """Validate protected launch, request and admission state before connecting."""
-    launch = checked_launch(request)
-    if store.run_id != launch["run_id"] or store.read_fact(FactName.LAUNCH) != request.expected_launch:
+    if store.read_fact(FactName.LAUNCH) != request.expected_launch:
         raise ManagedLiveError("managed relay launch unavailable")
     protected = store.read_request()
     if (
@@ -106,12 +104,13 @@ def _prepare(request: ManagedLiveRequest, store: ManagedJobStore) -> int:
         raise
 
 
-def _connect(directory: int, request: ManagedLiveRequest) -> socket.socket:
+def _connect(directory: int, request: ManagedLiveRequest, *, expires: float) -> socket.socket:
     """Connect once through the held validated directory and send fixed admission."""
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         connection.setblocking(False)
-        deadline = time.monotonic() + _SETUP_SECONDS
+        deadline = min(time.monotonic() + _SETUP_SECONDS, expires)
+        _remaining(deadline)
         result = connection.connect_ex(f"/proc/self/fd/{directory}/{LIVE_SOCKET_NAME}")
         if result not in (0, errno.EINPROGRESS, errno.EALREADY, errno.EWOULDBLOCK):
             raise OSError(result, "managed relay connection failed")
@@ -136,7 +135,9 @@ def _connect(directory: int, request: ManagedLiveRequest) -> socket.socket:
         raise
 
 
-def _relay(connection: socket.socket, *, live_input: bool, input_fd: int = 0, output_fd: int = 1) -> None:
+def _relay(
+    connection: socket.socket, *, live_input: bool, expires: float, input_fd: int = 0, output_fd: int = 1
+) -> None:
     """Copy raw bytes with one bounded chunk in each direction and no frame parser.
 
     The input descriptor belongs to this helper. Closing it on consumer closure
@@ -163,6 +164,7 @@ def _relay(connection: socket.socket, *, live_input: bool, input_fd: int = 0, ou
 
     try:
         while peer_open or to_output:
+            _remaining(expires)
             if write_open and not source_open and not to_peer:
                 connection.shutdown(socket.SHUT_WR)
                 write_open = False
@@ -176,7 +178,9 @@ def _relay(connection: socket.socket, *, live_input: bool, input_fd: int = 0, ou
                     selector.register(input_fd, selectors.EVENT_READ, "input")
                 if to_output:
                     selector.register(output_fd, selectors.EVENT_WRITE, "output")
-                ready = selector.select()
+                # poll's timeout is a signed 32-bit millisecond count. A wakeup
+                # for a longer finite budget does not expire that budget.
+                ready = selector.select(min(_remaining(expires), (2**31 - 1) // 1000))
             for key, event in ready:
                 if key.data == "input" and source_open:
                     try:
@@ -224,6 +228,9 @@ def main(nonce: str) -> int:
     """Refuse safely before attachment, without stopping or relaunching the job."""
     try:
         request = _read_request()
+        # This duration is sampled by the host immediately before preparation.
+        # Guest and host monotonic clock epochs need not match.
+        expires = time.monotonic() + request.remaining_ns / 1_000_000_000
         if (
             sys.platform != "linux"
             or sys.version_info < (3, 11)
@@ -233,14 +240,18 @@ def main(nonce: str) -> int:
         ):
             raise ManagedLiveError("managed relay identity mismatch")
         launch = checked_launch(request)
+        if not request.live_io.input:
+            _ready(0, selectors.EVENT_READ, min(time.monotonic() + _SETUP_SECONDS, expires))
+            if os.read(0, 1):
+                raise ManagedLiveError("unexpected managed relay input")
         with ManagedJobStore(cast("str", launch["run_id"])) as store:
             directory = _prepare(request, store)
             try:
-                connection = _connect(directory, request)
+                connection = _connect(directory, request, expires=expires)
             finally:
                 os.close(directory)
         with connection:
-            _relay(connection, live_input=request.live_io.input)
+            _relay(connection, live_input=request.live_io.input, expires=expires)
     except (ManagedLiveError, StoreError, _GuestRefusal, OSError, ValueError, TypeError):
         return _REFUSAL
     return 0

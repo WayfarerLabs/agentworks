@@ -8,6 +8,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable, Iterator
 from contextlib import suppress
 from dataclasses import replace
@@ -32,9 +33,13 @@ from agentworks.execution._managed_live_protocol import (
 
 from .test_managed_live_protocol import GUEST, NONCE, RUN, _request
 
+pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="requires Linux protected store and procfs sockets")
+
 
 @pytest.fixture
 def store(tmp_path: Path) -> Iterator[ManagedJobStore]:
+    if sys.platform != "linux":
+        pytest.skip("requires Linux protected store and procfs sockets")
     os.chmod(tmp_path, 0o700)
     anchor = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
     try:
@@ -338,7 +343,7 @@ def test_relay_preserves_nonbroken_fault_and_closes_owned_input(
 
             monkeypatch.setattr(os, "write", write)
             with pytest.raises(type(fault)) as caught:
-                guest._relay(relay, live_input=True, input_fd=source, output_fd=sink)
+                guest._relay(relay, live_input=True, expires=time.monotonic() + 30, input_fd=source, output_fd=sink)
             assert caught.value is fault
             with pytest.raises(OSError) as closed:
                 os.fstat(source)
@@ -378,6 +383,51 @@ def test_detachment_never_reconnects_replays_or_requests_stop(store: ManagedJobS
     assert store.read_fact(FactName.WAIT) is None
 
 
+@pytest.mark.parametrize("resume_after", [None, 5.1])
+def test_stalled_output_after_peer_eof_obeys_original_observation_budget(
+    store: ManagedJobStore, tmp_path: Path, resume_after: float | None
+) -> None:
+    import fcntl
+
+    request = replace(_request(input=False), remaining_ns=200_000_000 if resume_after is None else 10_000_000_000)
+    _publish(store, request)
+
+    def action(connection: socket.socket) -> None:
+        _handshake(connection, request)
+        connection.sendall(b"x" * 65536)
+        assert _read_all(connection) == b""
+
+    with _listener(store) as listener:
+        thread, errors = _serve(listener, action)
+        with _process(tmp_path) as process:
+            assert process.stdin is not None and process.stdout is not None and process.stderr is not None
+            # Keep the sink open and unread after the controller has sent all output
+            # and closed. Pending output must still have a finite observation bound.
+            fcntl.fcntl(process.stdout.fileno(), fcntl.F_SETPIPE_SZ, 4096)
+            try:
+                process.stdin.write(ROOT_PROGRAM.prefix + encode_envelope(request))
+                process.stdin.close()
+                process.stdin = None
+                thread.join(1)
+                assert not thread.is_alive() and not errors
+                if resume_after is None:
+                    assert process.wait(timeout=1) == 125
+                    assert process.stderr.read() == b""
+                else:
+                    # A drained sink may resume beyond five seconds after peer EOF
+                    # when the original caller observation budget still permits it.
+                    time.sleep(resume_after)
+                    stdout, stderr = process.communicate(timeout=3)
+                    assert process.returncode == 0 and stderr == b""
+                    assert stdout == b"x" * 65536
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=2)
+    assert not store.read_stop_request()
+    assert store.read_fact(FactName.WAIT) is None
+
+
 @pytest.mark.parametrize("variant", ["identity", "guest", "nonce"])
 def test_main_identity_and_nonce_fail_before_store(monkeypatch: pytest.MonkeyPatch, variant: str) -> None:
     monkeypatch.setattr(guest, "_read_request", _request)
@@ -413,7 +463,7 @@ def test_setup_deadline_and_failed_connection_close_owned_socket(store: ManagedJ
     before = set(os.listdir("/proc/self/fd"))
     try:
         with pytest.raises(OSError) as caught:
-            guest._connect(directory, request)
+            guest._connect(directory, request, expires=time.monotonic() + 30)
         assert caught.value.errno == errno.ENOENT
         assert set(os.listdir("/proc/self/fd")) == before
     finally:

@@ -35,9 +35,15 @@ def test_exact_packed_modules_load_and_leave_envelope_suffix(interpreter: str, t
         pytest.skip("interpreter unavailable")
     source = ROOT_PROGRAM.loader_source + (
         "_agw_load_identity()\n_agw_load_remaining()\n"
-        "g=sys.modules['_agw_managed_live._managed_live_guest']\n"
         "p=sys.modules['_agw_managed_live._managed_live_protocol']\n"
-        "request=g._read_request()\n"
+        "def exact(length):\n"
+        " data=bytearray()\n"
+        " while len(data)<length:\n"
+        "  chunk=os.read(0,length-len(data))\n"
+        "  assert chunk\n"
+        "  data.extend(chunk)\n"
+        " return bytes(data)\n"
+        "request=p.decode_request(exact(p.decode_header(exact(p.ENVELOPE_HEADER_BYTES))))\n"
         "assert p.encode_request(p.decode_request(p.encode_request(request)))==p.encode_request(request)\n"
         "suffix=os.read(0,65536)\n"
         "assert os.read(0,1)==b''\n"
@@ -57,6 +63,7 @@ def test_exact_packed_modules_load_and_leave_envelope_suffix(interpreter: str, t
     assert result.stdout == b"private-live-suffix\x00\xff" and result.stderr == b""
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="requires Linux protected store and procfs sockets")
 def test_python311_packed_relay_uses_actual_socket_and_pipes(store: ManagedJobStore, tmp_path: Path) -> None:
     interpreter = "/usr/bin/python3.11"
     if not Path(interpreter).is_file():

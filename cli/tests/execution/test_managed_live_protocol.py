@@ -52,7 +52,13 @@ def _request(*, input: bool = True, output: bool = True) -> ManagedLiveRequest:
             "receipt_protocol_version": 1,
         }
     )
-    return ManagedLiveRequest(ManagedLiveIO(NONCE, input, output), IdentityExpectation(0, 0, (0,)), GUEST, launch)
+    return ManagedLiveRequest(
+        ManagedLiveIO(NONCE, input, output),
+        IdentityExpectation(0, 0, (0,)),
+        GUEST,
+        launch,
+        remaining_ns=30_000_000_000,
+    )
 
 
 def _json(value: object) -> bytes:
@@ -78,6 +84,13 @@ def test_canonical_request_envelope_and_controller_handshake(input: bool, output
     [
         {"version": True},
         {"version": 2},
+        {"remaining_ns": True},
+        {"remaining_ns": 0},
+        {"remaining_ns": -1},
+        {"remaining_ns": 2**63},
+        {"remaining_ns": 1.5},
+        {"remaining_ns": "1000000000"},
+        {"remaining_ns": None},
         {"nonce": NONCE},
         {"live_io": {"nonce": NONCE, "input": 1, "output": True}},
         {"live_io": {"nonce": NONCE, "input": False, "output": False}},
@@ -120,6 +133,20 @@ def test_noncanonical_truncated_duplicate_and_oversized_json_refuse() -> None:
     for invalid in (data + b" ", data[:-1], b'{"version":1,' + data[1:], b"\xff", b"x" * (MAX_REQUEST_BYTES + 1)):
         with pytest.raises(ManagedLiveError):
             decode_request(invalid)
+
+
+def test_observation_budget_is_required_and_bounded_at_construction_and_wire() -> None:
+    request = _request()
+    for duration in (1, 2**63 - 1):
+        bounded = replace(request, remaining_ns=duration)
+        assert decode_request(encode_request(bounded)) == bounded
+    for invalid in (True, 0, -1, 2**63, 1.5, "1000000000", None):
+        with pytest.raises(ManagedLiveError):
+            replace(request, remaining_ns=invalid)
+    value = json.loads(encode_request(request))
+    del value["remaining_ns"]
+    with pytest.raises(ManagedLiveError):
+        decode_request(_json(value))
 
 
 @pytest.mark.parametrize("header", [b"", b"AGWR10000000A", b"AGWR100000000", b"AGWR100004001", b"AGWR200000001"])

@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ._helper_identity import IdentityExpectation, decode_identity
 from ._managed_job_request import ManagedLiveIO, RequestError, decode_request_launch
@@ -28,6 +28,12 @@ class ManagedLiveRequest:
     identity: IdentityExpectation
     guest: VMGuestIdentity
     expected_launch: bytes
+    remaining_ns: int = field(kw_only=True)
+
+    def __post_init__(self) -> None:
+        """Validate the finite duration supplied across the relay boundary."""
+        if type(self.remaining_ns) is not int or not 0 < self.remaining_ns <= 2**63 - 1:
+            raise ManagedLiveError("invalid managed relay observation budget")
 
 
 def encode_handshake(live_io: ManagedLiveIO) -> bytes:
@@ -74,6 +80,7 @@ def encode_request(request: ManagedLiveRequest) -> bytes:
     data = _json(
         {
             "version": 1,
+            "remaining_ns": request.remaining_ns,
             "live_io": {
                 "nonce": request.live_io.nonce,
                 "input": request.live_io.input,
@@ -106,7 +113,7 @@ def decode_request(data: bytes) -> ManagedLiveRequest:
         if (
             type(value) is not dict
             or _json(value) != data
-            or set(value) != {"version", "live_io", "identity", "guest", "expected_launch"}
+            or set(value) != {"version", "live_io", "identity", "guest", "expected_launch", "remaining_ns"}
             or type(value["version"]) is not int
             or value["version"] != 1
         ):
@@ -128,6 +135,7 @@ def decode_request(data: bytes) -> ManagedLiveRequest:
             decode_identity(value["identity"]),
             VMGuestIdentity(guest["instance_marker"], guest["boot_id"], guest["init_start_ticks"]),
             launch,
+            remaining_ns=value["remaining_ns"],
         )
         checked_launch(request)
     except (ValueError, TypeError, UnicodeError, KeyError, RecursionError, binascii.Error, RequestError):
