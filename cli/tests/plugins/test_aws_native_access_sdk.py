@@ -311,11 +311,43 @@ def native_aws(monkeypatch, tmp_path, inherited_aws):
         yield probe
 
 
+@pytest.mark.parametrize("field", ["security_group_id", "backend_name"])
+@pytest.mark.parametrize("invalid", ["missing", "null", "empty", "not_string"])
+def test_native_route_metadata_refuses_before_provider_work(native_aws, field, invalid):
+    p = native_aws
+    p.state = "stopped"
+    if invalid == "missing":
+        del p.vm.platform_metadata[field]
+    else:
+        p.vm.platform_metadata[field] = {"null": None, "empty": "", "not_string": 17}[invalid]
+    with pytest.raises((StateError, ValidationError)):
+        p.access.native_configuration_check()
+    assert not p.calls and not p.clients and not p.preparations
+    assert p.access.binding is None and p.access._activation is None and p.access._route is None
+    assert not p.owner.list_pending_lifecycle_obligations()
+    assert p.access.settle(p.deadline)
+
+
+@pytest.mark.parametrize("group", ["not-a-group", "sg-0123456", "sg-0123456789ABCDEF0"])
+def test_malformed_native_group_refuses_before_provider_work(native_aws, group):
+    p = native_aws
+    p.state = "stopped"
+    p.vm.platform_metadata["security_group_id"] = group
+    with pytest.raises(ValidationError):
+        p.access.native_configuration_check()
+    assert not p.calls and not p.clients and not p.preparations
+    assert p.access.binding is None and p.access._activation is None and p.access._route is None
+    assert not p.owner.list_pending_lifecycle_obligations()
+    assert p.access.settle(p.deadline)
+
+
 @pytest.mark.parametrize("power", [VMStatus.RUNNING, VMStatus.STOPPED])
 def test_availability_needs_no_public_endpoint_native_ingress_or_guest(native_aws, monkeypatch, power):
     p = native_aws
     p.state, p.endpoint = power.value, ""
     p.access._ctx.config.operator.ssh = None
+    del p.vm.platform_metadata["security_group_id"]
+    del p.vm.platform_metadata["backend_name"]
 
     def deny(*args, **kwargs):
         pytest.fail("availability selected native delivery")

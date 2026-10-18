@@ -22,6 +22,12 @@ if TYPE_CHECKING:
 KIND = "aws-ec2-native-route"
 
 
+def validate_native_route_selection(group: str, backend: str) -> None:
+    """Reject persisted native-route metadata before provider activation."""
+    if re.fullmatch(r"sg-[0-9a-f]{8}(?:[0-9a-f]{9})?", group) is None or not backend:
+        raise ValidationError("EC2 native route selection is invalid")
+
+
 @dataclass
 class _Rule:
     prefix: str
@@ -56,8 +62,7 @@ class EC2NativeRoute:
         *,
         role_auth: _OwnedRoleSession | None = None,
     ) -> None:
-        if re.fullmatch(r"sg-[0-9a-f]{8}(?:[0-9a-f]{9})?", group) is None or not backend:
-            raise ValidationError("EC2 native route selection is invalid")
+        validate_native_route_selection(group, backend)
         require_owned_instance(instance, backend, group)
         if not prefixes or len(prefixes) > 64 or any(str(IPv4Network(p)) != p for p in prefixes):
             raise ValidationError("EC2 native route prefixes are invalid")

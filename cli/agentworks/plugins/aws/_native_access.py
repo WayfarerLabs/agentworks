@@ -82,8 +82,13 @@ class EC2OwnedAccess:
         return self._validate_native_configuration
 
     def _validate_native_configuration(self) -> None:
+        from agentworks.plugins.aws._native_route import validate_native_route_selection
+
         if self._settings is None:
             self._settings = require_ssh_settings(self._vm, self._ctx, self._ctx.config)
+        validate_native_route_selection(
+            self._platform._security_group_id(self._vm), self._platform._backend_name(self._vm)
+        )
 
     @property
     def route_check(self) -> Callable[[Deadline], None] | None:
