@@ -671,9 +671,7 @@ def test_descendant_output_handles_do_not_block_cleanup(
         assert done.exists()
 
 
-def test_natural_exit_with_descendant_holding_stdin_reports_unsent_input(
-    synthetic: SyntheticSSH, tmp_path: Path
-) -> None:
+def test_natural_exit_with_descendant_holding_stdin_completes_consumer(synthetic: SyntheticSSH, tmp_path: Path) -> None:
     release = tmp_path / "release"
     done = tmp_path / "done"
     descendant = (
@@ -693,9 +691,12 @@ def test_natural_exit_with_descendant_holding_stdin_reports_unsent_input(
         started = time.monotonic()
         report = synthetic.execute(CarrierIO(input=FiniteInput(b"x" * 2_000_000)), seconds=None)
         assert time.monotonic() - started < 2
-        assert report.failure == Failure.INPUT
+        assert report.failure is None
+        assert report.dispatch == Dispatch.SENT
         assert report.completion == ExitStatus(code=23)
         assert report.stdout.data == b"parent"
+        assert report.stderr.data == b""
+        assert report.stdout.complete and report.stderr.complete
         assert report.local_status == 23
         synthetic.assert_closed()
     finally:
