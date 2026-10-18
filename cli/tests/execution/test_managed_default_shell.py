@@ -450,26 +450,43 @@ def test_literal_and_explicit_shell_skip_lookup(view, lookup, invocation):
 
 
 @pytest.mark.parametrize("refuse", [False, True])
-def test_selected_route_is_rechecked_before_lookup_and_start(view, lookup, refuse):
-    _, workflow, access, _, _ = view
+def test_selected_route_is_rechecked_before_lookup_and_start(view, lookup, refuse, monkeypatch):
+    _, workflow, access, main, _ = view
+    operation = workflow.views.execution_operation
     calls = []
+    checkpoints = []
+    budget = Deadline.after(5)
 
     def require(deadline):
         calls.append(deadline)
+        checkpoint = "start" if operation.managed_runs else "lookup" if operation.active_inline_calls else "entry"
+        checkpoints.append(checkpoint)
         if refuse:
             raise StateError("changed route")
 
-    workflow.views.execution_operation._route_check = require
-    budget = Deadline.after(5)
+    original_lookup, original_start = lookup[0].execute, main.start.execute
+
+    def execute_lookup(*args, **kwargs):
+        assert checkpoints[-1] == "lookup" and kwargs["deadline"] is budget
+        return original_lookup(*args, **kwargs)
+
+    def execute_start(*args, **kwargs):
+        assert checkpoints[-1] == "start" and kwargs["deadline"] is budget
+        return original_start(*args, **kwargs)
+
+    monkeypatch.setattr(lookup[0], "execute", execute_lookup)
+    monkeypatch.setattr(main.start, "execute", execute_start)
+    operation._route_check = require
     if refuse:
         with pytest.raises(StateError):
             start(access, deadline=budget)
         no_run(view)
-        assert lookup[0].calls == 0 and calls == [budget]
+        assert lookup[0].calls == 0 and checkpoints == ["entry"]
     else:
         start(access, deadline=budget)
-        assert calls == [budget, budget]
-    workflow.views.execution_operation._route_check = None
+        assert checkpoints[0] == "entry" and lookup[0].calls == main.start.calls == 1
+    assert calls and all(actual is budget for actual in calls)
+    operation._route_check = None
     workflow.close(cleanup_deadline=Deadline.after(5))
 
 

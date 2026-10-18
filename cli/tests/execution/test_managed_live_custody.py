@@ -346,13 +346,35 @@ def test_optional_native_closure_controls_settlement_and_retains_only_safe_state
         assert main.relay_calls == 0 and delivery.relay_calls == 1
 
 
-def test_route_fence_uses_original_deadline_and_failed_route_does_not_relay(view):
-    _, _, operation, main, _ = view
+def test_route_fence_uses_original_deadline_and_failed_route_does_not_relay(view, monkeypatch):
+    _, _, operation, main, keeper = view
     deadline = Deadline.after(5)
     routed: list[Deadline] = []
-    operation._route_check = routed.append
+    events = []
+
+    def check(actual):
+        routed.append(actual)
+        events.append("route")
+
+    original_clock, original_start = keeper.clock.execute, main.start.execute
+
+    def execute_clock(*args, **kwargs):
+        if keeper.clock.calls == 0:
+            assert events[-1] == "route" and kwargs["deadline"] is deadline
+            events.append("clock")
+        return original_clock(*args, **kwargs)
+
+    def execute_start(*args, **kwargs):
+        assert events[-1] == "route" and kwargs["deadline"] is deadline
+        events.append("start")
+        return original_start(*args, **kwargs)
+
+    monkeypatch.setattr(keeper.clock, "execute", execute_clock)
+    monkeypatch.setattr(main.start, "execute", execute_start)
+    operation._route_check = check
     reference = start(view, deadline=deadline)
-    assert routed == [deadline]
+    assert events[0] == "route" and "clock" in events and events[-1] == "start"
+    assert routed and all(actual is deadline for actual in routed)
     control = KeyboardInterrupt()
 
     def route(actual):

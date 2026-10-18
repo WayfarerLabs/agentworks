@@ -257,7 +257,9 @@ class ExecutionOperation:
         binding = self._native_binding
         if self._finishing or self._finished:
             raise StateError("Execution operation is closing")
-        if binding is None or carrier is not binding.carrier or runtime_selection != binding.runtime_selection:
+        if binding is None:
+            raise StateError("Managed delivery is unavailable for this bound operation")
+        if carrier is not binding.carrier or runtime_selection != binding.runtime_selection:
             raise ValidationError("Managed access requires the selected native binding")
         with self._owner._guard:  # noqa: SLF001
             self._owner._require_dispatch_admission_locked()  # noqa: SLF001

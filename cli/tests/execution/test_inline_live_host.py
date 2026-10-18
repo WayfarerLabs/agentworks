@@ -35,6 +35,7 @@ from agentworks.execution._inline_observer import InlineObserver, ObservationErr
 from agentworks.execution._inline_request import REQUEST_HEADER_BYTES, OutputMode, decode_manifest
 from agentworks.execution._process import LocalProcessOwner
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution.binding import NativeExecutionBinding
 from agentworks.execution.carrier import CarrierIO, Deadline, Failure, LiveInput, Retention, SinkOutput
 from agentworks.execution.models import Command, Input, Lifetime, Output, Script, Shell
 from agentworks.execution.profiles import Protection
@@ -587,12 +588,30 @@ def test_unsupported_live_carrier_refuses_before_operation_borrow(bound: Bound, 
 )
 def test_managed_live_choices_refuse_before_effects(bound: Bound, start: bool, lifetime: Lifetime) -> None:
     _, _, operation, carrier, access, _ = bound
+    assert operation._native_binding is None
     source = Source(b"unused")
     method = access.start if start else access.run
     with pytest.raises(StateError):
         method(Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=lifetime, stdin=Input.live(source))
     assert source.calls == carrier.calls == 0
-    assert not operation.unfinished_inline_executions
+    assert (
+        not operation.unfinished_inline_executions and not operation.active_inline_calls and not operation.managed_runs
+    )
+
+
+@pytest.mark.parametrize("mismatch", ["carrier", "runtime"])
+def test_job_binding_mismatch_remains_invalid_without_effects(bound: Bound, mismatch: str) -> None:
+    _, owner, operation, carrier, access, _ = bound
+    runtime = access._runtime_selection
+    operation._native_binding = NativeExecutionBinding(carrier, "root", runtime)
+    with pytest.raises(ValidationError):
+        operation.require_job_binding(
+            LocalCarrier() if mismatch == "carrier" else carrier,
+            RuntimeSelection(RuntimeTargetOS.DARWIN) if mismatch == "runtime" else runtime,
+        )
+    assert carrier.calls == 0 and not operation.active_inline_calls and not operation.managed_runs
+    operation.finish()
+    owner.close()
 
 
 @pytest.mark.parametrize("side", ["input", "output"])
