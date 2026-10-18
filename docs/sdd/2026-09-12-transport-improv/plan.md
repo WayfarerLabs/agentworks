@@ -4640,6 +4640,18 @@ the directory facade, native proof or complete R7 delivery.
       back confirmed entries. Prove complete traversal rather than interpreting a depth-limited
       inventory as a whole tree. Cover conservative local traversal, directory creation and
       publication on supported workstation systems before public exposure.
+- [x] Implement the private ordinary-call directory facade and owned local-path primitives,
+      including create-only remote directories, complete bounded manifests, explicit conflict
+      choices, actual transferred-byte budgets, one original deadline and bounded partial progress.
+      Retain local originals before I/O, share the ordinary upload borrow and include their exact
+      cleanup in native aggregate settlement without a parent transfer coordinator. At `6c5769293`,
+      the lead's file/native/context selection passes 2,374 tests with 25 skips, and strict typing
+      passes across 1,436 sources. Project and complexity reviewers at gpt-6-astra/high and generic
+      correctness at gpt-6.1-sol/medium independently clear the corrective source diff. Their
+      findings led to retiring replaced destination identities, validating all composed local paths
+      before mutation and checking creation modes before borrowing or opening sources. These are
+      Linux-local and deterministic branch proofs, not native Windows/macOS acceptance, complete
+      RunContext delivery or completion of the broader directory checkbox above.
 - [ ] Resolve lifecycle-ledger capacity before migrating high-volume artifact publication. Apply the
       selected core 128-unfinished-obligation bound and preserve commit-without-reply evidence and
       immutable completed receipts, rather than pruning, reusing IDs or increasing the limit.

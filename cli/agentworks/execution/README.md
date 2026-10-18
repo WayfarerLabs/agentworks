@@ -570,7 +570,7 @@ Local source, inventory and destination calls retain their actual owners before 
 owned upload uses the same serial borrow for local admission and its ordinary remote UPLOAD call,
 without a fabricated download association. Finalization closes originals before releasing that
 borrow, and native aggregate teardown includes this custody. Cleanup retries close known originals
-and settle captured remote bookkeeping independently; they never reread, rescan, recreate or
+and settle captured remote bookkeeping independently; they never reread, scan again, recreate or
 republish a failed child. Incomplete capture or unproved original closure keeps aggregate ownership
 unsettled.
 
