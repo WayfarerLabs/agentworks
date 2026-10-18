@@ -10,7 +10,6 @@ from contextlib import suppress
 from ._file_effect_gate import (
     FileEffectGateError,
     hold_file_effect_gate,
-    targets_file_effect_gate_namespace,
 )
 from ._file_metadata import (
     MetadataError,
@@ -96,8 +95,6 @@ def _metadata_failure(error: MetadataError) -> FileMetadataFailureControl:
 
 
 def _operate(request: FileMetadataRequest, expires_at: float | None) -> FileMetadataResultControl:
-    if targets_file_effect_gate_namespace(request.root_path, request.relative_path):
-        raise _SafeFailure(FileMetadataFailureControl(FileMetadataFailureCode.EFFECT_GATE_REFUSED))
     if (
         sys.platform == "linux"
         and request.operation is not FileMetadataOperation.CREATE_DIRECTORY

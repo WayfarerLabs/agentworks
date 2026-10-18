@@ -7,7 +7,7 @@ import sys
 import time
 from contextlib import suppress
 
-from ._file_effect_gate import FileEffectGateError, hold_file_effect_gate, targets_file_effect_gate_namespace
+from ._file_effect_gate import FileEffectGateError, hold_file_effect_gate
 from ._file_object_protocol import (
     MAX_REQUEST_BYTES,
     FileObjectFailureCode,
@@ -89,10 +89,6 @@ def _absence(request: FileObjectRequest, expires_at: float | None) -> FileObject
 
 
 def _operate(request: FileObjectRequest, expires_at: float | None) -> FileObjectResultControl:
-    if request.operation is FileObjectOperation.REMOVE and targets_file_effect_gate_namespace(
-        request.root_path, request.relative_path
-    ):
-        raise _SafeFailure(FileObjectFailureControl(FileObjectFailureCode.EFFECT_GATE_REFUSED))
     root_fd, parent_fd, leaf = _parent(request)
     if root_fd is None:
         return _absence(request, expires_at)

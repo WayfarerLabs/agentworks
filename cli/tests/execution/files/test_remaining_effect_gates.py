@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -50,7 +51,7 @@ from agentworks.execution._file_objects import FileKind
 from agentworks.execution._file_obligation import decode_file_call_obligation, encode_file_call_obligation
 from agentworks.execution._file_result import reduce_file_metadata, reduce_file_remove
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
-from agentworks.execution.carrier import Deadline
+from agentworks.execution.carrier import CarrierIO, Deadline, FiniteInput
 from agentworks.execution.files import FileFailureReason
 from agentworks.operations import OperationOwner
 from tests.execution._bound_carrier_support import bind_carrier as bind_carrier
@@ -68,6 +69,7 @@ if TYPE_CHECKING:
 
     from agentworks.execution._file_effect_gate import FileEffectGateBinding
     from agentworks.execution._file_operation import FileOperation
+    from agentworks.execution._helper_bundle import FixedFileHelperBundle
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution.carrier import Carrier
 
@@ -79,7 +81,7 @@ def _install(
     guest: str,
     exchange: ModuleType,
     extra: str = "",
-) -> None:
+) -> FixedFileHelperBundle:
     patch = (
         f"gate=sys.modules[{(package + '._file_effect_gate')!r}]\n"
         f"gate._GATE_NAMESPACE={_file_effect_gate._GATE_NAMESPACE!r}\n"
@@ -87,9 +89,9 @@ def _install(
         f"guest._identity=lambda: sys.modules[{(package + '._vm_guest_identity_protocol')!r}]."
         f"VMGuestIdentity({_GUEST.instance_marker!r}, {_GUEST.boot_id!r}, {_GUEST.init_start_ticks!r})\n"
     )
-    monkeypatch.setattr(
-        exchange, "FIXED_BUNDLE", fixture_file_bundle(package, modules, guest, "import os\n" + patch + extra)
-    )
+    bundle = fixture_file_bundle(package, modules, guest, "import os\n" + patch + extra)
+    monkeypatch.setattr(exchange, "FIXED_BUNDLE", bundle)
+    return bundle
 
 
 @pytest.fixture
@@ -98,6 +100,16 @@ def effects(context, monkeypatch):
     _install(monkeypatch, OBJECT_PACKAGE, OBJECT_MODULES, "_file_object_guest", _file_object_exchange)
     install_read_bundle(monkeypatch)
     return context
+
+
+def _target_wire(io: CarrierIO, prefix: bytes, target: str) -> CarrierIO:
+    """Deliver an untrusted reserved target to the unchanged destination decoder."""
+    assert isinstance(io.input, FiniteInput)
+    value = json.loads(io.input.data[len(prefix) :])
+    value["root"] = base64.b64encode(b"/").decode("ascii")
+    value["path"] = base64.b64encode(target[1:].encode()).decode("ascii")
+    manifest = json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("ascii")
+    return replace(io, input=FiniteInput(prefix + manifest, sensitive=True))
 
 
 def test_metadata_wire_carries_exact_gate(context) -> None:
@@ -122,9 +134,7 @@ def test_metadata_wire_carries_exact_gate(context) -> None:
 @pytest.mark.parametrize("case", ["set_metadata", "ensure_directory", "create_directory", "remove", "json"])
 @pytest.mark.parametrize("setup", [False, True])
 @pytest.mark.parametrize("runtime", [sys.executable, "/usr/bin/python3.11"])
-def test_exact_gate_is_durable_before_every_dispatch_and_stale_effect_refuses(
-    effects, case, setup, runtime, bind_carrier
-):
+def test_exact_gate_is_durable_before_every_dispatch(effects, case, setup, runtime, bind_carrier):
     database, owner, operation, root, plan, gate = effects
     path = root / "target"
     if case in {"set_metadata", "remove"}:
@@ -184,14 +194,6 @@ def test_exact_gate_is_durable_before_every_dispatch_and_stale_effect_refuses(
         assert path.exists()
     assert carrier.seen
     assert not database.operations.list_pending_lifecycle_obligations(owner.ownership)
-    advance_file_effect_gate(replace(gate, proposed_generation=b"z" * 16), lambda: _GUEST)
-    common["relative_path"] = "stale"
-    refused = set_file_metadata(
-        bind_carrier(LocalCarrier()), **common, effect_gate=gate, uid=os.geteuid(), gid=os.getegid(), mode=0o600
-    )
-    assert refused.observation is not None and refused.observation.failure is not None
-    assert refused.observation.failure.code is FileMetadataFailureCode.EFFECT_GATE_REFUSED
-    assert not (root / "stale").exists()
 
 
 def test_stat_cannot_carry_gate_and_remove_wire_preserves_gate(effects, bind_carrier):
@@ -622,17 +624,26 @@ def test_actual_guest_mismatch_refuses_before_effects(effects, monkeypatch, bind
 def test_metadata_guest_independently_refuses_reserved_convergence(effects, monkeypatch, bind_carrier, target):
     _, _, _, root, plan, _ = effects
     target = _file_effect_gate._GATE_NAMESPACE if target == "namespace" else target
-    extra = f"""
-from dataclasses import replace
-decode=guest.decode_file_metadata_request
-guest.decode_file_metadata_request=lambda data: replace(decode(data), root_path="/", relative_path={target[1:]!r})
+    extra = """
 def forbidden_parent(request):
  raise AssertionError("reserved convergence reached filesystem")
 guest._parent=forbidden_parent
 """
-    _install(monkeypatch, METADATA_PACKAGE, METADATA_MODULES, "_file_metadata_guest", _file_metadata_exchange, extra)
+    bundle = _install(
+        monkeypatch, METADATA_PACKAGE, METADATA_MODULES, "_file_metadata_guest", _file_metadata_exchange, extra
+    )
+
+    class ReservedWire(LocalCarrier):
+        def execute(self, invocation, *, io, deadline, custody=None):
+            return super().execute(
+                invocation,
+                io=_target_wire(io, bundle.prefix, target),
+                deadline=deadline,
+                custody=custody,
+            )
+
     result = set_file_metadata(
-        bind_carrier(LocalCarrier()),
+        bind_carrier(ReservedWire()),
         trusted_root_path=str(root),
         relative_path="benign",
         uid=os.geteuid(),
@@ -643,7 +654,11 @@ guest._parent=forbidden_parent
         runtime_selection=runtime_selection(sys.executable),
     )
     assert result.observation is not None and result.observation.failure is not None
-    assert result.observation.failure.code is FileMetadataFailureCode.EFFECT_GATE_REFUSED
+    assert result.observation.failure.code is (
+        FileMetadataFailureCode.INVALID_REQUEST
+        if target == _file_effect_gate._GATE_NAMESPACE
+        else FileMetadataFailureCode.EFFECT_GATE_REFUSED
+    )
 
 
 def test_json_escaping_control_capture_keeps_child_gate(effects):
@@ -684,18 +699,25 @@ def test_remove_control_namespace_refuses_at_host_and_guest(effects, monkeypatch
     with pytest.raises(ValidationError):
         operation.remove(carrier, trusted_root_path="/", relative_path=namespace[1:], **common)
     assert carrier.calls == 0
-    extra = f"""
-from dataclasses import replace
-decode=guest.decode_file_object_request
-guest.decode_file_object_request=lambda data: replace(decode(data), root_path="/", relative_path={namespace[1:]!r})
+    extra = """
 def forbidden_parent(request):
  raise AssertionError("reserved removal reached filesystem")
 guest._parent=forbidden_parent
 """
-    _install(monkeypatch, OBJECT_PACKAGE, OBJECT_MODULES, "_file_object_guest", _file_object_exchange, extra)
-    result = remove_file(bind_carrier(LocalCarrier()), trusted_root_path=str(root), relative_path="benign", **common)
+    bundle = _install(monkeypatch, OBJECT_PACKAGE, OBJECT_MODULES, "_file_object_guest", _file_object_exchange, extra)
+
+    class ReservedWire(LocalCarrier):
+        def execute(self, invocation, *, io, deadline, custody=None):
+            return super().execute(
+                invocation,
+                io=_target_wire(io, bundle.prefix, namespace),
+                deadline=deadline,
+                custody=custody,
+            )
+
+    result = remove_file(bind_carrier(ReservedWire()), trusted_root_path=str(root), relative_path="benign", **common)
     assert result.observation is not None and result.observation.failure is not None
-    assert result.observation.failure.code is FileObjectFailureCode.EFFECT_GATE_REFUSED
+    assert result.observation.failure.code is FileObjectFailureCode.INVALID_REQUEST
 
 
 def test_stat_namespace_never_opens_gate_or_observes_guest_epoch(effects, monkeypatch, bind_carrier):

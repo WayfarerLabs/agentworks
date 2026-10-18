@@ -977,6 +977,10 @@ class FileOperation:
         self._install(active, admission, self._active_json_updates)
         if gate_setup is not None:
             gate = self._setup_mutation_gate(active, FileCallFamily.JSON_UPDATE, gate_setup, deadline)
+            if gate is None:
+                borrow.close()
+                self._active_json_updates.pop(id(active))
+                raise StateError("File-effect gate setup was not dispatched")
             prepared.binding = replace(prepared.binding, effect_gate=gate)
             prepared.state.binding = prepared.binding
             active.binding = prepared.binding
@@ -1124,6 +1128,10 @@ class FileOperation:
         self._install(active, admission, self._active_removals)
         if gate_setup is not None:
             gate = self._setup_mutation_gate(active, FileCallFamily.REMOVE, gate_setup, deadline)
+            if gate is None:
+                borrow.close()
+                self._active_removals.pop(id(active))
+                raise StateError("File-effect gate setup was not dispatched")
             prepared.binding = replace(prepared.binding, effect_gate=gate)
             prepared.state.binding = prepared.binding
             active.binding = prepared.binding
@@ -1178,6 +1186,10 @@ class FileOperation:
         self._install(active, admission, self._active_metadata)
         if gate_setup is not None:
             gate = self._setup_mutation_gate(active, FileCallFamily.SET_METADATA, gate_setup, deadline)
+            if gate is None:
+                borrow.close()
+                self._active_metadata.pop(id(active))
+                raise StateError("File-effect gate setup was not dispatched")
             prepared.binding = replace(prepared.binding, effect_gate=gate)
             prepared.state.binding = prepared.binding
             active.binding = prepared.binding
@@ -1235,6 +1247,10 @@ class FileOperation:
         self._install(active, admission, self._active_metadata)
         if gate_setup is not None:
             gate = self._setup_mutation_gate(active, FileCallFamily.ENSURE_DIRECTORY, gate_setup, deadline)
+            if gate is None:
+                borrow.close()
+                self._active_metadata.pop(id(active))
+                raise StateError("File-effect gate setup was not dispatched")
             prepared.binding = replace(prepared.binding, effect_gate=gate)
             prepared.state.binding = prepared.binding
             active.binding = prepared.binding
@@ -1277,8 +1293,8 @@ class FileOperation:
         family: FileCallFamily,
         setup: FileEffectGateSetup,
         deadline: Deadline,
-    ) -> FileEffectGateBinding:
-        """Promote the admitted setup row before any mutation workflow runs."""
+    ) -> FileEffectGateBinding | None:
+        """Bind setup before mutation, or return None for settled, undispatched setup."""
         binding = active.binding
         operation = active.prepared.state.operation
         result = exchange_file_effect_gate(
@@ -1293,6 +1309,8 @@ class FileOperation:
             bootstrap=binding.bootstrap,
         )
         normal = operation.settle(result.dispatch, result.carrier_completion)
+        if result.dispatch is Dispatch.NOT_SENT and not operation.requires_owner_retention:
+            return None
         observed = result.observation
         if (
             not normal
