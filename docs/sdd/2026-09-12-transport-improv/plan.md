@@ -5801,6 +5801,16 @@ retained as a compatibility surface. Worker gates report 380 focused and 601 adj
 typing across 1,507 sources and clean changed-file lint/format. Lead combined validation and
 independent re-review remain required; the checkbox above is still open.
 
+The combined private source at `db5da5eb6` passes 1,985 scoped tests with one native-Windows skip
+and strict typing across 1,508 sources; matching file-quality checks pass after documentation-only
+formatting corrections. All three review lanes then identified remaining validation ordering: known
+unavailable MANAGED live I/O and invalid file/job arguments could reach provider admission first.
+Worker `708c00e0d` moves existing body, feature and file validation before that callback, without
+adding a validation framework. OPERATION and RESOURCE still check the route before their first
+effect. It reports 434 focused and 684 adjacent passes, strict typing across 1,509 sources and clean
+changed-file lint/format. Combined revalidation and independent re-review remain open; neither this
+checkpoint nor the earlier scoped counts establish native or full-suite acceptance.
+
 - [ ] Complete combined validation and independent review of the private Darwin buffered DIRECT
       helper (`c9bd8f1dd`), then obtain native macOS proof with the approved interpreter
       prerequisite. Preserve source/input separation, fixed fresh-exec identity and honest

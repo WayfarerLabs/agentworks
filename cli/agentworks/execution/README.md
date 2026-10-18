@@ -493,7 +493,7 @@ before DIRECT helper borrowing, before OPERATION or RESOURCE start reservations 
 and at managed reads, stop/disposal, shell observation and armed start checkpoints. Checks use the
 effective request deadline, including a shorter explicit execution budget, without holding the
 execution admission lock across provider I/O. Admission and expiry are checked again before DIRECT
-borrowing. FileAccess accepts the same core-bound callback after local path/elevation validation,
+borrowing. FileAccess accepts the same core-bound callback after complete local request validation,
 including directory child calls. Already-expired file calls skip provider reads and retain ordinary
 DEADLINE result reduction. Deadline retrieval itself is passive except for refusing a closed view.
 Absence binds no additional route check beyond shared preparation; it supplies no route-freshness
