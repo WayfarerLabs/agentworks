@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import errno
-import io
 import os
 import socket
 import subprocess
@@ -14,7 +13,6 @@ from collections.abc import Callable, Iterator
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
-from typing import IO, Any
 
 import pytest
 
@@ -36,19 +34,6 @@ from agentworks.execution._managed_live_protocol import (
 from .test_managed_live_protocol import GUEST, NONCE, RUN, _request
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="requires Linux protected store and procfs sockets")
-
-
-def _close_peer_rejected_stdin(stream: IO[bytes]) -> None:
-    with suppress(BrokenPipeError):
-        stream.close()
-
-
-class _BrokenPipeOnFlush(io.RawIOBase):
-    def writable(self) -> bool:
-        return True
-
-    def write(self, buffer: Any) -> int:
-        raise BrokenPipeError
 
 
 @pytest.fixture
@@ -221,20 +206,14 @@ def test_peer_consumer_closure_retires_open_source_and_continues_output(store: M
             except BrokenPipeError:
                 pass
             release_output.set()
-            _close_peer_rejected_stdin(process.stdin)
+            with suppress(BrokenPipeError):
+                process.stdin.close()
             process.stdin = None
             stdout, stderr = process.communicate(timeout=10)
         thread.join(6)
         assert not thread.is_alive() and not errors
     assert process.returncode == 0 and stderr == b""
     assert stdout == b"output-after-consumer-closed\0\xff"
-
-
-def test_peer_rejected_stdin_close_suppresses_buffer_flush_broken_pipe() -> None:
-    stream = io.BufferedWriter(_BrokenPipeOnFlush())
-    stream.write(b"buffered input")
-    _close_peer_rejected_stdin(stream)
-    assert stream.closed
 
 
 @pytest.mark.parametrize("variant", ["wrong-nonce", "truncated", "noncanonical", "unexpected-suffix"])
