@@ -159,7 +159,8 @@ these values, never carrier, account, command, path, provider, credential, outpu
 diagnostic identity, and deadline policy. Its `run(...)` accepts the intended stable foreground
 options for DIRECT inline execution and MANAGED launch followed by wait. MANAGED also accepts
 INDEPENDENT lifetime under an exact core RESOURCE namespace and an explicit no-idle-stop platform
-binding. Both preserve finite input, capture/discard/sensitivity policy and bound identity or
+binding. OPERATION execution also accepts borrowed live input and explicit live output on a
+live-capable carrier. Both preserve input, capture/discard/sensitivity policy and bound identity or
 elevation choices. DIRECT independent lifetime, non-Linux runtime, unsupported shell startup,
 unavailable elevation, invalid values and initially expired deadlines refuse before workload launch.
 DIRECT performs one preparation and dispatch attempt, then uses the contextual result reducer. It is
@@ -191,8 +192,21 @@ describes the whole verified capture, not consumption of this returned slice; in
 suppression leaves it false without an output-limit failure. Wait returns the existing
 `ExecutionResult` with a safe managed reference and never stops the workload or drains renewal.
 MANAGED `run` composes that same launch and wait without requiring a separate caller-facing start
-step. It selects its finite observation budget once for both phases; acknowledgement that exhausts
-the budget still returns UNKNOWN application progress, DEADLINE, incomplete output with the
+step. Live work first validates the relay passively, before shell lookup or managed reservation.
+After settled launch and keeper admission, it borrows one foreground relay under the same owner. The
+controller owns one private socket and delays workload entry until the one-use attachment is bound;
+a fixed pre-entry window prevents an unattached setup child from living indefinitely. Pipe pressure
+cannot block lease observation or cleanup. The relay's remaining finite allowance bounds every guest
+wait, without cancelling the job when observation ends. Retained run state contains direction
+metadata, not caller endpoints. `start` and independent lifetime reject live endpoints. Explicit
+live output has no durable spool. Its foreground result requires actual stream delivery and drained
+sinks separately from durable application status and resource closure. A later successful wait
+cannot erase a pipe failure or reconstruct presentation from discarded output. Unsettled relay
+custody prevents another poll, and escaping controls retain their original identity and safe job
+reference.
+
+It selects its finite observation budget once for launch, relay and wait; acknowledgement that
+exhausts the budget still returns UNKNOWN application progress, DEADLINE, incomplete output with the
 effective retention policy, and its safe `JobRef`, without further I/O or cleanup. Checked MANAGED
 run and wait use the bound logical entity and existing contextual checker, preserving the exact
 result/reference; known application failures remain application-phase, while deadline and

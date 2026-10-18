@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
@@ -12,7 +13,7 @@ from agentworks.errors import StateError, ValidationError
 
 from . import _directory_transfer, _file_memory_read
 from ._diagnostic_values import validate_logical_entity_value
-from ._execution_operation import ExecutionOperation, ManagedExecutionControlFact
+from ._execution_operation import ExecutionOperation, ManagedExecutionControlFact, OwnedInlineOutcome
 from ._execution_result import check_owned_inline_result, reduce_owned_inline_result
 from ._file_local_custody import LocalFileCall, local_failure, owned_local_call
 from ._file_local_download import FileLocalDownloadControlFact, FileLocalDownloadOutcome, download_to_local_file
@@ -36,7 +37,9 @@ from ._json import serialize_json_source, validate_json_object
 from ._local_file_io import LocalFileLimitError, LocalFileSource, LocalIdentity
 from ._managed_bound_run import ManagedDeadlineExpired
 from ._managed_job_protocol import StreamDisposition, WorkloadWaitFact
+from ._managed_job_request import ManagedLiveIO
 from ._managed_job_store import FactName, Stream
+from ._managed_live_result import compose_managed_live_result
 from ._managed_observation_exchange import ManagedObservationState
 from ._managed_result import _fact
 from ._managed_runs import ManagedOutputMode
@@ -283,6 +286,9 @@ class ExecutionAccess:
             self._raise_job_control(control, job)
         else:
             result = replace(outcome.result, job=job)
+        return self._check_managed_result(result, check=check)
+
+    def _check_managed_result(self, result: ExecutionResult, *, check: bool) -> ExecutionResult:
         if not check:
             return result
         return check_execution_result(
@@ -293,6 +299,47 @@ class ExecutionAccess:
             if result.failure in {ExecutionFailure.DEADLINE, ExecutionFailure.OBSERVATION}
             else None,
         )
+
+    def _wait_managed_live(
+        self,
+        job: JobRef,
+        live_io: ManagedLiveIO,
+        selected: Deadline,
+        *,
+        stdin: Input,
+        output: Output,
+        sensitive: bool,
+        check: bool,
+    ) -> ExecutionResult:
+        """Relay once, then combine independent presentation and job evidence."""
+        candidate = None
+        custody = OwnedInlineOutcome(deadline_exceeded=selected.expired)
+        if not selected.expired:
+            try:
+                candidate, custody = self._operation.relay_managed(
+                    job,
+                    self._carrier,
+                    deadline=selected,
+                    source=stdin.source,
+                    stdout=output.stdout,
+                    stderr=output.stderr,
+                    sensitive=sensitive,
+                )
+            except BaseException as control:
+                self._raise_job_control(control, job)
+        if custody.pending_remote_effects or custody.coordination_uncertain or custody.requires_owner_retention:
+            # The ordinary helper borrow is still unresolved. Do not overlap
+            # it with a new poll or replace its original observation budget.
+            result = ExecutionResult(
+                Dispatch.UNKNOWN,
+                ApplicationState.UNKNOWN,
+                failure=ExecutionFailure.OBSERVATION,
+                job=job,
+            )
+        else:
+            result = self._wait_managed(job, selected, check=False)
+        result = compose_managed_live_result(result, live_io=live_io, candidate=candidate, custody=custody)
+        return self._check_managed_result(result, check=check)
 
     def stop(self, job: JobRef, *, deadline: Deadline | None = None) -> JobStop:
         """Request permanent stop and report separate positive workload closure."""
@@ -399,10 +446,9 @@ class ExecutionAccess:
             raise ValidationError("Foreground execution requires a command or script")
         if type(stdin) is not Input or type(output) is not Output:
             raise ValidationError("Foreground execution requires explicit input and output values")
-        if (stdin.source is not None or output.stdout is not None) and (
-            profile is not Protection.DIRECT or lifetime is not Lifetime.OPERATION
-        ):
-            raise StateError("Live pipes require DIRECT operation execution")
+        live = stdin.source is not None or output.stdout is not None
+        if live and lifetime is not Lifetime.OPERATION:
+            raise StateError("Live pipes require operation execution lifetime")
         if type(sudo) is not bool or type(sensitive) is not bool or type(check) is not bool:
             raise ValidationError("Foreground execution flags must be booleans")
         if sudo and self._elevated_plan is None:
@@ -444,6 +490,11 @@ class ExecutionAccess:
                     check=check,
                     acknowledgement=acknowledgement,
                 )
+            live_io = (
+                ManagedLiveIO(secrets.token_hex(16), stdin.source is not None, output.stdout is not None)
+                if live
+                else None
+            )
             job = self._operation.start_managed(
                 self._carrier,
                 request,
@@ -455,7 +506,18 @@ class ExecutionAccess:
                 env=env,
                 cwd=cwd,
                 sensitive=effective_sensitive,
+                live_io=live_io,
             )
+            if live_io is not None:
+                return self._wait_managed_live(
+                    job,
+                    live_io,
+                    selected_deadline,
+                    stdin=stdin,
+                    output=output,
+                    sensitive=effective_sensitive,
+                    check=check,
+                )
             return self._wait_managed(job, selected_deadline, check=check)
 
         outcome = self._operation.run_inline(

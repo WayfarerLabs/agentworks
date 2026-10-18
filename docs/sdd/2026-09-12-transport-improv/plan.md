@@ -1947,10 +1947,12 @@ native process/resize mechanisms. Native Windows/SSH capability remains unproved
       distinguish local fixture evidence from privileged native bootstrap and ordinary/admin
       contention. All three private lanes are clean at `876355c7`; the file/Proxmox suite passes 305
       tests.
-- [ ] Compose fixed inline file-operation bundles with one-stream compression and data-only scratch.
-      Prove every final envelope against both complete Proxmox HTTP-body and workstation
-      process-command bounds; no executable-helper staging fallback. The Proxmox compatibility floor
-      remains 64 KiB even on providers accepting larger requests.
+- [ ] Compose fixed inline file-operation bundles with one-stream compression and shared owned
+      scratch delivery where their complete envelope requires it. Select inline or staged delivery
+      before effects; never retry uncertain inline dispatch through staging. Prove every final
+      envelope against complete Proxmox HTTP-body and workstation process-command bounds. The
+      Proxmox compatibility floor remains 64 KiB even on providers accepting larger requests;
+      readiness remains file-free.
 - [x] Review and integrate private held-object metadata, bounded inventory, search-only root
       traversal and read-only fixed lock-namespace composition. Preserve explicit partial/uncertain
       mutation facts and requested-depth completeness without claiming public FileAccess or native
@@ -1982,7 +1984,9 @@ native process/resize mechanisms. Native Windows/SSH capability remains unproved
       serialization produce 33,108 Windows command characters, exceeding 32,767. Dropping the unused
       read-protocol module while retaining framing reduces that fixture to 31,076; its dispatcher is
       still a test, not the production exchange. Select only actual family dependencies and prove
-      complete Windows and Proxmox request bounds without an implicit executable-staging fallback.
+      complete Windows and Proxmox request bounds. Where fixed assets require staging, use the same
+      operation-owned transfer and verified activation as execution, selected before dispatch rather
+      than as an uncertain-delivery fallback.
 - [x] Deliver private stage creation and exact-offset chunk exchanges using sensitive input,
       complete typed observations, original destination binding and the fixed transaction lock. All
       three private lanes are clean at `85d27904`, including post-cleanup expiry and exact chunk
@@ -5370,7 +5374,7 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
 - [ ] Implement the [managed foreground pipe design](managed-live-io-lld.md): retain settled
       buffered launch and keeper admission, add explicit protected live-direction metadata and one
       controller-owned per-run socket, and connect one foreground relay under the original owner.
-      Prove bounded admission, independent directions, lease/stop progress under backpressure, no
+      Prove bounded admission, independent directions, lease/stop progress under pipe pressure, no
       retained live output, exact socket disposal and actual presentation in the foreground result.
       Local proof must not substitute for native root/cgroup/SSH acceptance.
 - [ ] Connect the planned chunked helper/request staging before public managed acceptance. Preserve
@@ -5378,7 +5382,14 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
       Expanded inline helper source already exceeds that envelope in the local constructor proof;
       lowering the fixture, increasing the provider ceiling or merely rejecting required large
       inputs would not complete this work. Reuse operation-owned scratch transfer, exact
-      range/whole-object verification and attributable cleanup for helper code and payloads.
+      range/whole-object verification and attributable cleanup for helper code and payloads. Stage
+      the original prepared helper input, including its fixed packaged prefix, rather than embed a
+      second service loader in the start bundle or attempt unproved descriptor transfer across
+      systemd. A small generic root/guest loader verifies the owned whole object, gives its held
+      descriptor to the original trusted bootstrap, and never compiles request bytes. Record tokens
+      before creation, retain uncertain stage/activation debt and preserve the original one-shot
+      launch. Bulk preparation must not silently extend or reuse an expired operation lease; keep
+      that ordering gate open until the complete orchestration is proved.
 
 The private pipe checkpoint at `6b8fe8128` passes 1,318 scoped tests with one skip and strict typing
 across 1,442 sources. Changed-file Python and Markdown quality checks pass. Project, complexity and
@@ -5400,6 +5411,19 @@ sampled: no further source call starts after the pump's positive observation, no
 race with physical exit between samples. SSH was notified before implementation, but joint native
 acceptance is still owed. MANAGED live I/O, active output, terminal/native proof, production capture
 limits, complete RunContext and production ownership remain required and unfinished.
+
+The private managed pipe prerequisites through `29faed41f` add protected direction metadata, the
+one-use controller socket, bounded fixed relay and host presentation observation. All three private
+source-review lanes are clear for that head, including the corrected output-starvation and stalled
+relay lifetime findings. The lead's combined selection passes 800 tests and fails two unchanged
+Proxmox managed-envelope tests; strict typing passes across 1,456 sources. This is not a green
+checkpoint or native acceptance. The later private custody increment uses the same ordinary helper
+borrow, optional native closure delivery and retained run. Foreground result composition then keeps
+live presentation separate from durable application status, checks after composition, preserves safe
+job/control facts and prevents polling over unsettled relay custody. Its focused local selection
+passes 158 tests; strict typing passes across 1,460 sources. Those fixtures do not prove native
+systemd, root identity, cgroups or SSH. Staging, active durable output, terminal preparation,
+platform composition and the complete additive RunContext gate remain open.
 
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
 one all-callers cutover. PR #830 publishes this design only. The following implementation PR adds

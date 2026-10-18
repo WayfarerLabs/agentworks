@@ -612,9 +612,12 @@ and a new no-staging proof. Readiness never installs it.
 
 If the manifest or requested capture exceeds the inline bound, normal execution allocates an
 operation-owned 0700 scratch directory under a core-selected root. The caller cannot name or retain
-it. Source, stdin, manifest, and ordinary captured streams are distinct 0600 objects. Sensitive
-objects may exist only for the active operation and are removed on every observed terminal path;
-uncertain cleanup is reported and remains owner debt rather than being declared absent.
+it. Source and stdin remain separate fields of the canonical request. A staged fixed helper may
+store its exact packaged prefix and canonical request together as one prepared input stream in a
+0600 object. Its trusted bootstrap independently verifies the code-prefix length and hash before
+loading modules; request bytes are never code. Ordinary captured streams use separate 0600 objects.
+Sensitive objects may exist only for the active operation and are removed on every observed terminal
+path; uncertain cleanup is reported and remains owner debt rather than being declared absent.
 
 The private transfer substrate is below both public execution and FileAccess. It supports only
 create-owned-scratch, write-at-known-offset, verify length/digest, read-bounded-range, and
@@ -626,21 +629,24 @@ also reuse the substrate without exposing command access. Neither use grants the
 
 The private `_scratch.py` increment implements these destination-side object operations beneath a
 borrowed parent descriptor, including exact duplicate comparison, whole-object verification and
-identity-bound cleanup debt. It does not yet carry requests over a carrier, validate reconstructed
-wire references, deploy helpers or integrate execution preparation. Its fresh-interpreter fixture
-reconstructs scalar facts only in test code; it is not a production serializer. Known acquisition
-facts survive handled creation interruptions, but Python bookkeeping is not signal-atomic and
-filesystem calls have no hard interruption bound. Native macOS, concurrency composition and
+identity-bound cleanup debt. `_scratch_wire.py` carries strict active references, verified
+references and cleanup debt. The private stage family already carries begin, exact-offset chunk,
+ownership reconciliation and cleanup over a carrier. Its file adapter also binds destination
+context; generic helper preparation must use core-fixed parent selection and existing execution
+custody rather than construct a public FileAccess or file-call obligation. Known acquisition facts
+survive handled creation interruptions, but Python bookkeeping is not signal-atomic and filesystem
+calls have no hard interruption bound. Native macOS, complete execution composition and
 whole-request QGA bounds remain separate gates.
 
-Chunks use a conservative 24 KiB raw bound, an exact offset, total expected length, chunk SHA-256,
-and whole-object SHA-256. A lost chunk acknowledgement permits another control request only after
-the owned scratch identity and fixed range make the write demonstrably idempotent. Blind append,
-application relaunch, or fallback to another carrier is forbidden. Final whole-object verification
-precedes `LAUNCHING` or execution of a delivered file-helper asset. This shared delivery mechanism
-does not establish runtime availability: the approved early guest Python prerequisite still needs
-implementation and phase-specific proof. macOS hosts must supply the separately approved
-preinstalled compatible interpreter.
+The current stage wire uses a conservative 12 KiB raw chunk bound, below the scratch primitive's 24
+KiB ceiling, with an exact offset, total expected length, chunk SHA-256 and whole-object SHA-256. A
+lost chunk acknowledgement permits another control request only after the owned scratch identity and
+fixed range make the write demonstrably idempotent. Blind append, application relaunch, or fallback
+to another carrier is forbidden. Final whole-object verification precedes `LAUNCHING` or execution
+of a delivered file-helper asset. This shared delivery mechanism does not establish runtime
+availability: the approved early guest Python prerequisite still needs implementation and
+phase-specific proof. macOS hosts must supply the separately approved preinstalled compatible
+interpreter.
 
 Captured stdout and stderr spool separately. Each spool keeps at most `max_bytes + 1`; helper
 readers drain the remainder so a caller retention bound does not send SIGPIPE to the workload. The
