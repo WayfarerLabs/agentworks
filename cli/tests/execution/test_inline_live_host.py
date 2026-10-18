@@ -51,11 +51,14 @@ class Sink:
     stalled: bool = False
     data: bytearray = field(default_factory=bytearray)
     calls: int = 0
+    allowance: int | None = None
 
     def try_write(self, data: memoryview) -> int | None:
         self.calls += 1
-        if self.stalled:
+        if self.stalled or self.allowance == 0:
             return None
+        if self.allowance is not None:
+            self.allowance -= 1
         count = min(self.bound, len(data))
         self.data.extend(data[:count])
         return count
@@ -109,7 +112,7 @@ def test_request_prefix_does_not_read_source_until_envelope_is_complete() -> Non
 
 
 def test_one_frame_per_write_and_pending_chunk_block_further_decoding() -> None:
-    stdout, stderr = Sink(bound=2), Sink()
+    stdout, stderr = Sink(bound=2, allowance=1), Sink()
     observer = InlineObserver(OutputMode.DELIVER, 0, stdout=stdout, stderr=stderr)
     reader = FrameReader(NONCE, observer.accept)
     collector = _LiveCollector(reader, observer)
@@ -128,11 +131,27 @@ def test_one_frame_per_write_and_pending_chunk_block_further_decoding() -> None:
     assert collector.try_write(combined) is None
     assert stderr.calls == 0
     stdout.stalled = False
+    stdout.allowance = 1
     assert collector.try_write(combined) is None
     assert stdout.data == b"abcd"
+    stdout.allowance = None
     assert collector.try_write(combined) == 1
     assert collector.try_write(combined[1:]) == len(records[2])
     assert stdout.data == b"abcdef" and stderr.data == b"error"
+    observer.release()
+
+
+def test_positive_short_writes_drain_one_bounded_chunk_without_stalling() -> None:
+    stdout = Sink(bound=1)
+    observer = InlineObserver(OutputMode.DELIVER, 0, stdout=stdout, stderr=Sink())
+    reader = FrameReader(NONCE, observer.accept)
+    collector = _LiveCollector(reader, observer)
+    launching = encode_frame(NONCE, Frame(0, FrameKind.LAUNCHING, empty_body()))
+    assert collector.try_write(memoryview(launching)) == len(launching)
+    data = encode_frame(NONCE, Frame(1, FrameKind.STDOUT, b"x" * 4096))
+    assert collector.try_write(memoryview(data)) == len(data)
+    assert stdout.data == b"x" * 4096 and stdout.calls == 4096
+    assert observer._pending is None
     observer.release()
 
 
@@ -258,8 +277,10 @@ def test_public_run_forwards_live_endpoints_and_keeps_only_facts(bound: Bound) -
     source, stdout, stderr = Source(b"public-live"), Sink(bound=2), Sink()
     source_ref, stdout_ref, stderr_ref = weakref.ref(source), weakref.ref(stdout), weakref.ref(stderr)
     result = access.run(
-        Command(["/bin/cat"]), profile=Protection.DIRECT,
-        stdin=Input.live(source, sensitive=True), output=Output.live(stdout, stderr),
+        Command(["/bin/cat"]),
+        profile=Protection.DIRECT,
+        stdin=Input.live(source, sensitive=True),
+        output=Output.live(stdout, stderr),
     )
     assert result.status == ExitCode(0) and result.failure is None
     assert stdout.data == b"public-live"

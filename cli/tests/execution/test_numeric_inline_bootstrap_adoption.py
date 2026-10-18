@@ -23,7 +23,7 @@ from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._inline import execute_inline_candidate, prepare_inline_candidate
 from agentworks.execution._inline_bundle import FIXED_SOURCE, ROOT_PROGRAM
 from agentworks.execution._inline_control import StreamRetention, WaitFact, WaitKind
-from agentworks.execution._inline_request import MAX_MANIFEST_BYTES, decode_manifest
+from agentworks.execution._inline_request import MAX_MANIFEST_BYTES, REQUEST_HEADER_BYTES, decode_manifest
 from agentworks.execution._runtime_prerequisite import (
     RuntimePrerequisiteState,
     RuntimeSelection,
@@ -147,7 +147,11 @@ class _PackedCarrier:
         elif self.damage == "invalid":
             data += f"AGWE1 {nonce} invalid frame\n".encode()
         ready = f"AGW_RUNTIME_1:{nonce}:ready:0\n".encode()
-        io.output.stdout.try_write(memoryview(ready + data))
+        remaining = memoryview(ready + data)
+        while remaining:
+            written = io.output.stdout.try_write(remaining)
+            assert written is not None and 0 < written <= len(remaining)
+            remaining = remaining[written:]
         output = CapturedOutput(complete=True, retention=Retention.DELIVERED)
         return CarrierReport(Dispatch.SENT, ExitStatus(code=completed.returncode), 0, output, output, None)
 
@@ -187,7 +191,7 @@ def test_root_entry_is_distinct_from_body_and_manifest_is_unchanged(mode: Identi
     assert ROOT_PROGRAM.delivery is RootGuestDelivery.INLINE and ROOT_PROGRAM.prefix == b""
     assert secret not in " ".join(argv)
     assert isinstance(prepared.io.input, FiniteInput)
-    manifest = decode_manifest(prepared.io.input.data)
+    manifest = decode_manifest(prepared.io.input.data[REQUEST_HEADER_BYTES:])
     assert manifest.identity == plan.expected
     assert manifest.source == secret.encode() and manifest.stdin == b"\0\xff"
     assert manifest.env == (("PRIVATE", secret),) and manifest.cwd == "/tmp"
@@ -201,7 +205,7 @@ def test_root_entry_is_distinct_from_body_and_manifest_is_unchanged(mode: Identi
         sensitive=True,
     )
     assert isinstance(legacy.io.input, FiniteInput)
-    assert replace(decode_manifest(legacy.io.input.data), nonce=prepared.nonce) == manifest
+    assert replace(decode_manifest(legacy.io.input.data[REQUEST_HEADER_BYTES:]), nonce=prepared.nonce) == manifest
 
 
 @pytest.mark.parametrize(

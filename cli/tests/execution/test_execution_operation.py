@@ -18,7 +18,7 @@ from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
-from agentworks.execution._inline import InlineCandidateResult
+from agentworks.execution._inline import InlineCandidateResult, prepare_inline_candidate
 from agentworks.execution._inline_control import StreamRetention
 from agentworks.execution._inline_observer import InlineObservation, StreamObservation
 from agentworks.execution._runtime_prerequisite import (
@@ -146,10 +146,6 @@ def _candidate(report: CarrierReport, *, payload: bytes = b"") -> InlineCandidat
 def _patch_candidate_execution(monkeypatch: pytest.MonkeyPatch, *, payload: bytes = b"") -> list[Deadline]:
     deadlines: list[Deadline] = []
 
-    def prepare(*args: object, **kwargs: object) -> object:
-        del args, kwargs
-        return object()
-
     def execute(
         carrier: BorrowedFixedHelperCarrier,
         prepared: object,
@@ -161,7 +157,6 @@ def _patch_candidate_execution(monkeypatch: pytest.MonkeyPatch, *, payload: byte
         report = carrier.execute(PreparedInvocation(("/bin/true",)), io=CarrierIO(), deadline=deadline)
         return _candidate(report, payload=payload)
 
-    monkeypatch.setattr(execution_operation, "prepare_inline_candidate", prepare)
     monkeypatch.setattr(execution_operation, "execute_inline_candidate", execute)
     return deadlines
 
@@ -195,7 +190,7 @@ def test_preparation_expiring_deadline_refuses_before_borrow(
         nonlocal prepared
         del args, kwargs
         prepared = True
-        return object()
+        return prepare_inline_candidate(*args, **kwargs)
 
     def refuse_borrow(self: OperationOwner) -> None:
         del self

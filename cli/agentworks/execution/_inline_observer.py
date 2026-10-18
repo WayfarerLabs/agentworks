@@ -91,15 +91,14 @@ class InlineObserver:
         stream, data = self._pending
         sink = self._sinks[stream]
         assert sink is not None
-        remaining = memoryview(data)[self._offset :]
-        written = sink.try_write(remaining)
-        if written is None:
-            return False
-        if type(written) is not int or not 1 <= written <= len(remaining):
-            raise ValueError("Invalid application sink result")
-        self._offset += written
-        if self._offset < len(data):
-            return False
+        while self._offset < len(data):
+            remaining = memoryview(data)[self._offset :]
+            written = sink.try_write(remaining)
+            if written is None:
+                return False
+            if type(written) is not int or not 1 <= written <= len(remaining):
+                raise ValueError("Invalid application sink result")
+            self._offset += written
         self._pending = None
         self._offset = 0
         return True
