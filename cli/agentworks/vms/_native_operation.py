@@ -37,7 +37,7 @@ from agentworks.vms.target_preparation import (
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from agentworks.db import VMRow
+    from agentworks.db import AgentRow, VMRow
     from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 
@@ -51,6 +51,7 @@ class NativeVMOperation:
     file_operation: FileOperation
     execution_operation: ExecutionOperation
     target: ExecutionTarget
+    agent_target: ExecutionTarget | None = None
 
 
 class NativeVMOperationControlFact(Exception):
@@ -74,6 +75,7 @@ class _Workflow:
     local_delivery: LocalDeliveryCustody = field(default_factory=LocalDeliveryCustody, repr=False)
     access: OwnedNativePlatformAccess | None = None
     identity: TargetIdentityPreparation | None = None
+    agent_identity: TargetIdentityPreparation | None = None
     views: NativeVMOperation | None = None
     finalizing: bool = False
 
@@ -85,11 +87,11 @@ class _Workflow:
             or preparation.requires_owner_retention
         ):
             return False
-        identity = self.identity
-        if identity is not None and (
-            identity.pending_remote_effects or identity.coordination_uncertain or identity.requires_owner_retention
-        ):
-            return False
+        for identity in (self.identity, self.agent_identity):
+            if identity is not None and (
+                identity.pending_remote_effects or identity.coordination_uncertain or identity.requires_owner_retention
+            ):
+                return False
         views = self.views
         if views is None:
             return True
@@ -183,6 +185,7 @@ def _prepare(
     platform: VMPlatform,
     ctx: RunContext,
     trusted_root: PurePosixPath,
+    agent_name: str | None,
 ) -> NativeVMOperation:
     vm = _require_vm_row(db, vm_name, platform, ctx)
     instance_marker = validate_vm_instance_marker(vm.instance_marker)
@@ -190,6 +193,23 @@ def _prepare(
         encode_account_request(AccountRequest("0" * 32, vm.admin_username))
     except AccountRequestError as error:
         raise ValidationError("Native VM operation requires a valid administrative account") from error
+    agent: AgentRow | None = None
+    if agent_name is not None:
+        agent = db.get_agent(agent_name)
+        if agent is None:
+            raise NotFoundError(
+                "Native VM operation requires an existing agent", entity_kind="agent", entity_name=agent_name
+            )
+        if agent.vm_name != vm_name:
+            raise StateError(
+                "Native VM operation agent does not belong to the selected VM",
+                entity_kind="agent",
+                entity_name=agent_name,
+            )
+        try:
+            encode_account_request(AccountRequest("0" * 32, agent.linux_user))
+        except AccountRequestError as error:
+            raise ValidationError("Native VM operation requires a valid agent account") from error
     access = platform.build_native_execution_access(vm, ctx, owner=workflow.owner, custody=workflow.local_delivery)
     workflow.access = access
     power = access.observe_power(workflow.deadline)
@@ -233,12 +253,39 @@ def _prepare(
         raise
     workflow.identity = identity
     if (
-        identity.status is not TargetIdentityStatus.PREPARED
+        workflow.deadline.expired
+        or identity.status is not TargetIdentityStatus.PREPARED
         or identity.ordinary_plan is None
         or identity.elevated_plan is None
     ):
         raise StateError("Native VM account preparation is unavailable", entity_kind="vm", entity_name=vm_name)
     bootstrap = _NumericGuestBootstrap(identity.elevated_plan, guest)
+    agent_identity: TargetIdentityPreparation | None = None
+    if agent is not None:
+        try:
+            agent_identity = prepare_target_identity(
+                binding.carrier,
+                delivery_account=binding.delivery_account,
+                workload_account=agent.linux_user,
+                include_elevated=False,
+                runtime_selection=binding.runtime_selection,
+                deadline=workflow.deadline,
+                owner=workflow.owner,
+                bootstrap=bootstrap,
+            )
+        except BaseException as control:
+            if isinstance(control.__cause__, TargetIdentityControlFact):
+                workflow.agent_identity = control.__cause__.preparation
+            raise
+        workflow.agent_identity = agent_identity
+        if (
+            workflow.deadline.expired
+            or agent_identity.status is not TargetIdentityStatus.PREPARED
+            or agent_identity.ordinary_plan is None
+        ):
+            raise StateError(
+                "Native VM agent account preparation is unavailable", entity_kind="agent", entity_name=agent.name
+            )
     file_operation = FileOperation(workflow.owner, target, bootstrap=bootstrap)
     execution_operation = ExecutionOperation(
         workflow.owner,
@@ -275,7 +322,34 @@ def _prepare(
         deadline=selected_deadline,
     )
     execution_target = ExecutionTarget(execution, files, binding.carrier.features)
-    views = NativeVMOperation(workflow.owner, files, execution, file_operation, execution_operation, execution_target)
+    agent_target = None
+    if agent is not None and agent_identity is not None:
+        assert agent_identity.ordinary_plan is not None
+        agent_files = FileAccess(
+            file_operation,
+            binding.carrier,
+            trusted_root=trusted_root,
+            runtime_selection=binding.runtime_selection,
+            ordinary_plan=agent_identity.ordinary_plan,
+            elevated_plan=None,
+            entity_kind="agent",
+            entity_name=agent.name,
+            deadline=selected_deadline,
+        )
+        agent_execution = ExecutionAccess(
+            execution_operation,
+            binding.carrier,
+            runtime_selection=binding.runtime_selection,
+            ordinary_plan=agent_identity.ordinary_plan,
+            elevated_plan=None,
+            entity_kind="agent",
+            entity_name=agent.name,
+            deadline=selected_deadline,
+        )
+        agent_target = ExecutionTarget(agent_execution, agent_files, binding.carrier.features)
+    views = NativeVMOperation(
+        workflow.owner, files, execution, file_operation, execution_operation, execution_target, agent_target
+    )
     workflow.views = views
     return views
 
@@ -289,8 +363,9 @@ def native_vm_operation(
     *,
     deadline: Deadline,
     trusted_root: PurePosixPath,
+    agent_name: str | None = None,
 ) -> Iterator[NativeVMOperation]:
-    """Claim, admit, prepare and close one administrative native VM operation."""
+    """Claim and close one native operation with admin and optional selected agent views."""
     if type(db) is not Database or not isinstance(platform, VMPlatform):
         raise ValidationError("Native VM operation requires core database and platform values")
     if type(ctx) is not RunContext or type(deadline) is not Deadline or deadline.expires_at is None or deadline.expired:
@@ -305,7 +380,7 @@ def native_vm_operation(
     workflow = _Workflow(owner, deadline)
     primary: BaseException | None = None
     try:
-        yield _prepare(workflow, db, vm_name, platform, ctx, trusted_root)
+        yield _prepare(workflow, db, vm_name, platform, ctx, trusted_root, agent_name)
     except BaseException as control:
         primary = control
         raise
