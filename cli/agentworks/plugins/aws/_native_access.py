@@ -27,7 +27,6 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow
-    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
     from agentworks.operations import OperationOwner
@@ -52,7 +51,6 @@ class EC2OwnedAccess:
         ctx: RunContext,
         *,
         owner: OperationOwner | None = None,
-        custody: LocalDeliveryCustody | None = None,
     ) -> None:
         self._vm = vm
         self._platform = platform
@@ -63,7 +61,6 @@ class EC2OwnedAccess:
         self._closed = False
         self._lock = Lock()
         self._owner = owner
-        self._custody = custody
         self.binding: NativeExecutionBinding | None = None
         self.preparation: VMTargetPreparation | None = None
         self._activation: EC2Activation | None = None
@@ -72,8 +69,7 @@ class EC2OwnedAccess:
         self._endpoint: object = None
         self._used = False
         self._running: tuple[ProviderLocator, dict[str, Any]] | None = None
-        self._resolving_start = False
-        self._settled = False
+        self._effects_settled = False
 
     @property
     def route_check(self) -> Callable[[Deadline], None] | None:
@@ -84,19 +80,15 @@ class EC2OwnedAccess:
         from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
         from agentworks.plugins.aws._native_route import EC2NativeRoute
 
-        if (
-            self._used
-            or self._owner is None
-            or self._custody is None
-            or power not in (VMStatus.RUNNING, VMStatus.STOPPED)
-        ):
+        if self._used or self._owner is None or power not in (VMStatus.RUNNING, VMStatus.STOPPED):
             raise StateError("EC2 native preparation cannot be admitted")
         self._used = True
         settings = require_ssh_settings(self._vm, self._ctx, self._ctx.config)
         locator, instance = self._read_exact_instance(deadline)
         self._locator = locator
         if power is VMStatus.STOPPED:
-            if instance.get("State", {}).get("Name") != "stopped":
+            state = instance.get("State")
+            if self.cleanup_incomplete or type(state) is not dict or state.get("Name") != "stopped":
                 raise StateError("EC2 stopped selection changed before startup")
             instance_id, region, account_id = self._platform._locator_metadata(self._vm)
             self._activation = EC2Activation(
@@ -115,10 +107,13 @@ class EC2OwnedAccess:
                 remaining = provider_locator_remaining(deadline, vm_name=self._vm.name)
                 time.sleep(min(0.25, remaining))
                 provider_locator_remaining(deadline, vm_name=self._vm.name)
+        else:
+            self._require_running(instance)
         # A separate fresh endpoint read follows startup, even when it was already running.
         locator, instance = self._read_exact_instance(deadline)
         if locator != self._locator:
             raise StateError("EC2 selected locator changed")
+        self._require_running(instance)
         self._endpoint = instance.get("PublicIpAddress")
         self.binding = ssh_native_binding(self._vm, self._endpoint, settings)
         provider_locator_remaining(deadline, vm_name=self._vm.name)
@@ -155,6 +150,8 @@ class EC2OwnedAccess:
 
     def _active_transition(self, action: Any, deadline: Deadline) -> Any:
         """Serialize the same session's explicitly admitted credential interval."""
+        from botocore.exceptions import BotoCoreError, ClientError
+
         self._acquire(deadline)
         control: BaseException | None = None
         try:
@@ -162,7 +159,11 @@ class EC2OwnedAccess:
                 raise StateError("EC2 active transition retains unsettled clients")
             if self._role_auth is not None:
                 self._role_auth.begin(deadline)
-            return action(deadline)
+            try:
+                return action(deadline)
+            except (BotoCoreError, ClientError) as error:
+                # Internal bookkeeping errors and deadline/control categories stay intact.
+                raise wrap_ec2_error(error) from error
         except BaseException as error:
             if not isinstance(error, Exception):
                 control = error
@@ -183,10 +184,10 @@ class EC2OwnedAccess:
 
     def _complete_start(self, deadline: Deadline) -> bool:
         activation = self._activation
-        if activation is None:
+        if activation is None or activation.closed_without_start_attempt:
             return True
         assert self._owner is not None
-        if not self._resolving_start:
+        if self._running is None:
             activation.reconcile(deadline)
             if activation.obligation is not None and activation.obligation.state is LifecycleObligationState.RESOLVED:
                 return True
@@ -201,7 +202,6 @@ class EC2OwnedAccess:
                 return False
             # Keep the timely exact evidence before a possibly lost resolution reply.
             self._running = locator, instance
-            self._resolving_start = True
         obligation = activation.obligation
         if obligation is None or self._running is None:
             raise StateError("EC2 start completion has no retained evidence")
@@ -223,6 +223,7 @@ class EC2OwnedAccess:
         from agentworks.plugins.aws.network import require_owned_instance
 
         locator, instance = self._read_exact_instance(deadline)
+        self._require_running(instance)
         if locator != self._locator or instance.get("PublicIpAddress") != self._endpoint:
             raise StateError("EC2 native route endpoint or locator changed")
         if self._route is None:
@@ -235,8 +236,6 @@ class EC2OwnedAccess:
     def settle(self, deadline: Deadline) -> bool:
         """Settle retained effects without stopping the VM or closing its owner."""
         provider_locator_remaining(deadline, vm_name=self._vm.name)
-        if self._settled:
-            return not self.cleanup_incomplete
         settled = True
         control: BaseException | None = None
         self._acquire(deadline)
@@ -260,16 +259,20 @@ class EC2OwnedAccess:
             raise control
         if self.cleanup_incomplete:
             return False
-        if self._route is not None:
-            settled = self._active_transition(self._route.settle, deadline) and settled
-        if self._activation is not None:
-            # Cleanup can observe existing startup under its own finite budget.
-            # It never re-enters preparation or admits another start request.
-            settled = self._complete_start(deadline) and settled
-        if settled:
-            self._settled = self.close(deadline)
-            return self._settled
+        if not self._effects_settled:
+            route_settled = self._route is None or self._active_transition(self._route.settle, deadline)
+            # Cleanup only observes the existing start under its own finite budget.
+            start_settled = self._complete_start(deadline)
+            self._effects_settled = route_settled and start_settled
+        if self._effects_settled:
+            return self.close(deadline) and settled
         return False
+
+    def _require_running(self, instance: dict[str, Any]) -> None:
+        """Refuse new route/guest admission after a stale state or uncertain read close."""
+        state = instance.get("State")
+        if self.cleanup_incomplete or type(state) is not dict or state.get("Name") != "running":
+            raise StateError("EC2 native preparation requires fresh running state and retired read clients")
 
     @property
     def cleanup_incomplete(self) -> bool:
@@ -293,7 +296,9 @@ class EC2OwnedAccess:
 
     def observe_locator(self, deadline: Deadline) -> ProviderLocator:
         """Bound exact-identity callback for the retained caller."""
-        locator, _ = self._read_exact_instance(deadline)
+        locator, instance = self._read_exact_instance(deadline)
+        if self._owner is not None:
+            self._require_running(instance)
         return locator
 
     def observe_public_endpoint(self, deadline: Deadline) -> object:

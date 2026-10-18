@@ -147,6 +147,14 @@ class EC2Activation:
         return self._client is not None
 
     @property
+    def closed_without_start_attempt(self) -> bool:
+        """Caller-serialized proof that start admission ended without an attempt.
+
+        Registration uncertainty counts as an attempt, even without a handle.
+        """
+        return self._closed and not self._attempted
+
+    @property
     def payload(self) -> ActivationPayload:
         return self._payload
 

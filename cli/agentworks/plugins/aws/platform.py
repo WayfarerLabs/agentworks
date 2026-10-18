@@ -723,7 +723,7 @@ class EC2Platform(VMPlatform):
         ):
             raise StateError("EC2 native access requires exact VM ownership")
         self._locator_metadata(vm)
-        return EC2OwnedAccess(vm, self, ctx, owner=owner, custody=custody)
+        return EC2OwnedAccess(vm, self, ctx, owner=owner)
 
     def resolve_native_execution_binding(
         self,

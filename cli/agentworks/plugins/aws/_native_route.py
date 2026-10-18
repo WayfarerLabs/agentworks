@@ -126,17 +126,11 @@ class EC2NativeRoute:
     def close(self, deadline: Deadline) -> bool:
         """Retry public close on the actual returned original only."""
         self._remaining(deadline)
-        if self._client is not None:
-            try:
-                self._client.close()
-            except Exception:
-                pass
-            else:
-                self._client = None
+        self._finish(None)
         self._remaining(deadline)
         return not self.cleanup_incomplete
 
-    def _finish(self, deadline: Deadline, control: BaseException | None) -> None:
+    def _finish(self, control: BaseException | None) -> None:
         # Even expiry must attempt retirement of the already returned original.
         try:
             if self._client is not None:
@@ -294,7 +288,7 @@ class EC2NativeRoute:
                 control = error
             raise
         finally:
-            self._finish(deadline, control)
+            self._finish(control)
 
     def _reconcile(self, rule: _Rule) -> LifecycleObligation | None:
         row = self._owner.inspect_lifecycle_obligation(rule.obligation_id)
@@ -337,7 +331,7 @@ class EC2NativeRoute:
                 control = error
             raise
         finally:
-            self._finish(deadline, control)
+            self._finish(control)
 
     def settle(self, deadline: Deadline) -> bool:
         control: BaseException | None = None
@@ -386,4 +380,4 @@ class EC2NativeRoute:
                 control = error
             raise
         finally:
-            self._finish(deadline, control)
+            self._finish(control)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import socket
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
@@ -33,12 +34,37 @@ PREFIX = "192.0.2.1/32"
 
 
 @pytest.fixture
-def native_aws(monkeypatch, tmp_path):
+def inherited_aws(monkeypatch, tmp_path):
+    for name, value in {
+        "AWS_PROFILE": "nonexistent-poison-profile",
+        "AWS_DEFAULT_PROFILE": "nonexistent-poison-profile",
+        "AWS_CONFIG_FILE": str(tmp_path / "missing-poison-config"),
+        "AWS_SHARED_CREDENTIALS_FILE": str(tmp_path / "missing-poison-credentials"),
+        "AWS_ENDPOINT_URL": "https://poison.invalid",
+        "AWS_ENDPOINT_URL_EC2": "https://poison-ec2.invalid",
+        "AWS_ENDPOINT_URL_STS": "https://poison-sts.invalid",
+        "AWS_CA_BUNDLE": str(tmp_path / "missing-poison-ca"),
+        "AWS_WEB_IDENTITY_TOKEN_FILE": str(tmp_path / "missing-poison-token"),
+        "AWS_ROLE_ARN": "arn:aws:iam::000000000000:role/poison",
+    }.items():
+        monkeypatch.setenv(name, value)
+
+
+@pytest.fixture
+def native_aws(monkeypatch, tmp_path, inherited_aws):
     import boto3
     from botocore.awsrequest import AWSResponse
     from botocore.client import BaseClient
     from botocore.httpsession import URLLib3Session
 
+    for name in tuple(os.environ):
+        if name.startswith("AWS_"):
+            monkeypatch.delenv(name)
+    for name in ("AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE"):
+        path = tmp_path / name
+        path.touch(mode=0o600)
+        monkeypatch.setenv(name, str(path))
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
     clock = [100.0]
     wall = [datetime(2030, 1, 1, tzinfo=UTC)]
     monkeypatch.setattr("agentworks.execution.carrier.time", SimpleNamespace(monotonic=lambda: clock[0]))
@@ -66,6 +92,7 @@ def native_aws(monkeypatch, tmp_path):
         sts_close_error=None,
         role_trigger=None,
         role_fault=None,
+        api_error=None,
         clock=clock,
         calls=[],
         clients=[],
@@ -85,6 +112,7 @@ def native_aws(monkeypatch, tmp_path):
         after_send=lambda action: None,
         preparations=[],
         pauses=[],
+        close_hook=lambda client: None,
     )
 
     def pause(seconds):
@@ -120,6 +148,7 @@ def native_aws(monkeypatch, tmp_path):
 
     def close(client):
         probe.closes.append(client)
+        probe.close_hook(client)
         if client.meta.service_model.service_name == "sts" and probe.sts_close_error is not None:
             raise probe.sts_close_error
         if probe.close_error is not None:
@@ -154,6 +183,13 @@ def native_aws(monkeypatch, tmp_path):
         assert request.url.rstrip("/") == f"https://{service}.{REGION}.amazonaws.com"
         if probe.error is not None:
             raise probe.error
+        if probe.api_error is not None and probe.api_error[0] == action:
+            code = probe.api_error[1]
+            error_body = (
+                f"<Response><Errors><Error><Code>{code}</Code><Message>offline</Message>"
+                "</Error></Errors><RequestID>offline-request</RequestID></Response>"
+            ).encode()
+            return AWSResponse(request.url, 400, {"content-type": "text/xml"}, Raw(error_body))
         status = 200
         body: Any
         if action == "AssumeRole":
@@ -278,9 +314,14 @@ def test_sdk_duplicate_tuple_is_never_adopted_or_revoked(native_aws):
 @pytest.mark.parametrize("fault", ["lost", "malformed", "control"])
 def test_sdk_missing_authorize_receipt_stays_possible_effect(native_aws, fault):
     p = native_aws
-    p.authorize_error = {"lost": ConnectionError("offline"), "control": KeyboardInterrupt()}.get(fault)
+    from botocore.exceptions import EndpointConnectionError
+
+    p.authorize_error = {
+        "lost": EndpointConnectionError(endpoint_url="https://offline.invalid"),
+        "control": KeyboardInterrupt(),
+    }.get(fault)
     p.malformed_authorize = fault == "malformed"
-    expected = {"lost": ConnectionError, "malformed": ValidationError, "control": KeyboardInterrupt}[fault]
+    expected = {"lost": EC2Error, "malformed": ValidationError, "control": KeyboardInterrupt}[fault]
     with pytest.raises(expected):
         p.access.prepare(VMStatus.RUNNING, p.deadline)
     p.rules.clear()
@@ -492,15 +533,17 @@ def test_missing_route_guard_counterfactual_reaches_forbidden_send(native_aws, m
 
 
 def test_sdk_missing_start_ack_cannot_resolve_from_running(native_aws):
+    from botocore.exceptions import EndpointConnectionError
+
     p = native_aws
     p.state = "stopped"
 
     def lose_start(action):
         if action == "StartInstances":
-            raise ConnectionError("lost start acknowledgment")
+            raise EndpointConnectionError(endpoint_url="https://offline.invalid")
 
     p.after_send = lose_start
-    with pytest.raises(ConnectionError):
+    with pytest.raises(EC2Error):
         p.access.prepare(VMStatus.STOPPED, p.deadline)
     p.after_send = lambda action: None
     assert p.state == "running"
