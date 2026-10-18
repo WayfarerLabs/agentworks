@@ -350,7 +350,7 @@ for code in (0,1,255):
         assert result.stdout.data == b'final'*20000 and result.stderr.data == b'err'
         assert result.stdout.complete and result.stderr.complete
 assert 'agentworks' not in sys.modules
-print('consumer-completion-reused')
+sys.stdout.buffer.write(b'consumer-completion-reused\n')
 """
     completed = subprocess.run(
         [str(interpreter), "-I", "-S", "-B", "-c", script, str(CORE_PATH)],

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from contextlib import suppress
 from types import SimpleNamespace
 
 import pytest
@@ -111,26 +112,72 @@ def test_checked_managed_nonzero_retains_exact_contextual_result(view, monkeypat
 def test_foreground_budget_is_selected_once_and_shared(view, monkeypatch):
     _, workflow, access, main, _ = view
     _status(monkeypatch, 0)
-    composition, requested = Deadline.after(5), Deadline.after(3)
+    phase_started = time.perf_counter()
+    phase_timings = []
+
+    def record_phase(name: str, **facts: object) -> None:
+        phase_timings.append(f"{name} +{time.perf_counter() - phase_started:.3f}s {facts!r}")
+
+    record_phase("composition-deadline-create-enter")
+    composition = Deadline.after(5)
+    record_phase("composition-deadline-created", remaining=composition.remaining())
+    record_phase("requested-deadline-create-enter")
+    requested = Deadline.after(3)
+    record_phase(
+        "requested-deadline-created",
+        remaining=requested.remaining(),
+    )
     policies, delivered = [], []
 
     def policy():
         policies.append(True)
+        record_phase("deadline-policy-selected", selected_remaining=composition.remaining())
         return composition
 
     monkeypatch.setattr(access, "_deadline", policy)
-    for carrier in (main.start, main.observe):
+    for name, carrier in (("start", main.start), ("observe", main.observe)):
         original = carrier.execute
 
-        def execute(*args, _original=original, **kwargs):
-            delivered.append(kwargs["deadline"])
-            return _original(*args, **kwargs)
+        def execute(*args, _original=original, _name=name, **kwargs):
+            selected = kwargs["deadline"]
+            delivered.append(selected)
+            record_phase(
+                f"{_name}-execute-enter",
+                selected_is_requested=selected is requested,
+                selected_remaining=selected.remaining(),
+            )
+            report = _original(*args, **kwargs)
+            record_phase(
+                f"{_name}-execute-returned",
+                selected_remaining=selected.remaining(),
+                dispatch=report.dispatch.value,
+                completion=report.completion,
+                local_status=report.local_status,
+                failure=None if report.failure is None else report.failure.value,
+            )
+            return report
 
         monkeypatch.setattr(carrier, "execute", execute)
-    assert access.run(
-        Command(["/bin/true"]), profile=Protection.MANAGED, output=Output.discard(), deadline=requested
-    ).ok
-    assert len(policies) == 1 and len(delivered) == 4 and all(value is requested for value in delivered)
+    try:
+        result = access.run(
+            Command(["/bin/true"]), profile=Protection.MANAGED, output=Output.discard(), deadline=requested
+        )
+    except BaseException as error:
+        with suppress(BaseException):
+            error.add_note(f"Foreground deadline phase diagnostics: {phase_timings!r}")
+        raise
+    record_phase(
+        "access-run-returned",
+        ok=result.ok,
+        application_state=result.application_state.value,
+        status=None if result.status is None else result.status.value,
+        failure=None if result.failure is None else result.failure.value,
+        owned_cleanup_confirmed=result.owned_cleanup_confirmed,
+        deadline_exceeded=result.deadline_exceeded,
+    )
+    diagnostic = f"Foreground deadline phase diagnostics: {phase_timings!r}"
+    assert result.ok, diagnostic
+    assert len(policies) == 1 and len(delivered) == 4 and all(value is requested for value in delivered), diagnostic
     workflow.close(cleanup_deadline=Deadline.after(5))
 
 
