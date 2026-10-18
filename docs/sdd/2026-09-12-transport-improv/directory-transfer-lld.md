@@ -35,10 +35,13 @@ class DirectoryTransferProgress:
 ```
 
 The transfer limit counts the root as one entry at depth zero. Support at most 4,096 entries and
-depth eight, and a caller-selected finite aggregate byte bound from zero through `2**63 - 1`. Zero
-permits empty files, not extra uncounted bytes. Bound every relative UTF-8 path to 4,096 bytes; the
-entry and depth limits bound manifest/progress memory independently of content size. These are
-transfer limits, not a change to the standalone `DirectoryLimit` inventory contract.
+depth eight, and a caller-selected finite aggregate byte bound from zero through `2**63 - 1`. The
+byte bound counts content actually transferred, excluding preserved destinations. A fully preserved
+nonempty tree can succeed with zero; a zero budget otherwise permits only empty files, not extra
+uncounted bytes. Manifest construction reads metadata, not source content, and does not charge the
+sizes of files that may be preserved. Bound every relative UTF-8 path to 4,096 bytes; the entry and
+depth limits bound manifest/progress memory independently of content size. These are transfer
+limits, not a change to the standalone `DirectoryLimit` inventory contract.
 
 The root entry uses `PurePosixPath(".")` and must be a directory; other entries use nonempty
 normalized relative paths. Progress contains only regular files and directories, never source
@@ -87,6 +90,15 @@ destination kind refuses. Do not prune unmentioned entries, replace a directory 
 retry a create/replace conflict after observing changed state. Directory creation that races another
 creator fails rather than converging that creator's metadata.
 
+Reject distinct relative paths that map to an already assigned destination object, for files and
+directories alike. Track bounded actual filesystem-object identities separately from size/time
+observations; do not build a portable case/Unicode filename-normalization engine. For example, a
+case-insensitive destination must not count source `A` and `a` as two successfully copied entries.
+Use admitted metadata observations or publication identity facts before accepting the next entry. A
+failed identity observation after publication retains the known current-child change; it does not
+make that child unchanged or permit replay. These checks observe aliases, not an atomic namespace
+reservation against external writers.
+
 ## Bounded traversal and one budget
 
 Validate known arguments and select one original finite composition deadline before I/O. Bind an
@@ -98,7 +110,10 @@ inferred from a successful inventory.
 Build a bounded manifest before destination mutations, refusing links, hard-linked regular sources,
 special objects, unsupported path spellings and unsupported mount changes. A local inventory uses
 admitted host directory objects and records the file identity/size needed for subsequent source
-admission. A changed source is a conflict, not a reason to rebuild the manifest automatically.
+admission. A changed source is a conflict, not a reason to rebuild the manifest automatically. Pass
+that opaque manifest observation privately to the same owned-source implementation used by
+standalone `upload_file`; the public path-upload form does not gain a caller-supplied identity
+token.
 
 Remote traversal composes ordinary one-level inventories. Each child directory is explicitly
 visited, including a directory at the requested depth boundary: it may be empty, but any deeper
