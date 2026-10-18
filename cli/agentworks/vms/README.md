@@ -36,3 +36,12 @@ evidence; WSL2 uses its actual hold READY. Aggregate teardown retains the origin
 preparation until their effects and local custody settle. Neither a route switch nor an accessor can
 transfer or finalize that ownership. Canonical-context and creation/rollback integration remain
 separate unfinished work; existing consumers are unchanged.
+
+Local Lima's owned access selects its own opaque instance metadata and pins the client, home and
+directory identity before native delivery. Availability and native route selection remain separate;
+the latter pins the configured delivery user and driver. Startup is one-shot, with durable possible
+effect recorded before dispatch and exact running evidence required alongside successful client
+completion. Cleanup settles that request and local resources, not Lima's continuing VM runtime.
+Directory replacement checks do not promise uncopyable identity or automatic restore adoption.
+Windows directory-handle coverage, a non-waking power path for Lima's WSL driver and remote
+SSH-accessed platform-host composition still require their own native evidence and implementation.

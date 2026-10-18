@@ -163,6 +163,39 @@ composition can reuse availability and perform its own guest probe without nativ
 a preceding native guest probe. This staging is not a canonical-context implementation, native
 acceptance or general process-loss recovery.
 
+#### Local Lima composition
+
+Explicit local preparation pins the installed client and absolute Lima home. One bounded fixed
+`list --format=json --yq` projection observes the instance name, status, directory, driver,
+configured delivery user and presence of inspection errors. Discard raw diagnostics and never retain
+the whole configuration. The versioned provider locator hashes the site/local placement namespace,
+home, instance and actual directory device/inode. Owned access holds that directory, comparing the
+named path around observations and before effects. On Windows, reuse the existing native
+directory-handle API and compare its full file ID with Python's path observation; no new host lock
+or privileged setup is needed.
+
+This detects ordinary directory replacement and same-name clones materialized in a new directory. It
+does not promise an uncopyable universal generation, engineered inode-reuse protection or automatic
+continuity after in-place restoration. Preserve the random guest marker and complete guest boot/init
+observation. Restore workflows must decide logical identity explicitly; ordinary access never
+repairs the marker. The [source audit](prior-art-research.md#lima-instance-generation-evidence)
+records the boundary and supporting sources.
+
+Availability retains one ordinary `limactl start` request when needed, registered durably before
+possible dispatch. Reconciliation requires successful natural client completion and fresh exact
+running evidence; local process retirement alone cannot resolve an ambiguous start. Lima owns its
+continuing runtime. Do not substitute a generic macOS supervisor, mandatory foreground anchor or
+cleanup that stops the intended VM. Native route selection separately pins the actual configured
+delivery user and driver; common guest/account preparation remains core-owned.
+
+Upstream list inspection may remove stale PID files, and Lima's Windows WSL driver can invoke guest
+address commands. A proved non-waking power path for that driver remains unfinished. Independent
+availability is not inferred from the Lima client: the current native binding supplies the
+no-idle-stop fact only for QEMU and VZ, never unknown or WSL drivers. Native Windows directory
+mapping, installed Lima behavior, driver/version coverage and remote placement-host composition
+remain required acceptance gates. Remote Lima is the first instance of generalized SSH access to a
+VM platform host; local implementation does not complete that arm or provision/rollback workflows.
+
 PTY is an I/O choice, not a background state. `attach(ref, terminal=...)` requires an attach grant
 and supported transport, and does not create a new run. A reusable detached terminal needs an owned
 terminal endpoint such as the session's tmux server; ordinary inherited pipes are not durable.

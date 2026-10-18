@@ -64,9 +64,10 @@ executes literal prepared argv, including executable names containing `=` or beg
 without confusing them with environment assignments or options. This does not select the
 application's shell or bypass the outer login hooks. Zero client completion is only an outer
 command-chain observation; nonzero status cannot distinguish a Lima refusal from a remote exit.
-Local process fixtures prove the trampoline and I/O mapping, not Lima's remote quoting, native
-macOS/Windows behavior, actual guest delivery account, platform activation or production binding.
-Live and terminal I/O are unavailable in this private carrier.
+Local process fixtures prove the trampoline and I/O mapping, not Lima's remote quoting or native
+macOS/Windows behavior. The owned local platform composition below selects the actual configured
+delivery account and activation; that source implementation is not native acceptance. Live and
+terminal I/O are unavailable in this private carrier.
 
 The private managed-start exchange stages the five fixed protected request assets and invokes the
 first-party derived Linux service controller through one transient root systemd service. An
@@ -288,10 +289,28 @@ observers retain their existing separate read custody.
 Initial failures retain the same access for cleanup and, when retirement is uncertain, cleanup
 retry. The access keeps platform activation and hold custody; core retains shared guest/account
 preparation, closes child work and local delivery, checks the complete ledger, seals obligations and
-releases the aggregate owner. WSL2, Proxmox, AWS, Azure and GCP supply these private stages. They
-allow later canonical SSH composition to reuse availability without opening native public ingress or
-first probing through native guest delivery; a canonical context entry point is not yet implemented.
-Complete platform coverage, native acceptance and the public RunContext surface remain pending.
+releases the aggregate owner. WSL2, Proxmox, AWS, Azure, GCP and local Lima supply these private
+stages. They allow later canonical SSH composition to reuse availability without opening native
+public ingress or first probing through native guest delivery; a canonical context entry point is
+not yet implemented. Complete platform coverage, native acceptance and the public RunContext surface
+remain pending.
+
+Local Lima pins the selected client, absolute `LIMA_HOME`, instance directory and configured
+delivery account. Its bounded `list --format=json --yq` projection retains selected facts and an
+error boolean, not raw configuration or diagnostics. The provider locator binds the site/local
+placement, home, instance and directory device/inode. Access holds the original directory and checks
+its named path around observations; Windows uses the existing native handle API and full file ID.
+Ordinary replacement is detected, but engineered inode reuse and in-place restore require explicit
+workflow disposition. The persisted guest marker and complete boot identity remain independent
+requirements.
+
+Startup registers one exact lifecycle obligation before possible dispatch, invokes ordinary
+`limactl start` once and requires both natural zero client completion and fresh exact running
+evidence to settle it. Lima retains its own continuing VM runtime; aggregate cleanup never stops
+that intended resource or repeats startup. Lost completion remains debt. `list` is not strictly
+read-only: upstream inspection can retire stale PID files, and the Windows WSL driver can issue
+guest address commands. A non-waking WSL-driver power path, native workstation tests and generalized
+SSH platform-host composition remain acceptance gates, not implicit support claims.
 
 `plugins/aws/_native_access.py` supplies private, passive `EC2OwnedAccess` for exact power, locator
 and public-endpoint observations and the AWS owned native access factory. The caller retains it
@@ -1117,11 +1136,11 @@ pre-probe locator refuses before guest dispatch, and an unequal post-probe locat
 target. Unavailable or invalid confirmation is unconfirmed, not evidence of a changed locator.
 Release failure retains a target-suppressed custody fact. The resolving caller validates and retains
 the selected binding under the same deadline. WSL2 and Proxmox pass their retained native owner's
-bound observer when their required facts are available; SSH-backed cloud and Lima bindings remain
-future work. This seam has hermetic coverage only. A later use still needs a locator-bound platform
-hold and binding; malicious or engineered A-B-A host behavior is outside this checkpoint's threat
-scope. Production activation, hold, route and teardown, live WSL/SSH/QGA proof, recovery drain,
-adoption and public RunContext composition remain open.
+bound observer when their required facts are available; the private cloud and local Lima composition
+now use the same seam. This seam has hermetic coverage only. A later use still needs a locator-bound
+platform hold and binding; malicious or engineered A-B-A host behavior is outside this checkpoint's
+threat scope. Production activation, hold, route and teardown, live WSL/SSH/QGA proof, recovery
+drain, adoption and public RunContext composition remain open.
 
 `vms/_recovery_vm_span.py` supplies private caller-retained availability under an existing sealed
 recovery owner, without acquiring another VM claim. Its first factory explicitly supports only

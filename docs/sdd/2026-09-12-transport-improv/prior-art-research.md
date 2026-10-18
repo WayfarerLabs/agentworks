@@ -1379,10 +1379,33 @@ Sources:
 [clone exclusions](https://github.com/lima-vm/lima/blob/27bc4c4b101e27994e01e36566a0f2091bbca507/pkg/limatype/filenames/filenames.go#L104-L117),
 [clone implementation](https://github.com/lima-vm/lima/blob/27bc4c4b101e27994e01e36566a0f2091bbca507/pkg/instance/clone.go).
 
-Decision: retain the generation/placement-host identity item as unfinished before owned Lima access
-exposure. Driver-specific source facts do not authorize a new minimum version, platform restriction,
-host marker, adoption workflow or privileged host setup. Guest identity and SSH trust remain
-separate checks. This audit supplies no native-host evidence.
+Decision: use a versioned local locator over site/placement, pinned absolute Lima home, instance and
+the actual directory device/inode. Hold the original directory and compare the named path around
+observations and before effects. This detects ordinary replacement and separately materialized
+same-name clones; it is not an uncopyable generation or protection against engineered inode reuse.
+In-place restore continuity requires explicit workflow disposition. The random guest marker and
+complete boot/init identity remain independent checks; ordinary access never resets the marker.
+Driver-specific source facts do not require a new minimum version, driver restriction, host nonce or
+privileged setup. Remote placement-host identity still needs its own composition and proof.
+
+Lima's [list implementation](https://github.com/lima-vm/lima/blob/v2.2.1/cmd/limactl/list.go)
+supports a fixed JSON projection through `--yq`. Retain selected identity, status, driver and
+delivery user plus an inspection-error boolean; raw configuration and errors need not cross the
+boundary. [Store inspection](https://github.com/lima-vm/lima/blob/v2.2.1/pkg/store/instance.go) can
+retire stale PID files. The
+[WSL driver](https://github.com/lima-vm/lima/blob/v2.2.1/pkg/driver/wsl2/wsl_driver_windows.go) can
+invoke guest address commands while inspecting a running instance. Therefore ordinary `list` is not
+a universally guest-passive power observation. A non-waking path remains a gate for that driver, and
+QEMU/VZ runtime evidence cannot confer independent availability on every driver.
+
+For Windows directory custody, CPython's host minimum of 3.12 already supplies full native volume
+and file identity through `os.stat`; the guest-helper 3.11 minimum is separate. Compare the held
+native handle's full ID against that path snapshot, rather than acquiring Python-owned temporary
+observation handles. Sources:
+[native stat conversion](https://github.com/python/cpython/blob/v3.12.13/Python/fileutils.c#L1027-L1087)
+and
+[integer mapping](https://github.com/python/cpython/blob/v3.12.13/Modules/posixmodule.c#L1954-L2005).
+Synthetic Windows mappings and Linux fixtures do not supply native Windows or Lima evidence.
 
 ### Darwin ownership feasibility
 

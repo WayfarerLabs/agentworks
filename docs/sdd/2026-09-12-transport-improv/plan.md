@@ -5753,6 +5753,14 @@ ownership are unchanged, so the broader additive RunContext and migration gates 
       Delivery-account observation, provider identity, activation, SSH placement-host composition,
       provisioning, rollback and complete RunContext delivery remain required and unfinished under
       the broader factory gate.
+- [ ] Complete the private local Lima owned-composition checkpoint and its combined review. Retain
+      directory identity/custody, bounded private observations, separate availability/native stages
+      and one-shot startup reconciliation under the original owner/deadline. Validate combined
+      stage/context/provider behavior and matching permanent/design documentation. Worker checks at
+      `cfe732ff2` report 144 focused passes with one native-Windows skip, 262 adjacent passes and
+      strict typing across 1,502 sources; these do not substitute for lead integration or reviews.
+      Keep native Windows mapping, the WSL driver's non-waking power path, remote SSH platform-host
+      composition, create/rollback and installed-platform acceptance open.
 - [ ] Prove fresh-process platform composition without retirement dependencies, not only calls to
       already-imported native hooks. The first-binding audit at `6149cf06` found that VM-platform
       package initialization imports Lima's legacy dependencies, while plugin initialization imports
