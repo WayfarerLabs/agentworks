@@ -5480,7 +5480,7 @@ checkbox stays open.
       capture/spooling limits. Preserve requested profile, identity and sensitivity; never
       downgrade, substitute capture, or infer guest termination from observation loss. The DIRECT
       pipe prerequisite above does not narrow these requirements.
-- [ ] Replace whole-response closed MANAGED output retrieval with the
+- [x] Replace whole-response closed MANAGED output retrieval with the
       [bounded range design](preparation-lld.md#closed-managed-capture-ranges). Keep the existing
       protected run store, whole-spool length and digest checks, exact launch/end facts and one
       helper borrow per page. Bound encoded provider responses and collector memory; propagate
@@ -5490,6 +5490,13 @@ checkbox stays open.
       multi-page binary output, corruption outside the selected range, end-fact mismatch, partial
       retrieval and no replay. This does not complete DIRECT spooling, active output, the production
       capture default, staging or native acceptance.
+- [ ] Correct managed-service pipe ownership across observation and final cleanup. Early stdin
+      closure and output EOF must consume the same close-once ownership state that final cleanup
+      uses, so a reused descriptor number is never closed again. Preserve pre-observation and
+      observation-initialization cleanup, original controls and stream/wait facts. Prove actual
+      descriptor reuse with unchanged fairness assertions and packed Python 3.11 execution before
+      claiming this correction; do not identify it as the spontaneous CI failure's exact operation
+      without that evidence.
 - [ ] Obtain native root/cgroup/SSH acceptance for the implemented private
       [managed foreground pipe design](managed-live-io-lld.md): settled buffered launch and keeper
       admission, protected live-direction metadata, one controller-owned per-run socket and one
