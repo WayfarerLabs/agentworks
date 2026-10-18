@@ -1250,6 +1250,28 @@ Neither `--foreground` nor launchd establishes every MANAGED guarantee. The oper
 coordination ruling keeps actual host resource lifecycle with the VM platform instead of requiring a
 generic macOS MANAGED supervisor; native platform recovery still needs proof.
 
+### Lima instance-generation evidence
+
+A follow-up audit pins Lima v2.2.1 to `27bc4c4b101e27994e01e36566a0f2091bbca507`. For Linux guests
+using VZ, the driver stores Apple's opaque machine-identifier bytes in the instance directory's
+`vz-identifier`. It reuses nonempty data and generates new data when the file is absent or empty.
+This is a concrete generation-evidence candidate, not an approved universal Lima locator: no
+equivalent QEMU generation identity or supported-version range has been proved. Source:
+[VZ identifier construction](https://github.com/lima-vm/lima/blob/27bc4c4b101e27994e01e36566a0f2091bbca507/pkg/driver/vz/vm_darwin.go#L810-L829).
+
+Clone handling empties `vz-identifier` explicitly. Other instance files are generally copied except
+the documented exclusions and temporary suffixes. Consequently, adding an arbitrary Agentworks nonce
+file under the instance directory would not by itself distinguish a clone: the clone could inherit
+it. Do not implement or approve a marker on the assumption that Lima discards unknown metadata.
+Sources:
+[clone exclusions](https://github.com/lima-vm/lima/blob/27bc4c4b101e27994e01e36566a0f2091bbca507/pkg/limatype/filenames/filenames.go#L104-L117),
+[clone implementation](https://github.com/lima-vm/lima/blob/27bc4c4b101e27994e01e36566a0f2091bbca507/pkg/instance/clone.go).
+
+Decision: retain the generation/placement-host identity item as unfinished before owned Lima access
+exposure. Driver-specific source facts do not authorize a new minimum version, platform restriction,
+host marker, adoption workflow or privileged host setup. Guest identity and SSH trust remain
+separate checks. This audit supplies no native-host evidence.
+
 ### Darwin ownership feasibility
 
 The follow-up source audit distinguishes ordinary process-group cleanup from inherited ownership
