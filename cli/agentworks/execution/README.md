@@ -483,11 +483,14 @@ credentials. These are bound facts, not a fresh readiness check or elevation gra
 aggregate supplies exact admin and optional selected-agent identities with the native route. This
 wrapper does not construct RunContext, activate permissions or extend operation lifetime.
 
-`ExecutionOperation` requires an explicit managed target matching its owner's scope. An optional
-numeric bootstrap must match that VM's derived boot identity; platform-host targets cannot select
-it. The operation forwards its immutable context before preparation and borrowing, while each call
-keeps its explicit body identity. The private native VM factory constructs the shared bootstrap from
-its prepared elevated plan and actual full guest for WSL2 and Proxmox VMs. WSL2 retains its actual
+`ExecutionOperation` requires an explicit managed target matching its owner's scope for VM and
+managed-job work. An owned platform-host operation can instead explicitly supply no managed target
+for ordinary DIRECT execution, without manufacturing a VM marker or boot identity. Managed actions
+then refuse before preparation or effects. An optional numeric bootstrap must match the actual VM
+target's derived boot identity; an unbound or platform-host operation cannot select it. VM and
+managed calls forward their bound context before preparation and borrowing, while each call keeps
+its explicit body identity. The private native VM factory constructs the shared bootstrap from its
+prepared elevated plan and actual full guest for WSL2 and Proxmox VMs. WSL2 retains its actual
 platform hold; Proxmox needs no idle-stop hold. For a stopped Proxmox VM without operator-stopped
 intent, the private factory retains the selected locator and root QGA binding before one activation
 attempt. Only successful ordinary request settlement permits a fresh running-power read and bounded
