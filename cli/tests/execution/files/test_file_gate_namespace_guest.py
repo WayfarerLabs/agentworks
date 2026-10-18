@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import time
@@ -11,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from agentworks.execution import _file_effect_gate as gate
+from agentworks.execution import _file_gate_namespace_guest as guest
 from agentworks.execution._file_gate_namespace_bundle import _MODULE_NAMES, _PACKAGE
 from agentworks.execution._file_wire import FileRecord, FileRecordKind
 from agentworks.execution._file_wire_reader import FileRecordReader
@@ -19,7 +22,7 @@ from tests.execution.files._fixed_bundle_support import fixture_file_bundle
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux namespace helper")
 
 _SCRIPT = r"""
-import json,os,sys,time
+import json,os,stat,sys,time
 from pathlib import Path
 from dataclasses import replace
 from agentworks.execution import _file_effect_gate as gate
@@ -41,6 +44,16 @@ namespace=root/'run'/'agentworks'/'file-gates-v1'
 (namespace/'0').mkdir(parents=True,mode=0o700)
 rules=root/'etc'/'tmpfiles.d'; rules.mkdir(parents=True)
 guest._RULE_DIRECTORY=str(rules); guest._RULE_GID=gid
+# Shared ancestors above root are outside this synthetic ownership fixture.
+# Validate real fixture anchors; retain production leaf checks and direct effects.
+def open_fixture_rule_directory():
+ for anchor in (root,root/'etc',rules):
+  metadata=anchor.lstat()
+  if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid!=uid or metadata.st_mode&0o022:
+   raise ValueError('unsafe fixture rule anchor')
+  guest._no_acl(str(anchor))
+ return os.open(rules,os.O_RDONLY|os.O_DIRECTORY|gate._open_flags())
+guest._open_rule_directory=open_fixture_rule_directory
 guest._identity=lambda:epoch
 agent=namespace/str(uid)
 rule=rules/f'agentworks-file-gates-uid-{uid}.conf'
@@ -90,7 +103,7 @@ print(json.dumps({'status':status.value,'rule':rule.exists(),'temp':temporary_co
 """
 
 
-@pytest.mark.parametrize("runtime", [sys.executable, "/usr/bin/python3.11"])
+@pytest.mark.parametrize("runtime", [Path(sys.executable), Path("/usr/bin/python3.11")], ids=["current", "python311"])
 @pytest.mark.parametrize(
     ("mode", "status", "rule", "temporary"),
     [
@@ -111,8 +124,10 @@ print(json.dumps({'status':status.value,'rule':rule.exists(),'temp':temporary_co
     ],
 )
 def test_root_fenced_direct_effects(
-    tmp_path: Path, runtime: str, mode: str, status: str, rule: bool, temporary: int
+    tmp_path: Path, runtime: Path, mode: str, status: str, rule: bool, temporary: int
 ) -> None:
+    if not runtime.is_file():
+        pytest.skip(f"compatibility interpreter is unavailable: {runtime}")
     completed = subprocess.run(
         [runtime, "-B", "-c", _SCRIPT, str(tmp_path), mode], capture_output=True, timeout=10, check=False
     )
@@ -155,11 +170,14 @@ def test_killed_helper_never_exposes_partial_configuration(tmp_path: Path) -> No
 
 
 def test_separate_bundle_executes_in_bookworm_python() -> None:
+    runtime = Path("/usr/bin/python3.11")
+    if not runtime.is_file():
+        pytest.skip("Bookworm Python 3.11 is unavailable on this host")
     modules = ("_vm_guest_identity_protocol", "_vm_guest_identity_guest", *_MODULE_NAMES)
     bundle = fixture_file_bundle(_PACKAGE, modules, "_file_gate_namespace_guest")
     # Exercise the shipped module closure, without host application imports.
     completed = subprocess.run(
-        ["/usr/bin/python3.11", "-I", "-S", "-B", "-c", bundle.bootstrap, "0" * 32],
+        [str(runtime), "-I", "-S", "-B", "-c", bundle.bootstrap, "0" * 32],
         input=bundle.prefix + b"{}",
         capture_output=True,
         timeout=10,
@@ -172,3 +190,34 @@ def test_separate_bundle_executes_in_bookworm_python() -> None:
     assert completed.returncode == 0 and completed.stderr == b""
     assert reader.error is None
     assert [record.kind for record in records] == [FileRecordKind.RESULT, FileRecordKind.FINISHED]
+
+
+@pytest.mark.parametrize("unsafe", ["foreign-owner", "writable", "symlink"])
+def test_production_rule_opener_refuses_unsafe_ancestor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unsafe: str
+) -> None:
+    metadata = list(tmp_path.stat())
+    if unsafe == "foreign-owner":
+        metadata[4] = os.geteuid() + 1
+    elif unsafe == "writable":
+        metadata[0] = stat.S_IFDIR | 0o1777
+    else:
+        metadata[0] = stat.S_IFLNK | 0o777
+    observed: list[str] = []
+
+    def first_ancestor(path: str) -> os.stat_result:
+        observed.append(path)
+        assert path == "/fixture-anchor"
+        return os.stat_result(metadata)
+
+    def unexpected_open(*args: object, **kwargs: object) -> int:
+        pytest.fail("unsafe ancestor reached directory open")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(gate, "_ROOT_UID", os.geteuid())
+        patch.setattr(guest, "_RULE_DIRECTORY", "/fixture-anchor/etc/tmpfiles.d")
+        patch.setattr(os, "lstat", first_ancestor)
+        patch.setattr(os, "open", unexpected_open)
+        with pytest.raises(ValueError):
+            guest._open_rule_directory()
+    assert observed == ["/fixture-anchor"]
