@@ -371,7 +371,7 @@ def _validate_inputs(
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
-    bootstrap: _NumericGuestBootstrap | None,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> None:
     for account in (delivery_account, workload_account):
         valid = True
