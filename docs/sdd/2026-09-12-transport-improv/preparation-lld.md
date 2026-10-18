@@ -687,6 +687,8 @@ append/activation/cleanup. Tokens precede creation, and owner/debt lifetime rema
 lease validity and helper observation. Neither a timeout nor the loader's remaining allowance proves
 remote closure.
 
+### Captured output retrieval
+
 Captured stdout and stderr spool separately. Each spool keeps at most `max_bytes + 1`; helper
 readers drain the remainder so a caller retention bound does not send SIGPIPE to the workload. The
 extra byte proves caller-bound truncation. Completion frames contain safe sizes and digests, then
