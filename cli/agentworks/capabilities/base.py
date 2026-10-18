@@ -192,8 +192,10 @@ class RunContext:
       is reached through plain accessor METHODS. ``admin_target``
       and ``agent_target`` return the existing legacy transports;
       ``admin_execution_target`` and ``agent_execution_target`` return
-      independently supplied new execution target bindings. All are
-      passive pass-throughs, with no fallback between the two views.
+      independently supplied new execution target bindings;
+      ``platform_host_execution_target`` returns a separately supplied
+      platform-host binding. All are
+      passive pass-throughs, with no fallback between bindings.
       Absence accessors distinguish unavailable targets from withheld ones.
       ``secret`` reads the supplied resolved-secret reader.
 
@@ -213,8 +215,10 @@ class RunContext:
     _agent_target: Transport | None
     _admin_execution_target: ExecutionTarget | None
     _agent_execution_target: ExecutionTarget | None
+    _platform_host_execution_target: ExecutionTarget | None
     _admin_execution_target_absence: TargetAbsence | None
     _agent_execution_target_absence: TargetAbsence | None
+    _platform_host_execution_target_absence: TargetAbsence | None
     _secrets: SecretReader | None
 
     def __init__(
@@ -228,6 +232,8 @@ class RunContext:
         agent_execution_target: ExecutionTarget | None = None,
         admin_execution_target_absence: TargetAbsence = TargetAbsence.UNAVAILABLE,
         agent_execution_target_absence: TargetAbsence = TargetAbsence.UNAVAILABLE,
+        platform_host_execution_target: ExecutionTarget | None = None,
+        platform_host_execution_target_absence: TargetAbsence = TargetAbsence.UNAVAILABLE,
         secrets: SecretReader | None = None,
     ) -> None:
         # Hand-written only to store the power-granting inputs under
@@ -245,6 +251,7 @@ class RunContext:
         object.__setattr__(self, "_agent_target", agent_target)
         object.__setattr__(self, "_admin_execution_target", admin_execution_target)
         object.__setattr__(self, "_agent_execution_target", agent_execution_target)
+        object.__setattr__(self, "_platform_host_execution_target", platform_host_execution_target)
         object.__setattr__(
             self,
             "_admin_execution_target_absence",
@@ -254,6 +261,11 @@ class RunContext:
             self,
             "_agent_execution_target_absence",
             agent_execution_target_absence if agent_execution_target is None else None,
+        )
+        object.__setattr__(
+            self,
+            "_platform_host_execution_target_absence",
+            platform_host_execution_target_absence if platform_host_execution_target is None else None,
         )
         object.__setattr__(self, "_secrets", secrets)
 
@@ -282,6 +294,14 @@ class RunContext:
     def agent_execution_target_absence(self) -> TargetAbsence | None:
         """Return the supplied absence reason, or None for a bound agent target."""
         return self._agent_execution_target_absence
+
+    def platform_host_execution_target(self) -> ExecutionTarget | None:
+        """Return the supplied platform-host execution target binding unchanged."""
+        return self._platform_host_execution_target
+
+    def platform_host_execution_target_absence(self) -> TargetAbsence | None:
+        """Return the supplied absence reason, or None for a bound host target."""
+        return self._platform_host_execution_target_absence
 
     def secret(self, name: str) -> str:
         """A resolved secret value, from the operation's boundary

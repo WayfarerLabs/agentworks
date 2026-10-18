@@ -42,8 +42,10 @@ def test_targets_pass_through_unchanged() -> None:
     assert ctx.agent_target() is agent
     assert ctx.admin_execution_target() is None
     assert ctx.agent_execution_target() is None
+    assert ctx.platform_host_execution_target() is None
     assert ctx.admin_execution_target_absence() is TargetAbsence.UNAVAILABLE
     assert ctx.agent_execution_target_absence() is TargetAbsence.UNAVAILABLE
+    assert ctx.platform_host_execution_target_absence() is TargetAbsence.UNAVAILABLE
 
 
 def test_absent_targets_read_as_none() -> None:
@@ -52,6 +54,7 @@ def test_absent_targets_read_as_none() -> None:
     assert ctx.agent_target() is None
     assert ctx.admin_execution_target() is None
     assert ctx.agent_execution_target() is None
+    assert ctx.platform_host_execution_target() is None
 
 
 @pytest.mark.parametrize("bind_admin", [False, True])
@@ -96,6 +99,58 @@ def test_execution_bindings_do_not_supply_legacy_transports() -> None:
     assert ctx.agent_target() is None
 
 
+def test_platform_host_binding_is_independent_and_passive() -> None:
+    host = cast("ExecutionTarget", _UntouchableTarget())
+    ctx = RunContext(platform_host_execution_target=host)
+    for _ in range(2):
+        assert ctx.platform_host_execution_target() is host
+        assert ctx.platform_host_execution_target_absence() is None
+    assert ctx.admin_execution_target() is None
+    assert ctx.agent_execution_target() is None
+    assert ctx.admin_target() is None
+    assert ctx.agent_target() is None
+
+
+def test_platform_host_and_guest_bindings_remain_independent() -> None:
+    host = cast("ExecutionTarget", _UntouchableTarget())
+    admin = cast("ExecutionTarget", _UntouchableTarget())
+    agent = cast("ExecutionTarget", _UntouchableTarget())
+    legacy_admin = cast("Transport", _UntouchableTarget())
+    legacy_agent = cast("Transport", _UntouchableTarget())
+    reader = _Reader({"secret": "value"})
+    ctx = RunContext(
+        admin_target=legacy_admin,
+        agent_target=legacy_agent,
+        admin_execution_target=admin,
+        agent_execution_target=agent,
+        platform_host_execution_target=host,
+        secrets=reader,
+    )
+
+    for _ in range(2):
+        assert ctx.platform_host_execution_target() is host
+    assert ctx.admin_execution_target() is admin
+    assert ctx.agent_execution_target() is agent
+    assert ctx.admin_target() is legacy_admin
+    assert ctx.agent_target() is legacy_agent
+    assert ctx.platform_host_execution_target_absence() is None
+    assert ctx.admin_execution_target_absence() is None
+    assert ctx.agent_execution_target_absence() is None
+    assert reader.reads == []
+
+
+@pytest.mark.parametrize("absence", list(TargetAbsence))
+def test_absent_platform_host_binding_preserves_reason(absence: TargetAbsence) -> None:
+    guest = cast("ExecutionTarget", _UntouchableTarget())
+    ctx = RunContext(
+        agent_execution_target=guest,
+        platform_host_execution_target_absence=absence,
+    )
+    assert ctx.platform_host_execution_target() is None
+    assert ctx.platform_host_execution_target_absence() is absence
+    assert ctx.agent_execution_target() is guest
+
+
 @pytest.mark.parametrize(
     "field",
     [
@@ -103,16 +158,24 @@ def test_execution_bindings_do_not_supply_legacy_transports() -> None:
         "_agent_execution_target",
         "_admin_execution_target_absence",
         "_agent_execution_target_absence",
+        "_platform_host_execution_target",
+        "_platform_host_execution_target_absence",
     ],
 )
 def test_execution_bindings_are_frozen(field: str) -> None:
     admin = cast("ExecutionTarget", _UntouchableTarget())
     agent = cast("ExecutionTarget", _UntouchableTarget())
-    ctx = RunContext(admin_execution_target=admin, agent_execution_target=agent)
+    host = cast("ExecutionTarget", _UntouchableTarget())
+    ctx = RunContext(
+        admin_execution_target=admin,
+        agent_execution_target=agent,
+        platform_host_execution_target=host,
+    )
     with pytest.raises(dataclasses.FrozenInstanceError):
         setattr(ctx, field, None)
     assert ctx.admin_execution_target() is admin
     assert ctx.agent_execution_target() is agent
+    assert ctx.platform_host_execution_target() is host
 
 
 def test_secret_delegates_to_the_reader() -> None:
