@@ -1334,7 +1334,7 @@ The earlier private path-only Azure producer is superseded by one exact-incarnat
 completed implementation record remains historical, while its persisted codec and acknowledgment
 helpers remain supported.
 
-- [ ] Implement and privately review the
+- [x] Implement and privately review the
       [exact-incarnation Azure start boundary](execution-lifecycle-lld.md#exact-incarnation-azure-start-completion).
       Preserve path-only version-one obligations, bind new version-two admission to recorded UUID
       and path, and distinguish documented synchronous success from exact monitor completion. Prove
@@ -1342,14 +1342,21 @@ helpers remain supported.
       bookkeeping-only settlement through lost replies and uncertain original closure. Record newly
       created VM identity inside the rollback-covered provisioning interval, without silently
       adopting historical records. This does not close complete access or native acceptance.
+
+Private paired pin `d7977cf6` clears all three independent source re-reviews. The combined selection
+passes all 747 cases without skips; full strict typing passes over 1,397 sources and all 20 changed
+Python files pass lint and format checks. The one exact-incarnation producer retains the old
+persisted codec and all 167 old-module regression cases, migrated to the appropriate boundary.
+Native provider behavior, full access and RunContext acceptance remain open.
+
 - [ ] Complete owned Azure access with reviewed request-specific startup settlement, fresh endpoint
       trust, selected route lifetime, exact guest preparation and aggregate release. Account
-      explicitly for provider incarnation: current metadata and observations verify only the
-      reusable ARM resource path, not Azure's unique VM ID. Define new-VM recording and existing-VM
-      acquisition/adoption before claiming that check; the existing string metadata map can store it
-      without a schema migration, but cannot supply historical identity proof. A cloned guest marker
-      does not turn the ARM path into an immutable incarnation. Keep the acknowledged producer
-      separate from these unfinished integration and native-proof gates.
+      explicitly for provider incarnation: compose newly recorded VM UUID/path evidence with the
+      owned reader and complete native access. Historical records still lack unique-ID evidence;
+      their acquisition/adoption needs explicit disposition, not silent backfill. The existing
+      string metadata map needs no schema migration but cannot supply historical identity proof. A
+      cloned guest marker does not turn the ARM path into an immutable incarnation. Keep the
+      acknowledged producer separate from these unfinished integration and native-proof gates.
 - [ ] Establish explicit custody for provider and linked-endpoint read clients in the owned cloud
       composition, including preliminary power reads before activation. Existing AWS/Azure reads
       suppress ordinary close errors without retaining uncertain originals; GCP uses cached
@@ -4565,7 +4572,7 @@ the directory facade, native proof or complete R7 delivery.
       helper/source/publication replay. Retain readers for persisted versions three through six
       until their compatibility disposition is explicit; do not inspect or discard operator data to
       justify deletion. Preserve the distinct durable artifact ownership callback.
-- [ ] Allow an explicit zero-byte maximum throughout the ordinary download/snapshot path. Prove
+- [x] Allow an explicit zero-byte maximum throughout the ordinary download/snapshot path. Prove
       verified empty-file publication, nonempty-source refusal before publication and unchanged
       custody, including an empty source that grows after inventory. Keep in-memory read bounds
       positive. This is a directory-composition prerequisite, not delivery of that facade.
