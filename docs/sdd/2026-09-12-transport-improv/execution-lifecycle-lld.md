@@ -1603,8 +1603,17 @@ completed creation can establish that it is already removed without sending DELE
 sent, publish its exact cleanup intent before dispatch, retain its own documented HTTP 200/202/204
 receipt and observe any supplied monitor, even on HTTP 200. Any retained terminal DELETE result plus
 fresh absence can settle removal; a failed request with the rule still present cannot. An absent
-rule cannot settle an unknown queued PUT or an unacknowledged DELETE. Do not replay either mutation
-to manufacture a receipt.
+rule cannot settle an unknown queued PUT or an unacknowledged DELETE. Never replay an uncertain
+mutation to manufacture completion evidence.
+
+A known terminal failed or canceled DELETE is different from an uncertain request. If the exact
+owned rule still exists, a later explicit settlement call may admit one fresh cleanup attempt after
+retiring originals, reconciling ownership and repeating parent/nonce/content checks. Publish the new
+intent without presenting the previous attempt's acknowledgment or terminal result as its evidence.
+A lost intent-publication reply before dispatch can resume only after exact reconciliation; a lost
+receipt after dispatch remains uncertain and cannot replay. Do not retry a newly failed deletion
+inside the same settlement call. Preserve the one-attempt-per-call boundary and continue observing
+delayed absence after known success rather than sending another DELETE.
 
 `close()` bars opening/checking and retries original public closes; explicit `settle()` remains
 allowed to observe retained monitors and remove the owned rule. The start producer's `settle()` is
