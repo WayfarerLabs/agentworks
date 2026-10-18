@@ -1165,8 +1165,8 @@ actual outcome/capture/cleanup facts. Final combined validation and paired re-re
 
 The complete private unit is locally accepted at `f30e519c`: all three independent source re-reviews
 are clear, all 781 joint selected cases pass without skips, and full strict typing passes over 1,393
-sources. Sixteen changed Python files pass cacheless lint/format; paired documentation quality and
-whitespace checks pass. The two main test runs retain 2,896 verified regular fixture files,
+sources. Sixteen changed Python files pass lint/format without caches; paired documentation quality
+and whitespace checks pass. The two main test runs retain 2,896 verified regular fixture files,
 including their databases, in workspace evidence; recorded permissions/ownership and file hashes
 match. Separate bind mounts required copying during archival, so neither inode continuity nor atomic
 relocation is claimed. No fixture data was discarded; only the empty temporary parent was removed.
