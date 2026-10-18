@@ -1123,8 +1123,9 @@ test initially expected public access error translation at the private producer 
 corrected oracle checks the SDK rejection code, zero EC2 sends, retired clients and retained
 possible effect. Test helper annotations address the subsequent strict-typing failures without
 changing production behavior or assertions. Failed setup, interrupted and failed verification
-evidence remains preserved. Independent paired source review is pending; these earlier-base
-measurements do not establish whole-composition, native or complete AWS access acceptance.
+evidence remains preserved. All three independent paired source-review lanes clear `dfa22fca`; these
+earlier-base measurements do not establish whole-composition, native or complete AWS access
+acceptance.
 
 - [ ] Complete owned AWS access with a reviewed successful-start settlement rule, fresh power and
       exact guest preparation, endpoint trust and selected firewall-route lifetime. Obtain native
