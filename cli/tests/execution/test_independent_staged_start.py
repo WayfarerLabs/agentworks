@@ -17,7 +17,6 @@ from agentworks.execution._execution_operation import ManagedExecutionControlFac
 from agentworks.execution._managed_runs import ManagedLaunchState, ManagedRunIdentity
 from agentworks.execution._managed_start_bundle import FIXED_BUNDLE
 from agentworks.execution._managed_start_protocol import decode_request
-from agentworks.execution._staged_helper_bundle import build_staged_helper_program
 from agentworks.execution._staged_helper_protocol import decode_request as decode_activation
 from agentworks.execution.carrier import (
     CapturedOutput,
@@ -70,7 +69,7 @@ class IndependentCarrier(StagedStartCarrier):
         custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
         assert isinstance(io.input, FiniteInput)
-        prefix = build_staged_helper_program(FIXED_BUNDLE).prefix
+        prefix = self.activation_prefix
         if not io.input.data.startswith(prefix):
             if not self.owner._close_requested.is_set():
                 return super().execute(invocation, io=io, deadline=deadline, custody=custody)
@@ -135,7 +134,7 @@ class NativeDelivery:
         self.carrier.validate(invocation, io=io)
 
     def execute(self, invocation, *, io, deadline, custody=None):
-        self.activation = io.input.data.startswith(build_staged_helper_program(FIXED_BUNDLE).prefix)
+        self.activation = io.input.data.startswith(self.carrier.activation_prefix)
         self.custody = custody
         return self.carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
 

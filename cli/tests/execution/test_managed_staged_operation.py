@@ -45,6 +45,8 @@ class StagedStartCarrier(StageCarrier):
 
     def __init__(self, owner) -> None:
         super().__init__(owner)
+        # Keep fixed fixture packaging outside the timed helper exchanges.
+        self.activation_prefix = build_staged_helper_program(FIXED_BUNDLE).prefix
         self.data = bytearray()
         self.events: list[str] = []
         self.activated: ManagedStartRequest | None = None
@@ -64,7 +66,7 @@ class StagedStartCarrier(StageCarrier):
     ) -> CarrierReport:
         self.bodies.append(ProxmoxCarrier._request_body(invocation, io))
         assert isinstance(io.input, FiniteInput)
-        prefix = build_staged_helper_program(FIXED_BUNDLE).prefix
+        prefix = self.activation_prefix
         if not io.input.data.startswith(prefix):
             report = super().execute(invocation, io=io, deadline=deadline, custody=custody)
             stage_request = self.requests[-1]
