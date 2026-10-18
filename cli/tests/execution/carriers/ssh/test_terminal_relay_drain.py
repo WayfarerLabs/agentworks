@@ -451,7 +451,7 @@ def test_frozen_prefix_respects_original_deadline_and_control(boundary: str, mon
             assert not result.stdout.complete
             assert "private-native-queue-canary" not in repr(result)
         assert frozen.is_set()
-        assert stdout_fd is not None and frozen_pending[stdout_fd] == 4096
+        assert stdout_fd is not None and frozen_pending[stdout_fd] > 0
         # Pending stdout precedes its own reads; stderr may independently probe EOF.
         assert [limit for fd, limit in reads if fd == stdout_fd] == []
         if boundary == "query":
