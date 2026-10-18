@@ -5337,7 +5337,7 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
 
 ## 5. Add the complete new RunContext surface
 
-- [ ] Connect non-terminal live input/output to DIRECT execution through the existing inline helper
+- [x] Connect non-terminal live input/output to DIRECT execution through the existing inline helper
       and process pump. Use one bounded length-delimited request for finite and live input, keep
       script source separate, and deliver decoded stdout/stderr incrementally without retaining
       presentation bytes. Prove duplex progress before input EOF, binary separation, nonzero exits,
@@ -5345,12 +5345,36 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
       on unsupported routes, original control-flow preservation and endpoint release. Update the
       older private systemd producer to the same request format; do not keep a legacy decoder for
       this unreleased exchange. This is a private prerequisite, not a partial public API handoff.
+- [ ] Settle and prove shared input-completion semantics before public live-I/O acceptance.
+      Distinguish finite required-byte delivery, live source EOF and a consumer that finishes or
+      closes input early. Cover commands that do not read stdin, prefix consumers, sources that
+      remain open, real source faults and output/control facts buffered when input ends. Preserve
+      independently observed completion, original controls, bounded collection and endpoint release;
+      never infer termination from missing observation. Coordinate any shared pump semantic change
+      with the SSH lane before integration. The current private pipe checkpoint does not satisfy
+      this gate merely because its cooperative-EOF cases pass.
 - [ ] Complete the remaining live/terminal integration before additive RunContext acceptance:
       MANAGED foreground live I/O, active managed output and attachment, shared terminal preparation
       plus SSH-owned native relay adoption, supported workstation/backend proof and production
       capture/spooling limits. Preserve requested profile, identity and sensitivity; never
       downgrade, substitute capture, or infer guest termination from observation loss. The DIRECT
       pipe prerequisite above does not narrow these requirements.
+
+The private pipe checkpoint at `6b8fe8128` passes 1,318 scoped tests with one skip and strict typing
+across 1,442 sources. Changed-file Python and Markdown quality checks pass. Project, complexity and
+generic correctness source reviews are clear after removing an unnecessary writer alias and reusing
+the existing sink-result validator. The tests exercise actual local packed helpers, including Python
+3.11, not native SSH or platform workflows. A prior overly broad selection also ran the separately
+owned SSH suite inside a network namespace with loopback down; its errors and failures are not SSH
+validation, and that suite is excluded from this private unit's final selection rather than reported
+green.
+
+Additional bounded local probes show that an early-exiting command with an open live source
+currently returns INPUT failure. Depending on available evidence it reports either unknown
+application status or independently validated exit zero. No deadline expiry, replay or retained
+attempt was observed. These probes establish the open input-completion gate above, not acceptable
+public semantics. MANAGED live I/O, active output, terminal/native proof, production capture limits,
+complete RunContext and production ownership remain required and unfinished.
 
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
 one all-callers cutover. PR #830 publishes this design only. The following implementation PR adds

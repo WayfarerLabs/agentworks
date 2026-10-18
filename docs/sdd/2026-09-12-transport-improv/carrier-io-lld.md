@@ -148,6 +148,13 @@ output, terminal launch/attachment, native workstation/SSH proof and production 
 limits remain separate required additive-surface gates. The first pipe increment does not narrow
 their requirements or constitute a public handoff.
 
+Shared input-completion semantics remain an acceptance gate. A bounded local probe of an
+early-exiting command with a live source that remains open currently reports INPUT failure; its
+application outcome depends on the completion evidence observed before collection ends. Decide and
+prove how finite required bytes, live EOF and intentional consumer closure differ before public
+acceptance. Coordinate changes to shared pump behavior with SSH; the cooperative-EOF pipe proof is
+not evidence that this edge is settled.
+
 ## Transient collection and sensitive control evidence
 
 A carrier stream sink receives raw carrier bytes, not supposedly separated application streams.

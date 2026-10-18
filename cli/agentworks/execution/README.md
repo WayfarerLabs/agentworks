@@ -1560,6 +1560,11 @@ private `start` and MANAGED paths reject live endpoints rather than silently sub
 DIRECT execution. This candidate is not wired to production RunContext and does not yet supply
 staging, MANAGED live I/O, active managed output, terminal I/O or native live-platform acceptance.
 
+Live input currently requires source completion for a successful result. A command that exits while
+its source remains open reports an input failure; application status can still be known when its
+complete evidence was observed. Shared early-consumer-close semantics remain unresolved, so this
+private behavior is not a production live-input contract.
+
 The guest uses non-blocking writes while pumping application streams and restores its owned pipe
 flags afterward. A partially written evidence frame gets at most 0.5 seconds to finish after the
 pump stops; failure aborts later control emission rather than corrupting framing or claiming
