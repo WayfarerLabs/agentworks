@@ -28,17 +28,19 @@ from agentworks.operations import OperationOwner
 from agentworks.plugins.azure import _activation_client
 from agentworks.plugins.azure._activation import (
     ActivationPayload,
-    AzureVMActivation,
     StartAcknowledgment,
     decode_activation_payload,
     encode_activation_payload,
     start_url,
 )
+from agentworks.plugins.azure._incarnation_start import AzureIncarnationStart
+from agentworks.plugins.azure._incarnation_start_payload import decode_start_payload, encode_start_payload
 
+VM_ID = "01234567-89ab-0cde-0123-456789abcdef"
 SUBSCRIPTION = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 RESOURCE = f"/subscriptions/{SUBSCRIPTION}/resourceGroups/group/providers/Microsoft.Compute/virtualMachines/vm"
 OPERATION = f"https://management.azure.com/subscriptions/{SUBSCRIPTION}/providers/Microsoft.Compute/locations/eastus/operations/op?api-version=2026-04-01"
-LOCATOR = ProviderLocator(f"azure-vm:{RESOURCE}")
+LOCATOR = ProviderLocator(f"azure-vm:v2:{VM_ID}:{RESOURCE}")
 ACK = StartAcknowledgment(202, "offline-request", OPERATION)
 
 
@@ -99,7 +101,7 @@ def owned(tmp_path, monkeypatch):
             return client
 
         monkeypatch.setattr(_activation_client, "compute_start_client", construct)
-        adapter = AzureVMActivation(owner, "vm", object(), RESOURCE, LOCATOR)
+        adapter = AzureIncarnationStart(owner, "vm", object(), RESOURCE, VM_ID, LOCATOR)
         result = SimpleNamespace(
             adapter=adapter, owner=owner, repository=repository, calls=calls, client=client, response=response
         )
@@ -110,12 +112,12 @@ def test_passive_once_never_settles_or_closes_owner(owned):
     assert owned.calls == [] and owned.adapter.obligation is None
     assert owned.adapter.start(Deadline.after(5)) == ACK
     owned.owner.stop_admission()
-    owned.adapter.reconcile(Deadline.after(5))
+    owned.adapter.settle(Deadline.after(5))
     with pytest.raises(StateError):
         owned.adapter.start(Deadline.after(5))
     assert row(owned).state is LifecycleObligationState.POSSIBLE_EFFECT
     assert row(owned).payload_revision == 1
-    assert decode_activation_payload(row(owned).payload) == owned.adapter.payload
+    assert decode_start_payload(row(owned).payload) == owned.adapter.payload
     assert owned.calls == ["client", "send", "response-close", "client-close"]
     assert owned.response.closed and owned.client.closed and not owned.adapter.cleanup_incomplete
     assert owned.repository.inspect(owned.owner.ownership.scope) is not None
@@ -144,10 +146,10 @@ def test_lost_ledger_reply_never_replays(owned, monkeypatch, stage, committed, e
     assert caught.value is primary
     monkeypatch.setattr(owned.repository, method, original)
     if stage == "register" and not committed:
-        with pytest.raises(StateError):
-            owned.adapter.reconcile(Deadline.after(5))
+        assert owned.adapter.settle(Deadline.after(5))
+        assert owned.owner.inspect_lifecycle_obligation(owned.adapter.obligation_id) is None
     else:
-        owned.adapter.reconcile(Deadline.after(5))
+        owned.adapter.settle(Deadline.after(5))
         expected = LifecycleObligationState.POSSIBLE_EFFECT
         if stage == "register":
             expected = LifecycleObligationState.RESOLVED
@@ -185,7 +187,7 @@ def test_deadline_each_boundary_retains_late_ack(owned, monkeypatch, stage):
     monkeypatch.setattr(target, method, late)
     with pytest.raises(TimeoutError):
         owned.adapter.start(Deadline.after(0.02))
-    owned.adapter.reconcile(Deadline.after(5))
+    owned.adapter.settle(Deadline.after(5))
     dispatched = stage in {"send", "publish", "response-close", "client-close"}
     assert owned.adapter.payload.acknowledgment == (ACK if dispatched else None)
     assert row(owned).payload_revision == int(dispatched)
@@ -216,7 +218,7 @@ def test_close_failure_retains_actual_handle_and_ack(owned, monkeypatch, handle,
             owned.adapter.start(Deadline.after(5))
         assert caught.value is primary
     assert owned.adapter.cleanup_incomplete
-    assert owned.adapter._unclosed_handles == (target,)
+    assert owned.adapter._handles == (target,)
     assert target.closed is closed_first
     assert getattr(owned, "client" if handle == "response" else "response").closed
     assert owned.adapter.payload.acknowledgment == ACK
@@ -238,7 +240,7 @@ def test_original_control_wins_and_both_failed_handles_retained(owned, monkeypat
     with pytest.raises(KeyboardInterrupt) as caught:
         owned.adapter.start(Deadline.after(5))
     assert caught.value is primary
-    assert owned.adapter._unclosed_handles == (owned.client,)
+    assert owned.adapter._handles == (owned.client,)
     assert row(owned).state is LifecycleObligationState.POSSIBLE_EFFECT
 
 
@@ -246,7 +248,7 @@ def test_original_control_wins_and_both_failed_handles_retained(owned, monkeypat
 @pytest.mark.parametrize("exception_type", [KeyboardInterrupt, SystemExit])
 def test_interrupt_after_positive_handle_return_closes(owned, handle, exception_type):
     primary = exception_type("after returned handle")
-    code = owned.adapter.start.__func__.__code__
+    code = owned.adapter._send.__func__.__code__
     fired: list[bool] = []
 
     def interrupt(frame, event, arg):
@@ -298,7 +300,7 @@ def test_fence_takeover_refuses_effect_or_publication(owned, monkeypatch, stage)
         with pytest.raises(StateError):
             owned.adapter.start(Deadline.after(5))
     with pytest.raises(StateError):
-        owned.adapter.reconcile(Deadline.after(5))
+        owned.adapter.settle(Deadline.after(5))
     persisted = successors[0].inspect_lifecycle_obligation(owned.adapter.obligation_id)
     assert persisted is not None and persisted.payload_revision == int(stage == "after")
     assert owned.calls.count("send") == int(stage != "client")
@@ -306,28 +308,28 @@ def test_fence_takeover_refuses_effect_or_publication(owned, monkeypatch, stage)
 
 
 @pytest.mark.parametrize(
-    "field,value", [("obligation_kind", "foreign"), ("payload_version", 2), ("payload_revision", 2), ("payload", b"{}")]
+    "field,value", [("obligation_kind", "foreign"), ("payload_version", 1), ("payload_revision", 2), ("payload", b"{}")]
 )
 def test_corrupt_or_foreign_ledger_refused(owned, monkeypatch, field, value):
     owned.adapter.start(Deadline.after(5))
     persisted = replace(row(owned), **{field: value})
     monkeypatch.setattr(OperationOwner, "inspect_lifecycle_obligation", lambda *args: persisted)
     with pytest.raises((StateError, ValidationError)):
-        owned.adapter.reconcile(Deadline.after(5))
+        owned.adapter.settle(Deadline.after(5))
 
 
 def test_premature_resolution_and_foreign_ack_refused(owned):
     owned.adapter.start(Deadline.after(5))
     owned.adapter.obligation.publish_payload(
         expected_revision=1,
-        payload_version=1,
-        payload=encode_activation_payload(ActivationPayload(RESOURCE, replace(ACK, request_id="foreign"))),
+        payload_version=2,
+        payload=encode_start_payload(replace(owned.adapter.payload, acknowledgment=replace(ACK, request_id="foreign"))),
     )
     with pytest.raises(StateError):
-        owned.adapter.reconcile(Deadline.after(5))
+        owned.adapter.settle(Deadline.after(5))
     owned.adapter.obligation.resolve()
     with pytest.raises(StateError):
-        owned.adapter.reconcile(Deadline.after(5))
+        owned.adapter.settle(Deadline.after(5))
 
 
 @pytest.mark.parametrize(
@@ -374,7 +376,7 @@ def test_exact_owner_and_locator(tmp_path, kind, name, locator):
     with closing(Database(tmp_path / "o.db")) as database:
         owner = OperationOwner.acquire(database.operations, OperationScope(kind, name), "proof")
         with pytest.raises(ValidationError):
-            AzureVMActivation(owner, "vm", object(), RESOURCE, locator)
+            AzureIncarnationStart(owner, "vm", object(), RESOURCE, VM_ID, locator)
         assert owner.list_pending_lifecycle_obligations() == ()
 
 
@@ -401,10 +403,14 @@ def test_setup_or_dispatch_failure_is_not_remote_rejection(owned, monkeypatch, s
         (_activation_client, "compute_start_client") if stage == "client" else (owned.client, "send_request")
     )
     monkeypatch.setattr(target, method, fail)
-    with pytest.raises(exception_type) as caught:
+    expected_error = StateError if exception_type is OSError else exception_type
+    with pytest.raises(expected_error) as caught:
         owned.adapter.start(Deadline.after(5))
-    assert caught.value is primary
-    owned.adapter.reconcile(Deadline.after(5))
+    if exception_type is not OSError:
+        assert caught.value is primary
+    else:
+        assert caught.value.__cause__ is None and caught.value.__context__ is None
+    owned.adapter.settle(Deadline.after(5))
     assert row(owned).state is (
         LifecycleObligationState.RESOLVED if stage == "client" else LifecycleObligationState.POSSIBLE_EFFECT
     )
@@ -420,7 +426,7 @@ def test_lost_no_effect_resolution_reply(owned, monkeypatch, committed, exceptio
         raise OSError("offline setup failure")
 
     monkeypatch.setattr(_activation_client, "compute_start_client", setup_failure)
-    with pytest.raises(OSError):
+    with pytest.raises(StateError):
         owned.adapter.start(Deadline.after(5))
     original = owned.repository.resolve_lifecycle_obligation
     primary = exception_type("offline lost resolution reply")
@@ -432,10 +438,10 @@ def test_lost_no_effect_resolution_reply(owned, monkeypatch, committed, exceptio
 
     monkeypatch.setattr(owned.repository, "resolve_lifecycle_obligation", fail)
     with pytest.raises(exception_type) as caught:
-        owned.adapter.reconcile(Deadline.after(5))
+        owned.adapter.settle(Deadline.after(5))
     assert caught.value is primary
     monkeypatch.setattr(owned.repository, "resolve_lifecycle_obligation", original)
-    owned.adapter.reconcile(Deadline.after(5))
+    owned.adapter.settle(Deadline.after(5))
     assert row(owned).state is LifecycleObligationState.RESOLVED and owned.calls == []
 
 
@@ -463,14 +469,14 @@ def test_both_close_controls_preserve_original_publication_control(owned, monkey
     with pytest.raises(KeyboardInterrupt) as caught:
         owned.adapter.start(Deadline.after(5))
     assert caught.value is primary
-    assert owned.adapter._unclosed_handles == (owned.response, owned.client)
+    assert owned.adapter._handles == (owned.response, owned.client)
     assert not owned.response.closed and not owned.client.closed
     assert owned.adapter.payload.acknowledgment == ACK
 
 
 def test_fake_owner_boundary_refuses_before_registration():
     with pytest.raises(ValidationError):
-        AzureVMActivation(SimpleNamespace(), "vm", object(), RESOURCE, LOCATOR)
+        AzureIncarnationStart(SimpleNamespace(), "vm", object(), RESOURCE, VM_ID, LOCATOR)
 
 
 def test_concurrent_admission_and_lock_deadline_send_once(owned, monkeypatch):
@@ -495,7 +501,7 @@ def test_concurrent_admission_and_lock_deadline_send_once(owned, monkeypatch):
     try:
         assert entered.wait(2)
         with pytest.raises(TimeoutError):
-            owned.adapter.reconcile(Deadline.after(0.01))
+            owned.adapter.settle(Deadline.after(0.01))
         second.start()
     finally:
         release.set()

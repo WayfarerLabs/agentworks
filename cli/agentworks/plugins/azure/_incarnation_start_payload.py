@@ -105,6 +105,12 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _status_budget(deadline: Deadline) -> None:
+    remaining = deadline.remaining()
+    if remaining is None or remaining <= 0:
+        raise StartDeadlineExpired("Azure start monitor deadline expired")
+
+
 def observe_start_response(response: Any, ack: StartAcknowledgment, deadline: Deadline) -> StartState:
     """Validate one streamed monitor response; never consume Location bodies."""
     request = getattr(response, "request", None)
@@ -126,20 +132,25 @@ def observe_start_response(response: Any, ack: StartAcknowledgment, deadline: De
     if status != 200:
         raise ValidationError("Azure start monitor HTTP status is invalid")
     body = bytearray()
-    for chunk in response.iter_bytes():
+    _status_budget(deadline)
+    chunks = response.iter_bytes()
+    _status_budget(deadline)
+    iterator = iter(chunks)
+    while True:
+        _status_budget(deadline)
+        try:
+            chunk = next(iterator)
+        except StopIteration:
+            break
         if type(chunk) is not bytes or len(chunk) > MAX_STATUS_BODY_BYTES - len(body):
             raise ValidationError("Azure start monitor body exceeds its bound")
         body.extend(chunk)
-        # Retain no body, and refuse another iteration after elapsed local time.
-        remaining = deadline.remaining()
-        if remaining is None or remaining <= 0:
-            raise StartDeadlineExpired("Azure start monitor deadline expired")
     try:
         value = json.loads(body, object_pairs_hook=_unique_object)
         if type(value) is not dict:
             raise ValueError
         observed = value.get("status")
-        if type(observed) is not str or not 0 < len(observed) <= 256 or not observed.isascii():
+        if type(observed) is not str or not 0 < len(observed) <= 256:
             raise ValueError
         if not all(32 < ord(char) < 127 for char in observed):
             raise ValueError

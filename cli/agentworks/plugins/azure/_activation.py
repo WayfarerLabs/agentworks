@@ -1,21 +1,16 @@
-"""Private one-shot ARM VM start admission and acknowledgment custody."""
+"""Legacy persisted ARM start evidence and shared request validation."""
 
 from __future__ import annotations
 
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass, replace
-from threading import TIMEOUT_MAX, Lock
+from dataclasses import asdict, dataclass
 from typing import Any
 from urllib.parse import parse_qsl, quote, unquote, urlsplit
-from uuid import uuid4
 
-from agentworks.capabilities.vm_platform.base import ProviderLocator
-from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES, LifecycleObligationState, OperationResourceKind
-from agentworks.errors import StateError, ValidationError
-from agentworks.execution.carrier import Deadline
-from agentworks.operations import LifecycleObligation, OperationOwner
+from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES
+from agentworks.errors import ValidationError
 from agentworks.plugins.azure._identity import MAX_RESOURCE_ID_BYTES as MAX_RESOURCE_ID_BYTES
 from agentworks.plugins.azure._identity import parse_resource_id
 
@@ -167,183 +162,3 @@ def decode_acknowledgment(response: Any, resource_id: str) -> StartAcknowledgmen
     # Combined payload capacity is also an external-response boundary.
     encode_activation_payload(ActivationPayload(resource_id, ack))
     return ack
-
-
-class AzureVMActivation:
-    """Caller-retained one-shot start, with fenced bookkeeping and no settlement.
-
-    Construction is passive. Retain before start. SDK and credential setup are
-    synchronous: budgets and late-result refusal do not promise hard preemption.
-    """
-
-    def __init__(
-        self,
-        owner: OperationOwner,
-        vm_name: str,
-        credential: object,
-        resource_id: str,
-        expected_locator: ProviderLocator,
-    ) -> None:
-        if (
-            type(owner) is not OperationOwner
-            or owner.ownership.scope.resource_kind is not OperationResourceKind.VM
-            or owner.ownership.scope.resource_name != vm_name
-            or type(expected_locator) is not ProviderLocator
-        ):
-            raise ValidationError("Azure activation requires exact selected VM ownership")
-        self._payload = ActivationPayload(resource_id)
-        encode_activation_payload(self._payload)
-        if expected_locator.token != f"azure-vm:{resource_id}":
-            raise ValidationError("Azure activation locator does not match the selected identity")
-        self._owner = owner
-        self._credential = credential
-        self._lock = Lock()
-        self._obligation_id = uuid4().hex
-        self._obligation: LifecycleObligation | None = None
-        self._attempted = False
-        self._mark_began = False
-        self._unclosed_handles: tuple[Any, ...] = ()
-
-    @property
-    def payload(self) -> ActivationPayload:
-        return self._payload
-
-    @property
-    def obligation_id(self) -> str:
-        return self._obligation_id
-
-    @property
-    def obligation(self) -> LifecycleObligation | None:
-        return self._obligation
-
-    @property
-    def cleanup_incomplete(self) -> bool:
-        """Original handles remain in custody until close returns normally."""
-        return bool(self._unclosed_handles)
-
-    def _close_handles(self) -> None:
-        control: KeyboardInterrupt | SystemExit | None = None
-        try:
-            for handle in self._unclosed_handles:
-                try:
-                    handle.close()
-                except Exception:
-                    pass
-                except (KeyboardInterrupt, SystemExit) as error:
-                    if control is None:
-                        control = error
-                else:
-                    # Interrupted bookkeeping may retain a closed original, never lose an uncertain one.
-                    self._unclosed_handles = tuple(
-                        original for original in self._unclosed_handles if original is not handle
-                    )
-        except (KeyboardInterrupt, SystemExit):
-            if control is not None:
-                raise control from None
-            raise
-        if control is not None:
-            raise control
-
-    @staticmethod
-    def _remaining(deadline: Deadline) -> float:
-        if type(deadline) is not Deadline or deadline.expires_at is None:
-            raise ValidationError("Azure activation requires a finite deadline")
-        remaining = deadline.remaining()
-        assert remaining is not None
-        if remaining <= 0:
-            raise TimeoutError("Azure activation deadline expired")
-        return remaining
-
-    def _acquire(self, deadline: Deadline) -> None:
-        if not self._lock.acquire(timeout=min(self._remaining(deadline), TIMEOUT_MAX)):
-            raise TimeoutError("Azure activation transition deadline expired")
-
-    def start(self, deadline: Deadline) -> StartAcknowledgment:
-        """Submit at most once, retaining matching ACK before publication or cleanup."""
-        self._acquire(deadline)
-        control: KeyboardInterrupt | SystemExit | None = None
-        try:
-            self._remaining(deadline)
-            if self._attempted:
-                raise StateError("Azure activation was already attempted")
-            self._attempted = True
-            self._obligation = self._owner.register_lifecycle_obligation(
-                OBLIGATION_KIND,
-                payload_version=PAYLOAD_VERSION,
-                payload=encode_activation_payload(self._payload),
-                obligation_id=self._obligation_id,
-            )
-            from azure.core.rest import HttpRequest
-
-            from agentworks.plugins.azure._activation_client import compute_start_client
-
-            try:
-                self._remaining(deadline)
-                self._unclosed_handles = (
-                    compute_start_client(self._credential, _subscription(self._payload.resource_id)),
-                )
-                client = self._unclosed_handles[0]
-                self._remaining(deadline)
-                request = HttpRequest("POST", start_url(self._payload.resource_id))
-                self._mark_began = True
-                self._obligation.mark_possible_effect()
-                remaining = self._remaining(deadline)
-                self._unclosed_handles = (
-                    client.send_request(request, stream=True, connection_timeout=remaining, read_timeout=remaining),
-                    client,
-                )
-                response = self._unclosed_handles[0]
-                acknowledgment = decode_acknowledgment(response, self._payload.resource_id)
-                self._payload = replace(self._payload, acknowledgment=acknowledgment)
-                self._reconcile_locked()
-            except (KeyboardInterrupt, SystemExit) as error:
-                control = error
-                raise
-            finally:
-                self._close_handles()
-            self._remaining(deadline)
-            return acknowledgment
-        except (KeyboardInterrupt, SystemExit):
-            if control is not None:
-                raise control from None
-            raise
-        finally:
-            self._lock.release()
-
-    def reconcile(self, deadline: Deadline) -> None:
-        """Reconcile custody only, never replay, infer power settlement or close owner."""
-        self._acquire(deadline)
-        try:
-            self._remaining(deadline)
-            self._reconcile_locked()
-            self._remaining(deadline)
-        finally:
-            self._lock.release()
-
-    def _reconcile_locked(self) -> None:
-        if not self._attempted:
-            raise StateError("Azure activation has no registration attempt")
-        row = self._owner.inspect_lifecycle_obligation(self._obligation_id)
-        if row is None:
-            raise StateError("Azure activation registration remains uncertain")
-        if row.obligation_kind != OBLIGATION_KIND or row.payload_version != PAYLOAD_VERSION:
-            raise StateError("Azure activation custody conflicts")
-        durable = decode_activation_payload(row.payload)
-        initial = replace(self._payload, acknowledgment=None)
-        initial_matches = durable == initial and row.payload_revision == 0
-        acknowledgment_matches = (
-            durable == self._payload and self._payload.acknowledgment is not None and row.payload_revision == 1
-        )
-        if not (initial_matches or acknowledgment_matches):
-            raise StateError("Azure activation custody conflicts")
-        self._obligation = LifecycleObligation(self._owner, row)
-        if row.state is LifecycleObligationState.RESOLVED and self._mark_began:
-            raise StateError("Azure activation custody was prematurely resolved")
-        if row.state is LifecycleObligationState.REGISTERED and not self._mark_began:
-            self._obligation.resolve()
-        elif row.state is LifecycleObligationState.POSSIBLE_EFFECT and durable != self._payload:
-            self._obligation.publish_payload(
-                expected_revision=row.payload_revision,
-                payload_version=PAYLOAD_VERSION,
-                payload=encode_activation_payload(self._payload),
-            )

@@ -26,7 +26,11 @@ from agentworks.errors import StateError, ValidationError
 from agentworks.execution.carrier import Deadline
 from agentworks.operations import OperationOwner
 from agentworks.plugins.azure import _activation_client
-from agentworks.plugins.azure._activation import AzureVMActivation, decode_activation_payload, start_url
+from agentworks.plugins.azure._activation import start_url
+from agentworks.plugins.azure._incarnation_start import AzureIncarnationStart
+from agentworks.plugins.azure._incarnation_start_payload import decode_start_payload
+
+VM_ID = "01234567-89ab-0cde-0123-456789abcdef"
 
 SUBSCRIPTION = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 RESOURCE = f"/subscriptions/{SUBSCRIPTION}/resourceGroups/group/providers/Microsoft.Compute/virtualMachines/vm"
@@ -141,7 +145,9 @@ def sdk_owned(tmp_path, monkeypatch):
     monkeypatch.setattr(_activation_client, "compute_start_client", construct)
     with closing(Database(tmp_path / "s.db")) as database:
         owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm"), "proof")
-        adapter = AzureVMActivation(owner, "vm", credential, RESOURCE, ProviderLocator(f"azure-vm:{RESOURCE}"))
+        adapter = AzureIncarnationStart(
+            owner, "vm", credential, RESOURCE, VM_ID, ProviderLocator(f"azure-vm:v2:{VM_ID}:{RESOURCE}")
+        )
         yield SimpleNamespace(adapter=adapter, owner=owner, transport=transport, credential=credential)
     assert transport.closed
     assert all(response.closed for response in transport.responses)
@@ -168,9 +174,13 @@ def test_public_streaming_success_is_one_ack(sdk_owned, status, headers):
     ack = probe.adapter.start(Deadline.after(5))
     assert ack.status_code == status
     row = probe.owner.inspect_lifecycle_obligation(probe.adapter.obligation_id)
-    assert row.state is LifecycleObligationState.POSSIBLE_EFFECT and row.payload_revision == 1
-    assert decode_activation_payload(row.payload).acknowledgment == ack
-    probe.adapter.reconcile(Deadline.after(5))
+    synchronous = status == 200 and not any(
+        key.lower() in {"location", "azure-asyncoperation"} for key in headers if type(key) is str
+    )
+    assert row.state is (LifecycleObligationState.RESOLVED if synchronous else LifecycleObligationState.POSSIBLE_EFFECT)
+    assert row.payload_revision == (2 if synchronous else 1)
+    assert decode_start_payload(row.payload).acknowledgment == ack
+    probe.adapter.settle(Deadline.after(5))
     with pytest.raises(StateError):
         probe.adapter.start(Deadline.after(5))
     assert len(probe.transport.calls) == probe.credential.calls == 1
@@ -215,7 +225,7 @@ def test_bad_or_foreign_ack_no_replay_body_read_or_poll(sdk_owned, status, heade
     probe.transport.replies.append((status, headers, foreign))
     with pytest.raises(ValidationError):
         probe.adapter.start(Deadline.after(5))
-    probe.adapter.reconcile(Deadline.after(5))
+    probe.adapter.settle(Deadline.after(5))
     row = probe.owner.inspect_lifecycle_obligation(probe.adapter.obligation_id)
     assert row.state is LifecycleObligationState.POSSIBLE_EFFECT and row.payload_revision == 0
     assert probe.adapter.payload.acknowledgment is None
@@ -227,10 +237,14 @@ def test_transport_failure_or_control_no_replay(sdk_owned, exception_type):
     probe = sdk_owned
     primary = exception_type("offline dispatch failure")
     probe.transport.replies.append(primary)
-    with pytest.raises(exception_type) as caught:
+    ordinary = issubclass(exception_type, Exception)
+    with pytest.raises(StateError if ordinary else exception_type) as caught:
         probe.adapter.start(Deadline.after(5))
-    assert caught.value is primary
-    probe.adapter.reconcile(Deadline.after(5))
+    if ordinary:
+        assert caught.value.__cause__ is None and caught.value.__context__ is None
+    else:
+        assert caught.value is primary
+    probe.adapter.settle(Deadline.after(5))
     row = probe.owner.inspect_lifecycle_obligation(probe.adapter.obligation_id)
     assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
     assert len(probe.transport.calls) == probe.credential.calls == 1
@@ -244,7 +258,7 @@ def test_selected_header_nonstring_is_not_absence(sdk_owned, header, value):
     with pytest.raises(ValidationError):
         probe.adapter.start(Deadline.after(5))
     assert probe.adapter.payload.acknowledgment is None
-    probe.adapter.reconcile(Deadline.after(5))
+    probe.adapter.settle(Deadline.after(5))
     row = probe.owner.inspect_lifecycle_obligation(probe.adapter.obligation_id)
     assert row.state is LifecycleObligationState.POSSIBLE_EFFECT and row.payload_revision == 0
     assert len(probe.transport.calls) == probe.credential.calls == 1
@@ -266,30 +280,32 @@ def sdk_custody(tmp_path, monkeypatch):
     monkeypatch.setattr(_activation_client, "compute_start_client", construct)
     with closing(Database(tmp_path / "custody.db")) as database:
         owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm"), "proof")
-        adapter = AzureVMActivation(owner, "vm", credential, RESOURCE, ProviderLocator(f"azure-vm:{RESOURCE}"))
+        adapter = AzureIncarnationStart(
+            owner, "vm", credential, RESOURCE, VM_ID, ProviderLocator(f"azure-vm:v2:{VM_ID}:{RESOURCE}")
+        )
         yield SimpleNamespace(adapter=adapter, owner=owner, transport=transport, credential=credential, clients=clients)
     # Retained originals are inert scripted fixtures, never cleanup-retried by teardown.
-    assert transport.closed or any(handle is clients[0] for handle in adapter._unclosed_handles)
+    assert transport.closed or any(handle is clients[0] for handle in adapter._handles)
     assert all(
-        response.closed or any(handle is response for handle in adapter._unclosed_handles)
-        for response in transport.responses
+        response.closed or any(handle is response for handle in adapter._handles) for response in transport.responses
     )
 
 
 def assert_ack_custody(probe: Any, expected: tuple[Any, ...]) -> None:
     adapter = probe.adapter
-    assert len(adapter._unclosed_handles) == len(expected)
-    assert all(actual is original for actual, original in zip(adapter._unclosed_handles, expected, strict=True))
+    assert len(adapter._handles) == len(expected)
+    assert all(actual is original for actual, original in zip(adapter._handles, expected, strict=True))
     assert adapter.cleanup_incomplete is bool(expected)
     assert adapter.payload.acknowledgment.status_code == 202
-    adapter.reconcile(Deadline.after(5))
+    # Isolate fenced publication from deliberate original-handle close faults.
+    adapter._reconcile(Deadline.after(5))
     row = probe.owner.inspect_lifecycle_obligation(adapter.obligation_id)
     assert row.state is LifecycleObligationState.POSSIBLE_EFFECT and row.payload_revision == 1
-    assert decode_activation_payload(row.payload).acknowledgment == adapter.payload.acknowledgment
+    assert decode_start_payload(row.payload).acknowledgment == adapter.payload.acknowledgment
     with pytest.raises(StateError):
         adapter.start(Deadline.after(5))
     assert len(probe.transport.calls) == probe.credential.calls == 1
-    assert all(actual is original for actual, original in zip(adapter._unclosed_handles, expected, strict=True))
+    assert all(actual is original for actual, original in zip(adapter._handles, expected, strict=True))
 
 
 @pytest.mark.parametrize("boundary", ["before-first", "between", "bookkeeping", "control"])
@@ -312,7 +328,7 @@ def test_actual_sdk_cleanup_boundary_interrupt_retains_originals(sdk_custody, mo
 
         monkeypatch.setattr(OperationOwner, "inspect_lifecycle_obligation", interrupt_publication)
     fired: list[bool] = []
-    code = AzureVMActivation._close_handles.__code__
+    code = AzureIncarnationStart._close_handles.__code__
 
     def interrupt(frame, event, arg):
         if event == "line" and frame.f_code is code and not fired and boundary != "control":
@@ -443,7 +459,8 @@ def test_cleanup_entry_keeps_primary_and_custody(tmp_path, monkeypatch, primary_
         return result
 
     monkeypatch.setattr(OperationOwner, "inspect_lifecycle_obligation", interrupted_inspect)
-    source, first_line = inspect.getsourcelines(AzureVMActivation.start)
+    cleanup = inspect.unwrap(AzureIncarnationStart._provider_custody)
+    source, first_line = inspect.getsourcelines(cleanup)
     # Select the first cleanup-finally statement, including any wrapper entry before the call.
     entry = next(
         node.finalbody[0].lineno
@@ -456,7 +473,7 @@ def test_cleanup_entry_keeps_primary_and_custody(tmp_path, monkeypatch, primary_
         )
     )
     entry += first_line - 1
-    code = AzureVMActivation.start.__code__
+    code = cleanup.__code__
     fired: list[bool] = []
 
     def interrupt(frame, event, arg):
@@ -468,7 +485,9 @@ def test_cleanup_entry_keeps_primary_and_custody(tmp_path, monkeypatch, primary_
 
     with closing(Database(tmp_path / "entry.db")) as db:
         owner = OperationOwner.acquire(db.operations, OperationScope(OperationResourceKind.VM, "vm"), "proof")
-        adapter = AzureVMActivation(owner, "vm", credential, RESOURCE, ProviderLocator(f"azure-vm:{RESOURCE}"))
+        adapter = AzureIncarnationStart(
+            owner, "vm", credential, RESOURCE, VM_ID, ProviderLocator(f"azure-vm:v2:{VM_ID}:{RESOURCE}")
+        )
         previous, observed = sys.gettrace(), None
         sys.settrace(interrupt)
         try:
@@ -487,14 +506,14 @@ def test_cleanup_entry_keeps_primary_and_custody(tmp_path, monkeypatch, primary_
         assert transport.closed is (not inject) and adapter.cleanup_incomplete is inject
         if inject:
             assert response_ref() is not None and client_refs[0]() is not None
-            assert adapter._unclosed_handles[0] is response_ref() and adapter._unclosed_handles[1] is client_refs[0]()
-            assert adapter._unclosed_handles[0] is not None
-            assert len(adapter._unclosed_handles) == 2 and not adapter._unclosed_handles[0].closed
+            assert adapter._handles[0] is response_ref() and adapter._handles[1] is client_refs[0]()
+            assert adapter._handles[0] is not None
+            assert len(adapter._handles) == 2 and not adapter._handles[0].closed
         else:
-            assert adapter._unclosed_handles == () and response_ref() is None and client_refs[0]() is None
+            assert adapter._handles == () and response_ref() is None and client_refs[0]() is None
         row = owner.inspect_lifecycle_obligation(adapter.obligation_id)
         assert row is not None and row.state is LifecycleObligationState.POSSIBLE_EFFECT and row.payload_revision == 0
         assert_ack_custody(
             SimpleNamespace(adapter=adapter, owner=owner, transport=transport, credential=credential),
-            adapter._unclosed_handles,
+            adapter._handles,
         )

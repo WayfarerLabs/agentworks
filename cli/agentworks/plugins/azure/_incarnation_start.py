@@ -130,17 +130,22 @@ class AzureIncarnationStart:
 
     def _close_handles(self, deadline: Deadline) -> None:
         control: BaseException | None = None
-        for handle in self._handles:
-            try:
-                self._remaining(deadline)
-                handle.close()
-            except Exception:
-                pass
-            except BaseException as error:
-                if control is None:
-                    control = error
-            else:
-                self._handles = tuple(original for original in self._handles if original is not handle)
+        try:
+            for handle in self._handles:
+                try:
+                    self._remaining(deadline)
+                    handle.close()
+                except Exception:
+                    pass
+                except BaseException as error:
+                    if control is None:
+                        control = error
+                else:
+                    self._handles = tuple(original for original in self._handles if original is not handle)
+        except BaseException:
+            if control is not None:
+                raise control from None
+            raise
         if control is not None:
             raise control
 
@@ -148,34 +153,41 @@ class AzureIncarnationStart:
     def _provider_custody(self, deadline: Deadline) -> Iterator[None]:
         control: BaseException | None = None
         try:
-            yield
-        except BaseException as error:
-            if not isinstance(error, Exception):
-                control = error
-            raise
-        finally:
             try:
-                self._close_handles(deadline)
-            except BaseException:
-                if control is not None:
-                    raise control from None
+                yield
+            except BaseException as error:
+                if not isinstance(error, Exception):
+                    control = error
                 raise
+            finally:
+                self._close_handles(deadline)
+        except BaseException:
+            if control is not None:
+                raise control from None
+            raise
+
+    def _construct(self, deadline: Deadline) -> None:
+        from agentworks.plugins.azure._activation_client import compute_start_client
+
+        self._remaining(deadline)
+        self._handles = (
+            _sdk(lambda: compute_start_client(self._credential, parse_resource_id(self._payload.resource_id)[0])),
+        )
 
     def _send(self, method: str, url: str, deadline: Deadline) -> Any:
         from azure.core.rest import HttpRequest
 
-        from agentworks.plugins.azure._activation_client import compute_start_client
-
-        self._remaining(deadline)
-        client = _sdk(lambda: compute_start_client(self._credential, parse_resource_id(self._payload.resource_id)[0]))
-        self._handles = (client,)
+        client = self._handles[0]
         remaining = self._remaining(deadline)
-        response = _sdk(
-            lambda: client.send_request(
-                HttpRequest(method, url), stream=True, connection_timeout=remaining, read_timeout=remaining
-            )
+        self._handles = (
+            _sdk(
+                lambda: client.send_request(
+                    HttpRequest(method, url), stream=True, connection_timeout=remaining, read_timeout=remaining
+                )
+            ),
+            client,
         )
-        self._handles = (response, client)
+        response = self._handles[0]
         return response
 
     def start(self, deadline: Deadline) -> StartAcknowledgment:
@@ -191,11 +203,12 @@ class AzureIncarnationStart:
                 payload=encode_start_payload(self._payload),
                 obligation_id=self._obligation_id,
             )
-            self._remaining(deadline)
-            self._mark_began = True
-            self._obligation.mark_possible_effect()
-            self._bookkeeping_uncertain = False
             with self._provider_custody(deadline):
+                self._construct(deadline)
+                self._remaining(deadline)
+                self._mark_began = True
+                self._obligation.mark_possible_effect()
+                self._bookkeeping_uncertain = False
                 response = self._send("POST", start_url(self._payload.resource_id), deadline)
                 ack = _sdk(lambda: decode_acknowledgment(response, self._payload.resource_id))
                 terminal = StartState.SUCCEEDED if monitor_endpoint(ack) is None else None
@@ -220,6 +233,7 @@ class AzureIncarnationStart:
             if endpoint is None:
                 raise StateError("Azure start has no retained monitor")
             with self._provider_custody(deadline):
+                self._construct(deadline)
                 response = self._send("GET", endpoint, deadline)
                 observed = _sdk(lambda: observe_start_response(response, ack, deadline))
                 if observed in TERMINAL_STATES:
@@ -273,7 +287,7 @@ class AzureIncarnationStart:
             raise StateError("Azure start custody conflicts")
         self._obligation = LifecycleObligation(self._owner, row)
         if row.state is LifecycleObligationState.RESOLVED:
-            if not self._resolution_began:
+            if not self._resolution_began or row.payload_revision != max(expected):
                 raise StateError("Azure start custody was prematurely resolved")
             self._bookkeeping_uncertain = False
             return True
