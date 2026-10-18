@@ -33,6 +33,12 @@ from agentworks.execution._managed_job_access import (
     _explicit_managed_shell,
 )
 from agentworks.execution._managed_job_protocol import encode_managed_job_fact
+from agentworks.execution._managed_live_exchange import (
+    ManagedLiveCandidate,
+    PreparedManagedLive,
+    execute_managed_live,
+    prepare_managed_live,
+)
 from agentworks.execution._managed_observation_exchange import (
     ManagedObservationCandidate,
     PreparedManagedRead,
@@ -102,6 +108,7 @@ if TYPE_CHECKING:
 
     from agentworks.execution._helper_closure import HelperClosureDelivery
     from agentworks.execution._helper_launcher import IdentityPlan
+    from agentworks.execution._managed_job_request import ManagedLiveIO
     from agentworks.execution._managed_job_store import Stream
     from agentworks.execution._managed_start_exchange import ManagedStartCandidate
     from agentworks.execution._runtime_prerequisite import (
@@ -161,7 +168,7 @@ class ManagedExecutionControlFact(Exception):
 class _ActiveHelperCall:
     carrier: Carrier
     borrow: OperationBorrow
-    prepared: PreparedInlineCandidate | PreparedManagedRead | None
+    prepared: PreparedInlineCandidate | PreparedManagedRead | PreparedManagedLive | None
     operation: BorrowedFixedHelperCarrier
     inline: bool = False
     closure_delivery: HelperClosureDelivery | None = None
@@ -173,6 +180,7 @@ class _ActiveHelperCall:
     candidate: (
         InlineCandidateResult
         | ManagedObservationCandidate
+        | ManagedLiveCandidate
         | ManagedStopCandidate
         | DisposalCandidate
         | ManagedStartCandidate
@@ -410,6 +418,84 @@ class ExecutionOperation:
             )
         finally:
             prepared.clear()
+            if active is not None:
+                self._detach_helper_payload(active)
+                active.prepared = None
+
+    def relay_managed(
+        self,
+        reference: JobRef,
+        carrier: Carrier,
+        *,
+        deadline: Deadline,
+        source: ByteSource | None = None,
+        stdout: ByteSink | None = None,
+        stderr: ByteSink | None = None,
+        sensitive: bool = False,
+    ) -> tuple[ManagedLiveCandidate, OwnedInlineOutcome]:
+        """Borrow one foreground relay for an exact acknowledged OPERATION run."""
+        prepared = None
+        active = None
+        try:
+            with self._admission_guard:
+                if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
+                    raise StateError("Execution operation cannot admit a managed relay")
+                binding, bootstrap = self._native_binding, self._bootstrap
+                if binding is None or bootstrap is None:
+                    raise ValidationError("Managed relay requires its selected native binding")
+                self.require_job_binding(carrier, binding.runtime_selection)
+                run = self._control_run(reference, deadline)
+                if (
+                    run.live_io is None
+                    or run.live_relay_attempted
+                    or run.cleanup_complete
+                    or run.disposal_attempted
+                    or run.disposal_confirmed
+                ):
+                    raise StateError("Managed relay requires an unused live operation run")
+                if not carrier.features.live_stdio:
+                    raise ValidationError("Managed relay requires live carrier I/O")
+                prepared = prepare_managed_live(
+                    expected_launch=encode_managed_job_fact(run.receipt),
+                    live_io=run.live_io,
+                    bootstrap=bootstrap,
+                    runtime_selection=binding.runtime_selection,
+                    deadline=deadline,
+                    source=source,
+                    stdout=stdout,
+                    stderr=stderr,
+                    sensitive=sensitive,
+                )
+                # Admission consumes the local attempt even if validation or
+                # subsequent dispatch refuses. Consumed input is never replayed.
+                run.live_relay_attempted = True
+                carrier.validate(prepared.invocation, io=prepared.io)
+                active = self._borrow_helper_call(carrier, prepared)
+                operation = active.operation
+            try:
+                if binding._new_helper_delivery is not None:
+                    active.closure_expectation = prepared.closure_expectation
+                    active.closure_delivery = binding._new_helper_delivery(prepared.closure_expectation)
+                    active.operation = BorrowedFixedHelperCarrier(active.closure_delivery, active.borrow)
+                    operation = active.operation
+                self._admit(active)
+                if self._route_check is not None:
+                    self._route_check(deadline)
+                candidate = execute_managed_live(operation, prepared, deadline=deadline)
+                active.candidate = candidate
+                completion = candidate.carrier_completion
+                if active.closure_delivery is not None and not active.closure_delivery.closure_proven:
+                    completion = None
+                operation.settle(candidate.dispatch, completion)
+                custody = self._outcome(active, operation, deadline, include_candidate=False)
+                with self._admission_guard:
+                    self._capture(active, custody)
+            except BaseException as control:
+                self._raise_control(control, active, operation, deadline)
+            return candidate, custody
+        finally:
+            if prepared is not None:
+                prepared.clear()
             if active is not None:
                 self._detach_helper_payload(active)
                 active.prepared = None
@@ -791,6 +877,7 @@ class ExecutionOperation:
         env: Mapping[str, str] | None,
         cwd: str | None,
         sensitive: bool,
+        live_io: ManagedLiveIO | None = None,
     ) -> JobRef:
         """Freeze a body, retain its run, then reserve and start exactly once."""
         with self._admission_guard:
@@ -803,6 +890,8 @@ class ExecutionOperation:
                 raise StateError("Managed delivery is unavailable for this bound operation")
             if carrier is not binding.carrier or runtime_selection != binding.runtime_selection:
                 raise ValidationError("Managed start requires the selected native binding")
+            if live_io is not None and not carrier.features.live_stdio:
+                raise ValidationError("Managed foreground I/O requires a live carrier")
             identity = ManagedRunIdentity(uuid4().hex)
             user_default = isinstance(invocation, Script) and invocation.shell is Shell.USER_DEFAULT
             shell = (
@@ -826,7 +915,24 @@ class ExecutionOperation:
                 sensitive=sensitive,
                 identity=identity,
                 spec=spec,
+                live_io=live_io,
             )
+            if live_io is not None:
+                prepared = prepare_managed_live(
+                    expected_launch=body.request.launch,
+                    live_io=live_io,
+                    bootstrap=bootstrap,
+                    runtime_selection=runtime_selection,
+                    deadline=deadline,
+                    source=input.source,
+                    stdout=output.stdout,
+                    stderr=output.stderr,
+                    sensitive=sensitive or input.is_sensitive,
+                )
+                try:
+                    carrier.validate(prepared.invocation, io=prepared.io)
+                finally:
+                    prepared.clear()
         if user_default:
             resolved = self._observe_workload_shell(carrier, plan, runtime_selection, deadline)
             spec = replace(spec, shell=replace(shell, resolved_executable=resolved))
@@ -834,6 +940,22 @@ class ExecutionOperation:
             # lookup and must not be read again after guest effects.
             receipt = ManagedRunReceipt(identity, identity.unit_name, spec)
             body = replace(body, request=replace(body.request, launch=encode_managed_job_fact(receipt)))
+            if live_io is not None:
+                prepared = prepare_managed_live(
+                    expected_launch=body.request.launch,
+                    live_io=live_io,
+                    bootstrap=bootstrap,
+                    runtime_selection=runtime_selection,
+                    deadline=deadline,
+                    source=input.source,
+                    stdout=output.stdout,
+                    stderr=output.stderr,
+                    sensitive=sensitive or input.is_sensitive,
+                )
+                try:
+                    carrier.validate(prepared.invocation, io=prepared.io)
+                finally:
+                    prepared.clear()
         with self._admission_guard:
             if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
                 raise StateError("Execution operation cannot admit a managed start")
@@ -854,6 +976,7 @@ class ExecutionOperation:
                 guest=bootstrap.guest,
                 root_plan=bootstrap.root_entry,
                 runtime_selection=runtime_selection,
+                live_io=live_io,
             )
             self._managed_runs.append(run)
             reference = JobRef(identity.run_id)
@@ -1111,6 +1234,7 @@ class ExecutionOperation:
     def _known_termination(
         candidate: InlineCandidateResult
         | ManagedObservationCandidate
+        | ManagedLiveCandidate
         | ManagedStopCandidate
         | DisposalCandidate
         | ManagedStartCandidate
@@ -1144,7 +1268,7 @@ class ExecutionOperation:
     def _borrow_helper_call(
         self,
         carrier: Carrier,
-        prepared: PreparedInlineCandidate | PreparedManagedRead | None,
+        prepared: PreparedInlineCandidate | PreparedManagedRead | PreparedManagedLive | None,
         *,
         inline: bool = False,
         disposal: ManagedDisposalBinding | None = None,
@@ -1259,6 +1383,9 @@ class ExecutionOperation:
     def _detach_helper_payload(active: _ActiveHelperCall) -> None:
         if isinstance(active.prepared, PreparedInlineCandidate):
             active.prepared.release()
+            active.prepared = None
+        if isinstance(active.prepared, PreparedManagedLive):
+            active.prepared.clear()
             active.prepared = None
         if isinstance(active.prepared, PreparedManagedRead) and isinstance(
             active.candidate, ManagedObservationCandidate

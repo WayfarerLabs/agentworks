@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from agentworks.operations import OperationOwner
 
     from ._helper_launcher import IdentityPlan
+    from ._managed_job_request import ManagedLiveIO
     from ._managed_observation_exchange import ManagedObservationCandidate
     from ._managed_runs import ManagedRunReceipt, ManagedRunRecord, ManagedRunRepository, ManagedTargetIdentity
     from ._managed_start_exchange import _PreparedAttempt
@@ -58,11 +59,14 @@ class ManagedOperationRun:
         guest: VMGuestIdentity,
         root_plan: IdentityPlan,
         runtime_selection: RuntimeSelection,
+        live_io: ManagedLiveIO | None = None,
     ) -> None:
         self._caller_thread = threading.current_thread()
         if start_carrier is dedicated_keeper_carrier or start_obligation_id == keeper_obligation_id:
             raise ValidationError("Operation run requires dedicated delivery and distinct obligation identities")
         self.receipt = receipt
+        self.live_io = live_io
+        self.live_relay_attempted = False
         self.keeper = ManagedOperationKeeper(
             receipt,
             dedicated_keeper_carrier,
@@ -218,7 +222,11 @@ class ManagedOperationRun:
         if self._started:
             raise StateError("Operation run start is one-shot")
         self._started = True
-        if type(body) is not _ManagedBody or body.request.launch != self._expected_launch:
+        if (
+            type(body) is not _ManagedBody
+            or body.request.launch != self._expected_launch
+            or body.request.live_io != self.live_io
+        ):
             raise ValidationError("Operation body does not match planned receipt")
         if deadline.expires_at is None or deadline.expired:
             raise ValidationError("Operation run start requires a live finite deadline")
