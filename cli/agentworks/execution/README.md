@@ -119,17 +119,19 @@ uncertain obligation keeps owner custody. Recovery, later job actions, native SS
 RunContext delivery remain open.
 
 `models.py` defines immutable literal commands and scripts with explicit `Shell.SH`, `Shell.BASH` or
-`Shell.USER_DEFAULT` selection and separate startup flags. It also defines finite `Input`, bounded
-capture or discard `Output`, and explicit operation or independent `Lifetime` values. `profiles.py`
-defines the requested DIRECT and MANAGED protection values without making either one available
-implicitly. `preparation.py` consumes command and script values with ordinary environment/cwd and
-finite input. Source, environment and input are encoded into stdin, not process arguments. The Linux
-bootstrap needs Bash 5.1 or newer, GNU base64/env and `/dev/fd`; destination account-shell lookup
-also needs getent/id. It uses no installed guest helper, Python or staging files. Login and
-interactive startup are explicitly refused by this proof subset. Preparation accepts at most 256 KiB
-of encoded input; carriers can impose smaller documented delivery limits. Bash's saved
-process-substitution waits require the 5.1 floor; local fault-injection evidence currently covers
-Bash 5.2.15, not every version at or above that floor.
+`Shell.USER_DEFAULT` selection and separate startup flags. It also defines finite or borrowed live
+`Input`, bounded capture, discard or borrowed live `Output`, and explicit operation or independent
+`Lifetime` values. Live endpoints use nonblocking `try_read` and `try_write`; construction performs
+no stream I/O and endpoint values have no diagnostic representation. `profiles.py` defines the
+requested DIRECT and MANAGED protection values without making either one available implicitly.
+`preparation.py` consumes command and script values with ordinary environment/cwd and finite input.
+Source, environment and input are encoded into stdin, not process arguments. The Linux bootstrap
+needs Bash 5.1 or newer, GNU base64/env and `/dev/fd`; destination account-shell lookup also needs
+getent/id. It uses no installed guest helper, Python or staging files. Login and interactive startup
+are explicitly refused by this proof subset. Preparation accepts at most 256 KiB of encoded input;
+carriers can impose smaller documented delivery limits. Bash's saved process-substitution waits
+require the 5.1 floor; local fault-injection evidence currently covers Bash 5.2.15, not every
+version at or above that floor.
 
 `result.py` defines immutable public outcome facts without wiring them into production execution.
 Application progress and status precision remain separate from carrier dispatch evidence. Output
@@ -1532,18 +1534,38 @@ packaged modules with standard-library `bz2` and ASCII-armors them to reduce car
 Only core-selected packaged code uses that loader; it does not select modules from request data or
 install guest files. The destination Python must provide `bz2`. Caller arguments, script source,
 environment, working directory and finite stdin travel in the bounded stdin manifest, not helper
-argv. On Linux, scripts use an inherited memory file separately from application stdin. The caller
-must bind the expected destination identity and an explicit `RuntimeSelection`. The identity
-transition encloses the shared selector, which checks Python 3.11 and common loader imports before
-the bundled helper runs. A bounded prerequisite record precedes helper framing without consuming
-application input or staging files.
+argv. One ASCII envelope prefixes the canonical JSON with `AGWI2` and eight lowercase hexadecimal
+length digits. The guest reads exactly that envelope; finite mode then requires EOF. Live mode reads
+application stdin from the remaining pipe without waiting for EOF before launch. The host-owned
+prefix source sends all setup bytes before borrowing the caller's application source. On Linux,
+scripts use an inherited memory file separately from application stdin. The caller must bind the
+expected destination identity and an explicit `RuntimeSelection`. The identity transition encloses
+the shared selector, which checks Python 3.11 and common loader imports before the bundled helper
+runs. A bounded prerequisite record precedes helper framing without consuming application input or
+staging files.
 
 The result separates prerequisite evidence, carrier facts and an optional helper observation.
 Without READY admission, the helper observation is absent; READY alone proves neither application
 entry nor success. The host validates bounded helper evidence and does not infer an eager start
 acknowledgment. Preparation remains single-use and clears the prerequisite parser after the attempt,
-including carrier exceptions. This candidate is not wired to production RunContext and does not yet
-supply staging, terminal I/O or managed lifetime.
+including carrier exceptions. DIRECT execution can explicitly borrow live application input and
+separate stdout/stderr sinks. Decoded presentation uses bounded evidence frames, rolling count/hash
+checks and caller backpressure; raw carrier diagnostics never become application stderr. Sensitive
+live output is an explicit presentation choice, not permission to retain output. Capture/discard
+continues to suppress sensitive reflected output by default. Delivery results contain no application
+bytes, and the attempt releases borrowed endpoints and pending presentation on exit.
+
+Unsupported carrier I/O refuses through pure validation before operation borrowing. The current
+private `start` and MANAGED paths reject live endpoints rather than silently substituting capture or
+DIRECT execution. This candidate is not wired to production RunContext and does not yet supply
+staging, MANAGED live I/O, active managed output, terminal I/O or native live-platform acceptance.
+
+The guest uses nonblocking writes while pumping application streams and restores its owned pipe
+flags afterward. A partially written evidence frame gets at most 0.5 seconds to finish after the
+pump stops; failure aborts later control emission rather than corrupting framing or claiming
+completion. Existing post-exit pipe collection pauses for sink backpressure but does not wait
+indefinitely for descendants to close their output. Local observation loss is not guest
+cancellation.
 
 Explicit numeric-bootstrap preparation uses the existing INLINE root program without adding a stdin
 prefix or changing the manifest. Its full guest checkpoint precedes remaining helper modules and
