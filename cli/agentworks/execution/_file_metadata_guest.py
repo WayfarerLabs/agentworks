@@ -12,6 +12,7 @@ from ._file_metadata import (
     MetadataFailureKind,
     MetadataPhase,
     MetadataResult,
+    create_directory,
     ensure_directory,
     set_metadata,
 )
@@ -91,7 +92,12 @@ def _operate(request: FileMetadataRequest, expires_at: float | None) -> FileMeta
     root_fd, parent_fd, leaf = _parent(request)
     descriptor = root_fd if parent_fd is None else parent_fd
     try:
-        function = set_metadata if request.operation is FileMetadataOperation.SET_METADATA else ensure_directory
+        if request.operation is FileMetadataOperation.SET_METADATA:
+            function = set_metadata
+        elif request.operation is FileMetadataOperation.ENSURE_DIRECTORY:
+            function = ensure_directory
+        else:
+            function = create_directory
         result: MetadataResult = function(
             descriptor,
             leaf,

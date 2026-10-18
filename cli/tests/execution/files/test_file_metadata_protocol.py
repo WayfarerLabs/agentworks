@@ -8,7 +8,7 @@ import stat
 import subprocess
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +29,7 @@ from agentworks.execution._file_metadata_exchange import (
     FileMetadataMutationUncertain,
     FileMetadataObservationError,
     FileMetadataObservationState,
+    create_file_directory,
     ensure_file_directory,
     set_file_metadata,
 )
@@ -133,7 +134,7 @@ def _request(operation: FileMetadataOperation = FileMetadataOperation.SET_METADA
 
 
 @pytest.mark.parametrize("operation", list(FileMetadataOperation))
-def test_request_round_trips_both_closed_operations(operation: FileMetadataOperation) -> None:
+def test_request_round_trips_closed_operations(operation: FileMetadataOperation) -> None:
     request = _request(operation)
 
     decoded = decode_file_metadata_request(encode_file_metadata_request(request))
@@ -478,6 +479,36 @@ def test_complete_result_is_authoritative_and_carrier_evidence_stays_separate(pl
     assert result_observation is not None
     assert result_observation.state is FileMetadataObservationState.CHANGED
     assert result_observation.revision == _revision()
+
+
+@pytest.mark.parametrize("kind", list(FileMetadataResultKind))
+@pytest.mark.parametrize("mode", [stat.S_IFREG | 0o640, stat.S_IFDIR | 0o750])
+def test_create_only_success_requires_changed_directory(
+    plan: IdentityPlan, kind: FileMetadataResultKind, mode: int
+) -> None:
+    revision = FileRevision(replace(_revision().stat, mode=mode))
+    carrier = TranscriptCarrier(
+        lambda request: _records(request, encode_file_metadata_result(FileMetadataResultControl(kind, revision)))
+    )
+    result = create_file_directory(
+        carrier,
+        trusted_root_path="/trusted",
+        relative_path="leaf",
+        uid=1001,
+        gid=1002,
+        mode=0o750,
+        plan=plan,
+        deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
+    )
+    assert carrier.calls == 1
+    assert result.observation is not None
+    if kind is FileMetadataResultKind.CHANGED and stat.S_ISDIR(mode):
+        assert result.observation.state is FileMetadataObservationState.CHANGED
+    else:
+        assert result.observation.state is FileMetadataObservationState.UNCERTAIN
+        assert result.observation.error is FileMetadataObservationError.CONTROL
+        assert result.observation.revision is None
 
 
 @pytest.mark.parametrize(

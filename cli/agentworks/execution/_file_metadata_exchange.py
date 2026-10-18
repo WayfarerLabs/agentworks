@@ -19,6 +19,7 @@ from agentworks.execution._file_metadata_protocol import (
     FileMetadataRequest,
     FileMetadataRequestError,
     FileMetadataResultControl,
+    FileMetadataResultKind,
     encode_file_metadata_request,
     parse_empty_file_metadata_body,
     parse_file_metadata_failure,
@@ -133,8 +134,12 @@ class _FileMetadataCollector:
                     self._fail(FileMetadataObservationError.ORDER)
                 else:
                     result = parse_file_metadata_result(record.body)
-                    if self._operation is FileMetadataOperation.ENSURE_DIRECTORY and not stat.S_ISDIR(
-                        result.revision.stat.mode
+                    if (
+                        self._operation is not FileMetadataOperation.SET_METADATA
+                        and not stat.S_ISDIR(result.revision.stat.mode)
+                    ) or (
+                        self._operation is FileMetadataOperation.CREATE_DIRECTORY
+                        and result.kind is not FileMetadataResultKind.CHANGED
                     ):
                         self._fail(FileMetadataObservationError.CONTROL)
                     else:
@@ -392,6 +397,35 @@ def ensure_file_directory(
     return _exchange(
         carrier,
         operation=FileMetadataOperation.ENSURE_DIRECTORY,
+        trusted_root_path=trusted_root_path,
+        relative_path=relative_path,
+        uid=uid,
+        gid=gid,
+        mode=mode,
+        plan=plan,
+        deadline=deadline,
+        runtime_selection=runtime_selection,
+        bootstrap=bootstrap,
+    )
+
+
+def create_file_directory(
+    carrier: BoundHelperCarrier,
+    *,
+    trusted_root_path: str,
+    relative_path: str,
+    uid: int,
+    gid: int,
+    mode: int,
+    plan: IdentityPlan,
+    deadline: Deadline,
+    runtime_selection: RuntimeSelection,
+    bootstrap: _NumericGuestBootstrap | None = None,
+) -> FileMetadataCandidateResult:
+    """Create one final directory through one fresh attempt, refusing existing entries."""
+    return _exchange(
+        carrier,
+        operation=FileMetadataOperation.CREATE_DIRECTORY,
         trusted_root_path=trusted_root_path,
         relative_path=relative_path,
         uid=uid,

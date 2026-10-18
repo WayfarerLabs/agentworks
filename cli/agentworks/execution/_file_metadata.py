@@ -145,6 +145,19 @@ def ensure_directory(
     return _run_metadata(parent_fd, leaf_name, uid, gid, mode, expires_at, create=True)
 
 
+def create_directory(
+    parent_fd: int,
+    leaf_name: str,
+    *,
+    uid: int,
+    gid: int,
+    mode: int,
+    expires_at: float | None,
+) -> MetadataResult:
+    """Create only the final directory, refusing any existing entry unchanged."""
+    return _run_metadata(parent_fd, leaf_name, uid, gid, mode, expires_at, create=True, create_only=True)
+
+
 def _run_metadata(
     parent_fd: int,
     leaf_name: str,
@@ -154,6 +167,7 @@ def _run_metadata(
     expires_at: float | None,
     *,
     create: bool,
+    create_only: bool = False,
 ) -> MetadataResult:
     state = _MutationState()
     observed: _ObservedObject | None = None
@@ -176,6 +190,8 @@ def _run_metadata(
                 observed = _open_observed(parent_fd, leaf_name, FileObjectPhase.CONDITION, expires_at)
                 if observed is None or observed.revision.stat != created_revision.stat:
                     raise _error(MetadataFailureKind.CONFLICT, state)
+            elif create_only:
+                raise _error(MetadataFailureKind.CONFLICT, state)
             elif create and observed.kind is not FileKind.DIRECTORY:
                 kind = (
                     MetadataFailureKind.UNSUPPORTED

@@ -40,6 +40,7 @@ _STEP_ORDER = {step: index for index, step in enumerate(MetadataStep)}
 class FileMetadataOperation(StrEnum):
     SET_METADATA = "set_metadata"
     ENSURE_DIRECTORY = "ensure_directory"
+    CREATE_DIRECTORY = "create_directory"
 
 
 class FileMetadataResultKind(StrEnum):
