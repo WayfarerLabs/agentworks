@@ -666,7 +666,7 @@ preparation; the two lifetime modes need not have identical quote counts.
 The body contains the ordinary exact request assets without a lease. Reuse body-only validation and
 the existing complete-control lease headroom before any staging effect; a near-limit lease-free
 control alone does not prove that the reconstructed full control fits. Recalculate the outer request
-bound too. A body-only representation never produces a dispatchable request. The complete decoder
+bound too. A body-only representation never authorizes dispatch. The complete decoder
 rejects any lease already in the body, separates the exact final slot, validates canonical lease or
 null, reconstructs the control asset and uses the existing full request validator. There is no
 second staged grammar or compatibility decoder for the unreleased version-one start wire.
