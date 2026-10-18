@@ -146,7 +146,7 @@ def download_to_local_file(
                 writer.abort()
             except BaseException as exc:
                 cleanup_failed = True
-                if control is None:
+                if control is None or (isinstance(control, Exception) and not isinstance(exc, Exception)):
                     control = exc
         if cleanup_failed and writer is not None:
             operation.retain_local_download_stage(writer)

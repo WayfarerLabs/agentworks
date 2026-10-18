@@ -7,7 +7,7 @@ import os
 import stat
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -40,6 +40,8 @@ from tests.execution.files._file_download_support import owner
 from tests.execution.files._file_snapshot_support import LocalCarrier, install_fixture_bundle
 from tests.execution.files._runtime_support import runtime_selection
 from tests.execution.files._target_support import target_for_owner
+from tests.execution.files.test_production_file_admission import database as database
+from tests.execution.files.test_production_file_admission import prepared as prepared
 
 if TYPE_CHECKING:
     from agentworks.execution.carrier import ByteSink, Carrier
@@ -374,6 +376,58 @@ def test_fsync_failure_keeps_remote_result_and_refuses_publication(
     assert fact.outcome.download is operation.outcome
     assert not fact.outcome.published and not fact.outcome.publication_uncertain
     assert not destination.exists() and not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("initial", [OSError, KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("cleanup", [KeyboardInterrupt, SystemExit])
+def test_cleanup_interrupt_overrides_only_an_ordinary_public_download_failure(
+    prepared, monkeypatch: pytest.MonkeyPatch, initial: type[BaseException], cleanup: type[BaseException]
+) -> None:
+    first = initial("publication sync stopped")
+    cleanup_control = cleanup("stage close interrupted")
+    expected = cleanup_control if isinstance(first, Exception) else first
+    stages: list[LocalDownloadPublication] = []
+    close = os.close
+
+    def publisher(destination: Path, condition: Create | Replace) -> LocalDownloadPublication:
+        stage = LocalDownloadPublication(destination, condition=condition)
+        stages.append(stage)
+        return stage
+
+    def fail_sync(fd: int) -> None:
+        assert len(stages) == 1 and fd == stages[0]._stage_fd
+        raise first
+
+    def interrupted_close(fd: int) -> None:
+        if stages and fd == stages[0]._stage_fd:
+            close(fd)
+            raise cleanup_control
+        close(fd)
+
+    monkeypatch.setattr(local, "_publisher_for_host", publisher)
+    monkeypatch.setattr(os, "fsync", fail_sync)
+    monkeypatch.setattr(os, "close", interrupted_close)
+    prepared.retained = True
+    destination = prepared.root / "destination"
+    try:
+        with pytest.raises(type(expected)) as raised:
+            prepared.selected.files.download(PurePosixPath(prepared.root / "source"), destination, max_bytes=64)
+        assert raised.value is expected
+        fact = raised.value.__cause__
+        assert isinstance(fact, local.FileLocalDownloadControlFact)
+        assert fact.outcome.download is not None
+        assert fact.outcome.download.status is FileDownloadStatus.COMPLETE
+        assert not fact.outcome.download.requires_owner_retention
+        assert fact.outcome.cleanup_failed and fact.outcome.cleanup_uncertain
+        assert not fact.outcome.published and not fact.outcome.publication_uncertain
+        assert fact.outcome.unfinished_stage is stages[0]
+        assert prepared.selected.file_operation.retained_local_download_stage is stages[0]
+        assert not destination.exists()
+    finally:
+        monkeypatch.setattr(os, "close", close)
+        if stages:
+            with pytest.raises(OSError):
+                stages[0].abort()
 
 
 def test_fsync_expiry_keeps_remote_result_but_refuses_publication(
