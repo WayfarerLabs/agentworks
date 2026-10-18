@@ -124,6 +124,51 @@ def test_subnet_omission_matches_subnet_free_selection():
     assert reader._project_instance(json.dumps(body).encode(), NativeIdentity.from_row(vm)).endpoint == "192.0.2.17"
 
 
+@pytest.mark.parametrize(
+    "subnet",
+    [
+        "projects/project/regions/us-central1/subnetworks/default",
+        "https://compute.googleapis.com/compute/v1/projects/project/regions/us-central1/subnetworks/auto-selected",
+        "https://www.googleapis.com/compute/v1/projects/project/regions/us-central1/subnetworks/auto-selected",
+    ],
+)
+def test_unrecorded_subnet_accepts_valid_live_provider_selection(subnet):
+    reader, vm = native_selection()
+    del vm.platform_metadata["subnet_url"]
+    body = native_instance()
+    body["networkInterfaces"][0]["subnetwork"] = subnet
+    assert reader._project_instance(json.dumps(body).encode(), NativeIdentity.from_row(vm)).endpoint == "192.0.2.17"
+
+
+@pytest.mark.parametrize(
+    "subnet",
+    [
+        "projects/foreign/regions/us-central1/subnetworks/default",
+        "https://foreign.invalid/compute/v1/projects/project/regions/us-central1/subnetworks/default",
+        "projects/project/regions/us-central1/subnetworks/default?x=1",
+        "projects/project/regions/us-central1/subnetworks/%64efault",
+        "projects/project/regions/us-central1/subnetworks/../default",
+        "",
+        None,
+        42,
+    ],
+)
+def test_unrecorded_subnet_still_refuses_foreign_or_malformed_live_selection(subnet):
+    reader, vm = native_selection()
+    del vm.platform_metadata["subnet_url"]
+    body = native_instance()
+    body["networkInterfaces"][0]["subnetwork"] = subnet
+    with pytest.raises(ValidationError):
+        reader._project_instance(json.dumps(body).encode(), NativeIdentity.from_row(vm))
+
+
+def test_recorded_subnet_requires_live_subnet_presence():
+    body = native_instance()
+    del body["networkInterfaces"][0]["subnetwork"]
+    with pytest.raises(ValidationError):
+        project_native(body)
+
+
 def test_provider_collection_upper_bounds_and_optional_status():
     body = native_instance()
     body.pop("status")

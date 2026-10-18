@@ -237,10 +237,13 @@ class GCEOwnedRead:
                 != identity.network_url
             ):
                 raise ValueError("foreign network")
-            subnet = interface.get("subnetwork")
-            if (
-                None if subnet is None else canonical_path(subnet, project_id=identity.project_id, kind="subnet")
-            ) != identity.subnet_url:
+            subnet = (
+                canonical_path(interface["subnetwork"], project_id=identity.project_id, kind="subnet")
+                if "subnetwork" in interface
+                else None
+            )
+            # An unrecorded subnet leaves selection to the provider, not a promise of absence.
+            if identity.subnet_url is not None and subnet != identity.subnet_url:
                 raise ValueError("foreign subnet")
             configs = interface.get("accessConfigs")
             if type(configs) is not list or len(configs) != 1 or type(configs[0]) is not dict:

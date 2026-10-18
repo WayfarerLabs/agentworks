@@ -663,8 +663,11 @@ def test_invalid_credential_timeout_refuses_before_transport(sdk, timeout):
     assert reader.close(Deadline.after(5))
 
 
-def test_native_projection_uses_owned_middleware_and_fresh_bounded_reads(sdk):
+@pytest.mark.parametrize("record_subnet", [True, False])
+def test_native_projection_uses_owned_middleware_and_fresh_bounded_reads(sdk, record_subnet):
     reader, vm = native_selection()
+    if not record_subnet:
+        del vm.platform_metadata["subnet_url"]
     identity = NativeIdentity.from_row(vm)
     sdk.fields = NATIVE_INSTANCE_FIELDS
     sdk.body = json.dumps(native_instance()).encode()
