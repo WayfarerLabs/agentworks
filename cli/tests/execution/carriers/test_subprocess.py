@@ -1172,10 +1172,10 @@ def test_post_exit_pending_delivery_stops_fresh_reads_from_other_stream(
 def test_input_pipe_failure_is_safe(
     children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
 ) -> None:
-    def write(fd: int, data: bytes) -> int:
+    def write(fd: int, data: memoryview) -> int:
         raise OSError("secret-canary")
 
-    monkeypatch.setattr(os, "write", write)
+    monkeypatch.setattr(process_core, "_write_owned_stdin", write)
     result = execute("import time; time.sleep(30)", io=CarrierIO(input=FiniteInput(b"secret-canary")), custody=custody)
     assert result.failure == Failure.INPUT
     assert result.exit_status is None

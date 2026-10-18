@@ -8,13 +8,14 @@ import struct
 import subprocess
 import sys
 import time
-import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
 
 import pytest
+
+from agentworks.execution import _process as core
 
 pytestmark = [pytest.mark.windows, pytest.mark.skipif(sys.platform != "win32", reason="requires native Windows pipes")]
 
@@ -67,13 +68,13 @@ def _report(stage: str, count: int, error: OSError | None = None) -> None:
         f"winerror={getattr(error, 'winerror', None)} count={count}"
     )
     print(observation)
-    # Temporary native diagnosis through CI's unchanged warnings summary.
-    warnings.warn(observation, stacklevel=2)
 
 
 def _write(api: str, fd: int, data: memoryview) -> int:
     if api == "crt":
         return os.write(fd, data)
+    if api == "owned":
+        return core._write_owned_stdin(fd, data)
     if sys.platform != "win32":
         pytest.fail("native write reached on a non-Windows host")
     # These imports must only execute after the non-Windows test skip.
@@ -145,7 +146,7 @@ def _child(tmp_path: Path, *, closed: bool) -> Iterator[tuple[subprocess.Popen[b
         )
 
 
-@pytest.mark.parametrize("api", ["crt", "native"])
+@pytest.mark.parametrize("api", ["crt", "native", "owned"])
 def test_closed_reader_reports_originating_error_while_child_is_alive(api: str, tmp_path: Path) -> None:
     with _child(tmp_path, closed=True) as (child, release):
         assert child.stdin is not None
@@ -153,7 +154,8 @@ def test_closed_reader_reports_originating_error_while_child_is_alive(api: str, 
             written = _write(api, child.stdin.fileno(), memoryview(_CHUNK))
         except OSError as error:
             _report(f"closed-{api}", 0, error)
-            if api == "native":
+            if api in {"native", "owned"}:
+                assert isinstance(error, BrokenPipeError) and error.errno == errno.EPIPE
                 assert getattr(error, "winerror", None) in {109, 232}
             else:
                 assert error.errno in {errno.EINVAL, errno.EPIPE}
@@ -165,7 +167,7 @@ def test_closed_reader_reports_originating_error_while_child_is_alive(api: str, 
         assert child.wait(timeout=10) == 0
 
 
-@pytest.mark.parametrize("api", ["crt", "native"])
+@pytest.mark.parametrize("api", ["crt", "native", "owned"])
 def test_live_reader_pressure_then_byte_exact_progress(api: str, tmp_path: Path) -> None:
     with _child(tmp_path, closed=False) as (child, release):
         assert child.stdin is not None and child.stdout is not None
@@ -184,6 +186,7 @@ def test_live_reader_pressure_then_byte_exact_progress(api: str, tmp_path: Path)
             assert 0 <= written <= len(_CHUNK)
             expected.extend(_CHUNK[:written])
             if written == 0:
+                assert api != "owned"
                 _report(f"pressure-{api}-zero-write", written)
                 break
         else:
@@ -225,11 +228,13 @@ def test_live_reader_pressure_then_byte_exact_progress(api: str, tmp_path: Path)
         _report(f"resumed-{api}", len(received))
 
 
-@pytest.mark.parametrize("api", ["crt", "native"])
+@pytest.mark.parametrize("api", ["crt", "native", "owned"])
 def test_invalid_handle_is_distinct_from_consumer_closure(api: str) -> None:
     try:
         if api == "crt":
             os.write(-1, b"x")
+        elif api == "owned":
+            core._write_owned_stdin(-1, memoryview(b"x"))
         elif sys.platform == "win32":
             import _winapi
 
@@ -242,3 +247,63 @@ def test_invalid_handle_is_distinct_from_consumer_closure(api: str) -> None:
         assert getattr(error, "winerror", None) == (6 if api == "native" else None)
     else:
         pytest.fail("invalid handle accepted a write")
+
+
+@pytest.mark.parametrize("capacity", [0, 1, 4096])
+def test_owned_writer_shrinks_only_unaccepted_prefixes(capacity: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    import _winapi
+    import msvcrt
+
+    offers: list[bytes] = []
+    accepted = bytearray()
+
+    def write(handle: int, data: memoryview) -> tuple[int, int]:
+        assert handle == 42
+        offers.append(bytes(data))
+        assert bytes(data) == _CHUNK[: len(data)]
+        if len(data) > capacity:
+            return 0, 0
+        written = min(7, len(data))
+        accepted.extend(data[:written])
+        return written, 0
+
+    monkeypatch.setattr(msvcrt, "get_osfhandle", lambda fd: 42)
+    monkeypatch.setattr(_winapi, "WriteFile", write)
+    if capacity:
+        assert core._write_owned_stdin(123, memoryview(_CHUNK)) == len(accepted) == min(7, capacity)
+        assert bytes(accepted) == _CHUNK[: len(accepted)]
+    else:
+        with pytest.raises(BlockingIOError) as caught:
+            core._write_owned_stdin(123, memoryview(_CHUNK))
+        assert caught.value.errno == errno.EAGAIN and not accepted
+    assert 1 <= len(offers) <= 17
+    assert len(offers[0]) == len(_CHUNK)
+    assert all(len(right) < len(left) for left, right in zip(offers, offers[1:], strict=False))
+    assert len(offers[-1]) == max(1, capacity)
+
+
+@pytest.mark.parametrize("number", [errno.EIO, errno.EINVAL, errno.EBADF, errno.EPIPE])
+@pytest.mark.parametrize("boundary", ["handle", "write"])
+def test_owned_writer_preserves_originating_error(number: int, boundary: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    import _winapi
+    import msvcrt
+
+    original = OSError(number, "injected native fault")
+    offers = 0
+
+    def fail(*args: object) -> int:
+        raise original
+
+    def write(handle: int, data: memoryview) -> tuple[int, int]:
+        nonlocal offers
+        offers += 1
+        if offers == 1:
+            return 0, 0
+        raise original
+
+    monkeypatch.setattr(msvcrt, "get_osfhandle", fail if boundary == "handle" else lambda fd: 42)
+    monkeypatch.setattr(_winapi, "WriteFile", write)
+    with pytest.raises(OSError) as caught:
+        core._write_owned_stdin(123, memoryview(_CHUNK))
+    assert caught.value is original
+    assert offers == (0 if boundary == "handle" else 2)

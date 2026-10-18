@@ -21,10 +21,12 @@ becomes observable.
 from __future__ import annotations
 
 import _thread
+import errno
 import math
 import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 from contextlib import suppress
@@ -40,6 +42,26 @@ _CHUNK = 65_536
 _POLL_SECONDS = 0.01
 _CLEANUP_SECONDS = 0.5
 _EXIT_DRAIN_SECONDS = 0.1
+
+
+def _write_owned_stdin(fd: int, data: memoryview) -> int:
+    """Offer one nonempty bounded chunk, preserving native pipe errors."""
+    if sys.platform != "win32":
+        return os.write(fd, data)
+    import _winapi
+    import msvcrt
+
+    handle = msvcrt.get_osfhandle(fd)
+    size = len(data)
+    while True:
+        written, _ = _winapi.WriteFile(handle, data[:size])
+        if written:
+            return written
+        # A nonblocking Windows pipe can reject a large offer with zero bytes
+        # even when a smaller prefix fits. No prefix was accepted on this path.
+        if size == 1:
+            raise BlockingIOError(errno.EAGAIN, "owned stdin pipe is full")
+        size = max(1, size // 2)
 
 
 class ByteSource(Protocol):
@@ -236,7 +258,7 @@ class _Input:
                 self.pending = memoryview(chunk)
         if self.pending:
             try:
-                written = os.write(pipe.fileno(), self.pending[:_CHUNK])
+                written = _write_owned_stdin(pipe.fileno(), self.pending[:_CHUNK])
             except BlockingIOError:
                 return progressed, False
             except BrokenPipeError:

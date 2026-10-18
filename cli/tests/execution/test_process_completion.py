@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import errno
-import os
 import subprocess
 import sys
 import time
@@ -109,7 +108,8 @@ def test_broken_input_pipe_stops_source_before_later_output_and_sink_pressure(
 ) -> None:
     source = OpenSource()
     release = tmp_path / "release-consumer"
-    native_write = os.write
+    identity = tmp_path / "consumer-pid"
+    native_write = core._write_owned_stdin
     close_stdin = core.LocalProcessPipes.close_stdin
     broken = False
     close_attempts = 0
@@ -119,6 +119,7 @@ def test_broken_input_pipe_stops_source_before_later_output_and_sink_pressure(
         try:
             return native_write(fd, data)
         except BrokenPipeError:
+            assert int(identity.read_text()) == children[0].pid
             broken = True
             source.forbidden = True
             release.touch()
@@ -146,15 +147,16 @@ def test_broken_input_pipe_stops_source_before_later_output_and_sink_pressure(
             return written
 
     stdout, stderr = SlowSink(), SlowSink()
-    monkeypatch.setattr(os, "write", observe_write)
+    monkeypatch.setattr(core, "_write_owned_stdin", observe_write)
     monkeypatch.setattr(core.LocalProcessPipes, "close_stdin", observe_close)
     owner = core.LocalProcessOwner()
     try:
         result = core.run_owned_process(
             [
-                sys.executable,
+                vars(sys)["_base_executable"],
                 "-c",
-                "import os,sys,time; from pathlib import Path; os.close(0); "
+                "import os,sys,time; from pathlib import Path; "
+                f"Path({str(identity)!r}).write_text(str(os.getpid())); os.close(0); "
                 f"release=Path({str(release)!r}); end=time.monotonic()+5\n"
                 "while not release.exists() and time.monotonic()<end: time.sleep(.01)\n"
                 "assert release.exists()\n"
@@ -205,18 +207,18 @@ def test_known_exit_never_borrows_source_and_keeps_final_output(
     _assert_exact_cleanup(children)
 
 
-@pytest.mark.parametrize("number", [errno.EIO, errno.EINVAL])
+@pytest.mark.parametrize("number", [errno.EIO, errno.EINVAL, errno.EBADF])
 def test_other_input_pipe_errors_remain_failures(
     number: int, monkeypatch: pytest.MonkeyPatch, children: list[subprocess.Popen[bytes]]
 ) -> None:
-    native_write = os.write
+    native_write = core._write_owned_stdin
 
     def fail_input(fd: int, data: Any) -> int:
         if children and children[0].stdin is not None and fd == children[0].stdin.fileno():
             raise OSError(number, "injected input fault")
         return native_write(fd, data)
 
-    monkeypatch.setattr(os, "write", fail_input)
+    monkeypatch.setattr(core, "_write_owned_stdin", fail_input)
     result = core.run_owned_process(
         [sys.executable, "-c", "import time; time.sleep(30)"],
         input=core.ProcessInput(data=b"offered"),
@@ -227,6 +229,37 @@ def test_other_input_pipe_errors_remain_failures(
     assert result.failure == core.ProcessFailure.INPUT
     assert result.exit_status is None and result.local_status is not None
     assert len(children) == 1
+    _assert_exact_cleanup(children)
+
+
+def test_partial_owned_writes_and_pressure_preserve_unaccepted_suffix(
+    monkeypatch: pytest.MonkeyPatch, children: list[subprocess.Popen[bytes]]
+) -> None:
+    native_write = core._write_owned_stdin
+    accepted = bytearray()
+    offers: list[bytes] = []
+    payload = bytes(range(256)) * 33
+
+    def pressured_write(fd: int, data: memoryview) -> int:
+        offers.append(bytes(data))
+        assert bytes(data) == payload[len(accepted) :]
+        if len(offers) % 3 == 1:
+            raise BlockingIOError(errno.EAGAIN, "injected temporary pressure")
+        written = native_write(fd, data[:257])
+        accepted.extend(data[:written])
+        return written
+
+    monkeypatch.setattr(core, "_write_owned_stdin", pressured_write)
+    result = core.run_owned_process(
+        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())"],
+        input=core.ProcessInput(data=payload),
+        output=core.ProcessOutput(capture_limit=len(payload)),
+        deadline=core.Deadline(time.monotonic() + 5),
+        owner=core.LocalProcessOwner(),
+    )
+    assert bytes(accepted) == payload and len(offers) > 2
+    assert result.failure is None and result.local_status == result.exit_status == 0
+    assert result.stdout.data == payload and result.stdout.complete and result.stderr.complete
     _assert_exact_cleanup(children)
 
 
