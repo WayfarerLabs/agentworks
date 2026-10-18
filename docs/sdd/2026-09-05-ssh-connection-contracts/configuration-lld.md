@@ -26,11 +26,13 @@ values passed to SSH. Reject OpenSSH expansion tokens, control characters and am
 arbitrary client options, proxy selection, algorithm list or alias evaluation is accepted. The
 execution minimum stays OpenSSH 8.5 and is checked at operation time. Executable names select from
 operator-owned PATH once at admission; all launches in that operation reuse the absolute pin.
-Windows adds no implicit cwd selection. Explicit relative/cwd PATH entries remain operator policy.
-An absolute `ssh_executable` bypasses PATH; the operator must keep the selected executable and its
-directory stable through use. An explicitly selected agent can sign only for the configured
-identity; it cannot contribute another identity. Platform-specific endpoints require supported
-installed-client behavior and native evidence before being advertised.
+Windows requires the native `OpenSSH_for_Windows_` client banner; MSYS/Cygwin clients refuse at the
+existing version gate. There is no compatibility override or automatic substitute. Windows adds no
+implicit cwd selection. Explicit relative/cwd PATH entries remain operator policy. An absolute
+`ssh_executable` bypasses PATH; the operator must keep the selected executable and its directory
+stable through use. An explicitly selected agent can sign only for the configured identity; it
+cannot contribute another identity. Platform-specific endpoints require supported installed-client
+behavior and native evidence before being advertised.
 
 Keep `operator.ssh_private_key`, `ssh_public_key`, generated manual aliases and other existing
 fields/readers intact. The default identity comes from an already explicit setting, not key

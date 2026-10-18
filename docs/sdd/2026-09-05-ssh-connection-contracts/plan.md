@@ -43,17 +43,30 @@ one-hour collection window ended on 2026-10-10. The operator authorized one addi
 2026-10-17 (local date), then directed work to continue. This fourth round began in private working
 state, with `review-requested` removed before changes. Its
 [current record](phase2-results.md#additional-authorized-correction-round) defines the frozen
-fixture/dependency compatibility batch. No further public correction round is authorized.
+fixture/dependency compatibility batch. Its exact `1eed1018d` checkpoint received the full native
+report; the collection window ended at 2026-10-18 05:41:03 UTC. That allowance is spent.
+
+The operator subsequently directed a narrow Git/MSYS/Cygwin client refusal on Windows, without
+substantial compatibility work. This authorizes the focused client-family correction and retest, not
+an unbounded additional-loop allowance. The
+[critical reading and round start](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6253297714)
+records removal of `review-requested` before implementation. The existing version probe must reject
+unsupported Windows clients before command, forwarding or enrollment dispatch. Preserve native Win32
+OpenSSH, POSIX behavior, the 8.5 floor and the selected executable. No override, fallback or new
+shared outcome is selected. Private reviews and applicable gates precede the tester comment and next
+checkpoint signal. Shared input-completion adoption remains a separate dependency.
 
 The retained POSIX consumer preserves pending bytes and the frozen native output prefix. Local
 fixtures cover finite/enlarged-pipe preservation and retained cleanup; the last native report also
 proves the narrow macOS PENDIN comparison and natural-cleanup signal storm. The new shared
 retirement correction separates unknown exit status from positive local cleanup. Its focused
-owner-authored commits are now adopted; SSH compatibility fixtures pass private review, while exact
-combined validation remains in progress. Permanently unproved original-pipe cleanup must still
-prevent restoration and reuse. Installed held acquisition/construction, live cleanup refusal,
-shutdown, native Windows and complete RunContext/production acceptance remain open. No full
-implementation checkbox or merge intent follows from these corrections.
+owner-authored commits are now adopted; SSH compatibility fixtures pass private review and the
+loaded native cells. Native Linux/macOS exact-loss probes confirm positive local retirement and
+restoration without later PID authority. Permanently unproved original-pipe cleanup must still
+prevent restoration and reuse. Native permanent-close uncertainty, live cleanup refusal and held
+shutdown remain unproved; ordinary settled-return shutdown is narrower. Windows terminal and
+complete RunContext/production acceptance remain open. No full implementation checkbox or merge
+intent follows from these corrections.
 
 Transport solely owns the carrier contract, common types, acceptance criteria, shared preparation,
 public outcomes and proof harness. SSH owns its independent carrier, connection/trust migration,

@@ -3,7 +3,7 @@
 - Updated: 2026-10-18
 - PR: [#832](https://github.com/WayfarerLabs/agentworks/pull/832), draft
 - Main/contract base: `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (#830)
-- State: the operator-authorized additional correction round is in progress; full terminal and
+- State: the operator-directed Windows client-family correction is in progress; full terminal and
   production acceptance remain open
 
 Earlier checkpoint evidence and dependency history live in separate files. The headings below retain
@@ -744,3 +744,60 @@ admission. Those are owner Linux results, not composed or native Windows clearan
 reviews and affected checks precede the next SSH handoff; the PR remains draft without a new review
 edge until a complete green checkpoint. This adoption conveys no clearance for the surrounding
 private transport branch or the remaining full-implementation gates.
+
+## Native report and Windows client-family correction
+
+The additional-round checkpoint is exact `1eed1018db7a7cd0c1ba1b648dc4e319418b3611`, tree
+`fb27564032f9b4af9a47183bd47aac0340c1861d`. Its
+[tester considerations](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6245743833)
+precede the review signal at 2026-10-18 04:41:03 UTC. The minimum collection interval ended at
+05:41:03 UTC. All ten jobs in
+[hosted CI 39097009544](https://github.com/WayfarerLabs/agentworks/actions/runs/39097009544) pass;
+Windows reports 1,725 passed, 71 skipped and 25 warnings. The prior failed run remains evidence.
+
+The
+[full integration report](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6246085333)
+uses the same source tree on Linux, macOS and Windows. Its ten corrected fixture cases pass 300 of
+300 loaded executions per workstation. The seven owner-marked native retirement cases pass on the
+Windows bed. Linux/macOS wait-loss probes retain OBSERVATION and unknown completion, retire local
+resources and restore the terminal, without PID operations after the call observing exact loss.
+Inherited ignored SIGCHLD again loses status on Linux but not macOS. Those are distinct cells.
+
+The buffered Python helper delivers all 20 environment cases exactly on Linux OpenSSH 9.2p1, macOS
+10.2p1, Windows inbox 9.5p2 and native Win32-OpenSSH 10.0p2. Values remain outside SSH argv and
+SetEnv. Target exit 255, SIGTERM, SIGKILL and exit zero have distinct helper wait records while the
+SSH carrier exits zero; local custody settles. This validates the new stdin path for those clients,
+without repairing legacy production callers or adopting the version-specific environment holder
+hypothesis. The latter's non-ASCII corruption and MSYS failures are separately recorded on
+[#845](https://github.com/WayfarerLabs/agentworks/issues/845#issuecomment-6245832500).
+
+The report is not a complete acceptance pass. Its Linux full suite has four known hidepid-host
+failures alongside 17,114 passes and 54 skips. The Windows bed cannot provide an owned console.
+Native original-close uncertainty and descriptor reuse were not induced; their coverage remains
+injected fixtures. Acquisition/construction and running-interrupt probes settle and restore, but
+live cleanup refusal was unreachable because the kernel allowed prompt escalation/reaping. Shutdown
+clients were already settled at product return, so those observations do not establish held-resource
+shutdown. Final guest/bed teardown confirmation was requested because the report describes cleanup
+as in progress. Full terminal, preparation, production creation/publication, trust migration,
+factories, both usable RunContext paths and R1-R5 remain open.
+
+The new material finding is MSYS client admission on native Windows. Git's `OpenSSH_10.5p1` passes
+the current generic version regex, then mishandles quoted options and truncates the fixed helper
+command. Every tested new-stack operation returns UNKNOWN/OBSERVATION. These are native tester
+observations; independent source review confirms the acceptance path, not the native measurements. A
+post-launch diagnostic cannot safely turn that UNKNOWN into NOT_SENT.
+
+The operator directed the small detect/refuse approach through the authenticated session. The
+[critical reading and round start](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6253297714)
+records that new direction and removal of the review label before work. The existing version probe
+will require `OpenSSH_for_Windows_` on Windows, retain the 8.5 floor and POSIX behavior, and refuse
+through existing pre-dispatch outcomes. Command delivery, forwarding and enrollment share that gate.
+No quoting workaround, version-specific exclusion, config override, fallback search, shared report
+field or legacy patch is selected. The README and operative LLD describe the supported family;
+banner recognition does not establish executable authenticity.
+
+This is one focused operator-directed correction and retest after the previous allowance was spent.
+Private project, complexity and correctness reviews plus affected local/hosted gates must precede
+the next tester-focus comment and checkpoint signal. Transport's later input-completion pin is not
+part of this correction or evidence of complete RunContext delivery. No full implementation
+checkbox, ready handoff, SDD lock or old-stack deletion follows.

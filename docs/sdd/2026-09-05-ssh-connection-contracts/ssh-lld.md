@@ -52,20 +52,24 @@ and its
 [public-file fallback](https://github.com/openssh/openssh-portable/blob/V_8_5_P1/authfile.c#L263).
 This deliberately refuses certificate authentication in the current carrier.
 
-The client floor is OpenSSH 8.5. A bounded `ssh -V` probe accepts the upstream and Windows version
-forms on stderr; unknown, failed or older probes refuse before command dispatch. The probe and
-command spend the same original monotonic deadline. After passive validation, trust admission and
-expiry checks, an executable name resolves once against the caller's PATH. Directory-qualified
-absolute candidates preserve native executable suffix handling without Windows' implicit cwd search.
-Empty Windows PATH components are ignored; explicit `.` and relative directories remain operator
-policy. POSIX retains empty-component search semantics. Probe and command, including forwarding and
-both enrollment acknowledgments, use the same absolute selection even if PATH subsequently changes.
-An explicit native executable path bypasses PATH selection. The operator controls that executable
-and its directory throughout use; pinning a path does not protect against replacement by a writer to
-that directory. No executable is fetched or installed, and no process environment is mutated. Strict
-and enrollment argv builders require the executable keyword and never substitute a bare name when it
-is omitted. They remain passive serializers. Native Windows decoy and probe/launch acceptance
-remains required.
+The client floor is OpenSSH 8.5. A bounded `ssh -V` probe requires the native `OpenSSH_for_Windows_`
+banner on Windows. MSYS/Cygwin clients are outside this native invocation contract. The measured
+MSYS client does not preserve its arguments. POSIX retains the accepted upstream and Windows version
+forms. Unknown, failed, unsupported-family or older probes refuse before command dispatch through
+the existing dispatch-failure outcome. No warning-only mode, override, path guess or fallback client
+is added. Banner recognition identifies a supported family, not executable authenticity or general
+compatibility. The probe and command spend the same original monotonic deadline. After passive
+validation, trust admission and expiry checks, an executable name resolves once against the caller's
+PATH. Directory-qualified absolute candidates preserve native executable suffix handling without
+Windows' implicit cwd search. Empty Windows PATH components are ignored; explicit `.` and relative
+directories remain operator policy. POSIX retains empty-component search semantics. Probe and
+command, including forwarding and both enrollment acknowledgments, use the same absolute selection
+even if PATH subsequently changes. An explicit native executable path bypasses PATH selection. The
+operator controls that executable and its directory throughout use; pinning a path does not protect
+against replacement by a writer to that directory. No executable is fetched or installed, and no
+process environment is mutated. Strict and enrollment argv builders require the executable keyword
+and never substitute a bare name when it is omitted. They remain passive serializers. Native Windows
+decoy and probe/launch acceptance remains required.
 
 Prepared argv is serialized into one remote command string, quoting every argument, including empty
 arguments, command-position assignments and reserved words. Local spawning never uses a shell. A
