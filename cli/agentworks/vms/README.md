@@ -36,8 +36,8 @@ Core then retains the shared guest preparation and its escaping control facts be
 account/file/execution views. A platform can check the observed guest against its availability
 evidence; WSL2 uses its actual hold READY. Aggregate teardown retains the original access and shared
 preparation until their effects and local custody settle. Neither a route switch nor an accessor can
-transfer or finalize that ownership. Canonical-context and creation/rollback integration remain
-separate work; existing consumers are unchanged.
+transfer or finalize that ownership. Creation/rollback integration remains unfinished; existing
+consumers are unchanged.
 
 `vm_execution_context(..., route=...)` selects native or canonical delivery explicitly under one
 shared `VMOperation` and cleanup fact. Canonical mode validates its stored literal endpoint/account
