@@ -73,6 +73,26 @@ def test_stat_only_revision_does_not_read_content(tmp_path: Path, monkeypatch: p
     assert revision.stat.size == target.stat().st_size
 
 
+@pytest.mark.parametrize("operation", ["snapshot", "revision", "stat"])
+def test_unsupported_runtime_refuses_before_open_or_content_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    (tmp_path / "file").write_bytes(b"content")
+    root_fd = _open_root(tmp_path)
+    try:
+        monkeypatch.setattr(sys, "platform", "freebsd")
+        monkeypatch.setattr(os, "open", lambda *_args, **_kwargs: pytest.fail("unsupported runtime opened a path"))
+        monkeypatch.setattr(snapshot_module, "_read", lambda *_args: pytest.fail("unsupported runtime read content"))
+        with pytest.raises(SnapshotReadError) as raised:
+            if operation == "snapshot":
+                read_snapshot(root_fd, "file", 1024)
+            else:
+                read_revision(root_fd, "file", include_digest=operation == "revision")
+        assert raised.value.kind is SnapshotFailureKind.IO
+    finally:
+        os.close(root_fd)
+
+
 @pytest.mark.skipif(sys.platform != "linux", reason="O_PATH is Linux-specific")
 def test_stat_only_revision_uses_path_only_access_for_unreadable_leaf(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

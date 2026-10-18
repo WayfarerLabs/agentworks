@@ -184,26 +184,14 @@ def _open_at(parent_fd: int, name: str, *, directory: bool, stat_only: bool = Fa
     else:
         flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
 
-    if sys.platform in {"linux", "darwin"}:
-        try:
-            return open_file_confined(parent_fd, name, flags)
-        except ConfinedOpenError as error:
-            if error.kind is ConfinedOpenFailure.CONFLICT:
-                raise SnapshotReadError(SnapshotFailureKind.CONFLICT) from None
-            if error.kind is ConfinedOpenFailure.UNSUPPORTED_OBJECT:
-                raise SnapshotReadError(SnapshotFailureKind.UNSUPPORTED_OBJECT) from None
-            raise SnapshotReadError(SnapshotFailureKind.IO) from None
-
-    error_number: int | None = None
     try:
-        return os.open(name, flags, dir_fd=parent_fd)
-    except OSError as error:
-        error_number = error.errno
-    if error_number == errno.ENOENT:
-        return None
-    if error_number in {errno.ELOOP, errno.ENOTDIR, errno.ENXIO, errno.ENODEV, errno.EXDEV}:
-        raise SnapshotReadError(SnapshotFailureKind.UNSUPPORTED_OBJECT)
-    raise SnapshotReadError(SnapshotFailureKind.IO)
+        return open_file_confined(parent_fd, name, flags)
+    except ConfinedOpenError as error:
+        if error.kind is ConfinedOpenFailure.CONFLICT:
+            raise SnapshotReadError(SnapshotFailureKind.CONFLICT) from None
+        if error.kind is ConfinedOpenFailure.UNSUPPORTED_OBJECT:
+            raise SnapshotReadError(SnapshotFailureKind.UNSUPPORTED_OBJECT) from None
+        raise SnapshotReadError(SnapshotFailureKind.IO) from None
 
 
 def _check_deadline(expires_at: float | None) -> None:

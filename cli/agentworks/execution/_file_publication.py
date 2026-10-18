@@ -370,15 +370,21 @@ def publish_file(
         failure = prior = FilePublicationError(
             PublicationFailureKind.UNCERTAIN if publication_attempted else PublicationFailureKind.IO,
             PublicationPhase.PUBLICATION if publication_attempted else PublicationPhase.CLEANUP,
+            cleanup_debt=None if prior is None else prior.cleanup_debt,
         )
-    elif close_control is not None:
+    elif close_control is not None and (sys.platform != "darwin" or control is None or isinstance(control, OSError)):
         control = close_control
 
     if failure is None and control is None:
         assert published_revision is not None
         return published_revision
 
-    cleanup_debt = _cleanup_owned_stage(parent_fd, stage, prior=prior)
+    try:
+        cleanup_debt = _cleanup_owned_stage(parent_fd, stage, prior=prior)
+    except BaseException as cleanup_control:
+        if sys.platform != "darwin" or control is None or isinstance(control, OSError):
+            raise
+        _raise_control(control, prior=_control_fact(cleanup_control) or prior)
     if control is not None:
         _raise_control(control, prior=prior, cleanup_debt=cleanup_debt)
 
@@ -923,6 +929,7 @@ def _close_publication_descriptors(
     replacement_fd: int | None,
     stage: _StageOwnership,
 ) -> BaseException | None:
+    """Close every handle, retaining Darwin's first non-I/O interruption."""
     interrupted: BaseException | None = None
     close_descriptor = os.close if sys.platform == "darwin" else _close
     if replacement_fd is not None:
@@ -934,10 +941,13 @@ def _close_publication_descriptors(
         try:
             close_descriptor(stage.descriptor)
         except BaseException as control:
-            interrupted = control
+            if sys.platform != "darwin" or interrupted is None or isinstance(interrupted, OSError):
+                interrupted = control
     if stage.admission is not None:
         admission_control = stage.admission.close()
-        if admission_control is not None:
+        if admission_control is not None and (
+            sys.platform != "darwin" or interrupted is None or isinstance(interrupted, OSError)
+        ):
             interrupted = admission_control
     return interrupted
 
