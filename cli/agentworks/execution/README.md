@@ -490,38 +490,52 @@ remote effects or active permission grants.
 `access.py` composes a bound `FileAccess` from an already-acquired `FileOperation`, one carrier,
 trusted root, selected runtime, ordinary identity plan, optional elevated plan, safe logical
 diagnostic identity, and a composition-owned deadline factory. It provides bounded reads, stat,
-inventory, finite byte-value publication, caller-owned streaming upload, local-file download, JSON
-updates, directory convergence, metadata convergence and conditional removal through the retained
-private custody and result reducers. `UploadSource.read` receives a positive request no larger than
-the private stage chunk bound; `None` is retried under the original deadline, `b""` is EOF, and
-`FileAccess` never closes, seeks or retains the source. Exact uploads consume the declared size and
-perform one-byte excess detection. `sudo=True` selects only the already bound elevated plan and
-refuses before source validation or dispatch when absent. Every target is a normalized absolute
-POSIX path confined to the trusted root; the service rejects the filesystem root because the helper
-requires a nonempty leaf. The bound `download()` requires a concrete workstation `Path`, defaults to
-create-only `Create`, and permits explicit `Replace`. An optional nonnegative byte limit bounds the
-held remote snapshot; zero permits only an empty file. `None` uses the snapshot protocol's
-representable size rather than a separate source-stat race or an application file-size ceiling. Only
-a verified transfer with settled remote cleanup may publish locally. Success returns the verified
-source metadata; absence and failures use the shared typed file errors without exposing partial
-content or raw local exceptions. The view remains private: there is no directory transfer,
-production factory or RunContext accessor. This bound assembly does not activate recipient grants or
-the core allowlist during coexistence.
+inventory, finite byte-value publication, caller-owned streaming upload, owned local-path upload,
+file/directory download, directory upload, JSON updates, create-only directories, directory/metadata
+convergence and conditional removal through the retained private custody and result reducers.
+`UploadSource.read` receives a positive request no larger than the private stage chunk bound; `None`
+is retried under the original deadline, `b""` is EOF, and `upload` never closes, seeks or retains
+the source. Exact uploads consume the declared size and perform one-byte excess detection.
+`sudo=True` selects only the already bound elevated plan and refuses before source validation or
+dispatch when absent. Every target is a normalized absolute POSIX path confined to the trusted root;
+the service rejects the filesystem root because the helper requires a nonempty leaf. The bound
+`download()` requires a concrete workstation `Path`, defaults to create-only `Create`, and permits
+explicit `Replace`. An optional nonnegative byte limit bounds the held remote snapshot; zero permits
+only an empty file. `None` uses the snapshot protocol's representable size rather than a separate
+source-stat race or an application file-size ceiling. Only a verified transfer with settled remote
+cleanup may publish locally. Success returns the verified source metadata; absence and failures use
+the shared typed file errors without exposing partial content or raw local exceptions. The view
+remains private, without a production factory or RunContext delivery. This bound assembly does not
+activate recipient grants or the core allowlist during coexistence.
 
 `_local_file_io.py` supplies passive owners for a local source, bounded complete tree inventory and
 one-level destination directory creation. Core must retain each owner before I/O and close its
 original resources explicitly, including after failure. An uncertain close is never retried using
 the raw descriptor or handle number. Source EOF checks the admitted file observation before remote
-publication; inventories are bounded observations, not atomic snapshots. These primitives do not yet
-supply the bound directory-transfer methods or native Windows/macOS acceptance.
+publication; inventories are bounded observations, not atomic snapshots. `upload_file` owns its
+source through typed reduction and cleanup; ordinary stream `upload` retains its borrowed-source
+contract. Native Windows/macOS acceptance remains pending.
+
+Directory upload/download merge structure through ordinary serial file calls under one original
+finite deadline. `ExistingFile.ERROR`, `PRESERVE` or `REPLACE` explicitly selects existing-file
+behavior; existing directories keep their metadata. A complete bounded manifest precedes mutation.
+`DirectoryTransferLimit` counts the root at depth zero and bounds entries, depth and actual
+transferred bytes; preserved files consume zero bytes. Links, special objects and observed aliases
+between distinct destination paths refuse. No archive extraction, pruning, rollback or replay is
+implicit. Success returns `DirectoryTransferProgress`; `directory_transfer_progress(error)` reads
+only earlier settled entries after failure, excluding the failing child's independently retained
+effect and cleanup facts. Cleanup cannot turn the earlier failed result into success.
 
 ## File-call custody
 
 `FileOperation` requires a `ManagedTargetIdentity` that exactly matches its `OperationOwner` VM or
-platform-host scope. Each logical public file call installs one adapter-owned `file-call` lifecycle
+platform-host scope. Each ordinary remote file call installs one adapter-owned `file-call` lifecycle
 obligation, replacing the generic carrier row rather than adding a second row. Upload and download
 bind their scratch token in the initial payload. JSON uses one parent row without a token, then
 publishes the child token and bounded attempt before nested upload dispatch.
+
+Directory transfers compose those ordinary children without a parent lifecycle row. Local-only
+inventory and destination probes retain local custody without fabricating a remote association.
 
 Completed calls leave immutable receipts, not pending debt, so serial ordinary calls do not consume
 the 128 unfinished-obligation capacity through their history. Exact current-owner absence after a
@@ -551,6 +565,14 @@ Downloads admit the remote child before creating new workstation staging and ret
 facts through verified publication, cleanup and public reduction. Failed cleanup never becomes an
 original successful result after a later cleanup retry. Missing completion capture retains custody.
 Cleanup of a previously retained stage remains separate from admission of a new child.
+
+Local source, inventory and destination calls retain their actual owners before filesystem I/O. An
+owned upload uses the same serial borrow for local admission and its ordinary remote UPLOAD call,
+without a fabricated download association. Finalization closes originals before releasing that
+borrow, and native aggregate teardown includes this custody. Cleanup retries close known originals
+and settle captured remote bookkeeping independently; they never reread, rescan, recreate or
+republish a failed child. Incomplete capture or unproved original closure keeps aggregate ownership
+unsettled.
 
 Uncertain registration retains the original local call, prepared child and borrow even when no stage
 or helper was dispatched. Bookkeeping and aggregate closure refuse that unresolved admission; they
