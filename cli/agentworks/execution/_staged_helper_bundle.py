@@ -8,7 +8,9 @@ from ._helper_bundle import FixedFileHelperBundle, RootGuestDelivery, RootGuestP
 
 _MODULES = (
     "_helper_identity",
+    "_darwin_descriptors",
     "_file_paths",
+    "_file_paths_darwin",
     "_scratch_receipt",
     "_scratch",
     "_scratch_wire",

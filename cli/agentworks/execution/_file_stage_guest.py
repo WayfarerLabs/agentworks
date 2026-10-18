@@ -8,7 +8,7 @@ import time
 from contextlib import suppress
 
 from ._file_effect_gate import FileEffectGateError, hold_file_effect_gate
-from ._file_paths import ConfinedOpenError, open_linux_confined, open_linux_root
+from ._file_paths import ConfinedOpenError, directory_path_flags, open_file_confined, open_file_root
 from ._file_stage_protocol import (
     MAX_REQUEST_BYTES,
     FileStageBeginRequest,
@@ -29,7 +29,7 @@ from ._file_stage_protocol import (
     stage_context,
 )
 from ._file_wire import FileRecordKind, FileRecordWriter
-from ._helper_identity import matches_current_identity
+from ._helper_identity import matches_file_helper_identity
 from ._scratch import (
     ScratchFailureKind,
     ScratchPhase,
@@ -94,7 +94,7 @@ def _open_parent(
         except ScratchRootError:
             raise _SafeFailure(FileStageFailureControl(FileStageFailureCode.ROOT_REFUSED)) from None
     try:
-        root_fd = open_linux_root(request.root_path)
+        root_fd = open_file_root(request.root_path)
     except ConfinedOpenError:
         raise _SafeFailure(FileStageFailureControl(FileStageFailureCode.ROOT_REFUSED)) from None
     if root_fd is None:
@@ -104,9 +104,9 @@ def _open_parent(
         components = request.relative_path.split("/")
         if len(components) > 1:
             parent_path = "/".join(components[:-1])
-            flags = os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+            flags = directory_path_flags()
             try:
-                parent_fd = open_linux_confined(root_fd, parent_path, flags)
+                parent_fd = open_file_confined(root_fd, parent_path, flags)
             except ConfinedOpenError:
                 raise _SafeFailure(FileStageFailureControl(FileStageFailureCode.PARENT_REFUSED)) from None
             if parent_fd is None:
@@ -214,9 +214,9 @@ def main(nonce: str, *, fixed_scratch_root: bool = False) -> int:
         return _finish_failure(writer, FileStageFailureControl(error.failure))
     if request.nonce != nonce:
         return _finish_failure(writer, FileStageFailureControl(FileStageFailureCode.NONCE_MISMATCH))
-    if sys.platform != "linux":
+    if sys.platform not in {"linux", "darwin"} or (fixed_scratch_root and sys.platform != "linux"):
         return _finish_failure(writer, FileStageFailureControl(FileStageFailureCode.UNSUPPORTED_RUNTIME))
-    if not matches_current_identity(request.identity):
+    if not matches_file_helper_identity(request.identity):
         return _finish_failure(writer, FileStageFailureControl(FileStageFailureCode.IDENTITY_MISMATCH))
     if fixed_scratch_root and request.effect_gate is not None:
         return _finish_failure(writer, FileStageFailureControl(FileStageFailureCode.INVALID_REQUEST))

@@ -143,7 +143,7 @@ def test_root_descriptor_closes_when_snapshot_control_raises(
     interruption = KeyboardInterrupt()
     request = FileReadRequest("0" * 32, str(tmp_path), "file", 1, plan.expected, None)
 
-    monkeypatch.setattr(_file_read_guest, "open_linux_root", lambda _path: root_fd)
+    monkeypatch.setattr(_file_read_guest, "open_file_root", lambda _path: root_fd)
 
     def interrupt(*_args: object, **_kwargs: object) -> None:
         raise interruption

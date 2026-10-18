@@ -1,4 +1,4 @@
-"""Admission for the fixed Linux scratch parent."""
+"""Admission for an OS-selected existing scratch parent."""
 
 from __future__ import annotations
 
@@ -9,9 +9,10 @@ import time
 from contextlib import suppress
 from enum import Enum
 
-from ._file_paths import ConfinedOpenError, ConfinedOpenFailure, open_linux_root
+from ._file_paths import ConfinedOpenError, ConfinedOpenFailure, open_file_root, open_linux_root
 
 _LINUX_SCRATCH_ROOT = "/tmp"
+_DARWIN_SCRATCH_ROOT = "/private/tmp"
 _EXPECTED_OWNER_UID = 0
 _EXPECTED_MODE = 0o1777
 
@@ -35,12 +36,12 @@ class ScratchRootError(Exception):
 
 
 def open_scratch_root(*, expires_at: float | None) -> int:
-    """Open and validate the existing fixed Linux scratch parent.
+    """Open and validate the existing fixed Linux or Darwin scratch parent.
 
     The caller owns the returned descriptor. Selection creates and repairs
     nothing, and its cooperative deadline does not cancel filesystem calls.
     """
-    if sys.platform != "linux":
+    if sys.platform not in {"linux", "darwin"}:
         raise ScratchRootError(ScratchRootFailureKind.UNSUPPORTED)
     _raise_if_expired(expires_at)
 
@@ -48,7 +49,11 @@ def open_scratch_root(*, expires_at: float | None) -> int:
     failure: ScratchRootFailureKind | None = None
     try:
         try:
-            descriptor = open_linux_root(_LINUX_SCRATCH_ROOT)
+            descriptor = (
+                open_linux_root(_LINUX_SCRATCH_ROOT)
+                if sys.platform == "linux"
+                else open_file_root(_DARWIN_SCRATCH_ROOT)
+            )
         except ConfinedOpenError as error:
             failure = _open_failure(error.kind)
         else:

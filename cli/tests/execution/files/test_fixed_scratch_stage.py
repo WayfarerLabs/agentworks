@@ -127,7 +127,7 @@ def test_packed_fixed_entry_refuses_other_root_or_gate(interpreter: str, variant
     source = program.loader_source + (
         "_agw_load_identity()\n_agw_load_remaining()\n"
         "g=sys.modules['_agw_file_stage._file_stage_guest']\n"
-        "g.matches_current_identity=lambda identity:True\n"
+        "g.matches_file_helper_identity=lambda identity:True\n"
         "raise SystemExit(_agw_enter_body())\n"
     )
     request = replace(_request(), root_path="/var/tmp")

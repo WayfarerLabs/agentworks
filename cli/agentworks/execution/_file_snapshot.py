@@ -1,7 +1,7 @@
 """Cooperative POSIX regular-file snapshots from a caller-owned root descriptor.
 
-Linux lookup uses ``openat2`` confinement. Other POSIX platforms retain a
-separate component walk and do not claim equivalent mount-boundary enforcement.
+Linux lookup uses ``openat2`` confinement. Darwin uses a separate readable
+component walk with device checks, without claiming equivalent kernel enforcement.
 This does not provide malicious same-user protection or hard cancellation of a
 blocked filesystem call.
 Callers own their root and writer lock.
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 from ._file_paths import (
     ConfinedOpenError,
     ConfinedOpenFailure,
-    open_linux_confined,
+    open_file_confined,
 )
 from ._file_stat import FileStat
 
@@ -184,9 +184,9 @@ def _open_at(parent_fd: int, name: str, *, directory: bool, stat_only: bool = Fa
     else:
         flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
 
-    if sys.platform == "linux":
+    if sys.platform in {"linux", "darwin"}:
         try:
-            return open_linux_confined(parent_fd, name, flags)
+            return open_file_confined(parent_fd, name, flags)
         except ConfinedOpenError as error:
             if error.kind is ConfinedOpenFailure.CONFLICT:
                 raise SnapshotReadError(SnapshotFailureKind.CONFLICT) from None

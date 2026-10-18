@@ -347,8 +347,8 @@ def test_identity_mismatch_precedes_target_io(
     prepared = _prepared_request(plan, tmp_path)
     reads = [prepared, b""]
     written = bytearray()
-    monkeypatch.setattr(guest, "matches_current_identity", lambda _expected: False)
-    monkeypatch.setattr(guest, "open_linux_root", lambda _path: pytest.fail("target was accessed"))
+    monkeypatch.setattr(guest, "matches_file_helper_identity", lambda _expected: False)
+    monkeypatch.setattr(guest, "open_file_root", lambda _path: pytest.fail("target was accessed"))
     monkeypatch.setattr(os, "read", lambda _fd, _size: reads.pop(0))
     monkeypatch.setattr(os, "write", lambda _fd, data: written.extend(data) or len(data))
 
@@ -366,8 +366,8 @@ def test_owned_descriptors_close_on_control_interruption(
     root_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
     target_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
     request = FileInventoryRequest("0" * 32, str(tmp_path), "target", 8, 1, 4096, plan.expected, 1.0)
-    monkeypatch.setattr(guest, "open_linux_root", lambda _path: root_fd)
-    monkeypatch.setattr(guest, "open_linux_confined", lambda *_args: target_fd)
+    monkeypatch.setattr(guest, "open_file_root", lambda _path: root_fd)
+    monkeypatch.setattr(guest, "open_file_confined", lambda *_args: target_fd)
     monkeypatch.setattr(
         guest, "inventory_directory", lambda *_args, **_kwargs: (_ for _ in ()).throw(KeyboardInterrupt())
     )

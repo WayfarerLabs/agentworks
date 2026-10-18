@@ -20,7 +20,7 @@ from agentworks.execution._file_objects import (
     revision_kind,
     stat_file_object,
 )
-from agentworks.execution._file_paths import open_linux_confined
+from agentworks.execution._file_paths import open_file_confined
 from agentworks.execution._file_snapshot_read import read_revision
 from agentworks.execution._file_stat import FileRevision
 
@@ -108,9 +108,9 @@ def test_stat_uses_confined_path_only_access_for_unreadable_regular(
 
     def recording_open(root_fd: int, path: str, flags: int) -> int | None:
         observed_flags.append(flags)
-        return open_linux_confined(root_fd, path, flags)
+        return open_file_confined(root_fd, path, flags)
 
-    monkeypatch.setattr(objects_module, "open_linux_confined", recording_open)
+    monkeypatch.setattr(objects_module, "open_file_confined", recording_open)
     try:
         revision = _observe(parent_fd, target.name)
     finally:

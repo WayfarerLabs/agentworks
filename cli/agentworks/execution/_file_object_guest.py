@@ -1,4 +1,4 @@
-"""Destination entry point for one Linux file-object operation."""
+"""Destination entry point for one file-object operation."""
 
 from __future__ import annotations
 
@@ -29,9 +29,9 @@ from ._file_objects import (
     revision_kind,
     stat_file_object,
 )
-from ._file_paths import ConfinedOpenError, open_linux_confined, open_linux_root
+from ._file_paths import ConfinedOpenError, directory_path_flags, open_file_confined, open_file_root
 from ._file_wire import FileRecordKind, FileRecordWriter
-from ._helper_identity import matches_current_identity
+from ._helper_identity import matches_file_helper_identity
 
 
 class _SafeFailure(Exception):
@@ -52,16 +52,16 @@ def _read_request() -> FileObjectRequest:
 
 def _parent(request: FileObjectRequest) -> tuple[int | None, int | None, str]:
     try:
-        root_fd = open_linux_root(request.root_path)
+        root_fd = open_file_root(request.root_path)
     except ConfinedOpenError:
         raise _SafeFailure(FileObjectFailureControl(FileObjectFailureCode.ROOT_REFUSED)) from None
     components = request.relative_path.split("/")
     leaf = components[-1]
     if root_fd is None or len(components) == 1:
         return root_fd, None, leaf
-    flags = os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    flags = directory_path_flags()
     try:
-        parent_fd = open_linux_confined(root_fd, "/".join(components[:-1]), flags)
+        parent_fd = open_file_confined(root_fd, "/".join(components[:-1]), flags)
     except ConfinedOpenError:
         failure: BaseException = _SafeFailure(FileObjectFailureControl(FileObjectFailureCode.PARENT_REFUSED))
     except BaseException as error:
@@ -136,9 +136,9 @@ def main(nonce: str) -> int:
         return _finish_failure(writer, FileObjectFailureControl(error.failure))
     if request.nonce != nonce:
         return _finish_failure(writer, FileObjectFailureControl(FileObjectFailureCode.NONCE_MISMATCH))
-    if sys.platform != "linux":
+    if sys.platform not in {"linux", "darwin"}:
         return _finish_failure(writer, FileObjectFailureControl(FileObjectFailureCode.UNSUPPORTED_RUNTIME))
-    if not matches_current_identity(request.identity):
+    if not matches_file_helper_identity(request.identity):
         return _finish_failure(writer, FileObjectFailureControl(FileObjectFailureCode.IDENTITY_MISMATCH))
     expires_at = None if request.remaining_seconds is None else time.monotonic() + request.remaining_seconds
     if expires_at is not None and time.monotonic() >= expires_at:

@@ -476,7 +476,7 @@ def test_ownership_precedes_mode_reapplication(tmp_path: Path, monkeypatch: pyte
     verify_calls = 0
     events: list[MetadataStep] = []
 
-    def mismatched_first_owner(*args: object, **kwargs: object) -> tuple[object, str]:
+    def mismatched_first_owner(*args: object, **kwargs: object) -> tuple[object, str | int]:
         nonlocal verify_calls
         verify_calls += 1
         revision, bridge = original_verify(*args, **kwargs)  # type: ignore[arg-type]
@@ -731,7 +731,7 @@ def test_completed_ownership_step_is_reported_on_later_refusal(tmp_path: Path, m
     verify_calls = 0
     acl_calls = 0
 
-    def mismatched_first_owner(*args: object, **kwargs: object) -> tuple[object, str]:
+    def mismatched_first_owner(*args: object, **kwargs: object) -> tuple[object, str | int]:
         nonlocal verify_calls
         verify_calls += 1
         revision, bridge = original_verify(*args, **kwargs)  # type: ignore[arg-type]

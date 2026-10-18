@@ -23,8 +23,8 @@ from agentworks.execution._file_read_bundle import _MODULE_NAMES as READ_MODULE_
 from agentworks.execution._file_read_bundle import _PACKAGE as READ_PACKAGE
 from agentworks.execution._file_read_bundle import FIXED_BUNDLE as READ_BUNDLE
 from agentworks.execution._file_read_protocol import parse_file_read_failure
-from agentworks.execution._file_snapshot_bundle import _MODULE_NAMES as SNAPSHOT_MODULE_NAMES
 from agentworks.execution._file_snapshot_bundle import _PACKAGE as SNAPSHOT_PACKAGE
+from agentworks.execution._file_snapshot_bundle import _ROOT_MODULE_NAMES as SNAPSHOT_ROOT_MODULE_NAMES
 from agentworks.execution._file_snapshot_bundle import FIXED_BUNDLE as SNAPSHOT_BUNDLE
 from agentworks.execution._file_snapshot_host import parse_file_snapshot_failure
 from agentworks.execution._file_stage_bundle import FIXED_BUNDLE as STAGE_BUNDLE
@@ -305,7 +305,7 @@ def test_complete_provider_body_fits_and_oversize_refuses_before_wire(
 def test_two_phase_snapshot_complete_provider_body_fits(root_mode: IdentityMode) -> None:
     program = build_root_guest_program(
         SNAPSHOT_PACKAGE,
-        SNAPSHOT_MODULE_NAMES,
+        SNAPSHOT_ROOT_MODULE_NAMES,
         "_file_snapshot_guest",
         delivery=RootGuestDelivery.FIXED_PREFIX,
     )

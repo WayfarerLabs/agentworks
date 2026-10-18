@@ -100,10 +100,10 @@ def test_create_only_publishes_all_bytes_with_requested_metadata(tmp_path: Path)
     assert not _stage_names(tmp_path)
 
 
-def test_non_linux_platform_refuses_before_parent_io(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unsupported_platform_refuses_before_parent_io(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent_fd = _open_parent(tmp_path)
     os.close(parent_fd)
-    monkeypatch.setattr("agentworks.execution._file_publication.sys.platform", "darwin")
+    monkeypatch.setattr("agentworks.execution._file_publication.sys.platform", "freebsd")
     error = _failure(parent_fd, "target", b"content", condition=Create())
     assert error.kind is PublicationFailureKind.UNSUPPORTED
     assert error.phase is PublicationPhase.STAGING

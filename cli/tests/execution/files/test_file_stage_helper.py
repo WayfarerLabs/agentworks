@@ -50,12 +50,12 @@ clock=[guest.time.monotonic()]
 def controlled_monotonic():
  return clock[0]
 guest.time.monotonic=controlled_monotonic
-real_open_root=guest.open_linux_root
+real_open_root=guest.open_file_root
 def advancing_open_root(path):
  result=real_open_root(path)
  clock[0]+=10.0
  return result
-guest.open_linux_root=advancing_open_root
+guest.open_file_root=advancing_open_root
 """
 
 _ADVANCE_AFTER_OPERATE = """

@@ -1,4 +1,4 @@
-"""Destination entry point for one bounded identity-bound Linux file read."""
+"""Destination entry point for one bounded identity-bound file read."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import sys
 import time
 from contextlib import suppress
 
-from ._file_paths import ConfinedOpenError, open_linux_root
+from ._file_paths import ConfinedOpenError, open_file_root
 from ._file_read_protocol import (
     MAX_REQUEST_BYTES,
     FileReadFailure,
@@ -22,7 +22,7 @@ from ._file_read_protocol import (
 from ._file_snapshot import SnapshotFailureKind, SnapshotReadError
 from ._file_snapshot_read import FileSnapshot, read_snapshot
 from ._file_wire import MAX_RECORD_BODY_BYTES, FileRecordKind, FileRecordWriter
-from ._helper_identity import matches_current_identity
+from ._helper_identity import matches_file_helper_identity
 
 
 class _SafeFailure(Exception):
@@ -64,7 +64,7 @@ def _raise_if_expired(expires_at: float | None) -> None:
 
 def _snapshot(request: FileReadRequest, expires_at: float | None) -> FileSnapshot | None:
     try:
-        root_fd = open_linux_root(request.root_path)
+        root_fd = open_file_root(request.root_path)
     except ConfinedOpenError:
         raise _SafeFailure(FileReadFailure.ROOT_REFUSED) from None
     if root_fd is None:
@@ -108,9 +108,9 @@ def main(nonce: str) -> int:
         return _finish_failure(writer, error.failure)
     if request.nonce != nonce:
         return _finish_failure(writer, FileReadFailure.NONCE_MISMATCH)
-    if sys.platform != "linux":
+    if sys.platform not in {"linux", "darwin"}:
         return _finish_failure(writer, FileReadFailure.UNSUPPORTED_RUNTIME)
-    if not matches_current_identity(request.identity):
+    if not matches_file_helper_identity(request.identity):
         return _finish_failure(writer, FileReadFailure.IDENTITY_MISMATCH)
     try:
         expires_at = _expires_at(request.remaining_seconds)

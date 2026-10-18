@@ -1,4 +1,4 @@
-"""Bounded Linux directory inventory beneath a borrowed root descriptor.
+"""Bounded directory inventory beneath a borrowed root descriptor.
 
 The caller owns the trusted inventory-root descriptor and cooperating-writer
 lock. Inventory is a bounded set of metadata observations, not a transaction
@@ -25,7 +25,7 @@ from ._file_objects import (
     revision_kind,
     stat_file_object,
 )
-from ._file_paths import ConfinedOpenError, ConfinedOpenFailure, open_linux_confined
+from ._file_paths import ConfinedOpenError, ConfinedOpenFailure, open_file_confined
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -102,7 +102,7 @@ def inventory_directory(
     children. Directories at the requested boundary are observed but never
     enumerated.
     """
-    if sys.platform != "linux":
+    if sys.platform not in {"linux", "darwin"}:
         raise FileInventoryError(FileInventoryFailureKind.UNSUPPORTED)
     _raise_if_expired(expires_at)
     root = _fstat(root_fd)
@@ -251,7 +251,7 @@ def _require_directory_identity(descriptor: int, expected: FileRevision, root_de
 
 def _open_directory(parent_fd: int, name: str) -> int | None:
     try:
-        return open_linux_confined(parent_fd, name, _DIRECTORY_FLAGS)
+        return open_file_confined(parent_fd, name, _DIRECTORY_FLAGS)
     except ConfinedOpenError as error:
         if error.kind is ConfinedOpenFailure.CONFLICT:
             kind = FileInventoryFailureKind.CONFLICT

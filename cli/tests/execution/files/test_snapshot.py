@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 import agentworks.execution._file_snapshot as snapshot_module
-from agentworks.execution._file_paths import open_linux_confined
+from agentworks.execution._file_paths import open_file_confined
 from agentworks.execution._file_snapshot import SnapshotFailureKind, SnapshotReadError
 from agentworks.execution._file_snapshot_read import (
     FileSnapshot,
@@ -81,14 +81,14 @@ def test_stat_only_revision_uses_path_only_access_for_unreadable_leaf(
     target.write_bytes(b"content")
     target.chmod(0)
     root_fd = _open_root(tmp_path)
-    original_open = open_linux_confined
+    original_open = open_file_confined
     leaf_flags: list[int] = []
 
     def recording_open(parent_fd: int, path: str, flags: int) -> int | None:
         leaf_flags.append(flags)
         return original_open(parent_fd, path, flags)
 
-    monkeypatch.setattr(snapshot_module, "open_linux_confined", recording_open)
+    monkeypatch.setattr(snapshot_module, "open_file_confined", recording_open)
     monkeypatch.setattr(snapshot_module, "_read", lambda *_args: pytest.fail("content was read"))
     try:
         revision = read_revision(root_fd, "file", include_digest=False)
@@ -246,9 +246,9 @@ def test_regular_leaf_open_uses_nonblocking_nofollow_noctty_flags(
 
         def recording_confined_open(root_fd: int, path: str, flags: int) -> int | None:
             observed_flags.append(flags)
-            return open_linux_confined(root_fd, path, flags)
+            return open_file_confined(root_fd, path, flags)
 
-        monkeypatch.setattr("agentworks.execution._file_snapshot.open_linux_confined", recording_confined_open)
+        monkeypatch.setattr("agentworks.execution._file_snapshot.open_file_confined", recording_confined_open)
     else:
         original_open = os.open
 

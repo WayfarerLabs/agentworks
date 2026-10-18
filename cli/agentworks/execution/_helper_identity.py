@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 
 _MAX_ID = 2**32 - 1
@@ -61,3 +62,14 @@ def matches_fresh_exec_identity(expected: IdentityExpectation) -> bool:
         and os.getgid() == os.getegid() == expected.egid
         and tuple(sorted(set(os.getgroups()) | {os.getegid()})) == expected.groups
     )
+
+
+def matches_file_helper_identity(expected: IdentityExpectation) -> bool:
+    """Admit an ordinary file helper after the fixed interpreter exec.
+
+    The Darwin loader changes no credentials before this entry boundary.
+    Linux retains its real/effective/saved-ID check.
+    """
+    if sys.platform == "darwin":
+        return matches_fresh_exec_identity(expected)
+    return sys.platform == "linux" and matches_current_identity(expected)

@@ -235,8 +235,8 @@ def test_nested_parent_control_interruption_closes_owned_root(
 
     root_fd = os.open(tmp_path, os.O_PATH | os.O_DIRECTORY)
     request = FileObjectRequest("0" * 32, FileObjectOperation.STAT, str(tmp_path), "nested/leaf", 1.0, plan.expected)
-    monkeypatch.setattr(guest, "open_linux_root", lambda _path: root_fd)
-    monkeypatch.setattr(guest, "open_linux_confined", lambda *_args: (_ for _ in ()).throw(KeyboardInterrupt()))
+    monkeypatch.setattr(guest, "open_file_root", lambda _path: root_fd)
+    monkeypatch.setattr(guest, "open_file_confined", lambda *_args: (_ for _ in ()).throw(KeyboardInterrupt()))
 
     with pytest.raises(KeyboardInterrupt):
         guest._parent(request)
@@ -268,7 +268,7 @@ def test_root_absence_checks_guest_local_expiry_before_reporting_no_effect(
         FileKind.REGULAR if selected is FileObjectOperation.REMOVE else None,
         revision if selected is FileObjectOperation.REMOVE else None,
     )
-    monkeypatch.setattr(guest, "open_linux_root", lambda _path: None)
+    monkeypatch.setattr(guest, "open_file_root", lambda _path: None)
     monkeypatch.setattr("agentworks.execution._file_object_guest.time.monotonic", lambda: 2.0)
 
     with pytest.raises(guest._SafeFailure) as raised:

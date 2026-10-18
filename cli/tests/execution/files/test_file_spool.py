@@ -518,7 +518,9 @@ def test_fixed_modules_spool_under_current_and_python311(tmp_path: Path, runtime
         package,
         (
             "_file_stat",
+            "_darwin_descriptors",
             "_file_paths",
+            "_file_paths_darwin",
             "_file_snapshot",
             "_helper_identity",
             "_scratch_receipt",

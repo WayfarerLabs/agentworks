@@ -9,7 +9,7 @@ import time
 from contextlib import suppress
 
 from ._file_effect_gate import FileEffectGateError, hold_file_effect_gate
-from ._file_paths import ConfinedOpenError, open_linux_root
+from ._file_paths import ConfinedOpenError, open_file_root
 from ._file_snapshot_protocol import (
     MAX_REQUEST_BYTES,
     FileSnapshotBeginRequest,
@@ -34,7 +34,7 @@ from ._file_snapshot_protocol import (
 )
 from ._file_spool import SpoolSnapshot, SpoolSnapshotError, SpoolSnapshotFailureKind, spool_snapshot
 from ._file_wire import MAX_RECORD_BODY_BYTES, FileRecordKind, FileRecordWriter
-from ._helper_identity import matches_current_identity
+from ._helper_identity import matches_file_helper_identity
 from ._scratch import (
     ScratchFailureKind,
     ScratchPhase,
@@ -116,7 +116,7 @@ def _operate_begin(
     expires_at: float | None,
 ) -> SpoolSnapshot | None:
     try:
-        source_fd = open_linux_root(request.root_path)
+        source_fd = open_file_root(request.root_path)
     except ConfinedOpenError:
         raise _SafeFailure(FileSnapshotFailureControl(FileSnapshotFailureCode.ROOT_REFUSED)) from None
     if source_fd is None:
@@ -268,9 +268,9 @@ def main(nonce: str) -> int:
         return _finish_failure(writer, FileSnapshotFailureControl(error.failure))
     if request.nonce != nonce:
         return _finish_failure(writer, FileSnapshotFailureControl(FileSnapshotFailureCode.NONCE_MISMATCH))
-    if sys.platform != "linux":
+    if sys.platform not in {"linux", "darwin"}:
         return _finish_failure(writer, FileSnapshotFailureControl(FileSnapshotFailureCode.UNSUPPORTED_RUNTIME))
-    if not matches_current_identity(request.identity):
+    if not matches_file_helper_identity(request.identity):
         return _finish_failure(writer, FileSnapshotFailureControl(FileSnapshotFailureCode.IDENTITY_MISMATCH))
 
     expires_at = _expires_at(request.remaining_seconds)

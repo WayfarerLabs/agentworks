@@ -1,4 +1,4 @@
-"""Build the fixed no-install bundle for Linux file-object operations."""
+"""Build the fixed no-install bundle for file-object operations."""
 
 from __future__ import annotations
 
@@ -7,9 +7,11 @@ from agentworks.execution._helper_bundle import RootGuestDelivery, build_file_he
 _PACKAGE = "_agw_file_object"
 _MODULE_NAMES = (
     "_helper_identity",
+    "_darwin_descriptors",
     "_file_stat",
     "_file_revision_wire",
     "_file_paths",
+    "_file_paths_darwin",
     "_file_snapshot",
     "_file_snapshot_read",
     "_file_objects",
