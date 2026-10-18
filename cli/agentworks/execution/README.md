@@ -76,9 +76,11 @@ defaults use observed client evidence. WSL power uses only host registration and
 Selection checks the registration's machine, SID, GUID, name and installation directory against the
 held instance. Only the existing one-shot successful start plus matching running evidence can adopt
 a first import's new GUID. Native user resolution then uses Lima and pins instance/global YAML and
-`lima-version` fingerprints for later checks. This does not provide a WSL availability hold: both
-operation-length and independent-job holds for Lima's WSL driver remain open, as do native Windows
-and remote platform-host acceptance.
+`lima-version` fingerprints for later checks. The private operation-length WSL hold follows
+activation/registration adoption and precedes user lookup or canonical guest preparation. It
+requires durable READY plus live native ownership, matches guest boot/init identity, and retains the
+exact hold and directory through uncertain cleanup. Native Windows/Lima acceptance remains open;
+this does not provide an independent-job hold or complete remote platform-host composition.
 
 The private managed-start exchange stages the five fixed protected request assets and invokes the
 first-party derived Linux service controller through one transient root systemd service. An

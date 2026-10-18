@@ -5886,6 +5886,15 @@ reproducer and the Windows-owner module (14 passes, nine skips), with scoped str
 style. This is a narrow existing signal-state bug fix, not a legacy transport migration or a change
 to the WSL interrupt test. Combined validation and independent review remain required.
 
+- [x] Implement and privately validate the Lima WSL operation-length hold adapter and the separately
+      diagnosed port-forward signal restoration. At `8919ccaf0`, the combined single-process
+      selection passes 2,342 tests with ten native/platform skips; strict typing covers 1,513
+      sources and changed-file quality passes across 159 Python and 12 Markdown files. Project and
+      generic correctness reviews find no material issue; complexity review requires the stale
+      execution README's no-hold claim to match the implemented operation hold, corrected alongside
+      this record. These are private implementation checks, not native Windows/Lima proof,
+      independent-job availability, recovery, complete host composition or additive acceptance.
+
 - [ ] Complete combined validation and independent review of the private Darwin buffered DIRECT
       helper (`c9bd8f1dd`), then obtain native macOS proof with the approved interpreter
       prerequisite. Preserve source/input separation, fixed fresh-exec identity and honest
