@@ -5931,13 +5931,23 @@ to the WSL interrupt test. Combined validation and independent review remain req
       source-cleanup uncertainty. This does not complete platform-host identity/files/context
       composition, live foreground execution or any MANAGED host guarantee.
 
-- [ ] Pin fresh-process independence tests to the reviewed checkout explicitly. Isolated Python
+- [x] Pin fresh-process independence tests to the reviewed checkout explicitly. Isolated Python
       ignores `PYTHONPATH`, so a shared tooling environment's editable installation is not proof of
       candidate source. Install retirement guards before any first-party import, reject preloaded
       first-party modules, and validate package origins and search locations. Exercise an actual new
       RunContext workflow with command bytes/status, files, JSON, claim release, exact cleanup and
       post-close refusal. Keep this synthetic Linux proof distinct from native/platform and
       supervised-job acceptance.
+
+The private fresh-process correction is integrated at `8843cbb4f`. Both subprocess suites now pass
+the reviewed checkout explicitly, reject preloaded first-party modules before installing retirement
+guards, and check each loaded package's origin and search locations. The Linux workflow drives
+ordinary new RunContext composition, literal arguments, binary input and separate output, exit 23,
+file and JSON operations, claim release, cleanup and post-close refusal. Four focused cases pass at
+that head; the combined file/context selection at `3abd73849` passes 2,561 tests with 25 skips.
+Project, complexity and generic correctness reviews clear this bounded test correction. It is not
+native platform, complete production recovery or supervised-job acceptance.
+
 - [ ] Prove fresh-process platform composition without retirement dependencies, not only calls to
       already-imported native hooks. The first-binding audit at `6149cf06` found that VM-platform
       package initialization imports Lima's legacy dependencies, while plugin initialization imports
