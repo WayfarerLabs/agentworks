@@ -1327,19 +1327,28 @@ observation, helper and advance paths acquire the same flock before gate-row acc
 SQLite-only path may participate. Use ordinary rollback journal mode for transactional storage,
 close connections before effect work and avoid WAL, pooling or a custom persistence log. Its
 transient journal and the gate itself are reserved control state, not file-helper mutation targets;
-an authorized read of the gate inode must not release the effect lock. Native acceptance must prove
-namespace lifetime and local-mount semantics. The original private
-SQLite-transaction-through-effects attempt failed review because closing another descriptor for the
-database inode releases its POSIX locks, allowing a concurrent advance while an old helper still
-works. The replacement local proof must reproduce that same-inode read case, deadline expiry and
-retained flock exclusion. First prove the shared gate with the DOWNLOAD snapshot family under local
-spawned-controller failure, using one binding format in the existing `file-call` obligation and one
-guest gate implementation. That proof does not certify other helper families or production carriers.
-This remains a design candidate, not shipped recovery. Native acceptance must cover a helper active
-across takeover, a delayed old request, lost advance acknowledgment, recovery of recovery, stale
-advance, missing/replaced state, guest restart and both target-user/elevated identities. The exact
-guest epoch and provider locator still need platform-specific proof. Until those tests pass, the
-`_DownloadDrainEvidence` production producer remains absent and DOWNLOAD recovery stays private.
+an authorized read of the gate inode must not release the effect lock. Ordinary mutating APIs refuse
+the namespace itself and its descendants. On Linux, `set_metadata` and `ensure_directory`
+additionally refuse the two exact ancestor targets `/run` and `/run/agentworks`, whose ownership and
+writable modes are prerequisites of the namespace. This conservative operation restriction also
+excludes harmless metadata changes to those two directories; infrastructure provisioning owns them.
+It is not a ban on other `/run` descendants, read/stat/inventory operations, or a permission grant.
+Create-only directory creation already refuses existing ancestors without changing them, and
+nonrecursive removal cannot remove an ancestor containing the live namespace. Enforce the
+restriction before ordinary dispatch and at the actual Linux helper boundary, without changing
+Darwin's ancestor semantics. Native acceptance must prove namespace lifetime and local-mount
+semantics. The original private SQLite-transaction-through-effects attempt failed review because
+closing another descriptor for the database inode releases its POSIX locks, allowing a concurrent
+advance while an old helper still works. The replacement local proof must reproduce that same-inode
+read case, deadline expiry and retained flock exclusion. First prove the shared gate with the
+DOWNLOAD snapshot family under local spawned-controller failure, using one binding format in the
+existing `file-call` obligation and one guest gate implementation. That proof does not certify other
+helper families or production carriers. This remains a design candidate, not shipped recovery.
+Native acceptance must cover a helper active across takeover, a delayed old request, lost advance
+acknowledgment, recovery of recovery, stale advance, missing/replaced state, guest restart and both
+target-user/elevated identities. The exact guest epoch and provider locator still need
+platform-specific proof. Until those tests pass, the `_DownloadDrainEvidence` production producer
+remains absent and DOWNLOAD recovery stays private.
 
 The private download, upload and JSON custody slice attaches validated prepared workflows to
 `FileOperation` before running them. This preserves original carrier, binding and token through

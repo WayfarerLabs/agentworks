@@ -4926,6 +4926,18 @@ and a production drain-evidence producer remain unproved.
       Keep the public FileAccess and ownership release gates open until this and the concrete
       recovery handoff are proved.
 
+- [ ] Extend the private shared effect fence to metadata, directory convergence, conditional removal
+      and JSON's existing upload child. Carry the gate through canonical requests, helper effects
+      and cleanup, every durable row rewrite, and exact setup/proposal recovery without retaining
+      contents or replaying mutations. Generalize the existing package fence consumer rather than
+      adding per-family copies. Preserve historical nongated bytes, no-state stat/readiness and
+      Darwin behavior. Prove stale-request refusal, active-effect exclusion, lost setup/advance
+      replies, exact retained outcomes and complete provider envelopes. Reserve the control
+      namespace from ordinary mutations and the two exact Linux ancestor metadata targets from
+      convergence. This private family coverage does not complete production FileAccess admission,
+      namespace lifecycle, predecessor-controller settlement, native evidence or whole-operation
+      recovery.
+
 The reviewed setup design selects one deterministic, epoch-bound path and exclusive creation per
 managed scope/effective identity. A lost setup reply is reconciled by non-creating inspection of the
 complete gate under flock, not by replacing it or trusting the request's guest identity. Setup and
