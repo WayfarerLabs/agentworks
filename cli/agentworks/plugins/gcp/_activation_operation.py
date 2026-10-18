@@ -168,6 +168,20 @@ def decode_completion(body: bytes, payload: ActivationPayload) -> ActivationStat
             )
         ):
             raise ValueError("foreign completion")
+        return operation_state(value)
+    except (ValueError, TypeError, RecursionError):
+        raise ValidationError("GCE activation completion is invalid") from None
+
+
+def operation_state(value: dict[str, object]) -> ActivationState:
+    """Interpret selected Compute Operation status without retaining diagnostics.
+
+    Callers first establish their action, target and request identity. Both
+    zonal start and global firewall operations use this closed REST schema.
+    """
+    try:
+        if value.get("status") not in ("PENDING", "RUNNING", "DONE"):
+            raise ValueError("invalid operation status")
         has_error = "error" in value
         if has_error:
             error = value["error"]
@@ -193,4 +207,4 @@ def decode_completion(body: bytes, payload: ActivationPayload) -> ActivationStat
             return ActivationState.PENDING
         return ActivationState.FAILED if has_error else ActivationState.SUCCEEDED
     except (ValueError, TypeError, RecursionError):
-        raise ValidationError("GCE activation completion is invalid") from None
+        raise ValueError("invalid operation completion") from None
