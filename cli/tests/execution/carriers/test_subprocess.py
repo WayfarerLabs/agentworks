@@ -738,9 +738,10 @@ def test_natural_exit_is_observed_despite_unsent_input(
     try:
         input = LiveInput(EndlessSource()) if live else FiniteInput(b"x" * 2_000_000)
         result = execute(script, io=CarrierIO(input=input), seconds=None, live_stdio=live, custody=custody)
-        assert result.failure == Failure.INPUT
+        assert result.failure is None
         assert result.local_status == result.exit_status == 23
         assert result.stdout.data == b"parent"
+        assert result.stdout.complete and result.stderr.complete
         assert_closed(children)
     finally:
         release.touch()
@@ -750,7 +751,7 @@ def test_natural_exit_is_observed_despite_unsent_input(
         assert done.exists()
 
 
-def test_live_input_early_close_preserves_only_observed_evidence(
+def test_live_input_early_close_drains_output_and_observes_exit(
     children: list[subprocess.Popen[bytes]], custody: LocalDeliveryCustody
 ) -> None:
     class EndlessSource:
@@ -770,21 +771,24 @@ def test_live_input_early_close_preserves_only_observed_evidence(
         custody=custody,
     )
     assert source.calls > 0
-    assert result.failure == Failure.INPUT
-    assert result.local_status is not None
-    assert result.exit_status in (None, 23)
-    assert b"parent".startswith(result.stdout.data)
-    if result.exit_status is not None:
-        assert result.local_status == result.exit_status
+    assert result.failure is None
+    assert result.local_status == result.exit_status == 23
+    assert result.stdout.data == b"parent"
+    assert result.stdout.complete and result.stderr.complete
     assert_closed(children)
 
 
 def test_status_first_observed_during_cleanup_is_not_exit_evidence(
     children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
 ) -> None:
-    class EndlessSource:
+    class FailingSource:
+        calls = 0
+
         def try_read(self, limit: int) -> bytes:
-            return b"x" * limit
+            self.calls += 1
+            if self.calls > 1:
+                raise RuntimeError("source fault")
+            return b"x"
 
     def hide_status_until_cleanup(status: process_core._ProcessStatus) -> None:
         return None
@@ -800,7 +804,7 @@ def test_status_first_observed_during_cleanup_is_not_exit_evidence(
     monkeypatch.setattr(process_core, "_cleanup", observe_during_cleanup)
     result = execute(
         "import os,sys; os.read(0,1); os.close(0); sys.exit(23)",
-        io=CarrierIO(input=LiveInput(EndlessSource())),
+        io=CarrierIO(input=LiveInput(FailingSource())),
         seconds=2,
         live_stdio=True,
         custody=custody,
