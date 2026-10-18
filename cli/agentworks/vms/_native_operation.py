@@ -102,9 +102,7 @@ class _Workflow:
             or files.has_unfinished_local_file_call
             or files.retained_local_download_stage is not None
             or files.active_uploads
-            or files.active_package_uploads
             or files.unfinished_uploads
-            or files.unfinished_package_uploads
             or files.active_json_updates
             or files.unfinished_json_updates
             or files.active_stats

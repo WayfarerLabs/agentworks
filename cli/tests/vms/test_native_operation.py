@@ -14,6 +14,7 @@ import sys
 from contextlib import closing
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -1190,7 +1191,7 @@ def test_local_download_call_custody_blocks_aggregate_release(
         selected.file_operation.begin_local_download()
 
 
-def test_active_package_registry_blocks_aggregate_release(
+def test_active_upload_registry_blocks_aggregate_release(
     database: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     platform = WSL2Platform("wsl2", {})
@@ -1204,12 +1205,12 @@ def test_active_package_registry_blocks_aggregate_release(
     ):
         selected = views
         borrow = views.owner.borrow()
-        # Model retained package registry custody after its borrow has settled.
-        active = cast("_ActiveFileUpload", object())
-        views.file_operation._active_package_uploads[id(active)] = active
+        # Model retained upload registry custody after its borrow has settled.
+        active = cast("_ActiveFileUpload", SimpleNamespace(outcome=None))
+        views.file_operation._active_uploads[id(active)] = active
         borrow.close()
     assert selected is not None
     assert database.operations.inspect(_scope()) is not None
-    assert selected.file_operation.active_package_uploads
+    assert selected.file_operation.active_uploads
     with pytest.raises(StateError):
         selected.execution.run(Command(["/bin/true"]), profile=Protection.DIRECT)

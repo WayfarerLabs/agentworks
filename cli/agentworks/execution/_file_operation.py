@@ -39,7 +39,6 @@ from agentworks.execution._file_json import (
 from agentworks.execution._file_local_custody import LocalFileCall
 from agentworks.execution._file_metadata_protocol import FileMetadataOperation
 from agentworks.execution._file_obligation import (
-    MAX_PACKAGE_UPLOAD_MEMBERS,
     FileCallFamily,
     FileCallObligation,
     FileCallObligationCodecError,
@@ -68,7 +67,6 @@ from agentworks.execution._file_upload import (
     FileUploadBinding,
     FileUploadControlFact,
     FileUploadOutcome,
-    FileUploadStatus,
     _prepare_upload,
     _prepare_upload_from_binding,
     _PreparedUpload,
@@ -82,7 +80,7 @@ from agentworks.execution.carrier import Dispatch
 from agentworks.operations import LifecycleObligation, _is_pre_registration_refusal, release_borrow_after_custody
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable
 
     from agentworks.execution._file_effect_gate import FileEffectGateBinding
     from agentworks.execution._file_inventory_exchange import FileInventoryCandidateResult
@@ -194,37 +192,6 @@ class UnfinishedFileUpload:
 
 
 @dataclass(frozen=True, slots=True, repr=False)
-class PackageUploadMember:
-    """One caller-held package member; source bytes never enter the ledger."""
-
-    relative_path: str
-    source: ByteSource = field(repr=False)
-    size: int
-    condition: Create | Replace | Match
-    create_metadata: NewMetadata
-
-
-@dataclass(frozen=True, slots=True, repr=False)
-class UnfinishedPackageUpload:
-    """The one child retained after a batch stops."""
-
-    index: int
-    carrier: Carrier = field(repr=False)
-    binding: FileUploadBinding
-    outcome: FileUploadOutcome | None = field(default=None, repr=False)
-    checkpoint_pending: bool = False
-
-
-class PackageUploadStopped(Exception):
-    """A member did not finish; the caller must not infer a remaining plan."""
-
-    def __init__(self, index: int, outcome: FileUploadOutcome) -> None:
-        self.index = index
-        self.outcome = outcome
-        super().__init__("private package upload stopped at one member")
-
-
-@dataclass(frozen=True, slots=True, repr=False)
 class _PendingUploadSetup:
     setup: FileEffectGateSetup
     token: bytes
@@ -306,8 +273,6 @@ class FileOperation:
         self._local_file_call: LocalFileCall | None = None
         self._active_uploads: dict[int, _ActiveFileUpload] = {}
         self._unfinished_uploads: list[UnfinishedFileUpload] = []
-        self._active_package_uploads: dict[int, _ActiveFileUpload] = {}
-        self._unfinished_package_uploads: list[UnfinishedPackageUpload] = []
         self._active_json_updates: dict[int, _ActiveFileJsonUpdate] = {}
         self._unfinished_json_updates: list[UnfinishedFileJsonUpdate] = []
         self._active_stats: dict[int, _ActiveFileStat] = {}
@@ -481,16 +446,8 @@ class FileOperation:
         return tuple(self._active_uploads.values())
 
     @property
-    def active_package_uploads(self) -> tuple[_ActiveFileUpload, ...]:
-        return tuple(self._active_package_uploads.values())
-
-    @property
     def unfinished_uploads(self) -> tuple[UnfinishedFileUpload, ...]:
         return tuple(self._unfinished_uploads)
-
-    @property
-    def unfinished_package_uploads(self) -> tuple[UnfinishedPackageUpload, ...]:
-        return tuple(self._unfinished_package_uploads)
 
     @property
     def active_json_updates(self) -> tuple[_ActiveFileJsonUpdate, ...]:
@@ -945,258 +902,6 @@ class FileOperation:
         self._capture_upload(active, outcome)
         return outcome
 
-    def upload_package(
-        self,
-        carrier: Carrier,
-        *,
-        trusted_root_path: str,
-        members: Sequence[PackageUploadMember],
-        checkpoint: Callable[[int, FileUploadOutcome], None],
-        plan: IdentityPlan,
-        deadline: Deadline,
-        runtime_selection: RuntimeSelection,
-        effect_gate: FileEffectGateBinding | None = None,
-        gate_setup: FileEffectGateSetup | None = None,
-    ) -> tuple[FileUploadOutcome, ...]:
-        """Upload at most 4096 members under one row and a durable caller checkpoint.
-
-        The caller's checkpoint must durably record each confirmed member before
-        returning. No later member is prepared or dispatched until it returns.
-        """
-        if (
-            not 1 <= len(members) <= MAX_PACKAGE_UPLOAD_MEMBERS
-            or any(type(member) is not PackageUploadMember for member in members)
-            or not callable(checkpoint)
-        ):
-            raise ValidationError("Package upload requires 1 to 4096 members")
-        members = tuple(members)
-        borrow = self._owner.borrow()
-        obligation: LifecycleObligation | None = None
-        active: _ActiveFileUpload | None = None
-        first_prepared: _PreparedUpload | None = None
-        if gate_setup is not None:
-            active, first_prepared = self._setup_package_upload(
-                carrier,
-                trusted_root_path=trusted_root_path,
-                member=members[0],
-                plan=plan,
-                deadline=deadline,
-                runtime_selection=runtime_selection,
-                effect_gate=effect_gate,
-                gate_setup=gate_setup,
-                borrow=borrow,
-            )
-            obligation = self._require_obligation(active)
-            effect_gate = first_prepared.binding.effect_gate
-        completed: list[FileUploadOutcome] = []
-        for index, member in enumerate(members):
-            try:
-                prepared = (
-                    first_prepared
-                    if index == 0 and first_prepared is not None
-                    else _prepare_upload(
-                        carrier,
-                        trusted_root_path=trusted_root_path,
-                        relative_path=member.relative_path,
-                        source=member.source,
-                        size=member.size,
-                        condition=member.condition,
-                        create_metadata=member.create_metadata,
-                        plan=plan,
-                        deadline=deadline,
-                        runtime_selection=runtime_selection,
-                        borrow=borrow,
-                        bootstrap=self._bootstrap,
-                        effect_gate=effect_gate,
-                    )
-                )
-                self._validate_upload_gate(prepared.binding)
-            except BaseException:
-                # A previous child has already passed its application checkpoint.
-                borrow.close()
-                if active is not None:
-                    self._active_package_uploads.pop(id(active))
-                raise
-            if obligation is None:
-                try:
-                    admission = self._prepare_admission(
-                        FileCallFamily.PACKAGE_UPLOAD, prepared.binding, token=prepared.state.token, batch_index=index
-                    )
-                except BaseException:
-                    borrow.close()
-                    raise
-                active = _ActiveFileCall(carrier, prepared.binding, borrow, prepared, admission.obligation_id)
-                self._active_package_uploads[id(active)] = active
-                self._install(active, admission, self._active_package_uploads)
-                obligation = self._require_obligation(active)
-            elif index != 0 or first_prepared is None:
-                assert active is not None
-                active.binding = prepared.binding
-                active.prepared = prepared
-                active.outcome = None
-                expected_revision = obligation.payload_revision
-                try:
-                    record = self._obligation(
-                        FileCallFamily.PACKAGE_UPLOAD,
-                        prepared.binding,
-                        token=prepared.state.token,
-                        batch_index=index,
-                    )
-                    intended_payload = encode_file_call_admission(record)
-                except FileCallObligationCodecError:
-                    borrow.close()
-                    self._active_package_uploads.pop(id(active))
-                    raise ValidationError("Package child lifecycle recovery identity is too large or invalid") from None
-                try:
-                    try:
-                        published = obligation.publish_payload(
-                            expected_revision=expected_revision,
-                            payload_version=record.payload_version,
-                            payload=intended_payload,
-                        )
-                    except Exception:
-                        # Exact repetition reconciles a commit whose reply was lost.
-                        published = obligation.publish_payload(
-                            expected_revision=expected_revision,
-                            payload_version=record.payload_version,
-                            payload=intended_payload,
-                        )
-                    if published.payload_revision != expected_revision + 1 or published.payload != intended_payload:
-                        raise StateError("Package upload child publication did not advance exactly once")
-                except BaseException:
-                    # The row may name either the checkpointed predecessor or
-                    # this prepared child. Keep the borrow and prepared child
-                    # attached; no child may dispatch before exact confirmation.
-                    raise
-            try:
-                outcome = prepared.run()
-            except BaseException as control:
-                fact = control.__cause__
-                if isinstance(fact, FileUploadControlFact):
-                    assert active is not None
-                    try:
-                        self._stop_package_upload(active, index, fact.outcome)
-                    except BaseException:
-                        raise control from fact
-                raise
-            assert active is not None
-            active.outcome = outcome
-            if outcome.status is not FileUploadStatus.COMPLETE or outcome.requires_owner_retention:
-                self._stop_package_upload(active, index, outcome)
-                raise PackageUploadStopped(index, outcome)
-            try:
-                checkpoint(index, outcome)
-            except BaseException:
-                # The checkpoint may have committed. The exact child remains
-                # retained; takeover must consult application state.
-                release_borrow_after_custody(borrow, retain_effect=True)
-                self._unfinished_package_uploads.append(
-                    UnfinishedPackageUpload(index, carrier, prepared.binding, outcome, checkpoint_pending=True)
-                )
-                self._active_package_uploads.pop(id(active))
-                raise
-            completed.append(outcome)
-        borrow.close()
-        assert active is not None
-        self._active_package_uploads.pop(id(active))
-        return tuple(completed)
-
-    def _setup_package_upload(
-        self,
-        carrier: Carrier,
-        *,
-        trusted_root_path: str,
-        member: PackageUploadMember,
-        plan: IdentityPlan,
-        deadline: Deadline,
-        runtime_selection: RuntimeSelection,
-        effect_gate: FileEffectGateBinding | None,
-        gate_setup: FileEffectGateSetup,
-        borrow: OperationBorrow,
-    ) -> tuple[_ActiveFileUpload, _PreparedUpload]:
-        """Publish package index zero as setup, then bind it before any child work."""
-        try:
-            binding, condition, metadata = _validate_upload_inputs(
-                trusted_root_path,
-                member.relative_path,
-                member.source,
-                member.size,
-                member.condition,
-                member.create_metadata,
-                plan,
-                deadline,
-                runtime_selection,
-                borrow,
-                None,
-                bootstrap=self._bootstrap,
-            )
-            if (
-                type(gate_setup) is not FileEffectGateSetup
-                or effect_gate is not None
-                or self._target.kind is not ManagedTargetKind.VM
-                or runtime_selection.target_os is not RuntimeTargetOS.LINUX
-                or type(gate_setup.guest) is not VMGuestIdentity
-                or vm_guest_boot_id(gate_setup.guest) != self._target.boot_id
-                or gate_setup.path != file_effect_gate_path(self._target, plan.expected.euid, gate_setup.guest)
-            ):
-                raise ValidationError("Package upload gate setup must match the selected Linux VM and identity")
-            token = secrets.token_bytes(16)
-            operation = BorrowedFixedHelperCarrier(carrier, borrow)
-            admission = self._prepare_admission(
-                FileCallFamily.PACKAGE_UPLOAD, binding, token=token, batch_index=0, gate_setup=gate_setup
-            )
-            pending = _PendingUploadSetup(gate_setup, token, operation, member.source, condition, metadata)
-            active: _ActiveFileUpload = _ActiveFileCall(carrier, binding, borrow, pending, admission.obligation_id)
-        except BaseException:
-            borrow.close()
-            raise
-        try:
-            self._active_package_uploads[id(active)] = active
-        except BaseException:
-            borrow.close()
-            raise
-        self._install(active, admission, self._active_package_uploads)
-        result = exchange_file_effect_gate(
-            operation,
-            operation=GateControlOperation.SETUP,
-            path=gate_setup.path,
-            guest=gate_setup.guest,
-            scope_name=self._target.name,
-            plan=plan,
-            deadline=deadline,
-            runtime_selection=runtime_selection,
-            bootstrap=self._bootstrap,
-        )
-        normal = operation.settle(result.dispatch, result.carrier_completion)
-        if result.dispatch is Dispatch.NOT_SENT and not operation.requires_owner_retention:
-            borrow.close()
-            self._active_package_uploads.pop(id(active))
-            raise StateError("File-effect gate setup was not dispatched")
-        observed = result.observation
-        if (
-            not normal
-            or result.runtime_prerequisite.state is not RuntimePrerequisiteState.READY
-            or observed is None
-            or observed.state is not GateControlObservationState.RESOLVED
-            or observed.binding is None
-        ):
-            raise GateControlMutationUncertain("file-effect gate setup was not acknowledged")
-        bound = replace(binding, effect_gate=observed.binding)
-        self._validate_upload_gate(bound)
-        self._publish_retained(
-            active, self._obligation(FileCallFamily.PACKAGE_UPLOAD, bound, token=token, batch_index=0)
-        )
-        prepared = _prepare_upload_from_binding(
-            operation,
-            source=member.source,
-            deadline=deadline,
-            inputs=(bound, condition, metadata),
-            token=token,
-        )
-        active.binding = bound
-        active.prepared = prepared
-        return active, prepared
-
     def _validate_upload_gate(self, binding: FileUploadBinding) -> None:
         """Match a caller-supplied gate to this selected managed VM."""
         effect_gate = binding.effect_gate
@@ -1211,28 +916,6 @@ class FileOperation:
             != file_effect_gate_path(self._target, binding.identity_plan.expected.euid, effect_gate.guest)
         ):
             raise ValidationError("Upload effect gate must match the selected Linux VM and identity")
-
-    def _stop_package_upload(self, active: _ActiveFileUpload, index: int, outcome: FileUploadOutcome) -> None:
-        active.outcome = outcome
-        if outcome.requires_owner_retention:
-            self._publish_retained(
-                active,
-                self._obligation(
-                    FileCallFamily.PACKAGE_UPLOAD,
-                    active.binding,
-                    token=outcome.token,
-                    batch_index=index,
-                    scratch_reference=outcome.reference,
-                    scratch_cleanup_debt=outcome.scratch_cleanup_debt,
-                    publication_cleanup_debt=outcome.publication_cleanup_debt,
-                    uncertainty=self._upload_uncertainty(outcome),
-                ),
-            )
-            self._unfinished_package_uploads.append(
-                UnfinishedPackageUpload(index, active.carrier, active.binding, outcome)
-            )
-        release_borrow_after_custody(active.borrow, retain_effect=outcome.requires_owner_retention)
-        self._active_package_uploads.pop(id(active))
 
     def update_json(
         self,
@@ -1335,20 +1018,7 @@ class FileOperation:
             borrow.close()
             raise
         self._install(active, admission, self._active_stats)
-        try:
-            outcome = prepared.run()
-        except BaseException as control:
-            fact = control.__cause__
-            if isinstance(fact, OwnedFileControlFact):
-                try:
-                    self._capture_owned(active, fact.outcome, FileCallFamily.STAT)
-                    self._active_stats.pop(id(active))
-                except BaseException:
-                    raise control from fact
-            raise
-        self._capture_owned(active, outcome, FileCallFamily.STAT)
-        self._active_stats.pop(id(active))
-        return outcome
+        return self._run_owned(active, FileCallFamily.STAT, self._active_stats, prepared.run)
 
     def list_directory(
         self,
@@ -1392,20 +1062,7 @@ class FileOperation:
             borrow.close()
             raise
         self._install(active, admission, self._active_inventories)
-        try:
-            outcome = prepared.run()
-        except BaseException as control:
-            fact = control.__cause__
-            if isinstance(fact, OwnedFileControlFact):
-                try:
-                    self._capture_owned(active, fact.outcome, FileCallFamily.INVENTORY)
-                    self._active_inventories.pop(id(active))
-                except BaseException:
-                    raise control from fact
-            raise
-        self._capture_owned(active, outcome, FileCallFamily.INVENTORY)
-        self._active_inventories.pop(id(active))
-        return outcome
+        return self._run_owned(active, FileCallFamily.INVENTORY, self._active_inventories, prepared.run)
 
     def remove(
         self,
@@ -1447,20 +1104,7 @@ class FileOperation:
             borrow.close()
             raise
         self._install(active, admission, self._active_removals)
-        try:
-            outcome = prepared.run()
-        except BaseException as control:
-            fact = control.__cause__
-            if isinstance(fact, OwnedFileControlFact):
-                try:
-                    self._capture_owned(active, fact.outcome, FileCallFamily.REMOVE)
-                    self._active_removals.pop(id(active))
-                except BaseException:
-                    raise control from fact
-            raise
-        self._capture_owned(active, outcome, FileCallFamily.REMOVE)
-        self._active_removals.pop(id(active))
-        return outcome
+        return self._run_owned(active, FileCallFamily.REMOVE, self._active_removals, prepared.run)
 
     def set_metadata(
         self,
@@ -1505,20 +1149,7 @@ class FileOperation:
             borrow.close()
             raise
         self._install(active, admission, self._active_metadata)
-        try:
-            outcome = prepared.run()
-        except BaseException as control:
-            fact = control.__cause__
-            if isinstance(fact, OwnedFileControlFact):
-                try:
-                    self._capture_owned(active, fact.outcome, FileCallFamily.SET_METADATA)
-                    self._active_metadata.pop(id(active))
-                except BaseException:
-                    raise control from fact
-            raise
-        self._capture_owned(active, outcome, FileCallFamily.SET_METADATA)
-        self._active_metadata.pop(id(active))
-        return outcome
+        return self._run_owned(active, FileCallFamily.SET_METADATA, self._active_metadata, prepared.run)
 
     def ensure_directory(
         self,
@@ -1564,20 +1195,7 @@ class FileOperation:
             borrow.close()
             raise
         self._install(active, admission, self._active_metadata)
-        try:
-            outcome = prepared.run()
-        except BaseException as control:
-            fact = control.__cause__
-            if isinstance(fact, OwnedFileControlFact):
-                try:
-                    self._capture_owned(active, fact.outcome, FileCallFamily.ENSURE_DIRECTORY)
-                    self._active_metadata.pop(id(active))
-                except BaseException:
-                    raise control from fact
-            raise
-        self._capture_owned(active, outcome, FileCallFamily.ENSURE_DIRECTORY)
-        self._active_metadata.pop(id(active))
-        return outcome
+        return self._run_owned(active, FileCallFamily.ENSURE_DIRECTORY, self._active_metadata, prepared.run)
 
     def create_directory(
         self,
@@ -1635,7 +1253,6 @@ class FileOperation:
         binding: _FileCallBinding,
         *,
         token: bytes | None = None,
-        batch_index: int | None = None,
         gate_setup: FileEffectGateSetup | None = None,
     ) -> _FileCallAdmission:
         try:
@@ -1643,7 +1260,6 @@ class FileOperation:
                 family,
                 binding,
                 token=token,
-                batch_index=batch_index,
                 gate_setup=gate_setup,
             )
             payload = encode_file_call_admission(record)
@@ -1678,7 +1294,6 @@ class FileOperation:
         *,
         token: bytes | None = None,
         attempt: int | None = None,
-        batch_index: int | None = None,
         uncertainty: frozenset[FileCallUncertainty] = frozenset(),
         scratch_reference: ScratchReference | None = None,
         scratch_cleanup_debt: ScratchCleanupDebt | None = None,
@@ -1694,7 +1309,6 @@ class FileOperation:
             runtime_selection=binding.runtime_selection,
             token=token,
             attempt=attempt,
-            batch_index=batch_index,
             scratch_reference=scratch_reference,
             scratch_cleanup_debt=scratch_cleanup_debt,
             publication_cleanup_debt=publication_cleanup_debt,
@@ -1760,6 +1374,28 @@ class FileOperation:
         if outcome.publication_ownership_uncertain or outcome.publication_cleanup_debt is not None:
             result.add(FileCallUncertainty.PUBLICATION_OWNERSHIP)
         return frozenset(result)
+
+    def _run_owned[BindingT: _FileCallBinding, PreparedT, ResultT](
+        self,
+        active: _ActiveFileCall[BindingT, PreparedT, OwnedFileOutcome[ResultT]],
+        family: FileCallFamily,
+        active_records: dict[int, _ActiveFileCall[BindingT, PreparedT, OwnedFileOutcome[ResultT]]],
+        run: Callable[[], OwnedFileOutcome[ResultT]],
+    ) -> OwnedFileOutcome[ResultT]:
+        try:
+            outcome = run()
+        except BaseException as control:
+            fact = control.__cause__
+            if isinstance(fact, OwnedFileControlFact):
+                try:
+                    self._capture_owned(active, fact.outcome, family)
+                    active_records.pop(id(active))
+                except BaseException:
+                    raise control from fact
+            raise
+        self._capture_owned(active, outcome, family)
+        active_records.pop(id(active))
+        return outcome
 
     def _capture_owned[BindingT: _FileCallBinding, PreparedT, ResultT](
         self,
