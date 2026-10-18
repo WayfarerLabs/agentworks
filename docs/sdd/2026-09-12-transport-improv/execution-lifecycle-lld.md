@@ -1798,6 +1798,57 @@ unsupported critical operation. Native proof of this supported behavior, startup
 operation retention/recovery, guest preparation, endpoint trust, firewall-route lifetime and
 aggregate release remain open.
 
+### GCP start completion observation
+
+Extend the retained `GCEActivation` with explicit request observation and settlement. Its state is
+`UNKNOWN` before a matching acknowledgment, `PENDING` after acknowledgment, and `SUCCEEDED` or
+`FAILED` only after a validated terminal operation observation. The POST acknowledgment remains
+identity evidence even if its body contains `DONE`; do not reinterpret the existing admission
+contract as successful startup.
+
+Each explicit `observe(deadline)` admits at most one body-free GET to the constructed Compute v1
+zone operation route for the retained project, zone and operation name. Use the same selected
+`_OwnedAuth` and public middleware as submission, with actual service response/session custody,
+bounded identity-encoded raw ingestion, disabled redirects and the caller's original finite
+deadline. No generated poller, operation discovery, automatic start replay or provider-selected
+follow-up URL belongs here. A missing or expired operation record cannot establish completion.
+
+Validate kind, exact retained operation name, original `clientOperationId`, selected numeric
+`targetId`, exact selected instance `targetLink`, `operationType=start` and the closed status set
+`PENDING`, `RUNNING`, `DONE`. If `zone` or `selfLink` is present, require its complete selected
+constructed URL on one of the two accepted Google API hosts, without normalization. These are
+conservative local acceptance rules requiring native compatibility proof, not assertions that every
+provider response includes every optional field. Pending status must not carry contradictory
+terminal-error evidence. `DONE` without error evidence means request success; a well-formed nonempty
+`error.errors` array of coded errors means request failure. Refuse malformed or contradictory error
+fields instead of turning them into success. Discard raw bodies and provider diagnostics after
+selection. The public
+[zone operation API](https://docs.cloud.google.com/compute/docs/reference/rest/v1/zoneOperations/get)
+defines request completion separately from instance readiness and limits completed-record retention.
+
+Retain a validated terminal state before ledger publication, cleanup or late-budget refusal. Keep
+the existing version-1 identity/acknowledgment payload and its canonical bytes unchanged. Terminal
+state need not introduce another payload format: resolve the exact owned obligation only after the
+validated terminal observation and positive retirement of this borrower's service originals. The
+resolved row states that this request's custody settled, not that startup succeeded or that a guest
+is currently ready. A crash before resolution retains the acknowledgment for a later explicit
+operation observation; record expiration or missing acknowledgment leaves uncertainty unresolved.
+There is no inference of completion from VM power, local close or elapsed time.
+
+`settle(deadline)` retries only original local closes and exact fenced ledger bookkeeping. It never
+performs provider reads, credential acquisition or submission. Reconcile a lost acknowledgment
+publication or resolution reply against the same row, and require this producer's retained
+resolution intent before accepting a resolved row. Known registration without possible effect may
+settle by the existing no-effect rule. Once settlement is positively complete, repeated settlement
+does not need provider access or the released operation owner. `close(deadline)` bars future start
+and observation admission before fallible cleanup; it closes neither the shared authentication owner
+nor an outstanding provider request. Complete pending observations before that terminal close.
+
+The complete access owner must still observe fresh matching instance identity and `RUNNING`,
+establish the exact selected endpoint/firewall route and trust, prepare the guest, and retire the
+remaining dependents before shared authentication and aggregate release. This completion increment
+supplies none of those missing steps by implication.
+
 Actual locked public-pipeline tests must cover one POST/no service GET or replay, unread redirect
 and non-200/encoded bodies, finite identity reads and overflow, partial expiry and matching late
 ACK, ledger interruption/lost replies, fencing/concurrency, bounded identity/recovery parsing,
