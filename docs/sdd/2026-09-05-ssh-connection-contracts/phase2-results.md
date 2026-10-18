@@ -3,8 +3,8 @@
 - Updated: 2026-10-18
 - PR: [#832](https://github.com/WayfarerLabs/agentworks/pull/832), draft
 - Main/contract base: `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (#830)
-- State: the operator-directed Windows client-family correction is in progress; full terminal and
-  production acceptance remain open
+- State: the Windows client-family refusal is implemented; three input-fixture corrections are
+  supplied for transport composition. Full terminal and production acceptance remain open
 
 Earlier checkpoint evidence and dependency history live in separate files. The headings below retain
 existing plan links; the linked sections preserve the complete original records. Historical round 1
@@ -815,3 +815,52 @@ Private project, complexity and correctness reviews plus affected local/hosted g
 the next tester-focus comment and checkpoint signal. Transport's later input-completion pin is not
 part of this correction or evidence of complete RunContext delivery. No full implementation
 checkbox, ready handoff, SDD lock or old-stack deletion follows.
+
+## Input-fixture contribution on the shared completion and writer pins
+
+The operator authorized the two failing SSH fixtures and the additional short-write coverage
+correction on 2026-10-18, then directed continued independent SSH work during transport development
+and testing. This is one focused contribution, not another blanket public feedback allowance. The
+[complete patch handoff](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6255162261)
+contains both standalone patch payloads, their original parents, review evidence and native test
+focus.
+
+Patch `02e392c53` starts from the frozen shared completion pin
+`4dd99cbce2fd4156469405a5da60aee1e5e7cc08`. A consumer that exits 23 while its descendant holds
+stdin no longer incurs INPUT solely because offered bytes remain unread. The fixture retains the
+two-million-byte offer, exact exit and local status, parent bytes, original return bound and actual
+original child, pipe and custody checks before descendant rescue. It additionally requires SENT and
+complete output streams. The descendant release/done check remains distinct from containment or
+kernel-exit proof.
+
+Patch `a4a7e227b` starts from native-writer pin `ddd17459e64ae64ec92f67014022955ec4caf8ed`. Fault
+and short-write injection now target the actual `_process._write_owned_stdin` boundary on Windows
+and POSIX. The fault must run exactly once and retain INPUT, unknown dispatch/completion, privacy,
+cleanup and one-attempt assertions. Short writes call the original platform writer with at most
+seven bytes; multiple positive accepts, exact totals and binary echo prove that the injection ran
+without replay. Bypassing `os.write` on Windows can no longer silently remove this test coverage. No
+production error normalization, timing relaxation or new runtime path is introduced.
+
+Composition `39b4e3d3552823031e198f17700342f4df423e17`, tree
+`241f45e138a9174b649b89b77d926a52f4177102`, applies both patches on the newer writer pin. The full
+Linux SSH non-integration selection passes 562 tests with 12 skips. Targeted standalone checks,
+Ruff/format, configured typing and whitespace checks pass. All three independent private lanes clear
+the exact composition and independently pass the three corrected cases. Hook-bypass controls fail as
+intended; a separate injected-pressure check passes with two initial stalls and 450 bytes accepted
+through 65 real short writes. These are Linux synthetic-child observations, not native Windows or
+installed-client acceptance.
+
+Both complete patches pass an unchanged-worktree applicability check at the later transport head
+`a997b5db95126dab58453103e65583c3383cf5b4`. The relevant shared process/custody/carrier and SSH
+source are unchanged between those two transport pins. This establishes applicability, not
+whole-branch acceptance. The Windows-marked cases still require native execution in the composed
+transport validation. The earlier Windows client-family correction separately clears all three
+private lanes and the root local gates recorded in its
+[local closeout](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6253552962); its
+fresh native handoff remains open.
+
+The patch contribution does not adopt the shared increments into the older SSH branch, change the PR
+base or create a review-requested/ready edge. Shared runtime adoption, production terminal and
+presentation composition, genuine creation/trust publication, both usable RunContext paths and full
+R1-R5 acceptance remain open. Completed plan records and the later retirement sequence are
+unchanged.
