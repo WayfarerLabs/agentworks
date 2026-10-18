@@ -313,8 +313,9 @@ class ExecutionAccess:
     ) -> ExecutionResult:
         """Relay once, then combine independent presentation and job evidence."""
         candidate = None
-        custody = OwnedInlineOutcome(deadline_exceeded=selected.expired)
-        if not selected.expired:
+        expired = selected.expired
+        custody = OwnedInlineOutcome(deadline_exceeded=expired)
+        if not expired:
             try:
                 candidate, custody = self._operation.relay_managed(
                     job,
@@ -325,14 +326,21 @@ class ExecutionAccess:
                     stderr=output.stderr,
                     sensitive=sensitive,
                 )
+            except ManagedDeadlineExpired as control:
+                if control.__cause__ is not None:
+                    self._raise_job_control(control, job)
+                custody = OwnedInlineOutcome(deadline_exceeded=True)
             except BaseException as control:
                 self._raise_job_control(control, job)
         if custody.pending_remote_effects or custody.coordination_uncertain or custody.requires_owner_retention:
             # The ordinary helper borrow is still unresolved. Do not overlap
             # it with a new poll or replace its original observation budget.
+            missing = self._operation.unobserved_managed_output(job)
             result = ExecutionResult(
                 Dispatch.UNKNOWN,
                 ApplicationState.UNKNOWN,
+                stdout=missing,
+                stderr=missing,
                 failure=ExecutionFailure.OBSERVATION,
                 job=job,
             )

@@ -1,5 +1,7 @@
 # Managed foreground pipe I/O
 
+<!-- cspell:ignore AGWL AGWE -->
+
 This is the response design for `run(..., profile=MANAGED, lifetime=OPERATION)` with borrowed live
 input, explicit live output, or both. It extends the existing managed controller, not the carrier
 contract or public API. Implementation and native acceptance remain open. The

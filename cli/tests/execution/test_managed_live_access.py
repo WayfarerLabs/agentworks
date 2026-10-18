@@ -9,6 +9,7 @@ import pytest
 
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._execution_operation import ExecutionOperation, ManagedExecutionControlFact
+from agentworks.execution._managed_bound_run import ManagedDeadlineExpired
 from agentworks.execution._managed_job_protocol import encode_managed_job_fact
 from agentworks.execution._managed_job_store import FactName
 from agentworks.execution._managed_job_wire import decode_fact, encode_fact
@@ -163,6 +164,102 @@ def test_acknowledgement_expiry_never_renews_budget_or_starts_relay(access_view,
     assert result.failure is ExecutionFailure.DEADLINE and result.deadline_exceeded and result.job is not None
     assert result.stdout.retention is Retention.DELIVERED and not result.stdout.complete
     assert main.start.calls == 1 and main.relay_calls == main.observe.calls == 0
+
+
+@pytest.mark.parametrize("checked", [False, True])
+@pytest.mark.parametrize("boundary", ["entry", "admission", "preparation"])
+def test_expiry_inside_relay_admission_returns_deadline_result(access_view, monkeypatch, checked, boundary):
+    _, access, main, deadline = access_view
+    if boundary == "entry":
+        wait = access._wait_managed_live
+        expired_property = vars(Deadline)["expired"]
+        assert isinstance(expired_property, property)
+        original_expired = expired_property.fget
+        assert original_expired is not None
+        first = True
+
+        def expired(self):
+            nonlocal first
+            if self is deadline and first:
+                first = False
+                object.__setattr__(deadline, "expires_at", 0.0)
+                return False
+            return original_expired(self)
+
+        def enter(*args, **kwargs):
+            monkeypatch.setattr(Deadline, "expired", property(expired))
+            return wait(*args, **kwargs)
+
+        monkeypatch.setattr(access, "_wait_managed_live", enter)
+    elif boundary == "admission":
+        relay = ExecutionOperation.relay_managed
+
+        def admit(self, *args, **kwargs):
+            object.__setattr__(deadline, "expires_at", 0.0)
+            return relay(self, *args, **kwargs)
+
+        monkeypatch.setattr(ExecutionOperation, "relay_managed", admit)
+    else:
+        control_run = ExecutionOperation._control_run
+
+        def prepare(self, *args, **kwargs):
+            run = control_run(self, *args, **kwargs)
+            object.__setattr__(deadline, "expires_at", 0.0)
+            return run
+
+        monkeypatch.setattr(ExecutionOperation, "_control_run", prepare)
+    if checked:
+        with pytest.raises(CheckedExecutionError) as caught:
+            access.run(
+                Command(["/bin/true"]), profile=Protection.MANAGED, output=Output.live(Sink(), Sink()), check=True
+            )
+        result = caught.value.result
+    else:
+        result = access.run(Command(["/bin/true"]), profile=Protection.MANAGED, output=Output.live(Sink(), Sink()))
+    assert result.failure is ExecutionFailure.DEADLINE and result.deadline_exceeded and result.job is not None
+    assert result.stdout.retention is Retention.DELIVERED and not result.stdout.complete
+    assert main.start.calls == 1 and main.relay_calls == main.observe.calls == 0
+
+
+@pytest.mark.parametrize("sensitive", [False, True])
+def test_input_only_unsettled_relay_uses_retained_output_policy(access_view, monkeypatch, sensitive):
+    _, access, main, _ = access_view
+    relay = ExecutionOperation.relay_managed
+
+    def uncertain(self, *args, **kwargs):
+        candidate, custody = relay(self, *args, **kwargs)
+        return candidate, replace(custody, requires_owner_retention=True)
+
+    monkeypatch.setattr(ExecutionOperation, "relay_managed", uncertain)
+    result = access.run(
+        Command(["/bin/true"]),
+        profile=Protection.MANAGED,
+        stdin=Input.live(Source()),
+        output=Output.discard(),
+        sensitive=sensitive,
+    )
+    assert result.failure is ExecutionFailure.OBSERVATION and main.observe.calls == 0
+    assert (
+        result.stdout.retention
+        is result.stderr.retention
+        is (Retention.SUPPRESSED if sensitive else Retention.DISCARDED)
+    )
+    assert not result.stdout.complete and not result.stderr.complete
+
+
+def test_cause_bearing_expiry_is_not_swallowed_as_passive_deadline(access_view, monkeypatch):
+    _, access, main, _ = access_view
+    control = ManagedDeadlineExpired("Synthetic borrowed expiry")
+    cause = RuntimeError("Synthetic original custody")
+
+    def relay(*args, **kwargs):
+        raise control from cause
+
+    monkeypatch.setattr(ExecutionOperation, "relay_managed", relay)
+    with pytest.raises(ManagedDeadlineExpired) as caught:
+        access.run(Command(["/bin/true"]), profile=Protection.MANAGED, output=Output.live(Sink(), Sink()))
+    assert caught.value is control and isinstance(control.__cause__, ManagedExecutionControlFact)
+    assert control.__cause__.__cause__ is cause and main.observe.calls == 0
 
 
 def test_original_relay_control_escapes_with_safe_job_reference(access_view):

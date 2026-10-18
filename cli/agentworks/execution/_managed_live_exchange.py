@@ -13,6 +13,7 @@ from agentworks.errors import ValidationError
 from ._borrowed_io import DiscardSink, PrefixedSource, PresentationCollector
 from ._evidence_wire import Frame, FrameKind, FrameReader, WireError
 from ._inline_control import ControlError, StreamEnd, StreamName, StreamRetention, parse_empty, parse_stream_end
+from ._managed_bound_run import ManagedDeadlineExpired
 from ._managed_job_request import ManagedLiveIO
 from ._managed_live_bundle import ROOT_PROGRAM
 from ._managed_live_protocol import ManagedLiveRequest, encode_envelope
@@ -262,7 +263,9 @@ def prepare_managed_live(
         raise ValidationError("Managed live preparation requires a finite unexpired deadline")
     numerator, denominator = remaining.as_integer_ratio()
     remaining_ns = numerator * 1_000_000_000 // denominator
-    if not 0 < remaining_ns <= 2**63 - 1:
+    if remaining_ns <= 0:
+        raise ManagedDeadlineExpired("Managed live observation allowance expired before preparation")
+    if remaining_ns > 2**63 - 1:
         raise ValidationError("Managed live preparation requires a positive bounded nanosecond budget")
     request = ManagedLiveRequest(
         live_io, bootstrap.root_entry.expected, bootstrap.guest, expected_launch, remaining_ns=remaining_ns

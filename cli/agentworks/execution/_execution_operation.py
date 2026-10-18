@@ -422,6 +422,19 @@ class ExecutionOperation:
                 self._detach_helper_payload(active)
                 active.prepared = None
 
+    def unobserved_managed_output(self, reference: JobRef) -> ExecutionOutput:
+        """Return original OP output policy without borrowing or observing again."""
+        with self._admission_guard:
+            run = next((run for run in self._managed_runs if run.receipt.identity.run_id == reference.run_id), None)
+            if run is None or not run.acknowledged or run.reserved is None:
+                raise ValidationError("Managed output policy requires its acknowledged operation run")
+            retention = {
+                ManagedOutputMode.CAPTURE: Retention.CAPTURED,
+                ManagedOutputMode.DISCARD: Retention.DISCARDED,
+                ManagedOutputMode.SENSITIVITY_SUPPRESSED: Retention.SUPPRESSED,
+            }[run.reserved.output_policy.mode]
+            return ExecutionOutput(retention=retention)
+
     def relay_managed(
         self,
         reference: JobRef,

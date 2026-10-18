@@ -5425,6 +5425,14 @@ passes 158 tests; strict typing passes across 1,460 sources. Those fixtures do n
 systemd, root identity, cgroups or SSH. Staging, active durable output, terminal preparation,
 platform composition and the complete additive RunContext gate remain open.
 
+The private foreground-composition review reproduced eight failing cases around expiry inside relay
+admission and retention after unsettled input-only observation. The correction uses one entry expiry
+sample and the existing cause-free pre-borrow deadline exception, without swallowing borrowed
+control facts. Unobserved outputs use the acknowledged run's retained policy without another poll.
+The corrected selection passes 167 tests and strict typing across 1,460 sources; the earlier broad
+regression selection passes 1,396 tests with one existing skip. These remain local results, not
+resolution of the native envelope, staging or complete-surface gates.
+
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
 one all-callers cutover. PR #830 publishes this design only. The following implementation PR adds
 the new surface; migration and removal follow in their own PRs. Permissions are groundwork until
