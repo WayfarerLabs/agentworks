@@ -62,6 +62,7 @@ class LocalLima:
     calls: list[tuple[list[str], Deadline, str]] = field(default_factory=list)
     raw: bytes | None = None
     complete: bool = True
+    has_errors: bool = False
 
     @property
     def directory(self) -> Path:
@@ -97,10 +98,16 @@ class LocalLima:
                     "dir": str(self.directory),
                     "vmType": self.vm_type,
                     "user": self.user,
+                    "hasErrors": self.has_errors,
                 }
             ).encode()
         )
-        return process_result(stdout=CapturedOutput(data, complete=self.complete))
+        assert isinstance(io.output, SinkOutput)
+        assert io.output.stdout.try_write(memoryview(data)) == len(data)
+        discarded = io.output.stderr.try_write(memoryview(b"synthetic-private-provider-warning"))
+        assert discarded is not None and discarded > 0
+        output = CapturedOutput(complete=self.complete, retention=Retention.DELIVERED)
+        return process_result(stdout=output, stderr=output)
 
 
 @pytest.fixture

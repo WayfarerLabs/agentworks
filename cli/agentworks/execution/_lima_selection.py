@@ -19,15 +19,38 @@ from typing import TYPE_CHECKING
 from agentworks.capabilities.vm_platform.base import ProviderLocator, provider_locator_remaining
 from agentworks.db import VMStatus
 from agentworks.errors import ConnectivityError, StateError, ValidationError
-from agentworks.execution.carrier import Capture, CarrierIO
+from agentworks.execution._borrowed_io import DiscardSink
+from agentworks.execution.carrier import CarrierIO, SinkOutput
 from agentworks.execution.carriers._subprocess import run_process
 
 if TYPE_CHECKING:
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.carrier import Deadline
 
-_PROJECTION = '{"name": .name, "status": .status, "dir": .dir, "vmType": .vmType, "user": .config.user.name}'
+# Lima omits errors when its inspection-error slice is empty. Only the boolean
+# crosses our output boundary; raw provider errors can contain config material.
+_PROJECTION = (
+    '{"name": .name, "status": .status, "dir": .dir, "vmType": .vmType, '
+    '"user": .config.user.name, "hasErrors": (.errors != null)}'
+)
 _BOUND = 16_384
+
+
+class _ProjectionSink:
+    """Retain only the bounded selected stdout projection, never diagnostics."""
+
+    def __init__(self) -> None:
+        self.data = bytearray()
+        self.oversized = False
+
+    def try_write(self, data: memoryview) -> int:
+        if not self.oversized:
+            if len(data) > _BOUND - len(self.data):
+                self.data.clear()
+                self.oversized = True
+            else:
+                self.data.extend(data)
+        return len(data)
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -146,9 +169,10 @@ class LimaLocalSelection:
             raise StateError("Lima selection retains unsettled local delivery")
         if self.directory is not None:
             self.directory.check()
+        projection = _ProjectionSink()
         result = run_process(
             [self.executable, "list", "--format=json", "--yq", _PROJECTION, self.instance],
-            io=CarrierIO(output=Capture(_BOUND)),
+            io=CarrierIO(output=SinkOutput(projection, DiscardSink(), require_live=False)),
             deadline=deadline,
             custody=custody,
             env={**os.environ, "LIMA_HOME": self.home},
@@ -159,10 +183,10 @@ class LimaLocalSelection:
             or result.exit_status != 0
             or not result.stdout.complete
             or not custody.settled
-            or len(result.stdout.data) > _BOUND
+            or projection.oversized
         ):
             raise StateError("Lima selected instance observation is unavailable")
-        path, user, vm_type, power = _decode(result.stdout.data, self.instance)
+        path, user, vm_type, power = _decode(bytes(projection.data), self.instance)
         if self.directory is None:
             # Store custody immediately after acquisition, before any later check.
             try:
@@ -225,9 +249,14 @@ def _decode(data: bytes, instance: str) -> tuple[str, str, str, VMStatus]:
     """Validate only the bounded projected external response, never full config."""
     try:
         value = json.loads(data.decode("utf-8"))
-        if type(value) is not dict or set(value) != {"name", "status", "dir", "vmType", "user"}:
+        if type(value) is not dict or set(value) != {"name", "status", "dir", "vmType", "user", "hasErrors"}:
             raise ValueError
-        if any(type(item) is not str or not item or "\0" in item for item in value.values()):
+        if value["hasErrors"] is not False:
+            raise ValueError
+        if any(
+            type(value[key]) is not str or not value[key] or "\0" in value[key]
+            for key in ("name", "status", "dir", "vmType", "user")
+        ):
             raise ValueError
         if value["name"] != instance or not os.path.isabs(value["dir"]):
             raise ValueError

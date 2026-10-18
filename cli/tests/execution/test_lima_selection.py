@@ -21,8 +21,9 @@ from agentworks.execution._lima_activation import (
 )
 from agentworks.execution._lima_selection import LimaDirectoryCustody
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, encode_vm_guest_identity_success
-from agentworks.execution.carrier import CarrierIO, Deadline, Failure, PreparedInvocation
+from agentworks.execution.carrier import CarrierIO, Deadline, Failure, PreparedInvocation, Retention
 from agentworks.execution.carriers import lima
+from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.carriers.lima import LimaConnection
 from tests.execution.carriers.test_lima import process_result
 from tests.vms.test_lima_native_access import install_guest
@@ -53,7 +54,16 @@ def test_activation_payload_roundtrip_has_one_versioned_opaque_locator() -> None
 
 @pytest.mark.parametrize(
     "changed",
-    [{"name": "other"}, {"user": None}, {"user": ""}, {"dir": "relative"}, {"config": {"provision": "not-retained"}}],
+    [
+        {"name": "other"},
+        {"user": None},
+        {"user": ""},
+        {"dir": "relative"},
+        {"config": {"provision": "not-retained"}},
+        {"hasErrors": True},
+        {"hasErrors": None},
+        {"hasErrors": 0},
+    ],
 )
 def test_projection_external_fields_are_checked_before_directory_or_guest(local, changed) -> None:
     fake, access = local
@@ -64,12 +74,121 @@ def test_projection_external_fields_are_checked_before_directory_or_guest(local,
             "dir": str(fake.directory),
             "vmType": "qemu",
             "user": "limauser",
+            "hasErrors": False,
             **changed,
         }
     ).encode()
     with pytest.raises(StateError):
         access.observe_power(Deadline.after(5))
     assert access.route.directory is None
+
+
+def test_reported_inspection_errors_refuse_before_start_or_guest(local) -> None:
+    fake, access = local
+    fake.has_errors = True
+    fake.status = "Stopped"
+    with pytest.raises(StateError):
+        access.observe_power(Deadline.after(5))
+    assert access.selected is None and access.activation is None
+    assert all(argv[1] == "list" for argv, _, _ in fake.calls)
+
+
+def test_selected_query_discards_real_process_diagnostics_and_retains_only_projection(local, monkeypatch) -> None:
+    fake, access = local
+    results = []
+    projected = json.dumps(
+        {
+            "name": "selected",
+            "status": "Running",
+            "dir": str(fake.directory),
+            "vmType": "qemu",
+            "user": "limauser",
+            "hasErrors": False,
+        }
+    )
+
+    def deliver(argv, *, io, deadline, custody, env):
+        result = run_process(
+            [
+                sys.executable,
+                "-I",
+                "-S",
+                "-B",
+                "-c",
+                "import sys;print(sys.argv[1]);print(sys.argv[2],file=sys.stderr)",
+                projected,
+                "synthetic-private-provider-warning",
+            ],
+            io=io,
+            deadline=deadline,
+            custody=custody,
+            env=env,
+        )
+        results.append(result)
+        return result
+
+    monkeypatch.setattr(_lima_selection, "run_process", deliver)
+    access.observe_power(Deadline.after(5))
+    assert len(results) == 1
+    assert results[0].stdout.retention is Retention.DELIVERED
+    assert results[0].stdout.data == results[0].stderr.data == b""
+    assert access.selected.user == "limauser"
+
+
+def finalize_owner(access) -> None:
+    repository = access.owner._repository
+    access.owner.stop_admission()
+    access.owner.seal_lifecycle_obligations()
+    access.owner.record_effects_resolved()
+    access.owner.close()
+    assert repository.inspect(access.owner.ownership.scope) is None
+
+
+@pytest.mark.parametrize("control_type", [RuntimeError, KeyboardInterrupt])
+def test_registration_before_commit_has_exact_recoverable_no_effect_disposition(
+    local, monkeypatch, control_type
+) -> None:
+    fake, access = local
+    fake.status = "Stopped"
+    power = access.observe_power(Deadline.after(5))
+    control = control_type("original-registration-stop")
+
+    def refuse(*args, **kwargs):
+        raise control
+
+    monkeypatch.setattr(OperationRepository, "register_lifecycle_obligation", refuse)
+    with pytest.raises(control_type) as caught:
+        access.prepare(power, Deadline.after(5))
+    assert caught.value is control
+    assert access.activation.registration_absent is (control_type is RuntimeError)
+    assert access.settle(Deadline.after(5))
+    assert access.activation.registration_absent
+    assert all(argv[1] == "list" for argv, _, _ in fake.calls)
+    with pytest.raises(StateError):
+        access.activation.start(Deadline.after(5))
+    finalize_owner(access)
+
+
+def test_unreadable_registration_absence_retains_custody_until_fenced_read_recovers(local, monkeypatch) -> None:
+    fake, access = local
+    fake.status = "Stopped"
+    power = access.observe_power(Deadline.after(5))
+    inspect = OperationRepository.inspect_lifecycle_obligation
+
+    def refuse(*args, **kwargs):
+        raise RuntimeError
+
+    monkeypatch.setattr(OperationRepository, "register_lifecycle_obligation", refuse)
+    monkeypatch.setattr(OperationRepository, "inspect_lifecycle_obligation", refuse)
+    with pytest.raises(RuntimeError):
+        access.prepare(power, Deadline.after(5))
+    assert not access.activation.registration_absent
+    with pytest.raises(RuntimeError):
+        access.settle(Deadline.after(5))
+    monkeypatch.setattr(OperationRepository, "inspect_lifecycle_obligation", inspect)
+    assert access.settle(Deadline.after(5))
+    assert access.activation.registration_absent
+    finalize_owner(access)
 
 
 def test_missing_directory_is_not_a_selected_instance(local) -> None:

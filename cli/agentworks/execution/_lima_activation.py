@@ -12,9 +12,9 @@ from uuid import uuid4
 from agentworks.capabilities.vm_platform.base import provider_locator_remaining
 from agentworks.db import LifecycleObligationState, OperationResourceKind
 from agentworks.errors import StateError, ValidationError
-from agentworks.execution.carrier import Capture, CarrierIO, Failure
+from agentworks.execution.carrier import CarrierIO, Discard, Failure
 from agentworks.execution.carriers._subprocess import run_process
-from agentworks.operations import LifecycleObligation
+from agentworks.operations import LifecycleObligation, _is_pre_registration_refusal
 
 if TYPE_CHECKING:
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
@@ -86,6 +86,7 @@ class LimaActivation:
         self.payload = ActivationPayload(selected.locator.token)
         self.obligation: LifecycleObligation | None = None
         self.attempted = False
+        self.registration_absent = False
         self.mark_began = False
         self.client_completed = False
         self.no_dispatch = False
@@ -100,12 +101,16 @@ class LimaActivation:
         if current.power is not self.selected.power:
             raise StateError("Lima selected power changed before startup")
         self.attempted = True
-        self.obligation = self.owner.register_lifecycle_obligation(
-            OBLIGATION_KIND,
-            payload_version=PAYLOAD_VERSION,
-            payload=encode_activation_payload(self.payload),
-            obligation_id=self.obligation_id,
-        )
+        try:
+            self.obligation = self.owner.register_lifecycle_obligation(
+                OBLIGATION_KIND,
+                payload_version=PAYLOAD_VERSION,
+                payload=encode_activation_payload(self.payload),
+                obligation_id=self.obligation_id,
+            )
+        except BaseException as control:
+            self.registration_absent = _is_pre_registration_refusal(control)
+            raise
         provider_locator_remaining(deadline, vm_name=self.route.vm_name)
         assert self.route.directory is not None
         self.route.directory.check()
@@ -115,7 +120,7 @@ class LimaActivation:
         self.route.directory.check()
         result = run_process(
             [self.selected.executable, "start", "--tty=false", self.selected.instance],
-            io=CarrierIO(output=Capture(16_384)),
+            io=CarrierIO(output=Discard()),
             deadline=deadline,
             custody=self.custody,
             env={**os.environ, "LIMA_HOME": self.selected.home},
@@ -142,9 +147,15 @@ class LimaActivation:
         provider_locator_remaining(deadline, vm_name=self.route.vm_name)
         if not self.attempted:
             return True
+        if self.registration_absent:
+            return self.custody.settled
         row = self.owner.inspect_lifecycle_obligation(self.obligation_id)
         if row is None:
-            # Registration may have committed without returning its handle.
+            # This exact read is fenced by current ownership. No start can
+            # precede a returned handle and durable possible-effect mark.
+            if self.obligation is None and not self.mark_began:
+                self.registration_absent = True
+                return self.custody.settled
             raise StateError("Lima activation registration remains uncertain")
         if (
             row.obligation_kind != OBLIGATION_KIND
