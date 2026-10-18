@@ -960,21 +960,19 @@ directory-transfer composition; the existing implementation remains private.
 
 The candidate batch design retains one serial borrow and one adapter-owned row, with the current
 child's bounded recovery identity and cleanup facts in the payload. Admit a distinct child before
-its effect. Generic directory copying is non-atomic and leaves confirmed destinations in place: core
-checkpoints bounded transfer progress only after that child's required remote and local work
-settles. Artifact workflows additionally require their application's durable per-file ownership
-checkpoint before advancing; a progress ordinal cannot establish which artifacts the application
-owns for later reconciliation or retirement.
+its effect. Artifact workflows require their application's durable per-file ownership checkpoint
+before advancing; a progress ordinal cannot establish which artifacts the application owns for later
+reconciliation or retirement. Generic directory copying instead uses the ordinary-call composition
+below and does not enter this package path.
 
 Advance by expected-revision payload replacement, reconciling a lost reply against that same child
 and revision. Retain exact current-child identity and outstanding cleanup facts until its checkpoint
 and any next-child admission are confirmed; an ordinal or confirmed bit alone is insufficient. On
 takeover, recover only the retained child and stop; do not reconstruct or resume the remaining plan
-or undo confirmed prior destinations. Core progress is not application ownership, and the generic
-copy contract does not reconstruct a complete per-entry result after process loss. Keep completed
-artifact ownership in the application checkpoint, not a growing row payload.
+or undo confirmed prior destinations. Keep completed artifact ownership in the application
+checkpoint, not a growing row payload.
 
-For downloads, remote snapshot completion is not local publication. Core checkpoints progress only
+For downloads, remote snapshot completion is not local publication. Record successful progress only
 after the requested local Create or Replace publication has succeeded and local custody has settled.
 The recovery row does not persist workstation destination paths and promises no post-crash local
 repair or reconstruction of local completion from remote evidence.
@@ -989,90 +987,55 @@ boundary merely by reusing the generic borrow. Preserve the current bounds and e
 until the complete workflow is proved at the largest supported package size and interruption
 boundaries.
 
-The existing `upload_package` requires the real durable application checkpoint. Generic directory
-support must supply its core progress checkpoint explicitly; it cannot reuse that callback contract
-with a no-op or in-memory acknowledgment. Directory transfer and its checkpoint implementation are
-still open, not delivered by this clarification.
+The existing `upload_package` requires the real durable application ownership checkpoint. Generic
+directory copying does not use that callback, with either a no-op or an in-memory acknowledgment.
+Its ordinary-call composition below has a different contract and remains unfinished.
 
 ### Generic directory-transfer child checkpoints
 
-Generic directory copying composes ordinary owned file calls, with an explicit core checkpoint in
-the file adapter. The 128 limit applies to unfinished obligations, not their completed history, so
-generic copying does not need another batch family, rotating row or parent coordinator merely to fit
-a supported transfer. The serial-package candidate above retains its separate application ownership
-contract; its callback is not the generic copy checkpoint.
+The former generic positive-history checkpoint design is superseded by ordinary-call composition.
+Its completed private kernel work remains historical evidence in the plan; removing unused writers
+must preserve real custody safeguards and requires a separate persisted-format compatibility audit.
 
-The existing aggregate owns the surrounding operation's resource claim and availability. Each child
-holds the ordinary serial borrow. Directory copying is non-atomic and does not promise exclusive
-borrowing for the entire tree: other calls belonging to that same operation may run between settled
-children. A directory invocation selects one original finite deadline and does not refresh it for
-each child. This is neither a directory snapshot nor a transaction against other writers.
+Generic directory copying composes ordinary owned file calls. The 128 limit applies to unfinished
+obligations, not completed history. It needs no parent coordinator, rotating row, transfer ordinal
+or durable success-history record. The serial-package candidate above retains its distinct durable
+application ownership callback; generic progress cannot replace that callback.
 
-Before an effect, the file adapter admits the exact child with a bounded, non-sensitive transfer
-identifier and member ordinal. Its normal recovery payload still carries that child's actual target,
-identity, path and cleanup responsibility. After positive successful completion and all required
-remote and local custody settlement, the adapter publishes the explicit core success checkpoint in
-that same unresolved row, then closes the borrow and makes its receipt immutable. A resolved
-ordinary receipt alone proves no remaining responsibility, not successful copying; clean failures
-and refusals must not gain the success marker. Download success requires verified transfer,
-successful requested local publication and settled local custody, never remote snapshot completion
-alone.
+The aggregate owns the resource claim and availability. Each child holds the ordinary serial borrow.
+Copying is non-atomic; other calls belonging to the same operation may run between settled children.
+Select one original finite deadline for the invocation, without refreshing it for each child. This
+is neither a directory snapshot nor a transaction against other writers.
 
-Persist and confirm the exact intended payload and expected revision before advancing. A lost reply
-is reconciled only against that same child and revision. Interrupted confirmation or borrow closure
-retains the actual child, outcome and bookkeeping custody, preventing the next admission. Aggregate
-teardown may settle that bookkeeping without replaying a helper or reading the source again. A
-completed child checkpoint is not application artifact ownership, full-directory completion or a
-resumable plan. Recovery handles only exact retained obligations; a crash between settled children
-does not authorize reconstructing or continuing the remaining transfer. Workstation paths and the
-remaining manifest are not persisted, and no post-crash local repair is promised.
+Advance only after an actual successful typed child result and all required remote and local custody
+settlement. Never infer success from a resolved receipt, closed borrow, remote snapshot, publication
+flag or later cleanup retry. For a download, success requires verified transfer, requested local
+publication, successful result reduction and settled local custody. A cleanup failure remains an
+unsuccessful child even if its exact cleanup later succeeds.
 
-The private upload-child kernel implements admission, success checkpoint publication and bookkeeping
-settlement in ordinary `FileOperation.upload`. Associated records use payload versions three and
-four, preserving unassociated versions one and two without a database migration. The false marker is
-present at admission; only positively complete, settled success changes it to true. Exact revision
-and payload confirmation precede immutable closure. Native aggregate teardown retries only retained
-bookkeeping, not helper effects. Local borrow closure or handoff is not proof of a checkpoint,
-resolved effects or cleanup; after settled retained-effect handoff, unresolved rows alone do not
-universally forbid other body borrows. Teardown separately stops admission first.
+Ordinary obligations retain the actual target, identity, path and unfinished effect or cleanup
+responsibility. Keep admission before local staging, exact uncertain-admission custody, original
+exception priority, capture before exception-fact allocation, and refusal to finalize incomplete
+capture. Interrupted debt publication or borrow closure must retain the exact outcome and
+bookkeeping intent. Aggregate teardown may retry only that bookkeeping; it must not repeat helper
+effects, local publication or source reads. A local handoff may close a borrow while leaving an
+unresolved row, which still prevents aggregate release.
 
-The download-side implementation uses the same ordinary child and existing whole-call local download
-custody. Preparation and admission precede construction of a new workstation stage; the prepared
-workflow receives the actual sink before remote dispatch. A constructor refusal settles the child's
-false receipt before dispatch, retaining any actual local cleanup responsibility separately. Cleanup
-of a previously retained stage remains a different responsibility under the existing whole-call
-borrow, not completion of a newly admitted child. This split must not introduce a second download
-engine, coordinator or parent obligation.
+Remote directory convergence uses its ordinary metadata obligation. Local directory creation also
+needs truthful partial-failure reporting and conservative object checks, not a fabricated upload or
+download association. Do not add a success-history format merely to label `mkdir`.
 
-The local call retains the exact original active child, remote outcome and local completion
-disposition until checkpoint publication and borrow closure settle. Positive local disposition
-follows verified remote completion, successful requested publication, settled local cleanup and
-successful result reduction without an accompanying failure or exceptional control. A cleanup
-failure is unsuccessful even if a later exact cleanup retry succeeds; it must not retroactively
-upgrade the original call. Missing or interrupted completion capture retains custody instead of
-inferring success from flags, remote recovery, receipt resolution or borrow closure.
+Maintain bounded same-controller progress in memory and stop on the first failed, uncertain or
+interrupted child. Report already completed entries separately from the current child's partial or
+uncertain effects. Leave confirmed destinations in place; do not replay automatically, roll the tree
+back or remove unmentioned entries. Copying merges directory structure with an explicit conflict
+choice for existing regular files, not implicit tree pruning.
 
-Download associations use separate DOWNLOAD-only fields and payload versions five and six, with six
-carrying the numeric bootstrap. Versions one through four retain their existing byte and semantic
-contracts. Local codec tests prove the new versions' exact download recovery headroom and envelope
-separately from the upload proof. The original download row carries no workstation path, manifest,
-contents or reconstructed local result. Aggregate teardown retries captured download CAS and closure
-bookkeeping only, never stage publication, helper execution or source reads.
-
-The private download-child kernel implements these decisions under the existing local-call borrow.
-Tests cover admission before staging, verified completion and publication, failed cleanup, positive
-reduction, interrupted capture and exact bookkeeping-only CAS and closure retry. Earlier failure or
-control prevents success capture; an interruption after positive capture retains its exact intended
-success checkpoint rather than downgrading it. This is local fixture evidence, not native proof.
-Uncertain registration retains its original local call, active child and borrow, including committed
-registration with a lost reply or failed absence inspection. Bookkeeping and aggregate teardown
-refuse incomplete admission without discarding those objects or replaying effects. The existing
-typed proved-absent refusal remains the only absence classification. Reconciliation of unresolved
-admission is not supplied by this checkpoint kernel and remains broader recovery work. Directory
-facade options, traversal and extraction, aggregate partial-result semantics, production download
-checkpoint composition and native proof remain required work before complete R7 or public RunContext
-acceptance. The package callback and domain-specific artifact ownership must not be weakened while
-those pieces are built.
+After process loss, recovery handles exact retained obligations only. It does not reconstruct prior
+success, local destinations, the remaining manifest or a resumable plan. A crash between fully
+settled children loses only progress history that this contract does not promise to recover.
+Directory facade options, bounded complete traversal, local creation/publication and native proof
+remain required before complete R7 or public RunContext acceptance.
 
 ### DOWNLOAD recovery dispatch
 
@@ -1517,9 +1480,9 @@ contains old bytes, a diff, a hash, attributes, helper paths, or carrier diagnos
 `LimitExceededError`, `ConflictError`, `PartialMutationError`, and `UncertainOutcomeError` are new
 kind-based `AgentworksError` subclasses shared by execution operations rather than file-entity
 subclasses. Provider exception text and raw errno values remain internal. Core directory transfer
-checkpoints settled progress; artifact callers additionally checkpoint each confirmed ownership
-effect. This slice supplies no transaction and never reports a partial or uncertain operation as
-unchanged.
+records bounded settled progress in memory; artifact callers durably checkpoint each confirmed
+ownership effect. This slice supplies no transaction and never reports a partial or uncertain
+operation as unchanged.
 
 Public reduction follows core custody, never replaces it. Existing error `entity_kind` and
 `entity_name` fields carry a core-supplied safe logical target, not filesystem paths or account

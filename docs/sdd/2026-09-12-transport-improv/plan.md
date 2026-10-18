@@ -4502,6 +4502,23 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       Preserve versions one through four and prove the new DOWNLOAD-only versions five and six,
       their recovery envelope, original-row retention and aggregate teardown. This does not deliver
       a directory facade, post-crash local repair, native acceptance or complete public FileAccess.
+      The two completed private child-checkpoint kernels above are superseded by ordinary-call
+      directory composition; their historical completion records do not establish the simpler
+      implementation below.
+
+- [ ] Retire unused generic transfer-association writers and success-history publication while
+      preserving ordinary-call custody and exact bookkeeping-only retry. Keep admission before local
+      staging, uncertain registration, actual retained outcomes and cleanup debt, control precedence
+      and incomplete-capture refusal. Prove debt-publication and borrow-close recovery without
+      helper/source/publication replay. Retain readers for persisted versions three through six
+      until their compatibility disposition is explicit; do not inspect or discard operator data to
+      justify deletion. Preserve the distinct durable artifact ownership callback.
+- [ ] Deliver bounded directory upload/download by composing ordinary successful child results under
+      one original deadline. Define explicit existing-file conflict selection and bounded partial
+      progress, including failed/uncertain current-child effects. Merge directory structure without
+      pruning or rolling back confirmed entries. Prove complete traversal rather than interpreting a
+      depth-limited inventory as a whole tree. Cover conservative local traversal, directory
+      creation and publication on supported workstation systems before public exposure.
 - [ ] Resolve lifecycle-ledger capacity before migrating high-volume artifact publication. Apply the
       selected core 128-unfinished-obligation bound and preserve commit-without-reply evidence and
       immutable completed receipts, rather than pruning, reusing IDs or increasing the limit.
