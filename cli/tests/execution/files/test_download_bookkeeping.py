@@ -1,4 +1,4 @@
-"""Actual SQLite, helpers and workstation custody for download checkpoints."""
+"""Actual SQLite, helpers and workstation custody for ordinary downloads."""
 
 from __future__ import annotations
 
@@ -16,15 +16,12 @@ from agentworks.execution import access as access_module
 from agentworks.execution._file_download import FileDownloadStatus, _PreparedDownload
 from agentworks.execution._file_local_download import FileLocalDownloadControlFact
 from agentworks.execution._file_obligation import (
-    DownloadChildAssociation,
     FileCallObligation,
     decode_file_call_obligation,
-    encode_file_call_obligation,
 )
 from agentworks.execution._file_result_transfer import reduce_file_local_download
 from agentworks.execution._local_download_publication import LocalDownloadPublication
-from agentworks.execution.access import FileAccess
-from agentworks.execution.files import Change, Create, Replace
+from agentworks.execution.files import Create, Replace
 from agentworks.operations import LifecycleObligation, OperationBorrow, OperationOwner, _is_pre_registration_refusal
 from tests.execution._bound_carrier_support import obligation_receipt
 from tests.execution.files._file_access_support import bound_access as bound_access
@@ -32,13 +29,6 @@ from tests.execution.files._file_access_support import plan as plan
 from tests.execution.files._file_snapshot_support import LocalCarrier
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="actual workstation/helper proof requires Linux")
-
-
-def associate(access: FileAccess, monkeypatch: pytest.MonkeyPatch) -> DownloadChildAssociation:
-    child = DownloadChildAssociation.fresh()
-    begin = access._operation.begin_local_download
-    monkeypatch.setattr(access._operation, "begin_local_download", lambda: begin(download_child=child))
-    return child
 
 
 def pending(owner: OperationOwner) -> tuple[PersistedLifecycleObligation, FileCallObligation]:
@@ -57,7 +47,6 @@ def test_registration_failure_preserves_original_custody_unless_absence_is_prove
     from tests.execution.files._target_support import target_for_owner
 
     access, root, owner, db = bound_access
-    child = associate(access, monkeypatch)
     source = root / "source"
     source.write_bytes(b"verified")
     destination = root.parent / "destination"
@@ -118,7 +107,7 @@ def test_registration_failure_preserves_original_custody_unless_absence_is_prove
     assert constructors == [] and carrier.calls == 0 and not destination.exists()
     original_call, active, identifier, version, payload = admissions[0]
     record = decode_file_call_obligation(payload)
-    assert record.download_child == child and not record.download_child_complete
+    assert record.download_child is None
     assert isinstance(active.prepared, _PreparedDownload) and active.prepared.state.token == record.token
     assert active.obligation_id == identifier and active.borrow is original_call.borrow
     assert active.obligation is None and original_call.borrow._dispatch_obligation is None
@@ -142,7 +131,7 @@ def test_registration_failure_preserves_original_custody_unless_absence_is_prove
     with pytest.raises(StateError):
         access.download(PurePosixPath(source), root.parent / "next")
     with pytest.raises(StateError):
-        access._operation.settle_download_child_bookkeeping()
+        access._operation.settle_download_bookkeeping()
     workflow = _Workflow(owner, Deadline.after(20))
     workflow.views = NativeVMOperation(
         owner, None, None, access._operation, ExecutionOperation(owner, target_for_owner(owner)), None
@@ -157,9 +146,8 @@ def test_registration_failure_preserves_original_custody_unless_absence_is_prove
 
 
 @pytest.mark.parametrize("condition", [Create(), Replace()])
-def test_original_false_row_before_stage_and_helper_then_success_after_reduction(bound_access, monkeypatch, condition):
+def test_original_admission_before_stage_and_helper_then_close_after_reduction(bound_access, monkeypatch, condition):
     access, root, owner, _db = bound_access
-    child = associate(access, monkeypatch)
     (root / "source").write_bytes(b"verified")
     publisher = local._publisher_for_host
     reducer = reduce_file_local_download
@@ -169,8 +157,8 @@ def test_original_false_row_before_stage_and_helper_then_success_after_reduction
 
     def check_false() -> None:
         row, record = pending(owner)
-        assert row.payload_version == 5
-        assert record.download_child == child and not record.download_child_complete
+        assert row.payload_version == 1 and row.payload_revision == 0
+        assert record.download_child is None
         admitted.append((row.obligation_id, record.token))
 
     class InspectingCarrier(LocalCarrier):
@@ -196,7 +184,7 @@ def test_original_false_row_before_stage_and_helper_then_success_after_reduction
 
     def closing(borrow):
         row, record = pending(owner)
-        assert record.download_child_complete
+        assert record.download_child is None and row.payload_revision == 0
         assert record.token == admitted[0][1]
         assert events == ["construct", "reduce"]
         close(borrow)
@@ -214,15 +202,14 @@ def test_original_false_row_before_stage_and_helper_then_success_after_reduction
     assert len(set(admitted)) == 1
     row = obligation_receipt(owner, admitted[0][0])
     assert row.state is LifecycleObligationState.RESOLVED
-    assert decode_file_call_obligation(row.payload).download_child_complete
+    assert decode_file_call_obligation(row.payload).download_child is None and row.payload_revision == 0
 
 
 @pytest.mark.parametrize(
     "fault", ["constructor", "commit", "abort", "reduction", "control", "absent", "capture", "allocation"]
 )
-def test_failed_calls_never_complete_and_incomplete_capture_keeps_original_custody(bound_access, monkeypatch, fault):
+def test_failed_calls_and_incomplete_capture_keep_truthful_custody(bound_access, monkeypatch, fault):
     access, root, owner, _db = bound_access
-    child = associate(access, monkeypatch)
     source = root / "source"
     if fault != "absent":
         source.write_bytes(b"verified")
@@ -234,7 +221,7 @@ def test_failed_calls_never_complete_and_incomplete_capture_keeps_original_custo
     def construct(*args, **kwargs):
         row, record = pending(owner)
         receipt.append(row.obligation_id)
-        assert record.download_child == child and not record.download_child_complete
+        assert record.download_child is None
         if fault == "constructor":
             raise FileExistsError()
         return publisher(*args, **kwargs)
@@ -263,7 +250,7 @@ def test_failed_calls_never_complete_and_incomplete_capture_keeps_original_custo
         assert call.active.obligation.obligation_id == receipt[0]
         assert call.stage is not None
         with pytest.raises(StateError):
-            access._operation.settle_download_child_bookkeeping()
+            access._operation.settle_download_bookkeeping()
         with pytest.raises(StateError):
             access.download(PurePosixPath(source), root.parent / "next")
     else:
@@ -272,130 +259,22 @@ def test_failed_calls_never_complete_and_incomplete_capture_keeps_original_custo
         assert carrier.calls == 0
 
 
-@pytest.mark.parametrize(
-    "fault",
-    ["lost", "unconfirmed", "control", "committed-control", "close-control", "closed-control", "later-revision"],
-)
-def test_exact_bookkeeping_retry_never_replays_helpers_or_workstation(bound_access, monkeypatch, fault):
-    access, root, owner, _db = bound_access
-    child = associate(access, monkeypatch)
-    (root / "source").write_bytes(b"verified")
-    carrier = LocalCarrier()
-    monkeypatch.setattr(access, "_carrier", carrier)
-    publish = LifecycleObligation.publish_payload
-    close = OperationBorrow.close
-    intents = []
-    enabled = True
-
-    def interrupted(handle, *, expected_revision, payload_version, payload):
-        intents.append((handle.obligation_id, expected_revision, payload_version, payload))
-        if enabled and fault == "unconfirmed":
-            raise RuntimeError()
-        if enabled and fault == "control":
-            raise KeyboardInterrupt()
-        row = publish(handle, expected_revision=expected_revision, payload_version=payload_version, payload=payload)
-        if enabled and fault == "lost" and len(intents) == 1:
-            raise RuntimeError()
-        if enabled and fault == "committed-control":
-            raise KeyboardInterrupt()
-        if enabled and fault == "later-revision":
-            return replace(row, payload_revision=row.payload_revision + 1)
-        return row
-
-    def interrupted_close(borrow):
-        if enabled and fault == "close-control":
-            raise KeyboardInterrupt()
-        close(borrow)
-        if enabled and fault == "closed-control":
-            raise KeyboardInterrupt()
-
-    monkeypatch.setattr(LifecycleObligation, "publish_payload", interrupted)
-    monkeypatch.setattr(OperationBorrow, "close", interrupted_close)
-    destination = root.parent / "destination"
-    if fault == "lost":
-        assert access.download(PurePosixPath(root / "source"), destination).size == 8
-        assert len(intents) == 2 and intents[0] == intents[1]
-    else:
-        with pytest.raises(Exception if fault in {"unconfirmed", "later-revision"} else KeyboardInterrupt):
-            access.download(PurePosixPath(root / "source"), destination)
-        call = access._operation._local_download_call
-        assert call is not None
-        assert call.active.outcome.status is FileDownloadStatus.COMPLETE
-        assert call.local_outcome.published and call.reduction_succeeded
-        assert call.association == child and call.publication is not None
-        with pytest.raises(StateError):
-            access.download(PurePosixPath(root / "source"), root.parent / "next")
-        count = carrier.calls
-        enabled = False
-        owner.stop_admission()
-        access._operation.settle_download_child_bookkeeping()
-        assert carrier.calls == count and destination.read_bytes() == b"verified"
-        assert access._operation._local_download_call is None
-        assert len(set(intents)) == 1
-    row = obligation_receipt(owner, intents[0][0])
-    assert row.state is LifecycleObligationState.RESOLVED
-    assert decode_file_call_obligation(row.payload).download_child_complete
-
-
-@pytest.mark.parametrize("fault", ["fenced", "competing-child", "same-payload-later-revision"])
-def test_actual_fencing_and_revision_conflict_keep_original_child(bound_access, monkeypatch, fault):
-    access, root, owner, db = bound_access
-    associate(access, monkeypatch)
-    (root / "source").write_bytes(b"verified")
-    publish = LifecycleObligation.publish_payload
-    raced = False
-    recovered = None
-
-    def race(handle, *, expected_revision, payload_version, payload):
-        nonlocal raced, recovered
-        if not raced:
-            raced = True
-            if fault == "fenced":
-                recovered = OperationOwner.recover(db.operations, owner.ownership, "f" * 32)
-            else:
-                record = decode_file_call_obligation(payload)
-                other = replace(record, download_child=DownloadChildAssociation.fresh())
-                row = publish(
-                    handle,
-                    expected_revision=expected_revision,
-                    payload_version=payload_version,
-                    payload=encode_file_call_obligation(other),
-                )
-                if fault == "same-payload-later-revision":
-                    publish(
-                        handle, expected_revision=row.payload_revision, payload_version=payload_version, payload=payload
-                    )
-        return publish(handle, expected_revision=expected_revision, payload_version=payload_version, payload=payload)
-
-    monkeypatch.setattr(LifecycleObligation, "publish_payload", race)
-    with pytest.raises(ExternalError) as raised:
-        access.download(PurePosixPath(root / "source"), root.parent / "destination")
-    assert raised.value.details is not None and raised.value.details.effect is Change.CHANGED
-    call = access._operation._local_download_call
-    assert call is not None and not call.borrow.closed and call.publication is not None
-    with pytest.raises(StateError):
-        access._operation.settle_download_child_bookkeeping()
-    if recovered is not None:
-        assert not decode_file_call_obligation(pending(recovered)[0].payload).download_child_complete
-
-
-def test_aggregate_settles_captured_child_after_stop_before_component_check(bound_access, monkeypatch):
+def test_aggregate_settles_captured_closure_after_stop_before_component_check(bound_access, monkeypatch):
     from agentworks.execution._execution_operation import ExecutionOperation
     from agentworks.execution.carrier import Deadline
     from agentworks.vms._native_operation import NativeVMOperation, _Workflow
     from tests.execution.files._target_support import target_for_owner
 
     access, root, owner, db = bound_access
-    associate(access, monkeypatch)
     (root / "source").write_bytes(b"verified")
     carrier = LocalCarrier()
     monkeypatch.setattr(access, "_carrier", carrier)
-    publish = LifecycleObligation.publish_payload
+    close = OperationBorrow.close
 
     def interrupt(*args, **kwargs):
         raise KeyboardInterrupt()
 
-    monkeypatch.setattr(LifecycleObligation, "publish_payload", interrupt)
+    monkeypatch.setattr(OperationBorrow, "close", interrupt)
     with pytest.raises(KeyboardInterrupt):
         access.download(PurePosixPath(root / "source"), root.parent / "destination")
     workflow = _Workflow(owner, Deadline.after(20))
@@ -410,7 +289,7 @@ def test_aggregate_settles_captured_child_after_stop_before_component_check(boun
     with pytest.raises(KeyboardInterrupt):
         workflow.close()
     count = carrier.calls
-    monkeypatch.setattr(LifecycleObligation, "publish_payload", publish)
+    monkeypatch.setattr(OperationBorrow, "close", close)
     workflow.close(cleanup_deadline=Deadline.after(20))
     assert carrier.calls == count and access._operation._local_download_call is None
     assert db.operations.inspect(owner.ownership.scope) is None
@@ -428,16 +307,24 @@ def test_aggregate_settles_captured_child_after_stop_before_component_check(boun
         "cleanup-retry",
     ],
 )
-def test_actual_remote_and_late_local_failures_keep_false_checkpoint(bound_access, monkeypatch, fault):
+def test_actual_remote_and_late_local_failures_keep_original_outcome(bound_access, monkeypatch, fault):
     from agentworks.execution.carrier import Deadline, ExitStatus
 
     access, root, owner, _db = bound_access
-    associate(access, monkeypatch)
     (root / "source").write_bytes(b"verified")
     commit = LocalDownloadPublication.commit
     abort = LocalDownloadPublication.abort
     enabled = True
     receipts = []
+    calls = []
+    begin = access._operation.begin_local_download
+
+    def capture_call():
+        call = begin()
+        calls.append(call)
+        return call
+
+    monkeypatch.setattr(access._operation, "begin_local_download", capture_call)
 
     class FaultCarrier(LocalCarrier):
         def execute(self, *args, **kwargs):
@@ -481,11 +368,144 @@ def test_actual_remote_and_late_local_failures_keep_false_checkpoint(bound_acces
         access.download(PurePosixPath(root / "source"), root.parent / "destination")
     original = obligation_receipt(owner, receipts[0])
     assert not decode_file_call_obligation(original.payload).download_child_complete
+    assert calls[0].reduction_complete and not calls[0].reduction_succeeded
     if fault == "uncertain":
         assert original.state is LifecycleObligationState.POSSIBLE_EFFECT
-        assert decode_file_call_obligation(original.payload).download_child is not None
+        assert decode_file_call_obligation(original.payload).download_child is None
     if fault == "cleanup-retry":
         enabled = False
         assert access.download(PurePosixPath(root / "source"), root.parent / "next").size == 8
         assert obligation_receipt(owner, receipts[0]).payload == original.payload
-        assert not decode_file_call_obligation(original.payload).download_child_complete
+        assert calls[0].local_outcome.cleanup_failed and not calls[0].reduction_succeeded
+        assert calls[1].reduction_succeeded
+
+
+@pytest.mark.parametrize("fault", ["close-control", "committed-control", "closed-control"])
+def test_exact_closure_retry_retains_actual_local_result(bound_access, monkeypatch, fault):
+    access, root, owner, db = bound_access
+    (root / "source").write_bytes(b"verified")
+    carrier = LocalCarrier()
+    monkeypatch.setattr(access, "_carrier", carrier)
+    close = OperationBorrow.close
+    resolve = type(db.operations).resolve_lifecycle_obligation
+    enabled = True
+    receipts = []
+    publications = []
+    commit = LocalDownloadPublication.commit
+
+    def publishing(stage, **kwargs):
+        publications.append(stage)
+        return commit(stage, **kwargs)
+
+    def interrupted_close(borrow):
+        receipts.append(borrow._dispatch_obligation.obligation_id)
+        if enabled and fault == "close-control":
+            raise KeyboardInterrupt()
+        close(borrow)
+        if enabled and fault == "closed-control":
+            raise KeyboardInterrupt()
+
+    def interrupted_resolve(repository, ownership, obligation_id):
+        result = resolve(repository, ownership, obligation_id)
+        if enabled and fault == "committed-control":
+            raise KeyboardInterrupt()
+        return result
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("successful ordinary download published history")
+
+    monkeypatch.setattr(OperationBorrow, "close", interrupted_close)
+    monkeypatch.setattr(LocalDownloadPublication, "commit", publishing)
+    monkeypatch.setattr(type(db.operations), "resolve_lifecycle_obligation", interrupted_resolve)
+    monkeypatch.setattr(LifecycleObligation, "publish_payload", forbidden)
+    destination = root.parent / "destination"
+    with pytest.raises(KeyboardInterrupt):
+        access.download(PurePosixPath(root / "source"), destination)
+    call = access._operation._local_download_call
+    assert call is not None and call.active.outcome.status is FileDownloadStatus.COMPLETE
+    assert call.local_outcome.published and call.reduction_complete and call.reduction_succeeded
+    assert call.stage.published and not call.stage.cleanup_uncertain
+    assert call.borrow.closed is (fault == "closed-control")
+    with pytest.raises(StateError):
+        access.download(PurePosixPath(root / "source"), root.parent / "next")
+    count = carrier.calls
+    enabled = False
+    access._operation.settle_download_bookkeeping()
+    access._operation.settle_download_bookkeeping()
+    assert carrier.calls == count and destination.read_bytes() == b"verified"
+    assert publications == [call.stage]
+    assert access._operation._local_download_call is None
+    row = obligation_receipt(owner, receipts[0])
+    assert row.state is LifecycleObligationState.RESOLVED and row.payload_revision == 0
+    with pytest.raises(StateError):
+        owner.borrow()
+
+
+@pytest.mark.parametrize("fault", ["lost", "unconfirmed", "control", "committed-control", "retention"])
+def test_remote_debt_publication_retry_keeps_failed_local_outcome(bound_access, monkeypatch, fault):
+    access, root, owner, db = bound_access
+    (root / "source").write_bytes(b"verified")
+    publish = LifecycleObligation.publish_payload
+    retain = access._operation._retain_unfinished
+    enabled = True
+    intents = []
+
+    class FaultCarrier(LocalCarrier):
+        def execute(self, *args, **kwargs):
+            report = super().execute(*args, **kwargs)
+            if self.calls == 2:
+                return replace(report, completion=None)
+            return report
+
+    carrier = FaultCarrier()
+    monkeypatch.setattr(access, "_carrier", carrier)
+
+    def interrupted(handle, *, expected_revision, payload_version, payload):
+        intents.append((handle.obligation_id, expected_revision, payload_version, payload))
+        if enabled and fault == "unconfirmed":
+            raise RuntimeError()
+        if enabled and fault == "control":
+            raise KeyboardInterrupt()
+        row = publish(handle, expected_revision=expected_revision, payload_version=payload_version, payload=payload)
+        if enabled and fault == "lost" and len(intents) == 1:
+            raise RuntimeError()
+        if enabled and fault == "committed-control":
+            raise KeyboardInterrupt()
+        return row
+
+    monkeypatch.setattr(LifecycleObligation, "publish_payload", interrupted)
+
+    def interrupted_retention(unfinished):
+        retain(unfinished)
+        if enabled and fault == "retention":
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr(access._operation, "_retain_unfinished", interrupted_retention)
+    destination = root.parent / "destination"
+    with pytest.raises(KeyboardInterrupt if "control" in fault or fault == "retention" else Exception):
+        access.download(PurePosixPath(root / "source"), destination)
+    call = access._operation._local_download_call
+    if fault == "lost":
+        assert call is None and len(intents) == 2
+    else:
+        assert call is not None and call.local_failed and call.reduction_complete
+        assert not call.reduction_succeeded
+        active = call.active
+        assert active.outcome.requires_owner_retention and active.retained_payload is not None
+        captured = call.local_outcome
+    count = carrier.calls
+    enabled = False
+    access._operation.settle_download_bookkeeping()
+    access._operation.settle_download_bookkeeping()
+    assert not access._operation.active_downloads and access._operation._local_download_call is None
+    assert carrier.calls == count and not destination.exists()
+    assert len(access._operation.unfinished_downloads) == 1
+    if fault != "lost":
+        assert call.local_outcome is captured and not call.reduction_succeeded
+        assert access._operation.unfinished_downloads[0].outcome is active.outcome
+    assert len(set(intents)) == 1
+    row, record = pending(owner)
+    assert row.payload_revision == 1 and row.payload_version == 1 and record.uncertainty
+    assert record.download_child is None
+    with pytest.raises(StateError):
+        owner.borrow()

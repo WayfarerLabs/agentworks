@@ -146,8 +146,8 @@ class _Workflow:
         if self.views is not None:
             for run in self.views.execution_operation.managed_runs:
                 run.finish_cleanup(budget)
-            self.views.file_operation.settle_upload_child_bookkeeping()
-            self.views.file_operation.settle_download_child_bookkeeping()
+            self.views.file_operation.settle_upload_bookkeeping()
+            self.views.file_operation.settle_download_bookkeeping()
         if not self._components_settled():
             raise StateError("Native VM operation retains unsettled work")
         access_settled = self.access is None or self.access.settle(budget)
