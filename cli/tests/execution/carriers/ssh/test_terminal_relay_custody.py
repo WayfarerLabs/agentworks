@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import time
 from collections.abc import Iterator
 from threading import Event, Thread, current_thread
 from typing import Any, cast
@@ -60,7 +59,7 @@ def test_pending_worker_retains_borrowed_terminal_until_fresh_retry(
     borrowed = endpoint[1]
     mode = termios.tcgetattr(borrowed)
     flags = fcntl.fcntl(borrowed, fcntl.F_GETFL), os.get_inheritable(borrowed)
-    entered, release = Event(), Event()
+    entered, release, boundary_exited = Event(), Event(), Event()
     children: list[subprocess.Popen[bytes]] = []
     closers: list[Thread] = []
     releasers: list[tuple[PosixTerminal, Thread]] = []
@@ -73,7 +72,10 @@ def test_pending_worker_retains_borrowed_terminal_until_fresh_retry(
 
     def pause() -> None:
         entered.set()
-        assert release.wait(3)
+        try:
+            assert release.wait(3)
+        finally:
+            boundary_exited.set()
 
     def acquire(terminal: PosixTerminal) -> None:
         if boundary == "acquisition":
@@ -128,7 +130,6 @@ def test_pending_worker_retains_borrowed_terminal_until_fresh_retry(
         event = attempt._done if boundary == "cleanup" else attempt._operation_done
         monkeypatch.setattr(event, "wait", wait)
     try:
-        started = time.monotonic()
         if interrupt:
             with pytest.raises(KeyboardInterrupt) as raised:
                 attempt.run()
@@ -142,7 +143,9 @@ def test_pending_worker_retains_borrowed_terminal_until_fresh_retry(
                 assert result.exit_status == 0
         monkeypatch.setattr(attempt._operation_done, "wait", native_wait)
         monkeypatch.setattr(attempt._done, "wait", native_cleanup_wait)
-        assert time.monotonic() - started < 1
+        # Native startup precedes cleanup; prove return while its boundary is
+        # still held, including detection of the fixture's own hold timeout.
+        assert not release.is_set() and not boundary_exited.is_set()
         assert entered.is_set() and not attempt._done.is_set()
         assert not custody.settled
         assert not custody.close(Deadline.after(0.02))
