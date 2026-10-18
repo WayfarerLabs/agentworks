@@ -418,6 +418,12 @@ an entire interface, while a bound action restriction can distinguish upload/dow
 observe/stop or exact profiles. The [contract proposal](execution-contract.md) gives the concrete
 shape. The selected route remains inspectable metadata, not a way to obtain an unrestricted handle.
 
+A platform operation can separately receive `platform_host_execution_target()` and its matching
+absence reason. This is the already-bound management host, not a VM admin or agent alias, and can
+exist before a guest is created. It follows the same passive, immutable construction and
+composition-owned lifetime rules. Core chooses which stages receive that target; the accessor does
+not discover or activate a host, infer a grant, or resolve a missing guest target.
+
 Bind recipient authority at context composition, independently from guest identity and channel
 features. VM admin access does not by itself grant API-performed root elevation. Supplied interfaces
 check their bound action/elevation restrictions before preparation or effects, even when the guest

@@ -27,6 +27,12 @@ separate PRs, then physically delete legacy. New code never calls old execution 
 accessors. Existing `admin_target()` and `agent_target()` keep their legacy types and behavior until
 deletion; there is no union return type, runtime stack selector or fallback between stacks.
 
+Platform-operation contexts additionally use `platform_host_execution_target()` for an already-bound
+host target, with `platform_host_execution_target_absence()` carrying its supplied absence reason.
+It is independent of both guest identities and may exist before the VM does. Core supplies it only
+to the relevant stage; neither a guest target nor a host target fills in for the other. This adds no
+host lookup, connection, ownership acquisition or cleanup to RunContext itself.
+
 Permission/grant language below specifies the **post-removal contract**. During coexistence, do not
 withhold interfaces, reject calls or advertise isolation on the basis of new recipient grants,
 including the new core file ceiling. Record intended actions, paths, elevation and profiles during

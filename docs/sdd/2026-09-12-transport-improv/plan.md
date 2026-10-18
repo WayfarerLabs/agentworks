@@ -5684,6 +5684,13 @@ intermediate public API.
       union target type, stack selector or forwarding adapter. Prove passive construction/access and
       composition-owned lifetime, no new effects on existing callers, and independent new-stack
       usability with legacy modules unavailable. Do not claim restricted recipient authority.
+- [ ] Add the independent passive `platform_host_execution_target()` constructor binding and its
+      supplied absence reason for platform-operation stages. Keep guest and legacy views separate,
+      preserve immutable pass-through behavior, and prove a host can be supplied before any guest
+      exists without inspection, activation or ownership manufacture. This is private construction
+      groundwork; complete host execution/files, ownership, provisioning/recovery and native
+      acceptance before a production platform-host handoff. Existing context builders remain
+      unchanged, and this introduces neither active recipient enforcement nor a new transport.
 - [x] Complete and privately review paired native admin/agent preparation using an explicit
       core-selected agent row on the same VM. Reuse one file operation, execution operation, numeric
       guest bootstrap, carrier, owner and deadline; retain both account preparations and publish no
