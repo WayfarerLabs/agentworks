@@ -42,7 +42,7 @@ def manifest() -> InlineManifest:
 
 def _install_manifest(monkeypatch: pytest.MonkeyPatch, manifest: InlineManifest) -> None:
     monkeypatch.setattr(os, "read", lambda descriptor, limit: b"")
-    monkeypatch.setattr(guest, "_read_request", lambda: manifest)
+    monkeypatch.setattr(guest, "_read_request", lambda *, prepared_input=False: manifest)
     monkeypatch.setattr(guest, "matches_current_identity", lambda identity: True)
     monkeypatch.setattr(FrameWriter, "_write", staticmethod(lambda data: None))
 
@@ -165,7 +165,7 @@ manifest = request.InlineManifest(
     shell=request.ScriptShell.SH, env=(), cwd=None, stdin=b'',
     output_mode=request.OutputMode.CAPTURE, capture_limit=100,
     identity=identity.IdentityExpectation(0,0,(0,)))
-g._read_request = lambda: manifest
+g._read_request = lambda *, prepared_input=False: manifest
 g.matches_current_identity = lambda value: True
 FrameWriter._write = staticmethod(lambda data: None)
 emissions=[]
