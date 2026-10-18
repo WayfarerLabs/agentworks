@@ -3,11 +3,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .access import ExecutionAccess, FileAccess
     from .carrier import ChannelFeatures
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionIdentity:
+    """Account and exact numeric identity prepared for ordinary execution."""
+
+    account: str
+    uid: int
+    gid: int
+    groups: tuple[int, ...]
+
+
+class ExecutionRoute(StrEnum):
+    """Selected access route, independent of the underlying carrier."""
+
+    NATIVE = "native"
+    CANONICAL = "canonical"
+    PLATFORM_HOST = "platform_host"
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +42,8 @@ class ExecutionTarget:
     _execution: ExecutionAccess | None = field(repr=False)
     _files: FileAccess | None = field(repr=False)
     features: ChannelFeatures
+    identity: ExecutionIdentity
+    route: ExecutionRoute
 
     def execution(self) -> ExecutionAccess | None:
         """Return the already-bound execution interface, when supplied."""

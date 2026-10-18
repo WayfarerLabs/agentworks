@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
+from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel, TargetAbsence
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import Database, OperationClaimState
 from agentworks.errors import StateError, ValidationError
@@ -25,6 +25,7 @@ from agentworks.execution.carrier import Deadline
 from agentworks.execution.files import Create, NewMetadata
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
+from agentworks.execution.target import ExecutionIdentity, ExecutionRoute
 from agentworks.operations import OperationOwner
 from agentworks.orchestration.secrets import ScopedSecrets
 from agentworks.vms import _native_operation
@@ -144,6 +145,8 @@ def test_context_delivers_exact_prepared_views_and_preserves_input_world(
             assert ctx.admin_target() is legacy_admin and ctx.agent_target() is legacy_agent
             assert ctx.admin_execution_target() is operation.target
             assert ctx.agent_execution_target() is operation.agent_target
+            assert ctx.admin_execution_target_absence() is None
+            assert ctx.agent_execution_target_absence() is (TargetAbsence.UNAVAILABLE if agent_name is None else None)
             assert ctx.secret("allowed") == "one"
             with pytest.raises(StateError):
                 ctx.secret("other")
@@ -155,6 +158,9 @@ def test_context_delivers_exact_prepared_views_and_preserves_input_world(
         assert incoming.admin_execution_target() is incoming.agent_execution_target() is stale_target
         target = ctx.admin_execution_target()
         assert target is not None
+        expected = route.accounts.identities["admin"]
+        assert target.identity == ExecutionIdentity("admin", expected.euid, expected.egid, expected.groups)
+        assert target.route is ExecutionRoute.NATIVE
         files, execution = target.files(), target.execution()
         assert files is not None and execution is not None
         code = (
@@ -173,6 +179,8 @@ def test_context_delivers_exact_prepared_views_and_preserves_input_world(
             assert agent is None
         else:
             assert agent is not None
+            assert agent.identity == ExecutionIdentity("recorded-worker", 2401, 2402, (2402, 2403))
+            assert agent.route is ExecutionRoute.NATIVE
             agent_files, agent_execution = agent.files(), agent.execution()
             assert agent_files is not None and agent_execution is not None
             plans = []
@@ -204,6 +212,11 @@ def test_context_delivers_exact_prepared_views_and_preserves_input_world(
     for target in (ctx.admin_execution_target(), ctx.agent_execution_target()):
         if target is None:
             continue
+        reused = RunContext(admin_execution_target=target)
+        assert reused.admin_execution_target() is target
+        assert reused.admin_execution_target_absence() is None
+        assert target.route is ExecutionRoute.NATIVE
+        assert target.identity.account == ("admin" if target is operation.target else "recorded-worker")
         files, execution = target.files(), target.execution()
         assert files is not None and execution is not None
         with pytest.raises(StateError):
@@ -226,8 +239,13 @@ def test_context_delivers_exact_prepared_views_and_preserves_input_world(
         OperationScope(ScopeLevel.SESSION, vm="box", workspace="work", admin=True, session="s"),
     ],
 )
+@pytest.mark.parametrize("absence", list(TargetAbsence))
 def test_descriptive_scope_never_selects_an_agent(
-    database: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scope: OperationScope | None
+    database: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scope: OperationScope | None,
+    absence: TargetAbsence,
 ) -> None:
     platform = WSL2Platform("wsl2", {})
     route, _, _ = _install_route(database, platform, monkeypatch)
@@ -236,12 +254,18 @@ def test_descriptive_scope_never_selects_an_agent(
         database,
         "box",
         platform,
-        RunContext(operation_scope=scope),
+        RunContext(
+            operation_scope=scope,
+            admin_execution_target_absence=TargetAbsence.WITHHELD,
+            agent_execution_target_absence=absence,
+        ),
         deadline=Deadline.after(30),
         trusted_root=_root(tmp_path),
     ) as ctx:
         assert ctx.operation_scope is scope and ctx.agent_execution_target() is None
         assert ctx.admin_execution_target() is not None
+        assert ctx.admin_execution_target_absence() is None
+        assert ctx.agent_execution_target_absence() is absence
         assert ctx.admin_target() is ctx.agent_target() is None
     assert route.accounts.calls == ["admin", "root"]
     assert database.operations.inspect(_scope()) is None

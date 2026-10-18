@@ -25,7 +25,7 @@ from agentworks.execution.files import (
     ExistingFile,
     directory_transfer_progress,
 )
-from agentworks.execution.target import ExecutionTarget
+from agentworks.execution.target import ExecutionIdentity, ExecutionRoute, ExecutionTarget
 from agentworks.operations import OperationOwner
 from agentworks.vms._native_operation import NativeVMOperation, _Workflow
 from tests.execution.files._file_access_support import bound_access as bound_access
@@ -54,7 +54,18 @@ def workflow(access: FileAccess, owner: OperationOwner) -> _Workflow:
         execution,
         access._operation,
         execution_operation,
-        ExecutionTarget(execution, access, access._carrier.features),
+        ExecutionTarget(
+            execution,
+            access,
+            access._carrier.features,
+            ExecutionIdentity(
+                "worker",
+                access._ordinary_plan.expected.euid,
+                access._ordinary_plan.expected.egid,
+                access._ordinary_plan.expected.groups,
+            ),
+            ExecutionRoute.NATIVE,
+        ),
     )
     return _Workflow(owner, Deadline.after(30), views=views)
 

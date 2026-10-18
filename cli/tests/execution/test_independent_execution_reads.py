@@ -45,7 +45,7 @@ from agentworks.execution.jobs import JobStream
 from agentworks.execution.models import Command, Input, JobRef, Lifetime, Output
 from agentworks.execution.profiles import Protection
 from agentworks.execution.result import ApplicationState, ExecutionFailure
-from agentworks.execution.target import ExecutionTarget
+from agentworks.execution.target import ExecutionIdentity, ExecutionRoute, ExecutionTarget
 from agentworks.operations import OperationOwner
 from agentworks.vms._native_operation import NativeVMOperation, _Workflow
 
@@ -153,7 +153,14 @@ def observer(tmp_path):
         entity_name="vm-one",
         deadline=lambda: Deadline.after(5),
     )
-    target = ExecutionTarget(access, file_access, main.features)
+    expected = PLAN.expected
+    target = ExecutionTarget(
+        access,
+        file_access,
+        main.features,
+        ExecutionIdentity("root", expected.euid, expected.egid, expected.groups),
+        ExecutionRoute.NATIVE,
+    )
     workflow = _Workflow(
         owner, Deadline.after(5), views=NativeVMOperation(owner, file_access, access, files, operation, target)
     )

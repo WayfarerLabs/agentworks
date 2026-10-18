@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
+from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel, TargetAbsence
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
@@ -42,6 +42,8 @@ def test_targets_pass_through_unchanged() -> None:
     assert ctx.agent_target() is agent
     assert ctx.admin_execution_target() is None
     assert ctx.agent_execution_target() is None
+    assert ctx.admin_execution_target_absence() is TargetAbsence.UNAVAILABLE
+    assert ctx.agent_execution_target_absence() is TargetAbsence.UNAVAILABLE
 
 
 def test_absent_targets_read_as_none() -> None:
@@ -54,17 +56,25 @@ def test_absent_targets_read_as_none() -> None:
 
 @pytest.mark.parametrize("bind_admin", [False, True])
 @pytest.mark.parametrize("bind_agent", [False, True])
-def test_execution_bindings_are_independent_and_passive(bind_admin: bool, bind_agent: bool) -> None:
+@pytest.mark.parametrize("admin_absence", list(TargetAbsence))
+@pytest.mark.parametrize("agent_absence", list(TargetAbsence))
+def test_execution_bindings_are_independent_and_passive(
+    bind_admin: bool, bind_agent: bool, admin_absence: TargetAbsence, agent_absence: TargetAbsence
+) -> None:
     # Typed sentinels avoid constructing carriers: context only stores identities.
     admin = cast("ExecutionTarget", _UntouchableTarget()) if bind_admin else None
     agent = cast("ExecutionTarget", _UntouchableTarget()) if bind_agent else None
     legacy_admin = cast("Transport", _UntouchableTarget())
     legacy_agent = cast("Transport", _UntouchableTarget())
+    reader = _Reader({"secret": "value"})
     ctx = RunContext(
         admin_target=legacy_admin,
         agent_target=legacy_agent,
         admin_execution_target=admin,
         agent_execution_target=agent,
+        admin_execution_target_absence=admin_absence,
+        agent_execution_target_absence=agent_absence,
+        secrets=reader,
     )
 
     for _ in range(2):
@@ -72,6 +82,9 @@ def test_execution_bindings_are_independent_and_passive(bind_admin: bool, bind_a
         assert ctx.agent_execution_target() is agent
         assert ctx.admin_target() is legacy_admin
         assert ctx.agent_target() is legacy_agent
+        assert ctx.admin_execution_target_absence() is (None if bind_admin else admin_absence)
+        assert ctx.agent_execution_target_absence() is (None if bind_agent else agent_absence)
+    assert reader.reads == []
 
 
 def test_execution_bindings_do_not_supply_legacy_transports() -> None:
@@ -83,7 +96,15 @@ def test_execution_bindings_do_not_supply_legacy_transports() -> None:
     assert ctx.agent_target() is None
 
 
-@pytest.mark.parametrize("field", ["_admin_execution_target", "_agent_execution_target"])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "_admin_execution_target",
+        "_agent_execution_target",
+        "_admin_execution_target_absence",
+        "_agent_execution_target_absence",
+    ],
+)
 def test_execution_bindings_are_frozen(field: str) -> None:
     admin = cast("ExecutionTarget", _UntouchableTarget())
     agent = cast("ExecutionTarget", _UntouchableTarget())

@@ -8,7 +8,7 @@ from pathlib import PurePosixPath
 from threading import Lock
 from typing import TYPE_CHECKING
 
-from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.base import RunContext, TargetAbsence
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.db import Database, OperationResourceKind, OperationScope, VMStatus
 from agentworks.errors import NotFoundError, StateError, ValidationError
@@ -27,7 +27,7 @@ from agentworks.execution._target_identity import (
 )
 from agentworks.execution.access import ExecutionAccess, FileAccess
 from agentworks.execution.carrier import Deadline
-from agentworks.execution.target import ExecutionTarget
+from agentworks.execution.target import ExecutionIdentity, ExecutionRoute, ExecutionTarget
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
 from agentworks.operations import OperationOwner
 from agentworks.vms.identity import validate_vm_instance_marker
@@ -348,7 +348,14 @@ def _prepare(
         entity_name=vm_name,
         deadline=selected_deadline,
     )
-    execution_target = ExecutionTarget(execution, files, binding.carrier.features)
+    expected = identity.ordinary_plan.expected
+    execution_target = ExecutionTarget(
+        execution,
+        files,
+        binding.carrier.features,
+        ExecutionIdentity(vm.admin_username, expected.euid, expected.egid, expected.groups),
+        ExecutionRoute.NATIVE,
+    )
     agent_target = None
     if agent is not None and agent_identity is not None:
         assert agent_identity.ordinary_plan is not None
@@ -373,7 +380,14 @@ def _prepare(
             entity_name=agent.name,
             deadline=selected_deadline,
         )
-        agent_target = ExecutionTarget(agent_execution, agent_files, binding.carrier.features)
+        expected = agent_identity.ordinary_plan.expected
+        agent_target = ExecutionTarget(
+            agent_execution,
+            agent_files,
+            binding.carrier.features,
+            ExecutionIdentity(agent.linux_user, expected.euid, expected.egid, expected.groups),
+            ExecutionRoute.NATIVE,
+        )
     views = NativeVMOperation(
         workflow.owner, files, execution, file_operation, execution_operation, execution_target, agent_target
     )
@@ -452,6 +466,7 @@ def native_vm_context(
             agent_target=ctx.agent_target(),
             admin_execution_target=operation.target,
             agent_execution_target=operation.agent_target,
+            agent_execution_target_absence=ctx.agent_execution_target_absence() or TargetAbsence.UNAVAILABLE,
             # Trusted core stage assembly preserves the exact scoped reader.
             secrets=ctx._secrets,  # noqa: SLF001
         )

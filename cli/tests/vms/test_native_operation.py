@@ -592,7 +592,7 @@ def test_prepared_views_share_claim_and_clean_teardown(
         obligations = selected.owner.list_pending_lifecycle_obligations()
         for execution in (None, selected.execution):
             for files in (None, selected.files):
-                passive = ExecutionTarget(execution, files, features)
+                passive = ExecutionTarget(execution, files, features, target.identity, target.route)
                 assert passive.execution() is execution
                 assert passive.files() is files
                 assert passive.features is features

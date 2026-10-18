@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from abc import ABC
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks.errors import ConfigError, StateError
@@ -158,6 +158,13 @@ class OperationScope:
             )
 
 
+class TargetAbsence(StrEnum):
+    """Non-sensitive composition reason for an absent execution target."""
+
+    UNAVAILABLE = "unavailable"
+    WITHHELD = "withheld"
+
+
 @dataclass(frozen=True, init=False)
 class RunContext:
     """The resolved runtime world handed to a capability at a stage
@@ -187,7 +194,7 @@ class RunContext:
       ``admin_execution_target`` and ``agent_execution_target`` return
       independently supplied new execution target bindings. All are
       passive pass-throughs, with no fallback between the two views.
-      Existing orchestrators do not yet supply the new bindings.
+      Absence accessors distinguish unavailable targets from withheld ones.
       ``secret`` reads the supplied resolved-secret reader.
 
     Construction and target access do not inspect, activate, or close
@@ -206,6 +213,8 @@ class RunContext:
     _agent_target: Transport | None
     _admin_execution_target: ExecutionTarget | None
     _agent_execution_target: ExecutionTarget | None
+    _admin_execution_target_absence: TargetAbsence | None
+    _agent_execution_target_absence: TargetAbsence | None
     _secrets: SecretReader | None
 
     def __init__(
@@ -217,6 +226,8 @@ class RunContext:
         agent_target: Transport | None = None,
         admin_execution_target: ExecutionTarget | None = None,
         agent_execution_target: ExecutionTarget | None = None,
+        admin_execution_target_absence: TargetAbsence = TargetAbsence.UNAVAILABLE,
+        agent_execution_target_absence: TargetAbsence = TargetAbsence.UNAVAILABLE,
         secrets: SecretReader | None = None,
     ) -> None:
         # Hand-written only to store the power-granting inputs under
@@ -234,6 +245,16 @@ class RunContext:
         object.__setattr__(self, "_agent_target", agent_target)
         object.__setattr__(self, "_admin_execution_target", admin_execution_target)
         object.__setattr__(self, "_agent_execution_target", agent_execution_target)
+        object.__setattr__(
+            self,
+            "_admin_execution_target_absence",
+            admin_execution_target_absence if admin_execution_target is None else None,
+        )
+        object.__setattr__(
+            self,
+            "_agent_execution_target_absence",
+            agent_execution_target_absence if agent_execution_target is None else None,
+        )
         object.__setattr__(self, "_secrets", secrets)
 
     def admin_target(self) -> Transport | None:
@@ -253,6 +274,14 @@ class RunContext:
     def agent_execution_target(self) -> ExecutionTarget | None:
         """Return the supplied agent execution target binding unchanged."""
         return self._agent_execution_target
+
+    def admin_execution_target_absence(self) -> TargetAbsence | None:
+        """Return the supplied absence reason, or None for a bound admin target."""
+        return self._admin_execution_target_absence
+
+    def agent_execution_target_absence(self) -> TargetAbsence | None:
+        """Return the supplied absence reason, or None for a bound agent target."""
+        return self._agent_execution_target_absence
 
     def secret(self, name: str) -> str:
         """A resolved secret value, from the operation's boundary
