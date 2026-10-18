@@ -457,7 +457,7 @@ def test_wait_status_before_exec_pipe_eof_still_publishes_normal_exit(
     monkeypatch.setattr(os, "waitpid", lambda pid, option: (pid, 7 << 8))
     request = request_wire.ManagedJobRequest(_launch(), "command", ("/bin/true",), None, "discard", None, (), b"", b"")
     try:
-        guest._observe(RUN, "a" * 64, request, store, boundary, 12345, input_w, exec_r, [])
+        guest._observe(RUN, "a" * 64, request, store, boundary, 12345, input_w, exec_r, [], {input_w})
     finally:
         os.close(exec_r)
     assert boundary.killed
@@ -484,7 +484,7 @@ def test_boundary_waits_for_late_exec_status_and_wait(tmp_path: Path, monkeypatc
     request = request_wire.ManagedJobRequest(_launch(), "command", ("/bin/true",), None, "discard", None, (), b"", b"")
     worker = threading.Thread(
         target=guest._observe,
-        args=(RUN, "a" * 64, request, store, boundary, 12345, input_w, exec_r, []),
+        args=(RUN, "a" * 64, request, store, boundary, 12345, input_w, exec_r, [], {input_w}),
     )
     worker.start()
     try:
