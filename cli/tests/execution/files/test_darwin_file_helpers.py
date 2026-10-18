@@ -7,11 +7,9 @@ Darwin native calls are emulated; this does not certify macOS Python or filesyst
 from __future__ import annotations
 
 import ctypes
-import grp
 import importlib
 import io
 import os
-import pwd
 import sys
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
@@ -41,6 +39,8 @@ from tests.execution.files._fixed_bundle_support import fixture_file_bundle
 from tests.execution.files._runtime_support import runtime_selection
 
 _FAMILIES = ("read", "object", "inventory", "stage", "snapshot", "publication", "metadata")
+
+pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Darwin helper emulation requires Linux")
 
 
 def _install_bundles(monkeypatch: pytest.MonkeyPatch, scratch: Path) -> None:
@@ -98,6 +98,9 @@ def darwin_access(bound_access, monkeypatch):
 
 
 def _metadata(mode: int = 0o640) -> NewMetadata:
+    import grp
+    import pwd
+
     return NewMetadata(pwd.getpwuid(os.geteuid()).pw_name, grp.getgrgid(os.getegid()).gr_name, mode)
 
 
