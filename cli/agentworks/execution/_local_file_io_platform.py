@@ -196,10 +196,12 @@ class WindowsHandles(PosixHandles):
         for ancestor in reversed((path, *path.parents)):
             current = self._open(
                 ancestor,
-                directory=directory if ancestor == path else True,
+                directory=directory if ancestor == path else None,
                 deadline=deadline,
                 parent=current,
             )
+            if ancestor != path and self.observe(current).kind is not FileKind.DIRECTORY:
+                raise LocalFileUnsupportedError("Local ancestor is not an ordinary directory")
         assert current is not None
         return current
 
@@ -212,7 +214,8 @@ class WindowsHandles(PosixHandles):
         parent: _HeldHandle | None = None,
     ) -> _HeldHandle:
         check_deadline(deadline)
-        # Directory listing/read attributes, or GENERIC_READ. Never WRITE/READ_CONTROL.
+        # Directory admission requests listing. GENERIC_READ includes READ_CONTROL;
+        # metadata-only admission requests READ_ATTRIBUTES without data access.
         access = (0x80 | 1) if directory else (0x80 if directory is None else 0x80000000)
         flags = 0x02000000 | 0x00200000
         held = _HeldHandle(None, path, parent)
@@ -234,7 +237,7 @@ class WindowsHandles(PosixHandles):
         if observed.attributes & 0x400:
             raise LocalFileUnsupportedError("Local object is a reparse point")
         kind = FileKind.DIRECTORY if observed.attributes & 0x10 else FileKind.REGULAR
-        if kind is FileKind.REGULAR and (observed.links != 1 or observed.attributes & ~0x20A6):
+        if kind is FileKind.REGULAR and (observed.links != 1 or observed.attributes & ~0x20A7):
             raise LocalFileUnsupportedError("Local source is not an ordinary single-link file")
         return LocalIdentity(
             "windows",

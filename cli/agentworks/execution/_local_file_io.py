@@ -76,7 +76,12 @@ class LocalFileSource:
             raise ValueError("Local source cannot be reopened")
         self._started = True
         self._deadline = deadline
-        self._file = self._handles.open_path(self._path.absolute(), directory=False, deadline=deadline)
+        metadata_only = sys.platform != "win32"
+        self._file = self._handles.open_path(
+            self._path.absolute(),
+            directory=None if metadata_only else False,
+            deadline=deadline,
+        )
         original = self._handles.observe(self._file)
         if original.kind is not FileKind.REGULAR:
             raise LocalFileUnsupportedError("Local source is not an ordinary single-link file")
@@ -86,6 +91,12 @@ class LocalFileSource:
             raise FileExistsError("Local source changed since inventory")
         if self._handles.observe_named(self._file) != original:
             raise FileExistsError("Local source changed during admission")
+        if metadata_only:
+            parent = self._file.parent
+            assert parent is not None
+            self._file = self._handles.child(parent, self._file.path.name, directory=False, deadline=deadline)
+            if self._handles.observe(self._file) != original or self._handles.observe_named(self._file) != original:
+                raise FileExistsError("Local source changed while establishing read access")
         self._original = original
         check_deadline(deadline)
         return original.size

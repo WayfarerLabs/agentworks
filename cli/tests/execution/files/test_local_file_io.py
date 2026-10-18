@@ -110,6 +110,23 @@ def test_source_expected_inventory_identity_is_compared(tmp_path: Path) -> None:
     assert owner.settled
 
 
+def test_source_and_destination_probe_admit_read_only_file(tmp_path: Path) -> None:
+    path = tmp_path / "read-only"
+    path.write_bytes(b"readable")
+    path.chmod(0o400)
+    source, probe = local.LocalFileSource(path), local.LocalDestination(path)
+    deadline = Deadline.after(10)
+    try:
+        assert source.open(deadline) == 8
+        assert source.read(8) == b"readable" and source.read(1) == b""
+        observed = probe.observe(deadline)
+        assert observed is not None and observed.kind is FileKind.REGULAR
+    finally:
+        source.close(deadline)
+        probe.close(deadline)
+        path.chmod(0o600)
+
+
 def test_inventory_keeps_empty_entries_root_and_deterministic_order(tmp_path: Path) -> None:
     (tmp_path / "z").write_bytes(b"123")
     (tmp_path / "empty").mkdir()

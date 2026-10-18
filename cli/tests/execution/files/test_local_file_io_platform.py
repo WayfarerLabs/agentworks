@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import sys
 from dataclasses import replace
 from pathlib import Path, PureWindowsPath
@@ -88,7 +89,7 @@ def test_pure_host_validation_rejects_unnormalized_path_and_non_utf8_component(t
 def test_windows_read_only_primitives_and_retained_non_delete_shared_handles(tmp_path: Path) -> None:
     calls: list[tuple[object, ...]] = []
     identity = SimpleNamespace(volume=1, file_id=b"full identity")
-    observed = SimpleNamespace(identity=identity, attributes=0x20, links=1, size=3, created=(1, 2), modified=(3, 4))
+    observed = SimpleNamespace(identity=identity, attributes=0x21, links=1, size=3, created=(1, 2), modified=(3, 4))
 
     class API:
         def open(self, path: Path, access: int, sharing: int, disposition: int, flags: int) -> int:
@@ -122,23 +123,98 @@ def test_windows_read_only_primitives_and_retained_non_delete_shared_handles(tmp
     assert handles.settled
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX fault seams")
-@pytest.mark.parametrize("system", ["linux", "darwin"])
-def test_posix_owners_work_without_linux_only_open_flags(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, system: str):
-    monkeypatch.setattr(sys, "platform", system)
-    if system == "darwin":
-        monkeypatch.setattr(platform.PosixHandles, "_observation_flags", staticmethod(lambda: os.O_PATH))
+@pytest.mark.parametrize("directory, access", [(None, 0x80), (False, 0x80000000), (True, 0x81)])
+def test_windows_ancestry_needs_only_metadata_access(tmp_path: Path, directory: bool | None, access: int) -> None:
+    leaf = tmp_path / "selected"
+    calls: list[tuple[Path, int, int]] = []
+
+    class API:
+        def open(self, path: Path, access: int, sharing: int, disposition: int, flags: int) -> int:
+            calls.append((path, access, sharing))
+            return len(calls)
+
+        def info(self, token: int) -> SimpleNamespace:
+            path = calls[token - 1][0]
+            attributes = 0x10 if path != leaf or directory else 0x21
+            return SimpleNamespace(
+                identity=SimpleNamespace(volume=1, file_id=str(path).encode()),
+                attributes=attributes,
+                links=1,
+                size=1,
+                created=(1, 2),
+                modified=(3, 4),
+            )
+
+        def close(self, token: int) -> None:
+            pass
+
+    handles = platform.WindowsHandles()
+    handles._api = cast("_WindowsAPI", API())
+    try:
+        handles.open_path(leaf, directory=directory, deadline=Deadline.after(10))
+        assert calls[-1] == (leaf, access, 1 | 2)
+        assert all(rights == 0x80 and sharing == 1 | 2 for _, rights, sharing in calls[:-1])
+    finally:
+        handles.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX metadata admission seam")
+def test_source_refuses_special_metadata_before_data_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "source"
-    path.write_bytes(b"a")
-    owner = local.LocalFileSource(path)
+    path.write_bytes(b"fixture")
+    source = local.LocalFileSource(path)
+    metadata_flags = source._handles._observation_flags()
+    actual_open, actual_stat = os.open, os.fstat
+    leaf_fds: set[int] = set()
+    calls: list[int] = []
+
+    def open_recorded(name: object, flags: int, *args: object, **kwargs: object) -> int:
+        if name == "source":
+            calls.append(flags)
+            assert flags & metadata_flags
+        fd = actual_open(name, flags, *args, **kwargs)  # type: ignore[arg-type,call-overload]
+        if name == "source":
+            leaf_fds.add(fd)
+        return fd
+
+    def special_metadata(fd: int) -> os.stat_result:
+        observed = actual_stat(fd)
+        return os.stat_result((stat.S_IFCHR | 0o600, *observed[1:])) if fd in leaf_fds else observed
+
+    monkeypatch.setattr(os, "open", open_recorded)
+    monkeypatch.setattr(os, "fstat", special_metadata)
     deadline = Deadline.after(10)
     try:
-        assert owner.open(deadline) == 1
-        assert owner.read(1) == b"a"
-        assert owner.read(1) == b""
+        with pytest.raises(local.LocalFileUnsupportedError):
+            source.open(deadline)
+        assert len(calls) == 1
     finally:
-        owner.close(deadline)
-    assert owner.settled
+        source.close(deadline)
+    assert source.settled
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX metadata-to-data admission seam")
+def test_source_data_open_must_match_metadata_admission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "source"
+    path.write_bytes(b"original")
+    source = local.LocalFileSource(path)
+    metadata_flags = source._handles._observation_flags()
+    actual_open = os.open
+
+    def race(name: object, flags: int, *args: object, **kwargs: object) -> int:
+        if name == "source" and not flags & metadata_flags:
+            path.unlink()
+            path.write_bytes(b"different")
+        return actual_open(name, flags, *args, **kwargs)  # type: ignore[arg-type,call-overload]
+
+    monkeypatch.setattr(os, "open", race)
+    deadline = Deadline.after(10)
+    try:
+        with pytest.raises(FileExistsError):
+            source.open(deadline)
+    finally:
+        source.close(deadline)
+    assert source.settled
 
 
 @pytest.mark.parametrize("control", [OSError, KeyboardInterrupt, SystemExit])
