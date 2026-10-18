@@ -5114,6 +5114,15 @@ sources. A broader VM run was deliberately interrupted for fixture capacity and 
 original view is retained. Independent reviews and lead composition gates remain pending, so neither
 checkbox below nor the broader account-lifecycle gate is completed by these worker results.
 
+Private review then identified no-effect interruption/refusal custody leaks and a mismatch between
+the codec limit and the database's 8,192-byte lifecycle envelope. Owner correction `29a2843c2`
+reproduces those failures, recognizes only existing positive no-registration proof, and supports
+cleanup after fenced unused-borrow retirement without weakening uncertain registration retention.
+Admission now reserves the largest binding-added record before borrowing or root SETUP. The two
+derived persisted fields are removed. Its 67 focused cases, exact payload-boundary publication
+checks and strict typing pass locally; final lead composition and independent re-review remain
+required before completing the private unit below.
+
 - [ ] Bind managed-UID namespace preparation into the new-stack VM operation. Reuse one exact owner,
       selected route, verified root bootstrap and finite deadline. Register one durable row before
       root-gate SETUP, publish its exact binding before namespace effects, and retain the original

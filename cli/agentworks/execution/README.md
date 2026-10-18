@@ -1798,7 +1798,8 @@ helper holds that gate through direct filesystem work and owned temporary cleanu
 existing entries, refuses unsafe metadata, links, ACLs or changed rule content, and publishes only a
 completely prepared new rule without replacing an existing one. It never launches a mutating child
 or creates missing root gate anchors. Passive context construction and readiness do not run this
-helper; incomplete preparation retains the original workflow and ownership.
+helper. Uncertain effects or cleanup retain the original workflow and ownership. Positive
+no-dispatch proof permits cleanup, not another preparation attempt.
 
 Historical private operations without verified guest facts and platform-host operations retain their
 separate contracts; they do not fabricate a VM identity. This wiring does not migrate legacy
