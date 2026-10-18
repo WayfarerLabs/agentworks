@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import Database, OperationResourceKind, OperationScope
-from agentworks.db.operations import OperationRepository
+from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES, OperationRepository
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _file_gate_namespace as namespace
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
@@ -24,7 +24,6 @@ from agentworks.execution._file_gate_namespace import NamespacePreparation
 from agentworks.execution._file_gate_namespace_bundle import ROOT_PROGRAM
 from agentworks.execution._file_gate_namespace_exchange import NamespaceResult
 from agentworks.execution._file_gate_namespace_obligation import (
-    MAX_NAMESPACE_OBLIGATION_BYTES,
     decode_namespace_obligation,
     encode_namespace_obligation,
 )
@@ -43,12 +42,13 @@ from agentworks.execution._runtime_prerequisite import (
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from agentworks.execution.carrier import CarrierIO, Deadline, Dispatch, ExitStatus, FiniteInput, PreparedInvocation
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
-from agentworks.operations import OperationOwner
+from agentworks.operations import OperationBorrow, OperationOwner
 from agentworks.vms._native_operation import _Workflow
 from tests.execution.files.test_file_operations import SyntheticCarrier, _report
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from typing import Any
 
     from agentworks.execution._file_gate_namespace_obligation import NamespaceObligation
     from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
@@ -111,7 +111,7 @@ def _install(monkeypatch: pytest.MonkeyPatch, owner: OperationOwner, status: Nam
         bound = decode_namespace_obligation(rows[0].payload)
         assert bound == record and bound.binding is not None and initial is not None
         assert bound.nonce == initial.nonce and bound.uid == initial.uid and bound.gid == initial.gid
-        assert record.bootstrap == _BOOTSTRAP and record.runtime_selection == _RUNTIME
+        assert record.bootstrap == initial.bootstrap and record.runtime_selection == initial.runtime_selection
         events.append("bound-before-effects")
         report = _report(operation, deadline)
         return NamespaceResult(report.dispatch, report.completion, status)
@@ -310,6 +310,135 @@ def test_positive_result_survives_lost_durable_close_reply_without_replay(owned,
     assert owned[0].operations.inspect(owner.ownership.scope) is None
 
 
+@pytest.mark.parametrize("cleanup_control", [None, StateError, KeyboardInterrupt, SystemExit])
+def test_absent_registration_refusal_retires_exact_unused_borrow_and_retries(owned, monkeypatch, cleanup_control):
+    _, owner = owned
+    events = _install(monkeypatch, owner, NamespaceStatus.PREPARED)
+    refusal = ValidationError("registration refused")
+    cleanup = (cleanup_control or KeyboardInterrupt)("unused close reply")
+    original_close = OperationBorrow.close
+    close_calls = 0
+
+    def register(*args, **kwargs):
+        raise refusal
+
+    def close(borrow):
+        nonlocal close_calls
+        close_calls += 1
+        if cleanup_control and close_calls == 1:
+            raise cleanup
+        original_close(borrow)
+
+    monkeypatch.setattr(OperationRepository, "register_lifecycle_obligation", register)
+    monkeypatch.setattr(OperationBorrow, "close", close)
+    preparation = _preparation(owner)
+    preserves_cleanup = cleanup_control in (KeyboardInterrupt, SystemExit)
+    with pytest.raises(cleanup_control if preserves_cleanup else ValidationError) as caught:
+        preparation.prepare()
+    assert caught.value is (cleanup if preserves_cleanup else refusal)
+    assert not events and not owner.list_pending_lifecycle_obligations()
+    workflow = _Workflow(owner, Deadline.after(10), namespace=preparation)
+    workflow.close()
+    assert preparation.settled and not preparation.prepared
+    assert preparation._borrow is not None and preparation._borrow.closed
+    assert owned[0].operations.inspect(owner.ownership.scope) is None
+
+
+@pytest.mark.parametrize("case", ["committed-error", "unreadable", "registration-control"])
+def test_unproved_registration_stays_retained_after_cleanup_retry(owned, monkeypatch, case):
+    _, owner = owned
+    events = _install(monkeypatch, owner, NamespaceStatus.PREPARED)
+    original = OperationRepository.register_lifecycle_obligation
+    control = KeyboardInterrupt() if case == "registration-control" else ValidationError("registration reply")
+
+    def register(repository, *args, **kwargs):
+        if case == "committed-error":
+            original(repository, *args, **kwargs)
+        raise control
+
+    def unreadable(*args, **kwargs):
+        raise StateError("receipt read unavailable")
+
+    monkeypatch.setattr(OperationRepository, "register_lifecycle_obligation", register)
+    if case == "unreadable":
+        monkeypatch.setattr(OperationRepository, "inspect_lifecycle_obligation", unreadable)
+    preparation = _preparation(owner)
+    with pytest.raises(type(control)) as caught:
+        preparation.prepare()
+    assert caught.value is control
+    workflow = _Workflow(owner, Deadline.after(10), namespace=preparation)
+    for _ in range(2):
+        with pytest.raises(StateError):
+            workflow.close(cleanup_deadline=Deadline.after(10))
+    assert not preparation.settled and not events
+    assert preparation._borrow is not None and not preparation._borrow.closed
+    assert owned[0].operations.inspect(owner.ownership.scope) is not None
+
+
+def _at_payload_boundary(owner: OperationOwner) -> dict[str, Any]:
+    record = _preparation(owner)._record
+    binding = FileEffectGateBinding(record.setup.path, b"i" * 16, b"g" * 16, _GUEST, 0, "box", 2**64 - 1, 2**64 - 1)
+    value: dict[str, Any] = json.loads(encode_namespace_obligation(replace(record, binding=binding)))
+
+    def encoded() -> bytes:
+        return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+
+    count = 1
+    while True:
+        value["bootstrap"]["root_entry"]["groups"] = list(range(count + 1))
+        if len(encoded()) > MAX_LIFECYCLE_PAYLOAD_BYTES:
+            break
+        count += 1
+    value["bootstrap"]["root_entry"]["groups"] = list(range(count))
+    gap = MAX_LIFECYCLE_PAYLOAD_BYTES - len(encoded())
+    if gap:
+        last = value["bootstrap"]["root_entry"]["groups"][-1]
+        value["bootstrap"]["root_entry"]["groups"][-1] = 10 ** (len(str(last)) + gap - 1)
+    assert len(encoded()) == MAX_LIFECYCLE_PAYLOAD_BYTES
+    return value
+
+
+def test_namespace_admission_reserves_largest_binding_before_borrow(owned, monkeypatch):
+    _, owner = owned
+    value = _at_payload_boundary(owner)
+    value["bootstrap"]["root_entry"]["groups"][-1] *= 10
+    bootstrap = _NumericGuestBootstrap(
+        replace(_ROOT, expected=replace(_ROOT.expected, groups=tuple(value["bootstrap"]["root_entry"]["groups"]))),
+        _GUEST,
+    )
+    payload = encode_namespace_obligation(replace(_preparation(owner)._record, bootstrap=bootstrap))
+    assert len(payload) < MAX_LIFECYCLE_PAYLOAD_BYTES
+    record = decode_namespace_obligation(payload)
+    carrier = SyntheticCarrier()
+    monkeypatch.setattr(owner, "borrow", lambda: pytest.fail("oversized binding reached borrow"))
+    with pytest.raises(ValueError):
+        NamespacePreparation(owner, carrier, _TARGET, _AGENT, record.bootstrap, _RUNTIME, Deadline.after(10))
+    assert carrier.calls == 0
+
+
+def test_namespace_largest_supported_binding_fits_actual_publication(owned, monkeypatch):
+    _, owner = owned
+    value = _at_payload_boundary(owner)
+    bound_payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    bound = decode_namespace_obligation(bound_payload)
+    events = _install(monkeypatch, owner, NamespaceStatus.PREPARED)
+    original = vars(namespace)["exchange_file_effect_gate"]
+
+    def setup(*args, **kwargs):
+        result = original(*args, **kwargs)
+        return replace(result, observation=replace(result.observation, binding=bound.binding))
+
+    monkeypatch.setattr(namespace, "exchange_file_effect_gate", setup)
+    preparation = NamespacePreparation(
+        owner, SyntheticCarrier(), _TARGET, _AGENT, bound.bootstrap, _RUNTIME, Deadline.after(10)
+    )
+    preparation.prepare()
+    assert preparation.settled and preparation.prepared and len(events) == 2
+    value["bootstrap"]["root_entry"]["groups"][-1] *= 10
+    with pytest.raises(ValueError):
+        decode_namespace_obligation(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
+
+
 def test_durable_codec_is_closed_bounded_and_retains_exact_binding(owned, monkeypatch):
     _, owner = owned
     _install(monkeypatch, owner, NamespaceStatus.UNCERTAIN)
@@ -318,13 +447,13 @@ def test_durable_codec_is_closed_bounded_and_retains_exact_binding(owned, monkey
         preparation.prepare()
     payload = owner.list_pending_lifecycle_obligations()[0].payload
     record = decode_namespace_obligation(payload)
-    assert encode_namespace_obligation(record) == payload and len(payload) < MAX_NAMESPACE_OBLIGATION_BYTES
+    assert encode_namespace_obligation(record) == payload and len(payload) < MAX_LIFECYCLE_PAYLOAD_BYTES
     value = json.loads(payload)
     value["account"] = "unexpected"
     with pytest.raises(ValueError):
         decode_namespace_obligation(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
     with pytest.raises(ValueError):
-        decode_namespace_obligation(payload + b" " * MAX_NAMESPACE_OBLIGATION_BYTES)
+        decode_namespace_obligation(payload + b" " * MAX_LIFECYCLE_PAYLOAD_BYTES)
     assert record.binding is not None
     with pytest.raises(ValueError):
         encode_namespace_obligation(replace(record, binding=replace(record.binding, scope_name="other")))

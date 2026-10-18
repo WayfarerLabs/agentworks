@@ -14,6 +14,7 @@ from agentworks.execution import _file_gate_namespace as namespace
 from agentworks.execution._file_gate_namespace import NamespacePreparation
 from agentworks.execution._file_gate_namespace_protocol import NamespaceStatus
 from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._wsl2_lifecycle import GuestAnchorPresence
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.target import ExecutionRoute
 from agentworks.vms import _native_operation
@@ -120,3 +121,56 @@ def test_failed_namespace_admits_no_views_and_retains_exact_workflow_as_needed(d
     assert row in workflow.owner.list_pending_lifecycle_obligations()
     assert database.operations.inspect(_scope()) is not None
     assert native.events.count("close") == 0
+
+
+@pytest.mark.parametrize("phase", ["before-prepare", "borrow-reply"])
+@pytest.mark.parametrize("retry", [False, True])
+def test_no_effect_namespace_control_retires_only_fenced_unused_work(database, tmp_path, monkeypatch, phase, retry):
+    database.insert_agent("worker", "box", "recorded-worker")
+    platform = WSL2Platform("wsl2", {})
+    route, _, observer = _install_route(database, platform, monkeypatch)
+    route.accounts.identities["recorded-worker"] = IdentityExpectation(2401, 2402, (2402,))
+    original = NamespacePreparation.prepare
+    control = KeyboardInterrupt("namespace preparation control")
+    orphans = []
+    selected = []
+
+    def prepare(preparation):
+        selected.append(preparation)
+        if phase == "before-prepare":
+            raise control
+        original_borrow = preparation._owner.borrow
+
+        def borrow():
+            orphans.append(original_borrow())
+            raise control
+
+        monkeypatch.setattr(preparation._owner, "borrow", borrow)
+        original(preparation)
+
+    monkeypatch.setattr(NamespacePreparation, "prepare", prepare)
+    if retry:
+        observer.presence = GuestAnchorPresence.UNKNOWN
+    with (
+        pytest.raises(KeyboardInterrupt) as caught,
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=_root(tmp_path),
+            agent_name="worker",
+        ),
+    ):
+        pytest.fail("interrupted namespace admitted views")
+    assert caught.value is control and len(selected) == 1
+    assert all(borrow.closed for borrow in orphans)
+    if retry:
+        assert isinstance(control.__cause__, VMOperationControlFact)
+        assert database.operations.inspect(_scope()) is not None
+        observer.presence = GuestAnchorPresence.ABSENT_CONFIRMED
+        control.__cause__.retry_cleanup(Deadline.after(10))
+    assert selected[0].settled and not selected[0].prepared
+    assert database.operations.inspect(_scope()) is None

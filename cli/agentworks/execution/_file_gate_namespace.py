@@ -16,6 +16,7 @@ from agentworks.execution._file_gate_namespace_exchange import NamespaceResult, 
 from agentworks.execution._file_gate_namespace_obligation import (
     NAMESPACE_OBLIGATION_VERSION,
     NamespaceObligation,
+    encode_namespace_admission,
     encode_namespace_obligation,
 )
 from agentworks.execution._file_gate_namespace_protocol import NamespaceStatus
@@ -23,6 +24,7 @@ from agentworks.execution._file_gate_setup import FileEffectGateSetup
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution.carrier import Deadline, Dispatch, ExitStatus
+from agentworks.operations import _is_pre_registration_refusal
 
 if TYPE_CHECKING:
     from agentworks.execution._helper_launcher import IdentityPlan
@@ -59,7 +61,7 @@ class NamespacePreparation:
             runtime_selection,
             FileEffectGateSetup.for_target(target, 0, bootstrap.guest),
         )
-        self._payload = encode_namespace_obligation(self._record)
+        self._payload = encode_namespace_admission(self._record)
         self._borrow: OperationBorrow | None = None
         self._operation: BorrowedFixedHelperCarrier | None = None
         self._obligation: LifecycleObligation | None = None
@@ -77,12 +79,25 @@ class NamespacePreparation:
         self._started = True
         self._borrow = self._owner.borrow()
         self._operation = BorrowedFixedHelperCarrier(self._carrier, self._borrow)
-        self._obligation = self._borrow.install_dispatch_obligation(
-            self._obligation_id,
-            "file-gate-namespace",
-            payload_version=NAMESPACE_OBLIGATION_VERSION,
-            payload=self._payload,
-        )
+        try:
+            self._obligation = self._borrow.install_dispatch_obligation(
+                self._obligation_id,
+                "file-gate-namespace",
+                payload_version=NAMESPACE_OBLIGATION_VERSION,
+                payload=self._payload,
+            )
+        except BaseException as control:
+            if _is_pre_registration_refusal(control):
+                # Keep the positive no-registration proof retryable even when
+                # closing this exact borrow is itself interrupted.
+                self._unused = True
+                try:
+                    self.settle_local(self._deadline)
+                except BaseException as cleanup:
+                    if isinstance(control, Exception) and not isinstance(cleanup, Exception):
+                        raise
+                    raise control from control.__cause__
+            raise
         record = self._record
         result = exchange_file_effect_gate(
             self._operation,
@@ -129,6 +144,17 @@ class NamespacePreparation:
             return
         operation = self._operation
         borrow = self._borrow
+        # Aggregate teardown first fences and retires pristine unused borrows.
+        # No returned borrow cannot have entered this adapter's registration.
+        # Closed alone is insufficient: a retained effect can also hand off.
+        if self._obligation is None and (
+            borrow is None
+            or borrow.closed
+            and not borrow.has_installed_dispatch_obligation
+            and not borrow.dispatch_obligation_may_be_armed
+        ):
+            self.settled = True
+            return
         if operation is None or borrow is None:
             return
         result = self._result

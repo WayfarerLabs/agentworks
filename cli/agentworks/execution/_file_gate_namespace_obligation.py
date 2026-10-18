@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
+from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES
 from agentworks.execution._file_effect_gate import (
     FileEffectGateBinding,
     decode_file_effect_gate,
@@ -27,7 +28,6 @@ from agentworks.execution._runtime_prerequisite import RuntimeSelection, Runtime
 from agentworks.execution._vm_guest_identity_protocol import vm_guest_boot_id
 
 NAMESPACE_OBLIGATION_VERSION = 1
-MAX_NAMESPACE_OBLIGATION_BYTES = 16_384
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -58,17 +58,32 @@ def encode_namespace_obligation(record: NamespaceObligation) -> bytes:
             "runtime": _encode_runtime_selection(record.runtime_selection),
             "setup": {"guest": _encode_guest(record.setup.guest), "path": record.setup.path},
             "binding": None if record.binding is None else encode_file_effect_gate(record.binding),
-            "publication": "possible" if record.binding is not None else "not-admitted",
-            "cleanup": "owned-temporary-possible" if record.binding is not None else "not-admitted",
         }
     )
     decode_namespace_obligation(data)
     return data
 
 
+def encode_namespace_admission(record: NamespaceObligation) -> bytes:
+    """Reserve the largest exact root binding before borrowing or root SETUP."""
+    encoded = encode_namespace_obligation(record)
+    binding = FileEffectGateBinding(
+        record.setup.path,
+        b"\0" * 16,
+        b"\1" * 16,
+        record.setup.guest,
+        0,
+        record.target.name,
+        (1 << 64) - 1,
+        (1 << 64) - 1,
+    )
+    encode_namespace_obligation(replace(record, binding=binding))
+    return encoded
+
+
 def decode_namespace_obligation(data: bytes) -> NamespaceObligation:
     """Reject corrupt, old, oversized or mismatched persisted custody."""
-    value = _decode_object(data, maximum_bytes=MAX_NAMESPACE_OBLIGATION_BYTES)
+    value = _decode_object(data, maximum_bytes=MAX_LIFECYCLE_PAYLOAD_BYTES)
     if set(value) != {
         "version",
         "nonce",
@@ -79,8 +94,6 @@ def decode_namespace_obligation(data: bytes) -> NamespaceObligation:
         "runtime",
         "setup",
         "binding",
-        "publication",
-        "cleanup",
     }:
         raise ValueError("invalid namespace obligation")
     bootstrap = _decode_bootstrap(value["bootstrap"])
@@ -101,8 +114,6 @@ def decode_namespace_obligation(data: bytes) -> NamespaceObligation:
         or runtime.target_os is not RuntimeTargetOS.LINUX
         or runtime.explicit_path not in (None, "/usr/bin/python3")
         or value["setup"] != {"guest": _encode_guest(setup.guest), "path": setup.path}
-        or value["publication"] != ("possible" if binding is not None else "not-admitted")
-        or value["cleanup"] != ("owned-temporary-possible" if binding is not None else "not-admitted")
     ):
         raise ValueError("invalid namespace obligation")
     if binding is not None:
