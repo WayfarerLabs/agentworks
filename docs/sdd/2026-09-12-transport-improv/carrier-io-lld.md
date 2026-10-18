@@ -114,12 +114,22 @@ bounded integer, without imposing a capture-sized total-stream ceiling.
 The evidence decoder consumes at most one complete matching record per write. A host live collector
 drains its one bounded decoded data chunk into the selected application sink before accepting
 another record. Decoder callbacks only update trusted state; they do not call an external sink.
-Stalled/short writes propagate backpressure through the existing carrier pump. Stream count/digest,
-record order, completion and carrier/runtime facts are still validated. Delivery does not place
-application bytes in results or retained helper facts. Release borrowed source/sink references and
-pending presentation bytes when observation ends; bookkeeping/cleanup retries retain facts, not
-endpoints or a replayable payload. Invalid endpoint results and exceptions remain safe input/output
-failures, preserving independently known facts and original control flow.
+Positive short writes drain that chunk until completion or an actual stall. Its 4,096-byte bound
+bounds that work. If the sink stalls, the collector withholds the final encoded frame byte's
+acknowledgment so the existing carrier pump keeps polling even when the guest is waiting for input.
+Stalled writes propagate backpressure through that same pump. Stream count/digest, record order,
+completion and carrier/runtime facts are still validated. Delivery does not place application bytes
+in results or retained helper facts. Release borrowed source/sink references and pending
+presentation bytes when observation ends; bookkeeping/cleanup retries retain facts, not endpoints or
+a replayable payload. Invalid endpoint results and exceptions remain safe input/output failures,
+preserving independently known facts and original control flow.
+
+After the application pump stops, an unfinished guest frame gets at most 0.5 seconds of nonblocking
+flush attempts. Failure aborts later evidence rather than appending controls to a partial record or
+counting an uncompleted body. Control writes outside the pump retain their existing behavior. The
+process pump's existing post-exit collection allowance pauses for sink backpressure; it does not
+promise indefinite observation of descendants that retain output descriptors. None of these bounds
+establishes guest cancellation or stronger local cleanup evidence.
 
 ### Caller choices and scope of the first increment
 
