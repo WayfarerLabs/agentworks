@@ -2265,6 +2265,21 @@ grammar. That entry refuses file-effect gates and caller-selected parents, and o
 validated root-owned `01777` Linux `/tmp` as the staged loader before any scratch effect. Ordinary
 file-path staging retains its separate confined-parent behavior.
 
+`PreparedHelperStage` provides private serial ownership for opaque prepared input. Its parent must
+retain it before BEGIN. A separate `prepared-helper-stage` lifecycle row records the token, exact VM
+and guest/root/runtime binding before creation; it contains no payload, active reference or
+activation digest. Ordinary helper borrows keep their own dispatch custody. Acknowledged bounded
+chunks advance the offset only after helper settlement, and an interrupted append cannot replay.
+Preparing an activation control does not itself establish activation closure or permit cleanup.
+
+Cleanup accepts an explicit fresh finite budget without reopening preparation. It still requires
+actual helper and activation closure; token reconciliation supplies cleanup debt only, not an active
+load reference or absence proof. A failed or interrupted cleanup retires active reuse, and completed
+removal marks the stage cleaned before resolving its separate row. Unknown delivery, missing
+receipts and lost bookkeeping replies retain uncertainty. Parent launch retention, truthful
+activation reporting, same-process drain/bookkeeping continuation and process-loss recovery dispatch
+are not wired yet. This class does not activate jobs or provide a public FileAccess operation.
+
 `_scratch_root.py` opens the fixed Linux `/tmp` directory without following symlinks and requires
 UID 0 and mode 01777. It creates and repairs nothing, ignores environment-selected temporary paths,
 and returns a caller-owned descriptor or a closed failure kind. Download snapshots can use this

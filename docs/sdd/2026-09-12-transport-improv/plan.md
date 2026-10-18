@@ -5416,6 +5416,21 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
       complete-envelope length across clock digit changes. This codec prerequisite does not complete
       host staging, actual late sampling, recovery or native acceptance.
 
+- [x] Implement and privately review the prepared-input stage ownership prerequisite. Select the
+      fixed root/full-guest entry without changing the file-stage grammar; record a token-only exact
+      cleanup binding before BEGIN and keep scratch debt separate from ordinary helper custody.
+      Prove bounded acknowledged offsets, interrupted-append refusal, cleanup-only historical
+      reconciliation, activation-closure gating and fresh finite cleanup-only continuation. This
+      private primitive does not connect production launch, actual late sampling or recovery.
+- [ ] Complete prepared-input ownership continuations with the parent integration. Retain the actual
+      stage before any effect and the actual delivery handles needed for same-process drain, never
+      only a claim of quiescence. Reconcile lost bookkeeping replies without replaying helper
+      effects. Route cleanup with its actual fresh deadline, not a callback closing over expired
+      preparation time. Add exact process-loss recovery for the token-only row; historical or
+      missing receipts never grant activation or prove absence, and unresolved receipt-acquisition
+      gaps remain explicit debt. Prove these together with the complete staging/late-lease gates
+      above, not as a substitute for them.
+
 The private pipe checkpoint at `6b8fe8128` passes 1,318 scoped tests with one skip and strict typing
 across 1,442 sources. Changed-file Python and Markdown quality checks pass. Project, complexity and
 generic correctness source reviews are clear after removing an unnecessary writer alias and reusing
@@ -5473,6 +5488,16 @@ tests and retains exactly the two known Proxmox envelope failures. Strict typing
 sources. These are local codec and regression results, not a green public handoff. The next step
 connects operation-owned staging before actual initial lease sampling; neither the codec nor its
 constant-size tail establishes that ordering on its own.
+
+The prepared-input staging prerequisite at `d6a6e869f` clears project, complexity and generic
+correctness source review. The lead's combined file, staging, codec and managed composition
+selection passes 2,501 tests with 25 skips; strict typing passes across 1,472 sources and
+changed-file quality gates pass. The separate fixed-root selection passes 238 cases, including
+packed Python 3.11 refusals and a complete Proxmox request carrying the maximum 12 KiB wire chunk.
+Those are local measurements, not native or worst-case connection proof. The stage owner is not yet
+retained by production launch paths. Actual activation/late sampling, same-process and process-loss
+recovery, and the two known managed inline-envelope failures remain open. The unused registration
+flag found by complexity review is removed; no recovery engine or new host lock is introduced.
 
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
 one all-callers cutover. PR #830 publishes this design only. The following implementation PR adds

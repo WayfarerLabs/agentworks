@@ -92,7 +92,6 @@ class PreparedHelperStage:
         self.reference: ScratchReference | None = None
         self.cleanup_debt: ScratchCleanupDebt | None = None
         self.offset = 0
-        self.registration_started = False
         self.registration_uncertain = False
         self.helper_uncertain = False
         self.failed = False
@@ -164,7 +163,6 @@ class PreparedHelperStage:
         if self._begun:
             raise StateError("Prepared helper stage BEGIN is one-shot")
         self._begun = True
-        self.registration_started = True
         self.registration_uncertain = True
         self._obligation = self._owner.register_lifecycle_obligation(
             PREPARED_HELPER_OBLIGATION_KIND,

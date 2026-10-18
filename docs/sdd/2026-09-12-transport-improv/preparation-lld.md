@@ -688,6 +688,19 @@ append/activation/cleanup. Tokens precede creation, and owner/debt lifetime rema
 lease validity and helper observation. Neither a timeout nor the loader's remaining allowance proves
 remote closure.
 
+The private stage owner uses a separate token-only cleanup row, registered and marked possible
+before BEGIN. It does not overload the immutable managed-start/run obligation or retain payloads,
+active references or activation digests in that row. Settling an ordinary helper borrow does not
+resolve scratch debt. Chunk progress and active loading remain same-process facts; process-loss
+reconciliation may recover only historical cleanup authority. Missing or invalid acquisition
+receipts remain uncertainty, not absence or permission to recreate a stage.
+
+Production composition must retain the stage before effects and preserve actual helper delivery
+custody for drain. A cleanup-only continuation may use a fresh finite deadline after preparation
+expires, but routing must receive that fresh budget too. Interrupted bookkeeping needs exact local
+reconciliation without another helper effect. These parent and recovery continuations remain open;
+the stage primitive alone does not complete late-lease ordering or native activation.
+
 ### Captured output retrieval
 
 Captured stdout and stderr spool separately. Each spool keeps at most `max_bytes + 1`; helper
