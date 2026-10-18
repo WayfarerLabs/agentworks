@@ -233,7 +233,6 @@ class LimaLocalSelection:
     home: str
     executable: str
     directory: LimaDirectoryCustody | None = field(default=None, init=False)
-    _version: tuple[int, int] | None = field(default=None, init=False)
 
     @classmethod
     def resolve(cls, namespace: str, instance: str, vm_name: str, deadline: Deadline) -> LimaLocalSelection:
@@ -253,9 +252,8 @@ class LimaLocalSelection:
         configuration = read_configuration(self.home, self.instance)
         drivers = configuration.classify()
         if drivers is None:
-            if self._version is None:
-                self._version = decode_version(self._query([self.executable, "--version"], deadline, custody))
-            drivers = configuration.classify(self._version, executable=self.executable)
+            version = decode_version(self._query([self.executable, "--version"], deadline, custody))
+            drivers = configuration.classify(version, executable=self.executable)
         assert drivers is not None and self.directory is not None
         registration = None
         if drivers == {"wsl2"}:

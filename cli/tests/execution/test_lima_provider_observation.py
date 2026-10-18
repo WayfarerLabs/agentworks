@@ -68,6 +68,7 @@ def wsl(local, monkeypatch):
 
     monkeypatch.setattr(_lima_selection, "observe_registration", registration)
     monkeypatch.setattr(_lima_selection, "run_process", run)
+    state.run = run
     return fake, access, state
 
 
@@ -98,6 +99,36 @@ def test_wrong_lima_home_registration_refuses_before_power_or_lima(wsl) -> None:
     with pytest.raises(StateError):
         access.observe_power(Deadline.after(5))
     assert [item[0] for item in state.calls] == ["registry"] and fake.calls == []
+
+
+@pytest.mark.parametrize("wrong_base_path", [False, True])
+def test_implicit_driver_rechecks_version_before_each_provider_observation(wsl, monkeypatch, wrong_base_path) -> None:
+    fake, access, state = wsl
+    fake.vm_type = "qemu"
+    (fake.directory / "lima.yaml").write_text("{}\n")
+    monkeypatch.setattr(_lima_configuration, "sys", SimpleNamespace(platform="win32"))
+    versions = iter([b"limactl version 2.2.1\n", b"limactl version 2.1.0\n"])
+
+    def run(argv, *, io, deadline, custody, env):
+        if argv[0] != "wsl":
+            state.calls.append((argv[1], deadline))
+        if argv[1] == "--version":
+            assert argv == ["/literal/limactl", "--version"]
+            io.output.stdout.try_write(memoryview(next(versions)))
+            return process_result()
+        return state.run(argv, io=io, deadline=deadline, custody=custody, env=env)
+
+    monkeypatch.setattr(_lima_selection, "run_process", run)
+    assert access.observe_power(Deadline.after(5)) is VMStatus.RUNNING
+    assert [item[0] for item in state.calls] == ["--version", "list"]
+    state.calls.clear()
+    if wrong_base_path:
+        state.registration = replace(state.registration, base_path="C:\\another-home\\selected")
+    with pytest.raises(StateError):
+        access.observe_power(Deadline.after(5))
+    assert [item[0] for item in state.calls] == ["--version", "registry", *([] if wrong_base_path else ["power"])]
+    assert [argv[1] for argv, _, _ in fake.calls] == ["list"]
+    assert access.activation is None and access.binding is None
 
 
 def test_unrelated_registration_appearing_before_start_is_never_adopted(wsl) -> None:
