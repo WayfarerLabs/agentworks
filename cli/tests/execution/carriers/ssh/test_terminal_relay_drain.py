@@ -387,7 +387,9 @@ def test_frozen_prefix_respects_original_deadline_and_control(boundary: str, mon
     primary = KeyboardInterrupt("owned-post-cutoff-control")
     native_freeze, native_launch = _Stream.freeze, subprocess.Popen
     children: list[subprocess.Popen[bytes]] = []
-    reads: list[int] = []
+    reads: list[tuple[int, int]] = []
+    frozen_pending: dict[int, int] = {}
+    stdout_fd: int | None = None
     failed_fd: int | None = None
     delivered = bytearray()
     native_read = os.read
@@ -410,20 +412,25 @@ def test_frozen_prefix_respects_original_deadline_and_control(boundary: str, mon
         nonlocal failed_fd
         if stream.eof:
             return
+        fd = pipe.fileno()
+        frozen_pending[fd] = 0 if stream.pending is None else len(stream.pending)
         frozen.set()
-        if boundary == "query":
-            failed_fd = pipe.fileno()
+        if boundary == "query" and fd == stdout_fd:
+            failed_fd = fd
             raise OSError("private-native-queue-canary")
         native_freeze(stream, pipe)
 
     def launch(*args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
+        nonlocal stdout_fd
         child = cast("subprocess.Popen[bytes]", native_launch(*args, **kwargs))
+        assert child.stdout is not None
+        stdout_fd = child.stdout.fileno()
         children.append(child)
         return child
 
     def read(fd: int, limit: int) -> bytes:
-        if frozen.is_set() and (failed_fd is None or fd == failed_fd):
-            reads.append(limit)
+        if frozen.is_set():
+            reads.append((fd, limit))
         return native_read(fd, limit)
 
     monkeypatch.setattr(_Stream, "freeze", freeze)
@@ -444,8 +451,11 @@ def test_frozen_prefix_respects_original_deadline_and_control(boundary: str, mon
             assert not result.stdout.complete
             assert "private-native-queue-canary" not in repr(result)
         assert frozen.is_set()
-        assert reads == []  # Pending bytes must precede any EOF or quota read.
+        assert stdout_fd is not None and frozen_pending[stdout_fd] == 4096
+        # Pending stdout precedes its own reads; stderr may independently probe EOF.
+        assert [limit for fd, limit in reads if fd == stdout_fd] == []
         if boundary == "query":
+            assert failed_fd == stdout_fd
             assert delivered == b"X" * 4096
         assert time.monotonic() - started < 0.8
     finally:
