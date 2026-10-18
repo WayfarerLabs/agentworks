@@ -39,11 +39,16 @@ supported NIC, selected network/subnet and tag, and the named `ONE_TO_ONE_NAT` a
 absent NAT address on a stopped instance is not an endpoint; any supplied address must be canonical
 IPv4. Running preparation requires an actual address.
 
-Return a frozen observation carrying locator, raw power, mapped power, optional endpoint and
-attached service-account emails. Network/tag checks are against the frozen selected identity, not
-against a cached successful observation. Missing or malformed facts refuse admission. A borrowed
-auth accessor returns only the same retained helper. `close_read_client` bars later reads and
-retires reader service originals without closing shared authentication; final reader/auth close
+A missing recorded subnet means default-network selection, not a promise that the live NIC has no
+subnet. Accept a valid observed subnet in the selected project/network when no explicit subnet was
+recorded; otherwise require the exact recorded subnet. This preserves default auto-mode network
+creation while still refusing malformed or foreign observed paths.
+
+Return a frozen observation carrying locator, raw power, mapped power, optional endpoint, all
+attached tags and service-account emails. Network/tag checks are against the frozen selected
+identity, not against a cached successful observation. Missing or malformed facts refuse admission.
+A borrowed auth accessor returns only the same retained helper. `close_read_client` bars later reads
+and retires reader service originals without closing shared authentication; final reader/auth close
 remains terminal. Full access keeps authentication until all dependent custody settles.
 
 ## Preparation and route checks
@@ -81,7 +86,7 @@ an invented unknown policy.
 
 Inventory classic firewall rules with bounded complete pagination, selected behavioral fields only,
 and the same finite deadline. Refuse applicable existing priority-zero allows and operator-SSH
-denies, including account-targeted rules matching the freshly observed VM service accounts. Refuse
+denies matching any fresh VM tag or service account, not just its recorded Agentworks tag. Refuse
 incomplete inventory, malformed relevant shapes, loops or limit exhaustion. Do not repair, converge,
 adopt or delete existing rules. The selected route is an enabled priority-zero INGRESS TCP/22 allow
 for exactly the selected tag/network and prefixes, with an operation nonce description. Require its
@@ -120,6 +125,14 @@ terminal creation, fresh exact absence can settle; a surviving rule may be delet
 acknowledged numeric ID, unchanged full contents and a fresh fenced intent. Name-addressed DELETE
 has no numeric-incarnation precondition: the fresh GET detects known mismatch, not an atomic
 provider reservation.
+
+The originating controller separately records entry to the actual service dispatch. A durable
+possible-effect mark alone does not prove dispatch occurred. If terminal cleanup bars future entry
+and the same controller positively knows no service dispatch was entered, exact fenced bookkeeping
+and positive local retirement can settle that unused attempt. A lost mark reply must first reconcile
+against the exact row. Recovery cannot reconstruct this in-memory no-dispatch fact from a payload,
+missing acknowledgment, absence or elapsed time. Once dispatch was entered, retain the ordinary
+unknown-outcome rules even if the service method subsequently raises.
 
 Persist a fresh delete UUID/intent before one DELETE. Retain its exact Operation receipt before
 cleanup. Require terminal delete evidence and fresh absence before resolving. A later explicit
