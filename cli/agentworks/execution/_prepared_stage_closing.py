@@ -27,7 +27,6 @@ class _ClosingStageCall:
     carrier: Carrier
     cleanup: bool
     custody: LocalDeliveryCustody = field(default_factory=LocalDeliveryCustody)
-    expectation: HelperClosureExpectation | None = None
     delivery: HelperClosureDelivery | None = None
     entered: bool = False
     candidate: FileStageCandidateResult | None = None
@@ -112,7 +111,6 @@ class PreparedStageCleanup:
             call.base_carrier is not stage._carrier
             or (call.delivery is not None and call.carrier is not call.delivery)
             or (call.delivery is None and call.carrier is not call.base_carrier)
-            or (call.expectation is not None and call.expectation.guest != self._identity.bootstrap.guest)
         ):
             raise StateError("Prepared stage closing helper binding changed")
 
@@ -123,7 +121,6 @@ class PreparedStageCleanup:
     def _prepare_delivery(self, expectation: HelperClosureExpectation) -> _ClosingCarrier:
         call = self._active
         assert call is not None
-        call.expectation = expectation
         if self._stage._new_helper_delivery is not None:
             call.delivery = self._stage._new_helper_delivery(expectation)
             call.carrier = call.delivery

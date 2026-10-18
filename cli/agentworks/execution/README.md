@@ -2246,7 +2246,7 @@ contains the prepared assets without an operation lease; the tail contains the e
 lease JSON or literal `null`, padded with ASCII spaces. Complete decoding reconstructs the control
 asset and applies the full request validator, including lifetime and launch binding. Body
 preparation reserves full lease headroom but does not authorize dispatch. `ManagedStartPreparation`
-validates the immutable body and delivery limits without creating a dispatchable attempt. It freezes
+validates the immutable body and delivery limits without creating an executable attempt. It freezes
 one launch-bound lease/null tail and finalizes against the original carrier and deadline. The
 private OPERATION parent uses this path before reservation. When inline delivery does not fit, it
 stages the prefix and body before sampling the initial lease, appends that single tail, and
