@@ -130,8 +130,6 @@ def download_to_local_file(
                 )
     except BaseException as exc:
         control = exc
-        if local_call is not None:
-            local_call.local_failed = True
         if isinstance(exc.__cause__, FileDownloadControlFact):
             download = exc.__cause__.outcome
         if writer is None:
@@ -148,8 +146,6 @@ def download_to_local_file(
                 writer.abort()
             except BaseException as exc:
                 cleanup_failed = True
-                if local_call is not None:
-                    local_call.local_failed = True
                 if control is None:
                     control = exc
         if cleanup_failed and writer is not None:
@@ -166,7 +162,7 @@ def download_to_local_file(
         unfinished_stage=writer if cleanup_failed else None,
     )
     if local_call is not None:
-        operation.capture_local_download(local_call, outcome, failed=control is not None)
+        operation.capture_local_download(local_call, outcome)
     if control is not None:
         fact = FileLocalDownloadControlFact(outcome)
         fact.__cause__ = control.__cause__

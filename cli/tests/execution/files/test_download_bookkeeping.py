@@ -127,7 +127,7 @@ def test_registration_failure_preserves_original_custody_unless_absence_is_prove
     assert access._operation.active_downloads == (active,) and not original_call.borrow.closed
     assert original_call.stage is None and not original_call.dispatched
     assert original_call.local_outcome is fact.outcome and fact.outcome.download is None
-    assert original_call.local_failed and original_call.reduction_complete and not original_call.reduction_succeeded
+    assert original_call.reduction_complete
     with pytest.raises(StateError):
         access.download(PurePosixPath(source), root.parent / "next")
     with pytest.raises(StateError):
@@ -368,16 +368,17 @@ def test_actual_remote_and_late_local_failures_keep_original_outcome(bound_acces
         access.download(PurePosixPath(root / "source"), root.parent / "destination")
     original = obligation_receipt(owner, receipts[0])
     assert not decode_file_call_obligation(original.payload).download_child_complete
-    assert calls[0].reduction_complete and not calls[0].reduction_succeeded
+    assert calls[0].reduction_complete
     if fault == "uncertain":
         assert original.state is LifecycleObligationState.POSSIBLE_EFFECT
         assert decode_file_call_obligation(original.payload).download_child is None
     if fault == "cleanup-retry":
+        failed_outcome = calls[0].local_outcome
         enabled = False
         assert access.download(PurePosixPath(root / "source"), root.parent / "next").size == 8
         assert obligation_receipt(owner, receipts[0]).payload == original.payload
-        assert calls[0].local_outcome.cleanup_failed and not calls[0].reduction_succeeded
-        assert calls[1].reduction_succeeded
+        assert calls[0].local_outcome is failed_outcome and failed_outcome.cleanup_failed
+        assert calls[1].reduction_complete and not calls[1].local_outcome.cleanup_failed
 
 
 @pytest.mark.parametrize("fault", ["close-control", "committed-control", "closed-control"])
@@ -423,7 +424,8 @@ def test_exact_closure_retry_retains_actual_local_result(bound_access, monkeypat
         access.download(PurePosixPath(root / "source"), destination)
     call = access._operation._local_download_call
     assert call is not None and call.active.outcome.status is FileDownloadStatus.COMPLETE
-    assert call.local_outcome.published and call.reduction_complete and call.reduction_succeeded
+    assert call.local_outcome.published and call.reduction_complete
+    assert call.local_outcome.download is call.active.outcome
     assert call.stage.published and not call.stage.cleanup_uncertain
     assert call.borrow.closed is (fault == "closed-control")
     with pytest.raises(StateError):
@@ -488,8 +490,8 @@ def test_remote_debt_publication_retry_keeps_failed_local_outcome(bound_access, 
     if fault == "lost":
         assert call is None and len(intents) == 2
     else:
-        assert call is not None and call.local_failed and call.reduction_complete
-        assert not call.reduction_succeeded
+        assert call is not None and call.reduction_complete
+        assert not call.local_outcome.published
         active = call.active
         assert active.outcome.requires_owner_retention and active.retained_payload is not None
         captured = call.local_outcome
@@ -501,7 +503,7 @@ def test_remote_debt_publication_retry_keeps_failed_local_outcome(bound_access, 
     assert carrier.calls == count and not destination.exists()
     assert len(access._operation.unfinished_downloads) == 1
     if fault != "lost":
-        assert call.local_outcome is captured and not call.reduction_succeeded
+        assert call.local_outcome is captured and not captured.published
         assert access._operation.unfinished_downloads[0].outcome is active.outcome
     assert len(set(intents)) == 1
     row, record = pending(owner)

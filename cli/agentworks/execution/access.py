@@ -719,11 +719,11 @@ class FileAccess:
                 )
         except BaseException:
             # Core keeps the call and its borrow on failed finalization.
-            self._operation.capture_download_reduction(call, succeeded=False)
+            self._operation.mark_download_reduction_complete(call)
             with suppress(BaseException):
                 self._operation.finish_local_download(call)
             raise
-        self._operation.capture_download_reduction(call, succeeded=True)
+        self._operation.mark_download_reduction_complete(call)
         try:
             self._operation.finish_local_download(call)
         except Exception:

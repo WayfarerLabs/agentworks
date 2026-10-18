@@ -175,9 +175,7 @@ class _LocalDownloadCall:
     dispatched: bool = False
     stage: LocalDownloadStage | None = None
     local_outcome: FileLocalDownloadOutcome | None = None
-    local_failed: bool = False
     reduction_complete: bool = False
-    reduction_succeeded: bool = False
 
 
 type _ActiveFileDownload = _ActiveFileCall[
@@ -359,21 +357,17 @@ class FileOperation:
             raise StateError("Download local capture remains incomplete")
         self._settle_download_call(call)
 
-    def capture_local_download(
-        self, call: _LocalDownloadCall, outcome: FileLocalDownloadOutcome, *, failed: bool
-    ) -> None:
+    def capture_local_download(self, call: _LocalDownloadCall, outcome: FileLocalDownloadOutcome) -> None:
         """Retain actual publication facts before exception-fact allocation or reduction."""
         call.local_outcome = outcome
-        call.local_failed = call.local_failed or failed
         active = call.active
         if active is not None and active.obligation is not None and not call.dispatched:
             # Confirmed admission followed by constructor refusal has no remote
             # effect. Uncertain registration retains its original active custody.
             self._active_downloads.pop(id(active), None)
 
-    def capture_download_reduction(self, call: _LocalDownloadCall, *, succeeded: bool) -> None:
-        """Record the actual reducer disposition, never deducing it from publication."""
-        call.reduction_succeeded = succeeded and not call.local_failed
+    def mark_download_reduction_complete(self, call: _LocalDownloadCall) -> None:
+        """Record completion of the reduction phase before finalizing custody."""
         call.reduction_complete = True
 
     def settle_download_bookkeeping(self) -> None:
