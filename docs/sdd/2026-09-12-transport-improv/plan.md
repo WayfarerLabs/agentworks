@@ -1163,6 +1163,17 @@ existing refresh/send ordering, so no fabricated case is added. The annotation i
 same unit. The unused prefix result copy and download success flags are also removed while keeping
 actual outcome/capture/cleanup facts. Final combined validation and paired re-review remain open.
 
+The complete private unit is locally accepted at `f30e519c`: all three independent source re-reviews
+are clear, all 781 joint selected cases pass without skips, and full strict typing passes over 1,393
+sources. Sixteen changed Python files pass cacheless lint/format; paired documentation quality and
+whitespace checks pass. The two main test runs retain 2,896 verified regular fixture files,
+including their databases, in workspace evidence; recorded permissions/ownership and file hashes
+match. Separate bind mounts required copying during archival, so neither inode continuity nor atomic
+relocation is claimed. No fixture data was discarded; only the empty temporary parent was removed.
+This accepts the private owned AWS/prefix and ordinary-bookkeeping source unit, not native cloud/SSH
+behavior, complete platform coverage, independent-job availability, directory transfer, public
+RunContext or whole-PR acceptance.
+
 - [ ] Complete owned AWS access with a reviewed successful-start settlement rule, fresh power and
       exact guest preparation, endpoint trust and selected firewall-route lifetime. Obtain native
       startup/uncertainty/cleanup evidence before admission through RunContext. Missing start
@@ -4530,10 +4541,12 @@ positive-history writes while retaining exact debt/closure retry and supported c
 through six. Its 335 selected cases and full strict typing over 1,391 sources pass. Initial fixture
 failures came from unsafe inherited workspace permissions/ACLs; a fresh private temporary fixture
 root passes without weakening guards. Both failed and successful fixtures remain preserved, with
-successful fixtures moved into workspace evidence after terminal-use and byte/metadata checks.
-Independent review and joint integration remain pending, so the implementation item stays open.
+successful fixtures moved into workspace evidence after terminal-use and byte/metadata checks. The
+final private acceptance above includes all three source re-reviews and the 781-case joint selection
+covering these changes. This closes only ordinary bookkeeping and association-writer retirement, not
+the directory facade, native proof or complete R7 delivery.
 
-- [ ] Retire unused generic transfer-association writers and success-history publication while
+- [x] Retire unused generic transfer-association writers and success-history publication while
       preserving ordinary-call custody and exact bookkeeping-only retry. Keep admission before local
       staging, uncertain registration, actual retained outcomes and cleanup debt, control precedence
       and incomplete-capture refusal. Prove debt-publication and borrow-close recovery without
