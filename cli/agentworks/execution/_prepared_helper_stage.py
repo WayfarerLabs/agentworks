@@ -105,6 +105,7 @@ class PreparedHelperStage:
         self._before_dispatch = before_dispatch
         self._new_helper_delivery = new_helper_delivery
         self._active: _ActiveStageCall | None = None
+        self._acquiring_phase: FileStageOperation | None = None
         self._obligation: LifecycleObligation | None = None
         self.reference: ScratchReference | None = None
         self.cleanup_debt: ScratchCleanupDebt | None = None
@@ -120,7 +121,7 @@ class PreparedHelperStage:
     @property
     def helper_uncertain(self) -> bool:
         """Whether the exact staging call still retains local or helper custody."""
-        return self._active is not None
+        return self._active is not None or self._acquiring_phase is not None
 
     @property
     def deadline(self) -> Deadline:
@@ -145,11 +146,13 @@ class PreparedHelperStage:
         phase: FileStageOperation = FileStageOperation.BEGIN,
     ) -> FileStageCandidateResult:
         self._require_closed(deadline)
-        borrow = self._owner.borrow()
-        operation = BorrowedFixedHelperCarrier(self._carrier, borrow)
-        active = _ActiveStageCall(borrow, operation, phase)
-        self._active = active
+        self._acquiring_phase = phase
         try:
+            borrow = self._owner.borrow()
+            operation = BorrowedFixedHelperCarrier(self._carrier, borrow)
+            active = _ActiveStageCall(borrow, operation, phase)
+            self._active = active
+            self._acquiring_phase = None
             if self._before_dispatch is not None:
                 self._before_dispatch(self.deadline if deadline is None else deadline)
             result = action(operation)
@@ -233,6 +236,7 @@ class PreparedHelperStage:
             self._recover_dispatch_registration(active)
         if not active.borrow.closed:
             active.borrow.close()
+        self._acquiring_phase = None
         self._active = None
 
     def _recover_dispatch_registration(self, active: _ActiveStageCall) -> None:
@@ -258,6 +262,22 @@ class PreparedHelperStage:
             raise ValidationError("Prepared stage observation requires a finite live deadline")
         active = self._active
         if active is None:
+            if self.cleaned or self.cleanup_resolution_uncertain:
+                self.retry_bookkeeping()
+                self._acquiring_phase = None
+                return
+            if self._acquiring_phase is not None:
+                # No stage helper could enter before its actual call was
+                # retained. Core must first revoke any pristine orphan borrow.
+                with self._owner._guard:  # noqa: SLF001
+                    self._owner._require_no_active_work_locked()  # noqa: SLF001
+                row = self._inspect_registration()
+                if row is None or row.state is not LifecycleObligationState.POSSIBLE_EFFECT:
+                    raise StateError("Prepared stage acquisition lost its cleanup obligation")
+                self.failed = True
+                if self._acquiring_phase is FileStageOperation.BEGIN:
+                    self._resolve_cleanup()
+                self._acquiring_phase = None
             self.retry_bookkeeping()
             return
         self.failed = True
@@ -496,8 +516,8 @@ class PreparedHelperStage:
 
     def _resolve_cleanup(self) -> None:
         assert self._obligation is not None
+        self.cleanup_resolution_uncertain = True
         self.cleaned = True
         self.cleanup_debt = None
-        self.cleanup_resolution_uncertain = True
         self._obligation.resolve()
         self.cleanup_resolution_uncertain = False

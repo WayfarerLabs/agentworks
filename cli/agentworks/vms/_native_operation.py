@@ -124,6 +124,7 @@ class _Workflow:
             self.owner.close()
             return
         self.owner.stop_admission()
+        self.owner.retire_unused_borrow()
         budget = self.deadline if cleanup_deadline is None else cleanup_deadline
         if self.views is not None:
             drained = True
