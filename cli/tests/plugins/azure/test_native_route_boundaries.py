@@ -16,6 +16,7 @@ from agentworks.plugins.azure._native_route import AzureNativeRoute
 from agentworks.plugins.azure._native_route_evidence import resource_url
 from tests.plugins.azure.test_activation_sdk import deny
 from tests.plugins.azure.test_native_route import (
+    DELETE_OP,
     LOCATOR,
     NIC,
     NSG,
@@ -108,6 +109,28 @@ def test_check_validates_fresh_vm_before_any_network_request(owned, kind):
     with pytest.raises(StateError):
         owned.route.check(Deadline.after(5), observed_vm=owned.vm)
     assert len(owned.transport.calls) == before
+    assert owned.route.settle(Deadline.after(5))
+
+
+@pytest.mark.parametrize("field", ["id", "name"])
+def test_changed_rule_identity_never_deleted(owned, field):
+    owned.route.open(Deadline.after(5))
+    owned.transport.rule[field] += "foreign"
+    with pytest.raises(StateError):
+        owned.route.settle(Deadline.after(5))
+    assert len(mutations(owned)) == 1
+
+
+def test_async_monitor_subscription_casing_is_semantic_but_request_url_exact(owned):
+    monitor = OP.replace(SUB, SUB.upper())
+    owned.transport.overrides.extend(
+        [
+            ("PUT", (201, {"Azure-AsyncOperation": monitor}, deny)),
+            (monitor, (200, {}, {"status": "Succeeded"})),
+        ]
+    )
+    owned.route.open(Deadline.after(5))
+    assert any(call[:2] == ("GET", monitor) for call in owned.transport.calls)
     assert owned.route.settle(Deadline.after(5))
 
 
@@ -290,6 +313,33 @@ def test_unknown_delete_receipt_has_durable_intent_and_no_absence_shortcut(owned
     before = len(owned.transport.calls)
     assert not owned.route.settle(Deadline.after(5))
     assert len(owned.transport.calls) == before
+
+
+@pytest.mark.parametrize("state", ["Failed", "Canceled"])
+@pytest.mark.parametrize("absent", [False, True])
+def test_terminal_failed_delete_requires_fresh_absence_and_never_replays(owned, state, absent):
+    owned.route.open(Deadline.after(5))
+    owned.transport.overrides.extend(
+        [
+            ("DELETE", (200, {"Azure-AsyncOperation": DELETE_OP}, deny)),
+            (DELETE_OP, (200, {}, {"status": state})),
+        ]
+    )
+
+    def remove(response):
+        if absent and response.request.url == DELETE_OP:
+            owned.transport.rule = None
+
+    owned.transport.hook = remove
+    assert owned.route.settle(Deadline.after(5)) is absent
+    assert len(mutations(owned)) == 2
+    assert row(owned).state is (
+        LifecycleObligationState.RESOLVED if absent else LifecycleObligationState.POSSIBLE_EFFECT
+    )
+    if not absent:
+        owned.transport.rule = None
+        assert owned.route.settle(Deadline.after(5))
+        assert len(mutations(owned)) == 2
 
 
 def test_oversized_combined_receipt_is_not_truncated_or_followed(owned):

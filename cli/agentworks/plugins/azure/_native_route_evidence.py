@@ -7,14 +7,13 @@ No provider response body or provider error diagnostic enters the route ledger.
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
-from urllib.parse import parse_qsl, quote, unquote, urlsplit
+from urllib.parse import quote
 
 from agentworks.errors import ValidationError
-from agentworks.plugins.azure._identity import resource_name_equal
+from agentworks.plugins.azure._operation_url import valid_operation_url
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -37,32 +36,6 @@ def resource_url(resource_id: str) -> str:
 
 def _ascii(value: object, limit: int) -> bool:
     return type(value) is str and 0 < len(value) <= limit and all(32 < ord(char) < 127 for char in value)
-
-
-def _monitor_url(value: object, subscription: str) -> bool:
-    if not _ascii(value, 8192):
-        return False
-    assert isinstance(value, str)
-    try:
-        parsed = urlsplit(value)
-        query = parse_qsl(parsed.query, keep_blank_values=True, strict_parsing=True)
-        path = unquote(parsed.path, errors="strict")
-        prefix = f"/subscriptions/{quote(subscription, safe='')}/"
-        return (
-            parsed.scheme == "https"
-            and parsed.netloc == "management.azure.com"
-            and not parsed.fragment
-            and "#" not in value
-            and "," not in value
-            and re.search(r"%(?![0-9a-fA-F]{2})", value) is None
-            and "\\" not in path
-            and all(component not in {".", ".."} for component in path.split("/"))
-            and all(ord(char) >= 32 and ord(char) != 127 for char in path)
-            and resource_name_equal(parsed.path[: len(prefix)], prefix)
-            and (not parsed.query or (len(query) == 1 and query[0][0] == "api-version" and bool(query[0][1])))
-        )
-    except (ValueError, UnicodeError):
-        return False
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -108,7 +81,7 @@ def acknowledgment(response: Any, method: str, url: str, subscription: str) -> R
         key = key.lower()
         if key in retained or not _ascii(value, 256 if key == "x-ms-request-id" else 8192) or "," in value:
             raise ValidationError("Azure route receipt headers are invalid")
-        if key != "x-ms-request-id" and not _monitor_url(value, subscription):
+        if key != "x-ms-request-id" and not valid_operation_url(value, subscription):
             raise ValidationError("Azure route monitor identity is invalid")
         retained[key] = value
     ack = RuleAcknowledgment(

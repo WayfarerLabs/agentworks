@@ -442,7 +442,7 @@ class AzureNativeRoute:
                     if self._delete_ack is None:
                         return False
                     self._poll(deadline, deleting=True)
-                    if self._delete_state != "Succeeded":
+                    if self._delete_state not in TERMINAL:
                         return False
                     self._observe_topology(deadline)
                     value = self._get(self._rule_id(), deadline, missing=True)
