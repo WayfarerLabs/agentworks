@@ -5504,15 +5504,19 @@ retained by production launch paths. Actual activation/late sampling, same-proce
 recovery, and the two known managed inline-envelope failures remain open. The unused registration
 flag found by complexity review is removed; no recovery engine or new host lock is introduced.
 
-The next private composition connects OPERATION launch to body preparation, owned staging and one
-late tail. Its local scripted selection passes 446 cases and strict typing covers 1,479 sources. The
-10,000-byte staged workload is reconstructed unchanged while every actual helper request passes the
-existing complete Proxmox serializer limit. A final-preparation refusal proves no activation entry
-and permits exact stage cleanup without fabricated delivery evidence. The parent retains actual
-START helper custody for same-process continuation, and closing stage cleanup uses only its already
-admitted token binding. The duplicated stage uncertainty flag found by complexity review is replaced
-by the retained active-call state. These are implementation and local-test facts, not a completed
-private review or native acceptance. INDEPENDENT staging, process-loss recovery, the pre-entry
+The private composition through `e150a7886` connects OPERATION launch to body preparation, owned
+staging and one late tail. Its corrected local scripted selection passes 448 cases and strict typing
+covers 1,479 sources. The 10,000-byte staged workload is reconstructed unchanged while every actual
+helper request passes the existing complete Proxmox serializer limit. A final-preparation refusal
+proves no activation entry and permits exact stage cleanup without fabricated delivery evidence. The
+parent retains actual START helper custody for same-process continuation, and closing stage cleanup
+uses only its already admitted token binding. The duplicated stage uncertainty flag found by
+complexity review is replaced by the retained active-call state. All three private review lanes
+clear the corrected unit, including the native closure fence: a generic zero carrier exit cannot
+bypass false selected native proof. The broader file/staging selection passes 2,501 tests with 25
+skips at `bb83b77eb`, before that narrow correction, not an exact-head broad result. Changed-file
+quality gates pass at the corrected head. These are private implementation and local-test facts, not
+whole-PR or native acceptance. INDEPENDENT staging, process-loss recovery, the pre-entry
 borrow-publication seam and the two old inline-envelope fixtures remain open, along with the
 complete-surface gates above.
 

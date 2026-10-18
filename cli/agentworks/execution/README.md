@@ -2291,8 +2291,10 @@ exact owned stage after ordinary operation admission stops; it cannot create, ap
 work. Unknown cleanup delivery blocks another helper until closure is proved. Later explicit
 idempotent removal still requires the original cleanup debt and positive removal evidence. An
 abandoned activation that never reached start admission uses an explicit no-dispatch proof, not a
-fabricated exit code. Process-loss recovery and the pre-entry borrow-publication interruption window
-remain open ownership-integration gates. These classes do not provide a public FileAccess operation.
+fabricated exit code. When a native closure delivery is selected, its proof governs helper closure;
+a generic zero exit cannot bypass missing native evidence. Process-loss recovery and the pre-entry
+borrow-publication interruption window remain open ownership-integration gates. These classes do not
+provide a public FileAccess operation.
 
 `_scratch_root.py` opens the fixed Linux `/tmp` directory without following symlinks and requires
 UID 0 and mode 01777. It creates and repairs nothing, ignores environment-selected temporary paths,
