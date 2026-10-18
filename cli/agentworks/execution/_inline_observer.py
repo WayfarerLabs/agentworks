@@ -25,6 +25,7 @@ from ._inline_control import (
     parse_wait,
 )
 from ._inline_request import OutputMode
+from ._process import try_write_to_sink
 
 
 class ObservationError(StrEnum):
@@ -93,11 +94,9 @@ class InlineObserver:
         assert sink is not None
         while self._offset < len(data):
             remaining = memoryview(data)[self._offset :]
-            written = sink.try_write(remaining)
+            written = try_write_to_sink(sink, remaining)
             if written is None:
                 return False
-            if type(written) is not int or not 1 <= written <= len(remaining):
-                raise ValueError("Invalid application sink result")
             self._offset += written
         self._pending = None
         self._offset = 0
