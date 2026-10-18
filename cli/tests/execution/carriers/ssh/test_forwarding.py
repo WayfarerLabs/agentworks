@@ -360,7 +360,23 @@ def test_lost_wait_status_never_becomes_forwarding_exit_zero(monkeypatch: pytest
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    os.waitpid(process.pid, 0)
+    pid, status = os.waitpid(process.pid, 0)
+    assert pid == process.pid and os.waitstatus_to_exitcode(status) == 23
+    waits: list[int] = []
+    signals: list[tuple] = []
+    native_wait = os.waitpid
+
+    def wait(pid: int, options: int) -> tuple[int, int]:
+        waits.append(pid)
+        assert pid == process.pid and len(waits) == 1
+        return native_wait(pid, options)
+
+    def forbidden_signal(*args: Any, **kwargs: Any) -> None:
+        signals.append((args, kwargs))
+        pytest.fail("Lost PID authority was used for a signal")
+
+    monkeypatch.setattr(os, "waitpid", wait)
+    monkeypatch.setattr(os, "kill", forbidden_signal)
     monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
     owner = process_core.LocalProcessOwner()
     identity = Path(sys.executable).resolve()
@@ -379,7 +395,16 @@ def test_lost_wait_status_never_becomes_forwarding_exit_zero(monkeypatch: pytest
 
     assert caught.value.failure == Failure.OBSERVATION
     assert caught.value.local_status is None
-    assert not resource.close(Deadline.after(3))
+    assert resource.close(Deadline.after(3))
+    terminal = owner.snapshot().terminal
+    assert terminal is not None and terminal.cleaned and terminal.observation_failed
+    assert terminal.exit_status is terminal.local_status is process.returncode is None
+    assert resource._owner is resource._custody._owner is owner
+    assert resource.close(Deadline.after(3))
+    with pytest.raises(ForwardingError) as repeated:
+        resource.wait()
+    assert repeated.value.failure is Failure.OBSERVATION and repeated.value.local_status is None
+    assert waits == [process.pid] and not signals
     assert not resource._thread.is_alive()
     assert all(pipe is None or pipe.closed for pipe in (process.stdin, process.stdout, process.stderr))
 
@@ -966,20 +991,54 @@ def test_pending_discovery_refuses_forwarding_and_repeated_admission(
     synthetic.assert_closed()
 
 
+@pytest.mark.parametrize("delayed_preflight", [None, "trust", "version"])
 def test_passive_resource_and_failed_startup_remain_caller_held(
-    synthetic: SyntheticForwarding,
+    synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch, delayed_preflight: str | None
 ) -> None:
     resource = OwnedForwarding(synthetic.connection, [_forward()])
     synthetic.resources.append(resource)
     assert synthetic.calls == [] and synthetic.custody.settled
+    assert resource._owner is None and not resource._thread.is_alive()
     synthetic.script = "sys.stdin.buffer.read()"
-    with pytest.raises(ForwardingError) as caught:
-        resource.start(deadline=Deadline.after(0.1), custody=synthetic.custody)
+    await_ready = resource._await_ready
+    published: list[process_core.LocalProcessPipes] = []
+
+    def expire_after_publication(deadline: Deadline) -> None:
+        owner = resource._owner
+        assert owner is not None and synthetic.custody._owner is owner
+        while owner.snapshot().pipes is None:
+            assert not deadline.expired
+            time.sleep(0.001)
+        pipes = owner.snapshot().pipes
+        assert pipes is not None and len(synthetic.children) == 2
+        child = synthetic.children[-1]
+        assert (pipes.stdin, pipes.stdout, pipes.stderr) == (child.stdin, child.stdout, child.stderr)
+        assert child.poll() is None
+        published.append(pipes)
+        await_ready(Deadline.after(0))
+
+    with monkeypatch.context() as context:
+        if delayed_preflight is not None:
+            name = "admit_connection" if delayed_preflight == "trust" else "check_client_version"
+            preflight = getattr(forwarding, name)
+
+            def delayed(*args, **kwargs):
+                result = preflight(*args, **kwargs)
+                assert len(synthetic.children) == (0 if delayed_preflight == "trust" else 1)
+                time.sleep(0.2)
+                return result
+
+            context.setattr(forwarding, name, delayed)
+        context.setattr(resource, "_await_ready", expire_after_publication)
+        with pytest.raises(ForwardingError) as caught:
+            resource.start(deadline=Deadline.after(10), custody=synthetic.custody)
     assert caught.value.failure is Failure.DEADLINE
     owner = resource._owner
     assert owner is not None and synthetic.custody._owner is owner
+    assert len(published) == 1 and owner.snapshot().pipes is published[0]
     assert synthetic.children[-1].poll() is None
     assert resource.close(Deadline.after(3))
+    assert not resource._thread.is_alive()
     assert resource._owner is owner
     synthetic.assert_closed()
 

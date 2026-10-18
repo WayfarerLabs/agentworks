@@ -391,18 +391,25 @@ def test_retryable_cleanup_natural_exit_settles_without_fresh_close(
         assert custody.close(Deadline.after(3))
 
 
-def test_nonretryable_native_loss_finishes_worker_without_terminal_release() -> None:
-    # Confine permanent native loss to an owned probe. A regressed parked worker
-    # cannot hold the pytest interpreter at shutdown; its exact child is reaped
-    # before loss is introduced, and all terminal descriptors belong to the probe.
+def test_exact_wait_loss_retires_locally_and_restores_on_original_worker() -> None:
+    _run_retirement_probe("confirmed")
+
+
+@pytest.mark.parametrize("close_effect", ["before", "after_reuse"])
+def test_original_pipe_close_uncertainty_retains_terminal_and_native_objects(close_effect: str) -> None:
+    _run_retirement_probe(close_effect)
+
+
+def _run_retirement_probe(close_effect: str) -> None:
+    # Permanent close uncertainty belongs in a bounded disposable interpreter.
+    # Its exact child is externally reaped before the owner discovers wait loss.
     code = r"""
 import json,os,subprocess,sys,termios
-from typing import Any,cast
+from threading import current_thread
 import pytest
 from agentworks.errors import StateError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
-from agentworks.execution._process import LocalProcessOwner,LocalProcessTerminal
-from agentworks.execution._process import Deadline as ProcessDeadline
+from agentworks.execution._process import LocalProcessOwner
 from agentworks.execution.carrier import CarrierIO,Deadline,Failure,SinkOutput,TerminalInput
 from agentworks.execution.carriers.ssh._terminal_posix import PosixTerminal
 from agentworks.execution.carriers.ssh._terminal_relay import _Attempt
@@ -410,88 +417,167 @@ class Source:
     def try_read(self,limit):return b''
 class Sink:
     def try_write(self,data):return len(data)
-master,slave=os.openpty()
-endpoint=master,slave
+close_effect = sys.argv[1]
+master,borrowed=os.openpty()
+mode=termios.tcgetattr(borrowed)
+custody=LocalDeliveryCustody()
+children=[]
+owned_fds=[]
+releases=[]
+waits=[]
+signals=[]
+close_calls=[]
+pipe_calls=[]
+reused=[]
+original_pipes=[]
+fixture_closers=[]
+published=[]
+native_publish=LocalProcessOwner._publish_ready
+native_launch,native_wait=subprocess.Popen,os.waitpid
+native_acquire,native_release=PosixTerminal.acquire,PosixTerminal.release
+native_close=LocalProcessOwner.close_bounded
 with pytest.MonkeyPatch.context() as monkeypatch:
-
-    # This case owns and deliberately externally reaps its exact native child.
-    # That destroys owner status proof without leaving a real running process.
-    # Its lost terminal resource has a separate, explicit fixture repair below.
-    custody = LocalDeliveryCustody()
-    borrowed = endpoint[1]
-    mode = termios.tcgetattr(borrowed)
-    children: list[subprocess.Popen[bytes]] = []
-    owned_fds: list[int] = []
-    native_launch, native_acquire = subprocess.Popen, PosixTerminal.acquire
-    close_calls: list[LocalProcessOwner] = []
-    native_close = LocalProcessOwner.close_bounded
-
-    def launch(*args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
-        child = cast("subprocess.Popen[bytes]", native_launch(*args, **kwargs))
+    def launch(*args, **kwargs):
+        child=native_launch(*args, **kwargs)
+        pid,status=native_wait(child.pid,0)
+        assert pid==child.pid and os.waitstatus_to_exitcode(status)==23
         children.append(child)
-        pid, status = os.waitpid(child.pid, 0)
-        assert pid == child.pid and os.waitstatus_to_exitcode(status) == 0
+        assert child.stdout is not None and child.stderr is not None
+        original_pipes.extend((child.stdout,child.stderr))
+        if close_effect != 'confirmed':
+            pipe=child.stdout
+            original_close=pipe.close
+            fixture_closers.append(original_close)
+            original_fd=pipe.fileno()
+            def uncertain_close():
+                pipe_calls.append(pipe)
+                assert len(pipe_calls)==1
+                if close_effect=='after_reuse':
+                    original_close()
+                    fd=os.open(os.devnull,os.O_RDONLY)
+                    if fd!=original_fd:
+                        os.dup2(fd,original_fd)
+                        os.close(fd)
+                    reused.append(original_fd)
+                raise OSError('owned original pipe close uncertainty')
+            monkeypatch.setattr(pipe,'close',uncertain_close)
         return child
-
-    def acquire(terminal: PosixTerminal) -> None:
+    def wait(pid,options):
+        waits.append(pid)
+        assert len(children)==1 and pid==children[0].pid and len(waits)==1
+        return native_wait(pid,options)
+    def forbidden_signal(*args,**kwargs):
+        signals.append((args,kwargs))
+        pytest.fail('Lost numeric PID authority was used for a signal')
+    def acquire(terminal):
         native_acquire(terminal)
-        owned_fds.extend((terminal.master_fd, terminal.slave_fd))
-
-    def close(owner: LocalProcessOwner, deadline: ProcessDeadline) -> LocalProcessTerminal | None:
-        close_calls.append(owner)
-        return native_close(owner, deadline)
-
-    def forbidden_release(terminal: PosixTerminal) -> tuple[BaseException, ...]:
-        pytest.fail("Native custody loss cannot establish safe terminal restoration")
-
-    monkeypatch.setattr(subprocess, "Popen", launch)
-    monkeypatch.setattr(PosixTerminal, "acquire", acquire)
-    monkeypatch.setattr(PosixTerminal, "release", forbidden_release)
-    monkeypatch.setattr(LocalProcessOwner, "close_bounded", close)
-    io = CarrierIO(TerminalInput(borrowed, borrowed, "fixture", Source()), SinkOutput(Sink(), Sink()))
-    attempt = _Attempt([sys.executable, "-c", "pass"], io, Deadline.after(2), custody)
+        owned_fds.extend((terminal.master_fd,terminal.slave_fd))
+    def publish(owner,pipes):
+        assert (pipes.stdout,pipes.stderr)==tuple(original_pipes)
+        published.append((pipes,tuple(pipes._records)))
+        native_publish(owner,pipes)
+    def close(owner,deadline):
+        close_calls.append((owner,current_thread()))
+        return native_close(owner,deadline)
+    def release(terminal):
+        assert close_effect=='confirmed'
+        assert terminal is attempt._terminal
+        process=attempt._owner.snapshot().terminal
+        assert process is not None and process.cleaned and process.observation_failed
+        assert all(pipe.closed for pipe in original_pipes)
+        releases.append((terminal,current_thread()))
+        return native_release(terminal)
+    monkeypatch.setattr(subprocess,'Popen',launch)
+    monkeypatch.setattr(os,'waitpid',wait)
+    monkeypatch.setattr(os,'kill',forbidden_signal)
+    monkeypatch.setattr(PosixTerminal,'acquire',acquire)
+    monkeypatch.setattr(PosixTerminal,'release',release)
+    monkeypatch.setattr(LocalProcessOwner,'close_bounded',close)
+    monkeypatch.setattr(LocalProcessOwner,'_publish_ready',publish)
+    io=CarrierIO(TerminalInput(borrowed,borrowed,'fixture',Source()),SinkOutput(Sink(),Sink()))
+    attempt=_Attempt([sys.executable,'-c','import sys; sys.exit(23)'],io,Deadline.after(3),custody)
+    owner=attempt._owner
+    terminal=attempt._terminal
     try:
-        result = attempt.run()
+        result=attempt.run()
         assert result.started and result.exit_status is result.local_status is None
         assert result.failure is Failure.OBSERVATION
-        process = attempt._owner.snapshot().terminal
-        assert process is not None and not process.cleaned and not process.cleanup_retryable
-        assert attempt._done.is_set() and not attempt.settled and not custody.settled
-        assert not attempt._terminal.settled and termios.tcgetattr(borrowed) != mode
-        assert custody._owner is attempt._owner and custody._cleanup is attempt
-        assert len(close_calls) == 1
-        assert not custody.close(Deadline.after(0.1))
-        assert len(close_calls) == 1
-        with pytest.raises(StateError):
-            custody.begin_process()
-        for fd in (*endpoint, *owned_fds):
-            os.fstat(fd)
-        assert len(children) == 1
-        assert children[0].stdout is not None and children[0].stdout.closed
-        assert children[0].stderr is not None and children[0].stderr.closed
-        with pytest.raises(ChildProcessError):
-            os.waitpid(children[0].pid, os.WNOHANG)
+        assert attempt._done.wait(2)
+        attempt._worker.join(1)
+        assert not attempt._worker.is_alive()
+        process=owner.snapshot().terminal
+        assert process is not None and process.observation_failed and not process.cleanup_retryable
+        assert process.local_status is process.exit_status is children[0].returncode is None
+        assert custody._owner is owner and custody._cleanup is attempt
+        assert terminal._owner_thread is attempt._worker
+        assert len(close_calls)==1 and close_calls[0]==(owner,attempt._worker)
+        if close_effect=='confirmed':
+            assert process.cleaned and attempt.settled and custody.settled and terminal.settled
+            assert releases==[(terminal,attempt._worker)]
+            assert_preserved_terminal_mode(termios.tcgetattr(borrowed),mode)
+            for fd in owned_fds:
+                with pytest.raises(OSError):os.fstat(fd)
+        else:
+            assert not process.cleaned and not attempt.settled and not custody.settled
+            assert not terminal.settled and termios.tcgetattr(borrowed)!=mode
+            assert not releases
+            status=owner._retained_status
+            assert status is not None and status.lost and status.process_retired
+            assert status.process is owner._retained_process is children[0]
+            pipes=status.pipes
+            assert len(published)==1 and pipes is published[0][0]
+            assert pipes.stdout is original_pipes[0] and pipes.stderr is original_pipes[1]
+            records=published[0][1]
+            assert len(pipes._records)==len(records)
+            assert all(actual is original for actual,original in zip(pipes._records,records,strict=True))
+            uncertain=next(record for record in records if record.pipe is original_pipes[0])
+            assert uncertain.attempted and not uncertain.confirmed
+            assert all(record.confirmed for record in records if record is not uncertain)
+            assert original_pipes[0].closed is (close_effect=='after_reuse')
+            assert original_pipes[1].closed
+            for fd in (master,borrowed,*owned_fds,*reused):os.fstat(fd)
+            with pytest.raises(StateError):custody.begin_process()
+        assert custody.close(Deadline.after(.1)) is (close_effect=='confirmed')
+        assert custody.close(Deadline.after(.1)) is (close_effect=='confirmed')
+        assert len(close_calls)==1
+        assert waits==[children[0].pid] and not signals
+        assert len(pipe_calls)==(0 if close_effect=='confirmed' else 1)
+        assert owner.snapshot().terminal is process
+        if close_effect!='confirmed':
+            assert owner._retained_status is status and status.pipes is pipes
+            assert all(actual is original for actual,original in zip(pipes._records,records,strict=True))
+            assert not uncertain.confirmed and not releases
+            for fd in reused:os.fstat(fd)
+        # All product observations above precede exact fixture-only rescue.
+        proof={'worker_done':True,'settled':custody.settled,'releases':len(releases),
+            'native_reaped':True,'waits':len(waits),'pipe_calls':len(pipe_calls)}
     finally:
-        assert attempt._done.wait(3)
-        # The exact child was already reaped above, and the product borrower has
-        # finished. Repair only these known owned fixture fds, without retrying
-        # product release or changing its permanent lost-custody evidence.
-        termios.tcsetattr(borrowed, termios.TCSANOW, mode)
-        for fd in owned_fds:
-            os.close(fd)
-    assert not custody.settled
-    assert_preserved_terminal_mode(termios.tcgetattr(borrowed), mode)
-    os.close(slave)
-    os.close(master)
-    print(json.dumps({'worker_done':attempt._done.is_set(),'settled':custody.settled,
-        'releases':0,'native_reaped':True,'fixture_repaired':True}),flush=True)
+        assert attempt._done.wait(2)
+        attempt._worker.join(1)
+        assert not attempt._worker.is_alive()
+        # Rescue only these fixtures after observations, including a failed
+        # positive-case assertion. Never retry product close or change records.
+        # The exact child has already been externally reaped.
+        if not terminal.settled:
+            termios.tcsetattr(borrowed,termios.TCSANOW,mode)
+        if fixture_closers and not original_pipes[0].closed:
+            fixture_closers[0]()
+        if not terminal.settled:
+            for fd in owned_fds:os.close(fd)
+        for fd in reused:os.close(fd)
+        assert_preserved_terminal_mode(termios.tcgetattr(borrowed),mode)
+        os.close(borrowed)
+        os.close(master)
+print(json.dumps(proof),flush=True)
 """
     code = with_terminal_mode_assertion(code)
-    completed = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=8, check=False)
+    completed = subprocess.run([sys.executable, "-c", code, close_effect], capture_output=True, timeout=10, check=False)
     assert completed.returncode == 0, (completed.stdout[-4096:], completed.stderr[-4096:])
     import json
 
     proof = json.loads(completed.stdout)
-    assert proof["worker_done"] and not proof["settled"]
-    assert proof["releases"] == 0 and proof["native_reaped"] and proof["fixture_repaired"]
+    assert proof["worker_done"] and proof["settled"] is (close_effect == "confirmed")
+    assert proof["releases"] == (1 if close_effect == "confirmed" else 0)
+    assert proof["native_reaped"] and proof["waits"] == 1
+    assert proof["pipe_calls"] == (0 if close_effect == "confirmed" else 1)
     assert completed.stderr == b""
