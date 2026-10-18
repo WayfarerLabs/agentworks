@@ -5337,7 +5337,7 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
 
 ## 5. Add the complete new RunContext surface
 
-- [ ] Connect nonterminal live input/output to DIRECT execution through the existing inline helper
+- [ ] Connect non-terminal live input/output to DIRECT execution through the existing inline helper
       and process pump. Use one bounded length-delimited request for finite and live input, keep
       script source separate, and deliver decoded stdout/stderr incrementally without retaining
       presentation bytes. Prove duplex progress before input EOF, binary separation, nonzero exits,

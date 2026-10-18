@@ -66,7 +66,7 @@ handles support the same mechanism. The
 are constraints for the endpoint proof, not an assertion that cancellation or terminal support is
 already solved. A core adapter that cannot establish bounded use must refuse before dispatch.
 
-## Nonterminal live execution composition
+## Non-terminal live execution composition
 
 The next shared implementation connects the byte endpoints to decoded application I/O, not raw
 carrier streams. It uses the existing inline helper, numeric guest bootstrap, process pump and
@@ -80,7 +80,7 @@ Use one ASCII request envelope for finite and live inline calls: the five bytes 
 eight lowercase hexadecimal manifest-length digits, then exactly that many canonical ASCII JSON
 bytes. This preserves the existing native carrier's ASCII-armored input contract without adding
 provider-specific byte conversions. The existing 32,768-byte private manifest bound remains; reject
-a bad marker, noncanonical or invalid length, incomplete request or invalid manifest before
+a bad marker, incorrectly encoded or invalid length, incomplete request or invalid manifest before
 application launch. The manifest version is two. The canonical JSON encoder/decoder remains separate
 from envelope encoding so codec checks do not depend on reading a descriptor. The older private
 systemd proof producer adopts the same envelope rather than retaining another inline input format.
@@ -95,7 +95,7 @@ mixed with application stdin. Numeric root entry, body credentials and the full 
 unchanged and precede operation code.
 
 The guest's live stdin adapter belongs to its pipe helper, not a borrowed terminal. It must satisfy
-the existing nonblocking source contract, preserve any flags it changes and stop using the endpoint
+the existing non-blocking source contract, preserve any flags it changes and stop using the endpoint
 before return. There is no keyboard, terminal mode, background pump or cancellation behavior in this
 path.
 
@@ -104,7 +104,7 @@ path.
 Add an explicit delivery mode to the private inline output policy and `DELIVERED` stream retention.
 Guest output uses the existing process sink path. Each application chunk becomes one ordinary
 nonce-bound stdout/stderr evidence frame; raw carrier stderr stays private diagnostics. The frame
-writer uses bounded pending storage and nonblocking writes while the process pump runs. It cannot
+writer uses bounded pending storage and non-blocking writes while the process pump runs. It cannot
 block the pump in an ordinary write loop or allocate output proportional to job duration. Control
 records remain ordered with data, and final stream facts include the count and rolling digest of the
 represented bytes. Name the common private stream count `count`, not captured-only `retained`;
@@ -117,24 +117,24 @@ another record. Decoder callbacks only update trusted state; they do not call an
 Positive short writes drain that chunk until completion or an actual stall. Its 4,096-byte bound
 bounds that work. If the sink stalls, the collector withholds the final encoded frame byte's
 acknowledgment so the existing carrier pump keeps polling even when the guest is waiting for input.
-Stalled writes propagate backpressure through that same pump. Stream count/digest, record order,
+Stalled writes propagate flow control through that same pump. Stream count/digest, record order,
 completion and carrier/runtime facts are still validated. Delivery does not place application bytes
 in results or retained helper facts. Release borrowed source/sink references and pending
 presentation bytes when observation ends; bookkeeping/cleanup retries retain facts, not endpoints or
-a replayable payload. Invalid endpoint results and exceptions remain safe input/output failures,
-preserving independently known facts and original control flow.
+a payload that could be replayed. Invalid endpoint results and exceptions remain safe input/output
+failures, preserving independently known facts and original control flow.
 
-After the application pump stops, an unfinished guest frame gets at most 0.5 seconds of nonblocking
+After the application pump stops, an unfinished guest frame gets at most 0.5 seconds of non-blocking
 flush attempts. Failure aborts later evidence rather than appending controls to a partial record or
 counting an uncompleted body. Control writes outside the pump retain their existing behavior. The
-process pump's existing post-exit collection allowance pauses for sink backpressure; it does not
+process pump's existing post-exit collection allowance pauses for sink flow control; it does not
 promise indefinite observation of descendants that retain output descriptors. None of these bounds
 establishes guest cancellation or stronger local cleanup evidence.
 
 ### Caller choices and scope of the first increment
 
-`Input.live(source, sensitive=False)` selects a borrowed nonblocking application byte source.
-`Output.live(stdout, stderr)` explicitly selects borrowed nonblocking application sinks. Finite
+`Input.live(source, sensitive=False)` selects a borrowed non-blocking application byte source.
+`Output.live(stdout, stderr)` explicitly selects borrowed non-blocking application sinks. Finite
 input with live output and live input with capture/discard are both valid pipe choices. Selecting
 live output is the FRD R4 presentation choice: it may reflect sensitive data without enabling
 retained output, logging or guest artifacts. Default capture/discard remains suppressed for

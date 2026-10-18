@@ -121,7 +121,7 @@ RunContext delivery remain open.
 `models.py` defines immutable literal commands and scripts with explicit `Shell.SH`, `Shell.BASH` or
 `Shell.USER_DEFAULT` selection and separate startup flags. It also defines finite or borrowed live
 `Input`, bounded capture, discard or borrowed live `Output`, and explicit operation or independent
-`Lifetime` values. Live endpoints use nonblocking `try_read` and `try_write`; construction performs
+`Lifetime` values. Live endpoints use non-blocking `try_read` and `try_write`; construction performs
 no stream I/O and endpoint values have no diagnostic representation. `profiles.py` defines the
 requested DIRECT and MANAGED protection values without making either one available implicitly.
 `preparation.py` consumes command and script values with ordinary environment/cwd and finite input.
@@ -1550,7 +1550,7 @@ entry nor success. The host validates bounded helper evidence and does not infer
 acknowledgment. Preparation remains single-use and clears the prerequisite parser after the attempt,
 including carrier exceptions. DIRECT execution can explicitly borrow live application input and
 separate stdout/stderr sinks. Decoded presentation uses bounded evidence frames, rolling count/hash
-checks and caller backpressure; raw carrier diagnostics never become application stderr. Sensitive
+checks and caller flow control; raw carrier diagnostics never become application stderr. Sensitive
 live output is an explicit presentation choice, not permission to retain output. Capture/discard
 continues to suppress sensitive reflected output by default. Delivery results contain no application
 bytes, and the attempt releases borrowed endpoints and pending presentation on exit.
@@ -1560,10 +1560,10 @@ private `start` and MANAGED paths reject live endpoints rather than silently sub
 DIRECT execution. This candidate is not wired to production RunContext and does not yet supply
 staging, MANAGED live I/O, active managed output, terminal I/O or native live-platform acceptance.
 
-The guest uses nonblocking writes while pumping application streams and restores its owned pipe
+The guest uses non-blocking writes while pumping application streams and restores its owned pipe
 flags afterward. A partially written evidence frame gets at most 0.5 seconds to finish after the
 pump stops; failure aborts later control emission rather than corrupting framing or claiming
-completion. Existing post-exit pipe collection pauses for sink backpressure but does not wait
+completion. Existing post-exit pipe collection pauses for sink flow control but does not wait
 indefinitely for descendants to close their output. Local observation loss is not guest
 cancellation.
 
