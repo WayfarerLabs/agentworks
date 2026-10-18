@@ -61,6 +61,10 @@ machine, account SID, distribution GUID and installation directory. First import
 GUID only after the one successful start and matching fresh running evidence. Later native checks
 pin the four configuration inputs used for selection. Unsupported or unconfirmed driver selection
 refuses before invoking its inspector. Windows directory-handle coverage and this non-waking path
-still need native evidence. Lima WSL has no operation-length availability hold or independent-job
-hold yet; running observations alone do not prevent idle shutdown. Remote SSH-accessed platform-host
-composition remains unimplemented here.
+still need native evidence. Lima WSL retains the existing physical WSL hold for the operation after
+activation and registration adoption, before native delivery-user resolution or canonical guest
+preparation. Availability requires durable READY and live native ownership; the guest must match its
+boot/init identity. Cleanup retains that hold and directory custody through uncertainty and releases
+only after unrelated work settles. Native Windows/Lima proof remains open. This does not provide an
+independent-job hold; running observations alone do not prevent idle shutdown. Remote SSH-accessed
+platform-host composition remains unimplemented here.

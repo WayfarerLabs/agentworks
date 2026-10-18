@@ -208,13 +208,18 @@ WSL registration selection distinguishes absence from ambiguity and requires mat
 account SID, distribution name/GUID and installation directory. The existing activation owner may
 adopt a first import's new GUID only after successful natural client completion and matching fresh
 running evidence. Lost acknowledgment cannot authorize adoption or another start. These are local
-source and fixture proofs; native Windows evidence remains open. No operation-length Lima WSL hold
-or independent-job hold is implemented: running observations are not idle-stop prevention.
-Independent availability is not inferred from the Lima client: the current native binding supplies
-the no-idle-stop fact only for QEMU and VZ, never unknown or WSL drivers. Native Windows directory
-mapping, installed Lima behavior, driver/version coverage and remote placement-host composition
-remain required acceptance gates. Remote Lima is the first instance of generalized SSH access to a
-VM platform host; local implementation does not complete that arm or provision/rollback workflows.
+source and fixture proofs; native Windows evidence remains open. The private operation-length Lima
+WSL hold reuses the existing physical WSL owner after activation/registration adoption and before
+delivery-account lookup or canonical guest preparation. It requires durable READY and live native
+Job ownership, matches common guest boot/init observations, and retains exact hold/directory custody
+through uncertain startup or release. Unrelated obligations prevent release. Native Windows/Lima
+acceptance remains open, and no independent-job hold is implemented: running observations alone are
+not idle-stop prevention. Independent availability is not inferred from the Lima client: the current
+native binding supplies the no-idle-stop fact only for QEMU and VZ, never unknown or WSL drivers.
+Native Windows directory mapping, installed Lima behavior, driver/version coverage and remote
+placement-host composition remain required acceptance gates. Remote Lima is the first instance of
+generalized SSH access to a VM platform host; local implementation does not complete that arm or
+provision/rollback workflows.
 
 PTY is an I/O choice, not a background state. `attach(ref, terminal=...)` requires an attach grant
 and supported transport, and does not create a new run. A reusable detached terminal needs an owned

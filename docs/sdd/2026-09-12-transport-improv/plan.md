@@ -5868,6 +5868,16 @@ remain open.
       host-only running snapshots do not prevent idle shutdown. Independent-job hold adoption
       remains separately required before that lifetime can be exposed.
 
+Worker `36e487400` implements that private operation hold using the existing physical WSL owner,
+without changing lower WSL machinery or Lima's eventual delivery account. Durable READY and live
+native ownership precede user lookup and canonical preparation; guest boot/init checks and retained
+cleanup cover lost acknowledgments, unrelated debt and explicit release retries. It passes 234
+focused tests and strict typing across 1,513 sources. Two broader runs each return 1,817 passes, 12
+skips and one failure. A two-test diagnostic traces that failure to the existing port-forward
+command leaving its SIGINT handler installed, not to WSL hold behavior. A separate bounded
+restoration fix is in progress; combined validation, independent review and native Windows/Lima
+proof remain required. Independent-job survival and recovery remain separate gates.
+
 - [ ] Complete combined validation and independent review of the private Darwin buffered DIRECT
       helper (`c9bd8f1dd`), then obtain native macOS proof with the approved interpreter
       prerequisite. Preserve source/input separation, fixed fresh-exec identity and honest
