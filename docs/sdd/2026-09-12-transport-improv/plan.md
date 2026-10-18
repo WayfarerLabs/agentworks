@@ -4742,9 +4742,14 @@ derives setup for each selected effective UID. Snapshots, uploads, JSON, removal
 metadata effects retain one pending-to-bound row; local transfers reuse their original borrow and
 downloads admit before workstation writer creation. STAT, inventory and no-staging readiness stay
 non-creating. The developer's local checks pass 2,557 file cases with 25 skips, 1,303 VM adapter
-fixtures and 260 bounds/Python 3.11 cases. Independent combined review and lead composition checks
-are still pending. These are synthetic local results, not native delivery, managed-agent namespace
-lifecycle, predecessor settlement or complete recovery acceptance; the broader checkbox stays open.
+fixtures and 260 bounds/Python 3.11 cases. All three independent source-review lanes clear the
+private checkpoint at `72b940067`. The lead's combined selection passes 2,793 cases with 25 skips at
+`c4e0c916c`; the final cleanup-control correction and method simplification pass 280 focused cases,
+strict typing across 1,525 sources and file-quality checks. The correction preserves a cleanup
+interrupt over an earlier ordinary publication error without replacing an already recorded control
+or losing exact local-stage custody. These are synthetic local results, not native delivery,
+managed-agent namespace lifecycle, predecessor settlement or complete recovery acceptance; the
+broader checkbox stays open.
 
 The production artifact publisher currently preflights destinations, then retires and publishes
 members with a per-file ownership callback. Agent and workspace creation can call that publisher in
