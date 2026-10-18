@@ -505,6 +505,25 @@ same CA choice to platform API access and the new QGA connection; never reinterp
 for unmigrated calls, and the new binding rejects it with migration guidance. Loading the selected
 trust material belongs to delivery/readiness, not passive carrier or binding-value construction.
 
+### Host-local Lima delivery
+
+The independent local carrier invokes an explicit `limactl` executable and instance, with automatic
+start, reconnect, terminal UI and host-environment propagation disabled. Bootstrap delivery selects
+`/bin/bash` and `/` explicitly rather than inheriting the guest's default shell or a host directory.
+Lima's outer login startup hooks still run; the carrier does not promise to suppress them or infer
+application entry from client completion.
+
+Use a fixed non-login Bash trampoline to execute the literal prepared argv. A GNU `env --` prefix
+does not suffice: it still consumes assignment-looking operands. The trampoline's `exec -- "$@"`
+preserves those operands and option-looking executable names without another parser for workload
+source. This is bootstrap mechanics, separate from application-shell selection. Retain the original
+deadline and actual local process owner; never reconnect or replay an uncertain invocation.
+
+Only naturally observed zero client completion supplies a candidate outer command-chain completion.
+Nonzero status can also be a local Lima refusal, so preserve uncertainty and raw stream provenance.
+Account observation, provider selection, activation, placement-host SSH composition, provisioning
+and rollback remain required platform work; this carrier alone completes none of those gates.
+
 ## Filesystem and package layout
 
 These are proposed destination paths, not directories to create in this documentation revision. Use
