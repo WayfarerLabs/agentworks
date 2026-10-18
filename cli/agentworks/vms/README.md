@@ -42,6 +42,7 @@ directory identity before native delivery. Availability and native route selecti
 the latter pins the configured delivery user and driver. Startup is one-shot, with durable possible
 effect recorded before dispatch and exact running evidence required alongside successful client
 completion. Cleanup settles that request and local resources, not Lima's continuing VM runtime.
-Directory replacement checks do not promise uncopyable identity or automatic restore adoption.
-Windows directory-handle coverage, a non-waking power path for Lima's WSL driver and remote
-SSH-accessed platform-host composition still require their own native evidence and implementation.
+Directory replacement checks do not promise identity that cannot be copied or automatic restore
+adoption. Windows directory-handle coverage, a non-waking power path for Lima's WSL driver and
+remote SSH-accessed platform-host composition still require their own native evidence and
+implementation.

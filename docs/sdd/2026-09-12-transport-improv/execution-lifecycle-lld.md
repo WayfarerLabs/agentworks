@@ -163,7 +163,7 @@ composition can reuse availability and perform its own guest probe without nativ
 a preceding native guest probe. This staging is not a canonical-context implementation, native
 acceptance or general process-loss recovery.
 
-#### Local Lima composition
+### Local Lima composition
 
 Explicit local preparation pins the installed client and absolute Lima home. One bounded fixed
 `list --format=json --yq` projection observes the instance name, status, directory, driver,
@@ -175,11 +175,12 @@ directory-handle API and compare its full file ID with Python's path observation
 or privileged setup is needed.
 
 This detects ordinary directory replacement and same-name clones materialized in a new directory. It
-does not promise an uncopyable universal generation, engineered inode-reuse protection or automatic
-continuity after in-place restoration. Preserve the random guest marker and complete guest boot/init
-observation. Restore workflows must decide logical identity explicitly; ordinary access never
-repairs the marker. The [source audit](prior-art-research.md#lima-instance-generation-evidence)
-records the boundary and supporting sources.
+does not promise a universal generation that cannot be copied, engineered inode-reuse protection or
+automatic continuity after in-place restoration. Preserve the random guest marker and complete guest
+boot/init observation. Restore workflows must decide logical identity explicitly; ordinary access
+never repairs the marker. The
+[source audit](prior-art-research.md#lima-instance-generation-evidence) records the boundary and
+supporting sources.
 
 Availability retains one ordinary `limactl start` request when needed, registered durably before
 possible dispatch. Reconciliation requires successful natural client completion and fresh exact

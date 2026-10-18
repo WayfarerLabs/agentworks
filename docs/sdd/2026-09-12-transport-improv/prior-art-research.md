@@ -1382,11 +1382,11 @@ Sources:
 Decision: use a versioned local locator over site/placement, pinned absolute Lima home, instance and
 the actual directory device/inode. Hold the original directory and compare the named path around
 observations and before effects. This detects ordinary replacement and separately materialized
-same-name clones; it is not an uncopyable generation or protection against engineered inode reuse.
-In-place restore continuity requires explicit workflow disposition. The random guest marker and
-complete boot/init identity remain independent checks; ordinary access never resets the marker.
-Driver-specific source facts do not require a new minimum version, driver restriction, host nonce or
-privileged setup. Remote placement-host identity still needs its own composition and proof.
+same-name clones; it is not a generation that cannot be copied or protection against engineered
+inode reuse. In-place restore continuity requires explicit workflow disposition. The random guest
+marker and complete boot/init identity remain independent checks; ordinary access never resets the
+marker. Driver-specific source facts do not require a new minimum version, driver restriction, host
+nonce or privileged setup. Remote placement-host identity still needs its own composition and proof.
 
 Lima's [list implementation](https://github.com/lima-vm/lima/blob/v2.2.1/cmd/limactl/list.go)
 supports a fixed JSON projection through `--yq`. Retain selected identity, status, driver and
