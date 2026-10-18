@@ -662,7 +662,6 @@ class ExecutionOperation:
             )
 
     def _control_run(self, reference: JobRef, deadline: Deadline) -> ManagedOperationRun:
-        self._require_managed_target()
         repository, bootstrap, binding = self._managed_repository, self._bootstrap, self._native_binding
         if type(reference) is not JobRef or repository is None or bootstrap is None or binding is None:
             raise ValidationError("Managed control requires its bound operation")
@@ -733,7 +732,6 @@ class ExecutionOperation:
         self, expected_launch: bytes, deadline: Deadline, *, run: ManagedOperationRun | None = None
     ) -> ManagedStopOutcome:
         """Acquire ordinary lifetime custody; drain only an actual selected OP keeper."""
-        self._require_managed_target()
         binding, bootstrap = self._native_binding, self._bootstrap
         assert binding is not None and bootstrap is not None
         with self._admission_guard:
