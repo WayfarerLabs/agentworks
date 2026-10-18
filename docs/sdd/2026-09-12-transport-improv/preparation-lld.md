@@ -754,6 +754,75 @@ spool locally to avoid holding the selected bound during transfer, but construct
 `bytes` allocates at most that caller-selected amount. Workflows expecting unbounded data use
 FileAccess rather than stdout.
 
+#### DIRECT capture composition
+
+Use the existing bounded process capture first, then publish its retained bytes through the existing
+scratch primitive before emitting terminal helper evidence. The process pump already retains only
+the selected limit plus one byte while draining the rest. This avoids introducing a mutable,
+unknown-length scratch format: after child observation, each retained prefix has a known exact
+length and digest. Create its ordinary owned scratch object with that length, write bounded chunks
+and obtain the existing verified ready reference. The extra in-memory byte proves truncation and
+need not be stored. No padding to the caller's maximum, managed-run store, second process owner, or
+generic stream-storage framework is needed.
+
+Create these artifacts as the selected workload identity, not through an implicit administrative
+file authority. Reuse the core-selected scratch parent and the existing identity, type, link,
+receipt and whole-object checks. Fixed helper code chooses names from core-generated tokens;
+application source, arguments and file paths never choose them. Discarded or suppressed output
+creates no capture objects. The first bounded implementation may retain captured prefixes in helper
+memory until publication, as the existing inline helper does. This is bounded by the selected
+capture policy, not by provider output capacity. Streaming capture can replace that implementation
+later without changing the output or ownership contract.
+
+Publication failure after child observation is a separate normal outcome. This output mode emits one
+closed record per stream: either a ready reference bound to its retained-prefix facts, or an
+explicit unavailable-capture record with those facts and that token's creation disposition
+(`NOT_ENTERED` or `POSSIBLE`). Set `POSSIBLE` before entering scratch creation; only a creation
+never entered may report `NOT_ENTERED`. An unavailable record grants no ready reference, verified
+local bytes or complete public output. The mode's grammar accepts the actual wait after both
+records, then the ordinary failure and terminal records. Thus a handled create/write/verify failure
+can retain known application status instead of making scratch publication a prerequisite to
+reporting the child's wait. Preserve an earlier process failure; otherwise publication failure
+reports `OUTPUT`. Cleanup debt remains independent. If only one stream publishes, retain and
+retrieve its ready prefix without inventing the other stream's storage. Lost or interrupted terminal
+evidence still cannot establish application completion or a token's non-creation.
+
+The parent retains one exact cleanup binding for the two capture tokens before application dispatch.
+It includes the selected target/runtime/workload identity, not application bytes. Creation occurs
+inside the single fixed application helper, so the parent must also retain its actual delivery and
+closure until capture creation has stopped. A returned ready reference permits exact cleanup; a
+token by itself grants only the existing historical reconciliation path. Missing receipts remain
+uncertainty. A fixed helper may explicitly attest that a particular creation was never entered, but
+missing output or an unavailable reply is not such evidence. Keep this debt separate from helper
+custody and known application completion, using the same distinction as prepared-input cleanup.
+
+After ordinary admission stops, aggregate closing may reconcile and remove only these already-owned
+capture tokens; it cannot reopen an ordinary borrow or admit new work. Prepared-input and capture
+controllers retain their own exact row and protocol checks. They may share the small host-side
+mechanism for retaining and observing a closing helper's actual delivery, not a generic resource
+cleanup state machine. Aggregate cleanup must not enter another helper while an earlier closing
+helper retains unsettled custody. Artifact-only cleanup uncertainty remains separate and need not
+prevent other safe cleanup once actual helper closure is proved.
+
+Represent closed remote stream evidence separately from locally retrieved bytes. A nonce-bound
+capture reference must agree with its stream-end retained length, digest, retention and truncation
+facts. The observer must not require nonexistent inline data frames for that explicit output mode,
+nor weaken validation of the existing inline capture/delivery modes. A trusted terminal wait can
+establish application completion while capture retrieval is still incomplete. It cannot manufacture
+verified local bytes. Each bounded retrieval validates the exact ready object and range; the host
+checks ordering, coverage and the final retained length/digest before marking capture complete.
+Preserve verified prefixes and known status on later retrieval failure, with explicit incomplete
+output and the original failure precedence. Never patch bytes into an observation whose count/hash
+still describe different evidence.
+
+Select the fixed capture helper and validate complete activation/read envelopes before effects. Keep
+readiness on its small unstaged entry. Host observation, range retrieval and cleanup use the
+original selected deadline; expiry grants neither replay nor implicit guest cancellation. After that
+budget, retain exact cleanup custody for a separately admitted fresh cleanup continuation. The
+existing finite Linux VM input slice is the first composition target. Workload-identity scratch
+delivery, token cleanup/recovery, host/Darwin and live/unbounded combinations still require their
+own end-to-end proof before the production capture default or full surface is accepted.
+
 #### Closed MANAGED capture ranges
 
 Use the existing managed run store and observation owner for closed captures, not a second scratch

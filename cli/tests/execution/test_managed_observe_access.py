@@ -9,9 +9,10 @@ import pytest
 
 from agentworks.db import Database, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
-from agentworks.execution import _fixed_helper_operation as fixed_operation
+from agentworks.execution import _execution_operation as execution_module
 from agentworks.execution import _managed_observe_access as access
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
+from agentworks.execution._execution_operation import ExecutionOperation
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, encode_file_record
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
@@ -21,7 +22,7 @@ from agentworks.execution._managed_job_protocol import (
     encode_managed_job_fact,
 )
 from agentworks.execution._managed_job_store import FactName, Stream
-from agentworks.execution._managed_observation_exchange import ManagedObservationState
+from agentworks.execution._managed_observation_exchange import ManagedObservationCandidate, ManagedObservationState
 from agentworks.execution._managed_observation_protocol import ManagedResultControl
 from agentworks.execution._managed_observe_access import (
     ManagedObserveControlFact,
@@ -44,9 +45,10 @@ from agentworks.execution._managed_runs import (
     ManagedTargetIdentity,
     ManagedTargetKind,
 )
-from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS, _NumericGuestBootstrap
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
-from agentworks.execution.carrier import Deadline, Dispatch
+from agentworks.execution.binding import NativeExecutionBinding
+from agentworks.execution.carrier import Carrier, Deadline, Dispatch
 from agentworks.operations import OperationOwner
 
 from .test_managed_observation import ScriptedCarrier, _fact, _records
@@ -57,6 +59,7 @@ GUEST = VMGuestIdentity("d" * 32, "00000000-0000-4000-8000-000000000001", 1234)
 TARGET = ManagedTargetIdentity(ManagedTargetKind.VM, "vm-one", "v1:" + "c" * 64, vm_guest_boot_id(GUEST))
 ROOT_PLAN = IdentityPlan(IdentityExpectation(0, 0, (0,)), IdentityMode.SUDO_ROOT)
 RESOURCE_OWNER = ManagedRunOwner(ManagedRunOwnerKind.RESOURCE, "session-7")
+RUNTIME = RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
 
 
 def _reserved(
@@ -79,13 +82,13 @@ def _reserved(
     return database, repository, owner
 
 
-def _options(owner: OperationOwner, carrier: ScriptedCarrier, **changes: object) -> dict[str, object]:
+def _options(owner: OperationOwner, carrier: Carrier, **changes: object) -> dict[str, object]:
     options = {
         "target": TARGET,
         "guest": GUEST,
         "root_plan": ROOT_PLAN,
         "carrier": carrier,
-        "runtime_selection": RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+        "runtime_selection": RUNTIME,
         "deadline": Deadline.after(10),
         "owner": owner,
         "expected_resource_owner": RESOURCE_OWNER,
@@ -94,18 +97,63 @@ def _options(owner: OperationOwner, carrier: ScriptedCarrier, **changes: object)
     return options
 
 
-def _observe(repository: ManagedRunRepository, owner: OperationOwner, carrier: ScriptedCarrier, **changes: object):  # type: ignore[no-untyped-def]
-    return observe_bound_managed_run(repository, RUN, **_options(owner, carrier, **changes))  # type: ignore[arg-type]
+def _read_operation(
+    repository: ManagedRunRepository,
+    owner: OperationOwner,
+    carrier: Carrier,
+    *,
+    resource_owner: ManagedRunOwner | None = RESOURCE_OWNER,
+) -> ExecutionOperation:
+    return ExecutionOperation(
+        owner,
+        TARGET,
+        bootstrap=_NumericGuestBootstrap(ROOT_PLAN, GUEST),
+        managed_repository=repository,
+        native_binding=NativeExecutionBinding(carrier, "root", RUNTIME),
+        resource_owner=resource_owner,
+    )
+
+
+def _read_options(
+    owner: OperationOwner, carrier: Carrier, operation: ExecutionOperation, **changes: object
+) -> dict[str, object]:
+    options = _options(owner, carrier)
+    del options["expected_resource_owner"]
+    options["execution_operation"] = operation
+    options.update(changes)
+    return options
+
+
+def _observe(
+    repository: ManagedRunRepository,
+    owner: OperationOwner,
+    carrier: ScriptedCarrier,
+    operation: ExecutionOperation,
+    **changes: object,
+):  # type: ignore[no-untyped-def]
+    return observe_bound_managed_run(repository, RUN, **_read_options(owner, carrier, operation, **changes))  # type: ignore[arg-type]
 
 
 def _observe_and_reconcile(
-    repository: ManagedRunRepository, owner: OperationOwner, carrier: ScriptedCarrier, **changes: object
+    repository: ManagedRunRepository,
+    owner: OperationOwner,
+    carrier: ScriptedCarrier,
+    operation: ExecutionOperation,
+    **changes: object,
 ):  # type: ignore[no-untyped-def]
-    return observe_and_reconcile_bound_managed_run(repository, RUN, **_options(owner, carrier, **changes))  # type: ignore[arg-type]
+    return observe_and_reconcile_bound_managed_run(
+        repository, RUN, **_read_options(owner, carrier, operation, **changes)
+    )  # type: ignore[arg-type]
 
 
-def _read(repository: ManagedRunRepository, owner: OperationOwner, carrier: ScriptedCarrier, **changes: object):  # type: ignore[no-untyped-def]
-    options = _options(owner, carrier, stream=Stream.STDOUT, offset=0, count=262144)
+def _read(
+    repository: ManagedRunRepository,
+    owner: OperationOwner,
+    carrier: ScriptedCarrier,
+    operation: ExecutionOperation,
+    **changes: object,
+):  # type: ignore[no-untyped-def]
+    options = _read_options(owner, carrier, operation, stream=Stream.STDOUT, offset=0, count=262144)
     options.update(changes)
     return read_bound_managed_output(
         repository,
@@ -139,8 +187,9 @@ def test_observe_uses_exact_persisted_launch_and_does_not_change_row(tmp_path: P
         return _records(request.nonce, ManagedResultControl((FactName.LAUNCH,)), (request.expected_launch,))
 
     carrier = ScriptedCarrier(response)
+    operation = _read_operation(repository, owner, carrier)
     try:
-        outcome = _observe(repository, owner, carrier)
+        outcome = _observe(repository, owner, carrier, operation)
         assert outcome.candidate is not None
         assert outcome.candidate.observation is not None
         assert outcome.candidate.observation.state is ManagedObservationState.OBSERVED
@@ -165,8 +214,9 @@ def test_observe_and_reconcile_confirms_receipt_idempotently(tmp_path: Path) -> 
             (request.expected_launch, _fact(FactName.WAIT, request.expected_launch)),
         )
     )
+    operation = _read_operation(repository, owner, carrier)
     try:
-        outcome = _observe_and_reconcile(repository, owner, carrier)
+        outcome = _observe_and_reconcile(repository, owner, carrier, operation)
         confirmed = repository.inspect(RUN)
         assert confirmed is not None
         assert confirmed.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
@@ -175,14 +225,14 @@ def test_observe_and_reconcile_confirms_receipt_idempotently(tmp_path: Path) -> 
         assert outcome.candidate is not None and outcome.candidate.observation is not None
         assert outcome.candidate.observation.state is ManagedObservationState.OBSERVED
 
-        repeated_carrier = ScriptedCarrier(
-            lambda request: _records(
-                request.nonce, ManagedResultControl((FactName.LAUNCH,)), (request.expected_launch,)
-            )
+        carrier.response = lambda request: _records(
+            request.nonce, ManagedResultControl((FactName.LAUNCH,)), (request.expected_launch,)
         )
-        _observe_and_reconcile(repository, owner, repeated_carrier)
+        _observe_and_reconcile(repository, owner, carrier, operation)
         assert repository.inspect(RUN) == confirmed
-        assert repeated_carrier.calls == 1
+        assert carrier.calls == 2
+        assert operation.active_inline_calls == ()
+        assert len(owner.list_pending_lifecycle_obligations()) == 1
     finally:
         database.close()
 
@@ -218,8 +268,9 @@ def test_observe_and_reconcile_leaves_unconfirmed_evidence_unreconciled(tmp_path
         dispatch=Dispatch.UNKNOWN if case == "uncertain" else Dispatch.SENT,
         complete=case != "incomplete",
     )
+    operation = _read_operation(repository, owner, carrier)
     try:
-        outcome = _observe_and_reconcile(repository, owner, carrier)
+        outcome = _observe_and_reconcile(repository, owner, carrier, operation)
         assert outcome.candidate is not None and outcome.candidate.observation is not None
         expected = {
             "uncertain": ManagedObservationState.UNKNOWN,
@@ -246,16 +297,20 @@ def test_observe_and_reconcile_database_base_exception_preserves_custody_cause(
         lambda request: _records(request.nonce, ManagedResultControl((FactName.LAUNCH,)), (request.expected_launch,))
     )
     interrupted = KeyboardInterrupt("reconcile interrupted")
+    prior_cause = OSError("original reconciliation cause")
+    interrupted.__cause__ = prior_cause
 
     def fail_reconcile(*_args: object, **_kwargs: object) -> None:
         raise interrupted
 
     monkeypatch.setattr(repository, "reconcile", fail_reconcile)
+    operation = _read_operation(repository, owner, carrier)
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
-            _observe_and_reconcile(repository, owner, carrier)
+            _observe_and_reconcile(repository, owner, carrier, operation)
         assert raised.value is interrupted
         assert isinstance(raised.value.__cause__, ManagedObserveControlFact)
+        assert raised.value.__cause__.__cause__ is prior_cause
         assert raised.value.__cause__.outcome.candidate is not None
         assert carrier.calls == 1
         assert repository.inspect(RUN) == possible
@@ -279,9 +334,10 @@ def test_observe_and_reconcile_decode_interrupt_preserves_custody_cause(
         raise interrupted
 
     monkeypatch.setattr(access, "decode_managed_job_fact", interrupt_decode)
+    operation = _read_operation(repository, owner, carrier)
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
-            _observe_and_reconcile(repository, owner, carrier)
+            _observe_and_reconcile(repository, owner, carrier, operation)
         assert raised.value is interrupted
         assert isinstance(raised.value.__cause__, ManagedObserveControlFact)
         assert raised.value.__cause__.outcome.candidate is not None
@@ -301,6 +357,8 @@ def test_observe_and_reconcile_post_commit_interruption_retries_idempotently(
     repository.mark_possible_dispatch(reserved)
     original_reconcile = repository.reconcile
     interrupted = KeyboardInterrupt("after commit")
+    prior_cause = OSError("original commit cause")
+    interrupted.__cause__ = prior_cause
 
     def commit_then_interrupt(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
         original_reconcile(*args, **kwargs)  # type: ignore[arg-type]
@@ -310,24 +368,23 @@ def test_observe_and_reconcile_post_commit_interruption_retries_idempotently(
     first_carrier = ScriptedCarrier(
         lambda request: _records(request.nonce, ManagedResultControl((FactName.LAUNCH,)), (request.expected_launch,))
     )
+    operation = _read_operation(repository, owner, first_carrier)
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
-            _observe_and_reconcile(repository, owner, first_carrier)
+            _observe_and_reconcile(repository, owner, first_carrier, operation)
         assert raised.value is interrupted
         assert isinstance(raised.value.__cause__, ManagedObserveControlFact)
+        assert raised.value.__cause__.__cause__ is prior_cause
         committed = repository.inspect(RUN)
         assert committed is not None
         assert committed.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
 
         monkeypatch.setattr(repository, "reconcile", original_reconcile)
-        retry_carrier = ScriptedCarrier(
-            lambda request: _records(
-                request.nonce, ManagedResultControl((FactName.LAUNCH,)), (request.expected_launch,)
-            )
-        )
-        _observe_and_reconcile(repository, owner, retry_carrier)
+        _observe_and_reconcile(repository, owner, first_carrier, operation)
         assert repository.inspect(RUN) == committed
-        assert first_carrier.calls == retry_carrier.calls == 1
+        assert first_carrier.calls == 2
+        assert operation.active_inline_calls == ()
+        assert len(owner.list_pending_lifecycle_obligations()) == 1
     finally:
         database.close()
 
@@ -348,6 +405,7 @@ def test_refuses_wrong_row_or_target_before_borrow_and_carrier(
         return original_borrow()
 
     monkeypatch.setattr(owner, "borrow", borrow_spy)
+    operation = _read_operation(repository, owner, carrier)
     try:
         if case == "absent":
             repository._connection.execute("DELETE FROM execution_runs WHERE run_id = ?", (RUN.run_id,))  # noqa: SLF001
@@ -365,7 +423,7 @@ def test_refuses_wrong_row_or_target_before_borrow_and_carrier(
                 "UPDATE execution_runs SET target_kind = ? WHERE run_id = ?", ("platform-host", RUN.run_id)
             )
         with pytest.raises((ValidationError, StateError)):
-            _observe(repository, owner, carrier, **changes)
+            _observe(repository, owner, carrier, operation, **changes)
         assert carrier.calls == 0
         assert borrow_calls == 0
         assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
@@ -379,8 +437,9 @@ def test_ambiguous_dispatch_retains_owner_without_replay(tmp_path: Path) -> None
     database, repository, owner = _reserved(tmp_path)
     row = repository.inspect(RUN)
     carrier = ScriptedCarrier(lambda request: b"", dispatch=Dispatch.UNKNOWN, code=None)
+    operation = _read_operation(repository, owner, carrier)
     try:
-        outcome = _observe(repository, owner, carrier)
+        outcome = _observe(repository, owner, carrier, operation)
         assert outcome.candidate is not None
         assert outcome.pending_remote_effects
         assert outcome.requires_owner_retention
@@ -404,12 +463,13 @@ def test_carrier_base_exception_preserves_original_with_custody_fact(tmp_path: P
             raise interrupted
 
     carrier = InterruptedCarrier(lambda request: b"")
+    operation = _read_operation(repository, owner, carrier)
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
             if read:
-                _read(repository, owner, carrier)
+                _read(repository, owner, carrier, operation)
             else:
-                _observe(repository, owner, carrier)
+                _observe(repository, owner, carrier, operation)
         assert raised.value is interrupted
         assert isinstance(raised.value.__cause__, ManagedObserveControlFact)
         assert raised.value.__cause__.outcome.requires_owner_retention
@@ -434,26 +494,38 @@ def test_release_base_exception_preserves_original_with_custody_fact(
             else _records(request.nonce, ManagedResultControl((FactName.LAUNCH,)), (request.expected_launch,))
         )
     )
+    released: list[ManagedObservationCandidate] = []
 
     def fail_release(*_args: object, **_kwargs: object) -> None:
+        (active,) = operation.active_inline_calls
+        assert isinstance(active.candidate, ManagedObservationCandidate)
+        released.append(active.candidate)
         raise interrupted
 
-    monkeypatch.setattr(fixed_operation, "release_borrow_after_custody", fail_release)
+    monkeypatch.setattr(execution_module, "release_borrow_after_custody", fail_release)
+    operation = _read_operation(repository, owner, carrier)
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
             if read:
-                _read(repository, owner, carrier)
+                _read(repository, owner, carrier, operation)
             else:
-                _observe(repository, owner, carrier)
+                _observe(repository, owner, carrier, operation)
         assert raised.value is interrupted
         assert isinstance(interrupted.__cause__, ManagedObserveControlFact)
-        assert interrupted.__cause__.outcome.candidate is not None
+        (active,) = operation.active_inline_calls
+        assert active.bookkeeping_retained and not active.borrow.closed
+        assert isinstance(active.candidate, ManagedObservationCandidate)
+        assert active.candidate.dispatch is Dispatch.SENT
+        assert active.candidate.observation is None
+        assert active.prepared is None
         if read:
-            observation = interrupted.__cause__.outcome.candidate.observation
+            assert len(released) == 1
+            observation = released[0].observation
             assert observation is not None
             assert observation.state is ManagedObservationState.AVAILABLE
             assert observation.output is None
             assert secret not in repr(interrupted.__cause__.outcome).encode()
+            assert secret not in repr(active).encode()
         assert interrupted.__cause__.outcome.coordination_uncertain
         assert interrupted.__cause__.outcome.requires_owner_retention
         assert carrier.calls == 1
@@ -475,8 +547,9 @@ def test_read_admits_exact_captured_prefix_under_persisted_bound(
     database, repository, owner = _reserved(tmp_path, ManagedOutputPolicy(ManagedOutputMode.CAPTURE, 3))
     row = repository.inspect(RUN)
     carrier = ScriptedCarrier(lambda request: _output_reply(request, disposition=wire_disposition, content=b"q!z"))
+    operation = _read_operation(repository, owner, carrier)
     try:
-        outcome = _read(repository, owner, carrier, stream=stream)
+        outcome = _read(repository, owner, carrier, operation, stream=stream)
         assert outcome.accepted and outcome.disposition is expected
         assert outcome.output == b"q!z"
         assert outcome.attempt.candidate is not None
@@ -494,8 +567,9 @@ def test_read_admits_exact_captured_prefix_under_persisted_bound(
 def test_read_rejects_capture_over_persisted_bound_without_exposing_raw_bytes(tmp_path: Path) -> None:
     database, repository, owner = _reserved(tmp_path, ManagedOutputPolicy(ManagedOutputMode.CAPTURE, 2))
     carrier = ScriptedCarrier(lambda request: _output_reply(request, disposition="truncated-capture", content=b"abc"))
+    operation = _read_operation(repository, owner, carrier)
     try:
-        outcome = _read(repository, owner, carrier)
+        outcome = _read(repository, owner, carrier, operation)
         assert not outcome.accepted and outcome.disposition is None and outcome.output is None
         assert outcome.attempt.candidate is not None
         assert outcome.attempt.candidate.observation is not None
@@ -520,8 +594,9 @@ def test_read_admits_only_matching_non_capture_policy(
 ) -> None:
     database, repository, owner = _reserved(tmp_path, ManagedOutputPolicy(mode))
     carrier = ScriptedCarrier(lambda request: _output_reply(request, disposition=wire_disposition))
+    operation = _read_operation(repository, owner, carrier)
     try:
-        outcome = _read(repository, owner, carrier)
+        outcome = _read(repository, owner, carrier, operation)
         assert outcome.accepted is (expected is not None)
         assert outcome.disposition is expected and outcome.output is None
         assert outcome.attempt.candidate is not None
@@ -550,8 +625,9 @@ def test_read_never_admits_missing_or_mismatched_evidence(tmp_path: Path, fault:
         return _output_reply(request, disposition="complete-capture", content=b"abc", delivered=b"abd")
 
     carrier = ScriptedCarrier(response)
+    operation = _read_operation(repository, owner, carrier)
     try:
-        outcome = _read(repository, owner, carrier)
+        outcome = _read(repository, owner, carrier, operation)
         assert not outcome.accepted and outcome.disposition is None and outcome.output is None
         assert outcome.attempt.candidate is not None
         assert outcome.attempt.candidate.observation is not None
@@ -581,9 +657,10 @@ def test_read_refuses_before_borrow_and_carrier(tmp_path: Path, case: str, monke
         changes["target"] = replace(TARGET, incarnation="v1:" + "b" * 64)
     else:
         repository._connection.execute("DELETE FROM execution_runs WHERE run_id = ?", (RUN.run_id,))  # noqa: SLF001
+    operation = _read_operation(repository, owner, carrier)
     try:
         with pytest.raises(ValidationError):
-            _read(repository, owner, carrier, **changes)
+            _read(repository, owner, carrier, operation, **changes)
         assert calls == 0 and carrier.calls == 0
         assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
     finally:
@@ -598,8 +675,9 @@ def test_read_ambiguous_dispatch_retains_custody_and_does_not_admit_output(tmp_p
         dispatch=Dispatch.UNKNOWN,
         code=None,
     )
+    operation = _read_operation(repository, owner, carrier)
     try:
-        outcome = _read(repository, owner, carrier)
+        outcome = _read(repository, owner, carrier, operation)
         assert not outcome.accepted and outcome.output is None
         assert outcome.attempt.pending_remote_effects and outcome.attempt.requires_owner_retention
         assert carrier.calls == 1 and repository.inspect(RUN) == row
@@ -621,9 +699,10 @@ def test_read_reducer_base_exception_preserves_original_with_sanitized_custody(
         raise interrupted
 
     monkeypatch.setattr(access, "_admit_output", fail_reducer)
+    operation = _read_operation(repository, owner, carrier)
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
-            _read(repository, owner, carrier)
+            _read(repository, owner, carrier, operation)
         assert raised.value is interrupted
         assert isinstance(interrupted.__cause__, ManagedObserveControlFact)
         attempt = interrupted.__cause__.outcome

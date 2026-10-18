@@ -18,7 +18,7 @@ from agentworks.execution._managed_runs import ManagedLaunchState
 from .test_managed_disposal import ExchangeCarrier, _disposed
 from .test_managed_disposal_access import _not_ready
 from .test_managed_observation import ScriptedCarrier, _records
-from .test_managed_observe_access import RUN, _options, _output_reply, _reserved
+from .test_managed_observe_access import RUN, _options, _output_reply, _read_operation, _read_options, _reserved
 from .test_managed_result import _reply as _result_reply
 
 
@@ -37,10 +37,12 @@ def test_possible_dispatch_receipt_reconnects_without_relaunch(tmp_path: Path) -
                 (request.expected_launch,),
             )
         )
+        operation = _read_operation(repository, owner, observe_carrier)
+        options = _read_options(owner, observe_carrier, operation)
         observed = observe_and_reconcile_bound_managed_run(
             repository,
             RUN,
-            **_options(owner, observe_carrier),  # type: ignore[arg-type]
+            **options,  # type: ignore[arg-type]
         )
         assert observed.candidate is not None
         assert not observed.requires_owner_retention
@@ -52,32 +54,31 @@ def test_possible_dispatch_receipt_reconnects_without_relaunch(tmp_path: Path) -
         repeated = observe_and_reconcile_bound_managed_run(
             repository,
             RUN,
-            **_options(owner, observe_carrier),  # type: ignore[arg-type]
+            **options,  # type: ignore[arg-type]
         )
         assert repeated.candidate is not None
         assert repository.inspect(RUN) == confirmed
         assert observe_carrier.calls == 2
 
-        result_carrier = ScriptedCarrier(_result_reply)
+        observe_carrier.response = _result_reply
         collected = collect_bound_managed_result(
             repository,
             RUN,
-            **_options(owner, result_carrier),  # type: ignore[arg-type]
+            **options,  # type: ignore[arg-type]
         )
         assert collected.result.ok
         assert not collected.requires_owner_retention
-        assert result_carrier.calls == 3
+        assert observe_carrier.calls == 5
         assert repository.inspect(RUN) == confirmed
 
-        output_carrier = ScriptedCarrier(
-            lambda request: _output_reply(request, disposition="complete-capture", content=b"ok")
-        )
+        observe_carrier.response = lambda request: _output_reply(request, disposition="complete-capture", content=b"ok")
         output = read_bound_managed_output(
             repository,
             RUN,
             offset=0,
             count=262144,
-            **_options(owner, output_carrier, stream=Stream.STDOUT),  # type: ignore[arg-type]
+            stream=Stream.STDOUT,
+            **options,  # type: ignore[arg-type]
         )
         assert output.accepted
         assert output.output == b"ok"
@@ -86,11 +87,14 @@ def test_possible_dispatch_receipt_reconnects_without_relaunch(tmp_path: Path) -
             RUN,
             offset=0,
             count=262144,
-            **_options(owner, output_carrier, stream=Stream.STDERR),  # type: ignore[arg-type]
+            stream=Stream.STDERR,
+            **options,  # type: ignore[arg-type]
         )
         assert stderr.accepted
         assert stderr.output == b"ok"
-        assert output_carrier.calls == 2
+        assert observe_carrier.calls == 7
+        assert [row.obligation_kind for row in owner.list_pending_lifecycle_obligations()] == ["carrier-dispatch"]
+        operation.finish()
 
         disposal_carrier = ExchangeCarrier(_not_ready)
         not_ready = dispose_bound_managed_run(
@@ -109,6 +113,6 @@ def test_possible_dispatch_receipt_reconnects_without_relaunch(tmp_path: Path) -
         )
         assert disposed.state is DisposalState.DISPOSED
         assert repository.inspect(RUN) == confirmed
-        assert (observe_carrier.calls, disposal_carrier.calls, disposed_carrier.calls) == (2, 1, 1)
+        assert (observe_carrier.calls, disposal_carrier.calls, disposed_carrier.calls) == (7, 1, 1)
     finally:
         database.close()

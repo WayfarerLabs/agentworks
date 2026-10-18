@@ -128,29 +128,24 @@ def preflight_bound_read(
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
-    expected_resource_owner: ManagedRunOwner | None = None,
-    execution_operation: ExecutionOperation | None = None,
+    execution_operation: ExecutionOperation,
 ) -> tuple[ManagedRunRecord, bytes]:
     """Admit reads only through retained OP or constructor-bound RESOURCE authority."""
-    if execution_operation is not None:
-        if expected_resource_owner is not None:
-            raise ValidationError("Managed operation access cannot use a resource-owner binding")
-        if type(deadline) is not Deadline or deadline.expires_at is None:
-            raise ValidationError("Managed access requires a finite deadline")
-        if deadline.expired:
-            raise ManagedDeadlineExpired("Managed access deadline expired before admission")
-        admission = execution_operation.require_managed_access(
-            identity,
-            repository=repository,
-            owner=owner,
-            target=target,
-            guest=guest,
-            root_plan=root_plan,
-            runtime_selection=runtime_selection,
-        )
-        if not isinstance(admission, ManagedRunOwner):
-            return _inspect_operation_run(repository, identity, admission)
-        expected_resource_owner = admission
+    if type(deadline) is not Deadline or deadline.expires_at is None:
+        raise ValidationError("Managed access requires a finite deadline")
+    if deadline.expired:
+        raise ManagedDeadlineExpired("Managed access deadline expired before admission")
+    admission = execution_operation.require_managed_access(
+        identity,
+        repository=repository,
+        owner=owner,
+        target=target,
+        guest=guest,
+        root_plan=root_plan,
+        runtime_selection=runtime_selection,
+    )
+    if not isinstance(admission, ManagedRunOwner):
+        return _inspect_operation_run(repository, identity, admission)
     return preflight_bound_run(
         repository,
         identity,
@@ -160,5 +155,5 @@ def preflight_bound_read(
         runtime_selection=runtime_selection,
         deadline=deadline,
         owner=owner,
-        expected_resource_owner=expected_resource_owner,
+        expected_resource_owner=admission,
     )
