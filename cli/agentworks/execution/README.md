@@ -270,15 +270,28 @@ do not establish all-platform duration availability, session namespaces or a pub
 surface.
 
 The private native composition acquires the exact VM owner and validates the selection, then retains
-the passive `VMPlatform.build_native_execution_access()` result before its first
-`OwnedNativePlatformAccess.observe_power(deadline)` read. The same access, owner, local custody and
-original deadline cover that read and subsequent preparation. Unsupported state, expired observation
-or operator-stopped intent refuses preparation without activation, holds, routes or guest work.
-Initial read failures retain the same access for cleanup and, when retirement is uncertain, cleanup
-retry. The access also keeps platform activation, hold and partial preparation evidence; only core
-closes child work and local delivery, checks the complete ledger, seals obligations and releases the
-aggregate owner. WSL2, Proxmox, AWS, Azure and GCP supply private owned access adapters. Complete
-platform coverage, native acceptance and the public RunContext surface remain pending.
+the passive `VMPlatform.build_native_execution_access()` result before its optional pure
+`native_configuration_check` and first `observe_power(deadline)` read. Native configuration refusal
+still precedes provider reads or activation. The same access, owner, local custody and original
+deadline cover that read and subsequent preparation. Unsupported state, expired observation or
+operator-stopped intent refuses preparation without activation, holds, routes or guest work.
+
+`ensure_available(power, deadline)` retains platform activation/holds and returns the selected
+provider locator independently of native delivery. `prepare_native_route(deadline)` then selects the
+native binding and any route exposure. Core owns the shared guest preparation and its partial
+control facts before invoking an optional platform `guest_check`. WSL2 compares that guest against
+its retained hold's durable READY; it does not replace the physical hold with bookkeeping. GCP
+availability requires provider identity/power, not a public NAT endpoint. Proxmox activation,
+guest-agent readiness and QGA binding reuse the selected API connection, while fresh platform
+observers retain their existing separate read custody.
+
+Initial failures retain the same access for cleanup and, when retirement is uncertain, cleanup
+retry. The access keeps platform activation and hold custody; core retains shared guest/account
+preparation, closes child work and local delivery, checks the complete ledger, seals obligations and
+releases the aggregate owner. WSL2, Proxmox, AWS, Azure and GCP supply these private stages. They
+allow later canonical SSH composition to reuse availability without opening native public ingress or
+first probing through native guest delivery; a canonical context entry point is not yet implemented.
+Complete platform coverage, native acceptance and the public RunContext surface remain pending.
 
 `plugins/aws/_native_access.py` supplies private, passive `EC2OwnedAccess` for exact power, locator
 and public-endpoint observations and the AWS owned native access factory. The caller retains it

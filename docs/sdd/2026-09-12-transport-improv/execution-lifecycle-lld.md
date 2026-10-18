@@ -152,6 +152,17 @@ The shared native-operation gate admits only the typed stable states `RUNNING`, 
 and passes the original observed state unchanged; the adapter owns its concrete activation. This
 gate does not supply a missing platform adapter or prove native availability by itself.
 
+The private access implementation separates availability from native route preparation. Core retains
+the access before its optional pure native-configuration check, preserves early refusal before
+provider effects, observes power and enforces stopped intent. `ensure_available` returns the
+selected provider locator while retaining activation/hold custody; `prepare_native_route` selects
+the native binding and any native route exposure. Shared guest preparation and partial control facts
+belong to the core workflow before optional platform guest validation. WSL2 compares the result
+against its retained physical hold READY. Native calls retain this ordering; later canonical
+composition can reuse availability and perform its own guest probe without native public ingress or
+a preceding native guest probe. This staging is not a canonical-context implementation, native
+acceptance or general process-loss recovery.
+
 PTY is an I/O choice, not a background state. `attach(ref, terminal=...)` requires an attach grant
 and supported transport, and does not create a new run. A reusable detached terminal needs an owned
 terminal endpoint such as the session's tmux server; ordinary inherited pipes are not durable.

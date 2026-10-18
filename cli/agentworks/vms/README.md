@@ -21,3 +21,18 @@ independent-job availability fact in both passive resolution and owned preparati
 helper defaults to no guarantee; SSH connectivity alone says nothing about platform availability.
 This fact excludes explicit VM stop, reboot, host loss and external policy. Route activation,
 delivery custody and native lifecycle ownership belong to the caller.
+
+## Owned availability and native preparation
+
+The private native operation retains one platform access before any effect. An optional pure native
+configuration check rejects missing route inputs before provider reads, followed by bounded power
+observation and the core operator-stopped decision. `ensure_available` owns activation or the real
+platform hold and selects a provider locator without requiring native delivery. Native route
+preparation follows explicitly, including public endpoint and ingress work where needed.
+
+Core then retains the shared guest preparation and its escaping control facts before constructing
+account/file/execution views. A platform can check the observed guest against its availability
+evidence; WSL2 uses its actual hold READY. Aggregate teardown retains the original access and shared
+preparation until their effects and local custody settle. Neither a route switch nor an accessor can
+transfer or finalize that ownership. Canonical-context and creation/rollback integration remain
+separate unfinished work; existing consumers are unchanged.
