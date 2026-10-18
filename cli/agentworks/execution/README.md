@@ -1583,9 +1583,11 @@ continues to suppress sensitive reflected output by default. Delivery results co
 bytes, and the attempt releases borrowed endpoints and pending presentation on exit.
 
 Unsupported carrier I/O refuses through pure validation before operation borrowing. The current
-private `start` and MANAGED paths reject live endpoints rather than silently substituting capture or
-DIRECT execution. This candidate is not wired to production RunContext and does not yet supply
-staging, MANAGED live I/O, active managed output, terminal I/O or native live-platform acceptance.
+private `start` and INDEPENDENT lifetime reject borrowed live endpoints. OPERATION MANAGED `run`
+uses the separate supervised pipe path described above, without substituting capture or DIRECT
+execution. Inline preparation itself allocates neither a supervisor nor a terminal. Production
+RunContext, active managed output, terminal launch/attachment, production transfer limits and native
+live-platform acceptance remain incomplete.
 
 Finite and live pipe input offer bytes without requiring the consumer to read them all. Positively
 observed child exit or a broken input pipe stops borrowing the source, drops pending input, and

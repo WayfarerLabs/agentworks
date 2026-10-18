@@ -5592,7 +5592,7 @@ from older carried fixtures already corrected in SSH's current head, not new #83
 joint exact-head validation remains required after composition, along with the native and
 complete-surface gates.
 
-- [ ] Bind the owning operation's copied, immutable final environment and sensitivity provenance to
+- [x] Bind the owning operation's copied, immutable final environment and sensitivity provenance to
       execution views. Preserve core-protected values under per-call overrides and passive
       `with_env` derivation, retain the exact identity/carrier/owner/deadline and combine
       sensitivity monotonically across DIRECT/MANAGED and both lifetimes. Resolve no config or
@@ -5603,9 +5603,14 @@ complete-surface gates.
 The private bound-environment worker implements that shape with one immutable copied value and
 `ExecutionAccess.with_env`, without a resolver, namespace-specific permission service or new carrier
 contract. Its 59 focused and 433 adjacent cases pass, including actual DIRECT/managed preparation,
-protected collisions, inherited sensitivity and explicit live presentation. Root integration and
-independent review remain pending; these worker results do not close production context or
-complete-surface acceptance.
+protected collisions, inherited sensitivity and explicit live presentation. Root composition at
+`ec34ca120` passes 3,609 cases with 25 skips, strict typing across 1,492 sources and changed-file
+quality checks. Project (Astra), complexity and generic correctness source reviews clear the
+environment, audit, fixture and package-marker unit. A pre-existing README paragraph incorrectly
+claimed all MANAGED paths reject live endpoints; its correction distinguishes inline preparation
+from OPERATION managed pipe execution. These results close the private environment-view increment,
+not production context population, native acceptance or the complete-surface gate. The full joint
+non-integration suite must still be rerun after its disclosed fixture/composition corrections.
 
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
 one all-callers cutover. PR #830 publishes this design only. The following implementation PR adds
