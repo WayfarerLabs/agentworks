@@ -5373,6 +5373,12 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
       Prove bounded admission, independent directions, lease/stop progress under backpressure, no
       retained live output, exact socket disposal and actual presentation in the foreground result.
       Local proof must not substitute for native root/cgroup/SSH acceptance.
+- [ ] Connect the planned chunked helper/request staging before public managed acceptance. Preserve
+      the existing Proxmox 65,536-byte whole-POST floor and its 10,000-byte stdin regression test.
+      Expanded inline helper source already exceeds that envelope in the local constructor proof;
+      lowering the fixture, increasing the provider ceiling or merely rejecting required large
+      inputs would not complete this work. Reuse operation-owned scratch transfer, exact
+      range/whole-object verification and attributable cleanup for helper code and payloads.
 
 The private pipe checkpoint at `6b8fe8128` passes 1,318 scoped tests with one skip and strict typing
 across 1,442 sources. Changed-file Python and Markdown quality checks pass. Project, complexity and

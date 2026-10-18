@@ -71,7 +71,15 @@ the caller's deadline.
 
 The fixed foreground relay revalidates root/helper identity, guest incarnation, the exact protected
 launch and request directions before connecting. Its own bounded control envelope is read exactly
-before any live stdin suffix. The connection sends exactly the canonical 43-byte handshake:
+before any live stdin suffix. The envelope also carries the original managed call's remaining finite
+observation allowance as a positive bounded integer number of nanoseconds. Preparation samples it
+after settled start, not from a fresh timeout. The guest applies one monotonic expiry through
+connection, handshake and pumping, including every selector wait. This prevents a root relay with
+blocked stdout from surviving indefinitely after controller closure. It neither cancels the job nor
+synchronizes workstation and guest clocks: the host retains its original deadline and any uncertain
+helper custody until positive closure. Unbounded DIRECT execution is unchanged.
+
+The connection sends exactly the canonical 43-byte handshake:
 
 ```text
 AGWL1 <32-lowercase-hex-nonce> <0-or-1-input> <0-or-1-output>\n
@@ -102,7 +110,10 @@ Every socket, workload pipe and framing operation is non-blocking. Retain at mos
 chunk and one unfinished output frame. A full presentation queue stops further output reads, not
 lease checks, exact child observation or cgroup cleanup. Control frames also need non-blocking
 writes; the existing blocking `FrameWriter.emit` cannot simply be inserted into the controller loop.
-Retired descriptors leave the selector so its completion condition remains valid.
+Alternate the preferred ready output stream after each queued data frame rather than depending on
+descriptor registration or kernel readiness ordering. A continuously readable stdout must not starve
+a stderr producer needed for exit. Retired descriptors leave the selector so its completion
+condition remains valid.
 
 Input EOF half-closes only that direction. Finite-input/live-output work does not stop when relay
 input ends. Workload input closure or observed child exit stops offering input and propagates
