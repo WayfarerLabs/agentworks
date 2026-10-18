@@ -163,9 +163,13 @@ def sdk(tmp_path, monkeypatch):
             response.request, response.url, response.status_code = request, request.url, 200
             response.raw = HTTPResponse(body=io.BytesIO(b"{}"), preload_content=False)
             return response
-        expected = "https://compute.googleapis.com/compute/v1/projects/project/zones/us-central1-a/instances/"
-        expected += f"backend/start?requestId={p.adapter.payload.request_id}"
-        assert request.method == "POST" and request.url == expected
+        base = "https://compute.googleapis.com/compute/v1/projects/project/zones/us-central1-a"
+        expected = (
+            f"{base}/instances/backend/start?requestId={p.adapter.payload.request_id}"
+            if request.method == "POST"
+            else f"{base}/operations/Operation_1"
+        )
+        assert request.method in ("POST", "GET") and request.url == expected
         assert request.body is None and request.headers["Accept-Encoding"] == "identity"
         if isinstance(p.credential, service_account.Credentials):
             assert p.credential.token is not None
@@ -206,7 +210,7 @@ def sdk(tmp_path, monkeypatch):
             ProviderLocator("gcp-gce:project:us-central1-a:123"),
         )
         yield p
-        assert len(p.service_calls) <= 1
+        assert sum(method == "POST" for method, _ in p.service_calls) <= 1
         assert all(response.raw.closed or p.adapter._response is response for response in p.responses)
         assert not p.adapter._lock.locked()
         # Teardown does not retry uncertain originals or trigger Request.__del__ on them.
@@ -217,8 +221,10 @@ def sdk(tmp_path, monkeypatch):
             p.auth.close(Deadline.after(5))
         print(
             "dispatch accounting:",
-            len(p.service_calls),
-            "service POST, 0 service GET;",
+            sum(method == "POST" for method, _ in p.service_calls),
+            "service POST;",
+            sum(method == "GET" for method, _ in p.service_calls),
+            "service GET;",
             len(p.credential_calls),
             "credential-provider POST; retained:",
             p.adapter.cleanup_incomplete,
@@ -411,7 +417,7 @@ def test_cleanup_boundaries_keep_primary_custody_and_release_lock(sdk, monkeypat
         return result
 
     monkeypatch.setattr(OperationOwner, "inspect_lifecycle_obligation", publication)
-    source, first = inspect.getsourcelines(GCEActivation.start)
+    source, first = inspect.getsourcelines(GCEActivation._request)
     entry = (
         next(
             node.finalbody[0].lineno
@@ -430,7 +436,9 @@ def test_cleanup_boundaries_keep_primary_custody_and_release_lock(sdk, monkeypat
 
     def interrupt(frame, event, arg):
         if event == "line" and not fired:
-            eligible = boundary == "entry" and frame.f_code is GCEActivation.start.__code__ and frame.f_lineno == entry
+            eligible = (
+                boundary == "entry" and frame.f_code is GCEActivation._request.__code__ and frame.f_lineno == entry
+            )
             if frame.f_code is GCEActivation._close_handles.__code__:
                 handle = frame.f_locals.get("handle")
                 eligible |= boundary == "before-close" and handle is sdk.responses[0] and "response" not in sdk.closes
@@ -515,7 +523,7 @@ def test_interrupt_after_retained_original_has_matched_control(sdk, handle, inje
                 and frame.f_locals.get("self") is adapter._auth._request
                 and adapter._auth._request.session is not None
                 or handle == "service"
-                and frame.f_code is GCEActivation.start.__code__
+                and frame.f_code is GCEActivation._request.__code__
                 and adapter._service_session is not None
                 and not sdk.service_calls
                 or handle == "response"
