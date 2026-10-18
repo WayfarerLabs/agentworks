@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from threading import TIMEOUT_MAX, Lock
 from typing import TYPE_CHECKING, Any
@@ -72,7 +73,6 @@ class EC2OwnedAccess:
         self._used = False
         self._running: tuple[ProviderLocator, dict[str, Any]] | None = None
         self._resolving_start = False
-        self._operation_deadline: Deadline | None = None
         self._settled = False
 
     @property
@@ -92,7 +92,6 @@ class EC2OwnedAccess:
         ):
             raise StateError("EC2 native preparation cannot be admitted")
         self._used = True
-        self._operation_deadline = deadline
         settings = require_ssh_settings(self._vm, self._ctx, self._ctx.config)
         locator, instance = self._read_exact_instance(deadline)
         self._locator = locator
@@ -111,8 +110,11 @@ class EC2OwnedAccess:
                 role_auth=self._role_auth,
             )
             self._active_transition(self._activation.start, deadline)
-            if not self._complete_start(deadline):
-                raise StateError("EC2 startup has no exact acknowledged running observation")
+            while not self._complete_start(deadline):
+                # Only supported transitional states reach this foreground pause.
+                remaining = provider_locator_remaining(deadline, vm_name=self._vm.name)
+                time.sleep(min(0.25, remaining))
+                provider_locator_remaining(deadline, vm_name=self._vm.name)
         # A separate fresh endpoint read follows startup, even when it was already running.
         locator, instance = self._read_exact_instance(deadline)
         if locator != self._locator:
@@ -192,7 +194,10 @@ class EC2OwnedAccess:
                 return False
             locator, instance = self._read_exact_instance(deadline)
             state = instance.get("State")
-            if locator != self._locator or type(state) is not dict or state.get("Name") != "running":
+            name = state.get("Name") if type(state) is dict else None
+            if locator != self._locator or type(name) is not str or name not in ("running", "pending", "stopped"):
+                raise StateError("EC2 startup observation is unknown or invalid")
+            if name != "running":
                 return False
             # Keep the timely exact evidence before a possibly lost resolution reply.
             self._running = locator, instance
@@ -258,12 +263,9 @@ class EC2OwnedAccess:
         if self._route is not None:
             settled = self._active_transition(self._route.settle, deadline) and settled
         if self._activation is not None:
-            assert self._operation_deadline is not None
-            if not self._resolving_start and self._operation_deadline.expired:
-                return False
-            settled = (
-                self._complete_start(self._operation_deadline if not self._resolving_start else deadline) and settled
-            )
+            # Cleanup can observe existing startup under its own finite budget.
+            # It never re-enters preparation or admits another start request.
+            settled = self._complete_start(deadline) and settled
         if settled:
             self._settled = self.close(deadline)
             return self._settled

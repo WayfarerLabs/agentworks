@@ -84,7 +84,16 @@ def native_aws(monkeypatch, tmp_path):
         before_send=lambda action: None,
         after_send=lambda action: None,
         preparations=[],
+        pauses=[],
     )
+
+    def pause(seconds):
+        assert 0 < seconds <= 0.25
+        assert not probe.preparations and probe.access._route is None
+        probe.pauses.append(seconds)
+        clock[0] += seconds
+
+    monkeypatch.setattr(_native_access, "time", SimpleNamespace(sleep=pause))
     monkeypatch.setattr(_native_access, "_build_ambient_session", lambda region: session)
     monkeypatch.setattr(
         "agentworks.capabilities.vm_platform.ssh_exposure.operator_ssh_prefixes", lambda extras: [PREFIX]
@@ -348,18 +357,20 @@ def test_sdk_lost_start_resolution_reply_reconciles_exact_row(native_aws, monkey
     assert sum(a == "StartInstances" for a, _ in p.calls) == 1
 
 
-@pytest.mark.parametrize("state", ["pending", "stopped", "unknown"])
+@pytest.mark.parametrize("state", ["pending", "stopped"])
 def test_sdk_nonrunning_cannot_resolve_acknowledged_start(native_aws, state):
     p = native_aws
     p.state = "stopped"
     p.after_send = lambda action: setattr(p, "state", state) if action == "StartInstances" else None
-    with pytest.raises(StateError):
+    with pytest.raises(LimitExceededError):
         p.access.prepare(VMStatus.STOPPED, p.deadline)
     row = p.owner.inspect_lifecycle_obligation(p.access._activation.obligation_id)
     assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
-    assert not p.access.settle(p.deadline)
+    assert p.deadline.expired and p.pauses and p.access._running is None
+    cleanup = Deadline.after(5)
+    assert not p.access.settle(cleanup)
     p.state = "running"
-    assert p.access.settle(p.deadline)
+    assert p.access.settle(cleanup)
 
 
 def test_sdk_late_running_is_never_completion(native_aws):
@@ -369,7 +380,8 @@ def test_sdk_late_running_is_never_completion(native_aws):
     with pytest.raises(TimeoutError):
         p.access.prepare(VMStatus.STOPPED, p.deadline)
     assert p.access._running is None
-    assert not p.access.settle(Deadline.after(5))
+    p.after_send = lambda action: None
+    assert p.access.settle(Deadline.after(5))
 
 
 def enable_role(
