@@ -28,7 +28,9 @@ def lima_native_binding(selected: LimaSelection) -> NativeExecutionBinding:
         RuntimeSelection(RuntimeTargetOS.LINUX),
         _early_guest_facts_route=_EarlyGuestFactsRoute(carrier, root_entry, selected.user),
         _new_managed_delivery=lambda: LimaCarrier(connection),
-        # Ordinary Lima start leaves the instance running. Resource lifecycle,
-        # rather than this execution route, owns its eventual stop.
-        _independent_availability=_IndependentJobAvailability.NO_IDLE_STOP,
+        # The ordinary QEMU/VZ runtime outlives shell delivery. Unknown drivers
+        # and WSL2 require their own resource availability proof.
+        _independent_availability=(
+            _IndependentJobAvailability.NO_IDLE_STOP if selected.vm_type in {"qemu", "vz"} else None
+        ),
     )

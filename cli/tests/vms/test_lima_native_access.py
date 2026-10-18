@@ -40,6 +40,7 @@ from agentworks.execution.carriers._subprocess import ProcessResult
 from agentworks.execution.carriers.lima import LimaCarrier
 from agentworks.operations import OperationOwner
 from agentworks.vms._lima_native_access import LimaOwnedNativePlatformAccess
+from agentworks.vms._native_operation import _prepare_target, _Workflow
 from agentworks.vms.target_preparation import VMTargetPreparationFailure, VMTargetPreparationStatus
 from tests.execution.carriers.test_lima import process_result
 from tests.vms.test_target_preparation import _MARKER, TranscriptCarrier, _success_payload
@@ -153,6 +154,15 @@ def install_guest(monkeypatch: pytest.MonkeyPatch, *, payload: bytes | None = No
     return transcript
 
 
+def prepare_native(access: LimaOwnedNativePlatformAccess, power: VMStatus, deadline: Deadline) -> _Workflow:
+    workflow = _Workflow(access.owner, deadline, access=access)
+    access.native_configuration_check()
+    locator = access.ensure_available(power, deadline)
+    binding = access.prepare_native_route(deadline)
+    _prepare_target(workflow, access.vm, access.platform, locator, binding)
+    return workflow
+
+
 def test_passive_factory_and_missing_prerequisite(local, monkeypatch: pytest.MonkeyPatch) -> None:
     fake, access = local
     assert fake.calls == [] and access.route is None and access.binding is None and access.route_check is None
@@ -173,8 +183,8 @@ def test_projection_binding_and_same_deadline_home_through_start_and_guest(local
     selected = access.selected
     assert selected is not None
     monkeypatch.setenv("LIMA_HOME", "/must-not-follow-new-environment")
-    access.prepare(power, deadline)
-    assert access.preparation.status is VMTargetPreparationStatus.PREPARED
+    workflow = prepare_native(access, power, deadline)
+    assert workflow.preparation is not None and workflow.preparation.status is VMTargetPreparationStatus.PREPARED
     binding = access.binding
     assert binding.delivery_account == fake.user != access.vm.admin_username
     assert binding._early_guest_facts_route.account == fake.user
@@ -209,7 +219,7 @@ def test_original_power_change_refuses_before_start(local, monkeypatch) -> None:
     original = access.observe_power(Deadline.after(10))
     fake.status = "Running"
     with pytest.raises(StateError):
-        access.prepare(original, Deadline.after(10))
+        prepare_native(access, original, Deadline.after(10))
     assert access.activation is None and not access.owner.list_pending_lifecycle_obligations()
 
 
@@ -219,13 +229,15 @@ def test_selected_route_drift_refuses_before_guest(local, monkeypatch, change: s
     guest = install_guest(monkeypatch)
     power = access.observe_power(Deadline.after(10))
     original = access.selected.locator
+    access.ensure_available(power, Deadline.after(10))
+    access.prepare_native_route(Deadline.after(10))
     if change == "replacement":
         fake.directory.rename(fake.home / "old")
         fake.directory.mkdir()
     else:
         setattr(fake, change, "changed")
     with pytest.raises(StateError):
-        access.prepare(power, Deadline.after(10))
+        access.route_check(Deadline.after(10))
     assert guest.calls == 0
     assert access.selected.locator == original
     assert access.settle(Deadline.after(10))
@@ -331,7 +343,7 @@ def test_lost_start_registration_reply_reconciles_without_dispatch(local, monkey
 
     monkeypatch.setattr(OperationOwner, "register_lifecycle_obligation", lost)
     with pytest.raises(KeyboardInterrupt):
-        access.prepare(power, Deadline.after(10))
+        prepare_native(access, power, Deadline.after(10))
     assert access.activation is not None
     assert sum(argv[1] == "start" for argv, _, _ in fake.calls) == 0
     assert access.settle(Deadline.after(10))
@@ -354,7 +366,7 @@ def test_lost_resolution_reply_reuses_retained_running_evidence(local, monkeypat
 
     monkeypatch.setattr(OperationRepository, "resolve_lifecycle_obligation", lost)
     with pytest.raises(KeyboardInterrupt):
-        access.prepare(power, Deadline.after(10))
+        prepare_native(access, power, Deadline.after(10))
     assert access.activation.running_observed
     assert access.settle(Deadline.after(10))
     assert sum(argv[1] == "start" for argv, _, _ in fake.calls) == 1
@@ -373,7 +385,7 @@ def test_start_completion_without_fresh_readiness_stays_debt(local, monkeypatch)
 
     monkeypatch.setattr(_lima_activation, "run_process", start)
     with pytest.raises(StateError):
-        access.prepare(power, Deadline.after(10))
+        prepare_native(access, power, Deadline.after(10))
     assert access.activation.client_completed and not access.activation.running_observed
     assert not access.settle(Deadline.after(10))
     assert access.owner.list_pending_lifecycle_obligations()
@@ -392,7 +404,7 @@ def test_interrupted_start_retains_actual_process_custody_and_no_replay(local, m
 
     monkeypatch.setattr(_lima_activation, "run_process", interrupt)
     with pytest.raises(KeyboardInterrupt):
-        access.prepare(power, Deadline.after(10))
+        prepare_native(access, power, Deadline.after(10))
     assert not access.custody.settled and access.activation.custody is access.custody
     assert not access.settle(Deadline.after(10))
     assert access.custody.settled and len(held) == 1
@@ -425,11 +437,12 @@ def test_guest_marker_is_still_checked(local, monkeypatch, marker_ok: bool) -> N
     payload = _success_payload() if marker_ok else _success_payload().replace(_MARKER.encode(), b"f" * 32)
     guest = install_guest(monkeypatch, payload=payload)
     power = access.observe_power(Deadline.after(10))
-    access.prepare(power, Deadline.after(10))
+    workflow = prepare_native(access, power, Deadline.after(10))
     assert guest.calls == 1
-    assert (access.preparation.status is VMTargetPreparationStatus.PREPARED) is marker_ok
+    assert workflow.preparation is not None
+    assert (workflow.preparation.status is VMTargetPreparationStatus.PREPARED) is marker_ok
     if not marker_ok:
-        assert access.preparation.failure is VMTargetPreparationFailure.IDENTITY
+        assert workflow.preparation.failure is VMTargetPreparationFailure.IDENTITY
 
 
 def test_actual_packed_guest_probe_under_explicit_mocked_admission(local, monkeypatch) -> None:
@@ -460,8 +473,8 @@ def test_actual_packed_guest_probe_under_explicit_mocked_admission(local, monkey
 
     monkeypatch.setattr(LimaCarrier, "execute", execute)
     power = access.observe_power(Deadline.after(10))
-    access.prepare(power, Deadline.after(10))
-    assert access.preparation.status is VMTargetPreparationStatus.PREPARED
+    workflow = prepare_native(access, power, Deadline.after(10))
+    assert workflow.preparation is not None and workflow.preparation.status is VMTargetPreparationStatus.PREPARED
     assert len(calls) == 1 and calls[0].returncode == 0, calls[0].stderr
     assert access.settle(Deadline.after(5))
 

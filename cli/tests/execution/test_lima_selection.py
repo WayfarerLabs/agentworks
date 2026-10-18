@@ -21,12 +21,13 @@ from agentworks.execution._lima_activation import (
 )
 from agentworks.execution._lima_selection import LimaDirectoryCustody
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, encode_vm_guest_identity_success
+from agentworks.execution.binding import _IndependentJobAvailability
 from agentworks.execution.carrier import CarrierIO, Deadline, Failure, PreparedInvocation, Retention
 from agentworks.execution.carriers import lima
 from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.carriers.lima import LimaConnection
 from tests.execution.carriers.test_lima import process_result
-from tests.vms.test_lima_native_access import install_guest
+from tests.vms.test_lima_native_access import install_guest, prepare_native
 from tests.vms.test_lima_native_access import local as local
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="synthetic local directory and guest proof")
@@ -158,7 +159,7 @@ def test_registration_before_commit_has_exact_recoverable_no_effect_disposition(
 
     monkeypatch.setattr(OperationRepository, "register_lifecycle_obligation", refuse)
     with pytest.raises(control_type) as caught:
-        access.prepare(power, Deadline.after(5))
+        prepare_native(access, power, Deadline.after(5))
     assert caught.value is control
     assert access.activation.registration_absent is (control_type is RuntimeError)
     assert access.settle(Deadline.after(5))
@@ -181,7 +182,7 @@ def test_unreadable_registration_absence_retains_custody_until_fenced_read_recov
     monkeypatch.setattr(OperationRepository, "register_lifecycle_obligation", refuse)
     monkeypatch.setattr(OperationRepository, "inspect_lifecycle_obligation", refuse)
     with pytest.raises(RuntimeError):
-        access.prepare(power, Deadline.after(5))
+        prepare_native(access, power, Deadline.after(5))
     assert not access.activation.registration_absent
     with pytest.raises(RuntimeError):
         access.settle(Deadline.after(5))
@@ -212,7 +213,7 @@ def test_directory_replaced_during_query_refuses_after_observation(local, monkey
 
     monkeypatch.setattr(_lima_selection, "run_process", replace_directory)
     with pytest.raises(StateError):
-        access.prepare(power, Deadline.after(5))
+        prepare_native(access, power, Deadline.after(5))
     assert access.activation is None
 
 
@@ -227,7 +228,7 @@ def test_default_home_is_resolved_once_only_during_owned_selection(local, monkey
     power = access.observe_power(Deadline.after(5))
     install_guest(monkeypatch)
     monkeypatch.setenv("LIMA_HOME", "/changed-after-owned-selection")
-    access.prepare(power, Deadline.after(5))
+    prepare_native(access, power, Deadline.after(5))
     assert calls == [1]
 
 
@@ -274,6 +275,51 @@ def test_malformed_optional_directory_connection_refuses_at_boundary() -> None:
         LimaConnection("selected", "/limactl", "relative")
 
 
+def test_availability_stage_never_binds_or_probes_native_guest(local, monkeypatch) -> None:
+    fake, access = local
+    power = access.observe_power(Deadline.after(5))
+    monkeypatch.setattr(
+        "agentworks.vms._lima_native_access.lima_native_binding",
+        lambda *a: pytest.fail("availability constructed a native binding"),
+    )
+    locator = access.ensure_available(power, Deadline.after(5))
+    assert access.binding is None and access.route_check is None and access.guest_check is None
+    fake.user = "changed-native-user"
+    fake.vm_type = "changed-native-driver"
+    assert access.observe_locator(Deadline.after(5)) == locator
+    assert access.settle(Deadline.after(5))
+    assert all(argv[1] == "list" for argv, _, _ in fake.calls)
+
+
+def test_stopped_start_preserves_original_full_route_selection(local) -> None:
+    fake, access = local
+    fake.status = "Stopped"
+    power = access.observe_power(Deadline.after(5))
+    fake.user = "changed-native-user"
+    with pytest.raises(StateError):
+        access.ensure_available(power, Deadline.after(5))
+    assert access.activation is not None and not access.activation.attempted
+    assert not access.owner.list_pending_lifecycle_obligations()
+    assert all(argv[1] == "list" for argv, _, _ in fake.calls)
+
+
+@pytest.mark.parametrize("driver", ["qemu", "vz", "wsl2", "external-driver"])
+def test_independent_availability_requires_a_source_proved_driver_lifetime(local, driver: str) -> None:
+    fake, access = local
+    fake.vm_type = driver
+    binding = access.platform.resolve_native_execution_binding(access.vm, access.ctx, deadline=Deadline.after(5))
+    expected = _IndependentJobAvailability.NO_IDLE_STOP if driver in {"qemu", "vz"} else None
+    assert binding._independent_availability is expected
+
+
+def test_native_static_configuration_refuses_before_provider_observation(local) -> None:
+    fake, access = local
+    access.vm.platform_metadata["instance_name"] = "invalid/name"
+    with pytest.raises(StateError):
+        access.native_configuration_check()
+    assert not fake.calls
+
+
 def test_start_mark_lost_reply_never_replays_or_invents_completion(local, monkeypatch) -> None:
     fake, access = local
     fake.status = "Stopped"
@@ -286,7 +332,7 @@ def test_start_mark_lost_reply_never_replays_or_invents_completion(local, monkey
 
     monkeypatch.setattr(OperationRepository, "mark_lifecycle_obligation_possible_effect", lost)
     with pytest.raises(KeyboardInterrupt):
-        access.prepare(power, Deadline.after(5))
+        prepare_native(access, power, Deadline.after(5))
     assert access.activation is not None and access.activation.mark_began
     assert not access.settle(Deadline.after(5))
     assert all(argv[1] == "list" for argv, _, _ in fake.calls)
@@ -302,7 +348,7 @@ def test_proved_local_dispatch_failure_resolves_without_claiming_running(local, 
         lambda *a, **kw: process_result(started=False, exit_status=None, local_status=None, failure=Failure.DISPATCH),
     )
     with pytest.raises(StateError):
-        access.prepare(power, Deadline.after(5))
+        prepare_native(access, power, Deadline.after(5))
     assert access.activation.no_dispatch and not access.activation.running_observed
     assert access.settle(Deadline.after(5))
     assert not access.owner.list_pending_lifecycle_obligations()
@@ -314,7 +360,7 @@ def test_foreign_activation_revision_cannot_be_resolved(local, monkeypatch) -> N
     power = access.observe_power(Deadline.after(5))
     monkeypatch.setattr(_lima_activation, "run_process", lambda *a, **kw: process_result(exit_status=1))
     with pytest.raises(StateError):
-        access.prepare(power, Deadline.after(5))
+        prepare_native(access, power, Deadline.after(5))
     row = access.owner.inspect_lifecycle_obligation(access.activation.obligation_id)
     assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
     inspect = access.owner.inspect_lifecycle_obligation
@@ -332,8 +378,9 @@ def test_prepared_target_retains_full_guest_boot_fence(local, monkeypatch, field
     guest = VMGuestIdentity(access.vm.instance_marker, "00000000-0000-4000-8000-000000000001", 1234)
     install_guest(monkeypatch, payload=encode_vm_guest_identity_success("0" * 32, guest))
     power = access.observe_power(Deadline.after(5))
-    access.prepare(power, Deadline.after(5))
-    original = access.preparation.target
+    workflow = prepare_native(access, power, Deadline.after(5))
+    assert workflow.preparation is not None and workflow.preparation.target is not None
+    original = workflow.preparation.target
     assert access.settle(Deadline.after(5))
     changed = replace(guest, **{field: "00000000-0000-4000-8000-000000000002" if field == "boot_id" else 1235})
     install_guest(monkeypatch, payload=encode_vm_guest_identity_success("0" * 32, changed))
@@ -342,8 +389,9 @@ def test_prepared_target_retains_full_guest_boot_fence(local, monkeypatch, field
     )
     try:
         power = fresh.observe_power(Deadline.after(5))
-        fresh.prepare(power, Deadline.after(5))
-        assert fresh.preparation.target.incarnation == original.incarnation
-        assert fresh.preparation.target.boot_id != original.boot_id
+        fresh_workflow = prepare_native(fresh, power, Deadline.after(5))
+        assert fresh_workflow.preparation is not None and fresh_workflow.preparation.target is not None
+        assert fresh_workflow.preparation.target.incarnation == original.incarnation
+        assert fresh_workflow.preparation.target.boot_id != original.boot_id
     finally:
         assert fresh.settle(Deadline.after(5))

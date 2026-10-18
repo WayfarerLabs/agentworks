@@ -854,7 +854,11 @@ class LimaPlatform(VMPlatform):
         deadline: Deadline,
         custody: LocalDeliveryCustody,
     ) -> ProviderLocatorObservation:
-        """Observe local placement and directory generation without guest entry."""
+        """Observe local placement and directory generation through Lima inspection.
+
+        Driver inspection can invoke guest commands, notably for WSL2 address
+        discovery. This hook is not a guest-passive observation on every driver.
+        """
         from agentworks.execution._lima_selection import observe_lima_once
 
         del ctx
@@ -889,7 +893,12 @@ class LimaPlatform(VMPlatform):
     def observe_execution_power(
         self, vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody: LocalDeliveryCustody
     ) -> VMStatus:
-        """Observe projected local power; Lima may retire its own stale PID files."""
+        """Observe projected power through the driver's inspection path.
+
+        Lima may retire stale PID files, and WSL2 inspection can invoke guest
+        address commands. A non-waking WSL2 power path remains required before
+        that driver satisfies the native platform acceptance gate.
+        """
         from agentworks.execution._lima_selection import observe_lima_once
 
         del ctx
