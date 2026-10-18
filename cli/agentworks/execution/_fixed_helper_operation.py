@@ -87,9 +87,11 @@ class BorrowedFixedHelperCarrier:
     debt; it owns only actual-dispatch admission and termination evidence.
     """
 
-    def __init__(self, carrier: Carrier, borrow: OperationBorrow) -> None:
+    def __init__(self, carrier: Carrier, borrow: OperationBorrow, *, delivery: Carrier | None = None) -> None:
         self._carrier = carrier
+        self._delivery = carrier if delivery is None else delivery
         self._borrow = borrow
+        self.delivery_started = False
         self.outstanding_attempt: OperationAttempt | None = None
         self.pending_remote_effects = False
         self.coordination_uncertain = False
@@ -108,7 +110,7 @@ class BorrowedFixedHelperCarrier:
 
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         """Delegate pure structural validation without borrowing an attempt."""
-        self._carrier.validate(invocation, io=io)
+        self._delivery.validate(invocation, io=io)
 
     def wraps(self, carrier: Carrier) -> bool:
         """Identify the exact carrier behind this borrowed dispatch boundary."""
@@ -123,7 +125,8 @@ class BorrowedFixedHelperCarrier:
             self.coordination_uncertain = self._borrow.has_outstanding_attempt
             raise
         try:
-            return self._carrier.execute(invocation, io=io, deadline=deadline, custody=attempt.local_delivery)
+            self.delivery_started = True
+            return self._delivery.execute(invocation, io=io, deadline=deadline, custody=attempt.local_delivery)
         except BaseException:
             self.pending_remote_effects = True
             raise
