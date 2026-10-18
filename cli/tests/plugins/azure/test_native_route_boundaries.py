@@ -317,7 +317,7 @@ def test_unknown_delete_receipt_has_durable_intent_and_no_absence_shortcut(owned
 
 @pytest.mark.parametrize("state", ["Failed", "Canceled"])
 @pytest.mark.parametrize("absent", [False, True])
-def test_terminal_failed_delete_requires_fresh_absence_and_never_replays(owned, state, absent):
+def test_terminal_failed_delete_retries_only_on_later_explicit_settle(owned, state, absent):
     owned.route.open(Deadline.after(5))
     owned.transport.overrides.extend(
         [
@@ -337,9 +337,190 @@ def test_terminal_failed_delete_requires_fresh_absence_and_never_replays(owned, 
         LifecycleObligationState.RESOLVED if absent else LifecycleObligationState.POSSIBLE_EFFECT
     )
     if not absent:
-        owned.transport.rule = None
         assert owned.route.settle(Deadline.after(5))
-        assert len(mutations(owned)) == 2
+        assert len(mutations(owned)) == 3
+
+
+def failed_delete(owned, state: str) -> None:
+    owned.transport.overrides.extend(
+        [
+            ("DELETE", (200, {"Azure-AsyncOperation": DELETE_OP}, deny)),
+            (DELETE_OP, (200, {}, {"status": state})),
+        ]
+    )
+    assert not owned.route.settle(Deadline.after(5))
+
+
+@pytest.mark.parametrize("state", ["Failed", "Canceled"])
+def test_each_explicit_settle_submits_at_most_one_cleanup_delete(owned, state):
+    owned.route.open(Deadline.after(5))
+    failed_delete(owned, state)
+    first = row(owned)
+    assert json.loads(first.payload)["delete_state"] == state
+    assert len(mutations(owned)) == 2
+    intents = []
+
+    def inspect_new_intent(response):
+        if response.request.method == "DELETE":
+            selected = row(owned)
+            payload = json.loads(selected.payload)
+            assert selected.payload_revision > first.payload_revision
+            assert payload["delete_intent"] is True
+            assert payload["delete_ack"] is None and payload["delete_state"] is None
+            intents.append(selected.payload_revision)
+
+    owned.transport.hook = inspect_new_intent
+    failed_delete(owned, state)
+    assert len(mutations(owned)) == 3 and len(intents) == 1
+    assert owned.route.settle(Deadline.after(5))
+    assert len(mutations(owned)) == 4 and len(intents) == 2
+    assert row(owned).state is LifecycleObligationState.RESOLVED
+
+
+@pytest.mark.parametrize("state", ["Failed", "Canceled"])
+@pytest.mark.parametrize("error_type", [OSError, Control])
+def test_lost_retry_receipt_never_replayed_or_drained_by_absence(owned, state, error_type):
+    owned.route.open(Deadline.after(5))
+    failed_delete(owned, state)
+    primary = error_type("lost retry receipt")
+    owned.transport.overrides.append(("DELETE", primary))
+    with pytest.raises(StateError if error_type is OSError else error_type) as caught:
+        owned.route.settle(Deadline.after(5))
+    if error_type is Control:
+        assert caught.value is primary
+    intent = json.loads(row(owned).payload)
+    assert intent["delete_intent"] is True
+    assert intent["delete_ack"] is None and intent["delete_state"] is None
+    assert len(mutations(owned)) == 3
+    owned.transport.rule = None
+    before = len(owned.transport.calls)
+    assert not owned.route.settle(Deadline.after(5))
+    assert len(owned.transport.calls) == before
+    assert row(owned).state is LifecycleObligationState.POSSIBLE_EFFECT
+
+
+@pytest.mark.parametrize("state", ["Failed", "Canceled"])
+@pytest.mark.parametrize("committed", [False, True])
+@pytest.mark.parametrize("error_type", [OSError, Control])
+def test_lost_retry_intent_reply_reconciles_only_known_unsent_attempt(owned, monkeypatch, state, committed, error_type):
+    owned.route.open(Deadline.after(5))
+    failed_delete(owned, state)
+    previous = row(owned)
+    original = owned.repository.publish_lifecycle_obligation_payload
+    primary = error_type("lost next cleanup intent")
+
+    def lose_intent(*args, **kwargs):
+        candidate = json.loads(kwargs["payload"])
+        assert candidate["delete_intent"] is True
+        assert candidate["delete_ack"] is None and candidate["delete_state"] is None
+        if committed:
+            original(*args, **kwargs)
+        raise primary
+
+    monkeypatch.setattr(owned.repository, "publish_lifecycle_obligation_payload", lose_intent)
+    with pytest.raises(error_type) as caught:
+        owned.route.settle(Deadline.after(5))
+    assert caught.value is primary and len(mutations(owned)) == 2
+    current = row(owned)
+    assert current.payload_revision == previous.payload_revision + int(committed)
+    assert json.loads(current.payload)["delete_state"] == (None if committed else state)
+    monkeypatch.setattr(owned.repository, "publish_lifecycle_obligation_payload", original)
+
+    def inspect_intent(response):
+        if response.request.method == "DELETE":
+            intent = json.loads(row(owned).payload)
+            assert intent["delete_ack"] is None and intent["delete_state"] is None
+
+    owned.transport.hook = inspect_intent
+    assert owned.route.settle(Deadline.after(5))
+    assert len(mutations(owned)) == 3 and row(owned).state is LifecycleObligationState.RESOLVED
+
+
+@pytest.mark.parametrize("state", ["Failed", "Canceled"])
+@pytest.mark.parametrize("change", ["nic-guid", "nsg-guid", "association", "nonce", "content"])
+def test_retry_revalidates_original_parents_and_exact_rule(owned, state, change):
+    owned.route.open(Deadline.after(5))
+    failed_delete(owned, state)
+    if change in {"nic-guid", "nsg-guid"}:
+        selected = owned.transport.nic if change == "nic-guid" else owned.transport.nsg
+        selected["properties"]["resourceGuid"] = "31234567-89ab-0cde-0123-456789abcdef"
+    elif change == "association":
+        owned.transport.nic["properties"]["networkSecurityGroup"]["id"] = NSG + "foreign"
+    elif change == "nonce":
+        owned.transport.rule["properties"]["description"] += "foreign"
+    else:
+        owned.transport.rule["properties"]["destinationPortRange"] = "23"
+    with pytest.raises(StateError):
+        owned.route.settle(Deadline.after(5))
+    assert len(mutations(owned)) == 2
+    assert row(owned).state is LifecycleObligationState.POSSIBLE_EFFECT
+
+
+@pytest.mark.parametrize("state", ["Failed", "Canceled"])
+def test_retry_requires_positive_original_retirement(owned, state):
+    owned.route.open(Deadline.after(5))
+    terminal_seen = False
+
+    def retain_original(response):
+        nonlocal terminal_seen
+        if response.request.url == DELETE_OP:
+            terminal_seen = True
+        if terminal_seen and response.request.method == "GET" and "/securityRules/" in response.request.url:
+            response.close_errors.extend([OSError("first close"), OSError("next close")])
+
+    owned.transport.hook = retain_original
+    failed_delete(owned, state)
+    assert owned.route.cleanup_incomplete
+    original = owned.transport.responses[-1]
+    assert original.close_calls == 1
+    before = len(owned.transport.calls)
+    assert not owned.route.settle(Deadline.after(5))
+    assert original.close_calls == 2 and len(owned.transport.calls) == before
+    owned.transport.hook = None
+    assert owned.route.settle(Deadline.after(5))
+    assert original.close_calls == 3 and len(mutations(owned)) == 3
+
+
+def test_successful_delete_with_present_rule_only_observes_delayed_absence(owned):
+    owned.route.open(Deadline.after(5))
+    owned.transport.overrides.append(("DELETE", (200, {}, deny)))
+    assert not owned.route.settle(Deadline.after(5))
+    assert not owned.route.settle(Deadline.after(5))
+    assert len(mutations(owned)) == 2
+    owned.transport.rule = None
+    assert owned.route.settle(Deadline.after(5))
+    assert len(mutations(owned)) == 2
+
+
+@pytest.mark.parametrize("state", ["Failed", "Canceled"])
+def test_newly_observed_terminal_failure_waits_for_another_settle_call(owned, state):
+    owned.route.open(Deadline.after(5))
+    primary = Control("interrupted monitor")
+    owned.transport.overrides.extend(
+        [
+            ("DELETE", (200, {"Azure-AsyncOperation": DELETE_OP}, deny)),
+            (DELETE_OP, (200, {}, primary)),
+        ]
+    )
+    with pytest.raises(Control) as caught:
+        owned.route.settle(Deadline.after(5))
+    assert caught.value is primary and len(mutations(owned)) == 2
+    owned.transport.overrides.append((DELETE_OP, (200, {}, {"status": state})))
+    assert not owned.route.settle(Deadline.after(5))
+    assert len(mutations(owned)) == 2
+    assert owned.route.settle(Deadline.after(5))
+    assert len(mutations(owned)) == 3
+
+
+def test_passive_settle_bars_open_and_check_but_permits_further_cleanup(owned):
+    assert owned.route.settle(Deadline.after(5))
+    with pytest.raises(StateError):
+        owned.route.open(Deadline.after(5))
+    with pytest.raises(StateError):
+        owned.route.check(Deadline.after(5), observed_vm=owned.vm)
+    assert owned.route.close(Deadline.after(5))
+    assert owned.route.settle(Deadline.after(5))
+    assert owned.transport.calls == [] and row(owned) is None
 
 
 def test_oversized_combined_receipt_is_not_truncated_or_followed(owned):

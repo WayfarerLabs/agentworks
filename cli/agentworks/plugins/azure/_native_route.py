@@ -118,7 +118,7 @@ class AzureNativeRoute:
         self._create_state: str | None = None
         self._delete_state: str | None = None
         self._history: list[bytes] = []
-        self._attempted = self._closed = self._settling = False
+        self._attempted = self._closed = False
         self._register_began = self._put_began = self._delete_began = False
         self._delete_intent = False
         self._resolution_began = self._absent = False
@@ -341,7 +341,7 @@ class AzureNativeRoute:
         from azure.core.rest import HttpRequest
 
         with self._transition(deadline):
-            if self._closed or self._settling or self._attempted or self.cleanup_incomplete:
+            if self._closed or self._attempted or self.cleanup_incomplete:
                 raise StateError("Azure route opening is single use")
             self._attempted = True
             with self._custody(deadline):
@@ -387,7 +387,7 @@ class AzureNativeRoute:
     def check(self, deadline: Deadline, *, observed_vm: object) -> None:
         """Recheck only the retained route and its parent association."""
         with self._transition(deadline):
-            if self._closed or self._settling or self.cleanup_incomplete or not self._put_began:
+            if self._closed or self.cleanup_incomplete or not self._put_began:
                 raise StateError("Azure route cannot admit a check")
             if not observed_resource_id_equal(
                 vm_nic(observed_vm, self._resource_id, self._vm_id), self._nic_id, "networkInterfaces"
@@ -403,11 +403,12 @@ class AzureNativeRoute:
             self._remaining(deadline)
 
     def settle(self, deadline: Deadline) -> bool:
-        """Finish acknowledged requests and remove only this operation's rule."""
+        """Remove this operation's rule, retrying known failure only on a later call."""
         from azure.core.rest import HttpRequest
 
         with self._transition(deadline):
-            self._settling = True
+            self._closed = True
+            retry_delete = self._delete_began and self._delete_state in {"Failed", "Canceled"}
             self._close_handles(deadline)
             if self.cleanup_incomplete:
                 return False
@@ -419,39 +420,35 @@ class AzureNativeRoute:
                 self._poll(deadline)
                 if self._create_state not in TERMINAL:
                     return False
-                if not self._delete_began:
-                    if self._verify_rule(deadline, cleanup=True):
-                        self._construct(deadline)
-                        request = HttpRequest("DELETE", resource_url(self._rule_id()))
-                        self._delete_intent = True
-                        self._record()
-                        self._reconcile(deadline)
-                        self._remaining(deadline)
-                        self._delete_began = True
-                        response = self._send(request, deadline)
-                        self._delete_ack = _sdk(
-                            lambda: acknowledgment(response, "DELETE", request.url, self._subscription)
-                        )
-                        self._delete_state = "Succeeded" if self._delete_ack.monitor is None else None
-                        self._record()
-                        self._reconcile(deadline)
-                    else:
-                        self._absent = True
-                        self._record()
                 if self._delete_began:
                     if self._delete_ack is None:
                         return False
                     self._poll(deadline, deleting=True)
                     if self._delete_state not in TERMINAL:
                         return False
-                    self._observe_topology(deadline)
-                    value = self._get(self._rule_id(), deadline, missing=True)
-                    if value is not None:
-                        assert self._rule is not None
-                        validate_rule(value, self._rule_id(), self._name, self._rule, completed_failure=True)
-                        return False
+                if not self._verify_rule(deadline, cleanup=True):
                     self._absent = True
                     self._record()
+                elif not self._delete_began or retry_delete:
+                    self._construct(deadline)
+                    request = HttpRequest("DELETE", resource_url(self._rule_id()))
+                    # Prior closed evidence stays in its canonical history revision.
+                    # This next intent cannot carry the preceding request's receipt.
+                    self._delete_began, self._delete_ack, self._delete_state = False, None, None
+                    self._delete_intent = True
+                    self._record()
+                    self._reconcile(deadline)
+                    self._remaining(deadline)
+                    self._delete_began = True
+                    response = self._send(request, deadline)
+                    self._delete_ack = _sdk(lambda: acknowledgment(response, "DELETE", request.url, self._subscription))
+                    self._delete_state = "Succeeded" if self._delete_ack.monitor is None else None
+                    self._record()
+                    self._reconcile(deadline)
+                    self._poll(deadline, deleting=True)
+                    if self._delete_state in TERMINAL and not self._verify_rule(deadline, cleanup=True):
+                        self._absent = True
+                        self._record()
             return self._reconcile(deadline)
 
     def close(self, deadline: Deadline) -> bool:
