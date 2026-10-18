@@ -300,3 +300,43 @@ No retries or source changes occurred in this native run. Server descendants, th
 entrypoint, genuine provider creation, production writer coexistence, persisted operator-config
 rollback, other workstation/client versions and full RunContext delivery remain unproved. These
 local fixture observations do not close full R1-R5 or integrated acceptance.
+
+## External trust-maintenance CLI entrypoint
+
+A separate eight-command observation at public `1cfdd832c6f92289ae41f646ece978b61aaa8502` now
+exercises the actual `cli/.venv/bin/agw` executable on Linux arm64 with Python 3.12. This closes the
+external-entrypoint gap only for the explicit owned-path file-state operations measured here. The
+prior in-process/native observations retain their original scope and pins. The inputs are opaque
+policy and binary revocation snapshots; no OpenSSH process parses them in this observation.
+
+Import, describe, complete refresh, block, missing-source refresh failure, stale-generation refusal,
+complete forward repair and final describe produce external exits `0,0,0,0,1,1,0,0`. Every fresh
+console process positively records the reviewed observer hash, actual checkout module origins, one
+real entrypoint call and the expected maintenance function. Both failures reach the actual
+entrypoint as `StateError` and become `SystemExit(1)`. No app, handler or result is substituted; no
+prose wording is asserted.
+
+Independent file checks verify complete source/revocation bytes and manifest hashes, three distinct
+successful generations, blocked current policy after the failed refresh and retained partial copies
+of both known-host inputs. Stale refusal leaves the complete bundle snapshot unchanged. Forward
+repair unblocks a new complete generation while retaining every previous generation and partial
+publication byte and timestamp. Original sources remain unchanged.
+
+The reviewed runner's SHA256 is `4a337363f15749935c509a4fbaa1fdeae78a215e5ea5d035b32de4df18c283bc`;
+its additive observer is `666d626123a40116a129c6a10fe1a32d03c122ad9eb14a933224bc2216bcf0d3`. The
+complete signed report is `e2eed89ce6f2b9962040281b7ff227cda7024aac71b40f696ec3449c27c0ced1`, and
+the original aggregate receipt is
+`f88604621997407d43fb47d00f5706b3ad7a2304e36947c73ec171a693dca1eb`. The lead fully reads both
+records, checks every individual observer receipt against the aggregate and independently confirms
+fixture absence and four empty private CLI directories.
+
+All eight original console process handles have known exits, closed pipes and independent
+same-execution `ECHILD` observations before disposable-state removal. No timeout, signal, retry,
+SSH/keygen/server/agent process or network endpoint occurs. Private HOME/XDG directories precede app
+startup; bounded Python audit/profile hooks observe no guarded operator/default-config, database,
+socket or extra-subprocess attempts. These hooks do not establish complete kernel or arbitrary
+raw-thread coverage, and allowed CLI registration imports do not establish whole-app independence.
+
+This observation supplies no native SSH trust interpretation, production creation or writer
+ownership/coexistence, operator rollback, other platform, RunContext or full R1-R5 acceptance. The
+full implementation and retirement gates remain open.
