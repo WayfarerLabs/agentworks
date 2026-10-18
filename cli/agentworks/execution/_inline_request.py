@@ -15,7 +15,7 @@ from ._helper_identity import IdentityExpectation
 MAX_CAPTURE_BYTES = 4_096
 MAX_MANIFEST_BYTES = 32_768
 REQUEST_MARKER = b"AGWI2"
-REQUEST_HEADER_BYTES = len(REQUEST_MARKER) + 4
+REQUEST_HEADER_BYTES = len(REQUEST_MARKER) + 8
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z_0-9]*\Z")
 _LOWER_HEX = frozenset("0123456789abcdef")
 _RESERVED_ENV = frozenset({"BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "BASH_XTRACEFD"})
@@ -299,4 +299,4 @@ def encode_manifest(manifest: InlineManifest) -> bytes:
 def encode_request_envelope(manifest: InlineManifest) -> bytes:
     """Prefix canonical JSON with the single bounded private request header."""
     encoded = encode_manifest(manifest)
-    return REQUEST_MARKER + len(encoded).to_bytes(4, "big") + encoded
+    return REQUEST_MARKER + format(len(encoded), "08x").encode("ascii") + encoded
