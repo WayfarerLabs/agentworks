@@ -5372,7 +5372,7 @@ intermediate public API.
       union target type, stack selector or forwarding adapter. Prove passive construction/access and
       composition-owned lifetime, no new effects on existing callers, and independent new-stack
       usability with legacy modules unavailable. Do not claim restricted recipient authority.
-- [ ] Complete and privately review paired native admin/agent preparation using an explicit
+- [x] Complete and privately review paired native admin/agent preparation using an explicit
       core-selected agent row on the same VM. Reuse one file operation, execution operation, numeric
       guest bootstrap, carrier, owner and deadline; retain both account preparations and publish no
       partial pair on requested-agent failure. The agent view has its own ordinary body plan and no
@@ -5381,6 +5381,15 @@ intermediate public API.
       uncertain custody without introducing a persisted identity mode. Scoped tests and source
       reviews establish this private unit only; native cross-user proof, production context wiring
       and complete additive RunContext remain under the broader unchecked gate above.
+
+The paired private checkpoint at `9d490df01` passes 645 scoped cases, including both existing
+recovery preparation suites, plus strict typing across 1,438 sources and changed-file quality
+checks. Project, complexity and generic correctness source reviews are clear after correcting the
+optional validator argument for recovery callers. Existing-job actions remain operation/resource-
+and VM-bound, not recipient-account authorization; permission activation retains that separate gate.
+These results do not establish native credential transitions or close the broader additive
+RunContext gate.
+
 - [ ] Add platform-owned new-stack connection/provisioning composition without decoding opaque VM
       metadata in core or constructing legacy targets. Apply the
       [2026-09-21 factory inventory](migration-strategy.md#new-target-composition-inventory-2026-09-21):
