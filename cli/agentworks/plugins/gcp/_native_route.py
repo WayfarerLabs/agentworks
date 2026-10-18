@@ -7,6 +7,7 @@ The caller owns the shared credential and the surrounding operation claim.
 
 from __future__ import annotations
 
+import re
 import time
 from contextlib import contextmanager
 from dataclasses import replace
@@ -31,6 +32,7 @@ from agentworks.plugins.gcp._native_route_evidence import (
     decode_payload,
     encode_payload,
     json_object,
+    numeric_id,
     rule_url,
 )
 from agentworks.plugins.gcp._native_route_topology import (
@@ -355,8 +357,10 @@ class GCENativeRoute:
         tokens: set[str] = set()
         token: str | None = None
         count = 0
+        names: set[str] = set()
+        rule_ids: set[str] = set()
         for _page in range(64):
-            query = {"maxResults": "100", "fields": f"items({RULE_FIELDS}),nextPageToken,warning"}
+            query = {"maxResults": "100", "fields": f"items({RULE_FIELDS}),nextPageToken,warning(code)"}
             if token is not None:
                 query["pageToken"] = token
             page = self._get(f"{base_url(self._payload)}/firewalls?{urlencode(query)}", deadline)
@@ -370,6 +374,19 @@ class GCENativeRoute:
             for item in items:
                 if type(item) is not dict:
                     raise ValidationError("GCE firewall inventory is malformed")
+                name = item.get("name")
+                if (
+                    item.get("kind") != "compute#firewall"
+                    or type(name) is not str
+                    or re.fullmatch(r"[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?", name) is None
+                    or name in names
+                ):
+                    raise ValidationError("GCE firewall inventory identity is invalid")
+                rule_id = numeric_id(item.get("id"))
+                if rule_id in rule_ids:
+                    raise ValidationError("GCE firewall inventory has duplicate identities")
+                rule_ids.add(rule_id)
+                names.add(name)
                 if item.get("name") == self._payload.name:
                     validate_owned(item, self._payload)
                 elif item.get("name") == identity.deny_rule:
@@ -379,7 +396,11 @@ class GCENativeRoute:
             token = page.get("nextPageToken")
             if token is None or token == "":
                 return
-            if type(token) is not str or len(token.encode("utf-8")) > 4096 or token in tokens:
+            try:
+                valid = type(token) is str and len(token.encode("utf-8")) <= 4096 and token not in tokens
+            except UnicodeEncodeError:
+                valid = False
+            if not valid:
                 raise ValidationError("GCE firewall inventory token is invalid")
             tokens.add(token)
         raise ValidationError("GCE firewall inventory pagination exceeds its bound")
@@ -435,8 +456,8 @@ class GCENativeRoute:
 
     def close(self, deadline: Deadline) -> bool:
         """Terminally bar body admission and retry only original local closes."""
+        self._closed = True
         with self._transition(deadline):
-            self._closed = True
             self._close_handles()
             self._remaining(deadline)
             return not self.cleanup_incomplete
@@ -456,13 +477,15 @@ class GCENativeRoute:
 
     def settle(self, deadline: Deadline) -> bool:
         """Reconcile and remove only this acknowledged rule, never replay uncertainty."""
+        self._closed = True
         with self._transition(deadline):
-            self._closed = True
             if self._settled:
                 return True
             retry_delete = self._delete_entered and self._payload.delete_state is ActivationState.FAILED
             self._close_handles()
             self._reconcile(deadline)
+            if self._settled:
+                return True
             if self.cleanup_incomplete:
                 return False
             if not self._create_entered:

@@ -130,7 +130,7 @@ def encode_payload(payload: RoutePayload) -> bytes:
         ):
             if (
                 type(state) is not ActivationState
-                or (operation is None and state is not ActivationState.UNKNOWN)
+                or ((operation is None) != (state is ActivationState.UNKNOWN))
                 or (operation is not None and (type(operation) is not str or OPERATION.fullmatch(operation) is None))
             ):
                 raise ValueError("invalid operation knowledge")
