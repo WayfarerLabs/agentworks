@@ -4,6 +4,13 @@ This internal adapter accepts explicit connection policy and a prepared invocati
 buffered and live byte delivery plus owned local forwarding. Terminal integration is not implemented
 yet. Production factories and RunContext still use the existing execution stack.
 
+The selected client must report OpenSSH 8.5 or newer. On native Windows, the version probe also
+requires the `OpenSSH_for_Windows_` family banner. MSYS/Cygwin clients, including Git for Windows'
+`OpenSSH_` client, are refused locally before command, forwarding or enrollment launch. Select a
+supported native Windows client explicitly or through PATH. The probe checks the selected client
+without falling back to another installation. Banner recognition is a compatibility check, not an
+authenticity guarantee.
+
 The private `_terminal_posix` resource layer admits supplied readable terminal input and a terminal
 geometry descriptor, allocates its own PTY and restores borrowed input modes after all users stop.
 One retained non-main worker owns acquisition, resize and release; other threads cannot mutate the

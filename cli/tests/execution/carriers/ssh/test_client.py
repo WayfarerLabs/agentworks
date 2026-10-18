@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from threading import Thread
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -44,6 +45,7 @@ from agentworks.execution.carriers.ssh.trust import (
     resolve_trust,
     trust_status,
 )
+from tests.execution.carriers.ssh._client_banner import client_banner
 
 pytestmark = pytest.mark.windows
 
@@ -52,7 +54,7 @@ pytestmark = pytest.mark.windows
 class SyntheticSSH:
     carrier: SSHCarrier
     command: str = "pass"
-    version: str = "import sys; sys.stderr.write('OpenSSH_9.9p1, LibreSSL 3.3.6\\n')"
+    version: str = f"import sys; sys.stderr.write({client_banner()!r})"
     calls: list[list[str]] = field(default_factory=list)
     children: list[subprocess.Popen[bytes]] = field(default_factory=list)
     custody: LocalDeliveryCustody = field(default_factory=LocalDeliveryCustody)
@@ -367,7 +369,7 @@ def test_version_consumes_the_original_deadline(synthetic: SyntheticSSH) -> None
 
 
 def test_dispatch_only_gets_budget_remaining_after_version(synthetic: SyntheticSSH) -> None:
-    synthetic.version = "import sys,time; time.sleep(.2); sys.stderr.write('OpenSSH_9.9p1')"
+    synthetic.version = f"import sys,time; time.sleep(.2); sys.stderr.write({client_banner()!r})"
     synthetic.command = "import time; time.sleep(.25)"
     report = synthetic.execute(seconds=0.4)
     assert report.failure == Failure.DEADLINE
@@ -518,11 +520,46 @@ def test_unsupported_version_refuses_locally(synthetic: SyntheticSSH, version: s
     assert "secret-canary" not in repr(report)
 
 
-@pytest.mark.parametrize("version", ["OpenSSH_8.5p1", "OpenSSH_10.1", "OpenSSH_for_Windows_9.5p1, LibreSSL 3.8.2"])
-def test_supported_client_banners(synthetic: SyntheticSSH, version: str) -> None:
+@pytest.mark.parametrize("host", ["posix", "nt"])
+@pytest.mark.parametrize(
+    "version,supported,windows_family",
+    [
+        ("OpenSSH_8.4p1", False, False),
+        ("OpenSSH_8.5p1", True, False),
+        ("OpenSSH_10.5p1", True, False),
+        ("OpenSSH_for_Windows_8.4p1", False, True),
+        ("OpenSSH_for_Windows_8.5p1", True, True),
+        ("OpenSSH_for_Windows_9.5p2, LibreSSL 3.8.2", True, True),
+        ("OpenSSH_for_Windows_10.0p2 Win32-OpenSSH-GitHub, LibreSSL 4.2.0", True, True),
+        ("OpenSSH_for_Windows_9.x secret-canary", False, True),
+    ],
+)
+def test_client_family_and_version_admission(
+    synthetic: SyntheticSSH,
+    monkeypatch: pytest.MonkeyPatch,
+    host: str,
+    version: str,
+    supported: bool,
+    windows_family: bool,
+) -> None:
+    probe = client.check_client_version
+
+    def check(executable, *, deadline, custody):
+        # Replace only this module binding during the real probe. Global os.name
+        # and native Path/process behavior must keep the actual host semantics.
+        with monkeypatch.context() as context:
+            context.setattr(client, "os", SimpleNamespace(name=host))
+            return probe(executable, deadline=deadline, custody=custody)
+
+    monkeypatch.setattr(client, "check_client_version", check)
     synthetic.version = f"import sys; sys.stderr.write({version!r})"
-    assert synthetic.execute().failure is None
-    assert len(synthetic.calls) == 2
+    report = synthetic.execute()
+    accepted = supported and (host != "nt" or windows_family)
+    assert report.failure is (None if accepted else Failure.DISPATCH)
+    assert report.dispatch is (Dispatch.SENT if accepted else Dispatch.NOT_SENT)
+    assert len(synthetic.calls) == (2 if accepted else 1)
+    assert report.stderr.data == b"" and "secret-canary" not in repr(report)
+    synthetic.assert_closed()
 
 
 @pytest.mark.parametrize("phase", ["version", "command"])

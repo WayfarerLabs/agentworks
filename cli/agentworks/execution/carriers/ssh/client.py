@@ -149,7 +149,12 @@ def check_client_version(executable: str, *, deadline: Deadline, custody: LocalD
     if version.failure is not None:
         return version.failure
     match = _VERSION.match(version.stderr.data)
-    if version.exit_status != 0 or match is None or tuple(map(int, match.groups())) < (8, 5):
+    if (
+        version.exit_status != 0
+        or match is None
+        or (os.name == "nt" and not version.stderr.data.startswith(b"OpenSSH_for_Windows_"))
+        or tuple(map(int, match.groups())) < (8, 5)
+    ):
         return Failure.DISPATCH
     return None
 
