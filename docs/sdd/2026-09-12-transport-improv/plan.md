@@ -1153,6 +1153,16 @@ with 56 focused cases and scoped strict typing. It retains the HTTP original, bo
 blocks fallback on expiry or uncertain closure. Joint integration tests and all three independent
 paired re-reviews remain required before claiming this complete private unit accepted.
 
+Joint pin `e5a8a42f` passes all 743 selected cases; full typing identifies one test-only
+`BytesIO.read` annotation mismatch, not a production failure. Source re-review finds one additional
+admission gap: the final route callback could return after an uncertain EC2 client close. Author
+`4d1acde1` adds post-close custody/deadline checks and six actual-SDK cases, including the real
+execution consumer's helper-entry seam and a positive entry control; all 358 selected cases and
+scoped strict typing pass. The proposed additional final-STS-close scenario is refuted by the
+existing refresh/send ordering, so no fabricated case is added. The annotation is corrected in the
+same unit. The unused prefix result copy and download success flags are also removed while keeping
+actual outcome/capture/cleanup facts. Final combined validation and paired re-review remain open.
+
 - [ ] Complete owned AWS access with a reviewed successful-start settlement rule, fresh power and
       exact guest preparation, endpoint trust and selected firewall-route lifetime. Obtain native
       startup/uncertainty/cleanup evidence before admission through RunContext. Missing start
