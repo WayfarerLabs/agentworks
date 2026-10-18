@@ -188,7 +188,7 @@ def test_input_only_preserves_retention_and_omits_presentation(tmp_path: Path, m
 
     with _execute(tmp_path, request, peer) as store:
         assert [frame.kind for frame in frames] == [FrameKind.LAUNCHING, FrameKind.FINISHED]
-        assert store.read_capture_range(Stream.STDOUT, request.launch, offset=0, count=31) == (
+        assert store.read_capture_range(Stream.STDOUT, request.launch, offset=0, count=32) == (
             payload[:31] if mode == "capture" else None
         )
 
