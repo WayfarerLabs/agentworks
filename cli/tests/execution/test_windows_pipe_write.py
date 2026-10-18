@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import os
+import struct
 import subprocess
 import sys
 import time
@@ -11,6 +12,7 @@ import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -19,12 +21,21 @@ pytestmark = [pytest.mark.windows, pytest.mark.skipif(sys.platform != "win32", r
 _CHUNK = bytes(range(256)) * 256
 _LIMIT = 1024 * 1024
 _CHILD = """
-import os, pathlib, sys, time
+import _winapi, msvcrt, os, pathlib, struct, sys, time
 release = pathlib.Path(sys.argv[1])
 closed = sys.argv[2] == 'closed'
+reader = msvcrt.get_osfhandle(0)
+assert reader == _winapi.GetStdHandle(_winapi.STD_INPUT_HANDLE)
+assert _winapi.GetFileType(reader) == _winapi.FILE_TYPE_PIPE
 if closed:
     os.close(0)
-os.write(1, b'R')
+    try:
+        _winapi.GetFileType(reader)
+    except OSError as error:
+        assert error.winerror == 6
+    else:
+        raise SystemExit(76)
+os.write(1, struct.pack('<Qc', os.getpid(), b'C' if closed else b'L'))
 deadline = time.monotonic() + 20
 while not release.exists():
     if time.monotonic() >= deadline:
@@ -88,8 +99,12 @@ def _read(fd: int, size: int, deadline: float) -> bytes:
 @contextmanager
 def _child(tmp_path: Path, *, closed: bool) -> Iterator[tuple[subprocess.Popen[bytes], Path]]:
     release = tmp_path / "release"
+    # A Windows venv redirector retains inherited pipe readers while waiting for
+    # its real interpreter. Use that interpreter directly and verify its PID.
+    interpreter = cast("str", vars(sys)["_base_executable"])
+    print(f"stage=interpreter executable={sys.executable!r} base_executable={interpreter!r}")
     child = subprocess.Popen(
-        [sys.executable, "-I", "-S", "-B", "-c", _CHILD, str(release), "closed" if closed else "live"],
+        [interpreter, "-I", "-S", "-B", "-c", _CHILD, str(release), "closed" if closed else "live"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -102,7 +117,16 @@ def _child(tmp_path: Path, *, closed: bool) -> Iterator[tuple[subprocess.Popen[b
         assert child.stdin is not None and child.stdout is not None
         os.set_blocking(child.stdin.fileno(), False)
         os.set_blocking(child.stdout.fileno(), False)
-        assert _read(child.stdout.fileno(), 1, time.monotonic() + 10) == b"R"
+        acknowledgement = bytearray()
+        deadline = time.monotonic() + 10
+        while len(acknowledgement) < 9:
+            chunk = _read(child.stdout.fileno(), 9 - len(acknowledgement), deadline)
+            assert chunk
+            acknowledgement.extend(chunk)
+        pid, state = struct.unpack("<Qc", acknowledgement)
+        print(f"stage=child-identity owned_pid={child.pid} reported_pid={pid} state={state!r}")
+        assert pid == child.pid
+        assert state == (b"C" if closed else b"L")
         assert child.poll() is None
         yield child, release
     finally:
