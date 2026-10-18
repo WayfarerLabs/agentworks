@@ -1349,6 +1349,25 @@ Python files pass lint and format checks. The one exact-incarnation producer ret
 persisted codec and all 167 old-module regression cases, migrated to the appropriate boundary.
 Native provider behavior, full access and RunContext acceptance remain open.
 
+- [x] Implement and privately review the owned Azure native route and passive access factory under
+      the existing VM operation owner. Compose recorded incarnation reads, one start request,
+      source-prefix discovery, exclusive linked NIC/NSG selection, nonce-only rule lifetime and
+      partial guest-preparation custody. Prove unified offline public-SDK/SQLite composition,
+      credential-last closure and one fresh cleanup attempt after a known terminal deletion failure,
+      without replaying an unknown request. This records the private implementation boundary, not
+      native guest delivery, historical identity adoption or public RunContext acceptance.
+
+Paired pin `fccaa1dd` clears all three independent source re-reviews, including the cleanup-retry
+correction and removal of a redundant state flag and running-VM read. The combined Azure/native-core
+selection passes all 996 cases without skips; full strict typing passes over 1,409 sources and all
+19 changed Python files pass lint and format checks. Four unified tests compose the actual access,
+reader, start and route implementations with public SDK policies/model parsing and fresh SQLite;
+HTTP transports, credentials and source responses are synthetic, and guest preparation is explicitly
+stubbed. The tests prove dependent retirement before credential closure while the outer owner is
+still held, then no provider/token/ledger work on settled retries after its explicit release. Native
+provider/guest behavior, physical drain, full platform recovery and complete RunContext admission
+remain unproved. The following full-access acceptance item stays open.
+
 - [ ] Complete owned Azure access with reviewed request-specific startup settlement, fresh endpoint
       trust,
       [selected route lifetime and access composition](execution-lifecycle-lld.md#owned-azure-native-route-and-access-composition),
