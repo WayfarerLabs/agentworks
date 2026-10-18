@@ -14,7 +14,7 @@ _RESOURCE_ID = re.compile(
 )
 _VM_ID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 _ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
-ObservedResourceKind = Literal["virtualMachines", "networkInterfaces", "publicIPAddresses"]
+ObservedResourceKind = Literal["virtualMachines", "networkInterfaces", "publicIPAddresses", "networkSecurityGroups"]
 
 
 def resource_name_equal(left: str, right: str) -> bool:
