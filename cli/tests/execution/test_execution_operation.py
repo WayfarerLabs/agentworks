@@ -188,7 +188,6 @@ def test_preparation_expiring_deadline_refuses_before_borrow(
 
     def prepare(*args: object, **kwargs: object) -> object:
         nonlocal prepared
-        del args, kwargs
         prepared = True
         return prepare_inline_candidate(*args, **kwargs)
 
