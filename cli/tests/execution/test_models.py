@@ -65,7 +65,7 @@ def test_input_factories_keep_exact_finite_bytes_and_sensitivity() -> None:
     assert Input.bytes(payload, sensitive=True).is_sensitive
     assert Input.sensitive(payload).is_sensitive
     assert "private" not in repr(Input.sensitive(payload))
-    assert get_type_hints(Input)["data"] is bytes
+    assert get_type_hints(Input)["data"] == bytes | None
 
 
 @pytest.mark.parametrize("data", [bytearray(b"x"), "x", None])

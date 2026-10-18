@@ -6,12 +6,10 @@ import builtins
 import inspect
 from dataclasses import KW_ONLY, dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
 
-if TYPE_CHECKING:
-    from .carrier import ByteSink, ByteSource
+from .carrier import ByteSink, ByteSource
 
 
 def _endpoint(endpoint: object, method: str) -> None:
