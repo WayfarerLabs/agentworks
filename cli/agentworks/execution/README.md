@@ -2294,8 +2294,11 @@ cleanup budget, and reconciles local bookkeeping without replaying preparation.
 
 Both private parents retain stage cleanup before effects. OPERATION uses `ManagedStartCustody`;
 INDEPENDENT retains activation custody on its exact resource-start binding. Activation closure is
-independent of launch acknowledgment. `PreparedStageCleanup` may remove the exact owned stage after
-ordinary operation admission stops; it cannot create, append or activate work. Unknown cleanup
+independent of launch acknowledgment. Native workflow cleanup is serialized by one nonblocking
+aggregate lock. Every close publishes stop intent before acquiring it; competing or reentrant
+cleanup refuses without dispatching helpers or changing retained custody. An escaping control
+releases the lock for an exact later retry. `PreparedStageCleanup` may remove the exact owned stage
+after ordinary operation admission stops; it cannot create, append or activate work. Unknown cleanup
 delivery blocks another helper until closure is proved. Later explicit idempotent removal still
 requires the original cleanup debt and positive removal evidence. An abandoned activation that never
 reached start admission uses an explicit no-dispatch proof, not a fabricated exit code. When a
@@ -2306,6 +2309,19 @@ no-entry bookkeeping can then resolve an unused BEGIN row without querying remot
 unentered CHUNK retains the prior stage's cleanup debt. Process-loss recovery and the remaining
 helper-owner integration audit stay open. These classes do not provide a public FileAccess
 operation.
+
+`PreparedHelperStageRecovery` is a private cleanup-only adapter for a recovered, sealed owner whose
+only pending predecessor row is the exact prepared stage. Open it before admitting a new recovery
+span's support rows. Every remote exchange and cleanup-resolution retry requires that span's fresh
+protected action, exact target and guest, numeric root authority and runtime. A historical receipt
+grants cleanup debt only; it cannot activate the input or prove missing scratch is absent. The
+adapter retains actual recovery dispatch, attempt and local delivery through interrupted replies.
+Before each helper it publishes a revision-fenced version-two in-flight wrapper on the same row.
+Only actual helper, local delivery and dispatch closure permit restoration of the original idle
+payload; positive closed CLEANED evidence instead permits resolving that exact row. A later
+controller refuses an unresolved wrapper even after recovery support rows have been disposed.
+Availability support closure is not predecessor helper termination. This adapter does not establish
+generic native drain or all-platform recovery support.
 
 `_scratch_root.py` opens the fixed Linux `/tmp` directory without following symlinks and requires
 UID 0 and mode 01777. It creates and repairs nothing, ignores environment-selected temporary paths,

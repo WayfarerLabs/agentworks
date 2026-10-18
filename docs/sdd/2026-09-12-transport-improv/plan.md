@@ -5551,9 +5551,14 @@ private source-review lanes initially remained pending. The combined selection a
 pass. Project and complexity source reviews clear that head. Generic correctness review finds a
 reachable concurrent aggregate-cleanup race that can dispatch an untracked closing helper. Serialize
 the entire native workflow cleanup with a nonblocking per-workflow lock, publish stop intent before
-acquisition, and prove competing cleanup refuses without helper entry or early owner release. This
-correction and its re-review remain pending. No full helper-owner audit, process-loss recovery,
-complete RunContext surface or PR acceptance is claimed.
+acquisition, and prove competing cleanup refuses without helper entry or early owner release. The
+private correction adds one aggregate lock and four deterministic concurrent, reentrant and
+interrupted-route regressions; its worker selection passes those four cases and 231 adjacent cases.
+Conservative stage recovery now retains a revision-fenced in-flight marker before helpers and actual
+dispatch/local custody through interrupted replies. Its worker selection passes 68 focused and 420
+adjacent cases, with strict typing across 1,486 sources. Combined exact-head gates and independent
+review of both corrections remain pending. No full helper-owner audit, all-platform process-loss
+recovery, complete RunContext surface or PR acceptance is claimed.
 
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
 one all-callers cutover. PR #830 publishes this design only. The following implementation PR adds
