@@ -5,6 +5,20 @@
 
 ## Findings
 
+### Consumer closure is distinct from a pipe fault
+
+The inspected CPython 3.12.13 `subprocess` implementation ignores broken input pipes during
+`communicate` and continues observing output and process completion. Decision: use the same ordinary
+consumer-close distinction for offered finite and live pipe input, without adding a required-input
+flag. Stop borrowing input on confirmed child exit or broken pipe, but retain bounded output
+collection and independent completion evidence. Complete helper requests are still validated by
+their receiver before effects. This is a design inference from finite-input prior art, not native
+proof of our live-source adapter or process owner. Do not copy CPython's status-loss fallback or
+infer safe handling of arbitrary Windows errors from its buffered-stdin special case.
+
+Source:
+[CPython 3.12.13 subprocess input handling](https://github.com/python/cpython/blob/v3.12.13/Lib/subprocess.py#L1037-L1059).
+
 ### Lima delivery needs an observed account and an explicit bootstrap shell
 
 The 2026-10-18 source check uses [Lima v2.2.1](https://github.com/lima-vm/lima/releases/tag/v2.2.1),

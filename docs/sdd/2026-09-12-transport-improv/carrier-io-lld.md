@@ -148,12 +148,33 @@ output, terminal launch/attachment, native workstation/SSH proof and production 
 limits remain separate required additive-surface gates. The first pipe increment does not narrow
 their requirements or constitute a public handoff.
 
-Shared input-completion semantics remain an acceptance gate. A bounded local probe of an
-early-exiting command with a live source that remains open currently reports INPUT failure; its
-application outcome depends on the completion evidence observed before collection ends. Decide and
-prove how finite required bytes, live EOF and intentional consumer closure differ before public
-acceptance. Coordinate changes to shared pump behavior with SSH; the cooperative-EOF pipe proof is
-not evidence that this edge is settled.
+### Pipe-input completion candidate
+
+Pipe input offers bytes; it does not require the consumer to read every offered byte. Finite input
+offers its bounded bytes and then EOF. A live source may remain open until the consumer finishes.
+Neither a successful local pipe write nor consumer closure proves guest consumption. Required helper
+setup instead relies on the existing complete receiver-side envelope and identity checks before
+application effects. Do not introduce a required-input flag to confuse those two facts.
+
+The private shared pump treats positively observed child exit or a positively identified broken
+input pipe as the end of input pumping, not an INPUT failure. It drops its own pending input and
+source reference, closes only its owned input pipe, and makes no further source call. It then
+continues output collection under the original deadline and post-exit allowance. A consumer may
+close input while continuing to produce output; EOF from the supplied source is not required then.
+Do not wait for descendants to close an inherited input descriptor after the owned child exits.
+
+Source exceptions and invalid results, other pipe errors, failed owned closure, output failures,
+status loss and control interruption retain their existing failure and custody semantics. Do not
+swallow generic errors as consumer closure or upgrade status first observed during cleanup. A broken
+pipe is not an application-success fact; success still needs validated helper completion, normal
+wait and settled custody. The terminal relay is a distinct path and is unchanged.
+
+The prior cooperative-EOF checkpoint does not prove this behavior. Core and packed-helper tests now
+cover no-read commands, prefix consumers, explicit early closure, open sources, nonzero exits,
+buffered completion records, real faults and endpoint lifetime. Combined validation and independent
+review are required before publishing this increment. Native Windows pipe-error mapping and
+Linux/macOS/Windows SSH proof remain explicit acceptance work. The transport lead has notified the
+SSH lane before implementation; no SSH source or policy change is implied by this candidate.
 
 ## Transient collection and sensitive control evidence
 

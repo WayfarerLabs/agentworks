@@ -49,11 +49,12 @@ direct-request envelope; `execute` repeats validation before effects. Readiness,
 connectivity and delivery remain with `execute`. The SSH implementation of this shared method is
 supplied by its separate owner handoff, not by the private managed-start slice.
 
-`Failure.INPUT` records failed or incomplete required input delivery; intentional consumer closure
-is not automatically a failure. `Failure.OUTPUT` records failed output collection, including a
-stream whose EOF cannot be established within the carrier's collection bound. `OUTPUT_LIMIT` is the
-distinct capture-limit outcome. These local failures preserve independently observed completion and
-partial-stream evidence; none establishes guest cancellation or permits replay.
+`Failure.INPUT` records source faults, invalid source results and input-pipe failures other than
+ordinary consumer closure. Offered input need not all be consumed. `Failure.OUTPUT` records failed
+output collection, including a stream whose EOF cannot be established within the carrier's
+collection bound. `OUTPUT_LIMIT` is the distinct capture-limit outcome. These local failures
+preserve independently observed completion and partial-stream evidence; none establishes guest
+cancellation or permits replay.
 
 `carriers/lima.py` provides private buffered delivery through an explicit host-local Lima client and
 instance. It uses the caller's existing delivery custody and original deadline. Automatic start,
@@ -1560,10 +1561,14 @@ private `start` and MANAGED paths reject live endpoints rather than silently sub
 DIRECT execution. This candidate is not wired to production RunContext and does not yet supply
 staging, MANAGED live I/O, active managed output, terminal I/O or native live-platform acceptance.
 
-Live input currently requires source completion for a successful result. A command that exits while
-its source remains open reports an input failure; application status can still be known when its
-complete evidence was observed. Shared early-consumer-close semantics remain unresolved, so this
-private behavior is not a production live-input contract.
+Finite and live pipe input offer bytes without requiring the consumer to read them all. Positively
+observed child exit or a broken input pipe stops borrowing the source, drops pending input, and
+closes only the owned stdin pipe. The supplied source is not closed. Output observation continues
+under its original deadline and post-exit bound, including when the consumer closes input before
+finishing its output. Source faults, invalid results, other pipe errors and failed owned closure
+retain their failure and custody semantics. Neither accepted input bytes nor consumer closure
+establishes guest consumption or application success; helper admission and completion still require
+their own evidence. Native Windows pipe-error mapping and joint SSH proof remain acceptance work.
 
 The guest uses non-blocking writes while pumping application streams and restores its owned pipe
 flags afterward. A partially written evidence frame gets at most 0.5 seconds to finish after the

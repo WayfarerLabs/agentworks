@@ -367,6 +367,15 @@ admitted but unfinished constructor can still inherit must remain held, with any
 state, until that local custody settles. Returning pending cleanup is not permission to close, reuse
 or restore such resources. There is no hidden rewind, reuse, or retry of a consumed input source.
 
+Pipe input offers bytes rather than obligating the consumer to read them all. Finite input offers
+its bytes and then EOF; live input can remain open until the consumer finishes. A positively
+observed child exit or broken input pipe ends input pumping without closing the supplied source or
+itself becoming an input failure. Output observation continues within its existing bounds. This
+establishes neither complete guest consumption nor application success. Required helper setup is
+validated completely by the receiver before effects, not inferred from local pipe acceptance. Other
+source/pipe errors remain failures. Native proof of this shared completion rule remains an
+acceptance gate; terminal handoff has its separate input semantics.
+
 Input pumping and output draining are concurrent where the carrier requires it. Flow control must
 bound buffering without deadlocking duplex commands. Supplied live sources and sinks must satisfy a
 bounded-cancellation contract; an arbitrary blocking callback cannot be advertised as honoring a
