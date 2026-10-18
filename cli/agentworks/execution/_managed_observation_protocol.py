@@ -17,6 +17,7 @@ from ._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 
 MAX_REQUEST_BYTES = 8192
 MAX_CONTROL_BYTES = 512
+MAX_OUTPUT_PAGE_BYTES = 256 * 1024
 FACT_ORDER = (
     FactName.LAUNCH,
     FactName.WAIT,
@@ -60,12 +61,22 @@ class ManagedObservationRequest:
     identity: IdentityExpectation
     guest: VMGuestIdentity
     stream: Stream | None = None
+    offset: int | None = None
+    count: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ManagedOutputRange:
+    offset: int
+    count: int
+    sha256: str
 
 
 @dataclass(frozen=True, slots=True)
 class ManagedResultControl:
     facts: tuple[FactName, ...]
     controller: ControllerObservation | None = None
+    output_range: ManagedOutputRange | None = None
 
 
 def _json(value: object) -> bytes:
@@ -112,9 +123,10 @@ def encode_request(request: ManagedObservationRequest) -> bytes:
     checked_vm_launch(request.expected_launch, request.guest)
     if not valid_nonce(request.nonce) or type(request.operation) is not ManagedOperation:
         raise ManagedObservationError("invalid managed observation request")
-    if (request.operation is ManagedOperation.OBSERVE and request.stream is not None) or (
-        request.operation is ManagedOperation.READ_OUTPUT and type(request.stream) is not Stream
-    ):
+    if (
+        request.operation is ManagedOperation.OBSERVE
+        and any(value is not None for value in (request.stream, request.offset, request.count))
+    ) or (request.operation is ManagedOperation.READ_OUTPUT and type(request.stream) is not Stream):
         raise ManagedObservationError("invalid managed observation selector")
     data = _json(
         {
@@ -133,6 +145,11 @@ def encode_request(request: ManagedObservationRequest) -> bytes:
                 "init_start_ticks": request.guest.init_start_ticks,
             },
             "stream": request.stream.value if request.stream is not None else None,
+            **(
+                {"offset": request.offset, "count": request.count}
+                if request.operation is ManagedOperation.READ_OUTPUT
+                else {}
+            ),
         }
     )
     if len(data) > MAX_REQUEST_BYTES:
@@ -144,6 +161,8 @@ def encode_request(request: ManagedObservationRequest) -> bytes:
 def decode_request(data: bytes) -> ManagedObservationRequest:
     value = _load(data, MAX_REQUEST_BYTES)
     fields = {"version", "nonce", "operation", "expected_launch", "identity", "guest", "stream"}
+    if value.get("operation") == ManagedOperation.READ_OUTPUT.value:
+        fields |= {"offset", "count"}
     if set(value) != fields or type(value["version"]) is not int or value["version"] != 1:
         raise ManagedObservationError("invalid managed observation request")
     try:
@@ -168,6 +187,18 @@ def decode_request(data: bytes) -> ManagedObservationRequest:
         if selected is not None and type(selected) is not str:
             raise ValueError
         stream = None if selected is None else Stream(selected)
+        offset = None
+        count = None
+        if operation is ManagedOperation.READ_OUTPUT:
+            raw_offset, raw_count = value["offset"], value["count"]
+            if (
+                type(raw_offset) is not int
+                or not 0 <= raw_offset <= wire.MAX_CAPTURE_PREFIX_BYTES_V1
+                or type(raw_count) is not int
+                or not 0 < raw_count <= MAX_OUTPUT_PAGE_BYTES
+            ):
+                raise ValueError
+            offset, count = raw_offset, raw_count
     except (ValueError, TypeError, UnicodeError, KeyError, binascii.Error):
         raise ManagedObservationError("invalid managed observation request") from None
     if (
@@ -176,11 +207,14 @@ def decode_request(data: bytes) -> ManagedObservationRequest:
         or (operation is ManagedOperation.READ_OUTPUT and stream is None)
     ):
         raise ManagedObservationError("managed observation binding mismatch")
-    return ManagedObservationRequest(nonce, operation, launch_bytes, identity, guest, stream)
+    return ManagedObservationRequest(nonce, operation, launch_bytes, identity, guest, stream, offset, count)
 
 
 def encode_result(control: ManagedResultControl) -> bytes:
     value: dict[str, object] = {"version": 1, "facts": [name.value for name in control.facts]}
+    if control.output_range is not None:
+        selected = control.output_range
+        value["range"] = {"offset": selected.offset, "count": selected.count, "sha256": selected.sha256}
     if control.controller is not None:
         native = control.controller
         value["controller"] = {
@@ -194,7 +228,7 @@ def encode_result(control: ManagedResultControl) -> bytes:
 
 def decode_result(data: bytes) -> ManagedResultControl:
     value = _load(data, MAX_CONTROL_BYTES)
-    if set(value) not in ({"version", "facts"}, {"version", "facts", "controller"}) or (
+    if not {"version", "facts"} <= set(value) <= {"version", "facts", "controller", "range"} or (
         type(value["version"]) is not int or value["version"] != 1
     ):
         raise ManagedObservationError("invalid managed result")
@@ -234,7 +268,24 @@ def decode_result(data: bytes) -> ManagedResultControl:
         except (ValueError, TypeError):
             raise ManagedObservationError("invalid controller observation") from None
         controller = ControllerObservation(state, unit, boot, digest)
-    return ManagedResultControl(facts, controller)
+    output_range = None
+    if "range" in value:
+        selected = value["range"]
+        if type(selected) is not dict or set(selected) != {"offset", "count", "sha256"}:
+            raise ManagedObservationError("invalid managed output range")
+        offset, count, digest = selected["offset"], selected["count"], selected["sha256"]
+        if (
+            type(offset) is not int
+            or not 0 <= offset <= wire.MAX_CAPTURE_PREFIX_BYTES_V1
+            or type(count) is not int
+            or not 0 <= count <= MAX_OUTPUT_PAGE_BYTES
+            or type(digest) is not str
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise ManagedObservationError("invalid managed output range")
+        output_range = ManagedOutputRange(offset, count, digest)
+    return ManagedResultControl(facts, controller, output_range)
 
 
 def checked_controller(controller: ControllerObservation, expected_launch: bytes) -> None:

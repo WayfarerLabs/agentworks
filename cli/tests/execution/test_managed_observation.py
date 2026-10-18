@@ -7,6 +7,7 @@ import json
 import os
 import sys
 from collections.abc import Callable, Generator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -21,21 +22,23 @@ from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_job_store import FactName, ManagedJobStore, StoreError, Stream
 from agentworks.execution._managed_observation_bundle import FIXED_BUNDLE
 from agentworks.execution._managed_observation_exchange import (
-    _MAX_RESPONSE_RECORDS,
     ManagedObservationIssue,
     ManagedObservationState,
     _Collector,
+    _max_response_records,
     observe_managed_run,
     read_managed_output,
 )
 from agentworks.execution._managed_observation_protocol import (
     FACT_ORDER,
     MAX_CONTROL_BYTES,
+    MAX_OUTPUT_PAGE_BYTES,
     MAX_REQUEST_BYTES,
     ControllerState,
     ManagedObservationError,
     ManagedObservationRequest,
     ManagedOperation,
+    ManagedOutputRange,
     ManagedResultControl,
     checked_fact,
     decode_request,
@@ -133,10 +136,38 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[ManagedJ
 def _request(
     operation: ManagedOperation = ManagedOperation.OBSERVE, stream: Stream | None = None
 ) -> ManagedObservationRequest:
-    return ManagedObservationRequest(NONCE, operation, _launch(), IdentityExpectation(0, 0, (0,)), GUEST, stream)
+    return ManagedObservationRequest(
+        NONCE,
+        operation,
+        _launch(),
+        IdentityExpectation(0, 0, (0,)),
+        GUEST,
+        stream,
+        0 if operation is ManagedOperation.READ_OUTPUT else None,
+        MAX_OUTPUT_PAGE_BYTES if operation is ManagedOperation.READ_OUTPUT else None,
+    )
 
 
-def _records(nonce: str, control: ManagedResultControl, facts: tuple[bytes, ...], output: bytes = b"") -> bytes:
+def _records(
+    nonce: str,
+    control: ManagedResultControl,
+    facts: tuple[bytes, ...],
+    output: bytes = b"",
+    *,
+    range_from_end: bool = True,
+) -> bytes:
+    if (
+        range_from_end
+        and control.controller is None
+        and control.output_range is None
+        and len(control.facts) == 2
+        and control.facts[1] in (FactName.STDOUT_END, FactName.STDERR_END)
+    ):
+        end = wire.decode_fact(facts[1])
+        if end["disposition"] in ("complete-capture", "truncated-capture"):
+            control = replace(
+                control, output_range=ManagedOutputRange(0, end["retained_bytes"], end["retained_sha256"])
+            )
     entries = [(FileRecordKind.RESULT, encode_result(control))]
     entries.extend((FileRecordKind.DATA, fact) for fact in facts)
     entries.extend((FileRecordKind.DATA, output[offset : offset + 4096]) for offset in range(0, len(output), 4096))
@@ -207,7 +238,9 @@ def _plan() -> IdentityPlan:
     return IdentityPlan(IdentityExpectation(0, 0, (0,)), IdentityMode.SUDO_ROOT)
 
 
-def _exchange(carrier: ScriptedCarrier, *, stream: Stream | None = None):  # type: ignore[no-untyped-def]
+def _exchange(
+    carrier: ScriptedCarrier, *, stream: Stream | None = None, offset: int = 0, count: int = MAX_OUTPUT_PAGE_BYTES
+):  # type: ignore[no-untyped-def]
     kwargs = {
         "expected_launch": _launch(),
         "plan": _plan(),
@@ -217,7 +250,7 @@ def _exchange(carrier: ScriptedCarrier, *, stream: Stream | None = None):  # typ
     }
     if stream is None:
         return observe_managed_run(carrier, **kwargs)  # type: ignore[arg-type]
-    return read_managed_output(carrier, stream=stream, **kwargs)  # type: ignore[arg-type]
+    return read_managed_output(carrier, stream=stream, offset=offset, count=count, **kwargs)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("mask", range(16))
@@ -271,6 +304,8 @@ def test_request_codec_binds_exact_launch_and_rejects_arbitrary_selectors() -> N
             carrier,
             expected_launch=_launch(),
             stream="environment",  # type: ignore[arg-type]
+            offset=0,
+            count=MAX_OUTPUT_PAGE_BYTES,
             plan=_plan(),
             deadline=Deadline.after(10),
             runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX),
@@ -292,6 +327,8 @@ def test_host_refuses_unbound_guest_before_carrier(operation: ManagedOperation) 
     call = observe_managed_run if operation is ManagedOperation.OBSERVE else read_managed_output
     if operation is ManagedOperation.READ_OUTPUT:
         kwargs["stream"] = Stream.STDOUT
+        kwargs["offset"] = 0
+        kwargs["count"] = MAX_OUTPUT_PAGE_BYTES
     for launch, supplied in (
         (_launch(boot=GUEST.boot_id), GUEST),
         (_launch(kind="platform-host"), GUEST),
@@ -664,6 +701,157 @@ def test_result_and_record_bounds() -> None:
 
 def test_response_record_count_has_a_fixed_bound() -> None:
     collector = _Collector(_request(ManagedOperation.READ_OUTPUT, Stream.STDOUT))
-    collector.records = _MAX_RESPONSE_RECORDS
-    collector.accept(FileRecord(_MAX_RESPONSE_RECORDS, FileRecordKind.DATA, b"x"))
+    collector.records = _max_response_records(MAX_OUTPUT_PAGE_BYTES)
+    collector.accept(FileRecord(collector.records, FileRecordKind.DATA, b"x"))
     assert collector.issue is ManagedObservationIssue.CONTENT
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("offset", None),
+        ("offset", True),
+        ("offset", -1),
+        ("offset", wire.MAX_CAPTURE_PREFIX_BYTES_V1 + 1),
+        ("count", None),
+        ("count", True),
+        ("count", 0),
+        ("count", MAX_OUTPUT_PAGE_BYTES + 1),
+    ],
+)
+def test_read_request_requires_explicit_finite_range(field: str, value: object) -> None:
+    encoded = json.loads(encode_request(_request(ManagedOperation.READ_OUTPUT, Stream.STDOUT)))
+    encoded[field] = value
+    with pytest.raises(ManagedObservationError):
+        decode_request(json.dumps(encoded, sort_keys=True, separators=(",", ":")).encode())
+    del encoded[field]
+    with pytest.raises(ManagedObservationError):
+        decode_request(json.dumps(encoded, sort_keys=True, separators=(",", ":")).encode())
+
+
+def test_observation_rejects_ranges_without_changing_its_request_shape() -> None:
+    request = _request()
+    assert "offset" not in json.loads(encode_request(request))
+    with pytest.raises(ManagedObservationError):
+        encode_request(replace(request, offset=0, count=1))
+    value = json.loads(encode_request(request))
+    value.update(offset=0, count=1)
+    with pytest.raises(ManagedObservationError):
+        decode_request(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
+
+
+@pytest.mark.parametrize("stream", list(Stream))
+@pytest.mark.parametrize("offset", [65530, 262144, 524301, 524302])
+def test_guest_and_host_transfer_only_verified_requested_binary_range(
+    store: ManagedJobStore, stream: Stream, offset: int
+) -> None:
+    content = bytes(range(256)) * 2048 + b"\0binary-tail\xff"
+    launch = _launch()
+    store.publish_fact(FactName.LAUNCH, launch)
+    writer = store.open_capture(stream, len(content))
+    writer.write(content)
+    capture = writer.finish()
+    name = FactName.STDOUT_END if stream is Stream.STDOUT else FactName.STDERR_END
+    end = _fact(name, launch, disposition=capture.disposition.value, content=content)
+    store.publish_fact(name, end)
+
+    def response(request: ManagedObservationRequest) -> bytes:
+        prepared = guest._prepare(request, store)
+        assert prepared.output == content[offset : offset + 37]
+        assert prepared.control.output_range == ManagedOutputRange(
+            offset, len(prepared.output), hashlib.sha256(prepared.output).hexdigest()
+        )
+        return _records(request.nonce, prepared.control, prepared.facts, prepared.output)
+
+    carrier = ScriptedCarrier(response)
+    candidate = _exchange(carrier, stream=stream, offset=offset, count=37)
+    assert carrier.calls == 1
+    assert candidate.observation is not None and candidate.observation.state is ManagedObservationState.AVAILABLE
+    assert candidate.observation.output == content[offset : offset + 37]
+    assert candidate.observation.facts == ((FactName.LAUNCH, launch), (name, end))
+    assert b"binary-tail" not in repr(candidate).encode()
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "missing-range",
+        "offset",
+        "count",
+        "digest",
+        "missing-data",
+        "extra-data",
+        "wrong-end",
+        "oversized-data",
+        "range-on-observe",
+        "range-on-discard",
+    ],
+)
+def test_host_refuses_range_binding_and_payload_faults_and_erases_collector(fault: str) -> None:
+    request = replace(_request(ManagedOperation.READ_OUTPUT, Stream.STDOUT), offset=5, count=3)
+    if fault == "range-on-observe":
+        request = _request()
+    content, selected = b"private-canary", b"te-"
+    end = _fact(FactName.STDOUT_END, request.expected_launch, content=content)
+    output_range = ManagedOutputRange(5, 3, hashlib.sha256(selected).hexdigest())
+    if fault == "missing-range":
+        output_range = None  # type: ignore[assignment]
+    elif fault == "offset":
+        output_range = replace(output_range, offset=4)
+    elif fault == "count":
+        output_range = replace(output_range, count=2)
+    elif fault == "digest":
+        output_range = replace(output_range, sha256="0" * 64)
+    elif fault == "range-on-discard":
+        end = _fact(FactName.STDOUT_END, request.expected_launch, disposition="discarded")
+    elif fault == "wrong-end":
+        end = _fact(FactName.STDOUT_END, _launch(target="other"), content=content)
+    control = ManagedResultControl((FactName.LAUNCH, FactName.STDOUT_END), output_range=output_range)
+    entries = [
+        (FileRecordKind.RESULT, encode_result(control)),
+        (FileRecordKind.DATA, request.expected_launch),
+        (FileRecordKind.DATA, end),
+    ]
+    if fault != "missing-data":
+        entries.append((FileRecordKind.DATA, selected * 100 if fault == "oversized-data" else selected))
+    if fault == "extra-data":
+        entries.append((FileRecordKind.DATA, b"x"))
+    entries.append((FileRecordKind.FINISHED, b""))
+    collector = _Collector(request)
+    for sequence, (kind, body) in enumerate(entries):
+        collector.accept(FileRecord(sequence, kind, body))
+        assert len(collector.output) <= 3
+    observation = collector.finish(
+        None,
+        complete=True,
+        stderr_noise=False,
+        dispatch=Dispatch.SENT,
+        completion=ExitStatus(code=0),
+        carrier_failure=None,
+    )
+    assert observation.state in (ManagedObservationState.INVALID, ManagedObservationState.INCOMPLETE)
+    assert observation.output is None and observation.facts == ()
+    assert not collector.output and not collector.facts and collector.control is None
+    assert content not in repr(observation).encode()
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("offset", True),
+        ("offset", -1),
+        ("count", True),
+        ("count", MAX_OUTPUT_PAGE_BYTES + 1),
+        ("sha256", "private-canary"),
+        ("extra", 1),
+    ],
+)
+def test_range_control_refuses_malformed_external_values(field: str, value: object) -> None:
+    control = ManagedResultControl(
+        (FactName.LAUNCH, FactName.STDOUT_END), output_range=ManagedOutputRange(0, 0, hashlib.sha256(b"").hexdigest())
+    )
+    encoded = json.loads(encode_result(control))
+    encoded["range"][field] = value
+    with pytest.raises(ManagedObservationError) as caught:
+        decode_result(json.dumps(encoded, sort_keys=True, separators=(",", ":")).encode())
+    assert b"private-canary" not in repr(caught.value).encode()

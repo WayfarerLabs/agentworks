@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 from dataclasses import dataclass, field
@@ -19,6 +20,7 @@ from ._managed_observation_protocol import (
     ManagedObservationError,
     ManagedObservationRequest,
     ManagedOperation,
+    ManagedOutputRange,
     ManagedResultControl,
     checked_fact,
     checked_launch,
@@ -80,13 +82,17 @@ def _prepare(request: ManagedObservationRequest, store: ManagedJobStore) -> _Pre
     if end is None:
         return _PreparedResult(ManagedResultControl((FactName.LAUNCH,)), (launch,))
     end_fact = checked_fact(end_name, end, launch)
-    output = store.read_capture(request.stream, launch)
+    assert request.offset is not None and request.count is not None
+    output = store.read_capture_range(request.stream, launch, offset=request.offset, count=request.count)
     if end_fact["disposition"] in ("discarded", "sensitivity-suppressed"):
         return _PreparedResult(ManagedResultControl((FactName.LAUNCH, end_name)), (launch, end))
     if output is None:
         raise ManagedObservationError("invalid closed capture")
     return _PreparedResult(
-        ManagedResultControl((FactName.LAUNCH, end_name)),
+        ManagedResultControl(
+            (FactName.LAUNCH, end_name),
+            output_range=ManagedOutputRange(request.offset, len(output), hashlib.sha256(output).hexdigest()),
+        ),
         (launch, end),
         output,
     )

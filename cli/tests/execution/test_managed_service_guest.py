@@ -155,11 +155,11 @@ def test_literal_binary_io_and_exact_status(tmp_path: Path) -> None:
         stdin=payload,
         limit=31,
     )
-    assert store.read_capture(Stream.STDOUT, _launch()) == payload[:31]
+    assert store.read_capture_range(Stream.STDOUT, _launch(), offset=0, count=31) == payload[:31]
     stdout = wire.decode_fact(store.read_fact(FactName.STDOUT_END))  # type: ignore[arg-type]
     assert stdout["disposition"] == "truncated-capture"
     assert stdout["retained_sha256"] == hashlib.sha256(payload[:31]).hexdigest()
-    assert store.read_capture(Stream.STDERR, _launch()) == b"\xff"
+    assert store.read_capture_range(Stream.STDERR, _launch(), offset=0, count=31) == b"\xff"
     wait = wire.decode_fact(store.read_fact(FactName.WAIT))  # type: ignore[arg-type]
     assert wait["exit_code"] == 255
     store.close()
@@ -242,7 +242,7 @@ def test_stop_term_aware_anchor_drains_and_preserves_wait(tmp_path: Path) -> Non
     publisher.join(timeout=2)
     assert not publisher.is_alive()
     assert marker.exists()
-    assert store.read_capture(Stream.STDOUT, launch) == b"stopped"
+    assert store.read_capture_range(Stream.STDOUT, launch, offset=0, count=100) == b"stopped"
     wait = wire.decode_fact(store.read_fact(FactName.WAIT))  # type: ignore[arg-type]
     assert wait["exit_code"] == 7
     assert store.read_fact(FactName.BOUNDARY_EMPTY) is not None
@@ -457,7 +457,7 @@ def test_wait_status_before_exec_pipe_eof_still_publishes_normal_exit(
     monkeypatch.setattr(os, "waitpid", lambda pid, option: (pid, 7 << 8))
     request = request_wire.ManagedJobRequest(_launch(), "command", ("/bin/true",), None, "discard", None, (), b"", b"")
     try:
-        guest._observe(RUN, "a" * 64, request, store, boundary, 12345, input_w, exec_r, [])
+        guest._observe(RUN, "a" * 64, request, store, boundary, 12345, input_w, exec_r, [], {input_w})
     finally:
         os.close(exec_r)
     assert boundary.killed
@@ -484,7 +484,7 @@ def test_boundary_waits_for_late_exec_status_and_wait(tmp_path: Path, monkeypatc
     request = request_wire.ManagedJobRequest(_launch(), "command", ("/bin/true",), None, "discard", None, (), b"", b"")
     worker = threading.Thread(
         target=guest._observe,
-        args=(RUN, "a" * 64, request, store, boundary, 12345, input_w, exec_r, []),
+        args=(RUN, "a" * 64, request, store, boundary, 12345, input_w, exec_r, [], {input_w}),
     )
     worker.start()
     try:
@@ -521,7 +521,7 @@ def test_child_restores_sigpipe_before_exec(tmp_path: Path) -> None:
     finally:
         signal.signal(signal.SIGPIPE, previous)
     assert store.read_fact(FactName.WAIT) is None
-    assert store.read_capture(Stream.STDOUT, _launch()) == b""
+    assert store.read_capture_range(Stream.STDOUT, _launch(), offset=0, count=1024) == b""
     store.close()
 
 
@@ -532,7 +532,7 @@ def test_child_clears_inherited_signal_mask_before_exec(tmp_path: Path) -> None:
     finally:
         signal.pthread_sigmask(signal.SIG_SETMASK, previous)
     assert store.read_fact(FactName.WAIT) is None
-    assert store.read_capture(Stream.STDOUT, _launch()) == b""
+    assert store.read_capture_range(Stream.STDOUT, _launch(), offset=0, count=1024) == b""
     store.close()
 
 
@@ -543,7 +543,7 @@ def test_child_restores_inherited_ignored_signal_before_exec(tmp_path: Path) -> 
     finally:
         signal.signal(signal.SIGTERM, previous)
     assert store.read_fact(FactName.WAIT) is None
-    assert store.read_capture(Stream.STDOUT, _launch()) == b""
+    assert store.read_capture_range(Stream.STDOUT, _launch(), offset=0, count=1024) == b""
     store.close()
 
 
@@ -553,7 +553,7 @@ def test_literal_command_uses_explicit_request_path(tmp_path: Path) -> None:
         argv=("printf", "path-search"),
         environment=(("PATH", "/usr/bin:/bin"),),
     )
-    assert store.read_capture(Stream.STDOUT, _launch()) == b"path-search"
+    assert store.read_capture_range(Stream.STDOUT, _launch(), offset=0, count=1024) == b"path-search"
     store.close()
 
 
@@ -603,9 +603,11 @@ def test_script_source_is_separate_from_stdin(
         login=login,
     )
     assert (
-        store.read_capture(
+        store.read_capture_range(
             Stream.STDOUT,
             _launch(shell=shell, resolved_shell=resolved_shell, login=login),
+            offset=0,
+            count=1024,
         )
         == b"script:\x00binary\xff"
     )
@@ -654,7 +656,7 @@ def test_user_default_refuses_stale_or_unsupported_account_shell(
 @pytest.mark.parametrize("mode", ["discard", "sensitivity-suppressed"])
 def test_no_spool_for_non_capture(tmp_path: Path, mode: str) -> None:
     store, _ = _execute(tmp_path, argv=("/bin/sh", "-c", "printf secret"), output_mode=mode, limit=None)
-    assert store.read_capture(Stream.STDOUT, _launch()) is None
+    assert store.read_capture_range(Stream.STDOUT, _launch(), offset=0, count=1) is None
     assert not (tmp_path / "managed" / RUN / "stdout").exists()
     fact = wire.decode_fact(store.read_fact(FactName.STDOUT_END))  # type: ignore[arg-type]
     assert fact["disposition"] == ("discarded" if mode == "discard" else "sensitivity-suppressed")

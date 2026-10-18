@@ -386,6 +386,8 @@ class ExecutionOperation:
         deadline: Deadline,
         guest: VMGuestIdentity,
         stream: Stream | None,
+        offset: int | None = None,
+        count: int | None = None,
     ) -> tuple[ManagedObservationCandidate, ManagedObserveOutcome]:
         """Run one fixed read using the same lifetime row as inline execution."""
         self._require_managed_target()
@@ -397,6 +399,8 @@ class ExecutionOperation:
             deadline=deadline,
             runtime_selection=runtime_selection,
             guest=guest,
+            offset=offset,
+            count=count,
         )
         active = None
         try:
@@ -580,6 +584,9 @@ class ExecutionOperation:
         carrier: Carrier,
         deadline: Deadline,
         stream: Stream,
+        *,
+        offset: int,
+        count: int,
     ) -> ManagedReadOutputOutcome:
         """Read a closed output stream through retained operation custody."""
         self._require_managed_target()
@@ -590,6 +597,8 @@ class ExecutionOperation:
             repository,
             ManagedRunIdentity(reference.run_id),
             stream=stream,
+            offset=offset,
+            count=count,
             target=self._target,
             guest=bootstrap.guest,
             root_plan=bootstrap.root_entry,

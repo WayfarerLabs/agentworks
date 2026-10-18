@@ -13,8 +13,13 @@ from agentworks.execution import _managed_job_wire as wire
 from agentworks.execution import _managed_result as result_module
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._managed_job_store import FactName, Stream
-from agentworks.execution._managed_observation_protocol import ManagedOperation, ManagedResultControl
-from agentworks.execution._managed_observe_access import read_bound_managed_output
+from agentworks.execution._managed_observation_protocol import (
+    MAX_OUTPUT_PAGE_BYTES,
+    ManagedOperation,
+    ManagedOutputRange,
+    ManagedResultControl,
+)
+from agentworks.execution._managed_observe_access import ManagedObserveControlFact, read_bound_managed_output
 from agentworks.execution._managed_result import (
     ManagedResultControlFact,
     collect_bound_managed_result,
@@ -56,18 +61,26 @@ def _reply(
     boundary: bool = True,
     ends: tuple[Stream, ...] = (Stream.STDOUT, Stream.STDERR),
     disposition: str = "complete-capture",
+    contents: dict[Stream, bytes] | None = None,
 ) -> bytes:  # type: ignore[no-untyped-def]
     launch = request.expected_launch
+    contents = contents if contents is not None else {Stream.STDOUT: b"out", Stream.STDERR: b"err"}
     if request.operation is ManagedOperation.READ_OUTPUT:
         assert request.stream is not None
         end_name = FactName.STDOUT_END if request.stream is Stream.STDOUT else FactName.STDERR_END
-        content = b"out" if request.stream is Stream.STDOUT else b"err"
+        content = contents[request.stream]
         end = _fact(end_name, launch, disposition=disposition, content=content if "capture" in disposition else b"")
+        output = content[request.offset : request.offset + request.count] if "capture" in disposition else b""
         return _records(
             request.nonce,
-            ManagedResultControl((FactName.LAUNCH, end_name)),
+            ManagedResultControl(
+                (FactName.LAUNCH, end_name),
+                output_range=ManagedOutputRange(request.offset, len(output), hashlib.sha256(output).hexdigest())
+                if "capture" in disposition
+                else None,
+            ),
             (launch, end),
-            content if "capture" in disposition else b"",
+            output,
         )
     names = [FactName.LAUNCH]
     facts = [launch]
@@ -88,7 +101,7 @@ def _reply(
         )
     for stream in ends:
         name = FactName.STDOUT_END if stream is Stream.STDOUT else FactName.STDERR_END
-        content = (b"out" if stream is Stream.STDOUT else b"err") if "capture" in disposition else b""
+        content = contents[stream] if "capture" in disposition else b""
         names.append(name)
         facts.append(_fact(name, launch, disposition=disposition, content=content))
     if boundary:
@@ -123,6 +136,153 @@ def test_exact_zero_and_settled_streams_succeed(
         assert result.owned_cleanup_confirmed
         assert not outcome.requires_owner_retention
         assert carrier.calls == 3
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize("disposition", ["complete-capture", "truncated-capture"])
+@pytest.mark.parametrize("empty", [False, True])
+def test_closed_streams_collect_sequential_pages_under_one_deadline(
+    tmp_path: Path, disposition: str, empty: bool
+) -> None:
+    page = MAX_OUTPUT_PAGE_BYTES
+    contents = {
+        Stream.STDOUT: b"" if empty else bytes(range(256)) * (2 * page // 256) + b"stdout-tail",
+        Stream.STDERR: b"" if empty else b"\xff\0" * (page // 2) + b"stderr-tail",
+    }
+    database, repository, owner = _confirmed(tmp_path, ManagedOutputPolicy(ManagedOutputMode.CAPTURE, 3 * page))
+    deadline = Deadline.after(10)
+    requests = []
+
+    def reply(request):  # type: ignore[no-untyped-def]
+        requests.append(request)
+        return _reply(request, contents=contents, disposition=disposition)
+
+    class Carrier(ScriptedCarrier):
+        def execute(self, invocation, *, io, deadline: Deadline, custody=None):  # type: ignore[no-untyped-def]
+            assert deadline is selected
+            return super().execute(invocation, io=io, deadline=deadline, custody=custody)
+
+    selected = deadline
+    carrier = Carrier(reply)
+    try:
+        outcome = collect_bound_managed_result(repository, RUN, **_options(owner, carrier, deadline=deadline))  # type: ignore[arg-type]
+        assert outcome.result.status == ExitCode(0)
+        assert outcome.result.stdout.data == contents[Stream.STDOUT]
+        assert outcome.result.stderr.data == contents[Stream.STDERR]
+        assert outcome.result.stdout.complete is (disposition == "complete-capture")
+        assert outcome.result.stderr.complete is (disposition == "complete-capture")
+        assert outcome.result.failure is (ExecutionFailure.OUTPUT_LIMIT if disposition == "truncated-capture" else None)
+        assert len(outcome.attempts) == carrier.calls == (3 if empty else 6)
+        assert [(request.stream, request.offset, request.count) for request in requests[1:]] == (
+            [(Stream.STDOUT, 0, page), (Stream.STDERR, 0, page)]
+            if empty
+            else [
+                (Stream.STDOUT, 0, page),
+                (Stream.STDOUT, page, page),
+                (Stream.STDOUT, 2 * page, page),
+                (Stream.STDERR, 0, page),
+                (Stream.STDERR, page, page),
+            ]
+        )
+        assert not outcome.awaiting_facts and not outcome.requires_owner_retention
+        assert all(
+            attempt.candidate is not None
+            and attempt.candidate.observation is not None
+            and attempt.candidate.observation.output is None
+            for attempt in outcome.attempts[1:]
+        )
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize("disposition", ["complete-capture", "truncated-capture"])
+@pytest.mark.parametrize("fault", ["invalid", "end-change", "unknown", "deadline", "expire-before-borrow"])
+def test_later_page_failure_preserves_prefix_status_and_each_attempt_without_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, disposition: str, fault: str
+) -> None:
+    page = MAX_OUTPUT_PAGE_BYTES
+    contents = {Stream.STDOUT: bytes(range(256)) * (2 * page // 256) + b"tail", Stream.STDERR: b"err"}
+    database, repository, owner = _confirmed(tmp_path, ManagedOutputPolicy(ManagedOutputMode.CAPTURE, 3 * page))
+    deadline = Deadline.after(10)
+
+    def reply(request):  # type: ignore[no-untyped-def]
+        if request.operation is ManagedOperation.READ_OUTPUT and request.offset == page:
+            if fault == "invalid":
+                return b"invalid\n"
+            if fault == "end-change":
+                return _reply(
+                    request,
+                    wait=7,
+                    contents={**contents, Stream.STDOUT: contents[Stream.STDOUT][:-1] + b"X"},
+                    disposition=disposition,
+                )
+            if fault == "unknown":
+                carrier.dispatch, carrier.code = Dispatch.UNKNOWN, None
+            if fault == "deadline":
+                object.__setattr__(deadline, "expires_at", 0.0)
+                carrier.complete = False
+        return _reply(request, wait=7, contents=contents, disposition=disposition)
+
+    real_read = read_bound_managed_output
+
+    def read(*args, **kwargs):  # type: ignore[no-untyped-def]
+        if fault == "expire-before-borrow" and kwargs["offset"] == page:
+            object.__setattr__(deadline, "expires_at", 0.0)
+        return real_read(*args, **kwargs)
+
+    monkeypatch.setattr(result_module, "read_bound_managed_output", read)
+    carrier = ScriptedCarrier(reply)
+    try:
+        outcome = wait_bound_managed_result(repository, RUN, **_options(owner, carrier, deadline=deadline))  # type: ignore[arg-type]
+        result = outcome.result
+        assert result.application_state is ApplicationState.COMPLETED and result.status == ExitCode(7)
+        assert result.stdout.data == contents[Stream.STDOUT][:page] and not result.stdout.complete
+        assert result.stderr.data == b"" and not result.stderr.complete
+        assert result.failure is (
+            ExecutionFailure.DEADLINE if fault in ("deadline", "expire-before-borrow") else ExecutionFailure.OBSERVATION
+        )
+        assert result.deadline_exceeded is (fault in ("deadline", "expire-before-borrow"))
+        assert len(outcome.attempts) == carrier.calls == (2 if fault == "expire-before-borrow" else 3)
+        assert not outcome.awaiting_facts
+        assert outcome.requires_owner_retention is (fault == "unknown")
+    finally:
+        database.close()
+
+
+def test_later_page_interruption_preserves_original_control_cause_and_all_attempts(tmp_path: Path) -> None:
+    page = MAX_OUTPUT_PAGE_BYTES
+    contents = {Stream.STDOUT: b"private-prefix" * (page // 7), Stream.STDERR: b"err"}
+    database, repository, owner = _confirmed(tmp_path, ManagedOutputPolicy(ManagedOutputMode.CAPTURE, 3 * page))
+    cause = ValueError("original cause")
+    control = KeyboardInterrupt("later page interrupted")
+    control.__cause__ = cause
+
+    class Interrupted(ScriptedCarrier):
+        def execute(self, invocation, *, io, deadline, custody=None):  # type: ignore[no-untyped-def]
+            if self.calls == 2:
+                self.calls += 1
+                raise control
+            return super().execute(invocation, io=io, deadline=deadline, custody=custody)
+
+    carrier = Interrupted(lambda request: _reply(request, wait=7, contents=contents))
+    try:
+        with pytest.raises(KeyboardInterrupt) as caught:
+            collect_bound_managed_result(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
+        assert caught.value is control and isinstance(control.__cause__, ManagedResultControlFact)
+        custody = control.__cause__
+        assert isinstance(custody.__cause__, ManagedObserveControlFact)
+        assert custody.__cause__.__cause__ is cause
+        assert len(custody.attempts) == carrier.calls == 3
+        assert custody.attempts[-1].requires_owner_retention
+        assert not custody.attempts[1].requires_owner_retention
+        assert all(
+            attempt.candidate is None
+            or attempt.candidate.observation is None
+            or attempt.candidate.observation.output is None
+            for attempt in custody.attempts
+        )
+        assert b"private-prefix" not in repr(custody).encode()
     finally:
         database.close()
 

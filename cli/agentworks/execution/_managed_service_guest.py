@@ -149,6 +149,13 @@ def _close(fd: int) -> None:
         os.close(fd)
 
 
+def _close_owned(owned: set[int], fd: int) -> None:
+    if fd in owned:
+        # A failed close must never authorize retry against a reused number.
+        owned.remove(fd)
+        _close(fd)
+
+
 def _gate(fd: int) -> None:
     if os.read(fd, 1) != b"1":
         raise ControllerError("gate closed")
@@ -287,6 +294,7 @@ def _serve(
         os._exit(126)
     for fd in (placed_r, release_r, ready_w, input_r, output_w, error_w, exec_w):
         _close(fd)
+    owned_pipes = {input_w, output_r, error_r}
     launched = False
     writers: list[CaptureWriter] = []
     try:
@@ -319,12 +327,14 @@ def _serve(
                 checked_lease(lease, request.launch, boottime_ns())
             os.write(release_w, b"1")
         launched = True
-        _observe(run_id, digest, request, store, boundary, pid, input_w, exec_r, states, control, live)
+        _observe(run_id, digest, request, store, boundary, pid, input_w, exec_r, states, owned_pipes, control, live)
     finally:
         if live is not None:
             live.close()
-        for fd in (placed_w, release_w, ready_r, input_w, output_r, error_r, exec_r):
+        for fd in (placed_w, release_w, ready_r, exec_r):
             _close(fd)
+        for fd in tuple(owned_pipes):
+            _close_owned(owned_pipes, fd)
         for writer in writers:
             writer.close()
         if not launched:
@@ -345,24 +355,32 @@ def _observe(
     input_fd: int,
     exec_fd: int,
     states: list[_StreamState],
+    owned_pipes: set[int],
     lease_control: LeaseControl | None = None,
     live: LiveIO | None = None,
 ) -> None:
-    selector = selectors.DefaultSelector()
-    os.set_blocking(exec_fd, False)
-    selector.register(exec_fd, selectors.EVENT_READ, "exec")
-    for state in states:
-        os.set_blocking(state.fd, False)
-        selector.register(state.fd, selectors.EVENT_READ, state)
-    offset = 0
     live_input = live is not None and live.metadata.input
     input_open = bool(request.stdin) or live_input
-    if input_open:
-        os.set_blocking(input_fd, False)
-        if request.stdin:
-            selector.register(input_fd, selectors.EVENT_WRITE, None)
-    else:
-        _close(input_fd)
+    selector = None
+    try:
+        selector = selectors.DefaultSelector()
+        os.set_blocking(exec_fd, False)
+        selector.register(exec_fd, selectors.EVENT_READ, "exec")
+        for state in states:
+            os.set_blocking(state.fd, False)
+            selector.register(state.fd, selectors.EVENT_READ, state)
+        if input_open:
+            os.set_blocking(input_fd, False)
+            if request.stdin:
+                selector.register(input_fd, selectors.EVENT_WRITE, None)
+        else:
+            _close_owned(owned_pipes, input_fd)
+    except BaseException:
+        if selector is not None:
+            with suppress(OSError):
+                selector.close()
+        raise
+    offset = 0
     status: int | None = None
     exec_result: bool | None = None
     exec_failed = False
@@ -393,7 +411,7 @@ def _observe(
                 if input_open:
                     if input_fd in selector.get_map():
                         selector.unregister(input_fd)
-                    _close(input_fd)
+                    _close_owned(owned_pipes, input_fd)
                     input_open = False
                 if status is None:
                     with suppress(ProcessLookupError):
@@ -413,7 +431,7 @@ def _observe(
                     if status is not None or (live.input_eof and not live.input_pending):
                         if input_fd in selector.get_map():
                             selector.unregister(input_fd)
-                        _close(input_fd)
+                        _close_owned(owned_pipes, input_fd)
                         input_open = False
                     elif live.input_pending and input_fd not in selector.get_map():
                         selector.register(input_fd, selectors.EVENT_WRITE, None)
@@ -508,7 +526,7 @@ def _observe(
                     if finished_input:
                         if input_fd in selector.get_map():
                             selector.unregister(input_fd)
-                        _close(input_fd)
+                        _close_owned(owned_pipes, input_fd)
                         input_open = False
                 else:
                     state = cast("_StreamState", key.data)
@@ -530,7 +548,7 @@ def _observe(
                     else:
                         selector.unregister(state.fd)
                         open_streams.remove(state.fd)
-                        _close(state.fd)
+                        _close_owned(owned_pipes, state.fd)
                         if state.writer is not None:
                             capture = state.writer.finish()
                             retained, digest_bytes = capture.length, capture.sha256

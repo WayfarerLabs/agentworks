@@ -97,6 +97,91 @@ def _capture_prefix(store: ManagedJobStore, stream: Stream, limit: int, chunks: 
         writer.close()
 
 
+@pytest.mark.parametrize("stream", list(Stream))
+@pytest.mark.parametrize("offset", [0, 65530, 262140, 524301, 524302])
+def test_capture_range_verifies_binary_spool_with_bounded_short_reads(
+    store: ManagedJobStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stream: Stream, offset: int
+) -> None:
+    content = bytes(range(256)) * 2048 + b"\0binary-tail\xff"
+    launch = _launch()
+    store.publish_fact(FactName.LAUNCH, launch)
+    _capture_prefix(store, stream, len(content), (content,))
+    name = FactName.STDOUT_END if stream is Stream.STDOUT else FactName.STDERR_END
+    store.publish_fact(name, _end(launch, stream=stream.value, data=content))
+    inode = (_run_path(store, tmp_path) / stream.value).stat().st_ino
+    original = os.read
+    requested: list[int] = []
+    descriptors: set[int] = set()
+
+    def read(fd: int, count: int) -> bytes:
+        if os.fstat(fd).st_ino == inode:
+            descriptors.add(fd)
+            requested.append(count)
+            return original(fd, min(count, 4093))
+        return original(fd, count)
+
+    monkeypatch.setattr(os, "read", read)
+    monkeypatch.setattr(os, "lseek", lambda *_args: pytest.fail("capture range sought after verification"))
+    page = store.read_capture_range(stream, launch, offset=offset, count=262144)
+    assert page == content[offset : offset + 262144]
+    assert page is not None and len(page) <= 262144
+    assert max(requested) <= 65536
+    assert sum(min(count, 4093) for count in requested) >= len(content)
+    for fd in descriptors:
+        with pytest.raises(OSError):
+            os.fstat(fd)
+
+
+@pytest.mark.parametrize("fault", ["outside-before", "outside-after", "short", "read-error", "growth"])
+def test_capture_range_refuses_whole_spool_faults_and_closes_descriptors(
+    store: ManagedJobStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    content = bytes(range(256)) * 2048
+    launch = _launch()
+    store.publish_fact(FactName.LAUNCH, launch)
+    _capture_prefix(store, Stream.STDOUT, len(content), (content,))
+    store.publish_fact(FactName.STDOUT_END, _end(launch, data=content))
+    path = _run_path(store, tmp_path) / "stdout"
+    inode = path.stat().st_ino
+    if fault.startswith("outside"):
+        with path.open("r+b") as spool:
+            spool.seek(0 if fault == "outside-before" else len(content) - 1)
+            spool.write(b"X")
+    original = os.read
+    descriptors: set[int] = set()
+    consumed = 0
+
+    def read(fd: int, count: int) -> bytes:
+        nonlocal consumed
+        if os.fstat(fd).st_ino != inode:
+            return original(fd, count)
+        descriptors.add(fd)
+        if consumed and fault == "short":
+            return b""
+        if consumed and fault == "read-error":
+            raise OSError("synthetic read failure")
+        if consumed == len(content) and fault == "growth":
+            return b"x"
+        data = original(fd, count)
+        consumed += len(data)
+        return data
+
+    monkeypatch.setattr(os, "read", read)
+    with pytest.raises((StoreError, OSError)):
+        store.read_capture_range(Stream.STDOUT, launch, offset=65536, count=17)
+    for fd in descriptors:
+        with pytest.raises(OSError):
+            os.fstat(fd)
+
+
+@pytest.mark.parametrize(
+    "offset,count", [(-1, 1), (True, 1), (0, 0), (0, True), (0, wire.MAX_CAPTURE_PREFIX_BYTES_V1 + 1)]
+)
+def test_capture_range_refuses_invalid_caller_bounds(store: ManagedJobStore, offset: int, count: int) -> None:
+    with pytest.raises(StoreError):
+        store.read_capture_range(Stream.STDOUT, _launch(), offset=offset, count=count)
+
+
 def test_create_publish_idempotency_and_conflict(store: ManagedJobStore, tmp_path: Path) -> None:
     launch = _launch()
     assert store.read_fact(FactName.LAUNCH) is None
@@ -282,13 +367,13 @@ def test_closed_capture_requires_end_and_binding(store: ManagedJobStore) -> None
     launch = _launch()
     store.publish_fact(FactName.LAUNCH, launch)
     prefix = _capture_prefix(store, Stream.STDOUT, 3, (b"abcdef",))
-    assert store.read_capture(Stream.STDOUT, launch) is None
+    assert store.read_capture_range(Stream.STDOUT, launch, offset=0, count=3) is None
     wrong = _end(launch, data=b"abc")
     value = wire.decode_fact(wrong)
     value["receipt_sha256"] = "a" * 64
     store.publish_fact(FactName.STDOUT_END, wire.encode_fact(value))
     with pytest.raises(StoreError):
-        store.read_capture(Stream.STDOUT, launch)
+        store.read_capture_range(Stream.STDOUT, launch, offset=0, count=3)
     assert prefix.length == 3
 
 
@@ -315,10 +400,10 @@ def test_closed_capture_checks_exact_spool(store: ManagedJobStore, tmp_path: Pat
     elif mutation == "hardlink":
         os.link(path, path.parent / ".spool-link")
     if mutation == "none":
-        assert store.read_capture(Stream.STDOUT, launch) == b"abc"
+        assert store.read_capture_range(Stream.STDOUT, launch, offset=0, count=3) == b"abc"
     else:
         with pytest.raises(StoreError):
-            store.read_capture(Stream.STDOUT, launch)
+            store.read_capture_range(Stream.STDOUT, launch, offset=0, count=3)
 
 
 def test_oversize_capture_refuses_before_reading(
@@ -342,7 +427,7 @@ def test_oversize_capture_refuses_before_reading(
 
     monkeypatch.setattr(job_store, "_read_all", refuse_spool_read)
     with pytest.raises(StoreError):
-        store.read_capture(Stream.STDOUT, launch)
+        store.read_capture_range(Stream.STDOUT, launch, offset=0, count=3)
 
 
 @pytest.mark.parametrize("disposition", ["discarded", "sensitivity-suppressed"])
@@ -350,13 +435,13 @@ def test_noncapture_has_no_spool_and_no_bytes(store: ManagedJobStore, tmp_path: 
     launch = _launch()
     store.publish_fact(FactName.LAUNCH, launch)
     store.publish_fact(FactName.STDOUT_END, _end(launch, disposition=disposition))
-    assert store.read_capture(Stream.STDOUT, launch) is None
+    assert store.read_capture_range(Stream.STDOUT, launch, offset=0, count=3) is None
     path = _run_path(store, tmp_path) / "stdout"
     assert not path.exists()
     path.write_bytes(b"")
     os.chmod(path, 0o600)
     with pytest.raises(StoreError):
-        store.read_capture(Stream.STDOUT, launch)
+        store.read_capture_range(Stream.STDOUT, launch, offset=0, count=3)
 
 
 @pytest.mark.parametrize("interpreter", [Path(sys.executable), Path("/usr/bin/python3.11")])

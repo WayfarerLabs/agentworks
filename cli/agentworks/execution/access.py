@@ -41,8 +41,10 @@ from ._managed_bound_run import ManagedDeadlineExpired
 from ._managed_job_protocol import StreamDisposition, WorkloadWaitFact
 from ._managed_job_request import ManagedLiveIO
 from ._managed_job_store import FactName, Stream
+from ._managed_job_wire import MAX_CAPTURE_PREFIX_BYTES_V1
 from ._managed_live_result import compose_managed_live_result
 from ._managed_observation_exchange import ManagedObservationState
+from ._managed_observation_protocol import MAX_OUTPUT_PAGE_BYTES
 from ._managed_result import _fact
 from ._managed_runs import ManagedOutputMode
 from ._runtime_prerequisite import (
@@ -220,14 +222,23 @@ class ExecutionAccess:
         max_bytes: int = 4096,
         deadline: Deadline | None = None,
     ) -> JobOutput:
-        """Slice only verified immutable closed output using a byte offset."""
+        """Read verified closed output, returning at most 256 KiB from the byte cursor."""
         if type(stream) is not JobStream or type(cursor) is not int or cursor < 0:
             raise ValidationError("Managed output requires a stream and nonnegative byte cursor")
         if type(max_bytes) is not int or max_bytes <= 0:
             raise ValidationError("Managed output requires a positive byte bound")
+        if cursor > MAX_CAPTURE_PREFIX_BYTES_V1:
+            raise ValidationError("Managed output cursor exceeds the capture bound")
         selected = self._job_deadline(deadline)
         try:
-            outcome = self._operation.read_job(job, self._carrier, selected, Stream(stream.value))
+            outcome = self._operation.read_job(
+                job,
+                self._carrier,
+                selected,
+                Stream(stream.value),
+                offset=cursor,
+                count=min(max_bytes, MAX_OUTPUT_PAGE_BYTES),
+            )
         except BaseException as control:
             self._raise_job_control(control, job)
         candidate = outcome.attempt.candidate
@@ -242,9 +253,10 @@ class ExecutionAccess:
                 deadline_exceeded=expired,
             )
         data = outcome.output or b""
-        if cursor > len(data):
+        assert outcome.retained_bytes is not None
+        if cursor > outcome.retained_bytes:
             raise ValidationError("Managed output cursor exceeds the verified retained prefix")
-        chunk = data[cursor : cursor + max_bytes]
+        chunk = data
         disposition = outcome.disposition
         retention = (
             Retention.DISCARDED
@@ -260,7 +272,7 @@ class ExecutionAccess:
             chunk,
             cursor,
             cursor + len(chunk),
-            cursor + len(chunk) == len(data),
+            cursor + len(chunk) == outcome.retained_bytes,
             capture_complete,
             retention,
             ExecutionFailure.DEADLINE

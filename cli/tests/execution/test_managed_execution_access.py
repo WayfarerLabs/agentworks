@@ -41,6 +41,7 @@ from agentworks.execution._managed_observation_protocol import (
     ControllerObservation,
     ControllerState,
     ManagedObservationRequest,
+    ManagedOutputRange,
     ManagedResultControl,
 )
 from agentworks.execution._managed_operation_keeper import KeeperDrain
@@ -574,11 +575,15 @@ def test_retained_output_eof_is_separate_from_capture_completeness(view, disposi
     def response(request):
         end = decode_fact(fact(FactName.STDOUT_END, request.expected_launch))
         end.update(disposition=disposition, retained_bytes=3, retained_sha256=hashlib.sha256(b"abc").hexdigest())
+        output = b"abc"[request.offset : request.offset + request.count]
         return observation_tests._records(
             request.nonce,
-            ManagedResultControl((FactName.LAUNCH, FactName.STDOUT_END)),
+            ManagedResultControl(
+                (FactName.LAUNCH, FactName.STDOUT_END),
+                output_range=ManagedOutputRange(request.offset, len(output), hashlib.sha256(output).hexdigest()),
+            ),
             (request.expected_launch, encode_fact(end)),
-            b"abc",
+            output,
         )
 
     main.observe.response = response

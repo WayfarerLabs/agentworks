@@ -40,7 +40,7 @@ CONTROLS: tuple[Callable[..., object], ...] = (
 
 def _arguments(control: Callable[..., object]) -> dict[str, object]:
     if control is read_bound_managed_output:
-        return {"stream": Stream.STDOUT}
+        return {"stream": Stream.STDOUT, "offset": 0, "count": 262144}
     if control is dispose_bound_managed_run:
         return {"obligation_id": "e" * 32}
     return {}
@@ -161,6 +161,8 @@ def test_resource_binding_reconnects_from_new_operation_without_launch(tmp_path:
             repository,
             RUN,
             stream=Stream.STDOUT,
+            offset=0,
+            count=262144,
             **_options(reconnect, carrier),  # type: ignore[arg-type]
         )
         assert output.output == b"out"
