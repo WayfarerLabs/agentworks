@@ -5100,15 +5100,35 @@ RunContext factory, native delivery drain and recovery remain open.
       evidence of that `OperationOwner` exclusion. Cover interrupted provisioning, repeated reinit,
       retained work, deletion and numeric UID reuse without repairing or replacing a live gate file.
 
+The next private implementation unit prepares the namespace inside the explicit new-stack VM
+operation, after verifying the selected agent's numeric identity and guest epoch and before exposing
+its file view. This uses an existing owned consumer without first duplicating account orchestration.
+It does not enable production agent use: account creation, deletion and UID reuse must still join
+that same owner boundary before the broader lifecycle gate can close.
+
+- [ ] Bind managed-UID namespace preparation into the new-stack VM operation. Reuse one exact owner,
+      selected route, verified root bootstrap and finite deadline. Register one durable row before
+      root-gate SETUP, publish its exact binding before namespace effects, and retain the original
+      borrow and cleanup custody on uncertainty. The fixed helper creates or verifies the UID
+      directory and a separate persistent per-UID rule while holding the existing root-UID gate
+      through all effects and cleanup. Require the bootstrapped root namespace; never bootstrap it
+      implicitly, repair an unexpected entry, replace a live gate file or invoke a mutating child
+      outside that fence. Keep passive construction and no-staging readiness non-creating. Prove
+      exact existing-state reuse, wrong-entry refusal, interrupted preparation, stale-generation
+      refusal, whole-workflow retention, Bookworm Python and complete provider-body bounds. This
+      private unit does not settle account deletion, numeric UID reuse, native boot reconstruction
+      or whole-owner recovery.
+
 The account lifecycle audit found the shared create/reinit seam in `create_agent_on_vm`, after
 `useradd` or account convergence and before agent-level SSH. Standalone deletion currently continues
-after a best-effort remote cleanup failure and cannot establish safe UID retirement. Complete the
-owned VM lifecycle boundary first, then provision and retire the gate namespace with those callers;
-do not add an unused standalone ensure/retire API. Use a separate persistent `systemd-tmpfiles` rule
-per managed UID rather than rewriting bootstrap's root/admin rule file, which bootstrap replaces on
-replay. Retire the rule and directory only after the old helper and gate obligations are proved
-quiescent, before freeing the numeric UID. Neither the existing local mutation guard nor `pkill`
-alone provides that proof.
+after a best-effort remote cleanup failure and cannot establish safe UID retirement. Complete that
+owned lifecycle and reuse the preparation primitive there before production adoption; do not expose
+a standalone ensure/retire API. Use a separate persistent `systemd-tmpfiles` rule per managed UID
+rather than rewriting bootstrap's root/admin rule file, which bootstrap replaces on replay. Retire
+the rule and directory only after namespace predecessors are fenced through the root gate, file
+predecessors through the agent gate, and all other retained work is proved quiescent, before freeing
+the numeric UID. Neither the existing local mutation guard, either gate alone nor `pkill` provides
+whole-owner proof.
 
 The private bound-row correction now checks the deterministic VM/UID/guest gate path at the
 `file-call` codec boundary as well as the setup-only path. A substituted but syntactically valid

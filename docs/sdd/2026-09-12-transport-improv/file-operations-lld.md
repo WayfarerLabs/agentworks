@@ -1211,6 +1211,29 @@ deletion and UID reuse must share the VM ownership boundary with file effects an
 rule while an old gate helper or obligation can still act. Numeric UID reuse is the relevant
 identity hazard even when agent names differ.
 
+The private implementation may prepare a managed UID namespace inside the explicit new-stack VM
+operation after identity preparation, before constructing its file view. This is stateful core
+preparation, not an effect hidden in a passive constructor, account lookup or readiness probe. It
+uses the verified root bootstrap to set up the already bootstrapped root-UID gate in one retained
+row, publishes that binding, then runs one fixed root helper under its fence. An absent root
+namespace refuses; preparing an agent namespace must not recursively bootstrap its own protection.
+
+The helper creates/checks the selected UID directory and installs a separate persistent per-UID
+tmpfiles rule directly, without launching a mutating child. It accepts exact existing entries and
+refuses unexpected ownership, mode, links, ACLs or content. It never rewrites or removes gate
+databases. A new rule is prepared under a conflict-free, non-configuration temporary name and
+published create-only after its complete content and metadata are ready; boot must not consume a
+partial rule. The same root gate remains held through namespace effects and owned temporary cleanup;
+after release the helper may report results but perform no further filesystem effects. Lost replies,
+partial preparation and cleanup uncertainty retain the exact obligation, not permission to replay.
+
+This ordering provides a private implementation consumer, not account-lifecycle exclusion. Before
+production agent adoption, account creation/reinit must share this primitive and account deletion or
+UID reuse must exclude old namespace work through the root gate, old file work through the agent
+gate, and other retained work through the whole VM owner. Correct numeric ownership alone cannot
+distinguish a replacement account in the same guest epoch. Do not add an account-generation
+registry, permissive fallback or new recipient grant to hide that remaining lifecycle requirement.
+
 The private guest gate now validates a canonical `/<euid>/<64-lowercase-hex>.db` path under that
 namespace and walks each ancestor without following symlinks before setup, inspection, advance or
 hold. `/run` and both Agentworks anchors must be root-owned and not group/other writable; the UID
@@ -1246,7 +1269,8 @@ itself prove that a snapshot ran; recovery must still retain uncertainty conserv
 route setup-only work through snapshot recovery that assumes no gate. The private codec now uses a
 108-byte maximum canonical path, retains older version-1 payloads byte-for-byte, reserves the full
 synthetic binding/proposal plus DOWNLOAD recovery growth, and refuses setup-only snapshot recovery.
-Whole-call custody, selected-route dispatch and the guest-to-target proof remain unimplemented.
+Production whole-call custody, selected-route dispatch and guest-to-target proof remain acceptance
+gates beyond the private composition.
 
 The production control path uses one private fixed-helper family for setup, non-creating inspection
 and generation advance. It follows the file-object family's closed, bounded request and sequenced
