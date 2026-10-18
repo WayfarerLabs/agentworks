@@ -5878,6 +5878,14 @@ command leaving its SIGINT handler installed, not to WSL hold behavior. A separa
 restoration fix is in progress; combined validation, independent review and native Windows/Lima
 proof remain required. Independent-job survival and recovery remain separate gates.
 
+The separate correction `e5cd575bb` restores port-forward signal handlers on return, wait failure
+and partial installation failure, preserving forwarding while the tunnel is active. Nine
+Windows-selected regressions cover prior default/custom handlers, exact return/exception behavior
+and actual signal forwarding. Worker checks pass the 28-case owning module, the exact two-test order
+reproducer and the Windows-owner module (14 passes, nine skips), with scoped strict typing and
+style. This is a narrow existing signal-state bug fix, not a legacy transport migration or a change
+to the WSL interrupt test. Combined validation and independent review remain required.
+
 - [ ] Complete combined validation and independent review of the private Darwin buffered DIRECT
       helper (`c9bd8f1dd`), then obtain native macOS proof with the approved interpreter
       prerequisite. Preserve source/input separation, fixed fresh-exec identity and honest
