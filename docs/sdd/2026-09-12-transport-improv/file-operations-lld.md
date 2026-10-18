@@ -1219,9 +1219,9 @@ row, publishes that binding, then runs one fixed root helper under its fence. An
 namespace refuses; preparing an agent namespace must not recursively bootstrap its own protection.
 
 The helper creates/checks the selected UID directory and installs a separate persistent per-UID
-tmpfiles rule directly, without launching a mutating child. It accepts exact existing entries and
-refuses unexpected ownership, mode, links, ACLs or content. It never rewrites or removes gate
-databases. A new rule is prepared under a conflict-free, non-configuration temporary name and
+`systemd-tmpfiles` rule directly, without launching a mutating child. It accepts exact existing
+entries and refuses unexpected ownership, mode, links, ACLs or content. It never rewrites or removes
+gate databases. A new rule is prepared under a conflict-free, non-configuration temporary name and
 published create-only after its complete content and metadata are ready; boot must not consume a
 partial rule. The same root gate remains held through namespace effects and owned temporary cleanup;
 after release the helper may report results but perform no further filesystem effects. Lost replies,
