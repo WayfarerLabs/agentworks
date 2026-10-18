@@ -86,6 +86,9 @@ def _assign(
     previous = seen.get(key)
     if previous is not None and previous != relative:
         _fail(access, FileFailureReason.CONFLICT, changed=changed)
+    for assigned, path in tuple(seen.items()):
+        if path == relative and assigned != key:
+            del seen[assigned]
     seen[key] = relative
 
 
@@ -288,6 +291,9 @@ def download_directory(
         _live(access, deadline)
         validate_local_tree_destination(destination)
         manifest = _remote_manifest(access, path, limit, deadline, sudo)
+        for relative, _ in manifest:
+            _live(access, deadline)
+            validate_local_tree_destination(destination.joinpath(*relative.parts))
         for relative, source in manifest:
             _live(access, deadline)
             local = destination.joinpath(*relative.parts)

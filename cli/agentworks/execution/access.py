@@ -68,6 +68,7 @@ from .files import (
     _private_file_kind,
     _private_json_strategy,
     _private_write_condition,
+    _validate_creation_metadata,
 )
 from .jobs import JobDisposal, JobOutput, JobStatus, JobStop, JobStream
 from .models import Command, Input, JobRef, Lifetime, Output, Script
@@ -640,8 +641,7 @@ class FileAccess:
         source = _validate_upload_source(source)
         if type(size) is not int or not 0 <= size <= _MAX_UPLOAD_SIZE:
             raise ValidationError("File upload size must be a nonnegative bounded integer")
-        if type(create_metadata) is not NewMetadata:
-            raise ValidationError("File upload requires exact creation metadata")
+        _validate_creation_metadata(create_metadata, kind=FileKind.REGULAR)
         private_condition = _private_write_condition(condition)
         outcome = self._operation.upload(
             self._carrier,
@@ -680,8 +680,9 @@ class FileAccess:
         expected: LocalIdentity | None = None,
         max_bytes: int = _MAX_UPLOAD_SIZE,
     ) -> MutationResult:
-        if not isinstance(source, Path) or type(create_metadata) is not NewMetadata:
-            raise ValidationError("Path upload requires a local path and exact creation metadata")
+        if not isinstance(source, Path):
+            raise ValidationError("Path upload requires a local path")
+        _validate_creation_metadata(create_metadata, kind=FileKind.REGULAR)
         private_condition = _private_write_condition(condition)
         root, leaf, plan, deadline = self._request(path, sudo)
         if deadline.expires_at is None:
@@ -767,8 +768,8 @@ class FileAccess:
         sudo: bool = False,
     ) -> DirectoryTransferProgress:
         """Merge a bounded local tree through serial ordinary owned file calls."""
-        if type(file_metadata) is not NewMetadata or type(directory_metadata) is not NewMetadata:
-            raise ValidationError("Directory upload requires explicit creation metadata")
+        _validate_creation_metadata(file_metadata, kind=FileKind.REGULAR)
+        _validate_creation_metadata(directory_metadata, kind=FileKind.DIRECTORY)
         view, deadline = self._directory_view(path, source, limit, existing_files, sudo)
         return _directory_transfer.upload_directory(
             view,
@@ -957,8 +958,7 @@ class FileAccess:
         sudo: bool = False,
     ) -> MutationResult:
         """Create exactly one absent directory without converging an existing entry."""
-        if type(metadata) is not NewMetadata:
-            raise ValidationError("Directory creation requires exact metadata")
+        _validate_creation_metadata(metadata, kind=FileKind.DIRECTORY)
         root, leaf, plan, deadline = self._request(path, sudo)
         outcome = self._operation.create_directory(
             self._carrier,
@@ -981,9 +981,8 @@ class FileAccess:
         sudo: bool = False,
     ) -> MutationResult:
         """Create or converge exactly one directory and its metadata."""
+        _validate_creation_metadata(metadata, kind=FileKind.DIRECTORY)
         root, leaf, plan, deadline = self._request(path, sudo)
-        if type(metadata) is not NewMetadata:
-            raise ValidationError("Directory creation requires exact metadata")
         outcome = self._operation.ensure_directory(
             self._carrier,
             trusted_root_path=root,

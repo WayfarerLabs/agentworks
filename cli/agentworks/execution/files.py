@@ -8,7 +8,7 @@ import stat
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from agentworks.errors import ValidationError
 
@@ -485,6 +485,15 @@ class NewMetadata:
         _validate_ownership_names(self.owner, self.group)
         if type(self.mode) is not int or not 0 <= self.mode <= 0o7777:
             raise ValidationError("File mode must contain only supported mode bits")
+
+
+def _validate_creation_metadata(metadata: NewMetadata, *, kind: Literal[FileKind.REGULAR, FileKind.DIRECTORY]) -> None:
+    """Validate caller creation metadata for the known regular-file or directory target."""
+    if type(metadata) is not NewMetadata:
+        raise ValidationError("File creation requires exact metadata")
+    maximum = 0o777 if kind is FileKind.REGULAR else 0o3777
+    if metadata.mode > maximum:
+        raise ValidationError("Creation mode is unsupported for the requested object kind")
 
 
 @dataclass(frozen=True)
