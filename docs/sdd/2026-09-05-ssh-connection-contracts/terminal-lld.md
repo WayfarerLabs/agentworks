@@ -267,12 +267,14 @@ cleanup and restores modes. Finite caller return preserves pending native and te
 the same shared custody; later finite close requests reach that worker. Cancellation and possible
 native admission share a guard, so a possible late native effect cannot follow a NOT_SENT result.
 Borrowed terminal descriptors remain valid through settlement, including pending acquisition or
-construction after caller return. Pump borrowing stops before native cleanup. A permanent native
-loss finishes the worker without terminal restoration, retaining unsettled custody and refusing
-reuse or unsafe cleanup retries. Pending construction and retryable cleanup are observed at the
-existing bounded poll interval. A fresh caller request authorizes another cleanup attempt; observed
-natural native settlement also permits restoration without another close or signal. Keep the
-caller's original result unchanged.
+construction after caller return. Pump borrowing stops before native cleanup. Exact POSIX wait loss
+leaves execution unknown but permits restoration after every original local capability is positively
+retired and the same coordinator stops its borrowers. Permanently unproved local cleanup, such as an
+uncertain original pipe close, finishes the worker without terminal restoration, retaining unsettled
+custody and refusing reuse or unsafe cleanup retries. Pending construction and retryable cleanup are
+observed at the existing bounded poll interval. A fresh caller request authorizes another cleanup
+attempt; observed natural native settlement also permits restoration without another close or
+signal. Keep the caller's original result unchanged.
 
 Preserve a non-daemon terminal worker. Owned subprocess measurements show finite construction and
 retryable-cleanup returns can still hold ordinary interpreter shutdown open until the retained work

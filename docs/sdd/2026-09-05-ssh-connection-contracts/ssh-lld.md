@@ -142,9 +142,11 @@ The shared carrier contract requires caller-held `LocalDeliveryCustody` in `exec
 that shared storage directly; it does not create temporary adapter-local storage, another process
 owner or live cleanup capabilities inside reports or exception causes. The existing inert native
 owner must be retained before process admission. A bounded return with pending construction or
-cleanup leaves its exact ownership in the caller's enclosing lifetime. Pending or lost ownership
-prevents another exchange through that storage; lost ownership never permits signaling a reused PID.
-Local settlement does not establish remote cancellation or clear uncertain remote dispatch.
+cleanup leaves its exact ownership in the caller's enclosing lifetime. Incomplete local retirement
+prevents another exchange through that storage. Exact POSIX wait loss leaves execution unknown and
+never permits another operation on the numeric PID; positive original local retirement and separate
+coordinator settlement can still permit reuse. Local settlement does not establish remote
+cancellation or clear uncertain remote dispatch.
 
 The SSH adaptation must preserve borrowed native descriptors and associated terminal state until
 local custody settles, including while an unfinished constructor can still inherit them. Returning

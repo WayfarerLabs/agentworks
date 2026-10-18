@@ -43,7 +43,8 @@ custody to read or verify the candidate while the earlier client can still write
 
 The enclosing creation or maintenance lifetime must hold both resources before writer admission and
 provide serialized, explicitly bounded cleanup. Unsuccessful cleanup keeps the lock and native
-custody held; pending or lost ownership continues excluding competing recovery. After confirmed
+custody held; incomplete local retirement continues excluding competing recovery. Unknown execution
+alone does not prevent release after independently confirmed local settlement. After confirmed
 settlement, flush the final candidate bytes before releasing the lock and surface any flush failure
 without claiming durable evidence. Evidence receipts, reports and exception causes do not carry
 cleanup capabilities. Preserve the one first-contact attempt, strict-only recovery and stable
@@ -72,12 +73,14 @@ while this resource holds it. The passive lock object is retained before acquisi
 Interrupted acquisition retains uncertainty; a lock registered only after entering a lexical context
 would lose this ownership. Busy or interrupted acquisition performs no candidate flush before writer
 admission. Closing prevents further maintenance dispatch and forwards finite native cleanup to that
-exact storage. Pending or lost native ownership returns incomplete cleanup and retains the lock.
-After settlement, perform the final candidate flush and unlock; flush failure remains explicit and
-cannot produce a successful cleanup claim. A finite deadline bounds cleanup observation, not
-underlying filesystem syscalls or process construction. The existing immutable candidate receipt
-remains evidence only, with no live resource attached. A later strict recovery uses a new resource
-with the same bundle and creation identity after prior cleanup releases the lock.
+exact storage. Pending construction or unproved local cleanup returns incomplete cleanup and retains
+the lock. Exact wait-status loss remains an unknown execution result even when original local
+capabilities positively retire. After settlement, perform the final candidate flush and unlock;
+flush failure remains explicit and cannot produce a successful cleanup claim. A finite deadline
+bounds cleanup observation, not underlying filesystem syscalls or process construction. The existing
+immutable candidate receipt remains evidence only, with no live resource attached. A later strict
+recovery uses a new resource with the same bundle and creation identity after prior cleanup releases
+the lock.
 
 The caller attempts explicit close with a fresh finite deadline on both success and failure, and
 retains the resource when close reports incomplete cleanup. If maintenance already raised a control

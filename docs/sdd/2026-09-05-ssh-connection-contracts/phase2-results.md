@@ -1,10 +1,10 @@
 # SSH Phase 2 Implementation Progress
 
-- Updated: 2026-10-10
+- Updated: 2026-10-18
 - PR: [#832](https://github.com/WayfarerLabs/agentworks/pull/832), draft
 - Main/contract base: `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (#830)
-- State: implementation feedback/fix round 3 is open; full terminal and production acceptance remain
-  open
+- State: the operator-authorized additional correction round is in progress; full terminal and
+  production acceptance remain open
 
 Earlier checkpoint evidence and dependency history live in separate files. The headings below retain
 existing plan links; the linked sections preserve the complete original records. Historical round 1
@@ -626,3 +626,61 @@ All final standup and retirement gates retain their scope. This batch must compl
 private reviews and applicable gates, describe exact tester considerations before the next signal,
 and escalate any required contract change or work exceeding the authorized loop. No full-carrier
 checkbox, merge intent, SDD lock or platform acceptance follows from these corrections.
+
+## Additional authorized correction round
+
+The three original implementation rounds are spent. At the final third-round checkpoint
+`1fcabfe6082ab23b1e04eeac115e842f541eee95`, all ten hosted jobs passed, including Windows (1,715
+passed, 70 skipped). The root non-integration suite passed 17,071 cases with 55 skips. The
+[complete native report](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6093255918)
+and [critical reading](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6093386229)
+close collection, not full implementation acceptance. Its one-hour window ended at 2026-10-10
+03:53:52 UTC. Earlier round-3 text above records its pre-handoff state.
+
+Native macOS SSH tests passed 524 cases with 26 skips, without masks or injected startup code. The
+isolated `python -I` relay entered raw mode and restored every saved mode field except the added
+PENDIN bit. The previously failing isolated SIGINT case passed. Repeated signals during natural
+cleanup also settled custody and restored modes; those probes did not exercise held construction,
+live cleanup refusal or interpreter-shutdown holds. Inherited ignored SIGCHLD reproduced lost status
+on Linux, not macOS; in-process ignore and foreign reaping affected both. All those native
+measurements apply to the third-round pin, not the newly composed retirement correction.
+
+The Windows full selection reported two phase-sensitive SSH assertions alongside its known
+sshd-session console limitation. Read-only review reproduced both assertions by delaying successful
+trust admission or actual version discovery beyond their 0.1-second operation deadlines. The tests
+had not reached the intended forwarding owner or command cleanup-refusal phase. Baseline passed; all
+six final-trial cleanup checks passed, exact child pipes closed and children were reaped. This
+proves reachable test-phase fragility, not the measured cause of the specific loaded Windows
+failures.
+
+The operator authorized one additional round in the authenticated session on 2026-10-17 (local
+date), then explicitly directed continuation. The
+[round start](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6245164749) records
+label removal before changes. Its frozen batch covers those two phase-sensitive fixtures, the
+forwarding and terminal lost-status compatibility expectations, associated SSH documentation, and
+the focused reviewed shared-retirement dependency. No subsequent public correction round is
+authorized. The Python stdin-envelope launcher approach is unchanged.
+
+The six owner-authored commits `1368ada65`, `f28bbf20`, `2f28ed364`, `1f662c9d`, `c1dab268` and
+`40748a3c` are integrated as `488229996`, `595517ab6`, `691de395c`, `b25ce011d`, `f33afd71d` and
+`bf4cd46e2`. Documentation conflicts preserve only their intended retirement additions and edits;
+unrelated private context is excluded. The shared process delta is byte-identical to that focused
+owner delta. No shared runtime code is rewritten by SSH. This is not adoption of the entire private
+transport branch or native acceptance of its Windows, target, upload, download or cloud candidates.
+
+The [source reading](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6245096592)
+agrees that exact POSIX wait loss can retire original local capabilities while preserving
+OBSERVATION and unknown status. The SSH relay already restores on positive `cleaned` evidence;
+compatibility fixtures must distinguish that case from genuinely uncertain original-pipe close.
+Unknown execution never permits fabricated zero status, post-loss numeric-PID operations, remote
+completion or clearing dispatch debt. An uncertain original close is never retried against a reused
+descriptor and must still prevent terminal restoration and custody reuse.
+
+Implementation and exact combined validation of the SSH corrections are in progress. Three private
+review lanes, applicable gates and a tester-focus comment precede the next checkpoint signal. The
+new native combined report must verify exact-loss retirement/restoration and permanent-close
+uncertainty while retaining the installed held/delayed/refused/shutdown coverage obligations. Native
+Windows launch/keyboard/resize/clean-console, paired printable preparation and encoded-canary
+non-reflection, genuine new creation, settled-writer publication, trust migration/coexistence and
+rollback, complete factories, both usable RunContext paths and full R1-R5/workflow acceptance remain
+open. No full-carrier checkbox, ready handoff or SDD lock follows from this round.

@@ -111,10 +111,11 @@ existing production capability or native SSH acceptance.
 
 The enclosing forwarding lifetime must retain the same native owner before admission, including when
 startup fails before readiness. After stopping pipe use it must support serialized bounded cleanup
-retries, retaining pending or lost ownership. Adding retries only to an already returned resource
-leaves failed startup unresolved. The caller-held interface below addresses that ownership gap;
-native acceptance remains open; no second native owner or cleanup capability inside reports or
-exceptions is introduced.
+retries, retaining pending construction or unproved original local cleanup. Exact wait-status loss
+remains an unknown result after positive local retirement; it never authorizes a new PID operation.
+Adding retries only to an already returned resource leaves failed startup unresolved. The
+caller-held interface below addresses that ownership gap; native acceptance remains open; no second
+native owner or cleanup capability inside reports or exceptions is introduced.
 
 ### Caller-held forwarding interface
 

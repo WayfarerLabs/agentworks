@@ -1,6 +1,6 @@
 # Independent SSH Carrier: Staged Delivery Plan
 
-- Updated: 2026-10-10
+- Updated: 2026-10-18
 - Requirements: [frd.md](frd.md)
 - Architecture: [hla.md](hla.md)
 - Shared contract:
@@ -37,23 +37,23 @@ refuted by this single-PR scope. Its
 the reports and removal of `review-requested` before implementation. Record each later handoff and
 budget disposition on #832. Contract changes or unexpected scope return to the operator.
 
-Implementation rounds 1 and 2 are closed. Round 2's exact `057621b5` checkpoint received complete
-native and complexity reports, followed by the minimum one-hour collection interval. Round 3 of the
-authorized three is now open, with `review-requested` removed before fixes. Its
-[current record](phase2-results.md#round-3-collected-feedback-and-corrections) carries the frozen
-batch, reviewed CI dependencies, shared lost-status finding and unproved acceptance. No additional
-public fix round remains after this batch. The PR remains draft; these corrections assert neither a
-completed full implementation checkbox nor merge intent.
+The three original implementation feedback/fix rounds are spent. The last checkpoint at
+`1fcabfe6082ab23b1e04eeac115e842f541eee95` received full integration and complexity reports, and its
+one-hour collection window ended on 2026-10-10. The operator authorized one additional round on
+2026-10-17 (local date), then directed work to continue. This fourth round is now private working
+state, with `review-requested` removed before changes. Its
+[current record](phase2-results.md#additional-authorized-correction-round) defines the frozen
+fixture/dependency compatibility batch. No further public correction round is authorized.
 
-The retained POSIX consumer now uses that reviewed cleanup seam and preserves pending bytes plus the
-frozen native output prefix. Owned Linux fixtures verify finite/enlarged-pipe preservation, pending
-custody, retryable cleanup and permanent loss. Normal interpreter exit can still wait for pending
-construction or retryable cleanup; production caller-lifetime proof and native platform acceptance
-remain open. The latest native report also exposes permanent lost-status custody under ignored
-SIGCHLD and the resulting raw-terminal retention. Transport owns the shared cleanup distinction; SSH
-owns its consumer and macOS assertion corrections. The separately reviewed shared Windows CI test
-corrections are adopted locally, with hosted validation still required. These findings do not
-complete the broader terminal or RunContext work.
+The retained POSIX consumer preserves pending bytes and the frozen native output prefix. Local
+fixtures cover finite/enlarged-pipe preservation and retained cleanup; the last native report also
+proves the narrow macOS PENDIN comparison and natural-cleanup signal storm. The new shared
+retirement correction separates unknown exit status from positive local cleanup. Its focused
+owner-authored commits are now adopted; SSH compatibility fixtures and exact combined validation
+remain in progress. Permanently unproved original-pipe cleanup must still prevent restoration and
+reuse. Installed held acquisition/construction, live cleanup refusal, shutdown, native Windows and
+complete RunContext/production acceptance remain open. No full implementation checkbox or merge
+intent follows from these corrections.
 
 Transport solely owns the carrier contract, common types, acceptance criteria, shared preparation,
 public outcomes and proof harness. SSH owns its independent carrier, connection/trust migration,
@@ -213,25 +213,25 @@ proves that restoring old TOML does not discard current managed policy, revocati
 partial-update custody. Production writer coexistence and rollback through both usable RunContext
 paths still require transport composition and native acceptance.
 
-Current shared implementation dependency: transport #833 at
-`dd10ebbeee677570c95f9b0f30688f32f6891aeb`, with its reviewed retained cleanup seam from `a58517c2`
-and `f6ff0511` adopted separately. The latest full native SSH testing pin is
-`057621b5db6c49c93240a836e64ef0e7afeea888`. The
-[dependency chronology](phase2-results.md#historical-dependency-chronology) retains each earlier
-integration, measured gate and limitation. It does not change completed plan records or the
+Current public shared dependency: transport #833 at `dd10ebbeee677570c95f9b0f30688f32f6891aeb`, with
+separately adopted owner-authored cleanup and CI fixture corrections. The fourth round additionally
+adopts the six focused shared-retirement commits from `1368ada65` through `40748a3c`, integrated at
+`bf4cd46e2`; documentation conflicts preserve only those intended additions. This does not adopt the
+full private transport branch, its Windows prototype, printable preparation or unfinished
+platform/FileAccess/RunContext work. The latest full native SSH testing pin remains
+`1fcabfe6082ab23b1e04eeac115e842f541eee95`. The
+[dependency chronology](phase2-results.md#historical-dependency-chronology) retains earlier pins,
+measurements and limits without changing completed plan records or the
 [coordinated final stack](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6032839010).
 
-The current native reports and their limits are recorded in the
-[round 2 validation](phase2-results.md#round-2-handoff-and-native-validation) and
-[round 3 disposition](phase2-results.md#round-3-collected-feedback-and-corrections). Implementation
-rounds 1 and 2 are closed; round 3 of the three authorized rounds remains open. The retained POSIX
-consumer adopts transport's reviewed cleanup seam, with the newly measured shared lost-status
-cleanup finding still open. All three independent private reviews and combined gates must finish
-before the next checkpoint edge, with testing considerations posted first. No additional public fix
-round remains after this batch. `review-requested` was removed before fixes. SSH-owned resource
-interface choices proceed under the existing implementation authorization. Windows launch/resize,
-complete RunContext and supported-platform acceptance remain open. Production retained-custody and
-interrupted-exit proof also remain required before terminal activation.
+The [round 3 record](phase2-results.md#round-3-collected-feedback-and-corrections) preserves its
+historical correction batch. The
+[additional round](phase2-results.md#additional-authorized-correction-round) records the new
+authorization and exact composed retirement boundary. Independent project, complexity and
+correctness reviews plus applicable gates must finish before another checkpoint edge, with tester
+considerations posted first. Full installed/native terminal and production workflow acceptance
+remain required; unknown execution and remote debt never become success because local cleanup
+settles.
 
 ### Complete the carrier and migration
 
