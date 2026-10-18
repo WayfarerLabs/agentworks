@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -13,9 +14,11 @@ import pytest
 from agentworks.errors import ValidationError
 from agentworks.execution import _file_stage_guest as guest
 from agentworks.execution import _scratch_root as root
+from agentworks.execution._file_effect_gate import FileEffectGateBinding
 from agentworks.execution._file_stage_bundle import ROOT_SCRATCH_PROGRAM
-from agentworks.execution._file_stage_exchange import stage_begin
+from agentworks.execution._file_stage_exchange import stage_begin, stage_chunk
 from agentworks.execution._file_stage_protocol import (
+    MAX_STAGE_CHUNK_BYTES,
     FileStageBeginRequest,
     FileStageFailureCode,
     decode_file_stage_request,
@@ -27,6 +30,8 @@ from agentworks.execution._file_wire_reader import FileRecordReader
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS, _NumericGuestBootstrap
+from agentworks.execution._scratch import ScratchReference
+from agentworks.execution._scratch_receipt import ScratchOperation, ScratchOwnership, ScratchReceiptContext, _Identity
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 from agentworks.execution.carrier import (
     CarrierIO,
@@ -36,6 +41,7 @@ from agentworks.execution.carrier import (
     FiniteInput,
     PreparedInvocation,
 )
+from agentworks.execution.carriers.proxmox import ProxmoxCarrier
 
 NONCE = "a" * 32
 TOKEN = bytes(range(16))
@@ -112,7 +118,8 @@ def test_fixed_parent_closes_descriptor_when_primitive_control_escapes(
 
 
 @pytest.mark.parametrize("interpreter", [sys.executable, "/usr/bin/python3.11"])
-def test_packed_fixed_entry_decodes_existing_wire_and_refuses_other_root(interpreter: str) -> None:
+@pytest.mark.parametrize("variant", ["other-root", "effect-gate"])
+def test_packed_fixed_entry_refuses_other_root_or_gate(interpreter: str, variant: str) -> None:
     if not Path(interpreter).is_file():
         pytest.skip("interpreter unavailable")
     program = ROOT_SCRATCH_PROGRAM
@@ -124,6 +131,20 @@ def test_packed_fixed_entry_decodes_existing_wire_and_refuses_other_root(interpr
         "raise SystemExit(_agw_enter_body())\n"
     )
     request = replace(_request(), root_path="/var/tmp")
+    expected = FileStageFailureCode.ROOT_REFUSED
+    if variant == "effect-gate":
+        gate = FileEffectGateBinding(
+            "/run/agentworks/file-gates-v1/0/" + "c" * 64 + ".db",
+            b"a" * 16,
+            b"b" * 16,
+            GUEST,
+            0,
+            "stage-vm",
+            1,
+            2,
+        )
+        request = replace(_request(), effect_gate=gate)
+        expected = FileStageFailureCode.INVALID_REQUEST
     completed = subprocess.run(
         [interpreter, "-I", "-S", "-B", "-c", source, NONCE],
         input=program.prefix + encode_file_stage_request(request),
@@ -138,7 +159,7 @@ def test_packed_fixed_entry_decodes_existing_wire_and_refuses_other_root(interpr
     reader.finish()
     assert reader.error is None
     assert [record.kind for record in records] == [FileRecordKind.FAILED, FileRecordKind.FINISHED]
-    assert parse_file_stage_failure(records[0].body, TOKEN, ROOT).code is FileStageFailureCode.ROOT_REFUSED
+    assert parse_file_stage_failure(records[0].body, TOKEN, ROOT).code is expected
 
 
 class _CaptureCarrier:
@@ -188,3 +209,42 @@ def test_fixed_exchange_requires_bootstrap_before_dispatch_and_uses_selected_pro
     wire = decode_file_stage_request(carrier.input[len(ROOT_SCRATCH_PROGRAM.prefix) :])
     assert wire.root_path == "/tmp" and wire.relative_path == "prepared-input"
     assert carrier.argv is not None
+
+
+def test_complete_proxmox_fixed_stage_envelope_fits_maximum_wire_chunk() -> None:
+    carrier = _CaptureCarrier()
+    plan = IdentityPlan(ROOT, IdentityMode.DIRECT)
+    data = (bytes(range(256)) * (MAX_STAGE_CHUNK_BYTES // 256 + 1))[:MAX_STAGE_CHUNK_BYTES]
+    reference = ScratchReference(
+        ScratchOwnership(
+            TOKEN,
+            ScratchReceiptContext(ScratchOperation.STAGE, ROOT),
+            _Identity(1, 2),
+            _Identity(1, 3),
+            _Identity(1, 4),
+            0,
+            len(data),
+            _Identity(1, 5),
+        )
+    )
+    with pytest.raises(KeyboardInterrupt):
+        stage_chunk(
+            carrier,
+            trusted_root_path="/tmp",
+            relative_path="prepared-input",
+            token=TOKEN,
+            reference=reference,
+            offset=0,
+            data=data,
+            chunk_digest=hashlib.sha256(data).digest(),
+            plan=plan,
+            deadline=Deadline.after(10),
+            runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX),
+            bootstrap=_NumericGuestBootstrap(plan, GUEST),
+            fixed_scratch_root=True,
+        )
+    assert carrier.input is not None and carrier.argv is not None
+    serialized = ProxmoxCarrier._request_body(
+        PreparedInvocation(carrier.argv), CarrierIO(input=FiniteInput(carrier.input, sensitive=True))
+    )
+    assert len(serialized) <= 65_536
