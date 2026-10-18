@@ -69,7 +69,6 @@ class PreparedHelperStageRecovery:
         self._helper_terminated = True
         self._cleanup_confirmed = False
         self.cleanup_debt: ScratchCleanupDebt | None = None
-        self.last_candidate: FileStageCandidateResult | None = None
         self.cleaned = False
         self.resolution_pending = False
 
@@ -193,7 +192,6 @@ class PreparedHelperStageRecovery:
             bootstrap=_NumericGuestBootstrap(context.root_plan, context.guest),
             fixed_scratch_root=True,
         )
-        self.last_candidate = result
         observation = result.observation
         if observation is not None and observation.state is FileStageObservationState.RECOVERED:
             self.cleanup_debt = observation.cleanup_debt
@@ -218,7 +216,6 @@ class PreparedHelperStageRecovery:
             bootstrap=_NumericGuestBootstrap(context.root_plan, context.guest),
             fixed_scratch_root=True,
         )
-        self.last_candidate = result
         observation = result.observation
         self._cleanup_confirmed = (
             result.dispatch is Dispatch.SENT

@@ -2294,7 +2294,7 @@ cleanup budget, and reconciles local bookkeeping without replaying preparation.
 
 Both private parents retain stage cleanup before effects. OPERATION uses `ManagedStartCustody`;
 INDEPENDENT retains activation custody on its exact resource-start binding. Activation closure is
-independent of launch acknowledgment. Native workflow cleanup is serialized by one nonblocking
+independent of launch acknowledgment. Native workflow cleanup is serialized by one non-blocking
 aggregate lock. Every close publishes stop intent before acquiring it; competing or reentrant
 cleanup refuses without dispatching helpers or changing retained custody. An escaping control
 releases the lock for an exact later retry. `PreparedStageCleanup` may remove the exact owned stage

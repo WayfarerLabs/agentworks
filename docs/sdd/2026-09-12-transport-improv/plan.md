@@ -5550,7 +5550,7 @@ private source-review lanes initially remained pending. The combined selection a
 3,154 tests with 25 skips; strict typing passes across 1,483 sources and changed-file quality checks
 pass. Project and complexity source reviews clear that head. Generic correctness review finds a
 reachable concurrent aggregate-cleanup race that can dispatch an untracked closing helper. Serialize
-the entire native workflow cleanup with a nonblocking per-workflow lock, publish stop intent before
+the entire native workflow cleanup with a non-blocking per-workflow lock, publish stop intent before
 acquisition, and prove competing cleanup refuses without helper entry or early owner release. The
 private correction adds one aggregate lock and four deterministic concurrent, reentrant and
 interrupted-route regressions; its worker selection passes those four cases and 231 adjacent cases.
