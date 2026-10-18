@@ -174,7 +174,7 @@ class AzureOwnedAccess:
                 raise StateError("Azure native preparation cannot be admitted")
             self._used = True
             settings = require_ssh_settings(self._vm, self._ctx, self._ctx.config)
-            self._fresh_vm(deadline, power)
+            current = self._fresh_vm(deadline, power)
             if power in {VMStatus.STOPPED, VMStatus.DEALLOCATED}:
                 self._start = AzureIncarnationStart(
                     self._owner,
@@ -194,8 +194,6 @@ class AzureOwnedAccess:
                 if self._start.state is not StartState.SUCCEEDED:
                     raise StateError("Azure start did not establish request success")
                 current = self._await_running(deadline)
-            else:
-                current = self._fresh_vm(deadline, VMStatus.RUNNING)
             self._endpoint = self._reader.observe_public_endpoint(deadline)
             self._require_open()
             self.binding = ssh_native_binding(self._vm, self._endpoint, settings)
