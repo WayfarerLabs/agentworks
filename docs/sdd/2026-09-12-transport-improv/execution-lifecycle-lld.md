@@ -158,10 +158,20 @@ provider effects, observes power and enforces stopped intent. `ensure_available`
 selected provider locator while retaining activation/hold custody; `prepare_native_route` selects
 the native binding and any native route exposure. Shared guest preparation and partial control facts
 belong to the core workflow before optional platform guest validation. WSL2 compares the result
-against its retained physical hold READY. Native calls retain this ordering; later canonical
-composition can reuse availability and perform its own guest probe without native public ingress or
-a preceding native guest probe. This staging is not a canonical-context implementation, native
-acceptance or general process-loss recovery.
+against its retained physical hold READY. Native calls retain this ordering. The private
+`vm_execution_context` requires a native or canonical route explicitly and uses one shared
+`VMOperation`, owner, preparation and aggregate teardown; a platform-host route is invalid here.
+Canonical composition validates its stored literal Tailscale endpoint and operator SSH policy before
+provider effects, skips native-only configuration and route preparation, then probes the guest over
+that SSH binding. There is no native public ingress, native guest probe, trust enrollment, alias or
+fallback on this arm.
+
+Both routes check their selected route around successful guest/admin/agent preparation. Canonical
+checks retain provider custody and require fresh running power, equal provider locator, unchanged
+selected independent availability and equal database VM/account/agent selection. Returned views
+retain the same lifetime and reject closed admission before provider reads. These source mechanics
+do not establish native acceptance, all-platform composition, public RunContext completion or
+general process-loss recovery.
 
 ### Local Lima composition
 

@@ -5783,6 +5783,14 @@ canonical context, preparation-time route checks, generalized SSH host access, c
 live/terminal integration and all native evidence gates remain open. No new public review signal,
 permission enforcement, legacy migration or merge readiness follows from these private checks.
 
+- [ ] Complete and independently review the private shared native/canonical context checkpoint.
+      Worker `6cbb94112` supplies required-route `vm_execution_context`, shared `VMOperation` and
+      aggregate cleanup, canonical passive endpoint/account/SSH validation before provider effects,
+      native-free availability/guest composition, selected availability continuity and route checks
+      around successful guest/admin/agent preparation. It reports 375 focused passes, 1,031 adjacent
+      passes and strict typing across 1,498 sources before root Lima integration. Validate combined
+      actual platform adapters, including Lima's repeatable fresh power observations, shared
+      command/file helpers and managed job paths; retain matching collateral and all broader gates.
 - [ ] Prove fresh-process platform composition without retirement dependencies, not only calls to
       already-imported native hooks. The first-binding audit at `6149cf06` found that VM-platform
       package initialization imports Lima's legacy dependencies, while plugin initialization imports

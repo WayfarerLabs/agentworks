@@ -270,11 +270,12 @@ Explicit VM stop/reboot and host loss are outside that no-idle-stop fact. These 
 do not establish all-platform duration availability, session namespaces or a public RunContext
 surface.
 
-The private native composition acquires the exact VM owner and validates the selection, then retains
-the passive `VMPlatform.build_native_execution_access()` result before its optional pure
-`native_configuration_check` and first `observe_power(deadline)` read. Native configuration refusal
-still precedes provider reads or activation. The same access, owner, local custody and original
-deadline cover that read and subsequent preparation. Unsupported state, expired observation or
+The private VM composition acquires the exact VM owner and validates the selection, then retains the
+passive `VMPlatform.build_native_execution_access()` result before provider work. Native mode runs
+its optional pure `native_configuration_check` before the first power read. Canonical mode instead
+validates the stored literal `tailscale_host`, administrative account and operator SSH policy before
+retaining access, and skips native-only requirements. The same access, owner, local custody and
+original deadline cover power observation and preparation. Unsupported state, expired observation or
 operator-stopped intent refuses preparation without activation, holds, routes or guest work.
 
 `ensure_available(power, deadline)` retains platform activation/holds and returns the selected
@@ -290,10 +291,10 @@ Initial failures retain the same access for cleanup and, when retirement is unce
 retry. The access keeps platform activation and hold custody; core retains shared guest/account
 preparation, closes child work and local delivery, checks the complete ledger, seals obligations and
 releases the aggregate owner. WSL2, Proxmox, AWS, Azure, GCP and local Lima supply these private
-stages. They allow later canonical SSH composition to reuse availability without opening native
-public ingress or first probing through native guest delivery; a canonical context entry point is
-not yet implemented. Complete platform coverage, native acceptance and the public RunContext surface
-remain pending.
+stages. Canonical SSH uses that same availability without opening native public ingress or first
+probing through native guest delivery. Both routes bracket successful initial guest/admin/agent
+preparation with their selected route check. Complete platform coverage, native acceptance and the
+public RunContext surface remain pending.
 
 Local Lima pins the selected client, absolute `LIMA_HOME`, instance directory and configured
 delivery account. Its bounded `list --format=json --yq` projection retains selected facts and an
@@ -501,17 +502,28 @@ bindings or migrate provisioning. Identity preparation retains completed or part
 and conservative custody on borrow-release failure, preserving original escaping control. No target
 or root identity is inferred as a fallback.
 
-The private `native_vm_context` entry point yields a normal RunContext inside that same native
-operation. It acquires no second claim and adds no context-owned cleanup. The existing operation
-holds ownership before platform construction, power observation and activation, then binds its
-prepared admin and explicitly selected agent targets into the yielded context. Config, descriptive
-scope, scoped secrets and existing legacy handles pass through unchanged without resolution,
-inspection or fallback. Retaining the context cannot extend its target operations' lifetime. Context
-construction and body failures unwind the same aggregate; uncertain teardown retains the original
-cleanup fact. A SYSTEM or absent description does not create a broader database claim: the explicit
-VM argument still selects one exact VM claim. Same-VM workspace, agent and session descriptions are
-preserved rather than interpreted as target selection or grants. Existing production contexts and
+The private `vm_execution_context` entry point requires an explicit `ExecutionRoute.NATIVE` or
+`ExecutionRoute.CANONICAL` and yields a normal RunContext inside one shared `VMOperation`.
+`PLATFORM_HOST` is invalid for this VM entry point; no route is a fallback for another. It acquires
+no second claim and adds no context-owned cleanup. The existing operation holds ownership before
+platform construction, power observation and activation, then binds its prepared admin and
+explicitly selected agent targets into the yielded context. Config, descriptive scope, scoped
+secrets and existing legacy handles pass through unchanged without resolution, inspection or
+fallback. Retaining the context cannot extend its target operations' lifetime. Context construction
+and body failures unwind the same aggregate; uncertain teardown retains the original cleanup fact. A
+SYSTEM or absent description does not create a broader database claim: the explicit VM argument
+still selects one exact VM claim. Same-VM workspace, agent and session descriptions are preserved
+rather than interpreted as target selection or grants. Existing production contexts and
 activation/rollback orchestrators remain unchanged.
+
+Canonical preparation uses only the independently configured SSH connection to the pinned literal
+Tailscale endpoint. It never enrolls trust, resolves an alias, prepares native ingress or probes the
+guest through a native carrier first. Fresh owned provider power/locator observations and exact
+database VM/account/agent selection guard construction and later canonical calls. The platform's
+selected independent-availability fact is copied separately from delivery and must not change.
+Returned file/execution interfaces reject closed admission before provider reads; body helpers keep
+their full guest and numeric identity checks. These private paths have no new permission or legacy
+cutover authority.
 
 One shared `ExecutionOperation` keeps one lazily registered empty carrier-dispatch row for its
 lifetime, rather than consuming a row per clean command. Every call still uses a fresh serial

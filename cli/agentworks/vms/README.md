@@ -1,9 +1,11 @@
-# Native SSH binding
+# VM SSH binding
 
-The private `_ssh_native_binding.py` helper composes cloud-selected public IPv4 endpoints with
-loaded `operator.ssh` settings. It creates an immutable connection, an ordinary carrier and a
-factory for fresh managed delivery carriers using that same connection. Construction does not
-inspect local identity or trust files, start a process, enroll trust or activate a route.
+The private `ssh_execution_binding` helper in `_ssh_native_binding.py` composes selected literal
+IPv4 endpoints with loaded `operator.ssh` settings. Native cloud routes supply a provider-observed
+public endpoint; canonical routes supply the pinned database `tailscale_host`. It creates an
+immutable connection, an ordinary carrier and a factory for fresh managed delivery carriers using
+that same connection. Construction does not inspect local identity or trust files, start a process,
+enroll trust or activate a route.
 
 Each provider's `resolve_native_execution_binding` first requires explicit SSH settings, then reads
 and verifies the persisted provider identity under the caller's deadline. AWS reads the exact EC2
@@ -35,7 +37,17 @@ account/file/execution views. A platform can check the observed guest against it
 evidence; WSL2 uses its actual hold READY. Aggregate teardown retains the original access and shared
 preparation until their effects and local custody settle. Neither a route switch nor an accessor can
 transfer or finalize that ownership. Canonical-context and creation/rollback integration remain
-separate unfinished work; existing consumers are unchanged.
+separate work; existing consumers are unchanged.
+
+`vm_execution_context(..., route=...)` selects native or canonical delivery explicitly under one
+shared `VMOperation` and cleanup fact. Canonical mode validates its stored literal endpoint/account
+and SSH policy before provider work, skips native-only configuration and route preparation, and
+performs the common guest/account preparation through SSH. It checks retained provider power,
+locator and independent availability plus the pinned database selection before exposing views and on
+later canonical calls. Native mode checks its selected route around initial guest and account
+preparation too. Native and canonical views report their actual semantic route; neither silently
+switches delivery. Full platform/native acceptance, creation/rollback and public surface completion
+remain separate gates.
 
 Local Lima's owned access selects its own opaque instance metadata and pins the client, home and
 directory identity before native delivery. Availability and native route selection remain separate;
