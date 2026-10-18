@@ -950,7 +950,18 @@ process handles are reaped, custody settles, terminal state restores and the exa
 accepts an independent bind after cleanup. No application identity or retirement is claimed for this
 refusal.
 
-Both cases use fresh owned loopback fixtures and isolated owned shell startup, without operator
+A separate
+[native early-input case](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6255774980)
+passes all 28 measurement gates at the same joint pin. Fourteen keyboard bytes are positively queued
+before the actual client constructor, with runtime UNKNOWN, zero payload and no handoff. The full
+queue remains at payload readiness and bootstrap EOF after interactive readiness. The application
+then receives those exact bytes, with matching source/environment/argument hashes, complete streams,
+zero status, both resizes and measured cleanup. This fixture starts the borrowed terminal raw and
+uses `TCSANOW` in the application; the saved remote mode positively excludes canonical
+interpretation and relevant input transformations. It does not generalize to canonical processing or
+an application's own `TCSAFLUSH`. Keys are sent only once and no production code changes.
+
+All three cases use fresh owned loopback fixtures and isolated owned shell startup, without operator
 state, service or account changes. The earlier sandbox PTY ownership failure remains a separate
 failed environment observation. These host results do not establish native early-key/fault matrices,
 the minimum client version, macOS/Windows, shared presentation cleanup, CLI/RunContext or full R1-R5
