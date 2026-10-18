@@ -1290,6 +1290,20 @@ including interruption at Python cleanup-entry and bookkeeping boundaries. Recon
 retry closure or provider submission. This does not promise atomic resource handoff inside the SDK
 client constructor or safety under arbitrary repeated signals.
 
+For configured-role activation, pass the same retained `_OwnedRoleSession` used by the access. The
+access serializes its admitted deadline interval around `start`; the activation constructor only
+retains this optional collaborator. Register its concrete guard on the returned EC2 client's
+`before-send.ec2.StartInstances` event before possible-effect admission. This preserves SDK cache
+and valid advisory-refresh behavior while refusing expired or cleanup-uncertain service sends. Do
+not translate all SDK errors inside this private producer: the outer access owns public error
+mapping, while existing original control precedence remains unchanged.
+
+The producer's finite-deadline `close` acquires its existing transition lock, makes startup
+admission terminal, and retries only the retained original EC2 public close. Ordinary failure
+retains the original and reports incomplete cleanup; controls escape and the lock releases. This
+method does not inspect or mutate the ledger, refresh credentials, replay startup or retire the
+separately owned STS original. Whole-access settlement must still compose those responsibilities.
+
 Before invoking `StartInstances` with exactly the selected instance ID, register a fresh
 `aws-ec2-start` lifecycle obligation and durably mark its possible effect. The adapter admits at
 most one call, including after interruption. Its canonical payload contains only account, region,

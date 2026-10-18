@@ -1114,6 +1114,18 @@ across 1,375 sources pass. All three independent correction-review lanes are cle
 open; no ambient-provider cleanup guarantee, credential hard deadline, native proof or whole-access
 completion follows from this increment.
 
+The next private activation unit passes the same retained configured-role helper into
+`EC2Activation`, registers its post-signing guard before the possible-effect boundary, and adds
+finite-deadline original-only EC2 cleanup with terminal startup admission. This cleanup neither
+settles the start obligation nor retires the separate STS original. Author `863f49ca` passes all 84
+selected actual-SDK cases, full strict typing over 1,388 sources, and two-file lint/format. The new
+test initially expected public access error translation at the private producer boundary; the
+corrected oracle checks the SDK rejection code, zero EC2 sends, retired clients and retained
+possible effect. Test helper annotations address the subsequent strict-typing failures without
+changing production behavior or assertions. Failed setup, interrupted and failed verification
+evidence remains preserved. Independent paired source review is pending; these earlier-base
+measurements do not establish whole-composition, native or complete AWS access acceptance.
+
 - [ ] Complete owned AWS access with a reviewed successful-start settlement rule, fresh power and
       exact guest preparation, endpoint trust and selected firewall-route lifetime. Obtain native
       startup/uncertainty/cleanup evidence before admission through RunContext. Missing start

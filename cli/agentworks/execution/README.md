@@ -255,6 +255,12 @@ original after refresh. Failed closure retains that original. Post-signing send 
 expired work and unresolved STS custody even when the SDK suppresses an advisory refresh error.
 Teardown attempts both retained clients without refreshing credentials or replaying a request.
 
+`EC2Activation` accepts that same optional configured-role helper. Its caller serializes and admits
+the helper around startup; the retained EC2 client checks it before `StartInstances` sends. The
+producer's finite-deadline `close` makes later startup admission terminal and retries only its
+retained EC2 original. It neither retires STS nor observes or resolves the start obligation. Private
+producer SDK errors remain SDK errors; public access-layer translation is a separate boundary.
+
 These slots cover returned EC2/configured-role STS originals, not SDK constructor handoff or
 arbitrary ambient credential providers. Scripted actual-SDK tests use synthetic credentials; normal
 public close does not establish physical socket drain, request termination or native acceptance.
