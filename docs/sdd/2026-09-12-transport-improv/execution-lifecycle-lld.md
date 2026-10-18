@@ -1431,8 +1431,12 @@ lowercase hyphenated 128-bit UUID, without imposing UUID version 4. The provider
 locator is `azure-vm:v2:<canonical-uuid>:<complete-ARM-resource-path>`. The final path is the entire
 remainder, not another colon-split field. Keep its exact validated bytes and the existing stricter
 activation path bound; do not normalize or reinterpret it as a provider-selected URL. Core continues
-to hash the opaque locator together with the guest marker. Reads compare both recorded path and
-unique ID; a current path match alone cannot admit a replacement.
+to hash the opaque locator together with the guest marker. Reads validate complete observed paths
+before comparing their identity components with the recorded path, and separately compare the
+canonical unique ID. Accept ASCII casing differences in resource labels and names, but do not
+URL-decode, normalize Unicode or merge undocumented Unicode equivalents. Keep non-ASCII characters
+literal. The strict persisted activation-path parser remains unchanged. A current path match alone
+cannot admit a replacement, and case-varied observations never rewrite the frozen locator.
 
 Existing records lack historical VM-ID evidence. They must not silently acquire an ID, overwrite a
 mismatch or be presented as historically verified. An explicit adoption operation establishing a
@@ -1440,9 +1444,10 @@ disclosed current baseline awaits operator disposition; its implementation is no
 design proposal. Preserve old path-only activation payloads and cleanup/reconciliation references
 without rewriting their evidence. A later new-incarnation admission seam must remain distinct from
 old-obligation cleanup. Neither the new locator nor a fresh read makes ARM's path-based start
-selector atomic. The private reader stages recorded path/VM-ID checks and owned authentication;
-new-VM identity recording, complete access, startup settlement, endpoint/route/guest preparation and
-native acceptance remain unfinished.
+selector atomic. The private reader stages recorded path/VM-ID checks and owned authentication; new
+creation now records the returned identity inside its rollback-covered interval. The separate start
+producer records request completion. Complete access, endpoint/route/guest preparation and native
+acceptance remain unfinished.
 
 ### Azure activation admission and acknowledgment
 
@@ -1541,6 +1546,66 @@ the recorded incarnation, fresh running state, endpoint, route and guest marker 
 ARM's path-based start remains observationally fenced, not an atomic UUID selector. Keep native
 proof, full route ownership, aggregate release and RunContext exposure open until their complete
 implementation and acceptance.
+
+### Owned Azure native route and access composition
+
+The complete access owner retains the reader, start producer, source-prefix discovery, temporary
+route and partial guest preparation before each begins work. Construction and the platform factory
+are passive. Use the existing VM operation owner; neither access settlement nor a child adapter
+releases it. Serialize credential use and close the retained credential only after its dependent
+originals and effects settle. Borrowing an admitted credential must not select or probe another
+credential. An uncertain read close refuses the next mutation or guest operation.
+
+Before activation, require a fresh matching incarnation and supported power state. For stopped or
+deallocated VMs, start once and observe only the retained request monitor under the original finite
+deadline. Request failure refuses guest preparation; request success still requires a separate fresh
+running observation, public endpoint and independent SSH trust binding. Already-running VMs require
+the same fresh endpoint and guest checks. Keep the exact original locator through preparation and
+repeat incarnation, running-state, endpoint and route checks before later guest admission.
+
+Own one unpredictable nonce rule containing the selected IPv4 prefixes, not one rule per prefix or a
+whole-NSG rewrite. Follow the verified VM's actual NIC reference and that NIC's actual NSG
+reference. Validate complete same-subscription identities, the NIC's VM back-reference, core
+ownership tags, stable NIC/NSG resource GUID observations and successful parent provisioning.
+Require the NSG's reverse NIC association to contain only the selected NIC and no subnet
+associations. Do not treat derived names or placement in the VM's resource group as ownership
+evidence. Linked resources may live in another group. These observations refuse known sharing or
+replacement; they are not atomic provider preconditions against concurrent external changes.
+
+Require the existing correct priority-200 deny-all-inbound baseline without converging it. Select
+one free priority in the existing 100-199 band and one scoped inbound TCP/22 allow with its own
+nonce in name and description. Refuse collisions, occupied capacity or changed topology rather than
+retrying a create under another name. Register its bounded exact intent before marking possible
+effect, construct and retain the concrete client before that mark, and submit one PUT. Do not adopt
+preexisting rules or infer conditional-write support from an etag. The public rule contracts do not
+document the conditional create/delete guarantees needed for such a claim.
+
+Use the explicitly documented `2025-09-01` rule REST contract through the locked public network
+SDK's streamed request method, with challenge replay, retry, redirects and provider registration
+excluded from the mutation policy list. Verify the response request's exact method and URL. Retain
+bounded selected receipt fields and closed completion facts, never provider bodies or SDK exception
+messages. PUT accepts HTTP 200 or 201; operation headers take precedence over an apparent HTTP
+success, including on HTTP 200. Prefer the exact retained `Azure-AsyncOperation` monitor over
+`Location`. Without a monitor, a pending resource provisioning state is not completion. Prove the
+actual locked network SDK's final-send behavior; the compute start proof does not substitute.
+
+Keep request completion separate from route removal. After any known terminal create result,
+including `Failed` or `Canceled`, a fresh matching owned rule can still require deletion. Failed
+provisioning does not imply that a network resource is absent or ineffective. Validate parent
+identity and exact nonce/rule content before deleting only that rule. Fresh absence after known
+completed creation can establish that it is already removed without sending DELETE. Once DELETE is
+sent, retain its own documented HTTP 200/202/204 receipt and observe any supplied monitor, even on
+HTTP 200, before using fresh absence to settle it. An absent rule cannot settle an unknown queued
+PUT or an unacknowledged DELETE. Do not replay either mutation to manufacture a receipt.
+
+`close()` bars opening/checking and retries original public closes; explicit `settle()` remains
+allowed to observe retained monitors and remove the owned rule. The start producer's `settle()` is
+different: it performs only local cleanup and bookkeeping, so the access owner must finish any
+permitted explicit start observations before terminally closing that producer. Preserve partial
+guest-preparation custody and escaping control exceptions. Reconcile lost ledger replies from the
+same retained evidence. Do not stop the VM, sweep another nonce, alter the NSG's flow-reset setting
+or claim that deleting an allow kills established SSH connections. Full native topology, monitor,
+cleanup and aggregate-release proof remains required before acceptance.
 
 ### Owned GCP authentication boundary
 

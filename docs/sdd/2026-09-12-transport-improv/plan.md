@@ -1350,13 +1350,18 @@ persisted codec and all 167 old-module regression cases, migrated to the appropr
 Native provider behavior, full access and RunContext acceptance remain open.
 
 - [ ] Complete owned Azure access with reviewed request-specific startup settlement, fresh endpoint
-      trust, selected route lifetime, exact guest preparation and aggregate release. Account
-      explicitly for provider incarnation: compose newly recorded VM UUID/path evidence with the
-      owned reader and complete native access. Historical records still lack unique-ID evidence;
-      their acquisition/adoption needs explicit disposition, not silent backfill. The existing
-      string metadata map needs no schema migration but cannot supply historical identity proof. A
-      cloned guest marker does not turn the ARM path into an immutable incarnation. Keep the
-      acknowledged producer separate from these unfinished integration and native-proof gates.
+      trust,
+      [selected route lifetime and access composition](execution-lifecycle-lld.md#owned-azure-native-route-and-access-composition),
+      exact guest preparation and aggregate release. Prove actual locked-network-SDK one-shot
+      transmission, exclusive linked NIC/NSG selection, case-varied observed identities without
+      locator rewriting, terminal failed-create leftover cleanup, uncertain mutation retention,
+      unrelated-rule preservation and credential-last retirement. Account explicitly for provider
+      incarnation: compose newly recorded VM UUID/path evidence with the owned reader and complete
+      native access. Historical records still lack unique-ID evidence; their acquisition/adoption
+      needs explicit disposition, not silent backfill. The existing string metadata map needs no
+      schema migration but cannot supply historical identity proof. A cloned guest marker does not
+      turn the ARM path into an immutable incarnation. Keep the acknowledged producer separate from
+      these unfinished integration and native-proof gates.
 - [ ] Establish explicit custody for provider and linked-endpoint read clients in the owned cloud
       composition, including preliminary power reads before activation. Existing AWS/Azure reads
       suppress ordinary close errors without retaining uncertain originals; GCP uses cached

@@ -79,6 +79,42 @@ paths, rewrite historical identity evidence or broaden the existing strict path 
 Source:
 [Azure resource naming rules](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules).
 
+### Azure temporary native SSH route
+
+The 2026-10-18 source research identifies separate evidence for the selected VM, its linked NIC and
+NSG, rule creation, rule removal and local SDK closure. NIC and NSG responses expose their resource
+GUIDs and forward/reverse associations. A shared `owner=agentworks` tag or a derived NSG name alone
+does not establish exclusive attachment to the selected VM. Decision: follow actual references,
+validate the selected VM back-reference and exclusive NIC-level NSG attachment, and refuse observed
+identity changes. Do not reject an otherwise matching linked resource just because its group or name
+differs from the original provisioning convention. GUID equality remains an observation, not an
+atomic mutation precondition.
+
+The opened rule PUT and DELETE documentation establishes the `2025-09-01` contract. PUT returns HTTP
+200/201, and an operation header can require further observation; DELETE documents HTTP 200/202/204
+and its examples include `Azure-AsyncOperation` even on HTTP 200. Some requested Learn versions
+redirect to other versions, and direct retrieval of the requested `2026-01-01` rule pages failed in
+this research. Decision: use the explicitly inspected stable rule version, not the view string of an
+unverified page. Keep header-aware request completion separate from fresh rule-state observation.
+Neither public rule contract inspected documents conditional create/delete support; an etag field is
+not evidence of a supported compare-and-swap operation.
+
+Microsoft also documents that a network resource whose provisioning failed can still function.
+Decision: any retained terminal PUT result permits cleanup of an exact matching owned leftover; only
+successful provisioning admits guest work. An already absent rule after a completed create needs no
+DELETE, but absence does not drain an unknown queued mutation. Removing an allow normally changes
+new-connection admission, not established SSH flows. Do not broaden cleanup into a whole NSG
+replacement or flow-reset mutation. Actual locked-SDK dispatch and native lifecycle proof remain
+separate acceptance work.
+
+Sources:
+[NIC GET](https://learn.microsoft.com/en-us/rest/api/virtualnetwork/network-interfaces/get?view=rest-virtualnetwork-2026-01-01),
+[NSG GET](https://learn.microsoft.com/en-us/rest/api/virtualnetwork/network-security-groups/get?view=rest-virtualnetwork-2026-01-01),
+[rule PUT](https://learn.microsoft.com/en-us/rest/api/virtualnetwork/security-rules/create-or-update?view=rest-virtualnetwork-2025-09-01),
+[rule DELETE](https://learn.microsoft.com/en-us/rest/api/virtualnetwork/security-rules/delete?view=rest-virtualnetwork-2025-09-01),
+[failed network provisioning](https://learn.microsoft.com/en-us/azure/networking/troubleshoot-failed-state),
+[NSG flow behavior](https://learn.microsoft.com/en-us/azure/virtual-network/network-security-groups-overview).
+
 ### AWS start submission proof
 
 The 2026-10-09 offline proof uses locked boto3 1.43.92 and botocore 1.43.93 with ordinary query
