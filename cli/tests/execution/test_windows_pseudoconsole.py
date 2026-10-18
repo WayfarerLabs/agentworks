@@ -646,9 +646,7 @@ runpy.run_path({probe!r}, run_name='__main__')
     try:
         try:
             stdout, stderr = process.communicate(timeout=10)
-        except subprocess.TimeoutExpired as caught:
-            report = json.loads(caught.output)
-            assert report["stage"] == "retained_worker_pending" and not report["accepted"]
+        except subprocess.TimeoutExpired:
             assert process.poll() is None
         else:
             pytest.fail(
@@ -658,7 +656,11 @@ runpy.run_path({probe!r}, run_name='__main__')
     finally:
         if process.poll() is None:
             process.kill()
-        process.communicate(timeout=10)
+        stdout, stderr = process.communicate(timeout=10)
+    # Windows communicate() does not expose partial output on this timeout.
+    # Read the report only after outer supervision has ended the pending cell.
+    report = json.loads(stdout)
+    assert report["stage"] == "retained_worker_pending" and not report["accepted"], stderr
 
 
 @pytest.mark.integration
