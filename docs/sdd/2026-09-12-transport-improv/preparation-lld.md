@@ -796,6 +796,14 @@ uncertainty. A fixed helper may explicitly attest that a particular creation was
 missing output or an unavailable reply is not such evidence. Keep this debt separate from helper
 custody and known application completion, using the same distinction as prepared-input cleanup.
 
+After ordinary admission stops, aggregate closing may reconcile and remove only these already-owned
+capture tokens; it cannot reopen an ordinary borrow or admit new work. Prepared-input and capture
+controllers retain their own exact row and protocol checks. They may share the small host-side
+mechanism for retaining and observing a closing helper's actual delivery, not a generic resource
+cleanup state machine. Aggregate cleanup must not enter another helper while an earlier closing
+helper retains unsettled custody. Artifact-only cleanup uncertainty remains separate and need not
+prevent other safe cleanup once actual helper closure is proved.
+
 Represent closed remote stream evidence separately from locally retrieved bytes. A nonce-bound
 capture reference must agree with its stream-end retained length, digest, retention and truncation
 facts. The observer must not require nonexistent inline data frames for that explicit output mode,

@@ -5490,6 +5490,12 @@ checkbox stays open.
       multi-page binary output, corruption outside the selected range, end-fact mismatch, partial
       retrieval and no replay. This does not complete DIRECT spooling, active output, the production
       capture default, staging or native acceptance.
+- [ ] Require the same retained `ExecutionOperation` for managed observation, closed output, result
+      collection and launch reconciliation. Remove the unused alternate borrow/settle/release
+      controller without removing RESOURCE reconnects or exact launch-receipt reconciliation. Derive
+      resource authority from the bound operation, not a second caller-supplied read path. Port
+      foreign-resource, lost-reply, interrupted-construction/control and output-privacy tests onto
+      the retained boundary; prove actual custody and native closure remain authoritative.
 - [x] Correct managed-service pipe ownership across observation and final cleanup. Early stdin
       closure and output EOF must consume the same close-once ownership state that final cleanup
       uses, so a reused descriptor number is never closed again. Preserve pre-observation and
