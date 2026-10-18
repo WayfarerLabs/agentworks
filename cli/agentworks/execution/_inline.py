@@ -48,6 +48,7 @@ from agentworks.execution.models import Command, Script, Shell
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.execution._capture_control import RetrievedCapture
     from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution.carrier import ByteSink, ByteSource, Deadline, ExitStatus
@@ -91,6 +92,7 @@ class InlineCandidateResult:
     runtime_prerequisite: RuntimePrerequisiteObservation
     observation: InlineObservation | None
     requested_output: OutputMode = OutputMode.CAPTURE
+    retrieved_capture: tuple[RetrievedCapture, RetrievedCapture] | None = field(default=None, repr=False)
 
 
 def _utf8(value: str) -> bytes:
@@ -141,6 +143,7 @@ def _manifest(
     cwd: str | None,
     output_mode: OutputMode,
     capture_limit: int,
+    capture_tokens: tuple[bytes, bytes] | None = None,
 ) -> InlineManifest:
     if stdin is not None and type(stdin) is not bytes:
         raise ValidationError("Inline application input must be bytes")
@@ -178,6 +181,7 @@ def _manifest(
         output_mode=output_mode,
         capture_limit=capture_limit,
         identity=identity,
+        capture_tokens=capture_tokens,
     )
 
 
@@ -196,9 +200,15 @@ def prepare_inline_candidate(
     runtime_selection: RuntimeSelection,
     bootstrap: _NumericGuestBootstrap | None = None,
     _prepared_input: bool = False,
+    _capture_tokens: tuple[bytes, bytes] | None = None,
 ) -> PreparedInlineCandidate:
     """Validate all payload data and build one file-free Linux helper attempt."""
     nonce = secrets.token_hex(16)
+    program = PREPARED_PROGRAM if _prepared_input else ROOT_PROGRAM
+    if _capture_tokens is not None:
+        from agentworks.execution._capture_bundle import CAPTURE_PROGRAM
+
+        program = CAPTURE_PROGRAM
     if bootstrap is None:
         fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
             plan,
@@ -211,7 +221,7 @@ def prepare_inline_candidate(
             bootstrap.root_entry,
             plan.expected,
             selection=runtime_selection,
-            program=PREPARED_PROGRAM if _prepared_input else ROOT_PROGRAM,
+            program=program,
             nonce=nonce,
             expected_guest=bootstrap.guest,
         )
@@ -219,7 +229,10 @@ def prepare_inline_candidate(
         _utf8(cwd)
         if not posixpath.isabs(cwd):
             raise ValidationError("Inline working directory must be absolute")
-    if capture_limit is not None and (type(capture_limit) is not int or not 0 <= capture_limit <= 4_096):
+    if capture_limit is not None and (
+        type(capture_limit) is not int
+        or not 0 <= capture_limit <= (2**63 - 2 if _capture_tokens is not None else 4_096)
+    ):
         raise ValidationError("Inline capture limit must be between 0 and 4096 bytes")
     if stdout is not None and stderr is not None:
         output_mode, retained_limit = OutputMode.DELIVER, 0
@@ -230,7 +243,10 @@ def prepare_inline_candidate(
     elif capture_limit is None:
         output_mode, retained_limit = OutputMode.DISCARD, 0
     else:
-        output_mode, retained_limit = OutputMode.CAPTURE, capture_limit
+        output_mode, retained_limit = (
+            (OutputMode.SCRATCH_CAPTURE if _capture_tokens is not None else OutputMode.CAPTURE),
+            capture_limit,
+        )
     manifest = _manifest(
         request,
         nonce=nonce,
@@ -240,15 +256,21 @@ def prepare_inline_candidate(
         cwd=cwd,
         output_mode=output_mode,
         capture_limit=retained_limit,
+        capture_tokens=_capture_tokens,
     )
     manifest_error: ManifestErrorCode | None = None
     manifest_data = b""
     try:
-        manifest_data = (
-            PREPARED_PROGRAM.prefix + encode_prepared_request_envelope(manifest)
-            if _prepared_input
-            else encode_request_envelope(manifest)
-        )
+        if _capture_tokens is not None:
+            from agentworks.execution._inline_request import encode_capture_request_envelope
+
+            manifest_data = program.prefix + encode_capture_request_envelope(manifest)
+        else:
+            manifest_data = (
+                PREPARED_PROGRAM.prefix + encode_prepared_request_envelope(manifest)
+                if _prepared_input
+                else encode_request_envelope(manifest)
+            )
     except ManifestError as error:
         manifest_error = error.code
     if manifest_error is ManifestErrorCode.OVERSIZED:
@@ -256,7 +278,14 @@ def prepare_inline_candidate(
     if manifest_error is not None:
         raise ValidationError("Inline invocation contains an invalid field")
 
-    observer = InlineObserver(output_mode, retained_limit, stdout=stdout, stderr=stderr)
+    observer = InlineObserver(
+        output_mode,
+        retained_limit,
+        stdout=stdout,
+        stderr=stderr,
+        capture_tokens=_capture_tokens,
+        capture_identity=plan.expected,
+    )
     reader = FrameReader(nonce, observer.accept)
     collector = PresentationCollector(reader, observer)
     runtime = RuntimePrefixSink(nonce, candidates, collector, system_shim)

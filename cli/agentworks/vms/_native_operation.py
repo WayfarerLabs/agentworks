@@ -129,6 +129,7 @@ class _Workflow:
             or execution.active_inline_calls
             or execution.unfinished_inline_executions
             or execution._prepared_stages
+            or execution._captures
             or any(not run.cleanup_complete for run in execution.managed_runs)
         )
 
@@ -151,6 +152,10 @@ class _Workflow:
         self.owner.retire_unused_borrow()
         budget = self.deadline if cleanup_deadline is None else cleanup_deadline
         if self.views is not None:
+            # A previous close may retain an actual scratch helper independently
+            # from artifact debt. Retire it before admitting keeper cleanup.
+            if self.views.execution_operation.closing_scratch_helper_pending:
+                self.views.execution_operation.finish_scratch_cleanup(budget)
             drained = True
             interrupted: BaseException | None = None
             for run in self.views.execution_operation.managed_runs:
@@ -177,11 +182,11 @@ class _Workflow:
                 # Closed helpers can release scratch while unknown launch
                 # facts retain the independent START obligation and claim.
                 try:
-                    self.views.execution_operation.finish_prepared_stages(budget)
+                    self.views.execution_operation.finish_scratch_cleanup(budget)
                 except BaseException:
                     raise control from control.__cause__
                 raise
-            self.views.execution_operation.finish_prepared_stages(budget)
+            self.views.execution_operation.finish_scratch_cleanup(budget)
         if not self.local_delivery.close(budget) or not self.owner.close_local_delivery(budget):
             raise StateError("VM operation retains unsettled local delivery")
         if self.namespace is not None:

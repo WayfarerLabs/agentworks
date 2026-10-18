@@ -328,22 +328,39 @@ def main(nonce: str) -> int:
     return _main(nonce, prepared_input=False)
 
 
-def _main(nonce: str, *, prepared_input: bool) -> int:
+def _main(nonce: str, *, prepared_input: bool, capture_mode: bool = False) -> int:
     emitter = FrameWriter(nonce)
+
+    def reject(failure: FailureFact) -> int:
+        if capture_mode:
+            from ._capture_guest import emit_unentered
+
+            emit_unentered(emitter)
+        return _finish_failure(emitter, failure)
+
     try:
-        manifest = _read_request(prepared_input=prepared_input)
+        if capture_mode:
+            from ._capture_guest import read_request
+
+            manifest = read_request()
+        else:
+            manifest = _read_request(prepared_input=prepared_input)
     except ManifestError as error:
         code = FailureCode.OVERSIZED if error.code is ManifestErrorCode.OVERSIZED else FailureCode.INVALID
-        return _finish_failure(emitter, FailureFact(FailurePhase.REQUEST, code))
+        return reject(FailureFact(FailurePhase.REQUEST, code))
     except OSError:
-        return _finish_failure(emitter, FailureFact(FailurePhase.REQUEST, FailureCode.INVALID))
+        return reject(FailureFact(FailurePhase.REQUEST, FailureCode.INVALID))
     if manifest.nonce != nonce:
-        return _finish_failure(emitter, FailureFact(FailurePhase.REQUEST, FailureCode.NONCE))
-    if sys.platform not in {"linux", "darwin"} or not _supports_retrospective_completion():
-        return _finish_failure(emitter, FailureFact(FailurePhase.PREPARE, FailureCode.RUNTIME))
+        return reject(FailureFact(FailurePhase.REQUEST, FailureCode.NONCE))
+    if (
+        (capture_mode and sys.platform != "linux")
+        or sys.platform not in {"linux", "darwin"}
+        or not _supports_retrospective_completion()
+    ):
+        return reject(FailureFact(FailurePhase.PREPARE, FailureCode.RUNTIME))
     matches_identity = matches_fresh_exec_identity if sys.platform == "darwin" else matches_current_identity
     if not matches_identity(manifest.identity):
-        return _finish_failure(emitter, FailureFact(FailurePhase.IDENTITY, FailureCode.MISMATCH))
+        return reject(FailureFact(FailurePhase.IDENTITY, FailureCode.MISMATCH))
 
     try:
         launch = _prepare_launch(manifest)
@@ -351,7 +368,7 @@ def _main(nonce: str, *, prepared_input: bool) -> int:
         if sys.platform == "darwin" and not _SOURCE_OWNER.close():
             emitter.emit(FrameKind.FAILED, encode_failure(error.fact))
             return 1
-        return _finish_failure(emitter, error.fact)
+        return reject(error.fact)
 
     failure: FailureFact | None = None
     source_closed = True
@@ -373,7 +390,7 @@ def _main(nonce: str, *, prepared_input: bool) -> int:
                     ProcessOutput(stdout_sink=stdout, stderr_sink=stderr)
                     if stdout is not None
                     else ProcessOutput(capture_limit=manifest.capture_limit + 1)
-                    if manifest.output_mode is OutputMode.CAPTURE
+                    if manifest.output_mode in {OutputMode.CAPTURE, OutputMode.SCRATCH_CAPTURE}
                     else ProcessOutput()
                 ),
                 deadline=Deadline(None),
@@ -386,12 +403,23 @@ def _main(nonce: str, *, prepared_input: bool) -> int:
             if stdout is not None and stderr is not None:
                 emitter.finish_pending(stdout, stderr)
         if not result.started:
+            if capture_mode:
+                from ._capture_guest import emit_unentered
+
+                emit_unentered(emitter)
             failure = FailureFact(FailurePhase.LAUNCH, FailureCode.DISPATCH)
         else:
-            _emit_stream(emitter, manifest, StreamName.STDOUT, result.stdout, stdout)
-            _emit_stream(emitter, manifest, StreamName.STDERR, result.stderr, stderr)
-            emitter.emit(FrameKind.WAITED, encode_wait(_wait_fact(result.exit_status)))
             failure = _process_failure(result)
+            if capture_mode:
+                from ._capture_guest import publish
+
+                publication_failed = publish(emitter, manifest, result)
+                if failure is None and publication_failed:
+                    failure = FailureFact(FailurePhase.OBSERVE, FailureCode.OUTPUT)
+            else:
+                _emit_stream(emitter, manifest, StreamName.STDOUT, result.stdout, stdout)
+                _emit_stream(emitter, manifest, StreamName.STDERR, result.stderr, stderr)
+            emitter.emit(FrameKind.WAITED, encode_wait(_wait_fact(result.exit_status)))
     finally:
         if sys.platform == "darwin" and launch.source_fd is not None:
             source_closed = _SOURCE_OWNER.close()

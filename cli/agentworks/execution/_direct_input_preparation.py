@@ -136,6 +136,7 @@ def prepare_direct_input(
     cwd: str | None,
     capture_limit: int | None,
     sensitive: bool,
+    capture_tokens: tuple[bytes, bytes] | None = None,
 ) -> DirectInputPreparation:
     """Validate the complete staged activation and chunk carrier before effects."""
     remaining = deadline.remaining()
@@ -152,13 +153,19 @@ def prepare_direct_input(
         capture_limit=capture_limit,
         sensitive=sensitive,
         _prepared_input=True,
+        _capture_tokens=capture_tokens,
     )
     try:
         assert isinstance(candidate.io.input, FiniteInput)
         data = candidate.io.input.data
+        input_program = PREPARED_PROGRAM
+        if capture_tokens is not None:
+            from ._capture_bundle import CAPTURE_PROGRAM
+
+            input_program = CAPTURE_PROGRAM
         fixed = FixedFileHelperBundle(
-            _root_guest_bootstrap_source(plan.expected, PREPARED_PROGRAM, bootstrap.guest),
-            PREPARED_PROGRAM.prefix,
+            _root_guest_bootstrap_source(plan.expected, input_program, bootstrap.guest),
+            input_program.prefix,
         )
         program = build_staged_helper_program(fixed)
         argv, _, _ = build_root_guest_bootstrap_argv(

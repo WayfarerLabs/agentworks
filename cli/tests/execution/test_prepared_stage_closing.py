@@ -180,7 +180,7 @@ def test_unknown_closing_helper_blocks_next_helper_even_after_local_drain(owned,
     carrier.code, carrier.unsettled = code, True
     assert not cleanup.finish(Deadline.after(30))
     call = cleanup._active
-    assert call is not None and call.custody is carrier.custody and call.custody.settled
+    assert call is not None and call.helper.custody is carrier.custody and call.helper.custody.settled
     for _ in range(2):
         assert not cleanup.finish(Deadline.after(30))
     assert cleanup._active is call and len(carrier.requests) == 2
@@ -509,7 +509,7 @@ def test_local_cleanup_lost_reply_retries_actual_custody_without_helper_delivery
         patch.setattr(LocalDeliveryCustody, "close", interrupted)
         with pytest.raises(KeyboardInterrupt):
             cleanup.finish(Deadline.after(30))
-    assert cleanup._active is not None and cleanup._active.custody is carrier.custody
+    assert cleanup._active is not None and cleanup._active.helper.custody is carrier.custody
     assert cleanup.finish(Deadline.after(30)) and len(carrier.requests) == 2
     assert pending(owner) == []
 
@@ -528,7 +528,7 @@ def test_pre_entry_route_control_can_retry_cleanup_without_reopening_admission(o
     owner.stop_admission()
     with pytest.raises(KeyboardInterrupt) as caught:
         cleanup.finish(Deadline.after(30))
-    assert caught.value is control and cleanup._active is not None and not cleanup._active.entered
+    assert caught.value is control and cleanup._active is not None and not cleanup._active.helper.entered
     assert len(carrier.requests) == 1 and pending(owner) == [PREPARED_HELPER_OBLIGATION_KIND]
     prepared._before_dispatch = None
     assert cleanup.finish(Deadline.after(30)) and len(carrier.requests) == 2

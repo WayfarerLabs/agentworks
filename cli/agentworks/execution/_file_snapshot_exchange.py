@@ -44,6 +44,7 @@ from agentworks.execution._file_wire import (
 from agentworks.execution._file_wire_reader import FileRecordReader, FileWireError
 from agentworks.execution._runtime_prerequisite import (
     MAX_RUNTIME_RECORD_BYTES,
+    HelperClosureExpectation,
     RuntimePrefixSink,
     RuntimePrerequisiteObservation,
     RuntimePrerequisiteState,
@@ -386,6 +387,7 @@ def _exchange(
     on_stream_data: Callable[[bytes], bool] | None = None,
     *,
     bootstrap: _NumericGuestBootstrap | None = None,
+    prepare_delivery: Callable[[HelperClosureExpectation], BoundHelperCarrier] | None = None,
 ) -> FileSnapshotCandidateResult:
     if bootstrap is None:
         fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
@@ -428,6 +430,12 @@ def _exchange(
     )
     dispatch = Dispatch.UNKNOWN
     try:
+        if prepare_delivery is not None:
+            carrier = prepare_delivery(
+                HelperClosureExpectation(
+                    request.nonce, candidates, system_shim, bootstrap.guest if bootstrap is not None else None
+                )
+            )
         report = carrier.execute(PreparedInvocation(fixed_argv), io=io, deadline=deadline)
         dispatch = report.dispatch
         runtime_prerequisite = runtime.observation
@@ -458,7 +466,9 @@ def _exchange(
         reader.abort()
         collector.abort()
         if dispatch is not Dispatch.NOT_SENT:
-            raise control from _control_uncertainty(request.operation)
+            fact = _control_uncertainty(request.operation)
+            fact.__cause__ = control.__cause__
+            raise control from fact
         raise
     finally:
         runtime.clear()
@@ -503,6 +513,7 @@ def snapshot_chunk(
     runtime_selection: RuntimeSelection,
     effect_gate: FileEffectGateBinding | None = None,
     bootstrap: _NumericGuestBootstrap | None = None,
+    prepare_delivery: Callable[[HelperClosureExpectation], BoundHelperCarrier] | None = None,
 ) -> FileSnapshotCandidateResult:
     """Read one exact bounded range from an immutable private snapshot."""
     request = FileSnapshotChunkRequest(
@@ -515,7 +526,9 @@ def snapshot_chunk(
         deadline.remaining(),
         effect_gate,
     )
-    return _exchange(carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap)
+    return _exchange(
+        carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap, prepare_delivery=prepare_delivery
+    )
 
 
 def snapshot_stream(
@@ -548,6 +561,7 @@ def snapshot_reconcile(
     runtime_selection: RuntimeSelection,
     effect_gate: FileEffectGateBinding | None = None,
     bootstrap: _NumericGuestBootstrap | None = None,
+    prepare_delivery: Callable[[HelperClosureExpectation], BoundHelperCarrier] | None = None,
 ) -> FileSnapshotCandidateResult:
     """Read historical cleanup ownership without replaying snapshot creation."""
     request = FileSnapshotReconcileRequest(
@@ -557,7 +571,9 @@ def snapshot_reconcile(
         deadline.remaining(),
         effect_gate,
     )
-    return _exchange(carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap)
+    return _exchange(
+        carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap, prepare_delivery=prepare_delivery
+    )
 
 
 def snapshot_cleanup(
@@ -570,6 +586,7 @@ def snapshot_cleanup(
     runtime_selection: RuntimeSelection,
     effect_gate: FileEffectGateBinding | None = None,
     bootstrap: _NumericGuestBootstrap | None = None,
+    prepare_delivery: Callable[[HelperClosureExpectation], BoundHelperCarrier] | None = None,
 ) -> FileSnapshotCandidateResult:
     """Attempt exact identity-bound cleanup once without a quiescence claim."""
     request = FileSnapshotCleanupRequest(
@@ -580,4 +597,6 @@ def snapshot_cleanup(
         deadline.remaining(),
         effect_gate,
     )
-    return _exchange(carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap)
+    return _exchange(
+        carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap, prepare_delivery=prepare_delivery
+    )

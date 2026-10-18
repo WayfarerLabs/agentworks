@@ -51,6 +51,7 @@ class ScriptShell(StrEnum):
 
 class OutputMode(StrEnum):
     CAPTURE = "capture"
+    SCRATCH_CAPTURE = "scratch_capture"
     DELIVER = "deliver"
     DISCARD = "discard"
     SUPPRESS = "suppress"
@@ -69,6 +70,7 @@ class InlineManifest:
     output_mode: OutputMode
     capture_limit: int
     identity: IdentityExpectation
+    capture_tokens: tuple[bytes, bytes] | None = field(default=None, repr=False)
 
 
 def _invalid() -> ManifestError:
@@ -168,8 +170,9 @@ def _identity(value: object) -> IdentityExpectation:
     return IdentityExpectation(euid, egid, tuple(groups))
 
 
-def _output(value: object) -> tuple[OutputMode, int]:
-    if type(value) is not dict or set(value) != {"limit", "mode"}:
+def _output(value: object, *, capture: bool = False) -> tuple[OutputMode, int]:
+    fields = {"limit", "mode", "stdout_token", "stderr_token"} if capture else {"limit", "mode"}
+    if type(value) is not dict or set(value) != fields:
         raise _invalid()
     failed = False
     mode = OutputMode.CAPTURE
@@ -180,9 +183,15 @@ def _output(value: object) -> tuple[OutputMode, int]:
     if failed:
         raise _invalid()
     limit = value["limit"]
-    if type(limit) is not int or not 0 <= limit <= MAX_CAPTURE_BYTES:
+    if type(limit) is not int or not 0 <= limit <= (2**63 - 2 if capture else MAX_CAPTURE_BYTES):
         raise _invalid()
-    if mode is not OutputMode.CAPTURE and limit != 0:
+    if capture:
+        if mode is not OutputMode.SCRATCH_CAPTURE:
+            raise _invalid()
+        tokens = tuple(_decode_b64(value[key]) for key in ("stdout_token", "stderr_token"))
+        if any(len(token) != 16 for token in tokens) or tokens[0] == tokens[1]:
+            raise _invalid()
+    elif mode is OutputMode.SCRATCH_CAPTURE or (mode is not OutputMode.CAPTURE and limit != 0):
         raise _invalid()
     return mode, limit
 
@@ -205,7 +214,7 @@ def decode_prepared_manifest(data: bytes) -> InlineManifest:
     return _decode_manifest(data, MAX_PREPARED_MANIFEST_BYTES)
 
 
-def _decode_manifest(data: bytes, bound: int) -> InlineManifest:
+def _decode_manifest(data: bytes, bound: int, *, capture: bool = False) -> InlineManifest:
     if type(data) is not bytes:
         raise _invalid()
     if len(data) > bound:
@@ -264,7 +273,7 @@ def _decode_manifest(data: bytes, bound: int) -> InlineManifest:
     cwd = None if value["cwd"] is None else _decode_text(value["cwd"], nonempty=True)
     if cwd is not None and not cwd.startswith("/"):
         raise _invalid()
-    output_mode, capture_limit = _output(value["output"])
+    output_mode, capture_limit = _output(value["output"], capture=capture)
     return InlineManifest(
         nonce=nonce,
         kind=kind,
@@ -277,6 +286,11 @@ def _decode_manifest(data: bytes, bound: int) -> InlineManifest:
         output_mode=output_mode,
         capture_limit=capture_limit,
         identity=_identity(value["identity"]),
+        capture_tokens=(
+            (_decode_b64(value["output"]["stdout_token"]), _decode_b64(value["output"]["stderr_token"]))
+            if capture
+            else None
+        ),
     )
 
 
@@ -285,7 +299,7 @@ def encode_manifest(manifest: InlineManifest) -> bytes:
     return _encode_manifest(manifest, MAX_MANIFEST_BYTES)
 
 
-def _encode_manifest(manifest: InlineManifest, bound: int) -> bytes:
+def _encode_manifest(manifest: InlineManifest, bound: int, *, capture: bool = False) -> bytes:
     value = {
         "argv": [_b64(argument.encode("utf-8")) for argument in manifest.argv],
         "cwd": None if manifest.cwd is None else _b64(manifest.cwd.encode("utf-8")),
@@ -297,7 +311,14 @@ def _encode_manifest(manifest: InlineManifest, bound: int) -> bytes:
         },
         "kind": manifest.kind.value,
         "nonce": manifest.nonce,
-        "output": {"limit": manifest.capture_limit, "mode": manifest.output_mode.value},
+        "output": {"limit": manifest.capture_limit, "mode": manifest.output_mode.value}
+        if manifest.capture_tokens is None
+        else {
+            "limit": manifest.capture_limit,
+            "mode": manifest.output_mode.value,
+            "stdout_token": _b64(manifest.capture_tokens[0]),
+            "stderr_token": _b64(manifest.capture_tokens[1]),
+        },
         "shell": None if manifest.shell is None else manifest.shell.value,
         "source": None if manifest.source is None else _b64(manifest.source),
         "stdin": None if manifest.stdin is None else _b64(manifest.stdin),
@@ -306,7 +327,7 @@ def _encode_manifest(manifest: InlineManifest, bound: int) -> bytes:
     encoded = _json_bytes(value)
     if len(encoded) > bound:
         raise ManifestError(ManifestErrorCode.OVERSIZED)
-    _decode_manifest(encoded, bound)
+    _decode_manifest(encoded, bound, capture=capture)
     return encoded
 
 
@@ -319,4 +340,19 @@ def encode_request_envelope(manifest: InlineManifest) -> bytes:
 def encode_prepared_request_envelope(manifest: InlineManifest) -> bytes:
     """Encode only the fixed prepared entry's separately bounded request."""
     encoded = _encode_manifest(manifest, MAX_PREPARED_MANIFEST_BYTES)
+    return REQUEST_MARKER + format(len(encoded), "08x").encode("ascii") + encoded
+
+
+def decode_capture_manifest(data: bytes) -> InlineManifest:
+    """Admit only the fixed finite scratch-capture entry's larger request."""
+    manifest = _decode_manifest(data, MAX_PREPARED_MANIFEST_BYTES, capture=True)
+    if manifest.stdin is None:
+        raise _invalid()
+    return manifest
+
+
+def encode_capture_request_envelope(manifest: InlineManifest) -> bytes:
+    """Encode fixed capture policy separately from the ordinary inline entry."""
+    encoded = _encode_manifest(manifest, MAX_PREPARED_MANIFEST_BYTES, capture=True)
+    decode_capture_manifest(encoded)
     return REQUEST_MARKER + format(len(encoded), "08x").encode("ascii") + encoded
