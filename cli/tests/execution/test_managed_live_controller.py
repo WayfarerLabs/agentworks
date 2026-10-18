@@ -572,7 +572,7 @@ def test_continuous_stdout_cannot_starve_stderr_needed_for_exit(
                                 stopped=True
                         reader.finish()
                         assert reader.error is None
-                except BaseException as exc: errors.append(type(exc).__name__)
+                except BaseException as exc: errors.append(repr(exc))
                 finally:
                     with suppress(BaseException): store.publish_stop_request(launch)
                     os.close(directory)
