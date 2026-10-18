@@ -342,7 +342,7 @@ def test_sdk_prefix_response_debt_blocks_route_and_settles_original_without_repl
     with pytest.raises(StateError):
         p.access.prepare(VMStatus.RUNNING, p.deadline)
     exposure = p.access._exposure
-    assert exposure is not None and exposure.cleanup_incomplete and exposure.prefixes is None
+    assert exposure is not None and exposure.cleanup_incomplete
     assert p.access.cleanup_incomplete and p.access._route is None and not p.preparations
     assert len(p.prefix_responses) == 1
     response = p.prefix_responses[0]

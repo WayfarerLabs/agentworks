@@ -33,12 +33,6 @@ class OwnedSSHExposure:
         self._vm_name = vm_name
         self._response: _Response | None = None
         self._used = False
-        self._prefixes: tuple[str, ...] | None = None
-
-    @property
-    def prefixes(self) -> tuple[str, ...] | None:
-        """The selected plan, published only after timely response retirement."""
-        return self._prefixes
 
     @property
     def cleanup_incomplete(self) -> bool:
@@ -117,7 +111,6 @@ class OwnedSSHExposure:
         if detected is None:
             output.warn("Public IPv4 detection failed; using operator.ssh_allow_cidrs for scoped SSH access")
         self._remaining(deadline)
-        self._prefixes = prefixes
         return prefixes
 
     def close(self, deadline: Deadline) -> bool:

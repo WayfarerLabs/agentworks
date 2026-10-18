@@ -71,7 +71,7 @@ def test_passive_constructor_and_terminal_close(monkeypatch: pytest.MonkeyPatch)
     response = Response()
     calls = install(monkeypatch, response)
     owner = OwnedSSHExposure("box")
-    assert owner.prefixes is None and not owner.cleanup_incomplete and not calls
+    assert not owner.cleanup_incomplete and not calls
     assert owner.close(Deadline.after(10))
     with pytest.raises(StateError):
         owner.resolve((), Deadline.after(10))
@@ -88,7 +88,7 @@ def test_timeout_uses_original_remaining_budget(
     deadline = Deadline(100 + remaining)
     result = owner.resolve(["198.51.100.3/24", "203.0.113.7", "198.51.100.0/24"], deadline)
     assert result == ("203.0.113.7/32", "198.51.100.0/24")
-    assert owner.prefixes is result and not owner.cleanup_incomplete
+    assert not owner.cleanup_incomplete
     assert calls == [("https://checkip.amazonaws.com", min(5.0, remaining))]
     assert response.reads == [65] and response.closes == 1
     assert owner.close(deadline) and response.closes == 1
@@ -106,7 +106,7 @@ def test_invalid_external_body_is_retired_without_a_plan(monkeypatch: pytest.Mon
         owner.resolve((), Deadline.after(10))
     assert caught.value.entity_kind == "vm" and caught.value.entity_name == "box"
     assert caught.value.__cause__ is None
-    assert owner.prefixes is None and not owner.cleanup_incomplete
+    assert not owner.cleanup_incomplete
     assert response.reads == [65] and response.closes == 1
 
 
@@ -126,7 +126,7 @@ def test_finite_live_deadline_required_before_io(
     owner = OwnedSSHExposure("box")
     with pytest.raises(ValidationError if deadline.expires_at is None else LimitExceededError):
         owner.resolve(["198.51.100.1"], deadline)
-    assert not calls and owner.prefixes is None and not owner.cleanup_incomplete
+    assert not calls and not owner.cleanup_incomplete
 
 
 @pytest.mark.parametrize("expiry_stage", ["open", "read", "close"])
@@ -145,7 +145,6 @@ def test_late_work_never_publishes_and_cleanup_retries_only_original(
     owner = OwnedSSHExposure("box")
     with pytest.raises(LimitExceededError):
         owner.resolve(["198.51.100.1"], Deadline(110))
-    assert owner.prefixes is None
     assert owner.cleanup_incomplete == (expiry_stage != "close")
     assert response.reads == ([] if expiry_stage == "open" else [65])
     assert owner.close(Deadline(120))
@@ -203,7 +202,7 @@ def test_actual_original_is_retained_before_body_failure(
     owner = OwnedSSHExposure("box")
 
     def check_retained() -> None:
-        assert owner._response is response and owner.cleanup_incomplete and owner.prefixes is None
+        assert owner._response is response and owner.cleanup_incomplete
 
     failure = failure_type("read failed")
     response = Response(read_error=failure, before_read=check_retained, close_error=OSError("close failed"))
@@ -212,7 +211,7 @@ def test_actual_original_is_retained_before_body_failure(
         owner.resolve((), Deadline.after(10))
     if failure_type is not OSError:
         assert caught.value is failure
-    assert owner._response is response and owner.cleanup_incomplete and owner.prefixes is None
+    assert owner._response is response and owner.cleanup_incomplete
     assert not owner.close(Deadline.after(10)) and response.closes == 2
     response.close_error = None
     assert owner.close(Deadline.after(10))
@@ -232,7 +231,7 @@ def test_uncertain_retirement_blocks_success_and_fallback(
         owner.resolve(["198.51.100.1"], Deadline.after(10))
     if close_type is not OSError:
         assert caught.value is failure
-    assert owner._response is response and owner.cleanup_incomplete and owner.prefixes is None
+    assert owner._response is response and owner.cleanup_incomplete
     response.close_error = None
     assert owner.close(Deadline.after(10))
     with pytest.raises(StateError):
@@ -251,7 +250,7 @@ def test_primary_control_survives_cleanup_interruption(
     owner = OwnedSSHExposure("box")
     with pytest.raises(primary_type) as caught:
         owner.resolve(["198.51.100.1"], Deadline.after(10))
-    assert caught.value is primary and owner._response is response and owner.prefixes is None
+    assert caught.value is primary and owner._response is response
     response.close_error = None
     assert owner.close(Deadline.after(10))
 
@@ -266,7 +265,7 @@ def test_existing_typed_error_survives_ordinary_close_failure(
     owner = OwnedSSHExposure("box")
     with pytest.raises(failure_type) as caught:
         owner.resolve(["198.51.100.1"], Deadline.after(10))
-    assert caught.value is primary and owner._response is response and owner.prefixes is None
+    assert caught.value is primary and owner._response is response
     response.close_error = None
     assert owner.close(Deadline.after(10))
 
@@ -284,7 +283,7 @@ def test_cleanup_retry_control_retains_original_without_replay(
     response.close_error = control
     with pytest.raises(control_type) as caught:
         owner.close(Deadline.after(10))
-    assert caught.value is control and owner._response is response and owner.prefixes is None
+    assert caught.value is control and owner._response is response
     response.close_error = None
     assert owner.close(Deadline.after(10))
     assert response.closes == 3 and response.reads == [65] and len(calls) == 1
@@ -341,7 +340,6 @@ def test_combined_prefix_limit(monkeypatch: pytest.MonkeyPatch, count: int, dete
     if count + (not detection_fails) > 64:
         with pytest.raises(LimitExceededError):
             owner.resolve(extras, Deadline.after(10))
-        assert owner.prefixes is None
     else:
         assert len(owner.resolve(extras, Deadline.after(10))) == count + (not detection_fails)
     assert response.closes == 1 and not owner.cleanup_incomplete
