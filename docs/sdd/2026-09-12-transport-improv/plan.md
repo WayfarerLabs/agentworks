@@ -5443,6 +5443,12 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
       reconciliation supplies cleanup debt only; missing or invalid receipts remain debt. Resolve
       only this row after positively closed CLEANED evidence, retain actual recovery delivery on
       interruption, and keep all-platform availability and general predecessor-drain gates open.
+      Before every recovery helper, publish an exact revision-fenced version-two in-flight wrapper
+      on this same row. A later recovery refuses that marker even after its availability support
+      rows have been disposed: support closure does not prove this helper terminated. Restore the
+      original version-one payload only after actual helper, local delivery and dispatch closure, or
+      resolve the marker directly after positively closed cleanup. Retain and reconcile exact lost
+      publication replies without replaying a helper.
 
 The private pipe checkpoint at `6b8fe8128` passes 1,318 scoped tests with one skip and strict typing
 across 1,442 sources. Changed-file Python and Markdown quality checks pass. Project, complexity and
@@ -5540,8 +5546,14 @@ bookkeeping, and normal workflow close now owns the entire path. The two old env
 the selected delivery constructor while preserving their names, complete 65,536-byte serializer
 limit and exact 10,000/8,192-byte workloads. Worker tests pass both fixtures and all 46 cases in
 their module; this is constructor evidence, not native proof. Combined broad gates and the three
-private source-review lanes for this unit remain pending. No full helper-owner audit, process-loss
-recovery, complete RunContext surface or PR acceptance is claimed.
+private source-review lanes initially remained pending. The combined selection at `8f16ab4dc` passes
+3,154 tests with 25 skips; strict typing passes across 1,483 sources and changed-file quality checks
+pass. Project and complexity source reviews clear that head. Generic correctness review finds a
+reachable concurrent aggregate-cleanup race that can dispatch an untracked closing helper. Serialize
+the entire native workflow cleanup with a nonblocking per-workflow lock, publish stop intent before
+acquisition, and prove competing cleanup refuses without helper entry or early owner release. This
+correction and its re-review remain pending. No full helper-owner audit, process-loss recovery,
+complete RunContext surface or PR acceptance is claimed.
 
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
 one all-callers cutover. PR #830 publishes this design only. The following implementation PR adds
