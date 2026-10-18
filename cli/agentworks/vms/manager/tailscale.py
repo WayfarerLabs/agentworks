@@ -176,10 +176,15 @@ def port_forward_vm(
             def _handle_signal(sig: int, _frame: object) -> None:
                 proc.terminate()
 
-            signal.signal(signal.SIGINT, _handle_signal)
-            signal.signal(signal.SIGTERM, _handle_signal)
-
-            return proc.wait()
+            previous_int = signal.signal(signal.SIGINT, _handle_signal)
+            try:
+                previous_term = signal.signal(signal.SIGTERM, _handle_signal)
+                try:
+                    return proc.wait()
+                finally:
+                    signal.signal(signal.SIGTERM, previous_term)
+            finally:
+                signal.signal(signal.SIGINT, previous_int)
         except OSError as e:
             raise ConnectivityError(
                 f"failed to start SSH: {e}",
