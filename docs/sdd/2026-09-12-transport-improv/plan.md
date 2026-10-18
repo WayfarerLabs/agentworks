@@ -5613,6 +5613,34 @@ from OPERATION managed pipe execution. These results close the private environme
 not production context population, native acceptance or the complete-surface gate. The full joint
 non-integration suite must still be rerun after its disclosed fixture/composition corrections.
 
+- [x] Compose explicit no-idle-stop independent-job availability in both passive and owned
+      AWS/Azure/GCP binding paths. Keep the shared SSH helper conservative by default and prove
+      unsupported default, generic SSH and WSL2 bindings refuse before shell lookup, reservation or
+      dispatch. This is a platform fact, not a claim against explicit stop, reboot, host loss or
+      external policy, and not WSL2's still-required recoverable job-length hold.
+- [x] Complete and privately review immutable ordinary identity and semantic route metadata on the
+      existing target, plus independent unavailable/withheld absence reasons on the existing
+      RunContext. Bind native admin/selected-agent metadata from their exact prepared ordinary
+      plans, normalize reasons to absent targets and preserve incoming absent-agent reasons during
+      native reconstruction. Add no discovery, carrier access, lifetime extension, public package
+      export, recipient enforcement or migration.
+
+The combined private checkpoint at `6f3cec86c` clears independent project (Astra), complexity and
+generic correctness source reviews. Cloud worker selections pass 174 focused and 396 adjacent cases;
+metadata selections pass 119 focused and 2,465 adjacent cases with 25 skips. Root strict typing
+passes across 1,493 sources, and changed-file quality passes for 103 Python and ten Markdown files
+(spelling checks cover the Markdown files selected by repository configuration).
+
+The corrected full local non-integration run at that same head records 20,989 passes, 55 skips and
+four failures in 344.17 seconds, without collection errors. Three failures are the disclosed carried
+SSH expectations: two already corrected in the SSH owner's head, and the offered-input fixture
+adaptation requested on #832. The fourth is the packaging test's intentionally empty build cache in
+the offline test namespace. That exact packaging test separately passes with package-download access
+at the same head. This is not a green full joint gate; owner-authored SSH composition and native
+acceptance remain outstanding. Source fingerprints and unchanged heads are recorded for both root
+runs. Terminal synthetic views are retired after retaining logs, exits and source evidence; the
+failed suite's files are archived and compared before removing its uncompressed view.
+
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
 one all-callers cutover. PR #830 publishes this design only. The following implementation PR adds
 the new surface; migration and removal follow in their own PRs. Permissions are groundwork until
