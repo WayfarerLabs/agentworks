@@ -111,6 +111,7 @@ if TYPE_CHECKING:
     from agentworks.execution._managed_job_request import ManagedLiveIO
     from agentworks.execution._managed_job_store import Stream
     from agentworks.execution._managed_start_exchange import ManagedStartCandidate
+    from agentworks.execution._prepared_stage_closing import PreparedStageCleanup
     from agentworks.execution._runtime_prerequisite import (
         HelperClosureExpectation,
         RuntimeSelection,
@@ -238,6 +239,7 @@ class ExecutionOperation:
         self._resource_owner = resource_owner
         self._route_check = route_check
         self._managed_runs: list[ManagedOperationRun] = []
+        self._prepared_stages: list[PreparedStageCleanup] = []
         self._active_inline_calls: dict[object, _ActiveHelperCall] = {}
         self._unfinished_inline_executions: list[UnfinishedInlineExecution] = []
         self._admission_guard = Lock()
@@ -1084,6 +1086,12 @@ class ExecutionOperation:
                 self._dispatch_obligation.resolve()
             self._finished = True
 
+    def finish_prepared_stages(self, deadline: Deadline) -> None:
+        """Remove only stages whose exact cleanup controller proves settlement."""
+        for cleanup in tuple(self._prepared_stages):
+            if cleanup.finish(deadline):
+                self._prepared_stages.remove(cleanup)
+
     def retry_inline_bookkeeping(self) -> None:
         """Relinquish a failed call using exact bookkeeping, without dispatch.
 
@@ -1132,8 +1140,19 @@ class ExecutionOperation:
             outstanding = owner._outstanding_attempt  # noqa: SLF001
             if outstanding is not None and outstanding is not active.operation.outstanding_attempt:
                 raise StateError("Inline closure no longer owns its attempt")
-        if self._dispatch_id is None or owner.inspect_lifecycle_obligation(self._dispatch_id) is None:
+        identity = active.start.obligation_id if active.start is not None else self._dispatch_id
+        row = owner.inspect_lifecycle_obligation(identity) if identity is not None else None
+        if row is None:
             raise StateError("Inline closure lifetime obligation is unavailable")
+        if active.start is not None:
+            _, kind, version, payload = active.start.registration
+            if (row.obligation_kind, row.payload_version, row.payload, row.payload_revision) != (
+                kind,
+                version,
+                payload,
+                0,
+            ):
+                raise StateError("Managed start closure obligation binding changed")
         expectation = active.closure_expectation
         bootstrap = self._bootstrap
         binding = self._native_binding
@@ -1283,13 +1302,18 @@ class ExecutionOperation:
         inline: bool = False,
         disposal: ManagedDisposalBinding | None = None,
         start: ManagedResourceStartBinding | None = None,
+        delivery: HelperClosureDelivery | None = None,
         replacing: _ActiveHelperCall | None = None,
     ) -> _ActiveHelperCall:
         """Borrow and publish one helper call while its admission guard is held."""
         borrow = self._owner.borrow()
         active = None
         try:
-            operation = BorrowedFixedHelperCarrier(carrier, borrow)
+            operation = (
+                BorrowedFixedHelperCarrier(carrier, borrow)
+                if delivery is None
+                else BorrowedFixedHelperCarrier(carrier, borrow, delivery=delivery)
+            )
             active = _ActiveHelperCall(
                 carrier,
                 borrow,
@@ -1298,6 +1322,7 @@ class ExecutionOperation:
                 inline=inline,
                 disposal=disposal,
                 start=start,
+                closure_delivery=delivery,
             )
             if replacing is not None:
                 active.tracking_key = replacing.tracking_key

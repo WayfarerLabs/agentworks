@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from agentworks.db import LifecycleObligationState
 from agentworks.errors import StateError
-from agentworks.operations import LifecycleObligation
+from agentworks.operations import LifecycleObligation, release_borrow_after_custody
 
 from ._helper_launcher import _validate_plan
 from ._managed_job_access import _explicit_managed_shell
@@ -24,12 +24,16 @@ from ._managed_runs import (
     ManagedRunSpec,
     ManagedShellIdentity,
 )
-from ._managed_start_exchange import ManagedStartCandidate, ManagedStartState, prepare_managed_start, start_managed_run
+from ._managed_start_exchange import ManagedStartCandidate, ManagedStartState, start_managed_run
 from ._managed_start_operation import (
     MANAGED_START_OBLIGATION_KIND,
     MANAGED_START_PAYLOAD_VERSION,
     encode_managed_start_obligation,
 )
+from ._managed_start_preparation import prepare_managed_start_body
+from ._prepared_helper_stage import PreparedHelperStage
+from ._prepared_stage_closing import PreparedStageCleanup
+from ._runtime_prerequisite import HelperClosureExpectation
 from .binding import _IndependentJobAvailability
 from .carrier import Dispatch, ExitStatus
 from .models import JobRef, Script, Shell
@@ -37,6 +41,7 @@ from .models import JobRef, Script, Shell
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from ._delivery_custody import LocalDeliveryCustody
     from ._execution_operation import ExecutionOperation, OwnedInlineOutcome, _ActiveHelperCall
     from ._helper_launcher import IdentityPlan
     from ._managed_request_adapter import _ManagedBody
@@ -53,13 +58,15 @@ class ResourceStartAcknowledgement:
     output_policy: ManagedOutputPolicy
 
 
-@dataclass(frozen=True, slots=True, repr=False)
+@dataclass(slots=True, repr=False)
 class ManagedResourceStartBinding:
-    """Non-secret planned launch and its returned reservation evidence."""
+    """Exact planned launch and optional bounded activation custody."""
 
     obligation_id: str
     receipt: ManagedRunReceipt
     output_policy: ManagedOutputPolicy
+    stage: PreparedHelperStage | None = None
+    local_delivery: LocalDeliveryCustody | None = None
 
     @property
     def registration(self) -> tuple[str, str, int, bytes]:
@@ -77,6 +84,13 @@ def capture_resource_start(
     """Resolve exact launch evidence only together with actual helper closure."""
     start = active.start
     assert start is not None
+    settled = not active.operation.requires_owner_retention
+    stage = start.stage
+    if stage is not None and stage._activation_prepared and not stage._activation_settled:
+        if settled and not active.operation.delivery_started:
+            stage.note_activation_not_dispatched()
+        elif settled and start.local_delivery is not None:
+            stage.note_activation_closure(start.local_delivery)
     repository = operation._managed_repository
     assert repository is not None
     record = repository.inspect(start.receipt.identity)
@@ -102,7 +116,6 @@ def capture_resource_start(
         and candidate.observation.state is ManagedStartState.ACKNOWLEDGED
         and candidate.observation.launch_fact == encode_managed_job_fact(start.receipt)
     )
-    settled = not active.operation.requires_owner_retention
     if matching_ack and settled and record is not None and record.launch_state is ManagedLaunchState.POSSIBLE_DISPATCH:
         record = repository.reconcile(record, ManagedLaunchObservation(Dispatch.SENT, start.receipt))
     acknowledged = matching_ack and record is not None and record.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
@@ -114,6 +127,7 @@ def capture_resource_start(
     never_entered = (
         candidate is None
         and settled
+        and not active.operation.delivery_started
         and active.operation.outstanding_attempt is None
         and not active.borrow.has_outstanding_attempt
         and not active.operation.pending_remote_effects
@@ -132,6 +146,11 @@ def capture_resource_start(
     active.outcome = replace(outcome, requires_owner_retention=outcome.requires_owner_retention or not proved)
     active.bookkeeping_retained = True
     if not proved:
+        # Actual helper closure permits exact scratch cleanup even while the
+        # independent launch remains uncertain. Keep its START row and record.
+        if settled and not operation._borrow_closed(active):
+            operation._owner.stop_admission()
+            release_borrow_after_custody(active.borrow, retain_effect=True)
         return
     if not operation._borrow_closed(active):
         if not active.installed:
@@ -177,6 +196,10 @@ def start_resource_job(
     )
     identity = ManagedRunIdentity(uuid4().hex)
     reference = JobRef(identity.run_id)
+    preparation = None
+    prepared = None
+    stage = None
+    active = None
     try:
         user_default = isinstance(invocation, Script) and invocation.shell is Shell.USER_DEFAULT
         shell = (
@@ -198,8 +221,16 @@ def start_resource_job(
             body = replace(body, request=replace(body.request, launch=encode_managed_job_fact(receipt)))
         operation.require_job_binding(carrier, runtime_selection)
         assert body is not None
-        action = ManagedResourceStartBinding(
-            uuid4().hex, ManagedRunReceipt(identity, identity.unit_name, spec), body.output_policy
+        preparation = prepare_managed_start_body(
+            carrier,
+            identity,
+            spec,
+            body.output_policy,
+            body.request,
+            bootstrap.root_entry,
+            deadline,
+            runtime_selection,
+            bootstrap.guest,
         )
         with operation._admission_guard:
             if (
@@ -209,21 +240,49 @@ def start_resource_job(
                 or operation._unfinished_inline_executions
             ):
                 raise StateError("Execution operation cannot admit a managed resource start")
-            active = operation._borrow_helper_call(carrier, None, start=action)
-        prepared = None
-        try:
-            assert body is not None
-            prepared = prepare_managed_start(
+            with operation._owner._guard:
+                operation._owner._reconcile_transition_locked()
+                operation._owner._require_no_active_work_locked()
+        if preparation.staged:
+            stage = PreparedHelperStage(
+                operation._owner,
                 carrier,
-                identity,
-                spec,
-                body.output_policy,
-                body.request,
-                plan=bootstrap.root_entry,
-                deadline=deadline,
-                runtime_selection=runtime_selection,
-                guest=bootstrap.guest,
+                operation._target,
+                bootstrap,
+                runtime_selection,
+                deadline,
+                preparation.expected_length,
+                before_dispatch=operation._route_check,
+                new_helper_delivery=binding._new_helper_delivery,
             )
+            operation._prepared_stages.append(PreparedStageCleanup(stage))
+            if not stage.begin():
+                raise StateError("Independent managed body staging was not acknowledged")
+            for part in preparation.parts:
+                if not stage.append(part):
+                    raise StateError("Independent managed body staging was not acknowledged")
+        tail = preparation.freeze_tail(None)
+        control = None
+        if stage is not None:
+            if not stage.append(tail):
+                raise StateError("Independent managed body tail staging was not acknowledged")
+            assert preparation.digest is not None
+            control = stage.prepare_activation(preparation.nonce, preparation.digest)
+        prepared = preparation.finish(control)
+        expectation = HelperClosureExpectation(
+            prepared.runtime.nonce, prepared.runtime.candidates, prepared.runtime.system_shim, bootstrap.guest
+        )
+        delivery = binding._new_helper_delivery(expectation) if binding._new_helper_delivery is not None else None
+        action = ManagedResourceStartBinding(
+            uuid4().hex, ManagedRunReceipt(identity, identity.unit_name, spec), body.output_policy, stage
+        )
+        with operation._admission_guard:
+            operation.require_job_binding(carrier, runtime_selection)
+            if operation._active_inline_calls or operation._unfinished_inline_executions:
+                raise StateError("Execution operation cannot admit a managed resource start")
+            active = operation._borrow_helper_call(carrier, None, start=action, delivery=delivery)
+            active.closure_expectation = expectation
+        try:
             reserved = repository.reserve(spec, identity=identity, output_policy=body.output_policy)
             body = None
             prepared.claim(reserved, carrier, deadline)
@@ -234,18 +293,27 @@ def start_resource_job(
 
             def publish_candidate(candidate: ManagedStartCandidate) -> None:
                 active.candidate = candidate
+                active.not_sent = candidate.dispatch is Dispatch.NOT_SENT
 
-            attempt = start_managed_run(
-                repository,
-                reserved,
-                active.operation,
-                prepared=prepared,
-                deadline=deadline,
-                before_possible_dispatch=require_delivery_admission,
-                before_delivery=require_delivery_admission,
-                publish_candidate=publish_candidate,
-            )
-            active.operation.settle(attempt.candidate.dispatch, attempt.candidate.carrier_completion)
+            try:
+                attempt = start_managed_run(
+                    repository,
+                    reserved,
+                    active.operation,
+                    prepared=prepared,
+                    deadline=deadline,
+                    before_possible_dispatch=require_delivery_admission,
+                    before_delivery=require_delivery_admission,
+                    publish_candidate=publish_candidate,
+                )
+            finally:
+                actual = active.operation.outstanding_attempt
+                if actual is not None:
+                    action.local_delivery = actual.local_delivery
+            if delivery is None or active.not_sent:
+                active.operation.settle(attempt.candidate.dispatch, attempt.candidate.carrier_completion)
+            elif delivery.closure_proven:
+                active.operation.settle_helper_closure()
             with operation._admission_guard:
                 operation._capture(
                     active, operation._outcome(active, active.operation, deadline, include_candidate=False)
@@ -260,10 +328,6 @@ def start_resource_job(
         except BaseException as control:
             operation._raise_control(control, active, active.operation, deadline)
             raise AssertionError("Unreachable managed resource start control return") from None
-        finally:
-            body = None
-            if prepared is not None:
-                prepared.discard()
     except BaseException as control:
         from ._execution_operation import ManagedExecutionControlFact
 
@@ -273,3 +337,11 @@ def start_resource_job(
         except BaseException:
             raise control from control.__cause__
         raise control from fact
+    finally:
+        body = None
+        if preparation is not None:
+            preparation.clear()
+        if prepared is not None:
+            prepared.discard()
+        if stage is not None and stage._activation_prepared and not stage._activation_settled and active is None:
+            stage.note_activation_not_dispatched()

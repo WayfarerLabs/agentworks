@@ -114,6 +114,7 @@ class _Workflow:
             or files.unfinished_owned_files
             or execution.active_inline_calls
             or execution.unfinished_inline_executions
+            or execution._prepared_stages
             or any(not run.cleanup_complete for run in execution.managed_runs)
         )
 
@@ -141,7 +142,17 @@ class _Workflow:
                 raise StateError("Native VM managed keeper drain remains unsettled")
             if self.views.execution_operation.active_inline_calls:
                 self.views.execution_operation.observe_inline_cleanup(budget)
-            self.views.execution_operation.finish()
+            try:
+                self.views.execution_operation.finish()
+            except BaseException as control:
+                # Closed helpers can release scratch while unknown launch
+                # facts retain the independent START obligation and claim.
+                try:
+                    self.views.execution_operation.finish_prepared_stages(budget)
+                except BaseException:
+                    raise control from control.__cause__
+                raise
+            self.views.execution_operation.finish_prepared_stages(budget)
         if not self.local_delivery.close(budget) or not self.owner.close_local_delivery(budget):
             raise StateError("Native VM operation retains unsettled local delivery")
         if self.views is not None:
