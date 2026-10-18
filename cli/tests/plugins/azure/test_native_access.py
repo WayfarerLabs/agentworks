@@ -28,7 +28,14 @@ def owned(monkeypatch):
     now = [100.0]
     monkeypatch.setattr("agentworks.execution.carrier.time.monotonic", lambda: now[0])
     result = SimpleNamespace(
-        calls=calls, now=now, compute_error=None, compute_close_error=None, network_close_error=None
+        calls=calls,
+        now=now,
+        compute_error=None,
+        compute_close_error=None,
+        network_close_error=None,
+        nic_id=NIC,
+        pip_ref=PIP,
+        pip_id=PIP,
     )
     result.current = SimpleNamespace(
         id=RESOURCE,
@@ -80,9 +87,10 @@ def owned(monkeypatch):
         calls.append(kind + "-get")
         if kind == "nic":
             return SimpleNamespace(
-                id=NIC, ip_configurations=[SimpleNamespace(public_ip_address=SimpleNamespace(id=PIP))]
+                id=result.nic_id,
+                ip_configurations=[SimpleNamespace(public_ip_address=SimpleNamespace(id=result.pip_ref))],
             )
-        return SimpleNamespace(id=PIP, properties=SimpleNamespace(ip_address="198.51.100.2"))
+        return SimpleNamespace(id=result.pip_id, properties=SimpleNamespace(ip_address="198.51.100.2"))
 
     def close_network():
         calls.append("network-close")
@@ -121,6 +129,24 @@ def test_passive_metadata_copy_and_opaque_locator(owned):
     assert owned.calls[-1] == "credential-close"
 
 
+def test_credential_borrow_requires_prior_admission_and_positive_client_retirement(owned):
+    with pytest.raises(StateError):
+        owned.access.borrow_credential(Deadline.after(10))
+    assert owned.calls == []
+    assert owned.access.observe_vm(Deadline.after(10)) is owned.current
+    before = list(owned.calls)
+    assert owned.access.borrow_credential(Deadline.after(10)) is owned.credential
+    assert owned.calls == before
+    owned.compute_close_error = RuntimeError("offline close failure")
+    owned.access.observe_vm(Deadline.after(10))
+    with pytest.raises(StateError):
+        owned.access.borrow_credential(Deadline.after(10))
+    owned.compute_close_error = None
+    assert owned.access.close(Deadline.after(10))
+    with pytest.raises(StateError):
+        owned.access.borrow_credential(Deadline.after(10))
+
+
 @pytest.mark.parametrize("key", ["resource_id", "vm_id"])
 def test_missing_historical_identity_refuses_before_work(owned, key):
     del owned.vm.platform_metadata[key]
@@ -129,13 +155,117 @@ def test_missing_historical_identity_refuses_before_work(owned, key):
     assert owned.calls == [] and key not in owned.vm.platform_metadata
 
 
-@pytest.mark.parametrize("field,value", [("id", RESOURCE + "-foreign"), ("vm_id", None), ("vm_id", UUID[:-1] + "0")])
+@pytest.mark.parametrize("observed", [RESOURCE.upper(), RESOURCE.lower(), RESOURCE.swapcase()])
+def test_observed_vm_casing_keeps_frozen_locator_and_metadata(owned, observed):
+    owned.current.id = observed
+    assert owned.access.observe_locator(Deadline.after(10)).token == f"azure-vm:v2:{UUID}:{RESOURCE}"
+    assert owned.vm.platform_metadata == {"resource_id": RESOURCE, "vm_id": UUID}
+    assert owned.access.close(Deadline.after(10))
+
+
+@pytest.mark.parametrize("left,right", [("Straße", "STRASSE"), ("é", "e\u0301"), ("É", "é")])
+def test_unicode_names_do_not_invent_provider_equivalence(owned, monkeypatch, left, right):
+    owned.vm.platform_metadata["resource_id"] = RESOURCE.removesuffix("vm") + left
+    access = owned.new()
+    owned.current.id = RESOURCE.removesuffix("vm") + right
+    monkeypatch.setattr(owned.compute.virtual_machines, "get", lambda *a, **k: owned.current)
+    with pytest.raises(StateError):
+        access.observe_locator(Deadline.after(10))
+    assert "network" not in owned.calls
+    assert access.close(Deadline.after(10))
+
+
+def test_linked_id_casing_accepts_without_changing_stored_identity(owned):
+    owned.current.network_profile.network_interfaces[0].id = NIC.upper()
+    owned.nic_id = NIC.lower()
+    owned.pip_ref = PIP.swapcase()
+    owned.pip_id = PIP.upper()
+    assert owned.access.observe_public_endpoint(Deadline.after(10)) == "198.51.100.2"
+    assert owned.calls.count("nic-get") == owned.calls.count("pip-get") == 1
+    assert owned.vm.platform_metadata == {"resource_id": RESOURCE, "vm_id": UUID}
+    assert owned.access.close(Deadline.after(10))
+
+
+@pytest.mark.parametrize("field", ["nic_ref", "nic_id", "pip_ref", "pip_id"])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda p: p.replace("/sub/", "/foreign/"),
+        lambda p: p + "/extra",
+        lambda p: p + "\x00",
+        lambda p: p + "\x1f",
+        lambda p: p + "\x7f",
+        lambda p: p + "\ud800",
+        lambda p: p + "x" * 2048,
+        lambda p: p.replace("/group/", "/../"),
+        lambda p: p.replace("/group/", "/./"),
+        lambda p: p.replace("/group/", "//"),
+        lambda p: p.replace("Microsoft.Network", "Microsoft.Compute"),
+    ],
+)
+def test_invalid_linked_identity_stops_before_subsequent_fetch(owned, field, mutation):
+    original = NIC if field.startswith("nic") else PIP
+    value = mutation(original)
+    if field == "nic_ref":
+        owned.current.network_profile.network_interfaces[0].id = value
+    else:
+        setattr(owned, field, value)
+    with pytest.raises(StateError):
+        owned.access.observe_public_endpoint(Deadline.after(10))
+    assert owned.calls.count("nic-get") == int(field != "nic_ref")
+    assert owned.calls.count("pip-get") == int(field == "pip_id")
+    assert owned.access.close(Deadline.after(10))
+
+
+@pytest.mark.parametrize("field", ["nic_id", "pip_id"])
+@pytest.mark.parametrize("component", ["group", "name"])
+def test_changed_linked_resource_refuses(owned, field, component):
+    original = NIC if field == "nic_id" else PIP
+    changed = original.replace("/group/", "/foreign/") if component == "group" else original + "-foreign"
+    setattr(owned, field, changed)
+    with pytest.raises(StateError):
+        owned.access.observe_public_endpoint(Deadline.after(10))
+    assert owned.calls.count("pip-get") == int(field == "pip_id")
+    assert owned.access.close(Deadline.after(10))
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("id", RESOURCE + "-foreign"),
+        ("id", RESOURCE.replace("/sub/", "/foreign/")),
+        ("id", RESOURCE.replace("/group:literal/", "/foreign/")),
+        ("id", RESOURCE.replace("Microsoft.Compute", "Microsoft.Network")),
+        ("id", RESOURCE + "/extra"),
+        ("id", RESOURCE + "\x00"),
+        ("id", RESOURCE + "\x1f"),
+        ("id", RESOURCE + "\x7f"),
+        ("id", RESOURCE + "\ud800"),
+        ("id", RESOURCE + "x" * 2048),
+        ("id", RESOURCE.replace("/group:literal/", "/../")),
+        ("id", RESOURCE.replace("/group:literal/", "/./")),
+        ("id", RESOURCE.replace("/group:literal/", "//")),
+        ("id", None),
+        ("vm_id", None),
+        ("vm_id", UUID[:-1] + "0"),
+    ],
+)
 def test_path_and_uuid_must_both_match(owned, field, value):
     setattr(owned.current, field, value)
     with pytest.raises(StateError):
         owned.access.observe_public_endpoint(Deadline.after(10))
     assert "network" not in owned.calls and owned.calls[-1] == "compute-close"
     assert owned.vm.platform_metadata == {"resource_id": RESOURCE, "vm_id": UUID}
+    assert owned.access.close(Deadline.after(10))
+
+
+def test_linked_literal_url_syntax_is_not_decoded(owned):
+    literal = PIP.removesuffix("ip") + "ip%2F:?#é"
+    owned.pip_ref = owned.pip_id = literal
+    assert owned.access.observe_public_endpoint(Deadline.after(10)) == "198.51.100.2"
+    owned.pip_id = literal.replace("%2F", "/")
+    with pytest.raises(StateError):
+        owned.access.observe_public_endpoint(Deadline.after(10))
     assert owned.access.close(Deadline.after(10))
 
 

@@ -154,6 +154,42 @@ def bind_clients(
     return originals
 
 
+def test_fresh_verified_models_preserve_locator_and_literal_linked_names(monkeypatch):
+    credential = Credential()
+    monkeypatch.setattr("azure.identity.DefaultAzureCredential", lambda **kwargs: credential)
+    payload = vm_payload()
+    payload["id"] = RESOURCE.swapcase()
+    payload["properties"]["networkProfile"]["networkInterfaces"][0]["id"] = NIC.upper()
+    compute = ScriptedTransport([(200, payload, {}), (200, payload, {}), (200, payload, {})])
+    network = ScriptedTransport(
+        [
+            (
+                200,
+                {
+                    "id": NIC.lower(),
+                    "properties": {"ipConfigurations": [{"properties": {"publicIPAddress": {"id": PIP.upper()}}}]},
+                },
+                {},
+            ),
+            (200, {"id": PIP.lower(), "properties": {"ipAddress": "198.51.100.2"}}, {}),
+        ]
+    )
+    bind_clients(monkeypatch, compute, network)
+    row = vm_row()
+    access = AzureOwnedReadAccess(row, platform(), SimpleNamespace(secret=deny))
+    first = access.observe_vm(Deadline.after(10))
+    second = access.observe_vm(Deadline.after(10))
+    assert isinstance(first, VirtualMachine) and first is not second
+    assert first.id == second.id == RESOURCE.swapcase()
+    assert first.network_profile.network_interfaces[0].id == NIC.upper()
+    assert compute.closed == 2
+    assert access.borrow_credential(Deadline.after(10)) is credential
+    assert access.observe_public_endpoint(Deadline.after(10)) == "198.51.100.2"
+    assert compute.closed == 3 and network.closed == 1
+    assert row.platform_metadata == {"resource_id": RESOURCE, "vm_id": UUID}
+    assert access.close(Deadline.after(10)) and credential.closed == 1
+
+
 @pytest.mark.parametrize("shape", ["raw", "properties", "flattened"])
 def test_real_vm_model_exposes_nested_and_flattened_identity(shape):
     properties = VirtualMachineProperties()

@@ -38,7 +38,6 @@ priority band [100, 199] under the deny:
 from __future__ import annotations
 
 import contextlib
-import re
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
@@ -55,7 +54,12 @@ from agentworks.capabilities.vm_platform.ssh_exposure import (
     normalize_allow_cidrs,
     operator_ssh_prefixes,
 )
-from agentworks.errors import AuthorizationError, ProvisioningError, StateError
+from agentworks.errors import AuthorizationError, ProvisioningError, StateError, ValidationError
+from agentworks.plugins.azure._identity import (
+    observed_resource_id_equal,
+    parse_observed_resource_id,
+    resource_name_equal,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -65,6 +69,7 @@ if TYPE_CHECKING:
     from azure.mgmt.network.models import SecurityRule
 
     from agentworks.execution.carrier import Deadline
+    from agentworks.plugins.azure._identity import ObservedResourceKind
 
 __all__ = [
     "_EGRESS_IP_URL",
@@ -482,7 +487,7 @@ def read_native_public_ipv4(
         except Exception as exc:
             raise wrap_azure_error(exc) from exc
         provider_locator_remaining(deadline, vm_name=vm_name)
-        if nic.id != nic_id:
+        if not _native_network_identity_equal(nic.id, nic_id, "networkInterfaces", vm_name):
             raise StateError("Azure NIC returned a different resource identity", entity_kind="vm", entity_name=vm_name)
         for ip_config in nic.ip_configurations or []:
             pip_ref = ip_config.public_ip_address
@@ -496,7 +501,7 @@ def read_native_public_ipv4(
             except Exception as exc:
                 raise wrap_azure_error(exc) from exc
             provider_locator_remaining(deadline, vm_name=vm_name)
-            if pip.id != pip_id:
+            if not _native_network_identity_equal(pip.id, pip_id, "publicIPAddresses", vm_name):
                 raise StateError(
                     "Azure public IP returned a different resource identity", entity_kind="vm", entity_name=vm_name
                 )
@@ -504,23 +509,30 @@ def read_native_public_ipv4(
     return None
 
 
-def _native_network_reference(reference: object, kind: str, subscription: str, vm_name: str) -> tuple[str, str]:
+def _native_network_identity_equal(left: object, right: object, kind: ObservedResourceKind, vm_name: str) -> bool:
+    try:
+        return observed_resource_id_equal(left, right, kind)
+    except ValidationError as error:
+        raise StateError(
+            "Azure endpoint has an invalid linked resource identity", entity_kind="vm", entity_name=vm_name
+        ) from error
+
+
+def _native_network_reference(
+    reference: object, kind: ObservedResourceKind, subscription: str, vm_name: str
+) -> tuple[str, str]:
     """Validate linked provider identities before passing names to the SDK."""
-    match = (
-        re.fullmatch(
-            r"/subscriptions/([^/\x00]+)/resourceGroups/([^/\x00]+)/providers/Microsoft\.Network/"
-            + kind
-            + r"/([^/\x00]+)",
-            reference,
-        )
-        if isinstance(reference, str)
-        else None
-    )
-    if match is None or match[1] != subscription:
+    try:
+        observed_subscription, group, name = parse_observed_resource_id(reference, kind)
+    except ValidationError as error:
+        raise StateError(
+            "Azure endpoint has an invalid linked resource identity", entity_kind="vm", entity_name=vm_name
+        ) from error
+    if not resource_name_equal(observed_subscription, subscription):
         raise StateError(
             "Azure endpoint has an invalid linked resource identity", entity_kind="vm", entity_name=vm_name
         )
-    return match[2], match[3]
+    return group, name
 
 
 def _native_read_options(remaining: float) -> dict[str, float | int]:

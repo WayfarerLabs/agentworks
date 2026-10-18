@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal, cast
 from agentworks.capabilities.vm_platform.base import ProviderLocator, provider_locator_remaining
 from agentworks.db import VMStatus
 from agentworks.errors import AgentworksError, NotFoundError, StateError, ValidationError
-from agentworks.plugins.azure._identity import canonical_vm_id, parse_resource_id
+from agentworks.plugins.azure._identity import canonical_vm_id, observed_resource_id_equal, parse_resource_id
 from agentworks.plugins.azure._owned_auth import _OwnedAzureCredential
 from agentworks.plugins.azure.network import AzureError, _native_read_options, read_native_public_ipv4
 
@@ -73,6 +73,21 @@ class AzureOwnedReadAccess:
     def observe_public_endpoint(self, deadline: Deadline) -> object:
         return self._observe(deadline, "endpoint")
 
+    def observe_vm(self, deadline: Deadline) -> VirtualMachine:
+        """Return one fresh verified model through the owned read lifecycle."""
+        return cast("VirtualMachine", self._observe(deadline, "vm"))
+
+    def borrow_credential(self, deadline: Deadline) -> object:
+        """Borrow the already admitted credential while access retains custody."""
+        self._acquire(deadline)
+        try:
+            provider_locator_remaining(deadline, vm_name=self._vm_name)
+            if self._closed or self._auth.failed or self.cleanup_incomplete or not self._auth.has_credential:
+                raise self._refusal()
+            return self._auth.credential(deadline)
+        finally:
+            self._lock.release()
+
     def _acquire(self, deadline: Deadline) -> None:
         remaining = provider_locator_remaining(deadline, vm_name=self._vm_name)
         if not self._lock.acquire(timeout=min(remaining, TIMEOUT_MAX)):
@@ -85,7 +100,7 @@ class AzureOwnedReadAccess:
     def _refusal(self) -> StateError:
         return StateError("Azure read access cannot admit an observation", entity_kind="vm", entity_name=self._vm_name)
 
-    def _observe(self, deadline: Deadline, kind: Literal["power", "locator", "endpoint"]) -> object:
+    def _observe(self, deadline: Deadline, kind: Literal["power", "locator", "endpoint", "vm"]) -> object:
         self._acquire(deadline)
         control: BaseException | None = None
         admitted = False
@@ -103,6 +118,8 @@ class AzureOwnedReadAccess:
                     result: object = self._power(observed)
                 elif kind == "locator":
                     result = ProviderLocator(f"azure-vm:v2:{self._vm_id}:{self._resource_id}")
+                elif kind == "vm":
+                    result = observed
                 else:
                     # Never continue to linked reads after uncertain compute closure.
                     read_close_attempted = True
@@ -168,9 +185,12 @@ class AzureOwnedReadAccess:
             raise self._read_failure(failure_kind)
         try:
             observed_vm_id = canonical_vm_id(getattr(observed, "vm_id", None))
+            same_resource = observed_resource_id_equal(
+                getattr(observed, "id", None), self._resource_id, "virtualMachines"
+            )
         except ValidationError as error:
             raise self._identity_mismatch() from error
-        if type(getattr(observed, "id", None)) is not str or observed.id != self._resource_id:
+        if not same_resource:
             raise self._identity_mismatch()
         if observed_vm_id != self._vm_id:
             raise self._identity_mismatch()
