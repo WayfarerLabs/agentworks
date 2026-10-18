@@ -425,7 +425,9 @@ def _exchange(
         reader.abort()
         collector.abort()
         if dispatch is not Dispatch.NOT_SENT:
-            raise control from _control_uncertainty(request.operation)
+            fact = _control_uncertainty(request.operation)
+            fact.__cause__ = control.__cause__
+            raise control from fact
         raise
     finally:
         runtime.clear()

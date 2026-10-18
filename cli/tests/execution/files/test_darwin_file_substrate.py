@@ -195,6 +195,7 @@ def test_ancestor_acl_policy(tmp_path: Path, tags: tuple[int, ...], accepted: bo
 def test_metadata_changes_held_inode_without_a_path_bridge(tmp_path: Path, parent: int, monkeypatch) -> None:
     target = tmp_path / "file"
     target.write_bytes(b"content")
+    target.chmod(0o600)
     before = target.stat()
     real_stat = os.stat
 

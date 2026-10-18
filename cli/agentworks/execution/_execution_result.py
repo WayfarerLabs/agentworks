@@ -40,11 +40,15 @@ def reduce_owned_inline_result(outcome: OwnedInlineOutcome) -> ExecutionResult:
         )
 
     observation = candidate.observation
-    settled = not (outcome.pending_remote_effects or outcome.coordination_uncertain or outcome.requires_owner_retention)
+    settled = not (
+        outcome.pending_remote_effects or outcome.coordination_uncertain or outcome.helper_requires_owner_retention
+    )
     completed = _has_retrospective_normal_completion(candidate, settled)
     state = _application_state(candidate, completed)
     stdout, stderr = _outputs(candidate, completed)
     failure = _failure(candidate, completed)
+    if failure is None and outcome.scratch_cleanup_pending:
+        failure = ExecutionFailure.CLEANUP
     cleanup_confirmed = _cleanup_confirmed(outcome, candidate, completed)
     return ExecutionResult(
         dispatch=candidate.dispatch,

@@ -356,7 +356,9 @@ def test_raw_carrier_completion_never_substitutes_for_a_helper_terminal() -> Non
     assert result.status is None
 
 
-@pytest.mark.parametrize("retained", ["pending_remote_effects", "coordination_uncertain", "requires_owner_retention"])
+@pytest.mark.parametrize(
+    "retained", ["pending_remote_effects", "coordination_uncertain", "helper_requires_owner_retention"]
+)
 def test_retained_operation_ownership_blocks_completion_and_cleanup(retained: str) -> None:
     result = _reduce(**{retained: True})
 

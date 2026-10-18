@@ -304,7 +304,7 @@ def test_damaged_observation_keeps_application_uncertain(damage: str) -> None:
     assert result.observation is not None and not result.observation.trusted_terminal
     if damage == "invalid":
         assert result.observation.wait == WaitFact(WaitKind.EXIT, 0)
-    public = reduce_owned_inline_result(OwnedInlineOutcome(candidate=result, requires_owner_retention=True))
+    public = reduce_owned_inline_result(OwnedInlineOutcome(candidate=result, helper_requires_owner_retention=True))
     assert public.application_state is ApplicationState.UNKNOWN and public.status is None
 
 
@@ -324,7 +324,7 @@ def test_guest_mismatch_refuses_before_request_and_body(field: str, value: str |
     result = execute_inline_candidate(carrier, prepared, deadline=Deadline.after(10))
     assert result.carrier_completion == ExitStatus(code=125)
     assert carrier.events == ["admit"]
-    public = reduce_owned_inline_result(OwnedInlineOutcome(candidate=result, requires_owner_retention=True))
+    public = reduce_owned_inline_result(OwnedInlineOutcome(candidate=result, helper_requires_owner_retention=True))
     assert public.application_state is ApplicationState.UNKNOWN and public.status is None
 
 

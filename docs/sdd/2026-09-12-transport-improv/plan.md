@@ -5518,6 +5518,31 @@ checkbox stays open.
       copying the whole input. Prove local packed Python 3.11 behavior, status/control preservation
       and descriptor cleanup. Host orchestration, token obligations, lease ordering and native
       acceptance remain separate gates.
+- [x] Connect the existing prepared-input stage to normal finite-input, finite-deadline Linux VM
+      DIRECT execution under its original operation owner. Use the same token-only cleanup row,
+      transfer, verified fixed loader and actual activation custody, then enter the existing numeric
+      workload credential/full-guest checkpoint. Admit larger prepared requests without enlarging or
+      staging the readiness entry. Prove large separate source/stdin, every complete Proxmox request
+      bound, one application dispatch, controls and cleanup debt. This private vertical slice does
+      not complete host/Darwin staging, explicitly unbounded or live-input staging, captured output
+      spooling, general recovery or the complete additive handoff; see the
+      [integration order](preparation-lld.md#direct-prepared-input-integration-order).
+
+The private DIRECT input slice reuses the existing stage, durable cleanup codec and closing
+controller. Packed execution covers separate large source and binary stdin, numeric/root workload
+identities, credential/full-guest admission, fixed-prefix integrity, one activation and independent
+native-closure/local-delivery gates. A separate codec case admits 16 MiB source plus 16 MiB stdin
+within the fixed 64 MiB prepared manifest; the small entry remains 32 KiB and capture remains 4,096
+bytes. Actual complete Proxmox serialization retains its 65,536-byte ceiling and 10,000-byte stdin
+regression. Cleanup-only debt preserves known status 23 and verified output without claiming cleanup
+success. Project, complexity and generic source reviews cleared the composed code and collateral at
+`3179858c6`; root composition passes 984 tests. The owner's 906 plus 205 regression cases and full
+strict check of 1,541 sources also pass. Review found and corrected an unconditional Python 3.11
+fixture dependency; composition found and corrected two adjacent resource-test stubs, without
+relaxing their assertions. Original failures remain retained. Packed privilege/scratch admission is
+injected, not native VM/root/provider proof. The following staging, recovery and full handoff gates
+remain open.
+
 - [ ] Connect the planned chunked helper/request staging before public managed acceptance. Preserve
       the existing Proxmox 65,536-byte whole-POST floor and its 10,000-byte stdin regression test.
       Expanded inline helper source already exceeds that envelope in the local constructor proof;

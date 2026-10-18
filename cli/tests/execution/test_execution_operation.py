@@ -13,6 +13,7 @@ import pytest
 
 from agentworks.db import Database, OperationClaimState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution import _direct_input_operation as direct_input_operation
 from agentworks.execution import _execution_operation as execution_operation
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
@@ -304,7 +305,7 @@ def test_preparation_expiring_deadline_refuses_before_borrow(
         del self
         pytest.fail("expired preparation borrowed operation ownership")
 
-    monkeypatch.setattr(execution_operation, "prepare_inline_candidate", prepare)
+    monkeypatch.setattr(direct_input_operation, "prepare_inline_candidate", prepare)
     monkeypatch.setattr(time, "monotonic", lambda: 2.0 if prepared else 0.0)
     monkeypatch.setattr(OperationOwner, "borrow", refuse_borrow)
     carrier = RecordingCarrier()
@@ -341,7 +342,7 @@ def test_route_refusal_releases_preparation_before_borrow(
     def deny_borrow():
         pytest.fail("route refusal borrowed helper custody")
 
-    monkeypatch.setattr(execution_operation, "prepare_inline_candidate", prepare)
+    monkeypatch.setattr(direct_input_operation, "prepare_inline_candidate", prepare)
     monkeypatch.setattr(owned, "_route_check", route_check)
     monkeypatch.setattr(owner, "borrow", deny_borrow)
     carrier = RecordingCarrier()

@@ -11,7 +11,7 @@ from agentworks.errors import ValidationError
 from agentworks.execution._borrowed_io import DiscardSink, PrefixedSource, PresentationCollector
 from agentworks.execution._evidence_wire import FrameReader
 from agentworks.execution._helper_identity import IdentityExpectation
-from agentworks.execution._inline_bundle import FIXED_SOURCE, ROOT_PROGRAM
+from agentworks.execution._inline_bundle import FIXED_SOURCE, PREPARED_PROGRAM, ROOT_PROGRAM
 from agentworks.execution._inline_observer import InlineObservation, InlineObserver
 from agentworks.execution._inline_request import (
     InlineManifest,
@@ -20,6 +20,7 @@ from agentworks.execution._inline_request import (
     ManifestErrorCode,
     OutputMode,
     ScriptShell,
+    encode_prepared_request_envelope,
     encode_request_envelope,
 )
 from agentworks.execution._runtime_prerequisite import (
@@ -194,6 +195,7 @@ def prepare_inline_candidate(
     stderr: ByteSink | None = None,
     runtime_selection: RuntimeSelection,
     bootstrap: _NumericGuestBootstrap | None = None,
+    _prepared_input: bool = False,
 ) -> PreparedInlineCandidate:
     """Validate all payload data and build one file-free Linux helper attempt."""
     nonce = secrets.token_hex(16)
@@ -209,7 +211,7 @@ def prepare_inline_candidate(
             bootstrap.root_entry,
             plan.expected,
             selection=runtime_selection,
-            program=ROOT_PROGRAM,
+            program=PREPARED_PROGRAM if _prepared_input else ROOT_PROGRAM,
             nonce=nonce,
             expected_guest=bootstrap.guest,
         )
@@ -242,11 +244,15 @@ def prepare_inline_candidate(
     manifest_error: ManifestErrorCode | None = None
     manifest_data = b""
     try:
-        manifest_data = encode_request_envelope(manifest)
+        manifest_data = (
+            PREPARED_PROGRAM.prefix + encode_prepared_request_envelope(manifest)
+            if _prepared_input
+            else encode_request_envelope(manifest)
+        )
     except ManifestError as error:
         manifest_error = error.code
     if manifest_error is ManifestErrorCode.OVERSIZED:
-        raise ValidationError("Inline invocation exceeds the 32768-byte candidate manifest bound")
+        raise ValidationError("Execution invocation exceeds its fixed manifest bound")
     if manifest_error is not None:
         raise ValidationError("Inline invocation contains an invalid field")
 

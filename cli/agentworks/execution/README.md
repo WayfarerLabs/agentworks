@@ -1725,6 +1725,29 @@ wait. A bootstrap exit without that evidence leaves application state unknown. P
 mock privileged admission; native credential transitions and production context construction remain
 unproved.
 
+For Linux VM calls with finite input and a finite deadline, `ExecutionOperation.run_inline` selects
+prepared delivery when the complete small inline request does not fit. A separate fixed entry
+accepts a canonical request up to 64 MiB; the ordinary inline entry retains its 32 KiB bound.
+Preparation validates the complete activation and maximum-width chunk envelopes against the selected
+carrier before effects. It retains the existing `PreparedHelperStage` and token-only cleanup row
+before BEGIN, transfers the packaged prefix and request in bounded chunks, then activates once under
+the original deadline. The verified loader re-enters the numeric workload credential and full-guest
+checkpoint before loading application modules. Source and stdin remain separate fields. This
+selection happens before application dispatch and never replays a launch.
+
+An operation-local admission reservation spans preparation and transfers into the actual helper
+borrow. Actual activation delivery is retained before settlement; application completion alone
+cannot release the stage. Helper custody and scratch cleanup debt are separate outcome facts. A
+cleanup-only failure retains the owner and reports `CLEANUP` without erasing independently known
+application status or verified output. The existing stage cleanup controller handles both normal
+cleanup and later aggregate retries. Packed tests inject privileged admission, so native credential
+transitions, VM scratch behavior and provider acceptance remain unproved.
+
+Prepared delivery does not yet support platform hosts, Darwin, unbounded execution budgets or live
+endpoints. Supported small inline calls retain their existing behavior. No-staging readiness still
+uses the small entry. The prepared entry expands input admission, not capture retention or output
+spooling.
+
 The current private inline access captures at most 4,096 bytes per application stream and defaults
 to that limit. This is a checkpoint-local helper bound, not the proposed production caller default
 of 1 MiB per stream or its bounded spooling behavior. Larger output currently fails within this

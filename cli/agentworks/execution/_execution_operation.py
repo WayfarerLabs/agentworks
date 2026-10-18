@@ -9,13 +9,13 @@ from uuid import uuid4
 
 from agentworks.db import LifecycleObligationState, OperationResourceKind
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution._direct_input_operation import note_input_activation_closed, run_direct_input
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._helper_launcher import _validate_plan
 from agentworks.execution._inline import (
     InlineCandidateResult,
     PreparedInlineCandidate,
     execute_inline_candidate,
-    prepare_inline_candidate,
 )
 from agentworks.execution._managed_bound_run import ManagedDeadlineExpired, preflight_bound_run
 from agentworks.execution._managed_disposal_access import (
@@ -106,11 +106,13 @@ from agentworks.operations import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution._helper_closure import HelperClosureDelivery
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._managed_job_request import ManagedLiveIO
     from agentworks.execution._managed_job_store import Stream
     from agentworks.execution._managed_start_exchange import ManagedStartCandidate
+    from agentworks.execution._prepared_helper_stage import PreparedHelperStage
     from agentworks.execution._prepared_stage_closing import PreparedStageCleanup
     from agentworks.execution._runtime_prerequisite import (
         HelperClosureExpectation,
@@ -138,7 +140,13 @@ class OwnedInlineOutcome:
     deadline_exceeded: bool = False
     pending_remote_effects: bool = False
     coordination_uncertain: bool = False
-    requires_owner_retention: bool = False
+    helper_requires_owner_retention: bool = False
+    scratch_cleanup_pending: bool = False
+
+    @property
+    def requires_owner_retention(self) -> bool:
+        """Retain ownership for either helper custody or separate input cleanup."""
+        return self.helper_requires_owner_retention or self.scratch_cleanup_pending
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -192,6 +200,8 @@ class _ActiveHelperCall:
     disposal: ManagedDisposalBinding | None = None
     start: ManagedResourceStartBinding | None = None
     tracking_key: object = field(default_factory=object)
+    input_stage: PreparedHelperStage | None = None
+    input_delivery: LocalDeliveryCustody | None = None
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -248,6 +258,7 @@ class ExecutionOperation:
         self._active_inline_calls: dict[object, _ActiveHelperCall] = {}
         self._unfinished_inline_executions: list[UnfinishedInlineExecution] = []
         self._admission_guard = Lock()
+        self._inline_preparation: object | None = None
         self._finishing = False
         self._finished = False
         self._dispatch_id: str | None = None
@@ -263,12 +274,25 @@ class ExecutionOperation:
             raise StateError("Managed delivery is unavailable without a managed target")
         return target
 
+    def _require_no_inline_preparation(self, reservation: object | None = None) -> None:
+        """Fence new helper admission while a serial DIRECT preparation is live."""
+        if self._inline_preparation is not None and self._inline_preparation is not reservation:
+            raise StateError("Execution operation retains an active DIRECT preparation")
+
+    @property
+    def _scratch_cleanup_pending(self) -> bool:
+        return any(
+            cleanup._stage._begun and (not cleanup._stage.cleaned or cleanup._stage.cleanup_resolution_uncertain)
+            for cleanup in self._prepared_stages
+        )
+
     @property
     def managed_runs(self) -> tuple[ManagedOperationRun, ...]:
         return tuple(self._managed_runs)
 
     def require_job_binding(self, carrier: Carrier, runtime_selection: RuntimeSelection) -> None:
         """Fence an ordinary job call to this live selected operation binding."""
+        self._require_no_inline_preparation()
         self._require_managed_target()
         binding = self._native_binding
         if self._finishing or self._finished:
@@ -405,6 +429,7 @@ class ExecutionOperation:
         active = None
         try:
             with self._admission_guard:
+                self._require_no_inline_preparation()
                 if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
                     raise StateError("Execution operation cannot admit a managed read")
                 binding = self._native_binding
@@ -430,7 +455,7 @@ class ExecutionOperation:
                 custody = OwnedInlineOutcome(
                     pending_remote_effects=operation.pending_remote_effects,
                     coordination_uncertain=operation.coordination_uncertain,
-                    requires_owner_retention=operation.requires_owner_retention,
+                    helper_requires_owner_retention=operation.requires_owner_retention,
                 )
                 with self._admission_guard:
                     self._capture(active, custody)
@@ -479,6 +504,7 @@ class ExecutionOperation:
         active = None
         try:
             with self._admission_guard:
+                self._require_no_inline_preparation()
                 if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
                     raise StateError("Execution operation cannot admit a managed relay")
                 binding, bootstrap = self._native_binding, self._bootstrap
@@ -744,6 +770,7 @@ class ExecutionOperation:
         binding, bootstrap = self._native_binding, self._bootstrap
         assert binding is not None and bootstrap is not None
         with self._admission_guard:
+            self._require_no_inline_preparation()
             if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
                 raise StateError("Execution operation cannot admit a managed stop")
             active = self._borrow_helper_call(binding.carrier, None)
@@ -783,7 +810,9 @@ class ExecutionOperation:
         return ManagedStopOutcome(
             candidate,
             state
-            if not custody.requires_owner_retention and candidate is not None and candidate.dispatch is Dispatch.SENT
+            if not custody.helper_requires_owner_retention
+            and candidate is not None
+            and candidate.dispatch is Dispatch.SENT
             else None,
         )
 
@@ -826,6 +855,7 @@ class ExecutionOperation:
         if not run.terminal_proved(run.terminal_observation):
             raise StateError("Managed disposal retains no positive terminal proof")
         with self._admission_guard:
+            self._require_no_inline_preparation()
             if self._active_inline_calls or self._unfinished_inline_executions:
                 raise StateError("Managed disposal cannot overlap unfinished ordinary delivery")
             if not run.keeper.drain(deadline).drained:
@@ -935,6 +965,7 @@ class ExecutionOperation:
         """Freeze a body, retain its run, then reserve and start exactly once."""
         self.require_job_binding(carrier, runtime_selection)
         with self._admission_guard:
+            self._require_no_inline_preparation()
             binding, repository, bootstrap = self._native_binding, self._managed_repository, self._bootstrap
             if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
                 raise StateError("Execution operation is closing")
@@ -1013,6 +1044,7 @@ class ExecutionOperation:
                 finally:
                     prepared.clear()
         with self._admission_guard:
+            self._require_no_inline_preparation()
             if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
                 raise StateError("Execution operation cannot admit a managed start")
             with self._owner._guard:  # noqa: SLF001
@@ -1058,6 +1090,7 @@ class ExecutionOperation:
         """Resolve the selected account through the tracked helper lifetime."""
         self._require_managed_target()
         with self._admission_guard:
+            self._require_no_inline_preparation()
             if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
                 raise StateError("Execution operation cannot admit a shell lookup")
             active = self._borrow_helper_call(carrier, None)
@@ -1088,7 +1121,7 @@ class ExecutionOperation:
             or observed is None
             or observed.state is not WorkloadShellObservationState.RESOLVED
             or observed.shell is None
-            or custody.requires_owner_retention
+            or custody.helper_requires_owner_retention
         ):
             raise ManagedJobShellRefusal(
                 ManagedJobShellFact(
@@ -1117,6 +1150,7 @@ class ExecutionOperation:
         exact resolution, including when its previous reply was lost.
         """
         with self._admission_guard:
+            self._require_no_inline_preparation()
             self._finishing = True
             if self._finished:
                 return
@@ -1170,6 +1204,7 @@ class ExecutionOperation:
                     if not delivery.observe_closure(deadline=deadline, custody=attempt.local_delivery):
                         raise StateError("Inline helper closure remains unknown")
                     self._validate_closure_call(active)
+                note_input_activation_closed(active)
                 active.operation.settle_helper_closure()
                 self._capture(active, OwnedInlineOutcome())
 
@@ -1243,7 +1278,7 @@ class ExecutionOperation:
             outcome = OwnedInlineOutcome(
                 pending_remote_effects=operation.pending_remote_effects,
                 coordination_uncertain=operation.coordination_uncertain,
-                requires_owner_retention=operation.requires_owner_retention,
+                helper_requires_owner_retention=operation.requires_owner_retention,
             )
             self._capture(active, outcome)
 
@@ -1251,6 +1286,7 @@ class ExecutionOperation:
         """Reconcile this actual helper's local custody without any delivery."""
         if not active.bookkeeping_retained:
             raise StateError("Inline execution still has an active call")
+        note_input_activation_closed(active)
         operation = active.operation
         candidate = active.candidate
         if active.closure_delivery is not None and operation.outstanding_attempt is not None:
@@ -1353,8 +1389,11 @@ class ExecutionOperation:
         start: ManagedResourceStartBinding | None = None,
         delivery: HelperClosureDelivery | None = None,
         replacing: _ActiveHelperCall | None = None,
+        preparation: object | None = None,
+        input_stage: PreparedHelperStage | None = None,
     ) -> _ActiveHelperCall:
         """Borrow and publish one helper call while its admission guard is held."""
+        self._require_no_inline_preparation(preparation)
         borrow = self._owner.borrow()
         active = None
         try:
@@ -1372,6 +1411,7 @@ class ExecutionOperation:
                 disposal=disposal,
                 start=start,
                 closure_delivery=delivery,
+                input_stage=input_stage,
             )
             if replacing is not None:
                 active.tracking_key = replacing.tracking_key
@@ -1407,10 +1447,14 @@ class ExecutionOperation:
         stdout: ByteSink | None = None,
         stderr: ByteSink | None = None,
     ) -> OwnedInlineOutcome:
-        """Prepare, dispatch and settle one inline candidate without replay."""
-        prepared = prepare_inline_candidate(
+        """Choose delivery before exactly one ordinary helper attempt."""
+        return run_direct_input(
+            self,
+            carrier,
             request,
             plan=plan,
+            deadline=deadline,
+            runtime_selection=runtime_selection,
             stdin=stdin,
             env=env,
             cwd=cwd,
@@ -1419,27 +1463,34 @@ class ExecutionOperation:
             source=source,
             stdout=stdout,
             stderr=stderr,
-            runtime_selection=runtime_selection,
-            bootstrap=self._bootstrap,
         )
-        try:
-            carrier.validate(prepared.invocation, io=prepared.io)
-            if deadline.expired:
-                raise ValidationError("Inline execution deadline expired during preparation")
-            if self._finishing or self._finished:
+
+    def _run_inline_prepared(
+        self,
+        carrier: Carrier,
+        prepared: PreparedInlineCandidate,
+        deadline: Deadline,
+        reservation: object,
+        stage: PreparedHelperStage | None,
+    ) -> OwnedInlineOutcome:
+        """Transfer preparation admission into the actual tracked helper borrow."""
+        if deadline.expired:
+            raise ValidationError("Inline execution deadline expired during preparation")
+        if self._finishing or self._finished:
+            raise StateError("Inline execution cannot admit new work")
+        if self._route_check is not None:
+            self._route_check(deadline)
+        with self._admission_guard:
+            self._require_no_inline_preparation(reservation)
+            if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
                 raise StateError("Inline execution cannot admit new work")
-            if self._route_check is not None:
-                self._route_check(deadline)
-            with self._admission_guard:
-                if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
-                    raise StateError("Inline execution cannot admit new work")
-                if deadline.expired:
-                    raise ValidationError("Inline execution deadline expired during route admission")
-                active = self._borrow_helper_call(carrier, prepared, inline=True)
-                operation = active.operation
-        except BaseException:
-            prepared.release()
-            raise
+            if deadline.expired:
+                raise ValidationError("Inline execution deadline expired during route admission")
+            active = self._borrow_helper_call(
+                carrier, prepared, inline=True, preparation=reservation, input_stage=stage
+            )
+            self._inline_preparation = None
+            operation = active.operation
         try:
             try:
                 binding = self._native_binding
@@ -1451,6 +1502,7 @@ class ExecutionOperation:
                 self._admit(active)
                 candidate = execute_inline_candidate(operation, prepared, deadline=deadline)
                 active.candidate = candidate
+                note_input_activation_closed(active)
                 completion = candidate.carrier_completion
                 if active.closure_delivery is not None and not active.closure_delivery.closure_proven:
                     completion = None
@@ -1458,7 +1510,6 @@ class ExecutionOperation:
                 outcome = self._outcome(active, operation, deadline, include_candidate=True)
             except BaseException as control:
                 self._raise_control(control, active, operation, deadline)
-
             with self._admission_guard:
                 try:
                     self._capture(active, outcome)
@@ -1505,7 +1556,8 @@ class ExecutionOperation:
             deadline_exceeded=deadline.expired,
             pending_remote_effects=operation.pending_remote_effects,
             coordination_uncertain=operation.coordination_uncertain,
-            requires_owner_retention=operation.requires_owner_retention,
+            helper_requires_owner_retention=operation.requires_owner_retention,
+            scratch_cleanup_pending=self._scratch_cleanup_pending,
         )
 
     def _raise_control(
@@ -1518,6 +1570,7 @@ class ExecutionOperation:
         with self._admission_guard:
             active.bookkeeping_retained = True
             try:
+                note_input_activation_closed(active)
                 outcome = self._outcome(active, operation, deadline, include_candidate=False)
             except BaseException:
                 raise control from control.__cause__
@@ -1535,11 +1588,11 @@ class ExecutionOperation:
                 elif active.armed and not retryable:
                     self._capture(active, outcome)
                 else:
-                    outcome = replace(outcome, coordination_uncertain=True, requires_owner_retention=True)
+                    outcome = replace(outcome, coordination_uncertain=True, helper_requires_owner_retention=True)
                     active.outcome = outcome
             except BaseException:
                 try:
-                    outcome = replace(outcome, coordination_uncertain=True, requires_owner_retention=True)
+                    outcome = replace(outcome, coordination_uncertain=True, helper_requires_owner_retention=True)
                     active.outcome = outcome
                 except BaseException:
                     raise control from control.__cause__
@@ -1578,6 +1631,7 @@ class ExecutionOperation:
         raise control from fact
 
     def _capture(self, active: _ActiveHelperCall, outcome: OwnedInlineOutcome) -> None:
+        note_input_activation_closed(active)
         if active.start is not None:
             capture_resource_start(self, active, outcome)
             return
@@ -1585,7 +1639,7 @@ class ExecutionOperation:
             capture_disposal_call(self, active, outcome)
             return
         active.outcome = outcome
-        if active.closure_delivery is not None and outcome.requires_owner_retention:
+        if active.closure_delivery is not None and outcome.helper_requires_owner_retention:
             # The original attempt still needs its OPEN borrow for settlement.
             active.bookkeeping_retained = True
             return
@@ -1594,7 +1648,7 @@ class ExecutionOperation:
         # before repeating a handoff. Never default-close the lifetime row.
         if not self._borrow_closed(active):
             release_borrow_after_custody(active.borrow, retain_effect=True)
-        if outcome.requires_owner_retention:
+        if outcome.helper_requires_owner_retention:
             self._unfinished_inline_executions.append(UnfinishedInlineExecution(replace(outcome, candidate=None)))
         self._active_inline_calls.pop(active.tracking_key)
 

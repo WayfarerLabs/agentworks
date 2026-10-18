@@ -28,6 +28,7 @@ from ._inline_control import (
 from ._inline_guest_io import FrameWriter, PipeSource, StreamSink, nonblocking_pipe
 from ._inline_request import (
     MAX_MANIFEST_BYTES,
+    MAX_PREPARED_MANIFEST_BYTES,
     REQUEST_HEADER_BYTES,
     REQUEST_MARKER,
     InlineManifest,
@@ -37,6 +38,7 @@ from ._inline_request import (
     OutputMode,
     ScriptShell,
     decode_manifest,
+    decode_prepared_manifest,
 )
 from ._process import (
     Deadline,
@@ -299,7 +301,7 @@ def _read_exact(length: int) -> bytes:
     return bytes(data)
 
 
-def _read_request() -> InlineManifest:
+def _read_request(*, prepared_input: bool = False) -> InlineManifest:
     """Validate an untrusted envelope before any application preparation or launch."""
     header = _read_exact(REQUEST_HEADER_BYTES)
     if not header.startswith(REQUEST_MARKER):
@@ -308,11 +310,14 @@ def _read_request() -> InlineManifest:
     if any(character not in b"0123456789abcdef" for character in length_token):
         raise ManifestError(ManifestErrorCode.INVALID)
     length = int(length_token, 16)
-    if length > MAX_MANIFEST_BYTES:
+    if length > (MAX_PREPARED_MANIFEST_BYTES if prepared_input else MAX_MANIFEST_BYTES):
         raise ManifestError(ManifestErrorCode.OVERSIZED)
     if length == 0:
         raise ManifestError(ManifestErrorCode.INVALID)
-    manifest = decode_manifest(_read_exact(length))
+    data = _read_exact(length)
+    manifest = decode_prepared_manifest(data) if prepared_input else decode_manifest(data)
+    if prepared_input and (manifest.stdin is None or manifest.output_mode is OutputMode.DELIVER):
+        raise ManifestError(ManifestErrorCode.INVALID)
     if manifest.stdin is not None and os.read(0, 1):
         raise ManifestError(ManifestErrorCode.INVALID)
     return manifest
@@ -320,9 +325,13 @@ def _read_request() -> InlineManifest:
 
 def main(nonce: str) -> int:
     """Run one manifest and report only bounded nonce-bound evidence."""
+    return _main(nonce, prepared_input=False)
+
+
+def _main(nonce: str, *, prepared_input: bool) -> int:
     emitter = FrameWriter(nonce)
     try:
-        manifest = _read_request()
+        manifest = _read_request(prepared_input=prepared_input)
     except ManifestError as error:
         code = FailureCode.OVERSIZED if error.code is ManifestErrorCode.OVERSIZED else FailureCode.INVALID
         return _finish_failure(emitter, FailureFact(FailurePhase.REQUEST, code))

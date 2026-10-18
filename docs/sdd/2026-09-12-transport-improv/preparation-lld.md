@@ -648,6 +648,44 @@ availability: the approved early guest Python prerequisite still needs implement
 phase-specific proof. macOS hosts must supply the separately approved preinstalled compatible
 interpreter.
 
+### DIRECT prepared-input integration order
+
+Connect normal DIRECT execution to the existing prepared-input stage through a Linux VM vertical
+slice with finite input and a finite execution deadline first. This is implementation ordering, not
+a reduction of the complete target surface. Retain the actual stage on the original
+`ExecutionOperation` before its first effect and use the existing token-only obligation, bounded
+chunks, verified loader and cleanup controller. The staged object contains the exact packaged helper
+prefix followed by the canonical request; source and application input remain separate data fields.
+It is not a second application launch or a second general transfer mechanism.
+
+The outer loader enters through the existing root/full-guest checkpoint. After whole-object
+verification, its fixed first-party bootstrap re-enters the existing numeric credential admission
+for the selected workload identity before loading the application helper. A root-owned input stage
+does not authorize running the workload or manipulating its files as root. Bind identity and helper
+source in core preparation, never by compiling manifest contents. Keep activation closure distinct
+from application completion and preserve the actual activation delivery until closure is proved.
+Keep helper custody and prepared-input cleanup as separate outcome facts. A later stage-cleanup
+failure retains the owner and prevents cleanup confirmation without erasing independently known
+application status or verified output. Reserve normal execution admission across chunk delivery and
+transfer that reservation to the actual activation call; another execution helper must not enter
+between chunks. This is operation-local admission, not a new cross-file-operation lock. Releasing
+that reservation never discards retained stage or activation cleanup custody.
+
+A separate fixed prepared-input entry may accept the larger canonical request. The small inline
+entry and its no-staging readiness limits stay unchanged. Choose the delivery before application
+dispatch; a size refusal may select staging, but uncertain dispatch never permits another launch.
+Validate the complete staged activation and every chunk against the existing provider envelope,
+including the Proxmox 65,536-byte whole-POST floor and 10,000-byte stdin case.
+
+The existing loader consumes a finite activation request to EOF and borrows the staged file as
+stdin. That does not establish staged live-input support: a live source cannot be consumed to EOF
+for activation, nor replaced with the staged file's EOF. Complete the separate finite control,
+prepared-request and application-input descriptor handoff before enabling that combination.
+Platform-host/Darwin staging, explicit unbounded budgets, captured-output spooling and
+parent/recovery continuations also remain required before the complete additive surface is accepted.
+Do not invent a finite execution timeout, require host administrator setup, or generalize the entire
+recovery binding merely to claim this first slice complete.
+
 ### Late managed-start control
 
 Bulk transfer must precede the initial OPERATION lease sample. Source and stdin can each be 16 MiB;

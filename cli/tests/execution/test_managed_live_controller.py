@@ -113,20 +113,34 @@ def _execute(
         if peer is None:
             return
 
-        def connect() -> None:
-            directory = store.open_live_directory()
+        directory = store.open_live_directory()
+        try:
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        except BaseException:
+            os.close(directory)
+            raise
+
+        def communicate() -> None:
             try:
-                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                    client.settimeout(5)
-                    client.connect(f"/proc/self/fd/{directory}/{live_wire.LIVE_SOCKET_NAME}")
+                with client:
                     peer(client, store)
             except BaseException as exc:
                 errors.append(exc)
             finally:
                 os.close(directory)
 
-        worker = threading.Thread(target=connect, daemon=True)
-        worker.start()
+        try:
+            client.settimeout(5)
+            # Connect before observation can expire admission while the peer thread is unscheduled.
+            client.connect(f"/proc/self/fd/{directory}/{live_wire.LIVE_SOCKET_NAME}")
+            worker = threading.Thread(target=communicate, daemon=True)
+            worker.start()
+        except BaseException:
+            try:
+                client.close()
+            finally:
+                os.close(directory)
+            raise
 
     boundary = Boundary()
     result = guest.run(
@@ -214,7 +228,8 @@ def test_one_use_admission_refuses_without_application_entry(
     monkeypatch: pytest.MonkeyPatch,
     attach: str,
 ) -> None:
-    monkeypatch.setattr(live_wire, "_ADMISSION_SECONDS", 0.15)
+    if attach in ("missing", "partial", "expired"):
+        monkeypatch.setattr(live_wire, "_ADMISSION_SECONDS", 0.15)
     marker = tmp_path / "entered"
     request = _request(argv=("/bin/sh", "-c", f"printf entered > {marker}"))
 

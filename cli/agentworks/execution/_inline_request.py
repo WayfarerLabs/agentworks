@@ -14,6 +14,7 @@ from ._helper_identity import IdentityExpectation
 
 MAX_CAPTURE_BYTES = 4_096
 MAX_MANIFEST_BYTES = 32_768
+MAX_PREPARED_MANIFEST_BYTES = 64 * 1_024 * 1_024
 REQUEST_MARKER = b"AGWI2"
 REQUEST_HEADER_BYTES = len(REQUEST_MARKER) + 8
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z_0-9]*\Z")
@@ -196,9 +197,18 @@ def _reject_constant(_constant: str) -> None:
 
 def decode_manifest(data: bytes) -> InlineManifest:
     """Validate one untrusted canonical manifest from the carrier input boundary."""
+    return _decode_manifest(data, MAX_MANIFEST_BYTES)
+
+
+def decode_prepared_manifest(data: bytes) -> InlineManifest:
+    """Admit the fixed prepared entry's bounded canonical request boundary."""
+    return _decode_manifest(data, MAX_PREPARED_MANIFEST_BYTES)
+
+
+def _decode_manifest(data: bytes, bound: int) -> InlineManifest:
     if type(data) is not bytes:
         raise _invalid()
-    if len(data) > MAX_MANIFEST_BYTES:
+    if len(data) > bound:
         raise ManifestError(ManifestErrorCode.OVERSIZED)
     failed = False
     value: Any = None
@@ -272,6 +282,10 @@ def decode_manifest(data: bytes) -> InlineManifest:
 
 def encode_manifest(manifest: InlineManifest) -> bytes:
     """Encode trusted host state, then apply the same closed boundary validation."""
+    return _encode_manifest(manifest, MAX_MANIFEST_BYTES)
+
+
+def _encode_manifest(manifest: InlineManifest, bound: int) -> bytes:
     value = {
         "argv": [_b64(argument.encode("utf-8")) for argument in manifest.argv],
         "cwd": None if manifest.cwd is None else _b64(manifest.cwd.encode("utf-8")),
@@ -290,13 +304,19 @@ def encode_manifest(manifest: InlineManifest) -> bytes:
         "version": 2,
     }
     encoded = _json_bytes(value)
-    if len(encoded) > MAX_MANIFEST_BYTES:
+    if len(encoded) > bound:
         raise ManifestError(ManifestErrorCode.OVERSIZED)
-    decode_manifest(encoded)
+    _decode_manifest(encoded, bound)
     return encoded
 
 
 def encode_request_envelope(manifest: InlineManifest) -> bytes:
     """Prefix canonical JSON with the single bounded private request header."""
     encoded = encode_manifest(manifest)
+    return REQUEST_MARKER + format(len(encoded), "08x").encode("ascii") + encoded
+
+
+def encode_prepared_request_envelope(manifest: InlineManifest) -> bytes:
+    """Encode only the fixed prepared entry's separately bounded request."""
+    encoded = _encode_manifest(manifest, MAX_PREPARED_MANIFEST_BYTES)
     return REQUEST_MARKER + format(len(encoded), "08x").encode("ascii") + encoded

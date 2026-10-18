@@ -20,3 +20,9 @@ FIXED_SOURCE = build_helper_modules(_PACKAGE, _MODULE_NAMES) + (
     f"raise SystemExit(sys.modules[{(_PACKAGE + '._inline_guest')!r}].main(sys.argv[1]))\n"
 )
 ROOT_PROGRAM = build_root_guest_program(_PACKAGE, _MODULE_NAMES, "_inline_guest", delivery=RootGuestDelivery.INLINE)
+PREPARED_PROGRAM = build_root_guest_program(
+    "_agw_direct_input",
+    _MODULE_NAMES + ("_direct_input_guest",),
+    "_direct_input_guest",
+    delivery=RootGuestDelivery.FIXED_PREFIX,
+)
