@@ -35,7 +35,7 @@ from agentworks.execution._inline_control import (
     encode_wait,
 )
 from agentworks.execution._inline_observer import InlineObservation, InlineObserver, ObservationError
-from agentworks.execution._inline_request import OutputMode
+from agentworks.execution._inline_request import REQUEST_HEADER_BYTES, REQUEST_MARKER, OutputMode, decode_manifest
 from agentworks.execution.carrier import (
     ByteSink,
     CapturedOutput,
@@ -286,6 +286,20 @@ def test_fixed_unit_shape_has_no_stdio_properties_or_caller_controls(identity: I
             prerequisite=PrerequisiteState.READY,
             unit="untrusted.service",
         )
+
+
+def test_systemd_producer_uses_the_finite_inline_envelope(identity: IdentityExpectation) -> None:
+    prepared = _prepared(identity)
+    assert isinstance(prepared.io.input, FiniteInput)
+    envelope = prepared.io.input.data
+    assert envelope.startswith(REQUEST_MARKER) and envelope.isascii()
+    manifest_data = envelope[REQUEST_HEADER_BYTES:]
+    assert envelope[len(REQUEST_MARKER) : REQUEST_HEADER_BYTES] == format(len(manifest_data), "08x").encode("ascii")
+    manifest = decode_manifest(manifest_data)
+    assert manifest.nonce == prepared.run.token
+    assert manifest.stdin == b"private-input-canary"
+    assert manifest.identity == identity
+    assert manifest.output_mode is OutputMode.CAPTURE
 
 
 def test_fresh_identity_and_malformed_boundary_marker_are_not_reused(identity: IdentityExpectation) -> None:
