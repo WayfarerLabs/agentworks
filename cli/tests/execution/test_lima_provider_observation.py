@@ -113,7 +113,7 @@ def test_unrelated_registration_appearing_before_start_is_never_adopted(wsl) -> 
 
 
 @pytest.mark.parametrize("absent", [False, True])
-def test_core_operator_stopped_gate_precedes_lima_list_and_start(wsl, absent, monkeypatch, tmp_path) -> None:
+def test_core_operator_stopped_gate_precedes_lima_list_and_start(wsl, absent, monkeypatch) -> None:
     fake, access, state = wsl
     if absent:
         state.registration = replace(state.registration, guid=None, base_path=None)
@@ -137,7 +137,7 @@ def test_core_operator_stopped_gate_precedes_lima_list_and_start(wsl, absent, mo
             RunContext(),
             route=ExecutionRoute.NATIVE,
             deadline=Deadline.after(5),
-            trusted_root=PurePosixPath(tmp_path),
+            trusted_root=PurePosixPath("/proof"),
         ),
     ):
         pytest.fail("operator-stopped selection admitted a body")
