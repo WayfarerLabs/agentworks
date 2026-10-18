@@ -1334,7 +1334,7 @@ writable modes are prerequisites of the namespace. This conservative operation r
 excludes harmless metadata changes to those two directories; infrastructure provisioning owns them.
 It is not a ban on other `/run` descendants, read/stat/inventory operations, or a permission grant.
 Create-only directory creation already refuses existing ancestors without changing them, and
-nonrecursive removal cannot remove an ancestor containing the live namespace. Enforce the
+non-recursive removal cannot remove an ancestor containing the live namespace. Enforce the
 restriction before ordinary dispatch and at the actual Linux helper boundary, without changing
 Darwin's ancestor semantics. Native acceptance must prove namespace lifetime and local-mount
 semantics. The original private SQLite-transaction-through-effects attempt failed review because

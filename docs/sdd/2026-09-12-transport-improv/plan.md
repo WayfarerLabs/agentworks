@@ -4930,7 +4930,7 @@ and a production drain-evidence producer remain unproved.
       and JSON's existing upload child. Carry the gate through canonical requests, helper effects
       and cleanup, every durable row rewrite, and exact setup/proposal recovery without retaining
       contents or replaying mutations. Generalize the existing package fence consumer rather than
-      adding per-family copies. Preserve historical nongated bytes, no-state stat/readiness and
+      adding per-family copies. Preserve historical bytes without gates, no-state stat/readiness and
       Darwin behavior. Prove stale-request refusal, active-effect exclusion, lost setup/advance
       replies, exact retained outcomes and complete provider envelopes. Reserve the control
       namespace from ordinary mutations and the two exact Linux ancestor metadata targets from
