@@ -223,7 +223,6 @@ try:
             assert database.operations.inspect(scope) is None
             assert native.events.count("dispatch") == 1
             assert observer.events == ["observe"]
-            calls_after_close = route.local.calls
             effects_after_close = (len(route.routes), route.local.calls, tuple(native.events))
             with pytest.raises(StateError):
                 retained.execution().run(command, profile=Protection.DIRECT)
@@ -235,7 +234,6 @@ try:
                     create_metadata=metadata,
                 )
             assert (len(route.routes), route.local.calls, tuple(native.events)) == effects_after_close
-            assert route.local.calls == calls_after_close
             assert not (trusted_root_path / "after-close").exists()
             assert not list(scratch.iterdir())
 finally:
