@@ -728,10 +728,11 @@ page. Its complete encoded stdout requirement includes framing, facts and the ru
 provider's capacity must be sufficient before dispatch.
 
 `read_output` may return fewer bytes than its positive `max_bytes` bound when a page reaches this
-transport ceiling. Its next cursor and retained-prefix EOF use the verified total retained length,
-not the page length. An exact EOF cursor succeeds with empty data; a cursor beyond the verified
-prefix remains a validation error. Discarded and suppressed streams remain distinct from empty
-captured streams and retain no output payload.
+transport ceiling. Its next cursor is the requested cursor plus the returned byte count;
+retained-prefix EOF is true when that next cursor equals the verified total retained length. An
+exact EOF cursor succeeds with empty data; a cursor beyond the verified prefix remains a validation
+error. Discarded and suppressed streams remain distinct from empty captured streams and retain no
+output payload.
 
 Full result collection reads successive pages under the original deadline. Each page has its own
 ordinary helper borrow and outcome, matched against the exact stream-end fact first observed. Record
