@@ -711,11 +711,36 @@ whitespace, repository file quality and Rulesync pass. Website validation passes
 Node tests, four builds and both deterministic comparisons. Initial Bun file-quality/Rulesync
 attempts failed because its temporary directory was read-only; the same canonical scripts then
 passed through their supported npm fallback. Those original failures are retained, not counted as
-green. The following changes only clarify documentation and Windows markers; the final checkpoint
-records the final small-delta reviews and checks before its tester-focus comment and signal. The new
+green. The follow-up at `39b05f80e` only clarifies documentation and Windows markers; all three
+private lanes clear that delta. The final checkpoint records subsequent dependency reviews and
+checks before its tester-focus comment and signal. The new
 native combined report must verify exact-loss retirement/restoration and permanent-close uncertainty
 while retaining the installed held/delayed/refused/shutdown coverage obligations. Native Windows
 launch/keyboard/resize/clean-console, paired printable preparation and encoded-canary
 non-reflection, genuine new creation, settled-writer publication, trust migration/coexistence and
 rollback, complete factories, both usable RunContext paths and full R1-R5/workflow acceptance remain
 open. No full-carrier checkbox, ready handoff or SDD lock follows from this round.
+
+Hosted [CI run 39095228185](https://github.com/WayfarerLabs/agentworks/actions/runs/39095228185)
+on `39b05f80e` passes Linux Python 3.12, 3.13 and 3.14 and all other required jobs, but Windows
+reports three failed, 1,722 passed and 71 skipped cases. All three failures occur in inherited
+transport managed-operation clock-fault fixtures before their intended carrier injection; no SSH
+test fails. The affected test, run and keeper files match public transport `dd10ebbe` exactly.
+The [owner diagnostics](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6245543577)
+and [controlled reproduction](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6245564208)
+preserve the failed result. Baseline passes the three exact cases; delaying real reservation or
+admission by 1.1 seconds reproduces all three pre-clock refusals with expired deadlines and zero
+carrier calls. Real local drain completes. This demonstrates fixture timing dependence, not the
+specific Windows latency source or a new runtime safety defect.
+
+Transport supplied the focused test-only correction `9584f4ae2`, adopted as `9980c80e6` within this
+still-private round. The two fault-test functions use a finite 30-second delivery budget; the
+parameterized family now also asserts one actual clock-carrier call. Interruption identity, payload
+release, reservation and no-start assertions remain, as do real fencing and fresh bounded cleanup.
+Production source, deadline policy and global clocks are unchanged. The
+[owner handoff](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6245603513)
+reports 32 module passes and four fault-case passes after each separately delayed real reservation
+and admission. Those are owner Linux results, not composed or native Windows clearance. Independent
+reviews and affected checks precede the next SSH handoff; the PR remains draft without a new review
+edge until a complete green checkpoint. This adoption conveys no clearance for the surrounding
+private transport branch or the remaining full-implementation gates.

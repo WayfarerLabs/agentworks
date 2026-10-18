@@ -49,10 +49,11 @@ The retained POSIX consumer preserves pending bytes and the frozen native output
 fixtures cover finite/enlarged-pipe preservation and retained cleanup; the last native report also
 proves the narrow macOS PENDIN comparison and natural-cleanup signal storm. The new shared
 retirement correction separates unknown exit status from positive local cleanup. Its focused
-owner-authored commits are now adopted; SSH compatibility fixtures and exact combined validation
-remain in progress. Permanently unproved original-pipe cleanup must still prevent restoration and
-reuse. Installed held acquisition/construction, live cleanup refusal, shutdown, native Windows and
-complete RunContext/production acceptance remain open. No full implementation checkbox or merge
+owner-authored commits are now adopted; SSH compatibility fixtures pass private review, while exact
+combined validation remains in progress. Permanently unproved original-pipe cleanup must still
+prevent restoration and reuse. Installed held acquisition/construction, live cleanup refusal,
+shutdown, native Windows and complete RunContext/production acceptance remain open. No full
+implementation checkbox or merge
 intent follows from these corrections.
 
 Transport solely owns the carrier contract, common types, acceptance criteria, shared preparation,
