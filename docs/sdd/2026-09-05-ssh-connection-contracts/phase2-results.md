@@ -693,10 +693,28 @@ failures are retained in the developer evidence, not counted as green. Root's fi
 selection passes 205 cases with one Windows-only skip; the adopted dependency passes full typing
 across 1,336 sources. These are local scoped results, not native validation or final combined gates.
 
-The PR checkpoint records the three private review lanes and exact combined gates after their
-completion; a tester-focus comment precedes its next signal. The new native combined report must
-verify exact-loss retirement/restoration and permanent-close uncertainty while retaining the
-installed held/delayed/refused/shutdown coverage obligations. Native Windows
+All three independent private lanes reviewed exact `6f6da9597`. Project review found an operative
+unchecked plan sentence still describing blanket refusal after lost ownership; `b3ff31301` clarifies
+it as unproved local retirement without changing a completed record or requirement. It also found
+that the new shared native-child allocation/retry/poll faults were absent from Windows selection.
+Transport supplied the owner-authored four-marker commit `cb545f064`, adopted as `90d38180c`.
+Exactly seven cases now run under the Windows selection and pass locally; assertions, timers,
+platform guards and runtime behavior are unchanged. This is Linux selection proof, not native
+Windows evidence. The
+[owner response](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6245351907)
+retains full native and RunContext limits. The optional duplicate terminal JSON report is retained
+as a small structured completion record; its repeated assertions are not independent proof.
+
+At `6f6da9597`, complete local validation passes 17,117 tests with 55 skips and 29 warnings in
+339.77 seconds. Full typing covers 1,336 sources; Ruff/format, Typer isolation, locked-SDD,
+whitespace, repository file quality and Rulesync pass. Website validation passes 160 Python and 103
+Node tests, four builds and both deterministic comparisons. Initial Bun file-quality/Rulesync
+attempts failed because its temporary directory was read-only; the same canonical scripts then
+passed through their supported npm fallback. Those original failures are retained, not counted as
+green. The following changes only clarify documentation and Windows markers; the final checkpoint
+records the final small-delta reviews and checks before its tester-focus comment and signal. The new
+native combined report must verify exact-loss retirement/restoration and permanent-close uncertainty
+while retaining the installed held/delayed/refused/shutdown coverage obligations. Native Windows
 launch/keyboard/resize/clean-console, paired printable preparation and encoded-canary
 non-reflection, genuine new creation, settled-writer publication, trust migration/coexistence and
 rollback, complete factories, both usable RunContext paths and full R1-R5/workflow acceptance remain
