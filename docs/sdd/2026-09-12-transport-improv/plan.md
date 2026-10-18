@@ -5518,6 +5518,15 @@ checkbox stays open.
       copying the whole input. Prove local packed Python 3.11 behavior, status/control preservation
       and descriptor cleanup. Host orchestration, token obligations, lease ordering and native
       acceptance remain separate gates.
+- [ ] Connect the existing prepared-input stage to normal finite-input, finite-deadline Linux VM
+      DIRECT execution under its original operation owner. Use the same token-only cleanup row,
+      transfer, verified fixed loader and actual activation custody, then enter the existing numeric
+      workload credential/full-guest checkpoint. Admit larger prepared requests without enlarging or
+      staging the readiness entry. Prove large separate source/stdin, every complete Proxmox request
+      bound, one application dispatch, controls and cleanup debt. This private vertical slice does
+      not complete host/Darwin staging, explicitly unbounded or live-input staging, captured output
+      spooling, general recovery or the complete additive handoff; see the
+      [integration order](preparation-lld.md#direct-prepared-input-integration-order).
 - [ ] Connect the planned chunked helper/request staging before public managed acceptance. Preserve
       the existing Proxmox 65,536-byte whole-POST floor and its 10,000-byte stdin regression test.
       Expanded inline helper source already exceeds that envelope in the local constructor proof;
