@@ -646,13 +646,13 @@ class FileAccess:
         max_bytes: int | None = None,
         sudo: bool = False,
     ) -> FileMetadata:
-        """Publish one verified remote snapshot to a local regular file."""
+        """Publish one verified remote snapshot; a zero bound permits only empty files."""
         if not isinstance(destination, Path):
             raise ValidationError("File download requires a concrete local path")
         if type(local_condition) not in (Create, Replace):
             raise ValidationError("File download requires Create or Replace")
-        if max_bytes is not None and (type(max_bytes) is not int or not 0 < max_bytes <= _MAX_DOWNLOAD_SIZE):
-            raise ValidationError("File download requires a positive representable byte bound")
+        if max_bytes is not None and (type(max_bytes) is not int or not 0 <= max_bytes <= _MAX_DOWNLOAD_SIZE):
+            raise ValidationError("File download requires a nonnegative representable byte bound")
         root, leaf, plan, deadline = self._request(path, sudo)
         if deadline.expired:
             return reduce_file_local_download(

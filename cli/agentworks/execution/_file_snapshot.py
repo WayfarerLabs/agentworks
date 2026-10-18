@@ -164,8 +164,8 @@ def _validate_inputs(relative_path: str, max_bytes: int, expires_at: float | Non
         encoding_failed = False
     if encoding_failed:
         raise ValueError("Snapshot path is not encodable")
-    if type(max_bytes) is not int or max_bytes <= 0:
-        raise ValueError("Snapshot byte bound must be a positive integer")
+    if type(max_bytes) is not int or not 0 <= max_bytes <= (1 << 63) - 1:
+        raise ValueError("Snapshot byte bound must be a nonnegative representable integer")
     if expires_at is not None and (type(expires_at) not in {int, float} or expires_at != expires_at):
         raise ValueError("Snapshot deadline must be a monotonic timestamp or None")
     return components

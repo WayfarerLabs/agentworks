@@ -84,7 +84,7 @@ def test_real_helper_downloads_verified_content_and_cleans_snapshot(
     borrow = operation_owner.borrow()
     sink = BytesSink(writes=(1, None, 7)) if content else BytesSink()
     try:
-        outcome = download(borrow, source, sink, max(1, len(content)), plan)
+        outcome = download(borrow, source, sink, len(content), plan)
 
         assert outcome.status is FileDownloadStatus.COMPLETE
         assert outcome.stream_verified and outcome.accepted_bytes == len(content)
@@ -563,10 +563,12 @@ def test_runtime_refusal_stops_without_reconciliation(
         database.close()
 
 
+@pytest.mark.parametrize("max_bytes", [0, 3])
 def test_source_exceeding_bound_is_refused_without_sink_bytes(
     tmp_path: Path,
     roots: tuple[Path, Path],
     plan: IdentityPlan,
+    max_bytes: int,
 ) -> None:
     source, scratch = roots
     source.joinpath("source").write_bytes(b"too-large")
@@ -575,7 +577,7 @@ def test_source_exceeding_bound_is_refused_without_sink_bytes(
     borrow = operation_owner.borrow()
     sink = BytesSink()
     try:
-        outcome = download(borrow, source, sink, 3, plan)
+        outcome = download(borrow, source, sink, max_bytes, plan)
 
         assert outcome.failure is FileDownloadFailure.SNAPSHOT
         assert outcome.snapshot_failure is not None
@@ -1150,9 +1152,9 @@ class _FailingSinkGetter:
     [
         ("/approved/\udcff", BytesSink(), 1),
         ("/approved", _FailingSinkGetter(), 1),
-        ("/approved", BytesSink(), 0),
+        ("/approved", BytesSink(), -1),
     ],
-    ids=["invalid-utf8", "sink-getter", "zero-bound"],
+    ids=["invalid-utf8", "sink-getter", "negative-bound"],
 )
 def test_validation_preserves_caller_borrow_and_precedes_carrier_without_exception_context(
     tmp_path: Path,

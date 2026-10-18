@@ -156,12 +156,27 @@ def test_malformed_relative_path_never_reaches_confined_open(tmp_path: Path, mon
         os.close(root_fd)
 
 
-@pytest.mark.parametrize("max_bytes", [0, -1, True, 1.0, float("inf")])
-def test_byte_bound_must_be_a_positive_integer(tmp_path: Path, max_bytes: object) -> None:
+@pytest.mark.parametrize("max_bytes", [-1, True, False, 1.0, float("inf"), 1 << 63])
+def test_byte_bound_must_be_a_nonnegative_representable_integer(tmp_path: Path, max_bytes: object) -> None:
     root_fd = _open_root(tmp_path)
     os.close(root_fd)
     with pytest.raises(ValueError):
         read_snapshot(root_fd, "file", max_bytes)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("content", [b"", b"x"])
+def test_zero_bound_verifies_only_empty_snapshots(tmp_path: Path, content: bytes) -> None:
+    (tmp_path / "file").write_bytes(content)
+    root_fd = _open_root(tmp_path)
+    try:
+        if content:
+            assert _failure_kind(root_fd, "file", 0) is SnapshotFailureKind.LIMIT
+        else:
+            result = read_snapshot(root_fd, "file", 0)
+            assert result is not None and result.data == b""
+            assert result.stat.size == 0 and result.digest == hashlib.sha256(b"").digest()
+    finally:
+        os.close(root_fd)
 
 
 def test_ancestor_and_leaf_links_are_refused(tmp_path: Path) -> None:

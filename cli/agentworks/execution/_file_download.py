@@ -808,8 +808,8 @@ def _validate_binding(
         raise ValidationError("Download paths must be valid UTF-8")
     if len(root_bytes) > MAX_PATH_BYTES or len(relative_bytes) > MAX_PATH_BYTES:
         raise ValidationError("Download path exceeds the file protocol bound")
-    if type(max_bytes) is not int or not 0 < max_bytes <= _MAX_SIZE:
-        raise ValidationError("Download bound must be a positive bounded integer")
+    if type(max_bytes) is not int or not 0 <= max_bytes <= _MAX_SIZE:
+        raise ValidationError("Download bound must be a nonnegative bounded integer")
     if type(plan) is not IdentityPlan:
         raise ValidationError("Download requires a bound identity plan")
     _validate_plan(plan)
