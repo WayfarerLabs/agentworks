@@ -352,3 +352,100 @@ def test_replacement_merges_without_pruning_and_byte_limit_excludes_failed_child
     progress = directory_transfer_progress(stopped.value)
     assert progress is not None and progress.transferred_bytes == 3
     assert [str(entry.relative_path) for entry in progress.entries] == [".", "a"]
+
+
+@pytest.mark.parametrize("control", [False, True])
+def test_nested_inventory_failure_keeps_attempted_parent_and_original_cause(
+    bound_access, tmp_path, monkeypatch, control
+):
+    access, root, owner, _ = bound_access
+    nested = root / "outer" / "inner"
+    nested.mkdir(parents=True)
+    (nested / "file").write_bytes(b"untransferred")
+    destination = tmp_path / "destination"
+    cause = RuntimeError("original cause")
+    original = KeyboardInterrupt() if control else ConflictError("source inventory failed")
+    original.__cause__ = cause
+    ordinary_inventory = type(access).list_directory
+    attempted = []
+
+    def inventory(self, path, *, limit, sudo=False):
+        attempted.append(path)
+        if path == PurePosixPath(nested):
+            raise original
+        return ordinary_inventory(self, path, limit=limit, sudo=sudo)
+
+    monkeypatch.setattr(type(access), "list_directory", inventory)
+    with pytest.raises(KeyboardInterrupt if control else ConflictError) as stopped:
+        access.download_directory(
+            PurePosixPath(root), destination, limit=DirectoryTransferLimit(100), existing_files=ExistingFile.ERROR
+        )
+    assert stopped.value is original
+    fact = stopped.value.__cause__
+    assert isinstance(fact, DirectoryTransferControlFact)
+    assert fact.relative_path == PurePosixPath("outer/inner")
+    assert fact.__cause__ is cause
+    assert fact.progress.entries == () and fact.progress.transferred_bytes == 0
+    assert directory_transfer_progress(stopped.value) is fact.progress
+    assert attempted == [PurePosixPath(root), PurePosixPath(root / "outer"), PurePosixPath(nested)]
+    assert not destination.exists()
+    assert not owner.list_pending_lifecycle_obligations()
+
+
+def test_nested_inventory_local_oserror_is_reduced_before_location_attachment(bound_access, tmp_path, monkeypatch):
+    access, root, _, _ = bound_access
+    (root / "nested").mkdir()
+    destination = tmp_path / "destination"
+    ordinary_inventory = type(access).list_directory
+
+    def inventory(self, path, *, limit, sudo=False):
+        if path == PurePosixPath(root / "nested"):
+            raise FileExistsError("private-path-and-filesystem-text")
+        return ordinary_inventory(self, path, limit=limit, sudo=sudo)
+
+    monkeypatch.setattr(type(access), "list_directory", inventory)
+    with pytest.raises(ConflictError) as stopped:
+        access.download_directory(
+            PurePosixPath(root), destination, limit=DirectoryTransferLimit(0), existing_files=ExistingFile.ERROR
+        )
+    fact = stopped.value.__cause__
+    assert isinstance(fact, DirectoryTransferControlFact)
+    assert fact.relative_path == PurePosixPath("nested")
+    assert fact.progress.entries == ()
+    assert fact.__cause__ is None
+    assert "private-path-and-filesystem-text" not in str(stopped.value)
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("earlier_completed", [False, True])
+def test_preflight_does_not_adopt_progress_or_location_from_an_earlier_exception_cause(
+    bound_access, tmp_path, monkeypatch, earlier_completed
+):
+    access, root, _, _ = bound_access
+    earlier = DirectoryTransferControlFact(
+        DirectoryTransferProgress(
+            (DirectoryTransferEntry(PurePosixPath("."), FileKind.DIRECTORY, Change.CHANGED, 0),)
+            if earlier_completed
+            else (),
+            0,
+        ),
+        PurePosixPath("earlier"),
+    )
+    original = ConflictError("source inventory failed")
+    original.__cause__ = earlier
+
+    def inventory(*args, **kwargs):
+        raise original
+
+    monkeypatch.setattr(type(access), "list_directory", inventory)
+    destination = tmp_path / "destination"
+    with pytest.raises(ConflictError) as stopped:
+        access.download_directory(
+            PurePosixPath(root), destination, limit=DirectoryTransferLimit(0), existing_files=ExistingFile.ERROR
+        )
+    assert stopped.value is original
+    fact = stopped.value.__cause__
+    assert isinstance(fact, DirectoryTransferControlFact)
+    assert fact.relative_path == PurePosixPath(".") and fact.progress.entries == ()
+    assert fact.__cause__ is earlier
+    assert not destination.exists()

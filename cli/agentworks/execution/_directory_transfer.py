@@ -89,7 +89,24 @@ def _assign(
     seen[key] = relative
 
 
-def _attach(error: BaseException, entries: list[DirectoryTransferEntry], relative: PurePosixPath) -> Never:
+def _attach(
+    error: BaseException,
+    entries: list[DirectoryTransferEntry],
+    relative: PurePosixPath,
+    *,
+    preserve_preflight: bool = False,
+) -> Never:
+    cause = error.__cause__
+    if (
+        preserve_preflight
+        and not entries
+        and relative == PurePosixPath(".")
+        and type(cause) is DirectoryTransferControlFact
+        and not cause.progress.entries
+    ):
+        # A source inventory already identified its attempted directory before
+        # destination children began. Preserve that more precise location.
+        raise error from cause
     try:
         progress = DirectoryTransferProgress(tuple(entries), sum(entry.transferred_bytes for entry in entries))
         fact = DirectoryTransferControlFact(progress, relative)
@@ -218,30 +235,38 @@ def _remote_manifest(
     source_device = _file_revision_from_revision(root.revision).stat.device
     while pending:
         parent = pending.pop()
-        _live(access, deadline)
-        children = access.list_directory(path / parent, limit=DirectoryLimit(4_096, 1, 4 * 1_048_576), sudo=sudo)
-        for child in sorted(children, key=lambda entry: entry.relative_path.parts):
-            relative = parent / child.relative_path
-            if len(child.relative_path.parts) != 1:
-                _fail(access, FileFailureReason.INVALID_RESPONSE)
-            validate_local_tree_component(child.relative_path.name)
-            if (
-                len(manifest) >= limit.max_entries
-                or len(relative.parts) > limit.max_depth
-                or len(str(relative).encode("utf-8")) > 4_096
-            ):
-                _fail(access, FileFailureReason.LIMIT)
-            metadata = child.metadata
-            observed = _file_revision_from_revision(metadata.revision).stat
-            if (
-                metadata.kind not in (FileKind.REGULAR, FileKind.DIRECTORY)
-                or observed.device != source_device
-                or (metadata.kind is FileKind.REGULAR and observed.link_count != 1)
-            ):
-                _fail(access, FileFailureReason.UNSUPPORTED)
-            manifest.append((relative, metadata))
-            if metadata.kind is FileKind.DIRECTORY:
-                pending.append(relative)
+        try:
+            _live(access, deadline)
+            children = access.list_directory(path / parent, limit=DirectoryLimit(4_096, 1, 4 * 1_048_576), sudo=sudo)
+            for child in sorted(children, key=lambda entry: entry.relative_path.parts):
+                relative = parent / child.relative_path
+                if len(child.relative_path.parts) != 1:
+                    _fail(access, FileFailureReason.INVALID_RESPONSE)
+                validate_local_tree_component(child.relative_path.name)
+                if (
+                    len(manifest) >= limit.max_entries
+                    or len(relative.parts) > limit.max_depth
+                    or len(str(relative).encode("utf-8")) > 4_096
+                ):
+                    _fail(access, FileFailureReason.LIMIT)
+                metadata = child.metadata
+                observed = _file_revision_from_revision(metadata.revision).stat
+                if (
+                    metadata.kind not in (FileKind.REGULAR, FileKind.DIRECTORY)
+                    or observed.device != source_device
+                    or (metadata.kind is FileKind.REGULAR and observed.link_count != 1)
+                ):
+                    _fail(access, FileFailureReason.UNSUPPORTED)
+                manifest.append((relative, metadata))
+                if metadata.kind is FileKind.DIRECTORY:
+                    pending.append(relative)
+        except OSError as error:
+            try:
+                local_failure(error, entity_kind=access._entity_kind, entity_name=access._entity_name)
+            except BaseException as reduced:
+                _attach(reduced, [], parent)
+        except BaseException as error:
+            _attach(error, [], parent)
     return tuple(sorted(manifest, key=lambda member: member[0].parts))
 
 
@@ -299,7 +324,7 @@ def download_directory(
         try:
             local_failure(error, entity_kind=access._entity_kind, entity_name=access._entity_name)
         except BaseException as reduced:
-            _attach(reduced, entries, relative)
+            _attach(reduced, entries, relative, preserve_preflight=True)
     except BaseException as error:
-        _attach(error, entries, relative)
+        _attach(error, entries, relative, preserve_preflight=True)
     return DirectoryTransferProgress(tuple(entries), transferred)
