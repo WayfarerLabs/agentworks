@@ -796,6 +796,20 @@ No quoting workaround, version-specific exclusion, config override, fallback sea
 field or legacy patch is selected. The README and operative LLD describe the supported family;
 banner recognition does not establish executable authenticity.
 
+Implementation `dc93e821e` is adopted as `2c3c28bd1`. The only production change is the
+Windows-family condition inside the existing version-refusal expression. Synthetic successful
+clients now identify the supported family on their actual host. Host/banner/floor combinations,
+explicit/PATH pinning, non-reflection and pre-dispatch forwarding/enrollment refusal have focused
+regressions. The native-only tests retain Windows selection markers.
+
+The developer's full Linux SSH selection passes 562 cases with 12 skips; its focused selection
+passes 26 cases with two native-only skips. Scoped lint/format and typing pass. Removing only the
+family condition fails the two selected Windows-policy controls while their POSIX counterparts pass.
+Initial explicit-path fixture failures and one typing failure are preserved separately from their
+corrected passing runs. README spelling initially depends on the root dictionary addition for MSYS;
+composition supplies that permanent-doc vocabulary. These are developer Linux results, not native
+Windows proof or final composed gates.
+
 This is one focused operator-directed correction and retest after the previous allowance was spent.
 Private project, complexity and correctness reviews plus affected local/hosted gates must precede
 the next tester-focus comment and checkpoint signal. Transport's later input-completion pin is not
