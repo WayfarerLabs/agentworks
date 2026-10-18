@@ -1274,8 +1274,8 @@ The parent and observer share one ownership set for their stdin/stdout/stderr pi
 stdin close or output EOF consumes that ownership before attempting close; final cleanup closes only
 remaining owned ends, never a descriptor number already released and possibly reused. The
 exec-status pipe and launch gates keep their separate parent ownership. Observation initialization
-closes a created selector on failure without replacing the original exception with an ordinary
-selector-close error. This changes no child kill/reap policy: native manager fallback after
+closes a created selector on failure without replacing the original exception with an `OSError`
+from selector cleanup. This changes no child kill/reap policy: native manager fallback after
 controller death still requires its separate acceptance evidence, and missing workload facts remain
 unknown.
 
