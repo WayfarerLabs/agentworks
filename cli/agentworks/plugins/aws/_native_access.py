@@ -235,6 +235,9 @@ class EC2OwnedAccess:
             instance, self._platform._backend_name(self._vm), self._platform._security_group_id(self._vm)
         )
         self._active_transition(self._route.check, deadline)
+        provider_locator_remaining(deadline, vm_name=self._vm.name)
+        if self.cleanup_incomplete:
+            raise StateError("EC2 native route retains unsettled clients")
 
     def settle(self, deadline: Deadline) -> bool:
         """Settle retained effects without stopping the VM or closing its owner."""

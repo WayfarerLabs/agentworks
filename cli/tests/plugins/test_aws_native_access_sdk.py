@@ -133,7 +133,7 @@ def native_aws(monkeypatch, tmp_path, inherited_aws):
             self.close_calls = 0
             self.read_calls = 0
 
-        def read(self, size: int = -1) -> bytes:
+        def read(self, size: int | None = -1) -> bytes:
             assert size == 65
             self.read_calls += 1
             return super().read(size)
@@ -594,3 +594,84 @@ def test_sdk_missing_start_ack_cannot_resolve_from_running(native_aws):
     assert not p.access.settle(p.deadline)
     assert p.access._running is None
     assert sum(action == "StartInstances" for action, _ in p.calls) == 1
+
+
+@pytest.mark.parametrize("role", [False, True])
+@pytest.mark.parametrize("fault", [None, "close"])
+def test_route_final_retirement_controls_execution_consumer_admission(native_aws, monkeypatch, role, fault):
+    from agentworks.execution import _execution_operation
+    from agentworks.execution._helper_identity import IdentityExpectation
+    from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+    from tests.execution.files._target_support import target_for_owner
+
+    p = native_aws
+    if role:
+        enable_role(p, monkeypatch)
+    p.access.prepare(VMStatus.RUNNING, p.deadline)
+    binding = p.access.binding
+    consumer = _execution_operation.ExecutionOperation(
+        p.owner,
+        target_for_owner(p.owner),
+        native_binding=binding,
+        route_check=p.access.route_check,
+    )
+    guest_entries = []
+    originals = []
+
+    class GuestEntry(Exception):
+        pass
+
+    def guest_helper(*args, **kwargs):
+        guest_entries.append(1)
+        raise GuestEntry
+
+    def close_hook(client):
+        if client is p.access._route._client:
+            originals.append(client)
+            if fault == "close":
+                raise OSError("final route original close")
+
+    monkeypatch.setattr(_execution_operation, "observe_workload_shell", guest_helper)
+    p.close_hook = close_hook
+    expected = GuestEntry if fault is None else StateError
+    with pytest.raises(expected):
+        consumer._observe_workload_shell(
+            binding.carrier,
+            IdentityPlan(IdentityExpectation(0, 0, (0,)), IdentityMode.DIRECT),
+            binding.runtime_selection,
+            p.deadline,
+        )
+    assert guest_entries == ([] if fault else [1])
+    assert len(originals) == 1
+    assert (p.access._route._client is originals[0]) is (fault == "close")
+    if role:
+        assert not p.access._role_auth.cleanup_incomplete
+    p.close_hook = lambda client: None
+    calls = list(p.calls)
+    assert p.access._route.close(Deadline.after(5))
+    assert p.calls == calls
+    if fault == "close":
+        assert p.closes[-1] is originals[0]
+    consumer.finish()
+    assert p.access.settle(Deadline.after(5))
+
+
+@pytest.mark.parametrize("role", [False, True])
+def test_route_callback_refuses_deadline_crossed_by_successful_final_close(native_aws, monkeypatch, role):
+    p = native_aws
+    if role:
+        enable_role(p, monkeypatch)
+    p.access.prepare(VMStatus.RUNNING, p.deadline)
+    originals = []
+
+    def close_hook(client):
+        if client is p.access._route._client:
+            originals.append(client)
+            p.clock[0] = 106.0
+
+    p.close_hook = close_hook
+    with pytest.raises(LimitExceededError):
+        p.access.route_check(p.deadline)
+    assert len(originals) == 1 and not p.access.cleanup_incomplete
+    p.close_hook = lambda client: None
+    assert p.access.settle(Deadline.after(5))
