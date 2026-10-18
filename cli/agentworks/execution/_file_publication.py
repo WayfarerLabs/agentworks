@@ -360,9 +360,16 @@ def publish_file(
         )
 
     prior = failure or (_control_fact(control) if control is not None else None)
-    if prior is not None and sys.platform == "darwin" and publication_attempted and replacement is not None:
+    if (
+        sys.platform == "darwin"
+        and publication_attempted
+        and replacement is not None
+        and (prior is not None or control is not None)
+    ):
         prior = FilePublicationError(
-            PublicationFailureKind.UNCERTAIN, PublicationPhase.PUBLICATION, cleanup_debt=prior.cleanup_debt
+            PublicationFailureKind.UNCERTAIN,
+            PublicationPhase.PUBLICATION,
+            cleanup_debt=None if prior is None else prior.cleanup_debt,
         )
     if prior is None and publication_attempted and (published_revision is None or close_control is not None):
         prior = FilePublicationError(PublicationFailureKind.UNCERTAIN, PublicationPhase.PUBLICATION)

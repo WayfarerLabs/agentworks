@@ -209,6 +209,57 @@ def test_scratch_backed_close_failure_does_not_invent_stage_debt(tmp_path: Path,
 
 
 @pytest.mark.parametrize("control_type", [KeyboardInterrupt, SystemExit])
+def test_scratch_cleanup_close_control_retains_publication_fact_without_prior(
+    tmp_path: Path,
+    parent: int,
+    monkeypatch: pytest.MonkeyPatch,
+    control_type: type[BaseException],
+) -> None:
+    target = tmp_path / "target"
+    target.write_bytes(b"old")
+    ready = ready_scratch(parent, bytes(range(16)), b"new")
+    scratch_inode = next(path for path in tmp_path.iterdir() if path.is_dir()).stat().st_ino
+    interrupt = control_type()
+    real_unlink, real_close = os.unlink, os.close
+    record_removed = False
+    interrupted: list[int] = []
+
+    def remove_artifact(path: str, *args, **kwargs) -> None:
+        nonlocal record_removed
+        real_unlink(path, *args, **kwargs)
+        if path == "publication-receipt":
+            record_removed = True
+
+    def interrupt_initial_cleanup_close(descriptor: int) -> None:
+        is_scratch = os.fstat(descriptor).st_ino == scratch_inode
+        real_close(descriptor)
+        if is_scratch and record_removed and not interrupted:
+            interrupted.append(descriptor)
+            raise interrupt
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "unlink", remove_artifact)
+        patch.setattr(os, "close", interrupt_initial_cleanup_close)
+        with pytest.raises(BaseException) as raised:
+            publish_file(
+                parent, "target", ScratchFileSource(parent, ready), condition=Replace(), create_metadata=_metadata()
+            )
+    assert raised.value is interrupt and len(interrupted) == 1
+    with pytest.raises(OSError) as closed:
+        os.fstat(interrupted[0])
+    assert closed.value.errno == errno.EBADF
+    assert target.read_bytes() == b"new"
+    assert not list(tmp_path.glob(".agentworks-stage-*"))
+    assert not list(tmp_path.rglob("publication-receipt"))
+    fact = raised.value.__cause__
+    assert isinstance(fact, FilePublicationError)
+    assert fact.kind is PublicationFailureKind.UNCERTAIN and fact.phase is PublicationPhase.PUBLICATION
+    assert fact.cleanup_debt is None
+    cleanup_scratch(parent, ready)
+    assert list(tmp_path.iterdir()) == [target]
+
+
+@pytest.mark.parametrize("control_type", [KeyboardInterrupt, SystemExit])
 @pytest.mark.parametrize(
     "first,second,second_control",
     [
