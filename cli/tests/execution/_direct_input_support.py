@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -103,7 +104,7 @@ class DirectCarrier(Carrier):
         self.activation_unsettled = False
         self.inner_guest_mismatch = False
         self.damage_prefix = False
-        self.interpreter = "/usr/bin/python3.11"
+        self.interpreter = sys.executable
         self.target = (1001, 1002, (1002, 1003))
 
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
