@@ -224,20 +224,32 @@ def test_late_cleanup_does_not_rewrite_unknown_dispatch(
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
     monkeypatch.setattr(module, "run_process", observe_after_cleanup)
+    child_returncodes_before_rescue: tuple[int | None, ...] = ()
+    pipe_closed_before_rescue: tuple[tuple[bool, ...], ...] = ()
     try:
         report = _carrier(kind, tmp_path).execute(
             PreparedInvocation(("/fixture",)), io=CarrierIO(), deadline=Deadline.after(30), custody=custody
         )
     finally:
         release.set()
-        settled = custody.close(Deadline.after(3))
-        for child in children:
-            if child.poll() is None:
-                child.kill()
-            child.wait(timeout=3)
-            for pipe in (child.stdin, child.stdout, child.stderr):
-                if pipe is not None:
-                    pipe.close()
+        settled = False
+        try:
+            settled = custody.close(Deadline.after(3))
+        finally:
+            try:
+                child_returncodes_before_rescue = tuple(child.returncode for child in children)
+                pipe_closed_before_rescue = tuple(
+                    tuple(pipe is None or pipe.closed for pipe in (child.stdin, child.stdout, child.stderr))
+                    for child in children
+                )
+            finally:
+                for child in children:
+                    if child.poll() is None:
+                        child.kill()
+                    child.wait(timeout=3)
+                    for pipe in (child.stdin, child.stdout, child.stderr):
+                        if pipe is not None:
+                            pipe.close()
     diagnostic = f"Popen factory diagnostics after custody settlement: {factory_diagnostics!r}"
     assert marker.exists() and custody.settled, diagnostic
     assert report.dispatch is Dispatch.UNKNOWN, diagnostic
@@ -245,5 +257,6 @@ def test_late_cleanup_does_not_rewrite_unknown_dispatch(
     assert not factory_diagnostics, diagnostic
     assert settled
     assert len(children) == (1 if kind == "wsl" else 2)
-    assert all(child.returncode is not None for child in children)
-    assert all(pipe is None or pipe.closed for child in children for pipe in (child.stdin, child.stdout, child.stderr))
+    assert all(returncode is not None for returncode in child_returncodes_before_rescue), diagnostic
+    assert len(pipe_closed_before_rescue) == len(children)
+    assert all(all(pipe_states) for pipe_states in pipe_closed_before_rescue), diagnostic
