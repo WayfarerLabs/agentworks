@@ -5543,6 +5543,16 @@ relaxing their assertions. Original failures remain retained. Packed privilege/s
 injected, not native VM/root/provider proof. The following staging, recovery and full handoff gates
 remain open.
 
+- [ ] Implement and privately review the first finite-input, finite-deadline Linux VM DIRECT capture
+      composition described in the [capture design](preparation-lld.md#direct-capture-composition).
+      Reuse bounded process capture and exact-length scratch, distinguish remote stream facts from
+      verified local bytes, and retain known child status through publication, retrieval or cleanup
+      failure. Record output tokens before dispatch; preserve actual helper closure, per-token
+      creation uncertainty and same-process fresh cleanup continuation. Prove at least 1 MiB
+      capture, explicit truncation, partial publication/retrieval, suppression, controls and
+      complete carrier envelopes together with prepared input. Do not change the public default or
+      claim host/live/unbounded, process-loss recovery or native acceptance from this private slice.
+
 - [ ] Connect the planned chunked helper/request staging before public managed acceptance. Preserve
       the existing Proxmox 65,536-byte whole-POST floor and its 10,000-byte stdin regression test.
       Expanded inline helper source already exceeds that envelope in the local constructor proof;
