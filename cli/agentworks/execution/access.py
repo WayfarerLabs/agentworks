@@ -659,8 +659,8 @@ class FileAccess:
 
     def read_file(self, path: PurePosixPath, *, max_bytes: int, sudo: bool = False) -> ReadResult | None:
         """Read one bounded regular-file snapshot."""
-        if type(max_bytes) is not int or max_bytes <= 0:
-            raise ValidationError("File read requires a positive byte bound")
+        if type(max_bytes) is not int or not 0 < max_bytes <= _MAX_DOWNLOAD_SIZE:
+            raise ValidationError("File read requires a positive representable byte bound")
         root, leaf, plan, deadline = self._request(path, sudo)
         self._admit_request(deadline)
         outcome = _file_memory_read.read_file(

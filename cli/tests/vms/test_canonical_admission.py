@@ -230,6 +230,7 @@ def test_invalid_managed_body_refuses_before_provider_even_during_outage(
 @pytest.mark.parametrize(
     "invalid",
     [
+        "read-bound",
         "upload-size",
         "upload-condition",
         "upload-mode",
@@ -275,7 +276,9 @@ def test_invalid_file_request_refuses_before_provider_even_during_outage(canonic
         monkeypatch.setattr(p.accesses[0], "observe_locator", outage)
         before = len(p.connections)
         with pytest.raises(ValidationError):
-            if invalid.startswith("upload-"):
+            if invalid == "read-bound":
+                files.read_file(path, max_bytes=1 << 63)
+            elif invalid.startswith("upload-"):
                 files.upload(
                     path,
                     source,
