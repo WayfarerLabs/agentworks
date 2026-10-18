@@ -301,17 +301,41 @@ without retaining secret-bearing exception chains; original core and control err
 This is not a native access factory or proof of SDK-internal drain, new-VM identity recording,
 startup settlement, routes, guest preparation or RunContext admission.
 
-`plugins/gcp/_native_access.py` similarly stages private `GCEOwnedRead` power and locator reads. It
-preserves stock ADC selection or the explicitly selected service-account document. The shared
-`plugins/gcp/_owned_auth.py` helper supplies an owned public Google-auth Request to the selected
-credential's public `before_request` for the actual method and fixed URL. One streamed Compute GET
-selects only identity and power fields, bounds raw JSON ingestion, and compares the recorded
-instance ID, name, project and zone. Service originals and attributable credential responses remain
-retained through uncertain closure; no new observation can bypass that uncertainty. Credential
-redirects keep public SDK behavior rather than imposing a new credential policy. The same helper is
-borrowed by the start producer; only its access owner terminally closes the shared auth lifetime.
-This staging implementation supplies no full native access and proves neither real credential/socket
-drain nor native projection compatibility.
+`plugins/gcp/_native_access.py` supplies private `GCEOwnedRead` observations. Its small
+power/locator projection stays separate from the full native projection of the selected NIC,
+external NAT, tags and service-account emails. Both compare the recorded instance ID, name, project
+and zone without fetching unrestricted instance metadata. The full read requires the selected
+network, optional recorded subnet, tag and external access configuration. An unrecorded subnet
+permits a valid provider-selected subnet, not malformed or foreign input. Running preparation
+requires an actual canonical IPv4 endpoint. Authentication preserves stock ADC selection or the
+explicitly selected service-account document. The shared `plugins/gcp/_owned_auth.py` helper
+supplies an owned public Google-auth Request to the selected credential's public `before_request`
+for the actual method and fixed URL. Streamed Compute reads bound raw JSON ingestion. Service
+originals and attributable credential responses remain retained through uncertain closure; no new
+observation can bypass that uncertainty. Credential redirects keep public SDK behavior rather than
+imposing a new credential policy. The same helper is borrowed by start and route; only the access
+owner terminally closes shared authentication.
+
+`plugins/gcp/_native_execution_access.py` composes that reader with the retained start, prefix
+discovery, temporary route and shared guest preparation under the caller's exact existing VM owner.
+It requires explicit SSH trust and delivery settings before provider work. Stopped preparation
+submits once and explicitly observes its acknowledged Operation, then obtains fresh running and
+endpoint evidence. Running preparation submits no start. Fresh endpoint, instance and route checks
+precede guest preparation and subsequent route admission. Aggregate settlement bars body work,
+attempts dependent cleanup independently and keeps shared authentication until all dependent custody
+settles. It does not stop the VM or close the outer operation owner.
+
+`plugins/gcp/_native_route.py` owns one nonce-named classic firewall rule and one lifecycle row. It
+checks the exact recorded baseline deny, classic-first network and bounded complete firewall
+inventory, considering every freshly attached VM tag and service account. It refuses conflicting
+operator policy rather than repairing it. One durably admitted insert retains its matching global
+Operation receipt, including the firewall's numeric ID, before fallible cleanup or publication.
+Request completion and fresh rule realization remain distinct. Cleanup requires retained request
+evidence, fresh exact identity/contents and durable delete intent; unknown submissions are never
+replayed or adopted from a matching name. Name-addressed deletion is not an atomic numeric-ID
+reservation. Public close is not socket-drain proof. Scripted SDK and SQLite tests establish these
+adapter behaviors, not native GCP compatibility, real credential drain, restart recovery factories,
+independent job availability or production RunContext delivery.
 
 Public middleware preserves normal scopes, quota, auth mode and regional access boundary lookup,
 which the locked SDK enables by default for ordinary service-account credentials. Its concrete

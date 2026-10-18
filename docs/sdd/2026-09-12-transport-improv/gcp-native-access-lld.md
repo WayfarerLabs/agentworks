@@ -103,7 +103,7 @@ request evidence only when fully validated, never mere HTTP success. Request com
 exact rule realization are separate. Missing identity/acknowledgment remains uncertain; do not adopt
 a rule later merely because its name or contents match.
 
-Publish bounded versioned canonical payloads containing only selection, request/ operation
+Publish bounded versioned canonical payloads containing only selection, request and operation
 identities, closed terminal states and cleanup intent, never raw JSON, diagnostics or credentials.
 Reconcile lost registration/publication/resolution replies against the exact row, revision and fence
 before further effects. Keep only unresolved publication evidence, not an unbounded success/attempt
