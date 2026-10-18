@@ -386,6 +386,9 @@ def publish_file(
             raise
         _raise_control(control, prior=_control_fact(cleanup_control) or prior)
     if control is not None:
+        if sys.platform == "darwin" and prior is not None:
+            # A completed cleanup attempt reports current custody, including no debt.
+            prior = FilePublicationError(prior.kind, prior.phase, cleanup_debt=cleanup_debt)
         _raise_control(control, prior=prior, cleanup_debt=cleanup_debt)
 
     assert failure is not None

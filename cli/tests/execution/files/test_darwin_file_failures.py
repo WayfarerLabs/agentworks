@@ -384,6 +384,117 @@ def test_close_control_survives_later_cleanup_control(
     assert list(tmp_path.iterdir()) == [target]
 
 
+@pytest.mark.parametrize("control_type", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize(
+    "interrupt_at,remaining",
+    [("stage", "none"), ("record", "none"), ("stage", "stage"), ("stage", "record"), ("record", "record")],
+)
+def test_final_cleanup_reduces_interrupted_publication_to_latest_debt(
+    tmp_path: Path,
+    parent: int,
+    monkeypatch: pytest.MonkeyPatch,
+    control_type: type[BaseException],
+    interrupt_at: str,
+    remaining: str,
+) -> None:
+    target = tmp_path / "target"
+    target.write_bytes(b"old")
+    ready = ready_scratch(parent, bytes(range(16)), b"new")
+    interrupt = control_type()
+    real_unlink = os.unlink
+    interrupted = False
+
+    def interrupt_then_cleanup(path: str, *args, **kwargs) -> None:
+        nonlocal interrupted
+        artifact = (
+            "stage" if path.startswith(".agentworks-stage-") else "record" if path == "publication-receipt" else None
+        )
+        if artifact == interrupt_at and not interrupted:
+            interrupted = True
+            raise interrupt
+        if artifact == remaining:
+            raise OSError(errno.EIO, "final cleanup")
+        real_unlink(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "unlink", interrupt_then_cleanup)
+        with pytest.raises(BaseException) as raised:
+            publish_file(
+                parent, "target", ScratchFileSource(parent, ready), condition=Replace(), create_metadata=_metadata()
+            )
+    assert raised.value is interrupt and interrupted
+    fact = raised.value.__cause__
+    assert isinstance(fact, FilePublicationError)
+    assert fact.kind is PublicationFailureKind.UNCERTAIN and fact.phase is PublicationPhase.PUBLICATION
+    assert target.read_bytes() == b"new"
+    debt = fact.cleanup_debt
+    if remaining == "none":
+        assert not list(tmp_path.glob(".agentworks-stage-*"))
+        assert not list(tmp_path.rglob("publication-receipt"))
+        assert debt is None
+    else:
+        assert isinstance(debt, PublicationStageCleanupDebt)
+        assert debt._stage_removed is (remaining == "record")
+        stage = tmp_path / debt.name
+        assert stage.exists() is (remaining == "stage")
+        if stage.exists():
+            observed = stage.stat()
+            assert (observed.st_dev, observed.st_ino) == (debt._ownership._stage.device, debt._ownership._stage.inode)
+        records = list(tmp_path.rglob("publication-receipt"))
+        assert len(records) == 1
+        record = records[0].stat()
+        assert (record.st_dev, record.st_ino) == (debt._ownership._record.device, debt._ownership._record.inode)
+        cleanup_publication_stage(parent, parent, debt)
+    cleanup_scratch(parent, ready)
+    assert list(tmp_path.iterdir()) == [target]
+
+
+@pytest.mark.parametrize("control_type", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("cleanup_succeeds", [True, False])
+def test_final_cleanup_reduces_unrecorded_stage_debt(
+    tmp_path: Path,
+    parent: int,
+    monkeypatch: pytest.MonkeyPatch,
+    control_type: type[BaseException],
+    cleanup_succeeds: bool,
+) -> None:
+    target = tmp_path / "target"
+    target.write_bytes(b"old")
+    interrupt = control_type()
+    real_unlink = os.unlink
+    attempts = 0
+
+    def interrupt_then_cleanup(path: str, *args, **kwargs) -> None:
+        nonlocal attempts
+        if path.startswith(".agentworks-stage-"):
+            attempts += 1
+            if attempts == 1:
+                raise interrupt
+            if not cleanup_succeeds:
+                raise OSError(errno.EIO, "final cleanup")
+        real_unlink(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "unlink", interrupt_then_cleanup)
+        with pytest.raises(BaseException) as raised:
+            publish_file(parent, "target", b"new", condition=Replace(), create_metadata=_metadata())
+    assert raised.value is interrupt and attempts == 2
+    fact = raised.value.__cause__
+    assert isinstance(fact, FilePublicationError)
+    assert fact.kind is PublicationFailureKind.UNCERTAIN and fact.phase is PublicationPhase.PUBLICATION
+    assert target.read_bytes() == b"new"
+    debt = fact.cleanup_debt
+    if cleanup_succeeds:
+        assert list(tmp_path.iterdir()) == [target]
+        assert debt is None
+    else:
+        assert isinstance(debt, publication.PublicationCleanupDebt)
+        observed = (tmp_path / debt.name).stat()
+        assert (observed.st_dev, observed.st_ino) == (debt.device, debt.inode)
+        assert publication.retry_publication_cleanup(parent, debt)
+        assert list(tmp_path.iterdir()) == [target]
+
+
 @pytest.mark.parametrize("mode", [0o2770, 0o1700, 0o3770])
 def test_explicit_directory_special_bits_remain_supported(tmp_path: Path, parent: int, mode: int) -> None:
     result = metadata.create_directory(
