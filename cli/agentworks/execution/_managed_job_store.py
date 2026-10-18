@@ -514,6 +514,18 @@ class ManagedJobStore:
 
         return dispose(self, expected_launch)
 
+    def open_live_directory(self) -> int:
+        """Hold the protected existing run directory for create-only live admission."""
+        directory = self._run_dir(create=False)
+        if directory is None:
+            raise StoreError("missing run store")
+        try:
+            _refuse_disposal(directory)
+            return directory
+        except BaseException:
+            os.close(directory)
+            raise
+
     def read_capture(self, stream: Stream, expected_launch: bytes) -> bytes | None:
         if type(stream) is not Stream or type(expected_launch) is not bytes:
             raise StoreError("invalid capture read")

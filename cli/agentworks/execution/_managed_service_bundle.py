@@ -6,12 +6,15 @@ from ._helper_bundle import RootGuestDelivery, build_helper_modules, build_root_
 
 _MODULES = (
     "_helper_identity",
+    "_evidence_wire",
+    "_inline_control",
     "_managed_job_wire",
     "_managed_lease_wire",
     "_managed_job_request",
     "_managed_job_store",
     "_managed_lease_store",
     "_managed_lease_controller",
+    "_managed_live_io",
     "_managed_service_guest",
 )
 

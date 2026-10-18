@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -57,6 +58,17 @@ def _inventory(directory: int, owner: int) -> dict[str, _Leaf]:
         lease = name == LEASE_LEAF
         stage_lease = LEASE_STAGE.fullmatch(name) is not None
         spool = name in Stream._value2member_map_
+        if name == "live-io.sock":
+            info = os.stat(name, dir_fd=directory, follow_symlinks=False)
+            if (
+                not stat.S_ISSOCK(info.st_mode)
+                or info.st_uid != owner
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_nlink != 1
+            ):
+                raise StoreError("unsafe live socket")
+            result[name] = _Leaf(name, info.st_dev, info.st_ino, info.st_nlink, None)
+            continue
         if not (fact or request or stage_fact or stage_request or spool or lease or stage_lease or name == "disposal"):
             raise StoreError("unknown run object")
         fd = _open_leaf(directory, name, 0o600 if spool else 0o400, owner, links=(1, 2, 3))
@@ -204,6 +216,17 @@ def dispose(store: ManagedJobStore, expected_launch: bytes) -> bool:
         for name in inventory:
             if name == "disposal":
                 continue
+            if name == "live-io.sock":
+                info = os.stat(name, dir_fd=directory, follow_symlinks=False)
+                leaf = inventory[name]
+                if (
+                    not stat.S_ISSOCK(info.st_mode)
+                    or info.st_uid != store._owner_uid
+                    or stat.S_IMODE(info.st_mode) != 0o600
+                    or info.st_nlink != 1
+                    or (info.st_dev, info.st_ino) != leaf.key
+                ):
+                    raise StoreError("live socket changed during disposal")
             with suppress(FileNotFoundError):
                 os.unlink(name, dir_fd=directory)
         os.fsync(directory)
