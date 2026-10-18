@@ -1211,6 +1211,39 @@ application fakes. A delayed-retention counterfactual must fail cleanup evidence
 not establish physical socket drain, native acceptance or complete AWS access. Read/start clients,
 activation, routes, guest readiness, workloads and aggregate ownership remain separate obligations.
 
+### Owned AWS preparation and route lifetime
+
+The passive factory retains `EC2OwnedAccess` under the existing operation owner before power
+observation. Its selected session and configured-role helper serve reads, the retained one-shot
+activation and the selected SSH route. After acknowledged startup, explicitly observe supported
+pending/unchanged-stopped states in the foreground until exact running or the original finite
+deadline; do not use SDK waiters or resubmit startup. Unknown or mismatching observations refuse.
+Retain timely exact-running evidence before fenced obligation resolution and reconcile a lost
+resolution reply against the same row, payload and revision. Missing acknowledgment remains
+unresolved. Cleanup may establish completion of that existing acknowledged start using its own
+finite deadline, without reopening preparation or admitting another start.
+
+Bind the freshly observed endpoint through independent SSH connection/trust policy. Retain the
+prefix plan before route mutations. A concrete route adapter verifies selected instance ownership,
+group association, group account/tag/VPC and complete rule observations. Refuse preexisting TCP/22
+tuples rather than adopting them. Confirm revoke permission first, then durably admit each selected
+prefix before one authorization. Successful receipts must identify the exact group/account/prefix,
+rule ID and nonce description; retain that ID before later bookkeeping or expiry checks. Cleanup
+revokes only those positively owned IDs and requires fresh complete absence. Unknown authorization
+receipts retain possible effect, not an invented request-drain or force-release policy.
+
+Use the same bound locator observer in shared guest preparation, and freshly recheck endpoint,
+locator and route before work. Aggregate cleanup retains actual client/route/preparation custody,
+settles only this access's effects, and never stops an activated VM or releases the outer owner on
+its own. The new route requires `DescribeSecurityGroupRules`; its nonce description does not
+introduce an additional tagging permission.
+
+The current prefix helper's process cache, separate five-second timeout, unbounded HTTP body read
+and internally owned response remain a concrete acceptance gap. Before/after deadline checks alone
+are not preemption or response retirement. Resolve this gap before public exposure. Offline actual
+SDK evidence and source review do not supply native proof, restart recovery, independent-job
+availability or complete RunContext acceptance.
+
 ### Configured AWS role credential custody
 
 For the configured explicit access-key path with an optional role ARN, use a small private,

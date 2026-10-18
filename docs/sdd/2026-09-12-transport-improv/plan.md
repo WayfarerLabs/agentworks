@@ -1127,6 +1127,24 @@ evidence remains preserved. All three independent paired source-review lanes cle
 earlier-base measurements do not establish whole-composition, native or complete AWS access
 acceptance.
 
+The subsequent private owned-access implementation composes the passive factory, retained read/
+activation/configured-role clients, exact endpoint binding, shared guest preparation and temporary
+SSH routes under the same owner. Source inspection corrected single-sample asynchronous startup and
+cleanup tied to an expired original deadline: preparation now foreground-observes supported
+transitions, while fresh-budget cleanup may settle the existing acknowledged start without reopening
+admission. Missing acknowledgments remain unresolved. Author `f11ae51b` passes 316 selected offline
+actual-SDK cases, full strict typing across 1,391 sources and five-file Ruff lint/format. These are
+author-base measurements, not whole-composition or native acceptance. Independent paired source
+reviews remain pending.
+
+The initial verification launcher reused its new pytest temporary directory, replacing the first two
+failed runs' generated fixture databases; their logs and final-run fixtures remain. No
+pre-task/operator database was selected. This custody deviation is not recoverable from the green
+result. Both later correction runs use distinct fresh temporary directories and retain their
+fixtures and logs. The current prefix discovery helper still has separate timeout, body-size and
+response-lifetime limits; resolve those before public exposure rather than treating admission checks
+as complete original-budget proof.
+
 - [ ] Complete owned AWS access with a reviewed successful-start settlement rule, fresh power and
       exact guest preparation, endpoint trust and selected firewall-route lifetime. Obtain native
       startup/uncertainty/cleanup evidence before admission through RunContext. Missing start

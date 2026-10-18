@@ -238,15 +238,15 @@ closes child work and local delivery, checks the complete ledger, seals obligati
 aggregate owner. WSL2 and Proxmox supply these private adapters. Owned cloud SDK read clients, other
 platforms and the public RunContext surface remain pending.
 
-`plugins/aws/_native_access.py` separately stages a private, passive `EC2OwnedAccess` for exact
-power, locator and public-endpoint observations. It is not an owned native access factory. The
-caller retains it before observing; configured credential selection remains explicit, without the
-legacy EC2 client cache or fallback to another mode. One original returned EC2 read client is
-retained before dispatch, with exact stored account/region/instance validation, deadline-derived SDK
-budgets and one total service attempt. Ordinary close failure preserves the earlier result or error
-and leaves `cleanup_incomplete` true. Cleanup retries only that original; a normal public close
-clears the slot. An occupied slot or closed access refuses further observations. An already escaping
-control exception remains primary if cleanup is interrupted.
+`plugins/aws/_native_access.py` supplies private, passive `EC2OwnedAccess` for exact power, locator
+and public-endpoint observations and the AWS owned native access factory. The caller retains it
+before observing; configured credential selection remains explicit, without the legacy EC2 client
+cache or fallback to another mode. One original returned EC2 read client is retained before
+dispatch, with exact stored account/region/instance validation, deadline-derived SDK budgets and one
+total service attempt. Ordinary close failure preserves the earlier result or error and leaves
+`cleanup_incomplete` true. Cleanup retries only that original; a normal public close clears the
+slot. An occupied slot or closed access refuses further observations. An already escaping control
+exception remains primary if cleanup is interrupted.
 
 `plugins/aws/_owned_auth.py` retains configured-role STS clients separately from the EC2 read
 client. The SDK keeps its deferred refresh, cache and valid-credential advisory behavior. The helper
@@ -264,8 +264,27 @@ producer SDK errors remain SDK errors; public access-layer translation is a sepa
 These slots cover returned EC2/configured-role STS originals, not SDK constructor handoff or
 arbitrary ambient credential providers. Scripted actual-SDK tests use synthetic credentials; normal
 public close does not establish physical socket drain, request termination or native acceptance.
-This staging object supplies no activation settlement, route lifetime, guest preparation,
-independent job availability or RunContext admission.
+Preparation retains one start submission when needed, observes supported pending/stopped transitions
+in the foreground under the original deadline, and resolves only an acknowledged start with fresh
+exact-running evidence. Cleanup can observe that existing start under a fresh finite cleanup
+deadline without admitting another start or reopening preparation. Missing acknowledgment remains
+unresolved even when the VM is running. Lost resolution replies reconcile the exact owned row.
+
+`plugins/aws/_native_route.py` owns temporary SSH ingress by exact returned rule ID and a per-rule
+nonce description. It verifies instance/group ownership, plans prefixes once, checks revoke
+permission before authorization and durably admits each effect before dispatch. Preexisting tuples
+are refused, not adopted. Cleanup validates owned rule identity and fresh absence; a missing or
+invalid authorization receipt retains possible effect. `DescribeSecurityGroupRules` is required. The
+access binds the fresh endpoint using independent SSH policy, supplies the same owned locator
+observer to shared guest preparation, and rechecks endpoint and route before later work. It settles
+its own clients and effects, never stops the VM merely because it started it, and never closes the
+outer operation owner.
+
+The prefix-discovery helper still uses process caching and its own five-second HTTP timeout, with an
+unbounded body read and helper-internal response lifetime. Admission checks reject late planning but
+do not establish original-budget preemption or owned HTTP-response retirement. This limit must be
+addressed before public exposure. Native cloud/SSH acceptance, restart recovery factories,
+independent job availability and complete RunContext admission remain unproved.
 
 `plugins/azure/_native_access.py` stages private `AzureOwnedReadAccess` observations. Passive
 construction requires a recorded complete ARM path and unique VM ID; reads compare both, without
