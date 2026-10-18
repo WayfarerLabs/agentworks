@@ -14,7 +14,7 @@ from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_runs import ManagedLaunchState
-from agentworks.execution._managed_start_exchange import prepare_managed_start
+from agentworks.execution._managed_start_exchange import _PreparedAttempt, prepare_managed_start
 from agentworks.execution._managed_start_operation import (
     ManagedStartControlFact,
     ManagedStartCustody,
@@ -22,7 +22,7 @@ from agentworks.execution._managed_start_operation import (
 )
 from agentworks.execution._runtime_prerequisite import HelperClosureExpectation, RuntimeSelection, RuntimeTargetOS
 from agentworks.execution.carrier import Deadline, Dispatch
-from agentworks.operations import OperationAttempt, OperationBorrow
+from agentworks.operations import OperationAttempt, OperationBorrow, OperationOwner
 
 from .test_managed_start_operation import GUEST, OBLIGATION, ROOT, RUN, Carrier, _records, _request
 from .test_managed_start_operation import owned as owned
@@ -50,6 +50,7 @@ def start(
     route_check: Callable[[Deadline], None] | None = None,
     retain: Callable[[ManagedStartCustody], None] | None = None,
     deadline: Deadline | None = None,
+    delivery_factory: Callable[[HelperClosureExpectation], Delivery] | None = None,
 ) -> tuple[list[ManagedStartCustody], Callable[[], Any]]:
     _, repository, record, owner = owned
     budget = Deadline.after(10) if deadline is None else deadline
@@ -79,7 +80,7 @@ def start(
     def factory(actual):
         assert actual is expectation and len(held) == 1
         assert owner._active_borrow is None and not carrier.calls
-        return delivery
+        return delivery if delivery_factory is None else delivery_factory(actual)
 
     return held, lambda: start_owned_managed_run(
         repository,
@@ -91,9 +92,59 @@ def start(
         obligation_id=OBLIGATION,
         retain_custody=publish,
         closure_expectation=expectation,
-        new_helper_delivery=factory if delivery is not None else None,
+        new_helper_delivery=factory if delivery is not None or delivery_factory is not None else None,
         route_check=route_check,
     )
+
+
+@pytest.mark.parametrize("phase", ["retain", "factory", "claim", "expired", "borrow"])
+def test_early_control_publishes_positive_no_entry_without_dispatch_authority(owned, monkeypatch, phase):
+    _, _, _, owner = owned
+    carrier = Carrier(lambda request: b"")
+    control = KeyboardInterrupt("early interruption")
+    cause = ValueError("original cause")
+    control.__cause__ = cause
+    deadline = Deadline.after(10)
+    discarded = []
+    discard = _PreparedAttempt.discard
+
+    def note_discard(prepared):
+        discarded.append(prepared)
+        discard(prepared)
+
+    def interrupt(*args, **kwargs):
+        raise control
+
+    def retained(custody):
+        if phase == "retain":
+            raise control
+        if phase == "expired":
+            object.__setattr__(deadline, "expires_at", 0.0)
+
+    monkeypatch.setattr(_PreparedAttempt, "discard", note_discard)
+    if phase == "claim":
+        monkeypatch.setattr(_PreparedAttempt, "claim", interrupt)
+    if phase == "borrow":
+        monkeypatch.setattr(OperationOwner, "borrow", interrupt)
+    held, launch = start(
+        owned,
+        carrier,
+        deadline=deadline,
+        retain=retained,
+        delivery_factory=interrupt if phase == "factory" else None,
+    )
+    with pytest.raises(ValidationError if phase == "expired" else KeyboardInterrupt) as caught:
+        launch()
+    if phase != "expired":
+        assert caught.value is control and control.__cause__ is cause
+    assert discarded and discarded[0].io is None
+    custody = held[0]
+    view = custody.completion_view
+    assert view is not None and view[:2] == (Dispatch.NOT_SENT, None) and view[2].settled
+    custody.observe_cleanup(Deadline.after(0))
+    custody.retry_bookkeeping()
+    assert carrier.calls == 0 and owner._active_borrow is None
+    assert owner.list_pending_lifecycle_obligations() == ()
 
 
 @pytest.mark.parametrize("escaped", [False, True])

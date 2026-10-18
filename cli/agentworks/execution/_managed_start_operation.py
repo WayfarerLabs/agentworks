@@ -111,13 +111,13 @@ class ManagedStartCustody:
             self._local = operation.outstanding_attempt.local_delivery
         if self._active or not self._local.settled or not self._closed_helper:
             return None
-        dispatch = Dispatch.NOT_SENT if operation is not None and not operation.delivery_started else self._dispatch
+        dispatch = Dispatch.NOT_SENT if operation is None or not operation.delivery_started else self._dispatch
         return dispatch, self._completion, self._local
 
     @property
     def _closed_helper(self) -> bool:
         operation = self._operation
-        return operation is not None and (
+        return operation is None or (
             not operation.delivery_started
             or self._dispatch is Dispatch.NOT_SENT
             or (self._dispatch is Dispatch.SENT and self._completion == ExitStatus(0))
@@ -127,7 +127,7 @@ class ManagedStartCustody:
     def _validate(self) -> None:
         """Fence continuation to the original borrow, row, run and generation."""
         owner, borrow, operation = self._owner, self._borrow, self._operation
-        if self._active or borrow is None or operation is None or owner.ownership != self._ownership:
+        if self._active or borrow is None or owner.ownership != self._ownership:
             raise StateError("Managed start continuation has no inactive exact custody")
         with owner._guard:  # noqa: SLF001
             owner._reconcile_transition_locked()  # noqa: SLF001
@@ -139,17 +139,18 @@ class ManagedStartCustody:
             ):
                 raise StateError("Managed start continuation no longer owns its attempt")
             if (
-                operation.outstanding_attempt is not None
+                operation is not None
+                and operation.outstanding_attempt is not None
                 and attempt is not None
                 and attempt is not operation.outstanding_attempt
             ):
                 raise StateError("Managed start continuation attempt changed")
             # A lost begin reply precedes entry into the actual delivery.
-            if operation.outstanding_attempt is None and attempt is not None:
-                if operation.delivery_started:
+            if attempt is not None and (operation is None or operation.outstanding_attempt is None):
+                if operation is None or operation.delivery_started:
                     raise StateError("Managed start continuation lost its delivery attempt")
                 operation.outstanding_attempt = attempt
-            if operation.outstanding_attempt is not None:
+            if operation is not None and operation.outstanding_attempt is not None:
                 self._local = operation.outstanding_attempt.local_delivery
             row = owner._repository.inspect_lifecycle_obligation(self._ownership, self._obligation_id)  # noqa: SLF001
             if row is None:
@@ -174,6 +175,8 @@ class ManagedStartCustody:
 
     def observe_cleanup(self, deadline: Deadline) -> None:
         """Retire local delivery and observe this helper under a fresh route budget."""
+        if self._borrow is None and self.completion_view is not None:
+            return
         if self._borrow is not None and self._borrow.closed and self.completion_view is not None:
             return
         self._validate()
@@ -198,14 +201,16 @@ class ManagedStartCustody:
     def retry_bookkeeping(self) -> None:
         """Settle exact already-closed custody without replaying START or BEGIN."""
         borrow = self._borrow
+        if borrow is None and self.completion_view is not None:
+            return
         if borrow is not None and borrow.closed:
             return
         self._validate()
         operation = self._operation
-        assert borrow is not None and operation is not None
+        assert borrow is not None
         if not self._closed_helper or not self._local.settled:
             raise StateError("Managed start retains unresolved helper custody")
-        if operation.outstanding_attempt is not None:
+        if operation is not None and operation.outstanding_attempt is not None:
             operation.settle_helper_closure()
         record = self._repository.inspect(self._reserved.identity)
         assert record is not None
@@ -262,18 +267,19 @@ def start_owned_managed_run(
     if new_helper_delivery is not None and (retain_custody is None or closure_expectation is None):
         raise ValidationError("Managed start closure delivery requires retained exact custody")
     custody = ManagedStartCustody(repository, reserved, owner, obligation_id, route_check)
-    if retain_custody is not None:
-        retain_custody(custody)
-    if new_helper_delivery is not None and closure_expectation is not None:
-        custody._delivery = new_helper_delivery(closure_expectation)
-    payload = encode_managed_start_obligation(reserved.identity.run_id)
-    prepared.claim(reserved, carrier, deadline)
     try:
+        if retain_custody is not None:
+            retain_custody(custody)
+        if new_helper_delivery is not None and closure_expectation is not None:
+            custody._delivery = new_helper_delivery(closure_expectation)
+        payload = encode_managed_start_obligation(reserved.identity.run_id)
+        prepared.claim(reserved, carrier, deadline)
         borrow = owner.borrow()
         custody._borrow = borrow
     except BaseException:
         custody._active = False
-        prepared.discard()
+        if retain_custody is not None or prepared._claimed:
+            prepared.discard()
         raise
     try:
         operation = BorrowedFixedHelperCarrier(carrier, borrow, delivery=custody._delivery)
