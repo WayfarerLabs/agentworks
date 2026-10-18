@@ -507,6 +507,13 @@ the shared typed file errors without exposing partial content or raw local excep
 remains private: there is no directory transfer, production factory or RunContext accessor. This
 bound assembly does not activate recipient grants or the core allowlist during coexistence.
 
+`_local_file_io.py` supplies passive owners for a local source, bounded complete tree inventory and
+one-level destination directory creation. Core must retain each owner before I/O and close its
+original resources explicitly, including after failure. An uncertain close is never retried using
+the raw descriptor or handle number. Source EOF checks the admitted file observation before remote
+publication; inventories are bounded observations, not atomic snapshots. These primitives do not yet
+supply the bound directory-transfer methods or native Windows/macOS acceptance.
+
 ## File-call custody
 
 `FileOperation` requires a `ManagedTargetIdentity` that exactly matches its `OperationOwner` VM or
@@ -2023,13 +2030,18 @@ confirmed partial changes and uncertain attempts, retaining closed completed-ste
 owns path validation, the trusted parent and operation serialization. These private functions
 provide neither a public file service nor native or elevated acceptance.
 
-`_file_metadata_exchange.py` delivers `set_file_metadata` and `ensure_file_directory` through one
-sensitive finite-input carrier attempt. The fixed helper verifies execution identity, confines the
-parent and leaf, and emits its result after owned descriptor cleanup. Numeric metadata ownership is
-separate from execution identity. Missing parents refuse; directory creation does not create
-intermediate components. Complete failure records preserve known changes and uncertain attempts;
-lost observation after possible dispatch remains uncertain and never triggers replay. A control
-interruption carries a closed mutation-uncertainty marker.
+`create_directory` instead refuses an existing entry before metadata convergence, including a racing
+creator. It leaves existing directory ownership, mode and ACLs untouched. Confirmed creation
+followed by failure remains a changed or uncertain outcome, not permission to retry.
+
+`_file_metadata_exchange.py` delivers `set_file_metadata`, `ensure_file_directory` and the
+create-only `create_file_directory` through one sensitive finite-input carrier attempt. The fixed
+helper verifies execution identity, confines the parent and leaf, and emits its result after owned
+descriptor cleanup. Numeric metadata ownership is separate from execution identity. Missing parents
+refuse; directory creation does not create intermediate components. Complete failure records
+preserve known changes and uncertain attempts; lost observation after possible dispatch remains
+uncertain and never triggers replay. A control interruption carries a closed mutation-uncertainty
+marker.
 
 ## Private directory inventory
 
