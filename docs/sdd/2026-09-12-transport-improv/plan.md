@@ -5409,6 +5409,12 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
       staged request grammar identical; preserve original lease freshness checks, bounds,
       first-effect token ownership, partial-append debt and no replay. The codec alone does not
       complete staged execution.
+- [x] Implement and privately review the managed-start version-two codec: one immutable body without
+      a lease plus an exact 512-byte canonical lease/null tail. Reuse complete-control headroom and
+      the existing full request validator on reconstruction; refuse malformed tails, embedded leases
+      and lifetime or launch mismatches. Prove packed Python 3.11 decoding and stable
+      complete-envelope length across clock digit changes. This codec prerequisite does not complete
+      host staging, actual late sampling, recovery or native acceptance.
 
 The private pipe checkpoint at `6b8fe8128` passes 1,318 scoped tests with one skip and strict typing
 across 1,442 sources. Changed-file Python and Markdown quality checks pass. Project, complexity and
@@ -5460,6 +5466,13 @@ Proxmox activation request measures 24,003 bytes, not a worst-case or native gua
 managed-start path still has its two unchanged envelope failures because host staging is not yet
 connected. Remaining allowance is not proof of bounded EOF delivery or complete helper lifetime;
 native closure custody, first-effect tokens, stage cleanup and the late-lease ordering remain owed.
+
+The late-control codec at `6405d91b8` clears project, complexity and generic correctness source
+reviews. The lead's managed-start, operation and independent-start regression selection passes 531
+tests and retains exactly the two known Proxmox envelope failures. Strict typing passes across 1,466
+sources. These are local codec and regression results, not a green public handoff. The next step
+connects operation-owned staging before actual initial lease sampling; neither the codec nor its
+constant-size tail establishes that ordering on its own.
 
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
 one all-callers cutover. PR #830 publishes this design only. The following implementation PR adds

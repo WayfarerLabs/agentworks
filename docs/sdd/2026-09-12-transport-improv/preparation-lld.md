@@ -655,8 +655,8 @@ thousands of bounded transfer requests cannot consume that 60-second admission w
 increase the lease, renew it before settled start, lower the input limits or authorize a stale
 sample. The generic staged loader remains opaque to managed leases.
 
-The next private managed-start wire uses one version-two format for both inline and staged delivery:
-an immutable canonical body followed by a fixed 512-byte dispatch-control slot, using the existing
+The private managed-start codec uses one version-two format for both inline and staged delivery: an
+immutable canonical body followed by a fixed 512-byte dispatch-control slot, using the existing
 `MAX_LEASE_BYTES`. The slot contains the existing canonical lease JSON padded with ASCII spaces, or
 padded literal `null` for independent lifetime. It needs no extra wrapper, version or base64 layer.
 The lease's closed schema has fixed quoting/escaping within one bound operation; space padding makes
@@ -666,10 +666,11 @@ preparation; the two lifetime modes need not have identical quote counts.
 The body contains the ordinary exact request assets without a lease. Reuse body-only validation and
 the existing complete-control lease headroom before any staging effect; a near-limit lease-free
 control alone does not prove that the reconstructed full control fits. Recalculate the outer request
-bound too. A body-only representation never authorizes dispatch. The complete decoder
-rejects any lease already in the body, separates the exact final slot, validates canonical lease or
-null, reconstructs the control asset and uses the existing full request validator. There is no
-second staged grammar or compatibility decoder for the unreleased version-one start wire.
+bound too. A body-only representation never authorizes dispatch. The complete decoder rejects any
+lease already in the body, separates the exact final slot, validates canonical lease or null,
+reconstructs the control asset and uses the existing full request validator. There is no second
+staged grammar or compatibility decoder for the unreleased version-one start wire. This codec is
+implemented; staging orchestration and actual late sampling remain to be connected.
 
 Declare scratch length as packaged prefix plus immutable body plus that fixed slot. Transfer only
 the prefix/body before initial keeper sampling, stopping exactly at the slot offset without writing

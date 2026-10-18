@@ -2241,6 +2241,13 @@ expiry after parent resolution and before its first deletion. Neither recovery n
 that an earlier unobserved request can no longer arrive; delayed chunk requests must still validate
 their receipt and cannot recreate a cleaned stage.
 
+Managed-start requests use a canonical version-two body followed by an exact 512-byte tail. The body
+contains the prepared assets without an operation lease; the tail contains the existing canonical
+lease JSON or literal `null`, padded with ASCII spaces. Complete decoding reconstructs the control
+asset and applies the full request validator, including lifetime and launch binding. Body
+preparation reserves full lease headroom but does not authorize dispatch. This format permits bulk
+preparation before sampling a lease; host staging and actual late sampling are not connected yet.
+
 The private stage chunk cap is 12 KiB, below the scratch primitive's 24 KiB write-chunk cap. The
 complete manifest is limited to 32 KiB, and Proxmox independently enforces its full serialized body
 limit. Local tests exercise the actual request serializer, a fake provider executing the real
