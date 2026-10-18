@@ -7,7 +7,6 @@ disposition remain with that core; a returned start outcome is only start eviden
 from __future__ import annotations
 
 import threading
-from dataclasses import replace
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -17,10 +16,13 @@ from ._managed_job_protocol import encode_managed_job_fact
 from ._managed_operation_keeper import ManagedOperationKeeper, _clean_start_acknowledged
 from ._managed_request_adapter import _ManagedBody
 from ._managed_runs import ManagedLaunchState
-from ._managed_start_exchange import prepare_managed_start
 from ._managed_start_operation import ManagedStartControlFact, ManagedStartOutcome, start_owned_managed_run
+from ._managed_start_preparation import prepare_managed_start_body
 from ._managed_stop_exchange import ManagedStopState
 from ._managed_terminal import terminal_observation_proved
+from ._prepared_helper_stage import PreparedHelperStage
+from ._prepared_stage_closing import PreparedStageCleanup
+from ._runtime_prerequisite import HelperClosureExpectation, _NumericGuestBootstrap
 from .carrier import Dispatch, ExitStatus
 
 if TYPE_CHECKING:
@@ -28,11 +30,13 @@ if TYPE_CHECKING:
 
     from agentworks.operations import OperationOwner
 
+    from ._helper_closure import HelperClosureDelivery
     from ._helper_launcher import IdentityPlan
     from ._managed_job_request import ManagedLiveIO
     from ._managed_observation_exchange import ManagedObservationCandidate
     from ._managed_runs import ManagedRunReceipt, ManagedRunRecord, ManagedRunRepository, ManagedTargetIdentity
     from ._managed_start_exchange import _PreparedAttempt
+    from ._managed_start_operation import ManagedStartCustody
     from ._runtime_prerequisite import RuntimeSelection
     from ._vm_guest_identity_protocol import VMGuestIdentity
     from .carrier import Carrier, Deadline
@@ -60,6 +64,8 @@ class ManagedOperationRun:
         root_plan: IdentityPlan,
         runtime_selection: RuntimeSelection,
         live_io: ManagedLiveIO | None = None,
+        route_check: Callable[[Deadline], None] | None = None,
+        new_helper_delivery: Callable[[HelperClosureExpectation], HelperClosureDelivery] | None = None,
     ) -> None:
         self._caller_thread = threading.current_thread()
         if start_carrier is dedicated_keeper_carrier or start_obligation_id == keeper_obligation_id:
@@ -84,6 +90,8 @@ class ManagedOperationRun:
         self._guest = guest
         self._plan = root_plan
         self._runtime = runtime_selection
+        self._route_check = route_check
+        self._new_helper_delivery = new_helper_delivery
         self._expected_launch = encode_managed_job_fact(receipt)
         self._started = False
         self.reservation_started = False
@@ -93,6 +101,9 @@ class ManagedOperationRun:
         self.start_outcome: ManagedStartOutcome | None = None
         self.control_escaped = False
         self._prepared: _PreparedAttempt | None = None
+        self._stage: PreparedHelperStage | None = None
+        self._stage_cleanup: PreparedStageCleanup | None = None
+        self._start_custody: ManagedStartCustody | None = None
         self.cleanup_complete = False
         self.terminal_observation: ManagedObservationCandidate | None = None
         self.disposal_confirmed = False
@@ -113,6 +124,7 @@ class ManagedOperationRun:
         Original uncertain start debt is never resolved here. Store termination
         facts and native controller termination remain independent requirements.
         """
+        self._finish_preparation_cleanup(deadline)
         obligation = self.keeper.obligation
         if self.reservation_uncertain or self.keeper.admission_uncertain:
             raise StateError("Managed run admission remains uncertain")
@@ -170,6 +182,35 @@ class ManagedOperationRun:
         if obligation is not None:
             obligation.resolve()
 
+    def _retain_start_custody(self, custody: ManagedStartCustody) -> None:
+        """Publish actual activation custody before its first local effect."""
+        self._start_custody = custody
+
+    def _note_activation_closed(self) -> None:
+        stage, custody = self._stage, self._start_custody
+        if stage is None or not stage._activation_prepared or stage._activation_settled:  # noqa: SLF001
+            return
+        if custody is None:
+            # The retention callback precedes claim, borrow and carrier entry.
+            # No callback means final preparation failed before start admission.
+            stage.note_activation_not_dispatched()
+        elif (completion := custody.completion_view) is not None:
+            stage.note_activation_closure(completion[2])
+
+    def _finish_preparation_cleanup(self, deadline: Deadline) -> None:
+        custody = self._start_custody
+        if custody is not None:
+            try:
+                custody.observe_cleanup(deadline)
+                custody.retry_bookkeeping()
+            finally:
+                self._note_activation_closed()
+        else:
+            self._note_activation_closed()
+        cleanup = self._stage_cleanup
+        if cleanup is not None and not cleanup.finish(deadline):
+            raise StateError("Managed preparation retains owned staging")
+
     def _matches_reservation(self, record: ManagedRunRecord, body: _ManagedBody) -> bool:
         return (
             record.identity == self.receipt.identity
@@ -211,7 +252,7 @@ class ManagedOperationRun:
         *,
         before_dispatch: Callable[[], None] | None = None,
     ) -> ManagedStartOutcome | None:
-        """Reserve before keeper effects, then start once with its actual sample.
+        """Prepare and stage bulk input before sampling the actual launch lease.
 
         None means no start was attempted after a refused clock observation;
         the keeper retains that raw clock candidate. Escaping control preserves
@@ -230,24 +271,49 @@ class ManagedOperationRun:
             raise ValidationError("Operation body does not match planned receipt")
         if deadline.expires_at is None or deadline.expired:
             raise ValidationError("Operation run start requires a live finite deadline")
+        preparation = prepare_managed_start_body(
+            self._carrier,
+            self.receipt.identity,
+            self.receipt.spec,
+            body.output_policy,
+            body.request,
+            self._plan,
+            deadline,
+            self._runtime,
+            self._guest,
+        )
         try:
             self._reserve(body)
+            if preparation.staged:
+                self._stage = PreparedHelperStage(
+                    self._owner,
+                    self._carrier,
+                    self.receipt.spec.target,
+                    _NumericGuestBootstrap(self._plan, self._guest),
+                    self._runtime,
+                    deadline,
+                    preparation.expected_length,
+                    before_dispatch=self._route_check,
+                    new_helper_delivery=self._new_helper_delivery,
+                )
+                self._stage_cleanup = PreparedStageCleanup(self._stage)
+                if not self._stage.begin():
+                    return None
+                for part in preparation.parts:
+                    if not self._stage.append(part):
+                        return None
             self.keeper.admit()
             initial = self.keeper.sample_initial(deadline)
             if initial.lease is None:
                 return None
-            request = replace(body.request, operation_lease=initial.lease)
-            self._prepared = prepare_managed_start(
-                self._carrier,
-                self.receipt.identity,
-                self.receipt.spec,
-                body.output_policy,
-                request,
-                self._plan,
-                deadline,
-                self._runtime,
-                self._guest,
-            )
+            tail = preparation.freeze_tail(initial.lease)
+            control = None
+            if self._stage is not None:
+                if not self._stage.append(tail):
+                    return None
+                assert preparation.digest is not None
+                control = self._stage.prepare_activation(preparation.nonce, preparation.digest)
+            self._prepared = preparation.finish(control)
             assert self.reserved is not None
             self.start_outcome = start_owned_managed_run(
                 self._repository,
@@ -258,6 +324,15 @@ class ManagedOperationRun:
                 owner=self._owner,
                 obligation_id=self._start_obligation_id,
                 before_dispatch=before_dispatch,
+                retain_custody=self._retain_start_custody,
+                closure_expectation=HelperClosureExpectation(
+                    self._prepared.runtime.nonce,
+                    self._prepared.runtime.candidates,
+                    self._prepared.runtime.system_shim,
+                    self._guest,
+                ),
+                new_helper_delivery=self._new_helper_delivery,
+                route_check=self._route_check,
             )
             outcome = self.start_outcome
             if self.acknowledged:
@@ -269,6 +344,8 @@ class ManagedOperationRun:
                 self.start_outcome = control.__cause__.outcome
             raise
         finally:
+            preparation.clear()
+            self._note_activation_closed()
             prepared = self._prepared
             self._prepared = None
             if prepared is not None:

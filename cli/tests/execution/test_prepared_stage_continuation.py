@@ -93,7 +93,7 @@ def test_local_drain_uses_actual_custody_and_never_reopens_preparation(owned, mo
     assert prepared.cleanup(deadline=Deadline.after(30))
 
 
-def test_native_closure_false_then_true_under_fresh_route_and_same_custody(owned) -> None:
+def test_native_closure_false_then_true_under_fresh_route_and_same_custody(owned, monkeypatch) -> None:
     _, owner, carrier = owned
     deliveries: list[Delivery] = []
     routes: list[Deadline] = []
@@ -122,7 +122,7 @@ def test_native_closure_false_then_true_under_fresh_route_and_same_custody(owned
         delivery.observed.append((deadline, custody))
         return True
 
-    delivery.observe_closure = observe
+    monkeypatch.setattr(delivery, "observe_closure", observe)
     prepared.observe_cleanup(fresh)
     assert not prepared.helper_uncertain and active.borrow.closed and prepared.failed
     assert len(delivery.requests) == 1 and pending(owner) == [PREPARED_HELPER_OBLIGATION_KIND]

@@ -337,10 +337,14 @@ def test_foreground_overlap_retains_reservation_but_never_launches(view, monkeyp
     held: list[OperationBorrow] = []
     attempts: list[OperationAttempt] = []
     original = main.start.validate
+    validations = 0
 
     def validate(*args, **kwargs):
+        nonlocal validations
         original(*args, **kwargs)
-        if not held:
+        validations += 1
+        # The first validation is passive; inject overlap at actual launch.
+        if validations == 2:
             held.append(workflow.owner.borrow())
             if attempt_started:
                 attempts.append(held[0].begin_attempt())

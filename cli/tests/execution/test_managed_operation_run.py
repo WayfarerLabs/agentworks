@@ -352,7 +352,7 @@ def test_non_main_originating_caller_owns_database_and_actual_start(tmp_path: Pa
         assert not worker.is_alive()
 
 
-def test_post_reserve_carrier_refusal_retains_tombstone_and_clock(bound, monkeypatch) -> None:
+def test_delivery_preflight_refusal_precedes_reservation_and_clock(bound, monkeypatch) -> None:
     _, _, receipt = bound
     run, repository, start, clock = make_run(bound)
 
@@ -363,14 +363,10 @@ def test_post_reserve_carrier_refusal_retains_tombstone_and_clock(bound, monkeyp
         monkeypatch.setattr(start, "validate", refuse)
         with pytest.raises(ValidationError):
             run.start(body_for(receipt), Deadline.after(1))
-        assert run.reserved is not None and run.reserved.launch_state is ManagedLaunchState.RESERVED
-        assert repository.inspect(receipt.identity) == run.reserved
-        assert run.keeper.initial is not None and run.keeper.initial.lease is not None
-        assert clock.calls == 1 and start.calls == 0 and run._prepared is None
-        assert (
-            run.keeper.obligation is not None
-            and run.keeper.obligation.state is LifecycleObligationState.POSSIBLE_EFFECT
-        )
+        assert run.reserved is None and not run.reservation_started
+        assert repository.inspect(receipt.identity) is None
+        assert run.keeper.initial is None and run.keeper.obligation is None
+        assert clock.calls == 0 and start.calls == 0 and run._prepared is None
     finally:
         assert run.keeper.drain(Deadline.after(1)).drained
 
@@ -421,7 +417,15 @@ def test_close_or_takeover_between_clock_and_start_refuses_body(bound, monkeypat
     if phase == "clock":
         clock.response = response
     elif phase == "prepare":
-        monkeypatch.setattr(start, "validate", lambda *args, **kwargs: fence_change())
+        validations = 0
+
+        def fence_actual_preparation(*args, **kwargs) -> None:
+            nonlocal validations
+            validations += 1
+            if validations == 2:
+                fence_change()
+
+        monkeypatch.setattr(start, "validate", fence_actual_preparation)
     try:
         with pytest.raises(StateError):
             run.start(body_for(receipt), Deadline.after(1), before_dispatch=fence_change if phase == "armed" else None)

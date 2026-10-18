@@ -990,16 +990,13 @@ class ExecutionOperation:
                 root_plan=bootstrap.root_entry,
                 runtime_selection=runtime_selection,
                 live_io=live_io,
+                route_check=self._route_check,
+                new_helper_delivery=binding._new_helper_delivery,
             )
             self._managed_runs.append(run)
             reference = JobRef(identity.run_id)
             try:
-                route = self._route_check
-                run.start(
-                    body,
-                    deadline,
-                    before_dispatch=(lambda: route(deadline)) if route is not None else None,
-                )
+                run.start(body, deadline)
             except BaseException as control:
                 fact = ManagedExecutionControlFact(reference)
                 fact.__cause__ = control.__cause__

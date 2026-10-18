@@ -5430,6 +5430,11 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
       missing receipts never grant activation or prove absence, and unresolved receipt-acquisition
       gaps remain explicit debt. Prove these together with the complete staging/late-lease gates
       above, not as a substitute for them.
+- [ ] Complete the pre-entry borrow-publication interruption seam across helper owners. A control
+      that escapes after core admits a borrow but before its parent retains the returned handle must
+      not strand same-process cleanup. Use a general exact admission or core-owned unused borrow
+      drain, not adoption of an unidentified borrow by a particular stage. Process-loss recovery
+      alone does not satisfy this continuation gate.
 
 The private pipe checkpoint at `6b8fe8128` passes 1,318 scoped tests with one skip and strict typing
 across 1,442 sources. Changed-file Python and Markdown quality checks pass. Project, complexity and
@@ -5498,6 +5503,18 @@ Those are local measurements, not native or worst-case connection proof. The sta
 retained by production launch paths. Actual activation/late sampling, same-process and process-loss
 recovery, and the two known managed inline-envelope failures remain open. The unused registration
 flag found by complexity review is removed; no recovery engine or new host lock is introduced.
+
+The next private composition connects OPERATION launch to body preparation, owned staging and one
+late tail. Its local scripted selection passes 446 cases and strict typing covers 1,479 sources. The
+10,000-byte staged workload is reconstructed unchanged while every actual helper request passes the
+existing complete Proxmox serializer limit. A final-preparation refusal proves no activation entry
+and permits exact stage cleanup without fabricated delivery evidence. The parent retains actual
+START helper custody for same-process continuation, and closing stage cleanup uses only its already
+admitted token binding. The duplicated stage uncertainty flag found by complexity review is replaced
+by the retained active-call state. These are implementation and local-test facts, not a completed
+private review or native acceptance. INDEPENDENT staging, process-loss recovery, the pre-entry
+borrow-publication seam and the two old inline-envelope fixtures remain open, along with the
+complete-surface gates above.
 
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
 one all-callers cutover. PR #830 publishes this design only. The following implementation PR adds

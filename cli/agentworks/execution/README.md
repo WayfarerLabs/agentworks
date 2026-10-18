@@ -2245,8 +2245,13 @@ Managed-start requests use a canonical version-two body followed by an exact 512
 contains the prepared assets without an operation lease; the tail contains the existing canonical
 lease JSON or literal `null`, padded with ASCII spaces. Complete decoding reconstructs the control
 asset and applies the full request validator, including lifetime and launch binding. Body
-preparation reserves full lease headroom but does not authorize dispatch. This format permits bulk
-preparation before sampling a lease; host staging and actual late sampling are not connected yet.
+preparation reserves full lease headroom but does not authorize dispatch. `ManagedStartPreparation`
+validates the immutable body and delivery limits without creating a dispatchable attempt. It freezes
+one launch-bound lease/null tail and finalizes against the original carrier and deadline. The
+private OPERATION parent uses this path before reservation. When inline delivery does not fit, it
+stages the prefix and body before sampling the initial lease, appends that single tail, and
+activates the fixed loader once. INDEPENDENT parent adoption and native acceptance remain
+incomplete.
 
 The private stage chunk cap is 12 KiB, below the scratch primitive's 24 KiB write-chunk cap. The
 complete manifest is limited to 32 KiB, and Proxmox independently enforces its full serialized body
@@ -2276,9 +2281,18 @@ Cleanup accepts an explicit fresh finite budget without reopening preparation. I
 actual helper and activation closure; token reconciliation supplies cleanup debt only, not an active
 load reference or absence proof. A failed or interrupted cleanup retires active reuse, and completed
 removal marks the stage cleaned before resolving its separate row. Unknown delivery, missing
-receipts and lost bookkeeping replies retain uncertainty. Parent launch retention, truthful
-activation reporting, same-process drain/bookkeeping continuation and process-loss recovery dispatch
-are not wired yet. This class does not activate jobs or provide a public FileAccess operation.
+receipts and lost bookkeeping replies retain uncertainty. Same-process continuation retains the
+actual stage helper borrow, delivery and bounded candidate, observes exact closure under a fresh
+cleanup budget, and reconciles local bookkeeping without replaying preparation.
+
+The private OPERATION parent retains its stage and `ManagedStartCustody` before their effects.
+Activation closure is independent of launch acknowledgment. `PreparedStageCleanup` may remove the
+exact owned stage after ordinary operation admission stops; it cannot create, append or activate
+work. Unknown cleanup delivery blocks another helper until closure is proved. Later explicit
+idempotent removal still requires the original cleanup debt and positive removal evidence. An
+abandoned activation that never reached start admission uses an explicit no-dispatch proof, not a
+fabricated exit code. Process-loss recovery and the pre-entry borrow-publication interruption window
+remain open ownership-integration gates. These classes do not provide a public FileAccess operation.
 
 `_scratch_root.py` opens the fixed Linux `/tmp` directory without following symlinks and requires
 UID 0 and mode 01777. It creates and repairs nothing, ignores environment-selected temporary paths,
@@ -2297,11 +2311,11 @@ bytes stay data. Scratch descriptor borrowing reuses receipt, object identity, t
 cleanup-debt checks without copying the whole input into memory. Stdin and argv are restored;
 integer `SystemExit` returns through outer admission cleanup, while other controls propagate.
 
-This root-only private foundation is not connected to managed-start delivery or FileAccess. Host
-staging obligations, transfer orchestration, lease ordering and cleanup remain unimplemented. Its
-remaining allowance bounds verification/admission cooperatively, not stalled envelope delivery or
-the invoked helper's complete lifetime. Envelope reading still requires EOF, and actual native
-helper closure remains separate evidence. Local packed-helper tests are not native acceptance.
+The private OPERATION managed-start path selects this loader when the original inline delivery does
+not fit; FileAccess and INDEPENDENT launch do not use it. Its remaining allowance bounds
+verification/admission cooperatively, not stalled envelope delivery or the invoked helper's complete
+lifetime. Envelope reading still requires EOF, and actual native helper closure remains separate
+evidence. Local packed-helper and scripted composition tests are not native acceptance.
 
 ## Private file snapshot exchanges
 
