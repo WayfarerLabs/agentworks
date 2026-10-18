@@ -1316,10 +1316,7 @@ class FileOperation:
                 binding.effect_gate
                 if (
                     (family is FileCallFamily.DOWNLOAD and isinstance(binding, FileDownloadBinding))
-                    or (
-                        family in {FileCallFamily.UPLOAD, FileCallFamily.PACKAGE_UPLOAD}
-                        and isinstance(binding, FileUploadBinding)
-                    )
+                    or (family is FileCallFamily.UPLOAD and isinstance(binding, FileUploadBinding))
                 )
                 else None
             ),
