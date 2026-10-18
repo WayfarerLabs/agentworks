@@ -5851,6 +5851,15 @@ re-review remain required. Controlled package-build and installed-wheel proof at
 separately; it does not turn the earlier offline full-suite failure into a pass. No native or
 complete additive acceptance follows.
 
+All three independent source lanes clear the fresh-version correction at `b12b7ba9a`. The full
+non-integration run at that pin returns 21,312 passes, 56 skips and two failures in 393.39 seconds:
+the SSH-owned natural-exit input fixture already routed to its owner, and the isolated offline
+package-build test. The prior cloud and managed-admission regressions no longer fail. Separate
+controlled-dependency package-build and installed-wheel proof passes at the same pin, as do
+changed-file quality and source fingerprints. The full result remains a failure, not a green
+combined acceptance claim; SSH fixture adaptation, native evidence and the broader additive gates
+remain open.
+
 - [ ] Bind an actual operation-length availability hold for Lima's WSL driver before complete
       additive acceptance. Reuse the existing WSL ownership/lifetime machinery where applicable;
       host-only running snapshots do not prevent idle shutdown. Independent-job hold adoption
