@@ -5390,7 +5390,7 @@ and VM-bound, not recipient-account authorization; permission activation retains
 These results do not establish native credential transitions or close the broader additive
 RunContext gate.
 
-- [ ] Implement and privately review the native RunContext entry boundary over the existing native
+- [x] Implement and privately review the native RunContext entry boundary over the existing native
       operation. Acquire one exact VM claim before platform work and yield an ordinary context with
       its prepared admin and optional explicitly selected agent targets. Preserve config,
       descriptive scope, scoped secret reader and legacy handles without invoking or falling back to
@@ -5400,6 +5400,13 @@ RunContext gate.
       production activation/creation/rollback propagation, full platform and public-surface
       acceptance under their broader unchecked gates; this private entry point does not complete
       them.
+
+The native-context private checkpoint at `29089e229` passes 696 scoped cases and strict typing
+across 1,439 sources. Changed-file Ruff/format and Markdown quality checks pass. Independent
+project, complexity and generic correctness source reviews are clear. Actual packed helper command
+and file write/read tests use simulated guest admission; native credential transitions and complete
+backend workflows remain unproved. Existing production callers and their activation/rollback
+ownership are unchanged, so the broader additive RunContext and migration gates remain open.
 
 - [ ] Add platform-owned new-stack connection/provisioning composition without decoding opaque VM
       metadata in core or constructing legacy targets. Apply the
