@@ -1,4 +1,4 @@
-"""Owned local Lima selection, startup, and managed guest preparation."""
+"""Owned local Lima availability and native route preparation."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from agentworks.capabilities.vm_platform.base import ProviderLocator, provider_l
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
 from agentworks.execution._lima_activation import LimaActivation
-from agentworks.execution._lima_binding import lima_native_binding
+from agentworks.execution._lima_binding import lima_independent_availability, lima_native_binding
 from agentworks.execution._lima_selection import LimaLocalSelection
 
 if TYPE_CHECKING:
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution._lima_selection import LimaSelection
     from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
-    from agentworks.execution.binding import NativeExecutionBinding
+    from agentworks.execution.binding import NativeExecutionBinding, _IndependentJobAvailability
     from agentworks.execution.carrier import Deadline
     from agentworks.operations import OperationOwner
 
@@ -41,13 +41,19 @@ class LimaOwnedNativePlatformAccess:
     _native_selected: LimaSelection | None = field(default=None, init=False, repr=False)
     activation: LimaActivation | None = field(default=None, init=False, repr=False)
     _used: bool = field(default=False, init=False, repr=False)
-    _available: bool = field(default=False, init=False, repr=False)
+    _available_selection: LimaSelection | None = field(default=None, init=False, repr=False)
     _native_used: bool = field(default=False, init=False, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
 
     @property
     def route_check(self) -> Callable[[Deadline], None] | None:
         return self._check_route if self.binding is not None else None
+
+    @property
+    def independent_availability(self) -> _IndependentJobAvailability | None:
+        """Return the selected driver's fact without constructing a native route."""
+        selected = self._available_selection
+        return None if selected is None or self._closed else lima_independent_availability(selected.vm_type)
 
     @property
     def native_configuration_check(self) -> Callable[[], None]:
@@ -72,7 +78,17 @@ class LimaOwnedNativePlatformAccess:
                 self.vm.name,
                 deadline,  # noqa: SLF001
             )
-        return self.route.observe(deadline, self.custody)
+        try:
+            current = self.route.observe(deadline, self.custody)
+        except BaseException:
+            self._available_selection = None
+            raise
+        available = self._available_selection
+        if available is not None:
+            self._available_selection = (
+                current if current.power is VMStatus.RUNNING and current.locator == available.locator else None
+            )
+        return current
 
     def observe_power(self, deadline: Deadline) -> VMStatus:
         if self.selected is not None:
@@ -110,11 +126,11 @@ class LimaOwnedNativePlatformAccess:
             raise StateError("Lima native preparation requires fresh running readiness")
         if self.activation is not None:
             self.activation.confirm_running(current, deadline)
-        self._available = True
+        self._available_selection = current
         return selected.locator
 
     def prepare_native_route(self, deadline: Deadline) -> NativeExecutionBinding:
-        if self._native_used or self._closed or not self._available:
+        if self._native_used or self._closed or self._available_selection is None:
             raise StateError("Lima native route requires available single-use access")
         self._native_used = True
         current = self._observe(deadline)

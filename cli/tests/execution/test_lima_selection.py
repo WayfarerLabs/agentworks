@@ -275,20 +275,100 @@ def test_malformed_optional_directory_connection_refuses_at_boundary() -> None:
         LimaConnection("selected", "/limactl", "relative")
 
 
-def test_availability_stage_never_binds_or_probes_native_guest(local, monkeypatch) -> None:
+@pytest.mark.parametrize("driver", ["qemu", "vz", "wsl2", "external-driver"])
+def test_availability_stage_never_binds_or_probes_native_guest(local, monkeypatch, driver: str) -> None:
     fake, access = local
+    fake.vm_type = driver
+    assert access.independent_availability is None
     power = access.observe_power(Deadline.after(5))
+    assert access.independent_availability is None
     monkeypatch.setattr(
         "agentworks.vms._lima_native_access.lima_native_binding",
         lambda *a: pytest.fail("availability constructed a native binding"),
     )
     locator = access.ensure_available(power, Deadline.after(5))
     assert access.binding is None and access.route_check is None and access.guest_check is None
+    count = len(fake.calls)
+    expected = _IndependentJobAvailability.NO_IDLE_STOP if driver in {"qemu", "vz"} else None
+    assert access.independent_availability is expected
+    assert len(fake.calls) == count
+    with pytest.raises(AttributeError):
+        access.independent_availability = None
     fake.user = "changed-native-user"
     fake.vm_type = "changed-native-driver"
     assert access.observe_locator(Deadline.after(5)) == locator
+    assert access.independent_availability is None
     assert access.settle(Deadline.after(5))
+    assert access.independent_availability is None
     assert all(argv[1] == "list" for argv, _, _ in fake.calls)
+
+
+@pytest.mark.parametrize("original, fresh", [("qemu", "external-driver"), ("qemu", "wsl2"), ("external-driver", "vz")])
+def test_availability_fact_uses_fresh_confirmed_driver_instead_of_original_power_selection(
+    local, original, fresh
+) -> None:
+    fake, access = local
+    fake.vm_type = original
+    power = access.observe_power(Deadline.after(5))
+    fake.vm_type = fresh
+    access.ensure_available(power, Deadline.after(5))
+    expected = _IndependentJobAvailability.NO_IDLE_STOP if fresh in {"qemu", "vz"} else None
+    assert access.independent_availability is expected
+    assert access.binding is None
+
+
+@pytest.mark.parametrize("failure", ["power", "replacement", "projection"])
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_failed_or_lost_availability_never_exposes_original_driver_fact(local, failure: str, confirmed: bool) -> None:
+    fake, access = local
+    power = access.observe_power(Deadline.after(5))
+    if confirmed:
+        access.ensure_available(power, Deadline.after(5))
+        assert access.independent_availability is _IndependentJobAvailability.NO_IDLE_STOP
+    if failure == "power":
+        fake.status = "Stopped"
+    elif failure == "replacement":
+        fake.directory.rename(fake.home / "original")
+        fake.directory.mkdir()
+    else:
+        fake.raw = b"invalid projection"
+    if confirmed:
+        if failure == "power":
+            access.observe_locator(Deadline.after(5))
+        else:
+            with pytest.raises(StateError):
+                access.observe_locator(Deadline.after(5))
+    else:
+        with pytest.raises(StateError):
+            access.ensure_available(power, Deadline.after(5))
+    assert access.independent_availability is None
+    assert access.binding is None
+
+
+def test_stopped_activation_can_publish_availability_fact_without_native_route(local) -> None:
+    fake, access = local
+    fake.status = "Stopped"
+    power = access.observe_power(Deadline.after(5))
+    assert access.independent_availability is None
+    access.ensure_available(power, Deadline.after(5))
+    assert access.independent_availability is _IndependentJobAvailability.NO_IDLE_STOP
+    assert access.activation.running_observed and access.binding is None
+
+
+def test_availability_fact_uses_final_running_observation(local, monkeypatch) -> None:
+    fake, access = local
+    power = access.observe_power(Deadline.after(5))
+    run = fake.run
+
+    def change_after_revalidation(*args, **kwargs):
+        result = run(*args, **kwargs)
+        fake.vm_type = "external-driver"
+        return result
+
+    monkeypatch.setattr(_lima_selection, "run_process", change_after_revalidation)
+    access.ensure_available(power, Deadline.after(5))
+    assert access.selected.vm_type == "qemu"
+    assert access.independent_availability is None and access.binding is None
 
 
 def test_stopped_start_preserves_original_full_route_selection(local) -> None:

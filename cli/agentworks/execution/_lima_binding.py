@@ -14,6 +14,11 @@ if TYPE_CHECKING:
     from agentworks.execution._lima_selection import LimaSelection
 
 
+def lima_independent_availability(vm_type: str) -> _IndependentJobAvailability | None:
+    """QEMU/VZ runtime persists across shell delivery; other drivers need proof."""
+    return _IndependentJobAvailability.NO_IDLE_STOP if vm_type in {"qemu", "vz"} else None
+
+
 def lima_native_binding(selected: LimaSelection) -> NativeExecutionBinding:
     """Root entry obtains early facts; their body uses Lima's actual account."""
     connection = LimaConnection(selected.instance, selected.executable, selected.home, selected.directory)
@@ -28,9 +33,5 @@ def lima_native_binding(selected: LimaSelection) -> NativeExecutionBinding:
         RuntimeSelection(RuntimeTargetOS.LINUX),
         _early_guest_facts_route=_EarlyGuestFactsRoute(carrier, root_entry, selected.user),
         _new_managed_delivery=lambda: LimaCarrier(connection),
-        # The ordinary QEMU/VZ runtime outlives shell delivery. Unknown drivers
-        # and WSL2 require their own resource availability proof.
-        _independent_availability=(
-            _IndependentJobAvailability.NO_IDLE_STOP if selected.vm_type in {"qemu", "vz"} else None
-        ),
+        _independent_availability=lima_independent_availability(selected.vm_type),
     )
