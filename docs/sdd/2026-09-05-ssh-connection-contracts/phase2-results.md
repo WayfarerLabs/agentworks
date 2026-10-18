@@ -859,8 +859,66 @@ private lanes and the root local gates recorded in its
 [local closeout](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6253552962); its
 fresh native handoff remains open.
 
-The patch contribution does not adopt the shared increments into the older SSH branch, change the PR
-base or create a review-requested/ready edge. Shared runtime adoption, production terminal and
-presentation composition, genuine creation/trust publication, both usable RunContext paths and full
-R1-R5 acceptance remain open. Completed plan records and the later retirement sequence are
-unchanged.
+That standalone patch handoff did not adopt shared increments into the older SSH branch or create a
+review-requested/ready edge. The later working composition below records adoption separately.
+Production terminal and presentation composition, genuine creation/trust publication, both usable
+RunContext paths and full R1-R5 acceptance remain open. Completed plan records and the later
+retirement sequence are unchanged.
+
+## Current transport composition and independent terminal work
+
+Transport adopted the supplied input fixtures unchanged at
+`9011809a70d32535d871b451d7a3e637cc65a107`, using local commits `aeaae39e6` and `9011809a7`. The
+complete payload hashes, original authors and session trailers were preserved. These are local
+adoption identities, not the original SSH commit objects. The SSH working composition incorporates
+that transport head and retains the published SSH artifact head as an ancestor. No public base
+change or history rewrite is required.
+
+The initial merge with transport `a3c8e8613` had eight conflicting hunks in five transport-owned
+files. Selecting the published owner alternatives reproduced each complete file exactly. A later
+file-quality check found a duplicated 55-line retirement section: the two copies were
+byte-identical. Removing the second restored the entire transport SDD to its owner-published bytes.
+Two independent composition reviews clear the corrected `12630f8be`; they do not review the whole
+transport feature. The subsequent `9011809a7` merge is conflict-free. At evaluated joint pin
+`ccfbaf6ebdfd32e51c5b56463d5e73a90791f40b`, all production CLI source and the transport SDD match
+that owner head exactly.
+
+One additional SSH-owned drain fixture correction distinguishes per-pipe ordering from a global
+stream barrier. The original observation counted a valid one-byte stderr EOF probe while stdout
+retained pending bytes. The corrected test records the original stdout descriptor, proves a positive
+pending prefix and forbids further reads from that descriptor. The other stream may drain. The
+query-failure case targets that same descriptor and still requires all 4,096 bytes. Original
+deadlines, statuses, control-exception identity, privacy and original process/pipe/PTY cleanup
+checks remain. All three independent private lanes clear `ccfbaf6eb`; independent early-read
+controls fail all three boundary cases at the revised assertion. No production behavior changed.
+
+The first complete local composition run at `798d14236` (unchanged runtime/tests at `12630f8be`)
+reported four failures, 21,844 passes and 78 skips. Two were the SSH drain observations above. One
+used a nonstandard virtual-environment location; the normal `cli/.venv` layout passes that case. The
+transport metadata fixture assumes a file mode distinct from `0640`; inherited umask `027` already
+creates that mode, so its asserted change correctly does not occur. An isolated comparison passes
+both setup cases under `022` and preserves the metadata failure under `027`. This is routed to
+transport, with no shared fixture or production edit by SSH.
+
+The complete rerun at `ccfbaf6eb`, using normal CLI layout and child umask `022`, reports one
+failure, 21,938 passes, 78 skips and 51 fork warnings. All SSH cases pass. The remaining transport
+managed-controller fixture fails its peer's initial connection during a 0.15-second admission
+window, before sending the wrong handshake or reaching application-entry assertions. That unchanged
+node passes alone; no root cause or production correction is established. The
+[owner report](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6255585869) retains
+the exact scope. Full Ruff/format, strict typing across 1,535 sources and canonical file quality
+pass. Earlier Rulesync, locked-SDD, Typer isolation and website results remain attributed to their
+actual composition pin. Original failed views are retained; the combined head is not green.
+
+Independent SSH terminal work also proceeds under the operator's continuation direction. Private
+candidate `e9442d6a8150102656db15a9b410a7645f855231` routes concrete terminal input through the
+actual carrier's common admission/version/deadline/custody/report path and existing POSIX relay. Its
+three private lanes clear the corrected eight-file unit; the developer and independent correctness
+lane each pass 578 SSH cases with 12 skips. Sixteen new cases exercise actual shared terminal
+preparation through a synthetic installed client and owned PTYs. Delayed successful preflight and
+delayed application-entry controls pass after correcting fixture timing and canonical key
+interpretation. The parent observes raw `16 07 CR`, while the restored remote canonical mode
+observes `07 LF`. Literal and encoded privacy, exact status/output and retained cleanup remain
+checked. These are synthetic Linux observations. The candidate remains separate from public feature
+activation; installed-client proof, macOS/Windows, Windows owner/keyboard delivery and shared
+presentation cleanup remain open. Full standup and the later retirement sequence are unchanged.
