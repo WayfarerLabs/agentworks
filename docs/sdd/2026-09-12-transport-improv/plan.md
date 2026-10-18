@@ -1135,15 +1135,23 @@ transitions, while fresh-budget cleanup may settle the existing acknowledged sta
 admission. Missing acknowledgments remain unresolved. Author `f11ae51b` passes 316 selected offline
 actual-SDK cases, full strict typing across 1,391 sources and five-file Ruff lint/format. These are
 author-base measurements, not whole-composition or native acceptance. Independent paired source
-reviews remain pending.
+reviews were pending at that checkpoint.
 
 The initial verification launcher reused its new pytest temporary directory, replacing the first two
 failed runs' generated fixture databases; their logs and final-run fixtures remain. No
 pre-task/operator database was selected. This custody deviation is not recoverable from the green
 result. Both later correction runs use distinct fresh temporary directories and retain their
-fixtures and logs. The current prefix discovery helper still has separate timeout, body-size and
-response-lifetime limits; resolve those before public exposure rather than treating admission checks
-as complete original-budget proof.
+fixtures and logs. The current prefix discovery helper still had separate timeout, body-size and
+response-lifetime limits at that pin.
+
+All three subsequent source reviews identify required corrections rather than clearing that unit:
+never-admitted activation cleanup, final-close retry after settled effects, fresh running state,
+typed active SDK errors and inherited offline configuration. The corrected author `7079af98` passes
+351 selected cases and full strict typing across 1,391 sources; its final fixture-local rename is
+runtime-neutral and follows the test run. Main separately integrates a passive owned prefix detector
+with 56 focused cases and scoped strict typing. It retains the HTTP original, bounds discovery and
+blocks fallback on expiry or uncertain closure. Joint integration tests and all three independent
+paired re-reviews remain required before claiming this complete private unit accepted.
 
 - [ ] Complete owned AWS access with a reviewed successful-start settlement rule, fresh power and
       exact guest preparation, endpoint trust and selected firewall-route lifetime. Obtain native
@@ -4502,9 +4510,18 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       Preserve versions one through four and prove the new DOWNLOAD-only versions five and six,
       their recovery envelope, original-row retention and aggregate teardown. This does not deliver
       a directory facade, post-crash local repair, native acceptance or complete public FileAccess.
-      The two completed private child-checkpoint kernels above are superseded by ordinary-call
-      directory composition; their historical completion records do not establish the simpler
-      implementation below.
+
+#### Ordinary directory composition
+
+The two completed private child-checkpoint kernels above are superseded by ordinary-call directory
+composition; their historical completion records do not establish the simpler implementation below.
+The private ordinary-bookkeeping implementation at `e8f5caaf` removes association admission and
+positive-history writes while retaining exact debt/closure retry and supported codec versions one
+through six. Its 335 selected cases and full strict typing over 1,391 sources pass. Initial fixture
+failures came from unsafe inherited workspace permissions/ACLs; a fresh private temporary fixture
+root passes without weakening guards. Both failed and successful fixtures remain preserved, with
+successful fixtures moved into workspace evidence after terminal-use and byte/metadata checks.
+Independent review and joint integration remain pending, so the implementation item stays open.
 
 - [ ] Retire unused generic transfer-association writers and success-history publication while
       preserving ordinary-call custody and exact bookkeeping-only retry. Keep admission before local

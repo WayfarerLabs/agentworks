@@ -1238,11 +1238,18 @@ settles only this access's effects, and never stops an activated VM or releases 
 its own. The new route requires `DescribeSecurityGroupRules`; its nonce description does not
 introduce an additional tagging permission.
 
-The current prefix helper's process cache, separate five-second timeout, unbounded HTTP body read
-and internally owned response remain a concrete acceptance gap. Before/after deadline checks alone
-are not preemption or response retirement. Resolve this gap before public exposure. Offline actual
-SDK evidence and source review do not supply native proof, restart recovery, independent-job
-availability or complete RunContext acceptance.
+Use a passive access-owned prefix detector retained before discovery. Do not reuse process-cached
+discovery: bound its HTTP body, derive the timeout from the remaining original budget and retain
+each returned response before subsequent checks. Configured-prefix fallback requires settled
+response custody and a live deadline. Cleanup retries only the original response, without reopening
+discovery. Synchronous DNS/read/close remain best-effort bounded, and normal public close does not
+establish physical socket drain. Offline actual SDK evidence and source review do not supply native
+proof, restart recovery, independent-job availability or complete RunContext acceptance.
+
+Keep terminal work admission separate from effect settlement and final client retirement. Once
+effects settle, retain that fact before final closure so fresh cleanup can retire the original
+clients without re-entering active work. A terminally closed activation that never began admission
+has no startup effect; uncertain registration or a missing acknowledgment is not that proof.
 
 ### Configured AWS role credential custody
 

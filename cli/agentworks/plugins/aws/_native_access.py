@@ -20,6 +20,7 @@ from agentworks.plugins.aws.auth import _build_ambient_session
 from agentworks.plugins.aws.config import AwsAmbientAuth
 from agentworks.plugins.aws.network import error_code, wrap_ec2_error
 from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_native_binding
+from agentworks.vms._ssh_native_exposure import OwnedSSHExposure
 from agentworks.vms.target_preparation import VMTargetPreparationControlFact, prepare_managed_vm_target_from_platform
 
 if TYPE_CHECKING:
@@ -65,6 +66,7 @@ class EC2OwnedAccess:
         self.preparation: VMTargetPreparation | None = None
         self._activation: EC2Activation | None = None
         self._route: EC2NativeRoute | None = None
+        self._exposure: OwnedSSHExposure | None = None
         self._locator: ProviderLocator | None = None
         self._endpoint: object = None
         self._used = False
@@ -77,7 +79,7 @@ class EC2OwnedAccess:
 
     def prepare(self, power: VMStatus, deadline: Deadline) -> None:
         """Retain each selected effect before the next preparation boundary."""
-        from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
+        from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs
         from agentworks.plugins.aws._native_route import EC2NativeRoute
 
         if self._used or self._owner is None or power not in (VMStatus.RUNNING, VMStatus.STOPPED):
@@ -117,7 +119,8 @@ class EC2OwnedAccess:
         self._endpoint = instance.get("PublicIpAddress")
         self.binding = ssh_native_binding(self._vm, self._endpoint, settings)
         provider_locator_remaining(deadline, vm_name=self._vm.name)
-        prefixes = tuple(dict.fromkeys(operator_ssh_prefixes(config_allow_cidrs(self._ctx.config))))
+        self._exposure = OwnedSSHExposure(self._vm.name)
+        prefixes = self._exposure.resolve(config_allow_cidrs(self._ctx.config), deadline)
         provider_locator_remaining(deadline, vm_name=self._vm.name)
         instance_id, region, account_id = self._platform._locator_metadata(self._vm)
         self._route = EC2NativeRoute(
@@ -246,6 +249,9 @@ class EC2OwnedAccess:
                 closers.append(lambda: activation.close(deadline))
             if route is not None:
                 closers.append(lambda: route.close(deadline))
+            exposure = self._exposure
+            if exposure is not None:
+                closers.append(lambda: exposure.close(deadline))
             for closer in closers:
                 try:
                     closer()
@@ -276,12 +282,13 @@ class EC2OwnedAccess:
 
     @property
     def cleanup_incomplete(self) -> bool:
-        """Whether either concrete original lacks a normal public-close return."""
+        """Whether a retained original lacks a normal public-close return."""
         return (
             self._read_client is not None
             or (self._role_auth is not None and self._role_auth.cleanup_incomplete)
             or (self._activation is not None and self._activation.cleanup_incomplete)
             or (self._route is not None and self._route.cleanup_incomplete)
+            or (self._exposure is not None and self._exposure.cleanup_incomplete)
         )
 
     def observe_power(self, deadline: Deadline) -> VMStatus:

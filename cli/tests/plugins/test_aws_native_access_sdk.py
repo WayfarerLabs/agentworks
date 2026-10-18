@@ -6,6 +6,7 @@ import os
 import socket
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs
@@ -112,6 +113,8 @@ def native_aws(monkeypatch, tmp_path, inherited_aws):
         after_send=lambda action: None,
         preparations=[],
         pauses=[],
+        prefix_responses=[],
+        prefix_close_error=None,
         close_hook=lambda client: None,
     )
 
@@ -123,9 +126,31 @@ def native_aws(monkeypatch, tmp_path, inherited_aws):
 
     monkeypatch.setattr(_native_access, "time", SimpleNamespace(sleep=pause))
     monkeypatch.setattr(_native_access, "_build_ambient_session", lambda region: session)
-    monkeypatch.setattr(
-        "agentworks.capabilities.vm_platform.ssh_exposure.operator_ssh_prefixes", lambda extras: [PREFIX]
-    )
+
+    class PrefixResponse(BytesIO):
+        def __init__(self) -> None:
+            super().__init__(b"192.0.2.1\n")
+            self.close_calls = 0
+            self.read_calls = 0
+
+        def read(self, size: int = -1) -> bytes:
+            assert size == 65
+            self.read_calls += 1
+            return super().read(size)
+
+        def close(self) -> None:
+            self.close_calls += 1
+            if probe.prefix_close_error is not None:
+                raise probe.prefix_close_error
+            super().close()
+
+    def open_prefix_response(url: str, *, timeout: float) -> PrefixResponse:
+        assert url == "https://checkip.amazonaws.com" and 0 < timeout <= 5
+        response = PrefixResponse()
+        probe.prefix_responses.append(response)
+        return response
+
+    monkeypatch.setattr("agentworks.vms._ssh_native_exposure.urlopen", open_prefix_response)
 
     def prepare(vm, platform, locator, binding, *, deadline, owner, observe_locator):
         assert observe_locator.__self__ is probe.access
@@ -309,6 +334,25 @@ def test_sdk_duplicate_tuple_is_never_adopted_or_revoked(native_aws):
     assert p.access.settle(p.deadline)
     assert len(p.rules) == 1
     assert not any(a in ("AuthorizeSecurityGroupIngress", "RevokeSecurityGroupIngress") for a, _ in p.calls)
+
+
+def test_sdk_prefix_response_debt_blocks_route_and_settles_original_without_replay(native_aws):
+    p = native_aws
+    p.prefix_close_error = OSError("offline prefix response close")
+    with pytest.raises(StateError):
+        p.access.prepare(VMStatus.RUNNING, p.deadline)
+    exposure = p.access._exposure
+    assert exposure is not None and exposure.cleanup_incomplete and exposure.prefixes is None
+    assert p.access.cleanup_incomplete and p.access._route is None and not p.preparations
+    assert len(p.prefix_responses) == 1
+    response = p.prefix_responses[0]
+    assert response.read_calls == 1 and response.close_calls == 1 and not response.closed
+    assert not any(a in ("StartInstances", "AuthorizeSecurityGroupIngress") for a, _ in p.calls)
+    p.prefix_close_error = None
+    assert p.access.settle(p.deadline)
+    assert not exposure.cleanup_incomplete and response.closed
+    assert response.close_calls == 2 and response.read_calls == 1 and len(p.prefix_responses) == 1
+    assert not p.owner.list_pending_lifecycle_obligations()
 
 
 @pytest.mark.parametrize("fault", ["lost", "malformed", "control"])

@@ -994,8 +994,10 @@ Its ordinary-call composition below has a different contract and remains unfinis
 ### Generic directory-transfer child checkpoints
 
 The former generic positive-history checkpoint design is superseded by ordinary-call composition.
-Its completed private kernel work remains historical evidence in the plan; removing unused writers
-must preserve real custody safeguards and requires a separate persisted-format compatibility audit.
+Its completed private kernel work remains historical evidence in the plan. Ordinary-call admission
+no longer produces those associations or positive-history writes; real custody safeguards remain.
+Keep all supported persisted-format readers until their separate compatibility disposition, without
+inspecting or discarding operator databases to justify deletion.
 
 Generic directory copying composes ordinary owned file calls. The 128 limit applies to unfinished
 obligations, not completed history. It needs no parent coordinator, rotating row, transfer ordinal

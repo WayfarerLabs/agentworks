@@ -235,8 +235,9 @@ or operator-stopped intent refuses preparation without activation, holds, routes
 Initial read failures retain the same access for cleanup and, when retirement is uncertain, cleanup
 retry. The access also keeps platform activation, hold and partial preparation evidence; only core
 closes child work and local delivery, checks the complete ledger, seals obligations and releases the
-aggregate owner. WSL2 and Proxmox supply these private adapters. Owned cloud SDK read clients, other
-platforms and the public RunContext surface remain pending.
+aggregate owner. WSL2, Proxmox and AWS supply private owned access adapters; Azure and GCP have
+private retained read clients. Complete platform coverage, native acceptance and the public
+RunContext surface remain pending.
 
 `plugins/aws/_native_access.py` supplies private, passive `EC2OwnedAccess` for exact power, locator
 and public-endpoint observations and the AWS owned native access factory. The caller retains it
@@ -280,11 +281,15 @@ observer to shared guest preparation, and rechecks endpoint and route before lat
 its own clients and effects, never stops the VM merely because it started it, and never closes the
 outer operation owner.
 
-The prefix-discovery helper still uses process caching and its own five-second HTTP timeout, with an
-unbounded body read and helper-internal response lifetime. Admission checks reject late planning but
-do not establish original-budget preemption or owned HTTP-response retirement. This limit must be
-addressed before public exposure. Native cloud/SSH acceptance, restart recovery factories,
-independent job availability and complete RunContext admission remain unproved.
+`vms/_ssh_native_exposure.py` provides per-access prefix discovery without a process cache. AWS
+retains it before discovery, bounds the response body to 64 bytes and uses a timeout no greater than
+five seconds or the original remaining budget. Failed public response closure retains the original,
+blocks route admission and permits cleanup-only retry. Explicit configured prefixes remain the
+fallback after ordinary discovery failure, but not after expiry or uncertain response retirement.
+Public close, including HTTPError wrapper behavior, is not proof of physical socket drain.
+Synchronous DNS, reads and close retain best-effort rather than hard-preemption limits. Native
+cloud/SSH acceptance, restart recovery factories, independent job availability and complete
+RunContext admission remain unproved.
 
 `plugins/azure/_native_access.py` stages private `AzureOwnedReadAccess` observations. Passive
 construction requires a recorded complete ARM path and unique VM ID; reads compare both, without
@@ -508,28 +513,20 @@ application-checkpoint reconciliation remain necessary before package recovery c
 one-row package path provides serial checkpoint custody, not a workaround for completed-call
 history.
 
-An ordinary private upload can carry an `UploadChildAssociation`: a fresh 16-byte transfer identity
-and a member ordinal from 0 through 4,095. Its original row records that association and a false
-success marker before dispatch. Only a positively complete upload with settled custody and no
-failure, deadline expiry or uncertainty publishes the true marker, before borrow closure makes the
-receipt immutable. This core checkpoint is not application ownership or a complete directory result.
-Failed or refused calls can resolve their rows without success; retained effects keep their exact
-cleanup facts without success.
-
-An ordinary private download can similarly carry a `DownloadChildAssociation`. Admission precedes
-creation of new workstation staging. The existing local call retains the actual child and remote and
-local outcomes through publication and cleanup. Its success checkpoint follows verified remote
-completion, successful requested local publication and positive result reduction with settled
-custody. A failed cleanup remains unsuccessful even if subsequent cleanup settles its debt. Missing
-completion capture retains custody rather than inferring success from a resolved receipt. Cleanup of
-a previously retained stage remains separate from admission of the new child.
+Ordinary uploads and downloads do not admit transfer associations or publish durable success
+history. Each call retains its actual outcome and exact unfinished-debt publication intent until
+bookkeeping and borrow closure settle. Upload completion is not inferred from receipt resolution.
+Downloads admit the remote child before creating new workstation staging and retain remote/local
+facts through verified publication, cleanup and public reduction. Failed cleanup never becomes an
+original successful result after a later cleanup retry. Missing completion capture retains custody.
+Cleanup of a previously retained stage remains separate from admission of a new child.
 
 Uncertain registration retains the original local call, prepared child and borrow even when no stage
 or helper was dispatched. Bookkeeping and aggregate closure refuse that unresolved admission; they
 do not reconstruct it or replay the call. Only confirmed admission or a proved-absent refusal allows
 the active entry to be released before dispatch.
 
-Interrupted checkpoint publication retains the actual child, outcome and exact intended payload and
+Interrupted debt publication retains the actual child, outcome and exact intended payload and
 revision. Bookkeeping settlement retries only that same publication and borrow closure, without
 reading the source or dispatching another helper. Confirmation checks the payload and the exact next
 revision. Native aggregate teardown invokes this settlement before checking its components. Pending
@@ -544,10 +541,10 @@ credentials, commands, routes and connection objects. This is private, additive 
 not claim production orchestration, recovery takeover, RunContext adoption, permission enforcement
 or the future #377 lock hierarchy.
 
-The private file-call codec preserves version-one and version-two records byte-for-byte when no
-child association is supplied. Associated uploads use version three without numeric bootstrap and
-version four with it; associated downloads use versions five and six, respectively. Each associated
-version includes an explicit success marker from admission. Bootstrap-bound records retain
+New ordinary admissions use version-one or version-two records without transfer associations. The
+private codec also preserves supported persisted associated uploads in versions three/four and
+downloads in versions five/six, including their existing success fields. Retiring new association
+writers does not remove readers or authorize deleting existing data. Bootstrap-bound records retain
 root-entry identity and the full guest separately from the body identity. The codec validates Linux
 system-Python selection, target boot and any gate's full guest before encoding or accepting
 persisted bytes. Each typed record exposes its actual payload version; installation and updates use
