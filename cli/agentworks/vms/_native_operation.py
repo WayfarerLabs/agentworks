@@ -141,6 +141,10 @@ class _Workflow:
                 raise interrupted
             if not drained:
                 raise StateError("Native VM managed keeper drain remains unsettled")
+            # Bookkeeping cannot settle a finished helper while its actual
+            # host delivery is still open. This drain proves no guest closure.
+            if not self.owner.close_local_delivery(budget):
+                raise StateError("Native VM operation retains unsettled helper delivery")
             if self.views.execution_operation.active_inline_calls:
                 self.views.execution_operation.observe_inline_cleanup(budget)
             try:

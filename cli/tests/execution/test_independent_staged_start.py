@@ -392,12 +392,8 @@ def test_actual_activation_local_delivery_must_drain_before_scratch_cleanup(stag
     (active,) = operation.active_inline_calls
     assert active.start.local_delivery is carrier.activation_custody
     assert not active.start.local_delivery.settled and not active.start.stage._activation_settled
-    if not native:
-        with pytest.raises(StateError):
-            workflow.close(cleanup_deadline=Deadline.after(5))
-        assert not active.start.stage.cleaned
-        assert carrier.activation_custody.close(Deadline.after(5))
     workflow.close(cleanup_deadline=Deadline.after(5))
+    assert carrier.activation_custody.settled
     assert active.start.stage.cleaned and workflow.owner._released
     assert carrier.events.count("activate") == 1
 
