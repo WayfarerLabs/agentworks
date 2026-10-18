@@ -9,9 +9,12 @@ from pathlib import Path
 import pytest
 
 _FRESH_PROCESS_BOOTSTRAP = r"""
+import sys
+
+assert not any(name == "agentworks" or name.startswith("agentworks.") for name in sys.modules)
+
 import importlib.abc
 import os
-import sys
 
 retired = (
     "agentworks.transports", "agentworks.ssh", "agentworks.remote_exec",
@@ -26,12 +29,17 @@ class BlockRetired(importlib.abc.MetaPathFinder):
 
 sys.meta_path.insert(0, BlockRetired())
 source_root = os.path.normcase(os.path.realpath(sys.argv[1]))
+package_roots = {
+    package: os.path.normcase(os.path.realpath(os.path.join(source_root, package)))
+    for package in ("agentworks", "tests")
+}
 sys.path.insert(0, sys.argv[1])
 
-def within_source(path):
+def within_package(package, path):
     try:
         candidate = os.path.normcase(os.path.realpath(path))
-        return os.path.commonpath((source_root, candidate)) == source_root
+        package_root = package_roots[package]
+        return os.path.commonpath((package_root, candidate)) == package_root
     except ValueError:
         return False
 
@@ -44,10 +52,10 @@ def assert_first_party_origins(require_tests=False):
                 spec = module.__spec__
                 assert spec is not None, name
                 if spec.origin is not None:
-                    assert within_source(spec.origin), (name, spec.origin)
+                    assert within_package(package, spec.origin), (name, spec.origin)
                 if spec.submodule_search_locations is not None:
                     locations = tuple(spec.submodule_search_locations)
-                    assert locations and all(within_source(path) for path in locations), (name, locations)
+                    assert locations and all(within_package(package, path) for path in locations), (name, locations)
     assert found["agentworks"] and (not require_tests or found["tests"]), found
 """
 
@@ -94,7 +102,7 @@ assert_first_party_origins()
     _run_fresh_process(cli_root, script)
 
 
-@pytest.mark.windows
+@pytest.mark.skipif(sys.platform != "linux", reason="synthetic Linux workflow fixture")
 def test_native_context_workflow_in_a_fresh_process(tmp_path: Path) -> None:
     script = r"""
 import grp
@@ -105,7 +113,6 @@ import sys
 from contextlib import closing
 from pathlib import Path, PurePosixPath
 
-from _pytest.monkeypatch import MonkeyPatch
 import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
@@ -113,12 +120,12 @@ from agentworks.db import Database, OperationResourceKind, OperationScope
 from agentworks.errors import StateError
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.files import Create, JsonStrategy, NewMetadata
-from agentworks.execution.models import Command
+from agentworks.execution.models import Command, Input, Output
 from agentworks.execution.profiles import Protection
 from agentworks.execution.result import ExitCode
 from agentworks.execution.target import ExecutionRoute
 from agentworks.vms._native_operation import vm_execution_context
-from tests.vms.test_native_operation import _install_route, _scope
+from tests.vms.test_native_operation import _install_route
 from tests.vms.test_target_preparation import _MARKER
 
 assert_first_party_origins(require_tests=True)
@@ -138,10 +145,14 @@ metadata = NewMetadata(
 )
 platform = WSL2Platform("wsl2", {})
 deadline = Deadline.after(30)
-command = Command([
+command = Command((
     "/usr/bin/python3", "-I", "-S", "-B", "-c",
-    "import sys; print('fresh-workflow'); sys.exit(0)",
-])
+    "import sys; assert sys.argv[1:] == ['arg with spaces', 'quote with \"double\" and spaces', 'back\\\\slash']; "
+    "assert sys.stdin.buffer.read() == bytes.fromhex('00ff800d0a'); "
+    "sys.stdout.buffer.write(bytes.fromhex('6f757400ff0d0a')); "
+    "sys.stderr.buffer.write(bytes.fromhex('65727200800d0a')); sys.exit(23)",
+    "arg with spaces", "quote with \"double\" and spaces", "back\\slash",
+))
 scope = OperationScope(OperationResourceKind.VM, "box")
 retained = None
 route = None
@@ -150,7 +161,7 @@ try:
     with closing(Database(database_path)) as database:
         database.insert_vm("box", "wsl2", "box", admin_username="admin", instance_marker=_MARKER)
         database.update_vm_platform_metadata("box", {"distro_name": "Ubuntu"})
-        with MonkeyPatch.context() as monkeypatch:
+        with pytest.MonkeyPatch.context() as monkeypatch:
             route, native, observer = _install_route(database, platform, monkeypatch)
             route.local.scratch = scratch
             with vm_execution_context(
@@ -167,9 +178,16 @@ try:
                 execution = retained.execution()
                 files = retained.files()
                 assert execution is not None and files is not None
-                result = execution.run(command, profile=Protection.DIRECT, deadline=deadline)
-                assert result.ok and result.status == ExitCode(0)
-                assert result.stdout.data == b"fresh-workflow\n"
+                result = execution.run(
+                    command,
+                    profile=Protection.DIRECT,
+                    stdin=Input.bytes(bytes.fromhex("00ff800d0a")),
+                    output=Output.capture(max_bytes=64),
+                    deadline=deadline,
+                )
+                assert result.status == ExitCode(23)
+                assert result.stdout.data == bytes.fromhex("6f757400ff0d0a")
+                assert result.stderr.data == bytes.fromhex("65727200800d0a")
 
                 file_path = trusted_root / "workflow.txt"
                 written = files.write_file(
