@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import asdict, dataclass, replace
 from threading import TIMEOUT_MAX, Lock
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from agentworks.capabilities.vm_platform.base import ProviderLocator
@@ -14,6 +14,9 @@ from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES, LifecycleOblig
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution.carrier import Deadline
 from agentworks.operations import LifecycleObligation, OperationOwner
+
+if TYPE_CHECKING:
+    from agentworks.plugins.aws._owned_auth import _OwnedRoleSession
 
 OBLIGATION_KIND = "aws-ec2-start"
 PAYLOAD_VERSION = 1
@@ -101,6 +104,8 @@ class EC2Activation:
     Construction is passive. Retain this adapter before calling start; after
     interruption reconcile retries fenced ledger bookkeeping only. Selected
     credential work is synchronous and cannot enforce a hard elapsed deadline.
+    The caller serializes and admits the same configured-role helper and session
+    around start. Normal public client close does not prove physical socket drain.
     """
 
     def __init__(
@@ -112,6 +117,8 @@ class EC2Activation:
         region: str,
         instance_id: str,
         expected_locator: ProviderLocator,
+        *,
+        role_auth: _OwnedRoleSession | None = None,
     ) -> None:
         if (
             owner.ownership.scope.resource_kind is not OperationResourceKind.VM
@@ -125,10 +132,12 @@ class EC2Activation:
             raise ValidationError("EC2 activation locator does not match the selected identity")
         self._owner = owner
         self._session = session
+        self._role_auth = role_auth
         self._lock = Lock()
         self._obligation_id = uuid4().hex
         self._obligation: LifecycleObligation | None = None
         self._attempted = False
+        self._closed = False
         self._mark_began = False
         self._client: Any = None
 
@@ -169,7 +178,7 @@ class EC2Activation:
         control: KeyboardInterrupt | SystemExit | None = None
         try:
             self._remaining(deadline)
-            if self._attempted:
+            if self._closed or self._attempted:
                 raise StateError("EC2 activation was already attempted")
             self._attempted = True
             self._obligation = self._owner.register_lifecycle_obligation(
@@ -192,6 +201,8 @@ class EC2Activation:
                     ),
                 )
                 client = self._client
+                if self._role_auth is not None:
+                    client.meta.events.register("before-send.ec2.StartInstances", self._role_auth.guard_ec2_send)
                 self._remaining(deadline)
                 self._mark_began = True
                 self._obligation.mark_possible_effect()
@@ -220,6 +231,28 @@ class EC2Activation:
             if control is not None:
                 raise control from None
             raise
+        finally:
+            self._lock.release()
+
+    def close(self, deadline: Deadline) -> bool:
+        """Bar future start and retry only the retained original EC2 public close.
+
+        This neither settles startup nor reconciles its ledger or credential
+        helper. The caller separately owns configured-role client retirement.
+        """
+        self._acquire(deadline)
+        try:
+            self._closed = True
+            self._remaining(deadline)
+            if self._client is not None:
+                try:
+                    self._client.close()
+                except Exception:
+                    pass
+                else:
+                    self._client = None
+            self._remaining(deadline)
+            return not self.cleanup_incomplete
         finally:
             self._lock.release()
 
