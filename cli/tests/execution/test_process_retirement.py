@@ -329,6 +329,7 @@ def test_early_eof_and_teardown_share_sticky_close_and_original_control(
         original_close()
 
 
+@pytest.mark.windows
 @pytest.mark.parametrize("failure_site", ["status", "collection", "record", "publication"])
 def test_construction_failure_keeps_installed_records_and_actual_child_custody(
     monkeypatch: pytest.MonkeyPatch, failure_site: str
@@ -375,6 +376,7 @@ def test_construction_failure_keeps_installed_records_and_actual_child_custody(
         assert all(record.attempted and record.confirmed for record in retained_pipes._records)
 
 
+@pytest.mark.windows
 def test_unattempted_record_allocation_failure_retries_only_safe_work(monkeypatch: pytest.MonkeyPatch) -> None:
     owner = core.LocalProcessOwner()
     allocate = core._PipeClose
@@ -406,6 +408,7 @@ def test_unattempted_record_allocation_failure_retries_only_safe_work(monkeypatc
     assert owner.close() is first and not first.cleaned
 
 
+@pytest.mark.windows
 def test_permanent_status_allocation_failure_retains_child_until_explicit_safe_retry(monkeypatch: pytest.MonkeyPatch):
     owner = core.LocalProcessOwner()
     allocate = core._ProcessStatus
@@ -426,6 +429,7 @@ def test_permanent_status_allocation_failure_retains_child_until_explicit_safe_r
     assert owner.close() is first and not first.cleaned
 
 
+@pytest.mark.windows
 def test_generic_poll_error_preserves_separately_owned_process_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
     owner = core.LocalProcessOwner()
     poll = core._ProcessStatus.poll
