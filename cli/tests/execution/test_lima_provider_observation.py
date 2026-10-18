@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import time
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
@@ -204,13 +205,24 @@ def test_authorized_wsl_start_acquires_exact_registration_then_resolves_user(wsl
     if absent:
         state.registration = replace(exact, guid=None, base_path=None)
     state.listing = b"lima-selected Stopped 2"
+    phase_started = time.monotonic()
+    phase_timings: list[tuple[str, float]] = []
+
+    def record_phase(name: str) -> None:
+        phase_timings.append((name, time.monotonic() - phase_started))
+
     deadline = Deadline.after(5)
+    record_phase("deadline-created")
+    record_phase("observe-power-start")
     power = access.observe_power(deadline)
+    record_phase("observe-power-returned")
     original = access.selected
     start = fake.run
 
     def activate(*args, **kwargs):
+        record_phase("activation-enter")
         result = start(*args, **kwargs)
+        record_phase("activation-returned")
         state.registration = exact
         state.listing = b"lima-selected Running 2"
         return result
@@ -219,14 +231,30 @@ def test_authorized_wsl_start_acquires_exact_registration_then_resolves_user(wsl
     spawn = state.native.spawn_owned
 
     def hold_spawn(argv, hold_deadline):
+        record_phase("hold-spawn-enter")
         assert hold_deadline is deadline and access.wsl_hold is not None
         assert access.wsl_hold.selected.registration == exact
         assert access.activation.running_observed
         assert access.activation.obligation.state is LifecycleObligationState.RESOLVED
         spawn(argv, hold_deadline)
+        record_phase("hold-spawn-returned")
 
     monkeypatch.setattr(state.native, "spawn_owned", hold_spawn)
-    locator = access.ensure_available(power, deadline)
+    record_phase("ensure-available-start")
+    try:
+        locator = access.ensure_available(power, deadline)
+    except BaseException as error:
+        error.add_note(
+            "WSL readiness phase diagnostics: "
+            f"elapsed={time.monotonic() - phase_started:.3f}s, "
+            f"deadline_remaining={deadline.remaining()!r}, phases={phase_timings!r}, "
+            f"provider_events={[name for name, _ in state.calls]!r}, "
+            f"lima_actions={[argv[1] for argv, _, _ in fake.calls]!r}, "
+            f"hold_events={state.native.events!r}, "
+            f"hold_spawn_reached={any(name == 'hold-spawn-enter' for name, _ in phase_timings)}"
+        )
+        raise
+    record_phase("ensure-available-returned")
     assert access.selected is original and access.activation.running_observed
     assert access.activation.obligation.state is LifecycleObligationState.RESOLVED
     assert access.wsl_hold is not None

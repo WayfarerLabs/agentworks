@@ -172,26 +172,43 @@ def test_late_cleanup_does_not_rewrite_unknown_dispatch(
     original_clock = time.monotonic
     module = wsl2 if kind == "wsl" else client
     pump = module.run_process
+    factory_diagnostics: list[str] = []
     monkeypatch.setattr(time, "monotonic", lambda: original_clock() + (60 if entered.is_set() else 0))
 
     def spawn(argv, **kwargs):
-        if kind == "ssh" and argv[-1] == "-V":
-            child = original([sys.executable, "-c", "import sys; sys.stderr.write('OpenSSH_9.9p1')"], **kwargs)
-        else:
-            entered.set()
-            assert release.wait(30)
-            child = original(
-                [sys.executable, "-c", f"import pathlib,time; pathlib.Path({str(marker)!r}).touch(); time.sleep(30)"],
-                **kwargs,
-            )
+        started_at = original_clock()
+        stage = "ssh-version" if kind == "ssh" and argv[-1] == "-V" else "dispatch"
+        child: subprocess.Popen[bytes] | None = None
+        try:
+            if stage == "ssh-version":
+                child = original([sys.executable, "-c", "import sys; sys.stderr.write('OpenSSH_9.9p1')"], **kwargs)
+            else:
+                entered.set()
+                assert release.wait(30)
+                child = original(
+                    [
+                        sys.executable,
+                        "-c",
+                        f"import pathlib,time; pathlib.Path({str(marker)!r}).touch(); time.sleep(30)",
+                    ],
+                    **kwargs,
+                )
             children.append(child)
-            until = original_clock() + 3
-            while not marker.exists() and original_clock() < until:
-                time.sleep(0.01)
-            assert marker.exists()
+            if stage == "dispatch":
+                stage = "client-marker-readiness"
+                until = original_clock() + 3
+                while not marker.exists() and original_clock() < until:
+                    time.sleep(0.01)
+                assert marker.exists()
             return child
-        children.append(child)
-        return child
+        except Exception as error:
+            factory_diagnostics.append(
+                f"stage={stage!r}, error={type(error).__name__}: {error!r}, "
+                f"elapsed={original_clock() - started_at:.3f}s, marker_ready={marker.exists()}, "
+                f"child_alive={child is not None and child.poll() is None}, "
+                f"child_returncode={None if child is None else child.returncode}"
+            )
+            raise
 
     def observe_after_cleanup(argv, **kwargs):
         result = pump(argv, **kwargs)
@@ -211,12 +228,22 @@ def test_late_cleanup_does_not_rewrite_unknown_dispatch(
         report = _carrier(kind, tmp_path).execute(
             PreparedInvocation(("/fixture",)), io=CarrierIO(), deadline=Deadline.after(30), custody=custody
         )
-        assert marker.exists() and custody.settled
-        assert report.dispatch is Dispatch.UNKNOWN
-        assert report.completion is None and report.failure is Failure.OBSERVATION
     finally:
         release.set()
-        assert custody.close(Deadline.after(3))
+        settled = custody.close(Deadline.after(3))
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=3)
+            for pipe in (child.stdin, child.stdout, child.stderr):
+                if pipe is not None:
+                    pipe.close()
+    diagnostic = f"Popen factory diagnostics after custody settlement: {factory_diagnostics!r}"
+    assert marker.exists() and custody.settled, diagnostic
+    assert report.dispatch is Dispatch.UNKNOWN, diagnostic
+    assert report.completion is None and report.failure is Failure.OBSERVATION, diagnostic
+    assert not factory_diagnostics, diagnostic
+    assert settled
     assert len(children) == (1 if kind == "wsl" else 2)
     assert all(child.returncode is not None for child in children)
     assert all(pipe is None or pipe.closed for child in children for pipe in (child.stdin, child.stdout, child.stderr))
