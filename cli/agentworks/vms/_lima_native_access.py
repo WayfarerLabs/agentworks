@@ -11,6 +11,7 @@ from agentworks.errors import StateError
 from agentworks.execution._lima_activation import LimaActivation
 from agentworks.execution._lima_binding import lima_independent_availability, lima_native_binding
 from agentworks.execution._lima_selection import LimaLocalSelection
+from agentworks.execution._lima_wsl_hold import LimaWSLHold
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -40,6 +41,8 @@ class LimaOwnedNativePlatformAccess:
     selected: LimaSelection | None = field(default=None, init=False, repr=False)
     _native_selected: LimaNativeSelection | None = field(default=None, init=False, repr=False)
     activation: LimaActivation | None = field(default=None, init=False, repr=False)
+    wsl_hold: LimaWSLHold | None = field(default=None, init=False, repr=False)
+    _wsl_release_confirmed: bool = field(default=False, init=False, repr=False)
     _used: bool = field(default=False, init=False, repr=False)
     _available_selection: LimaSelection | None = field(default=None, init=False, repr=False)
     _native_used: bool = field(default=False, init=False, repr=False)
@@ -61,7 +64,7 @@ class LimaOwnedNativePlatformAccess:
 
     @property
     def guest_check(self) -> Callable[[VMGuestIdentity], None] | None:
-        return None
+        return None if self.wsl_hold is None else self.wsl_hold.require_guest
 
     def _validate_native_configuration(self) -> None:
         self.platform._require_local_native()  # noqa: SLF001
@@ -88,6 +91,8 @@ class LimaOwnedNativePlatformAccess:
             self._available_selection = (
                 current if current.power is VMStatus.RUNNING and current.locator == available.locator else None
             )
+            if self.wsl_hold is not None:
+                self.wsl_hold.require_ready()
         return current
 
     def observe_power(self, deadline: Deadline) -> VMStatus:
@@ -130,6 +135,15 @@ class LimaOwnedNativePlatformAccess:
             self.activation.confirm_running(current, deadline)
         else:
             selected.require_same_route(current)
+        if current.vm_type == "wsl2":
+            self.wsl_hold = LimaWSLHold(self.vm, current, self.owner)
+            self.wsl_hold.start(deadline)
+            confirmed = self._observe(deadline)
+            current.require_same_route(confirmed)
+            if confirmed.power is not VMStatus.RUNNING:
+                raise StateError("Lima WSL hold requires fresh running readiness")
+            self.wsl_hold.require_ready()
+            current = confirmed
         self._available_selection = current
         return current.locator
 
@@ -141,6 +155,8 @@ class LimaOwnedNativePlatformAccess:
         current = self._observe(deadline)
         if current.locator != available.locator or current.power is not VMStatus.RUNNING:
             raise StateError("Lima selected native route changed or is no longer running")
+        if self.wsl_hold is not None:
+            self.wsl_hold.require_ready()
         assert self.route is not None
         self._native_selected = self.route.resolve_native(current, deadline, self.custody)
         self.binding = lima_native_binding(self._native_selected)
@@ -150,6 +166,8 @@ class LimaOwnedNativePlatformAccess:
         if self._native_selected is None or self.route is None:
             raise StateError("Lima native route is not selected")
         self.route.check_native(self._native_selected, deadline, self.custody)
+        if self.wsl_hold is not None:
+            self.wsl_hold.require_ready()
 
     def settle(self, deadline: Deadline) -> bool:
         """Retire local custody and exact bookkeeping without stopping the VM."""
@@ -157,6 +175,22 @@ class LimaOwnedNativePlatformAccess:
         self._closed = True
         if not self.custody.close(deadline):
             return False
+        if self.wsl_hold is not None:
+            assert self.route is not None
+            if self._wsl_release_confirmed:
+                return self.route.close()
+            try:
+                if self.activation is not None and not self.activation.reconcile(deadline):
+                    return False
+                selected = self.wsl_hold.selected
+                selected.require_same_route(self.route.observe(deadline, self.custody))
+                if not self.wsl_hold.release(deadline):
+                    return False
+                selected.require_same_route(self.route.observe(deadline, self.custody))
+            except Exception:
+                return False
+            self._wsl_release_confirmed = True
+            return self.route.close()
         directory_settled = False
         try:
             settled = self.activation is None or self.activation.reconcile(deadline)

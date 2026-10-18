@@ -18,7 +18,7 @@ from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope, VMStatus
 from agentworks.db.operations import OperationRepository
 from agentworks.errors import ConnectivityError, LimitExceededError, StateError, ValidationError
-from agentworks.execution import _lima_activation, _lima_selection
+from agentworks.execution import _lima_activation, _lima_selection, _lima_wsl_hold
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._helper_launcher import IdentityMode
 from agentworks.execution._lima_activation import decode_activation_payload
@@ -223,6 +223,24 @@ def test_original_power_change_refuses_before_start(local, monkeypatch) -> None:
     with pytest.raises(StateError):
         prepare_native(access, original, Deadline.after(10))
     assert access.activation is None and not access.owner.list_pending_lifecycle_obligations()
+
+
+@pytest.mark.parametrize("driver", ["qemu", "vz"])
+def test_non_wsl_availability_never_constructs_windows_hold(local, monkeypatch, driver) -> None:
+    fake, access = local
+    fake.vm_type = driver
+    (fake.directory / "lima.yaml").write_text(f"vmType: {driver}\n")
+
+    def denied(*args, **kwargs):
+        pytest.fail("non-WSL availability constructed Windows ownership")
+
+    monkeypatch.setattr(_lima_wsl_hold, "WindowsWSL2HostClient", denied)
+    monkeypatch.setattr(_lima_wsl_hold, "WSL2GuestObserver", denied)
+    deadline = Deadline.after(5)
+    access.ensure_available(access.observe_power(deadline), deadline)
+    access.prepare_native_route(deadline)
+    assert access.wsl_hold is None and access.guest_check is None
+    assert access.independent_availability is not None and access.settle(deadline)
 
 
 @pytest.mark.parametrize("initial", ["Running", "Stopped"])

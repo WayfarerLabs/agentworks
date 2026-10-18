@@ -19,7 +19,7 @@ from agentworks.capabilities.base import RunContext, TargetAbsence
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
-from agentworks.execution import _lima_activation, _lima_selection
+from agentworks.execution import _lima_activation, _lima_selection, _lima_wsl_hold
 from agentworks.execution._lima_selection import LimaDirectoryCustody, LimaLocalSelection
 from agentworks.execution._wsl2_registration import WSLRegistration
 from agentworks.execution.binding import _IndependentJobAvailability
@@ -28,9 +28,11 @@ from agentworks.execution.carriers.lima import LimaCarrier
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
 from agentworks.execution.target import ExecutionRoute
+from agentworks.operations import LifecycleObligation
 from agentworks.vms._lima_native_access import LimaOwnedNativePlatformAccess
 from agentworks.vms._native_operation import vm_execution_context
 from tests.execution.carriers.test_lima import process_result
+from tests.execution.test_wsl2_platform_hold import FakeNative, FakeObserver
 from tests.vms.canonical_support import ADDRESS, canonical_config, install_canonical_delivery
 from tests.vms.test_lima_native_access import LocalLima
 from tests.vms.test_native_operation import _root, _RouteCarrier, _scope
@@ -63,7 +65,18 @@ def lima(database, tmp_path, monkeypatch, request):
         original=None,
         deadline=Deadline.after(30),
         root=_root(tmp_path),
+        native=FakeNative([]),
+        observer=FakeObserver([]),
     )
+    original_delivery = route.execute
+
+    def delivery(*args, **kwargs):
+        if driver == "wsl2":
+            assert state.access.wsl_hold is not None
+            state.access.wsl_hold.require_ready()
+        return original_delivery(*args, **kwargs)
+
+    monkeypatch.setattr(route, "execute", delivery)
     original_build = platform.build_native_execution_access
     original_which = shutil.which
     monkeypatch.setenv("LIMA_HOME", str(home))
@@ -115,6 +128,8 @@ def lima(database, tmp_path, monkeypatch, request):
     if driver == "wsl2":
         monkeypatch.setattr(_lima_selection, "sys", SimpleNamespace(platform="win32"))
         monkeypatch.setattr(_lima_selection, "observe_registration", registration)
+        monkeypatch.setattr(_lima_wsl_hold, "WindowsWSL2HostClient", lambda: state.native)
+        monkeypatch.setattr(_lima_wsl_hold, "WSL2GuestObserver", lambda connection: state.observer)
 
     monkeypatch.setattr(platform, "build_native_execution_access", build)
     monkeypatch.setattr(platform, "resolve_native_execution_binding", deny)
@@ -149,6 +164,10 @@ def test_canonical_lima_repeated_observations_share_context_owner_and_cleanup(da
         assert len(fake.calls) + len(lima.host_calls) > 3
         if fake.vm_type == "wsl2":
             assert all(argv[1] == "start" for argv, _, _ in fake.calls)
+            assert access.wsl_hold is not None
+            access.wsl_hold.require_ready()
+        else:
+            assert access.wsl_hold is None and lima.native.events == []
         assert access.binding is access.route_check is None
         assert lima.route.guest.calls == 1 and lima.route.accounts.calls == ["admin", "root"]
         held = access.route.directory
@@ -186,6 +205,46 @@ def test_canonical_lima_repeated_observations_share_context_owner_and_cleanup(da
     with pytest.raises(StateError):
         files.stat(lima.root / "missing")
     assert before == (len(fake.calls), len(lima.connections))
+
+
+@pytest.mark.parametrize("lima", [("wsl2", "Running")], indirect=True)
+def test_canonical_guest_preparation_requires_durable_wsl_ready(database, tmp_path, lima, monkeypatch):
+    monkeypatch.setattr(LifecycleObligation, "publish_payload", lambda self, **kwargs: self._persisted_obligation)
+    with (
+        pytest.raises(StateError),
+        vm_execution_context(
+            database,
+            "box",
+            lima.platform,
+            RunContext(config=canonical_config(tmp_path)),
+            route=ExecutionRoute.CANONICAL,
+            deadline=lima.deadline,
+            trusted_root=lima.root,
+        ),
+    ):
+        pytest.fail("non-durable WSL hold admitted guest preparation")
+    assert lima.route.guest.calls == 0 and lima.connections == [] and lima.fake.calls == []
+    assert lima.native.events.count("dispatch") == 1
+
+
+@pytest.mark.parametrize("lima", [("wsl2", "Running")], indirect=True)
+def test_canonical_wsl_restarted_distribution_refuses_before_account_preparation(database, tmp_path, lima):
+    lima.route.guest.init_ticks += 1
+    with (
+        pytest.raises(StateError),
+        vm_execution_context(
+            database,
+            "box",
+            lima.platform,
+            RunContext(config=canonical_config(tmp_path)),
+            route=ExecutionRoute.CANONICAL,
+            deadline=lima.deadline,
+            trusted_root=lima.root,
+        ),
+    ):
+        pytest.fail("restarted WSL distribution admitted a body")
+    assert lima.route.guest.calls == 1 and lima.route.accounts.calls == []
+    assert lima.access.route.directory.settled and database.operations.inspect(_scope()) is None
 
 
 @pytest.mark.parametrize("lima", [("unknown", "Running")], indirect=True)

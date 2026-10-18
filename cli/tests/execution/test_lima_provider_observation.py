@@ -13,15 +13,21 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.db import LifecycleObligationState, VMStatus
 from agentworks.errors import StateError
-from agentworks.execution import _lima_activation, _lima_configuration, _lima_selection
+from agentworks.execution import _lima_activation, _lima_configuration, _lima_selection, _lima_wsl_hold
 from agentworks.execution._lima_configuration import LimaConfiguration, decode_version, read_configuration
 from agentworks.execution._lima_selection import LimaDirectoryCustody, LimaLocalSelection
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
+from agentworks.execution._wsl2_lifecycle import GuestAnchorPresence
+from agentworks.execution._wsl2_platform_hold import decode_hold_payload, encode_hold_payload
 from agentworks.execution._wsl2_registration import WSLRegistration, decode_registration, execution_power_from_listing
 from agentworks.execution.carrier import Deadline, SinkOutput
 from agentworks.execution.target import ExecutionRoute
+from agentworks.operations import LifecycleObligation, OperationOwner
 from agentworks.vms._native_operation import _vm_operation
 from tests.execution.carriers.test_lima import process_result
+from tests.execution.test_wsl2_platform_hold import BOOT, OPEN, SETTLED, FakeNative, FakeObserver
 from tests.vms.test_lima_native_access import local as local
+from tests.vms.test_target_preparation import _MARKER
 
 pytestmark = pytest.mark.windows
 
@@ -46,6 +52,8 @@ def wsl(local, monkeypatch):
         listing=b"NAME STATE VERSION\n* lima-selected Running 2\n",
         calls=[],
         owned=True,
+        native=FakeNative([]),
+        observer=FakeObserver([]),
     )
 
     def registration(name, vm_name, deadline, custody):
@@ -68,7 +76,10 @@ def wsl(local, monkeypatch):
 
     monkeypatch.setattr(_lima_selection, "observe_registration", registration)
     monkeypatch.setattr(_lima_selection, "run_process", run)
+    monkeypatch.setattr(_lima_wsl_hold, "WindowsWSL2HostClient", lambda: state.native)
+    monkeypatch.setattr(_lima_wsl_hold, "WSL2GuestObserver", lambda connection: state.observer)
     state.run = run
+    state.observe_registration = registration
     return fake, access, state
 
 
@@ -173,6 +184,7 @@ def test_core_operator_stopped_gate_precedes_lima_list_and_start(wsl, absent, mo
     ):
         pytest.fail("operator-stopped selection admitted a body")
     assert fake.calls == [] and access.activation is None and access.binding is None
+    assert access.wsl_hold is None and state.native.events == []
 
 
 @pytest.mark.parametrize("absent", [False, True])
@@ -194,9 +206,22 @@ def test_authorized_wsl_start_acquires_exact_registration_then_resolves_user(wsl
         return result
 
     monkeypatch.setattr(_lima_activation, "run_process", activate)
+    spawn = state.native.spawn_owned
+
+    def hold_spawn(argv, hold_deadline):
+        assert hold_deadline is deadline and access.wsl_hold is not None
+        assert access.wsl_hold.selected.registration == exact
+        assert access.activation.running_observed
+        assert access.activation.obligation.state is LifecycleObligationState.RESOLVED
+        spawn(argv, hold_deadline)
+
+    monkeypatch.setattr(state.native, "spawn_owned", hold_spawn)
     locator = access.ensure_available(power, deadline)
     assert access.selected is original and access.activation.running_observed
     assert access.activation.obligation.state is LifecycleObligationState.RESOLVED
+    assert access.wsl_hold is not None
+    access.wsl_hold.require_ready()
+    assert state.native.argv[:5] == ("wsl", "--distribution", exact.name, "--user", "root")
     assert [argv[1] for argv, _, _ in fake.calls] == ["start"]
     assert (locator != original.locator) is absent
     assert access.observe_locator(deadline) == locator
@@ -255,6 +280,262 @@ def test_native_route_pins_all_lima_user_input_files(wsl, relative) -> None:
     with pytest.raises(StateError):
         access.route_check(Deadline.after(5))
     assert len(fake.calls) == count
+
+
+def test_hold_ready_precedes_native_user_lookup(wsl, monkeypatch) -> None:
+    fake, access, state = wsl
+    original = fake.run
+
+    def run(argv, **kwargs):
+        if argv[0] == "wsl":
+            return state.run(argv, **kwargs)
+        assert access.wsl_hold is not None
+        access.wsl_hold.require_ready()
+        assert state.native.events.count("dispatch") == 1
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(_lima_selection, "run_process", run)
+    deadline = Deadline.after(5)
+    power = access.observe_power(deadline)
+    assert access.wsl_hold is None and state.native.events == []
+    access.ensure_available(power, deadline)
+    assert fake.calls == [] and access.independent_availability is None
+    access.prepare_native_route(deadline)
+    assert len(fake.calls) == 1
+    assert access.settle(Deadline.after(5))
+
+
+def test_missing_durable_ready_refuses_availability_and_native_lookup(wsl, monkeypatch) -> None:
+    fake, access, state = wsl
+    power = access.observe_power(Deadline.after(5))
+    with monkeypatch.context() as patch:
+        patch.setattr(LifecycleObligation, "publish_payload", lambda self, **kwargs: self._persisted_obligation)
+        with pytest.raises(StateError):
+            access.ensure_available(power, Deadline.after(5))
+    assert access.wsl_hold is not None and access.binding is None and fake.calls == []
+    with pytest.raises(StateError):
+        access.prepare_native_route(Deadline.after(5))
+    assert state.native.events.count("dispatch") == 1
+    assert access.settle(Deadline.after(5))
+
+
+def test_changed_durable_ready_revision_blocks_user_lookup(wsl) -> None:
+    fake, access, state = wsl
+    access.ensure_available(access.observe_power(Deadline.after(5)), Deadline.after(5))
+    obligation = access.wsl_hold.hold.obligation
+    row = obligation._persisted_obligation
+    access.owner._repository.publish_lifecycle_obligation_payload(
+        access.owner.ownership,
+        row.obligation_id,
+        expected_revision=row.payload_revision,
+        payload_version=row.payload_version,
+        payload=encode_hold_payload(replace(decode_hold_payload(row.payload), nonce="f" * 32)),
+    )
+    with pytest.raises(StateError):
+        access.prepare_native_route(Deadline.after(5))
+    assert fake.calls == [] and not access.settle(Deadline.after(5))
+    assert access.route.directory.descriptor is not None
+    assert state.native.events.count("dispatch") == 1 and "eof" not in state.native.events
+
+
+@pytest.mark.parametrize("control", [OSError, KeyboardInterrupt])
+def test_lost_ready_ack_retains_same_hold_for_cleanup_without_relaunch(wsl, monkeypatch, control) -> None:
+    fake, access, state = wsl
+    power = access.observe_power(Deadline.after(5))
+    original = LifecycleObligation.publish_payload
+
+    def publish(self, **kwargs):
+        original(self, **kwargs)
+        raise control("lost READY acknowledgment")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(LifecycleObligation, "publish_payload", publish)
+        with pytest.raises(control):
+            access.ensure_available(power, Deadline.after(5))
+    retained = access.wsl_hold
+    assert retained is not None and fake.calls == [] and access.binding is None
+    assert retained.hold.evidence.identity is not None
+    with pytest.raises(StateError):
+        access.ensure_available(power, Deadline.after(5))
+    assert access.settle(Deadline.after(5)) and access.wsl_hold is retained
+    assert state.native.events.count("dispatch") == 1
+    assert not access.owner.list_pending_lifecycle_obligations()
+
+
+def test_interrupted_hold_launch_retains_unresolved_owner_and_directory(wsl) -> None:
+    fake, access, state = wsl
+    state.native.fail_spawn = KeyboardInterrupt()
+    power = access.observe_power(Deadline.after(5))
+    with pytest.raises(KeyboardInterrupt):
+        access.ensure_available(power, Deadline.after(5))
+    retained = access.wsl_hold
+    assert retained is not None and fake.calls == []
+    assert not access.settle(Deadline.after(5))
+    assert access.wsl_hold is retained and access.route.directory.descriptor is not None
+    assert access.owner.list_pending_lifecycle_obligations()
+    assert state.native.events.count("dispatch") == 1
+
+
+def test_uncertain_registration_prevents_release_success(wsl, monkeypatch) -> None:
+    fake, access, state = wsl
+    power = access.observe_power(Deadline.after(5))
+    original = OperationOwner.register_lifecycle_obligation
+
+    def register(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        raise OSError("lost registration acknowledgment")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(OperationOwner, "register_lifecycle_obligation", register)
+        with pytest.raises(OSError):
+            access.ensure_available(power, Deadline.after(5))
+    assert access.wsl_hold.hold.registration_uncertain
+    assert not access.settle(Deadline.after(5))
+    assert access.route.directory.descriptor is not None and fake.calls == []
+    assert "dispatch" not in state.native.events and access.owner.list_pending_lifecycle_obligations()
+
+
+@pytest.mark.parametrize("field", ["boot", "init"])
+def test_common_guest_must_match_held_boot_and_distribution_epoch(wsl, field) -> None:
+    _, access, _ = wsl
+    access.ensure_available(access.observe_power(Deadline.after(5)), Deadline.after(5))
+    guest = VMGuestIdentity(_MARKER, BOOT, 4096)
+    access.guest_check(guest)
+    changed = replace(
+        guest,
+        **({"boot_id": "00000000-0000-4000-8000-000000000001"} if field == "boot" else {"init_start_ticks": 4097}),
+    )
+    with pytest.raises(StateError):
+        access.guest_check(changed)
+    assert access.settle(Deadline.after(5))
+
+
+def test_unrelated_lifecycle_debt_blocks_release_until_resolved(wsl) -> None:
+    _, access, state = wsl
+    access.ensure_available(access.observe_power(Deadline.after(5)), Deadline.after(5))
+    debt = access.owner.register_lifecycle_obligation("unrelated-work", payload_version=1, payload=b"work")
+    debt.mark_possible_effect()
+    assert not access.settle(Deadline.after(5))
+    assert "eof" not in state.native.events and access.route.directory.descriptor is not None
+    debt.resolve()
+    assert access.settle(Deadline.after(5))
+    assert access.route.directory.settled and state.native.events.count("dispatch") == 1
+
+
+def test_unknown_absence_keeps_directory_and_retries_only_release(wsl) -> None:
+    _, access, state = wsl
+    access.ensure_available(access.observe_power(Deadline.after(5)), Deadline.after(5))
+    retained = access.wsl_hold
+    state.observer.presence = GuestAnchorPresence.UNKNOWN
+    assert not access.settle(Deadline.after(5))
+    assert state.native.local == SETTLED and access.route.directory.descriptor is not None
+    assert access.owner.list_pending_lifecycle_obligations()
+    state.observer.presence = GuestAnchorPresence.ABSENT_CONFIRMED
+    assert access.settle(Deadline.after(5)) and access.wsl_hold is retained
+    assert state.native.events.count("dispatch") == state.native.events.count("eof") == 1
+    assert state.observer.events == ["observe", "observe"]
+
+
+def test_unsettled_native_handles_keep_directory_for_explicit_retry(wsl, monkeypatch) -> None:
+    _, access, state = wsl
+    access.ensure_available(access.observe_power(Deadline.after(5)), Deadline.after(5))
+    with monkeypatch.context() as patch:
+        patch.setattr(state.native, "wait", lambda deadline: None)
+        patch.setattr(state.native, "settle", lambda deadline: OPEN)
+        assert not access.settle(Deadline.after(5))
+    assert access.route.directory.descriptor is not None and state.observer.events == []
+    assert access.settle(Deadline.after(5))
+    assert state.native.events.count("dispatch") == 1
+
+
+def test_registration_change_blocks_release_without_closing_directory(wsl) -> None:
+    _, access, state = wsl
+    access.ensure_available(access.observe_power(Deadline.after(5)), Deadline.after(5))
+    selected = state.registration
+    state.registration = replace(selected, guid="b2979319-35a4-4dd6-9bbb-e4a060d0b908")
+    assert not access.settle(Deadline.after(5))
+    assert "eof" not in state.native.events and access.route.directory.descriptor is not None
+    state.registration = selected
+    assert access.settle(Deadline.after(5))
+
+
+def test_local_delivery_custody_blocks_hold_release(wsl, monkeypatch) -> None:
+    _, access, state = wsl
+    access.ensure_available(access.observe_power(Deadline.after(5)), Deadline.after(5))
+    with monkeypatch.context() as patch:
+        patch.setattr(access.custody, "close", lambda deadline: False)
+        assert not access.settle(Deadline.after(5))
+    assert "eof" not in state.native.events and access.route.directory.descriptor is not None
+    assert access.settle(Deadline.after(5))
+
+
+def test_release_interruption_retains_same_hold_and_directory(wsl, monkeypatch) -> None:
+    _, access, state = wsl
+    access.ensure_available(access.observe_power(Deadline.after(5)), Deadline.after(5))
+    retained = access.wsl_hold
+
+    def interrupt(deadline):
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as patch:
+        patch.setattr(state.native, "wait", interrupt)
+        with pytest.raises(KeyboardInterrupt):
+            access.settle(Deadline.after(5))
+    assert access.wsl_hold is retained and access.route.directory.descriptor is not None
+    assert access.settle(Deadline.after(5))
+    assert state.native.events.count("dispatch") == 1
+
+
+def test_lost_release_ack_keeps_directory_until_retry(wsl, monkeypatch) -> None:
+    _, access, state = wsl
+    access.ensure_available(access.observe_power(Deadline.after(5)), Deadline.after(5))
+    original = LifecycleObligation.resolve
+
+    def resolve(self):
+        original(self)
+        raise OSError("lost release acknowledgment")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(LifecycleObligation, "resolve", resolve)
+        assert not access.settle(Deadline.after(5))
+    assert access.route.directory.descriptor is not None
+    assert access.settle(Deadline.after(5))
+    assert state.native.events.count("dispatch") == state.native.events.count("eof") == 1
+
+
+def test_dead_native_hold_blocks_native_lookup(wsl) -> None:
+    fake, access, state = wsl
+    access.ensure_available(access.observe_power(Deadline.after(5)), Deadline.after(5))
+    state.native.local = SETTLED
+    with pytest.raises(StateError):
+        access.prepare_native_route(Deadline.after(5))
+    assert fake.calls == [] and access.settle(Deadline.after(5))
+
+
+def test_hold_must_still_be_live_after_registration_confirmation(wsl, monkeypatch) -> None:
+    fake, access, state = wsl
+    power = access.observe_power(Deadline.after(5))
+    observe = state.observe_registration
+
+    def registration(*args, **kwargs):
+        if "dispatch" in state.native.events:
+            state.native.local = SETTLED
+        return observe(*args, **kwargs)
+
+    monkeypatch.setattr(_lima_selection, "observe_registration", registration)
+    with pytest.raises(StateError):
+        access.ensure_available(power, Deadline.after(5))
+    assert fake.calls == [] and access.binding is None
+    assert access.settle(Deadline.after(5))
+
+
+def test_successful_release_and_directory_closure_are_idempotent(wsl) -> None:
+    _, access, state = wsl
+    access.ensure_available(access.observe_power(Deadline.after(5)), Deadline.after(5))
+    assert access.settle(Deadline.after(5))
+    before = list(state.calls), list(state.native.events), list(state.observer.events)
+    assert access.settle(Deadline.after(5))
+    assert before == (state.calls, state.native.events, state.observer.events)
 
 
 def test_direct_stopped_wsl_resolver_does_not_inspect_or_start(wsl, monkeypatch) -> None:
