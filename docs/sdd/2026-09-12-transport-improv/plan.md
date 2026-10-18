@@ -5490,12 +5490,20 @@ checkbox stays open.
       multi-page binary output, corruption outside the selected range, end-fact mismatch, partial
       retrieval and no replay. This does not complete DIRECT spooling, active output, the production
       capture default, staging or native acceptance.
-- [ ] Require the same retained `ExecutionOperation` for managed observation, closed output, result
+- [x] Require the same retained `ExecutionOperation` for managed observation, closed output, result
       collection and launch reconciliation. Remove the unused alternate borrow/settle/release
       controller without removing RESOURCE reconnects or exact launch-receipt reconciliation. Derive
       resource authority from the bound operation, not a second caller-supplied read path. Port
       foreign-resource, lost-reply, interrupted-construction/control and output-privacy tests onto
       the retained boundary; prove actual custody and native closure remain authoritative.
+
+The private one-owner checkpoint at `c88534284` clears independent project, complexity and
+correctness source reviews. The lead's broader managed composition passes 1,847 tests, and changed
+file quality passes. Worker strict typing covers 1,541 source and test files; seeded reconciliation
+interruptions preserve the original exception and cause. Failed fixtures remain retained. This
+removes a duplicate read controller, not RESOURCE reconnects or uncertain-start reconciliation; it
+does not close native acceptance, active output, DIRECT capture or the complete RunContext gate.
+
 - [x] Correct managed-service pipe ownership across observation and final cleanup. Early stdin
       closure and output EOF must consume the same close-once ownership state that final cleanup
       uses, so a reused descriptor number is never closed again. Preserve pre-observation and
