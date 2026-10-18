@@ -676,11 +676,28 @@ Unknown execution never permits fabricated zero status, post-loss numeric-PID op
 completion or clearing dispatch debt. An uncertain original close is never retried against a reused
 descriptor and must still prevent terminal restoration and custody reuse.
 
-Implementation and exact combined validation of the SSH corrections are in progress. Three private
-review lanes, applicable gates and a tester-focus comment precede the next checkpoint signal. The
-new native combined report must verify exact-loss retirement/restoration and permanent-close
-uncertainty while retaining the installed held/delayed/refused/shutdown coverage obligations. Native
-Windows launch/keyboard/resize/clean-console, paired printable preparation and encoded-canary
+SSH worker `6b55dcc1d273b684312fcccacacdd8c9594a00d8` is integrated as `b4e8e4458`. Its selected
+operation deadlines expire only after the intended native child and pipes exist; delayed trust and
+successful version-probe variants retain the command cleanup-refusal and forwarding ownership
+assertions. Fresh close uses real cleanup budgets and the same owner. The forwarding loss case
+retains OBSERVATION and unknown status while accepting confirmed local cleanup. Disposable terminal
+probes distinguish one original-worker restoration from sticky pipe-close uncertainty before effects
+and after close/descriptor reuse, with no post-loss PID action or product close retry. Fixture
+rescue runs after the product observations. The permanent SSH README now states that distinction.
+
+The developer's final Linux SSH selection passes 546 cases with ten skips; its ten-case correction
+selection, scoped Ruff/format, typing and documentation gates pass. Negative controls fail the
+intended assertions for premature preflight expiry, suppressed restoration despite confirmed local
+retirement, and closed-flag trust after descriptor reuse. Initial fixture instrumentation and type
+failures are retained in the developer evidence, not counted as green. Root's first composed shared
+selection passes 205 cases with one Windows-only skip; the adopted dependency passes full typing
+across 1,336 sources. These are local scoped results, not native validation or final combined gates.
+
+The PR checkpoint records the three private review lanes and exact combined gates after their
+completion; a tester-focus comment precedes its next signal. The new native combined report must
+verify exact-loss retirement/restoration and permanent-close uncertainty while retaining the
+installed held/delayed/refused/shutdown coverage obligations. Native Windows
+launch/keyboard/resize/clean-console, paired printable preparation and encoded-canary
 non-reflection, genuine new creation, settled-writer publication, trust migration/coexistence and
 rollback, complete factories, both usable RunContext paths and full R1-R5/workflow acceptance remain
 open. No full-carrier checkbox, ready handoff or SDD lock follows from this round.

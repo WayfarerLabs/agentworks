@@ -40,7 +40,7 @@ budget disposition on #832. Contract changes or unexpected scope return to the o
 The three original implementation feedback/fix rounds are spent. The last checkpoint at
 `1fcabfe6082ab23b1e04eeac115e842f541eee95` received full integration and complexity reports, and its
 one-hour collection window ended on 2026-10-10. The operator authorized one additional round on
-2026-10-17 (local date), then directed work to continue. This fourth round is now private working
+2026-10-17 (local date), then directed work to continue. This fourth round began in private working
 state, with `review-requested` removed before changes. Its
 [current record](phase2-results.md#additional-authorized-correction-round) defines the frozen
 fixture/dependency compatibility batch. No further public correction round is authorized.
