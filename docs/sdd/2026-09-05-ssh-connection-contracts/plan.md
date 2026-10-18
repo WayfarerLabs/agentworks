@@ -226,10 +226,10 @@ proves that restoring old TOML does not discard current managed policy, revocati
 partial-update custody. Production writer coexistence and rollback through both usable RunContext
 paths still require transport composition and native acceptance.
 
-Current public shared dependency: transport #833 at `9011809a70d32535d871b451d7a3e637cc65a107`,
-incorporated into SSH working head `72a841d830d8b74a99ec27ab64b46b459d25187a`. Production CLI source
-and the transport SDD match the owner head; the extra CLI change is the reviewed SSH drain fixture
-correction. The complete combined local run still has one transport fixture failure. This working
+Current public shared dependency: transport #833 at `08b5ce9d1dd0be71bdee7f4df18d9ce4dbd628e5`,
+incorporated into SSH working composition `442c067ccc80409a5b6ed5e372ab4cc3398cc6fb`. Production CLI
+source and the transport SDD match the owner head; the extra CLI change is the reviewed SSH drain
+fixture correction. The complete combined local run passes 21,971 tests with 78 skips. This working
 composition does not accept unfinished terminal, platform/FileAccess or RunContext work. The latest
 full native SSH testing pin remains `1fcabfe6082ab23b1e04eeac115e842f541eee95`; subsequent private
 Linux terminal component observations are separately scoped in the progress record. The
