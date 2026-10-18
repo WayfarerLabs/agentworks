@@ -666,8 +666,8 @@ source in core preparation, never by compiling manifest contents. Keep activatio
 from application completion and preserve the actual activation delivery until closure is proved.
 Keep helper custody and prepared-input cleanup as separate outcome facts. A later stage-cleanup
 failure retains the owner and prevents cleanup confirmation without erasing independently known
-application status or verified output. Reserve normal execution admission across chunk delivery
-and transfer that reservation to the actual activation call; another helper must not enter between
+application status or verified output. Reserve normal execution admission across chunk delivery and
+transfer that reservation to the actual activation call; another helper must not enter between
 chunks. Releasing that reservation never discards retained stage or activation cleanup custody.
 
 A separate fixed prepared-input entry may accept the larger canonical request. The small inline
