@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from contextlib import suppress
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypedDict
 from uuid import uuid4
 
+from agentworks.db.operations import LifecycleObligationState
 from agentworks.errors import StateError, ValidationError
-from agentworks.operations import release_borrow_after_custody
+from agentworks.operations import LifecycleObligation, OperationAttempt
 
 from ._file_stage_exchange import (
     FileStageCandidateResult,
@@ -19,7 +20,7 @@ from ._file_stage_exchange import (
     stage_cleanup,
     stage_reconcile,
 )
-from ._file_stage_protocol import MAX_STAGE_CHUNK_BYTES, FileStageFailureCode
+from ._file_stage_protocol import MAX_STAGE_CHUNK_BYTES, FileStageFailureCode, FileStageOperation
 from ._fixed_helper_operation import BorrowedFixedHelperCarrier, BoundHelperCarrier
 from ._prepared_helper_obligation import (
     PREPARED_HELPER_OBLIGATION_KIND,
@@ -35,11 +36,14 @@ from .carrier import Deadline, Dispatch, ExitStatus
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from agentworks.operations import LifecycleObligation, OperationOwner
+    from agentworks.db.operations import LifecycleObligation as PersistedLifecycleObligation
+    from agentworks.operations import OperationBorrow, OperationOwner
 
     from ._delivery_custody import LocalDeliveryCustody
+    from ._helper_closure import HelperClosureDelivery
     from ._helper_launcher import IdentityPlan
     from ._managed_runs import ManagedTargetIdentity
+    from ._runtime_prerequisite import HelperClosureExpectation
     from ._scratch_receipt import ScratchCleanupDebt
     from .carrier import Carrier
 
@@ -53,6 +57,17 @@ class _StageArguments(TypedDict):
     runtime_selection: RuntimeSelection
     bootstrap: _NumericGuestBootstrap
     fixed_scratch_root: bool
+    prepare_delivery: Callable[[HelperClosureExpectation], BoundHelperCarrier]
+
+
+@dataclass(slots=True, repr=False)
+class _ActiveStageCall:
+    borrow: OperationBorrow
+    operation: BorrowedFixedHelperCarrier
+    phase: FileStageOperation
+    closure_delivery: HelperClosureDelivery | None = None
+    closure_expectation: HelperClosureExpectation | None = None
+    candidate: FileStageCandidateResult | None = None
 
 
 class PreparedHelperStage:
@@ -72,7 +87,8 @@ class PreparedHelperStage:
         deadline: Deadline,
         expected_length: int,
         *,
-        before_dispatch: Callable[[], None] | None = None,
+        before_dispatch: Callable[[Deadline], None] | None = None,
+        new_helper_delivery: Callable[[HelperClosureExpectation], HelperClosureDelivery] | None = None,
     ) -> None:
         if deadline.expires_at is None or deadline.expired or not 0 <= expected_length <= 2**63 - 1:
             raise ValidationError("Prepared helper stage requires a finite live budget and bounded length")
@@ -88,6 +104,8 @@ class PreparedHelperStage:
         self._bootstrap, self._runtime = bootstrap, runtime
         self._deadline, self.expected_length = deadline, expected_length
         self._before_dispatch = before_dispatch
+        self._new_helper_delivery = new_helper_delivery
+        self._active: _ActiveStageCall | None = None
         self._obligation: LifecycleObligation | None = None
         self.reference: ScratchReference | None = None
         self.cleanup_debt: ScratchCleanupDebt | None = None
@@ -117,15 +135,23 @@ class PreparedHelperStage:
         self._require_budget(self.deadline if deadline is None else deadline)
 
     def _call(
-        self, action: Callable[[BoundHelperCarrier], FileStageCandidateResult], *, deadline: Deadline | None = None
+        self,
+        action: Callable[[BoundHelperCarrier], FileStageCandidateResult],
+        *,
+        deadline: Deadline | None = None,
+        phase: FileStageOperation = FileStageOperation.BEGIN,
     ) -> FileStageCandidateResult:
         self._require_closed(deadline)
         borrow = self._owner.borrow()
         operation = BorrowedFixedHelperCarrier(self._carrier, borrow)
+        active = _ActiveStageCall(borrow, operation, phase)
+        self._active = active
+        self.helper_uncertain = True
         try:
             if self._before_dispatch is not None:
-                self._before_dispatch()
+                self._before_dispatch(self.deadline if deadline is None else deadline)
             result = action(operation)
+            active.candidate = result
             observation = result.observation
             if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
                 if observation.reference is not None:
@@ -135,16 +161,170 @@ class PreparedHelperStage:
                     self.cleanup_debt = observation.cleanup_debt
                 if observation.failure is not None and observation.failure.cleanup_debt is not None:
                     self.cleanup_debt = observation.failure.cleanup_debt
-            operation.settle(result.dispatch, result.carrier_completion)
-            self.helper_uncertain = operation.requires_owner_retention
-            release_borrow_after_custody(borrow, retain_effect=self.helper_uncertain)
+            self._settle_active(active)
             return result
         except BaseException:
             self.helper_uncertain = True
             self.failed = True
-            with suppress(BaseException):
-                release_borrow_after_custody(borrow, retain_effect=operation.requires_owner_retention)
             raise
+
+    def _prepare_delivery(self, expectation: HelperClosureExpectation) -> BoundHelperCarrier:
+        active = self._active
+        assert active is not None
+        active.closure_expectation = expectation
+        if self._new_helper_delivery is not None:
+            delivery = self._new_helper_delivery(expectation)
+            active.closure_delivery = delivery
+            active.operation = BorrowedFixedHelperCarrier(delivery, active.borrow)
+        return active.operation
+
+    def _validate_active(self, active: _ActiveStageCall) -> None:
+        owner = self._owner
+        with owner._guard:  # noqa: SLF001
+            owner._reconcile_transition_locked()  # noqa: SLF001
+            borrower = owner._active_borrow  # noqa: SLF001
+            if self._active is not active or (
+                borrower is not active.borrow and (borrower is not None or not active.borrow._closed)  # noqa: SLF001
+            ):
+                raise StateError("Prepared stage no longer owns its borrow")
+            attempt = owner._outstanding_attempt  # noqa: SLF001
+            if attempt is not None and (
+                not isinstance(attempt, OperationAttempt)
+                or attempt._borrow is not active.borrow  # noqa: SLF001
+                or (
+                    active.operation.outstanding_attempt is not None
+                    and attempt is not active.operation.outstanding_attempt
+                )
+            ):
+                raise StateError("Prepared stage no longer owns its attempt")
+        row = self._inspect_registration()
+        if row is None or row.state is not LifecycleObligationState.POSSIBLE_EFFECT:
+            raise StateError("Prepared stage cleanup obligation is no longer admitted")
+        expectation = active.closure_expectation
+        delivery = active.closure_delivery
+        if (expectation is not None and expectation.guest != self._bootstrap.guest) or not active.operation.wraps(
+            self._carrier if delivery is None else delivery
+        ):
+            raise StateError("Prepared stage helper binding changed")
+
+    def _settle_active(self, active: _ActiveStageCall) -> None:
+        """Retry only this call's local accounting with positive closure proof."""
+        self._validate_active(active)
+        operation = active.operation
+        candidate = active.candidate
+        delivery = active.closure_delivery
+        known = candidate is not None and (
+            candidate.dispatch is Dispatch.NOT_SENT
+            or (candidate.dispatch is Dispatch.SENT and candidate.carrier_completion == ExitStatus(0))
+        )
+        if delivery is not None:
+            known = (candidate is not None and candidate.dispatch is Dispatch.NOT_SENT) or delivery.closure_proven
+        attempt = operation.outstanding_attempt
+        if attempt is not None:
+            if not known or not attempt.local_delivery.settled:
+                return
+            operation.settle_helper_closure()
+        elif operation.pending_remote_effects:
+            raise StateError("Prepared stage retains unknown helper closure")
+        else:
+            # A lost begin-attempt reply precedes entry to the actual carrier.
+            with self._owner._guard:  # noqa: SLF001
+                admission = self._owner._outstanding_attempt  # noqa: SLF001
+            if admission is not None:
+                assert isinstance(admission, OperationAttempt)
+                admission.settle()
+            self._recover_dispatch_registration(active)
+        if not active.borrow.closed:
+            active.borrow.close()
+        self._active = None
+        self.helper_uncertain = False
+
+    def _recover_dispatch_registration(self, active: _ActiveStageCall) -> None:
+        """Recover only the generic row whose registration preceded carrier entry."""
+        borrow = active.borrow
+        identity = borrow._dispatch_obligation_id  # noqa: SLF001
+        if identity is None or borrow._dispatch_obligation is not None:  # noqa: SLF001
+            return
+        row = self._owner.inspect_lifecycle_obligation(identity)
+        if row is not None:
+            if (row.obligation_kind, row.payload_version, row.payload, row.payload_revision) != (
+                "carrier-dispatch",
+                1,
+                b"",
+                0,
+            ):
+                raise StateError("Prepared stage dispatch registration conflicts")
+            borrow._dispatch_obligation = row  # noqa: SLF001
+
+    def observe_cleanup(self, deadline: Deadline) -> None:
+        """Drain the exact retained helper without replaying any stage request."""
+        if deadline.expires_at is None or deadline.expired:
+            raise ValidationError("Prepared stage observation requires a finite live deadline")
+        active = self._active
+        if active is None:
+            self.retry_bookkeeping()
+            return
+        self.failed = True
+        self._validate_active(active)
+        attempt = active.operation.outstanding_attempt
+        no_entry = attempt is None and active.candidate is None and not active.operation.pending_remote_effects
+        if attempt is not None:
+            if not attempt.local_delivery.close(deadline):
+                raise StateError("Prepared stage local delivery remains unsettled")
+            self._validate_active(active)
+            delivery = active.closure_delivery
+            not_sent = active.candidate is not None and active.candidate.dispatch is Dispatch.NOT_SENT
+            if delivery is not None and not not_sent and not delivery.closure_proven:
+                if self._before_dispatch is not None:
+                    self._before_dispatch(deadline)
+                self._validate_active(active)
+                if not delivery.observe_closure(deadline=deadline, custody=attempt.local_delivery):
+                    raise StateError("Prepared stage helper closure remains unknown")
+                self._validate_active(active)
+        self._settle_active(active)
+        if self._active is not None:
+            raise StateError("Prepared stage helper closure remains unknown")
+        candidate = active.candidate
+        no_stage = active.phase is FileStageOperation.BEGIN and (
+            no_entry or (candidate is not None and self._no_creation(candidate))
+        )
+        removed = (
+            candidate is not None
+            and active.phase is FileStageOperation.CLEANUP
+            and self._accepted(candidate, FileStageObservationState.CLEANED)
+        )
+        if no_stage or removed:
+            self._resolve_cleanup()
+
+    def _inspect_registration(self) -> PersistedLifecycleObligation | None:
+        row = self._owner.inspect_lifecycle_obligation(self.obligation_id)
+        if row is not None and (row.obligation_kind, row.payload_version, row.payload, row.payload_revision) != (
+            PREPARED_HELPER_OBLIGATION_KIND,
+            PREPARED_HELPER_PAYLOAD_VERSION,
+            self._payload,
+            0,
+        ):
+            raise StateError("Prepared stage registration conflicts")
+        if row is None and not self.registration_uncertain:
+            raise StateError("Prepared stage registration disappeared")
+        return row
+
+    def retry_bookkeeping(self) -> None:
+        """Resolve interrupted exact stage registration or known-clean resolution."""
+        if self._active is not None:
+            raise StateError("Prepared stage retains helper custody")
+        if not self.registration_uncertain and not self.cleanup_resolution_uncertain:
+            return
+        with self._owner._guard:  # noqa: SLF001
+            self._owner._reconcile_transition_locked()  # noqa: SLF001
+        row = self._inspect_registration()
+        self.failed = True
+        if row is not None:
+            self._obligation = LifecycleObligation(self._owner, row)
+            self._resolve_cleanup()
+        else:
+            self.cleaned = True
+        self.registration_uncertain = False
 
     @staticmethod
     def _accepted(result: FileStageCandidateResult, state: FileStageObservationState) -> bool:
@@ -157,12 +337,23 @@ class PreparedHelperStage:
             and result.observation.state is state
         )
 
+    @classmethod
+    def _no_creation(cls, result: FileStageCandidateResult) -> bool:
+        observation = result.observation
+        return result.dispatch is Dispatch.NOT_SENT or (
+            cls._accepted(result, FileStageObservationState.REFUSED)
+            and observation is not None
+            and observation.failure is not None
+            and observation.failure.code is not FileStageFailureCode.SCRATCH
+        )
+
     def begin(self) -> bool:
         """Admit cleanup identity before one non-replayed BEGIN attempt."""
         self._require_closed()
         if self._begun:
             raise StateError("Prepared helper stage BEGIN is one-shot")
         self._begun = True
+        self.failed = True
         self.registration_uncertain = True
         self._obligation = self._owner.register_lifecycle_obligation(
             PREPARED_HELPER_OBLIGATION_KIND,
@@ -172,7 +363,6 @@ class PreparedHelperStage:
         )
         self._obligation.mark_possible_effect()
         self.registration_uncertain = False
-        self.failed = True
         result = self._call(
             lambda carrier: stage_begin(carrier, expected_length=self.expected_length, **self._arguments())
         )
@@ -181,14 +371,7 @@ class PreparedHelperStage:
             and self.reference is not None
             and not self.helper_uncertain
         )
-        observation = result.observation
-        refused_before_creation = (
-            self._accepted(result, FileStageObservationState.REFUSED)
-            and observation is not None
-            and observation.failure is not None
-            and observation.failure.code is not FileStageFailureCode.SCRATCH
-        )
-        if not self.helper_uncertain and (result.dispatch is Dispatch.NOT_SENT or refused_before_creation):
+        if not self.helper_uncertain and self._no_creation(result):
             self._resolve_cleanup()
         return not self.failed
 
@@ -202,6 +385,7 @@ class PreparedHelperStage:
             "runtime_selection": self._runtime,
             "bootstrap": self._bootstrap,
             "fixed_scratch_root": True,
+            "prepare_delivery": self._prepare_delivery,
         }
 
     def append(self, data: bytes) -> bool:
@@ -228,7 +412,7 @@ class PreparedHelperStage:
                     **self._arguments(),
                 )
 
-            result = self._call(write)
+            result = self._call(write, phase=FileStageOperation.CHUNK)
             if self.helper_uncertain or not self._accepted(result, FileStageObservationState.ACCEPTED):
                 self.failed = True
                 return False
@@ -281,7 +465,9 @@ class PreparedHelperStage:
         self.failed = True
         if self.cleanup_debt is None:
             result = self._call(
-                lambda carrier: stage_reconcile(carrier, **self._arguments(cleanup_deadline)), deadline=cleanup_deadline
+                lambda carrier: stage_reconcile(carrier, **self._arguments(cleanup_deadline)),
+                deadline=cleanup_deadline,
+                phase=FileStageOperation.RECONCILE,
             )
             if (
                 self.helper_uncertain
@@ -293,6 +479,7 @@ class PreparedHelperStage:
         result = self._call(
             lambda carrier: stage_cleanup(carrier, cleanup_debt=debt, **self._arguments(cleanup_deadline)),
             deadline=cleanup_deadline,
+            phase=FileStageOperation.CLEANUP,
         )
         if self.helper_uncertain or not self._accepted(result, FileStageObservationState.CLEANED):
             return False

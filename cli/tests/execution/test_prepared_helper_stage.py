@@ -487,7 +487,8 @@ def test_route_refusal_keeps_cleanup_admission_without_dispatch(owned) -> None:
     _, owner, carrier = owned
     interrupted = KeyboardInterrupt("route changed")
 
-    def route() -> None:
+    def route(deadline: Deadline) -> None:
+        assert deadline is prepared.deadline
         assert pending(owner) == [PREPARED_HELPER_OBLIGATION_KIND]
         raise interrupted
 
