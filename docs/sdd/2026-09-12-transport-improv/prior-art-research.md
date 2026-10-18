@@ -71,6 +71,14 @@ native provider behavior or proof that a path-based selector atomically binds a 
 Source:
 [ARM asynchronous operation tracking](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/async-operations).
 
+Azure also documents case-insensitive resource/group names and permits response casing to differ
+from the requested name. Decision: new creation admission compares the validated selected identity
+components case-insensitively and records the exact returned path. This does not normalize stored
+paths, rewrite historical identity evidence or broaden the existing strict path parser.
+
+Source:
+[Azure resource naming rules](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules).
+
 ### AWS start submission proof
 
 The 2026-10-09 offline proof uses locked boto3 1.43.92 and botocore 1.43.93 with ordinary query

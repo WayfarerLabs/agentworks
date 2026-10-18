@@ -1446,12 +1446,12 @@ native acceptance remain unfinished.
 
 ### Azure activation admission and acknowledgment
 
-The next private Azure unit follows the same admission boundary, not a shared cloud task model.
-Retain a passive provider-owned adapter under the exact VM operation owner before work. Match the
-complete recorded ARM VM identity to its selected locator, register a fresh versioned lifecycle
-obligation, and mark possible effect durably before one start submission. Interrupted registration,
-marking or response publication never permits another submission. Reconciliation is fenced ledger
-bookkeeping, not a start retry or startup settlement.
+Azure start follows the same admission boundary, not a shared cloud task model. Retain a passive
+provider-owned adapter under the exact VM operation owner before work. Match the complete recorded
+ARM VM identity to its selected locator, register a fresh versioned lifecycle obligation, and mark
+possible effect durably before one start submission. Interrupted registration, marking or response
+publication never permits another submission. Reconciliation is fenced ledger bookkeeping, not a
+start retry or startup settlement.
 
 Use a fresh compute client with an explicit public policy list containing only bearer-token
 authentication whose public challenge hook refuses resending. Omit retry, redirect and
@@ -1479,29 +1479,33 @@ positively confirmed closures. An interruption between originals must retain the
 an attempted close is not confirmed retirement. Retain uncertain original handles rather than
 discarding them after a cleanup exception. Ordinary cleanup failures do not replace the earlier
 outcome, a new control exception escapes, and an already escaping original control takes precedence.
-Local cleanup and remote possible effect stay separate. Neither HTTP 200, HTTP 202, local closure
-nor a later running-power snapshot resolves this producer's possible-effect obligation.
+Local cleanup and remote possible effect stay separate. Submission acknowledgment is not a generic
+completion rule. Apply the request-specific completion rule below; local closure or a later power
+snapshot cannot replace it.
 
-This is private implementation within #833, not separately mergeable native access. Later owned
-access must define and review provider-specific startup settlement, route lifetime, endpoint trust,
-guest preparation and aggregate release, then prove them natively before RunContext admission. A
-missing acknowledgment remains unknown. The
+This is private implementation within #833, not separately mergeable native access. Complete owned
+access must implement and review request-specific startup settlement, route lifetime, endpoint
+trust, guest preparation and aggregate release, then prove them natively before RunContext
+admission. A missing acknowledgment remains unknown. The
 [middleware research](prior-art-research.md#azure-and-gcp-mutation-middleware-proof) records the
 completed middleware audit and the producer's separate scripted streamed-path evidence, with their
 remaining limits.
 
 ### Exact-incarnation Azure start completion
 
-The path-only version-one producer above remains readable and unchanged. New admission uses a
-distinct version-two payload containing the recorded canonical VM UUID, complete ARM path, matching
-acknowledgment and optional closed terminal result. Its selected locator must match
-`azure-vm:v2:<canonical-uuid>:<complete-ARM-resource-path>` exactly. Never synthesize a path-only
-locator to reuse old admission or upgrade an old obligation with a current UUID observation.
+Keep the path-only version-one payload codec and shared acknowledgment helpers, not a second live
+producer. New admission uses a distinct version-two payload containing the recorded canonical VM
+UUID, complete ARM path, matching acknowledgment and optional closed terminal result. Its selected
+locator must match `azure-vm:v2:<canonical-uuid>:<complete-ARM-resource-path>` exactly. Never
+synthesize a path-only locator to reuse old admission or upgrade an old obligation with a current
+UUID observation.
 
 Record the returned creation model's path and canonical VM UUID during new provisioning, within its
 existing rollback-covered creation interval and before bootstrap admission. Missing, malformed or
-foreign creation identity fails that attempt. This establishes evidence for newly created VMs only;
-historical adoption remains unimplemented and requires operator disposition.
+foreign creation identity fails that attempt. Compare validated selected subscription, group and VM
+name components case-insensitively, since Azure may return equivalent names with different casing;
+record the exact returned path bytes for subsequent identity checks. This establishes evidence for
+newly created VMs only; historical adoption remains unimplemented and requires operator disposition.
 
 Use Azure's documented request-completion evidence, not an AWS-style power-state inference. A
 validated start response with HTTP 200 and no operation headers records synchronous success. If an
@@ -1512,12 +1516,15 @@ The existing fixed-origin, selected-subscription URL validation still applies.
 Each explicit observation performs at most one streamed GET under the original finite deadline,
 using the public challenge-refusing policy list without retry, redirect, registration or generated
 polling middleware. Verify the response request's exact GET and URL. For `Azure-AsyncOperation`,
-accept HTTP 200 with a JSON object whose bounded status is `Succeeded`, `Failed`, `Canceled` or a
-pending provider value. Bound the streamed body to 16 KiB, reject duplicate status fields and
-malformed or oversized input, and retain only the closed terminal fact. Never persist or render the
-body, provider error text or credential-bearing exception chains. For a Location-only monitor, HTTP
-202 remains pending and HTTP 200 or 204 records success, without reading its body. Other HTTP
-statuses or malformed evidence cannot establish completion.
+check the remaining budget before creating the body iterator and before each potentially blocking
+iteration. Late headers do not admit another body read. Retain their original response/client for
+cleanup under a fresh finite budget instead. For the status body, accept HTTP 200 with a JSON object
+whose bounded status is `Succeeded`, `Failed`, `Canceled` or a pending provider value. Bound the
+streamed body to 16 KiB, reject duplicate status fields and malformed or oversized input, and retain
+only the closed terminal fact. Never persist or render the body, provider error text or
+credential-bearing exception chains. For a Location-only monitor, HTTP 202 remains pending and HTTP
+200 or 204 records success, without reading its body. Other HTTP statuses or malformed evidence
+cannot establish completion.
 
 Retain a terminal observation before ledger publication, handle cleanup or late-result refusal.
 Publish acknowledgment and completion through exact version/revision comparisons, reconciling a lost

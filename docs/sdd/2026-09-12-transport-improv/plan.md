@@ -1330,6 +1330,10 @@ plus scoped lint/format. All three independent correction source-review lanes cl
 source/test files on the author's earlier base, not whole-composition or native acceptance. No
 historical identity adoption, new-VM recording or complete access is implied; keep this item open.
 
+The earlier private path-only Azure producer is superseded by one exact-incarnation producer; its
+completed implementation record remains historical, while its persisted codec and acknowledgment
+helpers remain supported.
+
 - [ ] Implement and privately review the
       [exact-incarnation Azure start boundary](execution-lifecycle-lld.md#exact-incarnation-azure-start-completion).
       Preserve path-only version-one obligations, bind new version-two admission to recorded UUID
