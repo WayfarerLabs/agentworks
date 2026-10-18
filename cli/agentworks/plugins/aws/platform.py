@@ -44,6 +44,7 @@ from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscal
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import AuthorizationError, ConfigError, NotFoundError, StateError, TokenRejectedError
+from agentworks.execution.binding import _IndependentJobAvailability
 from agentworks.plugins.aws.auth import _build_access_key_session, _build_ambient_session
 from agentworks.plugins.aws.config import (
     AwsAmbientAuth,
@@ -741,7 +742,12 @@ class EC2Platform(VMPlatform):
         provider_locator_remaining(deadline, vm_name=vm.name)
         current = self._read_exact_instance(vm, ctx, identity, deadline=deadline)
         provider_locator_remaining(deadline, vm_name=vm.name)
-        binding = ssh_native_binding(vm, current.get("PublicIpAddress"), settings)
+        binding = ssh_native_binding(
+            vm,
+            current.get("PublicIpAddress"),
+            settings,
+            independent_availability=_IndependentJobAvailability.NO_IDLE_STOP,
+        )
         provider_locator_remaining(deadline, vm_name=vm.name)
         return binding
 

@@ -13,6 +13,7 @@ from agentworks.capabilities.vm_platform.base import (
 )
 from agentworks.db import LifecycleObligationState, VMStatus
 from agentworks.errors import AgentworksError, NotFoundError, StateError
+from agentworks.execution.binding import _IndependentJobAvailability
 from agentworks.operations import LifecycleObligation
 from agentworks.plugins.aws._activation import EC2Activation, encode_activation_payload
 from agentworks.plugins.aws._owned_auth import _OwnedRoleSession
@@ -117,7 +118,9 @@ class EC2OwnedAccess:
             raise StateError("EC2 selected locator changed")
         self._require_running(instance)
         self._endpoint = instance.get("PublicIpAddress")
-        self.binding = ssh_native_binding(self._vm, self._endpoint, settings)
+        self.binding = ssh_native_binding(
+            self._vm, self._endpoint, settings, independent_availability=_IndependentJobAvailability.NO_IDLE_STOP
+        )
         provider_locator_remaining(deadline, vm_name=self._vm.name)
         self._exposure = OwnedSSHExposure(self._vm.name)
         prefixes = self._exposure.resolve(config_allow_cidrs(self._ctx.config), deadline)

@@ -25,6 +25,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import LimitExceededError, NotFoundError, StateError
+from agentworks.execution.binding import _IndependentJobAvailability
 from agentworks.plugins.azure._identity import canonical_vm_id, parse_resource_id
 from agentworks.plugins.azure.auth import (
     _build_ambient_credential,
@@ -850,7 +851,9 @@ class AzureVMPlatform(VMPlatform):
         finally:
             with contextlib.suppress(Exception):
                 network.close()
-        binding = ssh_native_binding(vm, endpoint, settings)
+        binding = ssh_native_binding(
+            vm, endpoint, settings, independent_availability=_IndependentJobAvailability.NO_IDLE_STOP
+        )
         provider_locator_remaining(deadline, vm_name=vm.name)
         return binding
 

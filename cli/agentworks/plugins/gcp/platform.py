@@ -28,6 +28,7 @@ from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs,
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import AgentworksError, ConnectivityError, NotFoundError, StateError
+from agentworks.execution.binding import _IndependentJobAvailability
 from agentworks.plugins.gcp.auth import GcpClientCache
 from agentworks.plugins.gcp.bootstrap import (
     GCE_READINESS_COMMAND,
@@ -618,7 +619,9 @@ class GCEPlatform(VMPlatform):
         provider_locator_remaining(deadline, vm_name=vm.name)
         verify_instance_network(current, network_url=identity.network_url, subnet_url=identity.subnet_url)
         endpoint = live_external_ipv4(current, access_config_name=identity.access_config_name)
-        binding = ssh_native_binding(vm, endpoint, settings)
+        binding = ssh_native_binding(
+            vm, endpoint, settings, independent_availability=_IndependentJobAvailability.NO_IDLE_STOP
+        )
         provider_locator_remaining(deadline, vm_name=vm.name)
         return binding
 

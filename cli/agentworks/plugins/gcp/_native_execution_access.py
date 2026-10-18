@@ -11,6 +11,7 @@ from agentworks.capabilities.vm_platform.base import provider_locator_remaining
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs
 from agentworks.db import OperationResourceKind, VMStatus
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution.binding import _IndependentJobAvailability
 from agentworks.operations import OperationOwner
 from agentworks.plugins.gcp._activation import ActivationState, GCEActivation
 from agentworks.plugins.gcp._native_access import GCEOwnedRead
@@ -200,7 +201,9 @@ class GCEOwnedAccess:
                     raise StateError("GCE start did not establish request success")
                 current = self._await_running(deadline, current.raw_power)
             self._endpoint = current.endpoint
-            self.binding = ssh_native_binding(self._vm, self._endpoint, settings)
+            self.binding = ssh_native_binding(
+                self._vm, self._endpoint, settings, independent_availability=_IndependentJobAvailability.NO_IDLE_STOP
+            )
             self._exposure = OwnedSSHExposure(self._vm.name)
             prefixes = self._exposure.resolve(config_allow_cidrs(self._ctx.config), deadline)
             provider_locator_remaining(deadline, vm_name=self._vm.name)

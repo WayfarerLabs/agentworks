@@ -18,6 +18,7 @@ from agentworks.db import Database, LifecycleObligationState, VMStatus
 from agentworks.db.operations import OperationResourceKind, OperationScope
 from agentworks.errors import LimitExceededError, StateError, ValidationError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
+from agentworks.execution.binding import _IndependentJobAvailability
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.ssh import SSHSettings
 from agentworks.operations import OperationOwner
@@ -316,6 +317,7 @@ def test_sdk_prepares_and_removes_only_owned_rule(native_aws, power):
     assert p.access.observe_power(p.deadline) is power
     p.access.prepare(power, p.deadline)
     assert len(p.preparations) == 1 and p.access.preparation is not None
+    assert p.access.binding._independent_availability is _IndependentJobAvailability.NO_IDLE_STOP
     p.access.route_check(p.deadline)
     assert p.access.settle(p.deadline)
     actions = [a for a, _ in p.calls]

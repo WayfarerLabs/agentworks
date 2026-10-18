@@ -16,6 +16,7 @@ from agentworks.db import Database, OperationResourceKind, OperationScope, VMSta
 from agentworks.errors import ConfigError, LimitExceededError, StateError, ValidationError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
+from agentworks.execution.binding import _IndependentJobAvailability
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.ssh import SSHSettings
 from agentworks.operations import OperationOwner
@@ -247,7 +248,7 @@ def test_success_orders_refresh_reentry_route_and_auth_last(full, power):
     p = full
     p.current["status"] = "RUNNING" if power is VMStatus.RUNNING else "TERMINATED"
     p.access.prepare(power, p.deadline)
-    assert p.access.binding._independent_availability is None
+    assert p.access.binding._independent_availability is _IndependentJobAvailability.NO_IDLE_STOP
     assert p.calls.count("start-post") == int(power is VMStatus.STOPPED)
     assert p.calls.index("source-close") < p.calls.index("route-open") < p.calls.index("guest-stub")
     assert p.calls[p.calls.index("route-open") - 1] == "instance-read"

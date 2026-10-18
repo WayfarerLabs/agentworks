@@ -9,7 +9,7 @@ from agentworks.errors import ConfigError, StateError
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
-from agentworks.execution.binding import NativeExecutionBinding, _EarlyGuestFactsRoute
+from agentworks.execution.binding import NativeExecutionBinding, _EarlyGuestFactsRoute, _IndependentJobAvailability
 from agentworks.execution.carriers.ssh import ManagedSSHTrust, SSHCarrier, SSHConnection
 
 if TYPE_CHECKING:
@@ -32,7 +32,13 @@ def require_ssh_settings(vm: VMRow, ctx: RunContext, config: Config | None) -> S
     return settings
 
 
-def ssh_native_binding(vm: VMRow, endpoint: object, settings: SSHSettings) -> NativeExecutionBinding:
+def ssh_native_binding(
+    vm: VMRow,
+    endpoint: object,
+    settings: SSHSettings,
+    *,
+    independent_availability: _IndependentJobAvailability | None = None,
+) -> NativeExecutionBinding:
     """Bind a provider's current literal IPv4 without admitting local files."""
     try:
         if not isinstance(endpoint, str):
@@ -67,4 +73,5 @@ def ssh_native_binding(vm: VMRow, endpoint: object, settings: SSHSettings) -> Na
         RuntimeSelection(RuntimeTargetOS.LINUX),
         _early_guest_facts_route=_EarlyGuestFactsRoute(carrier, root_entry, vm.admin_username),
         _new_managed_delivery=lambda: SSHCarrier(connection),
+        _independent_availability=independent_availability,
     )

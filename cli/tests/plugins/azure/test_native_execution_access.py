@@ -13,6 +13,7 @@ from agentworks.db import Database, OperationResourceKind, OperationScope, VMSta
 from agentworks.errors import ConfigError, LimitExceededError, StateError, ValidationError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
+from agentworks.execution.binding import _IndependentJobAvailability
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.ssh import SSHSettings
 from agentworks.operations import OperationOwner
@@ -244,6 +245,7 @@ def test_success_orders_fresh_reads_route_guest_and_credential_last(full, power)
     assert p.access.observe_power(p.deadline) is power
     p.access.prepare(power, p.deadline)
     assert p.access.preparation is p.prep and p.access.route_check is not None
+    assert p.access.binding._independent_availability is _IndependentJobAvailability.NO_IDLE_STOP
     assert p.calls.index("prefix-close") < p.calls.index("route-open") < p.calls.index("guest-prepare")
     assert p.calls.count("start-post") == int(power is not VMStatus.RUNNING)
     assert p.calls.count("vm-get") >= 5

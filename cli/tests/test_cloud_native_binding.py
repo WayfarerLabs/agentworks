@@ -19,6 +19,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.errors import AlreadyExistsError, ConfigError, LimitExceededError, StateError
 from agentworks.execution._helper_launcher import IdentityMode
 from agentworks.execution._runtime_prerequisite import RuntimeTargetOS
+from agentworks.execution.binding import _IndependentJobAvailability
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.ssh import ManagedSSHTrust, SSHSettings
 from agentworks.plugins.aws.platform import EC2Platform
@@ -199,7 +200,7 @@ def test_explicit_passive_binding_and_fresh_delivery(cloud: Any, account: str) -
     assert (connection.agent_socket, connection.ssh_executable) == (SETTINGS.agent_socket, SETTINGS.ssh_executable)
     assert (connection.keepalive_interval, connection.keepalive_count_max) == (17, 5)
     assert binding.runtime_selection.target_os is RuntimeTargetOS.LINUX
-    assert binding._independent_availability is None
+    assert binding._independent_availability is _IndependentJobAvailability.NO_IDLE_STOP
     route = binding._early_guest_facts_route
     assert route.carrier is binding.carrier
     assert route.account == account
@@ -333,6 +334,7 @@ def test_binding_construction_does_not_admit_files(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(subprocess, "Popen", denied)
     binding = ssh_native_binding(NS(name="vm", admin_username="admin"), IP, SETTINGS)
     assert binding.carrier.features.live_stdio
+    assert binding._independent_availability is None
     assert binding._new_managed_delivery is not None
     assert binding._new_managed_delivery() is not binding.carrier
 
