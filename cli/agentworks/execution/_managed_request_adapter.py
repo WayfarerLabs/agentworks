@@ -15,6 +15,7 @@ from ._managed_job_request import (
     MAX_CONTROL_BYTES,
     MAX_ENVIRONMENT_ENTRIES,
     MAX_SOURCE_BYTES,
+    OPERATION_LEASE_CONTROL_HEADROOM,
     ManagedJobRequest,
     ManagedLiveIO,
     RequestError,
@@ -22,7 +23,6 @@ from ._managed_job_request import (
     decode_request_launch,
     encode_request,
 )
-from ._managed_lease_wire import MAX_LEASE_BYTES
 from ._managed_runs import (
     ManagedOutputMode,
     ManagedOutputPolicy,
@@ -35,8 +35,6 @@ from .models import Command, Input, Output, Script
 
 if TYPE_CHECKING:
     from ._managed_lease_wire import OperationLease
-
-OPERATION_LEASE_CONTROL_HEADROOM = MAX_LEASE_BYTES + len(b',"operation_lease":')
 
 
 @dataclass(frozen=True, slots=True, repr=False)

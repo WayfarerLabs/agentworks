@@ -283,6 +283,7 @@ def test_codec_is_canonical_bounded_and_secret_safe(reserved: tuple[ManagedRunRe
     binary_data = encode_request(binary)
     assert binary_data.isascii()
     assert decode_request(binary_data) == binary
+    body, tail = data[:-512], data[-512:]
     with pytest.raises(ManagedStartError):
         decode_request(data + b"x")
     with pytest.raises(ManagedStartError):
@@ -294,14 +295,14 @@ def test_codec_is_canonical_bounded_and_secret_safe(reserved: tuple[ManagedRunRe
         {"instance_marker": GUEST.instance_marker, "boot_id": GUEST.boot_id, "init_start_ticks": -1},
         {"instance_marker": GUEST.instance_marker, "boot_id": GUEST.boot_id},
     ):
-        value = json.loads(data)
+        value = json.loads(body)
         value["guest"] = invalid_guest
         with pytest.raises(ManagedStartError):
-            decode_request(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
-    value = json.loads(data)
+            decode_request(json.dumps(value, sort_keys=True, separators=(",", ":")).encode() + tail)
+    value = json.loads(body)
     value["assets"][0] = value["assets"][0][:-1]
     with pytest.raises(ManagedStartError):
-        decode_request(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
+        decode_request(json.dumps(value, sort_keys=True, separators=(",", ":")).encode() + tail)
     assert decode_result(encode_result(ManagedStartResult(None, None, (FactName.LAUNCH,)))).facts == (FactName.LAUNCH,)
     for facts in (["wait"], ["launch", "wait"]):
         with pytest.raises(ManagedStartError):

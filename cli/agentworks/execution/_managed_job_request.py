@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import cast
 
 from . import _managed_job_wire as wire
-from ._managed_lease_wire import LeaseError, OperationLease, checked_lease, decode_lease, encode_lease
+from ._managed_lease_wire import MAX_LEASE_BYTES, LeaseError, OperationLease, checked_lease, decode_lease, encode_lease
 
 VERSION = 1
 MAX_LAUNCH_BYTES = wire.MAX_MANAGED_JOB_FACT_BYTES
@@ -27,6 +27,7 @@ MAX_CAPTURE_PREFIX_BYTES = wire.MAX_CAPTURE_PREFIX_BYTES_V1
 MAX_TEXT_BYTES = 4096
 MAX_ARGV = 256
 MAX_ENVIRONMENT_ENTRIES = 256
+OPERATION_LEASE_CONTROL_HEADROOM = MAX_LEASE_BYTES + len(b',"operation_lease":')
 
 _NAME = re.compile(r"[A-Za-z_][A-Za-z_0-9]*\Z")
 _RUN = re.compile(r"[0-9a-f]{32}\Z")

@@ -11,13 +11,13 @@ from agentworks.execution._managed_job_request import (
     MAX_CONTROL_BYTES,
     MAX_SOURCE_BYTES,
     MAX_STDIN_BYTES,
+    OPERATION_LEASE_CONTROL_HEADROOM,
     RequestError,
     decode_request,
     encode_request,
 )
 from agentworks.execution._managed_lease_wire import sampled_lease
 from agentworks.execution._managed_request_adapter import (
-    OPERATION_LEASE_CONTROL_HEADROOM,
     _ManagedBody,
     compose_managed_body,
     compose_managed_request,
