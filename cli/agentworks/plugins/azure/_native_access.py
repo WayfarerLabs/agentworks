@@ -77,6 +77,40 @@ class AzureOwnedReadAccess:
         """Return one fresh verified model through the owned read lifecycle."""
         return cast("VirtualMachine", self._observe(deadline, "vm"))
 
+    @property
+    def recorded_resource_id(self) -> str:
+        return self._resource_id
+
+    @property
+    def recorded_vm_id(self) -> str:
+        return self._vm_id
+
+    @property
+    def recorded_locator(self) -> ProviderLocator:
+        return ProviderLocator(f"azure-vm:v2:{self._vm_id}:{self._resource_id}")
+
+    def close_read_client(self, deadline: Deadline) -> bool:
+        """Bar reads and retry their original, retaining borrowed credentials."""
+        self._acquire(deadline)
+        control: BaseException | None = None
+        try:
+            self._closed = True
+            provider_locator_remaining(deadline, vm_name=self._vm_name)
+            self._close_read_client()
+            provider_locator_remaining(deadline, vm_name=self._vm_name)
+            return self._read_client is None
+        except BaseException as error:
+            if not isinstance(error, Exception):
+                control = error
+            raise
+        finally:
+            try:
+                self._lock.release()
+            except BaseException:
+                if control is not None:
+                    raise control from None
+                raise
+
     def borrow_credential(self, deadline: Deadline) -> object:
         """Borrow the already admitted credential while access retains custody."""
         self._acquire(deadline)
@@ -113,7 +147,9 @@ class AzureOwnedReadAccess:
                     raise self._refusal()
                 admitted = True
                 credential = self._auth.credential(deadline)
-                observed = self._read_vm(credential, deadline, expand="instanceView" if kind == "power" else None)
+                observed = self._read_vm(
+                    credential, deadline, expand="instanceView" if kind in {"power", "vm"} else None
+                )
                 if kind == "power":
                     result: object = self._power(observed)
                 elif kind == "locator":
@@ -251,23 +287,28 @@ class AzureOwnedReadAccess:
 
     @staticmethod
     def _power(observed: object) -> VMStatus:
-        statuses = getattr(getattr(observed, "instance_view", None), "statuses", None)
-        if not isinstance(statuses, list):
-            return VMStatus.UNKNOWN
-        power_codes = []
-        for status in statuses:
-            code = getattr(status, "code", None)
-            if type(code) is not str:
-                return VMStatus.UNKNOWN
-            if code.startswith("PowerState/"):
-                power_codes.append(code)
-        if len(power_codes) != 1:
-            return VMStatus.UNKNOWN
         return {
             "PowerState/running": VMStatus.RUNNING,
             "PowerState/stopped": VMStatus.STOPPED,
             "PowerState/deallocated": VMStatus.DEALLOCATED,
-        }.get(power_codes[0], VMStatus.UNKNOWN)
+        }.get(AzureOwnedReadAccess._power_code(observed) or "", VMStatus.UNKNOWN)
+
+    @staticmethod
+    def _power_code(observed: object) -> str | None:
+        """Accept one complete provider power code, preserving transitional states."""
+        statuses = getattr(getattr(observed, "instance_view", None), "statuses", None)
+        if not isinstance(statuses, list):
+            return None
+        power_codes = []
+        for status in statuses:
+            code = getattr(status, "code", None)
+            if type(code) is not str:
+                return None
+            if code.startswith("PowerState/"):
+                power_codes.append(code)
+        if len(power_codes) != 1:
+            return None
+        return power_codes[0]
 
     def _close_read_client(self) -> None:
         client = self._read_client
