@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
+from agentworks.execution._borrowed_io import DiscardSink, PrefixedSource, PresentationCollector
 from agentworks.execution._evidence_wire import FrameReader
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._inline_bundle import FIXED_SOURCE, ROOT_PROGRAM
@@ -51,56 +52,6 @@ if TYPE_CHECKING:
     from agentworks.execution.carrier import ByteSink, ByteSource, Deadline, ExitStatus
 
 
-class _RequestSource:
-    """Send the complete request before borrowing the application source."""
-
-    def __init__(self, envelope: bytes, source: ByteSource) -> None:
-        self._prefix = envelope
-        self._source: ByteSource | None = source
-
-    def try_read(self, limit: int) -> bytes | None:
-        if self._prefix:
-            chunk = self._prefix[:limit]
-            self._prefix = self._prefix[len(chunk) :]
-            return chunk
-        return b"" if self._source is None else self._source.try_read(limit)
-
-    def release(self) -> None:
-        self._prefix = b""
-        self._source = None
-
-
-class _LiveCollector:
-    """Drain one decoded chunk before allowing the next evidence frame."""
-
-    def __init__(self, reader: FrameReader, observer: InlineObserver) -> None:
-        self._reader = reader
-        self._observer = observer
-        self._awaiting_ack = False
-
-    def try_write(self, data: memoryview) -> int | None:
-        if not self._observer.drain():
-            return None
-        if self._awaiting_ack:
-            self._awaiting_ack = False
-            return 1
-        consumed = self._reader.try_write(data)
-        if not self._observer.drain():
-            # Keep the final encoded byte pending in the carrier so it keeps
-            # polling delivery even when the guest waits for application input.
-            self._awaiting_ack = True
-            return consumed - 1 if consumed > 1 else None
-        return consumed
-
-
-class _DiscardSink:
-    """Consume borrowed diagnostic bytes without retaining their contents."""
-
-    @staticmethod
-    def try_write(data: memoryview) -> int:
-        return len(data)
-
-
 @dataclass
 class PreparedInlineCandidate:
     """One non-replayable carrier attempt and its bounded evidence collector."""
@@ -117,7 +68,7 @@ class PreparedInlineCandidate:
 
     def release(self) -> None:
         """Drop caller endpoints and request bytes after the sole observation."""
-        if isinstance(self.io.input, LiveInput) and isinstance(self.io.input.source, _RequestSource):
+        if isinstance(self.io.input, LiveInput) and isinstance(self.io.input.source, PrefixedSource):
             self.io.input.source.release()
         self.io = CarrierIO()
         self._observer.release()
@@ -301,15 +252,15 @@ def prepare_inline_candidate(
 
     observer = InlineObserver(output_mode, retained_limit, stdout=stdout, stderr=stderr)
     reader = FrameReader(nonce, observer.accept)
-    collector = _LiveCollector(reader, observer)
+    collector = PresentationCollector(reader, observer)
     runtime = RuntimePrefixSink(nonce, candidates, collector, system_shim)
     return PreparedInlineCandidate(
         invocation=PreparedInvocation(fixed_argv),
         io=CarrierIO(
             input=FiniteInput(manifest_data, sensitive=sensitive)
             if source is None
-            else LiveInput(_RequestSource(manifest_data, source), sensitive=sensitive),
-            output=SinkOutput(runtime, _DiscardSink(), require_live=output_mode is OutputMode.DELIVER),
+            else LiveInput(PrefixedSource(manifest_data, source), sensitive=sensitive),
+            output=SinkOutput(runtime, DiscardSink(), require_live=output_mode is OutputMode.DELIVER),
             sensitive=sensitive,
         ),
         nonce=nonce,

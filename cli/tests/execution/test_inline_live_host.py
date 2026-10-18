@@ -13,12 +13,11 @@ from threading import Event
 import pytest
 
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution._borrowed_io import PrefixedSource, PresentationCollector
 from agentworks.execution._evidence_wire import Frame, FrameKind, FrameReader, encode_frame
 from agentworks.execution._execution_operation import OwnedInlineOutcome
 from agentworks.execution._execution_result import reduce_owned_inline_result
 from agentworks.execution._inline import (
-    _LiveCollector,
-    _RequestSource,
     execute_inline_candidate,
     prepare_inline_candidate,
 )
@@ -127,7 +126,7 @@ def test_public_endpoints_validate_passively_and_hide_values() -> None:
 
 def test_request_prefix_does_not_read_source_until_envelope_is_complete() -> None:
     source = Source(b"application")
-    request = _RequestSource(b"envelope", source)
+    request = PrefixedSource(b"envelope", source)
     assert request.try_read(3) == b"env"
     assert request.try_read(100) == b"elope"
     assert source.calls == 0
@@ -141,7 +140,7 @@ def test_one_frame_per_write_and_pending_chunk_block_further_decoding() -> None:
     stdout, stderr = Sink(bound=2, allowance=1), Sink()
     observer = InlineObserver(OutputMode.DELIVER, 0, stdout=stdout, stderr=stderr)
     reader = FrameReader(NONCE, observer.accept)
-    collector = _LiveCollector(reader, observer)
+    collector = PresentationCollector(reader, observer)
     records = [
         encode_frame(NONCE, Frame(0, FrameKind.LAUNCHING, empty_body())),
         encode_frame(NONCE, Frame(1, FrameKind.STDOUT, b"abcdef")),
@@ -171,7 +170,7 @@ def test_positive_short_writes_drain_one_bounded_chunk_without_stalling() -> Non
     stdout = Sink(bound=1)
     observer = InlineObserver(OutputMode.DELIVER, 0, stdout=stdout, stderr=Sink())
     reader = FrameReader(NONCE, observer.accept)
-    collector = _LiveCollector(reader, observer)
+    collector = PresentationCollector(reader, observer)
     launching = encode_frame(NONCE, Frame(0, FrameKind.LAUNCHING, empty_body()))
     assert collector.try_write(memoryview(launching)) == len(launching)
     data = encode_frame(NONCE, Frame(1, FrameKind.STDOUT, b"x" * 4096))
@@ -186,7 +185,7 @@ def test_delivered_stream_counts_and_digest_are_checked_without_retained_bytes(b
     stdout, stderr = Sink(), Sink()
     observer = InlineObserver(OutputMode.DELIVER, 0, stdout=stdout, stderr=stderr)
     reader = FrameReader(NONCE, observer.accept)
-    collector = _LiveCollector(reader, observer)
+    collector = PresentationCollector(reader, observer)
     frames = [Frame(0, FrameKind.LAUNCHING, empty_body())]
     payload = bytes(range(256)) * 32
     for offset in range(0, len(payload), 4096):
@@ -427,7 +426,7 @@ def test_public_drains_buffered_completion_records_after_client_exit(
     _, _, operation, _, access, _ = bound
     exited = Event()
     snapshot = LocalProcessOwner.snapshot
-    write = _LiveCollector.try_write
+    write = PresentationCollector.try_write
     accept = InlineObserver.accept
     declined = 0
     accepted: list[FrameKind] = []
@@ -451,7 +450,7 @@ def test_public_drains_buffered_completion_records_after_client_exit(
         return accept(observer, frame)
 
     monkeypatch.setattr(LocalProcessOwner, "snapshot", observe)
-    monkeypatch.setattr(_LiveCollector, "try_write", after_exit)
+    monkeypatch.setattr(PresentationCollector, "try_write", after_exit)
     monkeypatch.setattr(InlineObserver, "accept", record)
     source = OpenSource()
     result = access.run(
