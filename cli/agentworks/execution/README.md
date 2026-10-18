@@ -217,19 +217,25 @@ verified retained prefix, whose EOF does not imply complete source capture. `cap
 describes the whole verified capture, not consumption of this returned slice; intentional discard or
 suppression leaves it false without an output-limit failure. Wait returns the existing
 `ExecutionResult` with a safe managed reference and never stops the workload or drains renewal.
-MANAGED `run` composes that same launch and wait without requiring a separate caller-facing start
-step. Live work first validates the relay passively, before shell lookup or managed reservation.
-After settled launch and keeper admission, it borrows one foreground relay under the same owner. The
-controller owns one private socket and delays workload entry until the one-use attachment is bound;
-a fixed pre-entry window prevents an unattached setup child from living indefinitely. Pipe pressure
-cannot block lease observation or cleanup. The relay's remaining finite allowance bounds every guest
-wait, without cancelling the job when observation ends. Retained run state contains direction
-metadata, not caller endpoints. `start` and independent lifetime reject live endpoints. Explicit
-live output has no durable spool. Its foreground result requires actual stream delivery and drained
-sinks separately from durable application status and resource closure. A later successful wait
-cannot erase a pipe failure or reconstruct presentation from discarded output. Unsettled relay
-custody prevents another poll, and escaping controls retain their original identity and safe job
-reference.
+Closed capture reads return at most the requested `max_bytes` and 256 KiB per call. Larger positive
+requests receive a shorter page. The next cursor advances by returned bytes; retained-prefix EOF
+compares it with the verified total retained length. Exact EOF returns an empty page, while a cursor
+beyond the verified prefix raises a validation error. Full result collection records every page's
+helper custody under the original deadline and retains verified prefixes and independently known
+application completion if later retrieval returns a failure. Escaping controls retain their original
+identity and cause chain rather than becoming payload-carrying exceptions. MANAGED `run` composes
+that same launch and wait without requiring a separate caller-facing start step. Live work first
+validates the relay passively, before shell lookup or managed reservation. After settled launch and
+keeper admission, it borrows one foreground relay under the same owner. The controller owns one
+private socket and delays workload entry until the one-use attachment is bound; a fixed pre-entry
+window prevents an unattached setup child from living indefinitely. Pipe pressure cannot block lease
+observation or cleanup. The relay's remaining finite allowance bounds every guest wait, without
+cancelling the job when observation ends. Retained run state contains direction metadata, not caller
+endpoints. `start` and independent lifetime reject live endpoints. Explicit live output has no
+durable spool. Its foreground result requires actual stream delivery and drained sinks separately
+from durable application status and resource closure. A later successful wait cannot erase a pipe
+failure or reconstruct presentation from discarded output. Unsettled relay custody prevents another
+poll, and escaping controls retain their original identity and safe job reference.
 
 It selects its finite observation budget once for launch, relay and wait; acknowledgement that
 exhausts the budget still returns UNKNOWN application progress, DEADLINE, incomplete output with the
@@ -1350,6 +1356,16 @@ private observation operations now require an observed VM guest identity: host p
 the expected launch's VM kind and derived boot, and the bundled helper rereads the protected marker,
 kernel boot and PID 1 start time before opening the store. This does not establish a production
 route or public job view.
+
+Each closed-output helper verifies the entire protected spool's length and SHA-256 while retaining
+only the requested intersection of bounded 64 KiB reads. The host checks the requested offset,
+returned count, range digest and original launch/end facts before admitting bytes. The declared
+complete stdout capacity includes the runtime prefix and encoded control, facts and data; provider
+limits do not permit silently truncated success. One page uses one helper invocation and borrow.
+This avoids a second output store or read-session record, at the cost of repeated whole-spool
+verification: a 16 MiB capture needs 64 pages and scans 1 GiB; a 1 MiB capture needs four pages and
+scans 4 MiB. Native timing, helper staging, active output and DIRECT production spooling still need
+separate acceptance.
 
 After validating the protected launch, `observe` also queries the derived local systemd unit and
 returns separately correlated controller evidence: RUNNING, EXITED, ABSENT or UNKNOWN. A failed,
