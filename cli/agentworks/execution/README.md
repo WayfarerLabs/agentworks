@@ -261,12 +261,13 @@ ownership caller settles actual delivery separately and preserves observed launc
 settlement is interrupted. Bookkeeping and finish never launch, and an acknowledged independent job
 has no operation keeper or aggregate job cleanup owner. Foreground RESOURCE run shares its original
 deadline with wait; a cause-free expiry before the first observation uses only its same-invocation
-acknowledgement and frozen output policy. Explicit wait receives no such acknowledgement. Proxmox
-alone currently supplies the immutable no-idle-stop fact, separate from live operation and prepared
-guest admission. WSL2 leaves it absent and refuses independent launch, even with an operation
-command hold; a physical recoverable job-length availability hold remains future work. Explicit VM
-stop/reboot and host loss are outside that no-idle-stop fact. These private increments do not
-establish all-platform duration availability, session namespaces or a public RunContext surface.
+acknowledgement and frozen output policy. Explicit wait receives no such acknowledgement. Proxmox,
+AWS, Azure and GCP currently supply the immutable no-idle-stop fact, separate from live operation
+and prepared guest admission. WSL2 leaves it absent and refuses independent launch, even with an
+operation command hold; a physical recoverable job-length availability hold remains future work.
+Explicit VM stop/reboot and host loss are outside that no-idle-stop fact. These private increments
+do not establish all-platform duration availability, session namespaces or a public RunContext
+surface.
 
 The private native composition acquires the exact VM owner and validates the selection, then retains
 the passive `VMPlatform.build_native_execution_access()` result before its first
@@ -429,8 +430,12 @@ interfaces. Accessors return those exact interfaces, or `None` when composition 
 native aggregate supplies this view while retaining sole ownership of preparation and teardown;
 retaining the view does not keep the operation open. Its immutable feature description is the same
 object supplied by the selected carrier. Features describe channel support, not readiness,
-authorization or implemented consumer live/terminal methods. No public RunContext accessor or
-permission enforcement is supplied by this wrapper.
+authorization or implemented consumer live/terminal methods. Its immutable `ExecutionIdentity`
+contains the prepared ordinary account, UID, GID and group-set snapshot; `ExecutionRoute`
+distinguishes native, canonical and platform-host composition without exposing a carrier or its
+credentials. These are bound facts, not a fresh readiness check or elevation grant. The native
+aggregate supplies exact admin and optional selected-agent identities with the native route. This
+wrapper does not construct RunContext, activate permissions or extend operation lifetime.
 
 `ExecutionOperation` requires an explicit managed target matching its owner's scope. An optional
 numeric bootstrap must match that VM's derived boot identity; platform-host targets cannot select

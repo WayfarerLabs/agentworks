@@ -5371,12 +5371,13 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
       capture/spooling limits. Preserve requested profile, identity and sensitivity; never
       downgrade, substitute capture, or infer guest termination from observation loss. The DIRECT
       pipe prerequisite above does not narrow these requirements.
-- [ ] Implement the [managed foreground pipe design](managed-live-io-lld.md): retain settled
-      buffered launch and keeper admission, add explicit protected live-direction metadata and one
-      controller-owned per-run socket, and connect one foreground relay under the original owner.
-      Prove bounded admission, independent directions, lease/stop progress under pipe pressure, no
-      retained live output, exact socket disposal and actual presentation in the foreground result.
-      Local proof must not substitute for native root/cgroup/SSH acceptance.
+- [ ] Obtain native root/cgroup/SSH acceptance for the implemented private
+      [managed foreground pipe design](managed-live-io-lld.md): settled buffered launch and keeper
+      admission, protected live-direction metadata, one controller-owned per-run socket and one
+      foreground relay under the original owner. Prove bounded admission, independent directions,
+      lease/stop progress under pipe pressure, no retained live output, exact socket disposal and
+      actual presentation in the foreground result. The implementation checkpoint below is not
+      native acceptance; this item does not call for a second relay or controller.
 - [x] Compose private MANAGED OPERATION live execution through the existing ordinary helper owner,
       settled launch and dedicated keeper. Validate before start effects, admit one relay attempt,
       release endpoints and combine actual presentation with independent durable status before
@@ -5618,6 +5619,11 @@ the new surface; migration and removal follow in their own PRs. Permissions are 
 removal: do not enforce new recipient grants or the successor core file ceiling, or rely on their
 isolation, in coexistence releases. Operational safety and selected profile guarantees still apply.
 
+The additive PR supplies explicit new operation-context entry points yielding the existing
+RunContext type. It proves complete new-only workflows through those entry points; it does not
+populate the 24 legacy context builders or acquire claims in their existing workflows. Consumer
+migration batches adopt those entry points later, before their activation and rollback effects.
+
 The RunContext-accessor checkbox below describes the delivery outcome, not the next construction
 step. Complete target identity, execution/jobs, FileAccess, platform composition and whole-workflow
 validation first through private composition seams. Only then expose the two passive RunContext
@@ -5690,11 +5696,12 @@ ownership are unchanged, so the broader additive RunContext and migration gates 
       WSL2 distribution/user binding, independent Lima delivery and explicit SSH placement-host
       endpoint/account/trust/OS facts. Preserve unchanged legacy hooks during coexistence; new
       factories cannot obtain their inputs through those hooks.
-- [ ] Implement and prove the first independent native-binding hooks for Proxmox and WSL2 under the
-      [core binding contract](execution-contract.md#core-native-binding). Preserve passive
-      construction, actual delivery-account facts, explicit runtime selection and old-hook behavior.
-      Proxmox uses the configured CA for both platform API and new QGA delivery, without accepting
-      legacy verification bypass. Other platforms, provisioning-result integration and complete
+- [ ] Obtain native acceptance for the implemented first independent native-binding hooks for
+      Proxmox and WSL2 under the [core binding contract](execution-contract.md#core-native-binding).
+      Preserve passive construction, actual delivery-account facts, explicit runtime selection and
+      old-hook behavior. Proxmox uses the configured CA for both platform API and new QGA delivery,
+      without accepting legacy verification bypass. Existing private implementation checkpoints do
+      not supply native evidence. Other platforms, provisioning-result integration and complete
       target identity composition remain part of the required gate above.
 - [ ] Expose native binding resolution as an explicit preparation operation with a deadline, before
       passive target/RunContext construction. The remaining-platform inventory shows that cloud

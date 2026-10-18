@@ -246,11 +246,24 @@ The public surface does not expose SSH credentials, provider task IDs, or a carr
 `RunContext.admin_execution_target()` and `.agent_execution_target()` return
 `ExecutionTarget | None`, with each supplied view scoped to that recipient after activation. Context
 composition retains a non-sensitive absence reason distinguishing unavailable lifecycle state from
-withheld authority; the LLD specifies its representation. An absent interface is not a claim that
-the carrier cannot implement it. `RunContext` stays in `capabilities/base.py`; it is not cloned into
-the execution package. During coexistence, the new accessors sit beside unchanged legacy accessors.
-The composition root owns target/resource closure; retaining a target cannot extend its authorized
-lifetime. A later job observer receives a newly authorized target.
+withheld authority. The paired `admin_execution_target_absence()` and
+`agent_execution_target_absence()` accessors return `TargetAbsence.UNAVAILABLE` or
+`TargetAbsence.WITHHELD` for an absent binding, and `None` when a target is supplied. Constructor
+reasons default to unavailable and are normalized away for supplied targets without inspecting them.
+The native context prepares its admin target, optionally prepares an explicitly selected agent
+target, and preserves an incoming absent-agent reason when no new agent target is requested. An
+incoming supplied target's identity does not become an absence reason. No production recipient
+permission check or withheld selection is activated by this representation.
+
+Each target also carries immutable `ExecutionIdentity` metadata (the prepared ordinary account, UID,
+GID and groups) and `ExecutionRoute` (`NATIVE`, `CANONICAL` or `PLATFORM_HOST`). Route is a
+composition choice, not the carrier technology: a native cloud route can use SSH. Metadata reads do
+not resolve accounts, recheck readiness, grant elevation or expose credentials/provider handles. An
+absent interface is not a claim that the carrier cannot implement it. `RunContext` stays in
+`capabilities/base.py`; it is not cloned into the execution package. During coexistence, the new
+accessors sit beside unchanged legacy accessors. The composition root owns target/resource closure;
+retaining a target cannot extend its authorized lifetime. A later job observer receives a newly
+authorized target.
 
 ## Carrier contract
 

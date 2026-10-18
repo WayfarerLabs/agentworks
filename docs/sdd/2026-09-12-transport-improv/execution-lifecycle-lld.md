@@ -1180,8 +1180,11 @@ The Linux binding retains the recorded VM admin account for delivery and a fixed
 named-account guest probe. Delivery as root uses direct entry; other admin accounts use explicit
 passwordless sudo. The existing bootstrap resolves the account's actual UID/GID/groups before its
 named body; no UID is guessed. Managed delivery uses fresh carriers with the same immutable
-connection. Binding alone advertises no independent-job availability: owned activation, firewall
-routes, keep-awake guarantees, complete RunContext composition and native proof remain open.
+connection. AWS, Azure and GCP explicitly bind the no-idle-stop independent-job availability fact in
+passive resolution and owned preparation. The shared SSH helper defaults to no guarantee. This fact
+excludes explicit stop, reboot, host loss and external policy; complete RunContext composition and
+native proof remain open. WSL2's operation-scoped hold does not satisfy its separate recoverable
+job-length availability requirement.
 
 ### AWS provider read custody
 

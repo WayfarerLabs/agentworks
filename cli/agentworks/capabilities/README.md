@@ -225,15 +225,18 @@ accessor methods: the legacy transports (`ctx.admin_target()` / `ctx.agent_targe
 those users on a VM), independent new execution target bindings (`ctx.admin_execution_target()` /
 `ctx.agent_execution_target()`), and resolved secrets (`ctx.secret(name)`). The new target accessors
 return exactly the supplied `ExecutionTarget` or `None`, without inspecting, activating, or closing
-it and without fallback to a legacy transport. The composition root owns target/resource closure;
-each target enforces its lifetime. Existing orchestrators do not yet supply the new bindings.
-Permission enforcement is not active, and security activation remains deferred until the old stack
-is removed. Everything is optional, and the timing is what populates it: **preflight gets it as of
-command start** (targets that _already_ exist, no resolved secrets), **runup gets it as of op
-start** (current targets, resolved secrets). It is the same object minus the secrets, differing only
-by when it is built. A `vm create` preflight is handed a context with no VM target, so it cannot
-reach the thing the command has not created yet. Pre-resolve concerns read `self` (config bound at
-construct); runup and ops read the context.
+it and without fallback to a legacy transport. The corresponding `admin_execution_target_absence()`
+and `agent_execution_target_absence()` return `None` for a supplied target or a non-sensitive
+`TargetAbsence.UNAVAILABLE` or `TargetAbsence.WITHHELD` reason for an absent one. Composition
+supplies the reason, defaulting to unavailable; accessors do not infer permission or inspect a
+target. The composition root owns target/resource closure; each target enforces its lifetime.
+Existing orchestrators do not yet supply the new bindings. Permission enforcement is not active, and
+security activation remains deferred until the old stack is removed. Everything is optional, and the
+timing is what populates it: **preflight gets it as of command start** (targets that _already_
+exist, no resolved secrets), **runup gets it as of op start** (current targets, resolved secrets).
+It is the same object minus the secrets, differing only by when it is built. A `vm create` preflight
+is handed a context with no VM target, so it cannot reach the thing the command has not created yet.
+Pre-resolve concerns read `self` (config bound at construct); runup and ops read the context.
 
 #### Stage 1: Declare
 

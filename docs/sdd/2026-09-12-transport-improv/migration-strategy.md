@@ -14,12 +14,14 @@ Python modules, with no target/access/file/job/profile implementation or product
 24 production `RunContext(` construction sites and no new execution-target accessors. These counts
 came from a source search, not runtime coverage.
 
-The additive composition work owns `capabilities/base.py` and these context-producing families: VM
-manager boundaries/lifecycle/nodes, agent lifecycle, session create/roll/lifecycle/scope, workspace
-create, VM inspection/power/status and doctor. They continue passing through the old targets
-unchanged while gaining separately supplied new targets. Composition binds the new targets from
-resolved connection/identity facts, never by wrapping a legacy target. Absent targets remain absent
-at preflight; adding accessors cannot activate a route or discover authority.
+The context-producing families are VM manager boundaries/lifecycle/nodes, agent lifecycle, session
+create/roll/lifecycle/scope, workspace create, VM inspection/power/status and doctor. The additive
+PR owns `capabilities/base.py` and explicit new operation-context entry points returning that same
+RunContext type. It does not populate the 24 existing context-construction sites or acquire new
+claims in legacy workflows. Those sites adopt the new entry points in their consumer-migration
+batches. New-only workflows bind independently prepared targets from resolved connection/identity
+facts, never by wrapping a legacy target; supplied legacy handles can pass through unchanged. Absent
+targets remain absent at preflight. Adding accessors cannot activate a route or discover authority.
 
 The adapter inventory is local Lima, remote Lima's guest hop, WSL2, and Proxmox QGA, plus the
 separately owned SSH carrier used for canonical access, cloud-native access and placement hosts. The
