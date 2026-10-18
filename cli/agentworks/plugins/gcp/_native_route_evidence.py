@@ -73,7 +73,6 @@ class RoutePayload:
     delete_request_id: str | None = None
     delete_operation: str | None = None
     delete_state: ActivationState = ActivationState.UNKNOWN
-    absent: bool = False
 
     @property
     def name(self) -> str:
@@ -84,8 +83,8 @@ class RoutePayload:
         return f"agentworks native SSH route {self.nonce}"
 
 
-def encode_payload(payload: RoutePayload) -> bytes:
-    """Validate cross-execution input and emit a canonical bounded v1 payload."""
+def _validate_payload(payload: RoutePayload) -> None:
+    """Validate persisted selection and request facts at the decoding boundary."""
     try:
         if type(payload) is not RoutePayload or type(payload.identity) is not NativeIdentity:
             raise ValueError("invalid payload type")
@@ -120,7 +119,6 @@ def encode_payload(payload: RoutePayload) -> bytes:
             or any(type(p) is not str or str(IPv4Network(p)) != p for p in payload.prefixes)
             or type(payload.nonce) is not str
             or re.fullmatch(r"[0-9a-f]{32}", payload.nonce) is None
-            or type(payload.absent) is not bool
         ):
             raise ValueError("invalid selection")
         request_id(payload.create_request_id)
@@ -144,14 +142,16 @@ def encode_payload(payload: RoutePayload) -> bytes:
                 raise ValueError("premature delete intent")
         elif payload.delete_operation is not None:
             raise ValueError("missing delete intent")
-        if payload.absent and payload.create_state not in TERMINAL:
-            raise ValueError("absence without terminal creation")
-        data = json.dumps(asdict(payload), ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("ascii")
-        if len(data) > MAX_LIFECYCLE_PAYLOAD_BYTES:
-            raise ValueError("oversized payload")
-        return data
     except (ValueError, TypeError, AttributeError, ValidationError):
         raise ValidationError("GCE route payload is invalid") from None
+
+
+def encode_payload(payload: RoutePayload) -> bytes:
+    """Serialize interior selected facts as canonical bounded v1 JSON."""
+    data = json.dumps(asdict(payload), ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("ascii")
+    if len(data) > MAX_LIFECYCLE_PAYLOAD_BYTES:
+        raise ValidationError("GCE route payload exceeds its storage bound")
+    return data
 
 
 def decode_payload(data: bytes) -> RoutePayload:
@@ -165,6 +165,7 @@ def decode_payload(data: bytes) -> RoutePayload:
         value["create_state"] = ActivationState(value["create_state"])
         value["delete_state"] = ActivationState(value["delete_state"])
         payload = RoutePayload(**value)
+        _validate_payload(payload)
         if encode_payload(payload) != data:
             raise ValueError("noncanonical payload")
         return payload

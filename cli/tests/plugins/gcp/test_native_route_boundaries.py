@@ -264,7 +264,14 @@ def test_owner_fence_takeover_blocks_further_mutations(sdk, monkeypatch, stage):
 
 
 @pytest.mark.parametrize(
-    "field,value", [("obligation_kind", "foreign"), ("payload_version", 2), ("payload_revision", 42)]
+    "field,value",
+    [
+        ("obligation_kind", "foreign"),
+        ("payload_version", 2),
+        ("payload_revision", 42),
+        ("payload", b"{}"),
+        ("payload", b"not JSON"),
+    ],
 )
 def test_exact_ledger_row_is_required_for_later_checks(sdk, monkeypatch, field, value):
     open_route(sdk)
@@ -299,6 +306,9 @@ def test_lost_resolution_reply_reconciles_exact_row(sdk, monkeypatch, committed)
     assert len(mutations(sdk, "DELETE")) == 1
     if committed:
         assert len(sdk.calls) == before
+    else:
+        assert len(sdk.calls) == before + 1
+        assert sdk.calls[-1][0] == "GET" and sdk.calls[-1][1].endswith(sdk.route.payload.name)
     assert sdk.owner.inspect_lifecycle_obligation(sdk.route.obligation_id).state is LifecycleObligationState.RESOLVED
 
 

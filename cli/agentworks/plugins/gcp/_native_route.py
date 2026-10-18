@@ -29,7 +29,6 @@ from agentworks.plugins.gcp._native_route_evidence import (
     acknowledgment,
     base_url,
     completion,
-    decode_payload,
     encode_payload,
     json_object,
     numeric_id,
@@ -252,7 +251,6 @@ class GCENativeRoute:
             return
         if row.obligation_kind != OBLIGATION_KIND or row.payload_version != PAYLOAD_VERSION:
             raise StateError("GCE route custody conflicts")
-        decode_payload(row.payload)
         if self._publication is None:
             if (row.payload, row.payload_revision) != (self._durable, self._revision):
                 raise StateError("GCE route custody conflicts")
@@ -500,8 +498,6 @@ class GCENativeRoute:
                 if self._payload.delete_state is ActivationState.FAILED and not retry_delete:
                     return False
             if not self._rule(deadline, missing=True):
-                self._payload = replace(self._payload, absent=True)
-                self._publish(deadline)
                 return self._resolve(deadline)
             if self._delete_entered and not retry_delete:
                 return False
@@ -525,6 +521,4 @@ class GCENativeRoute:
                 return False
             if self._rule(deadline, missing=True):
                 return False
-            self._payload = replace(self._payload, absent=True)
-            self._publish(deadline)
             return self._resolve(deadline)

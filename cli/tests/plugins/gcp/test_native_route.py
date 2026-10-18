@@ -26,7 +26,7 @@ from agentworks.plugins.gcp._activation_operation import ActivationState
 from agentworks.plugins.gcp._native_access import GCEInstanceObservation
 from agentworks.plugins.gcp._native_identity import NativeIdentity
 from agentworks.plugins.gcp._native_route import GCENativeRoute
-from agentworks.plugins.gcp._native_route_evidence import decode_payload, encode_payload
+from agentworks.plugins.gcp._native_route_evidence import RoutePayload, decode_payload, encode_payload
 from agentworks.plugins.gcp._native_route_topology import rule_body
 from agentworks.plugins.gcp._owned_auth import _OwnedAuth
 from agentworks.plugins.gcp.config import GcpAmbientAuth
@@ -534,3 +534,54 @@ def test_payload_canonical_roundtrip_rejects_corruption_and_keeps_no_diagnostic(
     for corrupt in (data + b" ", b"{}", b'{"a":1,"a":2}', data.replace(b'"789"', b'"0789"')):
         with pytest.raises(ValidationError):
             decode_payload(corrupt)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"identity.project_id": "../foreign"},
+        {"identity.zone": ""},
+        {"identity.instance_id": 123},
+        {"identity.instance_id": "0123"},
+        {"identity.deny_rule_id": "18446744073709551616"},
+        {"identity.network_url": "projects/foreign/global/networks/net"},
+        {"identity.network_tag": "UPPERCASE"},
+        {"identity.subnet_url": "projects/foreign/regions/us-central1/subnetworks/subnet"},
+        {"identity.access_config_name": "bad/name"},
+        {"prefixes": ["198.51.100.1/24"]},
+        {"prefixes": ["198.51.100.0/24", "198.51.100.0/24"]},
+        {"prefixes": []},
+        {"prefixes": ["::/0"]},
+        {"nonce": "not-a-nonce"},
+        {"create_request_id": "00000000-0000-0000-0000-000000000000"},
+        {"create_operation": None},
+        {"create_operation": "foreign/operation"},
+        {"rule_id": None},
+        {"create_state": "foreign"},
+        {"create_state": "unknown"},
+        {"delete_request_id": "bad-uuid"},
+        {"delete_operation": "Delete_1", "delete_state": "pending"},
+        {"create_state": "pending", "delete_request_id": "12345678-1234-4234-8234-123456789abc"},
+        {"foreign": True},
+        {"absent": True},
+    ],
+)
+def test_persisted_payload_selection_and_request_invariants(changes):
+    payload = RoutePayload(
+        IDENTITY,
+        ("198.51.100.0/24",),
+        "a" * 32,
+        "12345678-1234-4234-8234-123456789abc",
+        create_operation="Insert_1",
+        rule_id="789",
+        create_state=ActivationState.SUCCEEDED,
+    )
+    document = json.loads(encode_payload(payload))
+    for field, value in changes.items():
+        if field.startswith("identity."):
+            document["identity"][field.split(".")[1]] = value
+        else:
+            document[field] = value
+    persisted = json.dumps(document, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("ascii")
+    with pytest.raises(ValidationError):
+        decode_payload(persisted)
