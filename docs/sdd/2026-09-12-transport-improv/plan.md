@@ -4926,7 +4926,7 @@ and a production drain-evidence producer remain unproved.
       Keep the public FileAccess and ownership release gates open until this and the concrete
       recovery handoff are proved.
 
-- [ ] Extend the private shared effect fence to metadata, directory convergence, conditional removal
+- [x] Extend the private shared effect fence to metadata, directory convergence, conditional removal
       and JSON's existing upload child. Carry the gate through canonical requests, helper effects
       and cleanup, every durable row rewrite, and exact setup/proposal recovery without retaining
       contents or replaying mutations. Generalize the existing package fence consumer rather than
@@ -4937,6 +4937,18 @@ and a production drain-evidence producer remain unproved.
       convergence. This private family coverage does not complete production FileAccess admission,
       namespace lifecycle, predecessor-controller settlement, native evidence or whole-operation
       recovery.
+
+The private family extension at `8fd874a4b` and settled non-dispatch correction at `bf9a12142` now
+carry the exact gate through these requests and retained rows. The shared
+`FileMutationFenceRecovery` reuses the previous package consumer's proposal/advance/adopt algorithm
+without replay or whole-owner release. Real decoder tests cover the reserved namespace; Linux
+metadata also refuses the two exact ancestor targets. Five entry-point regressions prove that known
+non-dispatch resolves only its own row and permits owner completion, while unknown delivery,
+unsettled local resources and lost publication keep custody. The integrated file/native-context
+selection passes 2,691 tests with 25 skips; strict typing checks 1,522 files. Independent project,
+correctness and complexity reviews clear this private family implementation. Production automatic
+admission, namespace lifecycle, predecessor-controller fencing, native proof and whole-operation
+recovery remain open below; these local results do not establish them.
 
 The reviewed setup design selects one deterministic, epoch-bound path and exclusive creation per
 managed scope/effective identity. A lost setup reply is reconciled by non-creating inspection of the
