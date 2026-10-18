@@ -12,6 +12,7 @@ import textwrap
 import weakref
 from collections.abc import Iterator
 from contextlib import closing
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs
@@ -352,7 +353,7 @@ print('parent registration legacy baseline:', baseline)
 print('adapter source:', adapter.__file__)
 """,
         ],
-        env={**os.environ, "PYTHONPATH": os.environ["PYTHONPATH"]},
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2])},
         capture_output=True,
         text=True,
         timeout=10,

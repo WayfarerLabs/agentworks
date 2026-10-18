@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -41,10 +42,19 @@ from tests.vms.test_native_operation import database as database
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="packed Linux helpers and held directory proof")
 
 
+def _wsl_host_path(path: Path) -> Path:
+    value = str(path)
+    if os.name == "nt" or not value.startswith("/") or value.startswith("//"):
+        return path
+    return Path(f"/{value}")
+
+
 @pytest.fixture
 def lima(database, tmp_path, monkeypatch, request):
     driver, status = getattr(request, "param", ("qemu", "Running"))
     home = tmp_path / "lima-home"
+    if driver == "wsl2":
+        home = _wsl_host_path(home)
     home.mkdir()
     (home / "selected").mkdir()
     (home / "selected/lima.yaml").write_text(f"vmType: {driver}\n")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
@@ -32,9 +33,18 @@ from tests.vms.test_target_preparation import _MARKER
 pytestmark = pytest.mark.windows
 
 
+def _wsl_host_path(path: Path) -> Path:
+    value = str(path)
+    if os.name == "nt" or not value.startswith("/") or value.startswith("//"):
+        return path
+    return Path(f"/{value}")
+
+
 @pytest.fixture
 def wsl(local, monkeypatch):
     fake, access = local
+    fake.home = _wsl_host_path(fake.home)
+    monkeypatch.setenv("LIMA_HOME", str(fake.home))
     fake.vm_type = "wsl2"
     (fake.directory / "lima.yaml").write_text("vmType: wsl2\n")
     route = LimaLocalSelection("local", "selected", "box", str(fake.home), "/literal/limactl")
