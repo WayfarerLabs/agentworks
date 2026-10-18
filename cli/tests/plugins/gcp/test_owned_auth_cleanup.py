@@ -14,6 +14,7 @@ from tests.plugins.gcp.test_native_execution_access import full as full
 from tests.plugins.gcp.test_owned_auth_copy import copied, run_copy
 from tests.plugins.gcp.test_owned_read_sdk import FreshCredential, observe
 from tests.plugins.gcp.test_owned_read_sdk import sdk as sdk
+from tests.vms.native_stages import prepare_native
 
 
 class RefreshingCredential(FreshCredential):
@@ -23,7 +24,7 @@ class RefreshingCredential(FreshCredential):
         self.token = "offline-refreshed-token"
 
 
-@pytest.mark.parametrize("method", ["observe_power", "prepare"])
+@pytest.mark.parametrize("method", ["observe_power", "prepare_native"])
 def test_first_read_refresh_debt_is_retained_before_borrower_failure(full, method):
     from agentworks.db import VMStatus
 
@@ -33,14 +34,17 @@ def test_first_read_refresh_debt_is_retained_before_borrower_failure(full, metho
     p.sdk.credential = selected
     p.sdk.failed_close = "credential-response"
     with pytest.raises(StateError):
-        if method == "prepare":
-            p.access.prepare(VMStatus.RUNNING, p.deadline)
+        if method == "prepare_native":
+            prepare_native(p, VMStatus.RUNNING, p.deadline)
         else:
             p.access.observe_power(p.deadline)
     auth = p.access._auth
     assert auth is p.access._reader._auth and auth.cleanup_incomplete and not auth.closed
     assert auth._credential is selected and len(p.sdk.adc_calls) == 1
     assert [kind for kind, _, _ in p.sdk.sends] == ["credential"]
+    assert p.access._start is None and p.access._route is None and p.access.binding is None
+    assert "guest-stub" not in p.calls
+    assert not p.owner.list_pending_lifecycle_obligations()
     assert not p.access.settle(p.deadline)
     assert not auth.closed and "auth-close" not in p.calls
     p.sdk.failed_close = None

@@ -586,15 +586,29 @@ def test_final_credential_retirement_retry_does_not_revisit_settled_effects(full
     assert p.calls[len(before) :] == ["credential-close"]
 
 
-def test_cleanup_cannot_close_borrowed_credential_during_route_admission(full):
+def test_cleanup_cannot_close_borrowed_credential_during_route_admission(full, monkeypatch):
     p = full
     admitted, release, settling = Event(), Event(), Event()
     finished = Event()
     failures = []
+    refusals = []
+    observe_locator = p.access.observe_locator
+
+    def observe_after_cleanup(deadline):
+        # Core guest preparation is a new stage after the provider route borrow.
+        assert finished.wait(5)
+        assert p.access._closed and p.access._settled
+        before = list(p.calls)
+        with pytest.raises(StateError) as caught:
+            observe_locator(deadline)
+        assert p.calls == before
+        refusals.append(caught.value)
+        raise caught.value
 
     def hold():
         admitted.set()
         assert release.wait(5)
+        assert "credential-close" not in p.calls
 
     def prepare():
         try:
@@ -612,6 +626,7 @@ def test_cleanup_cannot_close_borrowed_credential_during_route_admission(full):
             finished.set()
 
     p.route_open_hook = hold
+    monkeypatch.setattr(p.access, "observe_locator", observe_after_cleanup)
     preparing = Thread(target=prepare)
     cleaning = Thread(target=settle)
     preparing.start()
@@ -625,5 +640,14 @@ def test_cleanup_cannot_close_borrowed_credential_during_route_admission(full):
         preparing.join(5)
         if cleaning.ident is not None:
             cleaning.join(5)
-    assert not preparing.is_alive() and not cleaning.is_alive() and not failures
-    assert p.calls[-1] == "credential-close"
+    assert not preparing.is_alive() and not cleaning.is_alive()
+    assert len(refusals) == 1 and failures == refusals
+    assert p.calls.count("credential-close") == 1
+    closed = p.calls.index("credential-close")
+    assert all(call == "guest-prepare" for call in p.calls[closed + 1 :])
+    before = list(p.calls)
+    for action in (p.access.observe_power, observe_locator, p.access.prepare_native_route):
+        with pytest.raises(StateError):
+            action(p.deadline)
+    assert p.access.settle(p.deadline)
+    assert p.calls == before

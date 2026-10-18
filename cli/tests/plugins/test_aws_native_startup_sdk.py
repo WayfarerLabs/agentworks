@@ -11,6 +11,7 @@ from agentworks.plugins.aws.network import EC2Error
 from tests.plugins.test_aws_native_access_sdk import enable_role
 from tests.plugins.test_aws_native_access_sdk import inherited_aws as inherited_aws
 from tests.plugins.test_aws_native_access_sdk import native_aws as native_aws
+from tests.vms.native_stages import prepare_native
 
 
 @pytest.mark.parametrize("states", [("pending", "running"), ("stopped", "pending", "running")])
@@ -35,7 +36,7 @@ def test_sdk_foreground_start_observes_transitions_before_guest_or_route(native_
             assert not remaining and p.state == "running"
 
     p.before_send = before
-    p.access.prepare(VMStatus.STOPPED, p.deadline)
+    prepare_native(p, VMStatus.STOPPED, p.deadline)
     assert observed == list(states)
     assert len(p.pauses) == len(states) - 1
     assert sum(action == "StartInstances" for action, _ in p.calls) == 1
@@ -51,7 +52,10 @@ def test_sdk_unsupported_start_observation_refuses_without_waiting(native_aws, s
     p.state = "stopped"
     p.after_send = lambda action: setattr(p, "state", state) if action == "StartInstances" else None
     with pytest.raises(StateError):
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
+    assert p.state == state
+    assert {action for action, _ in p.calls} == {"DescribeInstances", "StartInstances"}
+    assert sum(action == "StartInstances" for action, _ in p.calls) == 1
     assert not p.pauses and p.access._running is None
     assert not p.preparations and p.access._route is None
     row = p.owner.inspect_lifecycle_obligation(p.access._activation.obligation_id)
@@ -73,7 +77,7 @@ def test_sdk_fresh_cleanup_settles_existing_ack_without_reopening_preparation(na
 
     monkeypatch.setattr(p.repository, "resolve_lifecycle_obligation", observed_resolve)
     with pytest.raises(LimitExceededError):
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
     activation = p.access._activation
     assert p.deadline.expired and activation.payload.request_id is not None
     obligation_id = activation.obligation_id
@@ -101,7 +105,7 @@ def test_sdk_fresh_cleanup_settles_existing_ack_without_reopening_preparation(na
     assert sum(action == "StartInstances" for action, _ in p.calls) == 1
     assert not p.preparations and p.access._route is None and p.access.binding is None
     with pytest.raises(StateError):
-        p.access.prepare(VMStatus.RUNNING, cleanup)
+        prepare_native(p, VMStatus.RUNNING, cleanup)
 
 
 def test_sdk_fresh_cleanup_running_without_ack_remains_unresolved(native_aws):
@@ -116,7 +120,7 @@ def test_sdk_fresh_cleanup_running_without_ack_remains_unresolved(native_aws):
 
     p.after_send = lose_ack
     with pytest.raises(EC2Error):
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
     p.clock[0] = p.deadline.expires_at + 1
     p.after_send = lambda action: None
     assert p.state == "running"
@@ -144,7 +148,7 @@ def test_stored_activation_without_admission_can_settle(native_aws, monkeypatch,
 
     monkeypatch.setattr(p.access, "_active_transition", refuse)
     with pytest.raises(KeyboardInterrupt if fault == "control" else LimitExceededError) as caught:
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
     if fault == "control":
         assert caught.value is control
     activation = p.access._activation
@@ -163,7 +167,7 @@ def test_stopped_read_close_debt_cannot_admit_start(native_aws):
     p.state = "stopped"
     p.close_error = OSError("read close")
     with pytest.raises(StateError):
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
     original = p.access._read_client
     assert original is not None and p.access._activation is None
     p.close_error = None
@@ -182,7 +186,7 @@ def test_failed_start_registration_is_not_proven_absence_or_provider_error(nativ
 
     monkeypatch.setattr(p.owner, "register_lifecycle_obligation", fail)
     with pytest.raises(type(error)) as caught:
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
     assert caught.value is error
     assert not p.access._activation.closed_without_start_attempt
     with pytest.raises(StateError):
@@ -194,7 +198,7 @@ def test_failed_start_registration_is_not_proven_absence_or_provider_error(nativ
 @pytest.mark.parametrize("fault", ["ordinary", "expired", "control"])
 def test_settled_effects_retry_only_original_final_closure(native_aws, monkeypatch, fault):
     p = native_aws
-    p.access.prepare(VMStatus.RUNNING, p.deadline)
+    prepare_native(p, VMStatus.RUNNING, p.deadline)
     originals = []
     control = KeyboardInterrupt("final close")
     if fault == "ordinary":
@@ -249,8 +253,10 @@ def test_fresh_nonrunning_state_blocks_route_and_guest(native_aws, state, stage)
 
     p.before_send = before
     with pytest.raises(StateError):
-        p.access.prepare(power, p.deadline)
+        prepare_native(p, power, p.deadline)
+    assert reads[0] == {"initial": 1, "endpoint": 2, "after-start": 3}[stage] and p.state == state
     assert not p.preparations and p.access._route is None
+    assert not p.prefix_responses
     assert not any(action == "AuthorizeSecurityGroupIngress" for action, _ in p.calls)
     assert sum(action == "StartInstances" for action, _ in p.calls) == (stage == "after-start")
     assert p.access.settle(p.deadline)
@@ -265,8 +271,10 @@ def test_bound_guest_observer_refuses_read_close_debt_before_guest(native_aws):
 
     p.after_send = after
     with pytest.raises(StateError):
-        p.access.prepare(VMStatus.RUNNING, p.deadline)
+        prepare_native(p, VMStatus.RUNNING, p.deadline)
     assert p.access._read_client is not None and not p.preparations
+    assert p.access._route is not None and len(p.rules) == 1
+    assert not any(action == "StartInstances" for action, _ in p.calls)
     p.close_error = None
     p.after_send = lambda action: None
     assert p.access.settle(p.deadline)
@@ -278,7 +286,8 @@ def test_poisoned_inherited_profile_endpoints_and_configs_are_ignored(native_aws
     if role:
         enable_role(p, monkeypatch)
     assert p.access.observe_power(p.deadline) is VMStatus.RUNNING
-    p.access.prepare(VMStatus.RUNNING, p.deadline)
+    prepare_native(p, VMStatus.RUNNING, p.deadline)
+    assert len(p.preparations) == 1
     assert p.access.settle(p.deadline)
     assert sum(action == "AssumeRole" for action, _ in p.calls) == int(role)
 
@@ -302,9 +311,13 @@ def test_active_sdk_errors_have_public_domain_types_without_replay(native_aws, a
     power = VMStatus.STOPPED if action == "StartInstances" else VMStatus.RUNNING
     p.state = "stopped" if power is VMStatus.STOPPED else "running"
     with pytest.raises(kind):
-        p.access.prepare(power, p.deadline)
+        prepare_native(p, power, p.deadline)
     before = sum(sent == action for sent, _ in p.calls)
     assert before == 1 and not p.preparations
+    assert sum(sent == "StartInstances" for sent, _ in p.calls) == int(action == "StartInstances")
+    assert sum(sent == "AuthorizeSecurityGroupIngress" for sent, _ in p.calls) == int(
+        action == "AuthorizeSecurityGroupIngress"
+    )
     p.api_error = None
     assert p.access.settle(p.deadline) is (action not in ("StartInstances", "AuthorizeSecurityGroupIngress"))
     assert sum(sent == action for sent, _ in p.calls) == before
@@ -315,7 +328,7 @@ def test_active_sdk_errors_have_public_domain_types_without_replay(native_aws, a
 )
 def test_cleanup_sdk_denial_keeps_owned_rule_retryable(native_aws, code, kind):
     p = native_aws
-    p.access.prepare(VMStatus.RUNNING, p.deadline)
+    prepare_native(p, VMStatus.RUNNING, p.deadline)
     p.api_error = "RevokeSecurityGroupIngress", code
     with pytest.raises(kind):
         p.access.settle(p.deadline)
