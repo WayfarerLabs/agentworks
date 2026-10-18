@@ -9,7 +9,7 @@ from threading import Lock
 from typing import TYPE_CHECKING
 
 from agentworks.capabilities.base import RunContext, TargetAbsence
-from agentworks.capabilities.vm_platform.base import VMPlatform
+from agentworks.capabilities.vm_platform.base import VMPlatform, provider_locator_remaining
 from agentworks.db import Database, OperationResourceKind, OperationScope, VMStatus
 from agentworks.errors import NotFoundError, StateError, ValidationError
 from agentworks.execution._account_protocol import AccountRequest, AccountRequestError, encode_account_request
@@ -32,13 +32,18 @@ from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
 from agentworks.operations import OperationOwner
 from agentworks.vms.identity import validate_vm_instance_marker
 from agentworks.vms.target_preparation import (
+    VMTargetPreparation,
+    VMTargetPreparationControlFact,
     VMTargetPreparationStatus,
+    prepare_managed_vm_target_from_platform,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from agentworks.capabilities.vm_platform.base import ProviderLocator
     from agentworks.db import AgentRow, VMRow
+    from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 
@@ -75,6 +80,7 @@ class _Workflow:
     deadline: Deadline
     local_delivery: LocalDeliveryCustody = field(default_factory=LocalDeliveryCustody, repr=False)
     access: OwnedNativePlatformAccess | None = None
+    preparation: VMTargetPreparation | None = None
     identity: TargetIdentityPreparation | None = None
     agent_identity: TargetIdentityPreparation | None = None
     views: NativeVMOperation | None = None
@@ -82,7 +88,7 @@ class _Workflow:
     _cleanup_lock: Lock = field(default_factory=Lock, init=False, repr=False)
 
     def _components_settled(self) -> bool:
-        preparation = self.access.preparation if self.access is not None else None
+        preparation = self.preparation
         if preparation is not None and (
             preparation.pending_remote_effects
             or preparation.coordination_uncertain
@@ -191,6 +197,33 @@ class _Workflow:
         raise StateError("Native VM operation retains unsettled work")
 
 
+def _prepare_target(
+    workflow: _Workflow,
+    vm: VMRow,
+    platform: VMPlatform,
+    locator: ProviderLocator,
+    binding: NativeExecutionBinding,
+) -> VMTargetPreparation:
+    """Retain common guest preparation before any platform guest check."""
+    assert workflow.access is not None
+    try:
+        workflow.preparation = prepare_managed_vm_target_from_platform(
+            vm,
+            platform,
+            locator,
+            binding,
+            deadline=workflow.deadline,
+            owner=workflow.owner,
+            observe_locator=workflow.access.observe_locator,
+        )
+    except BaseException as control:
+        if isinstance(control.__cause__, VMTargetPreparationControlFact):
+            workflow.preparation = control.__cause__.preparation
+        raise
+    provider_locator_remaining(workflow.deadline, vm_name=vm.name)
+    return workflow.preparation
+
+
 def _require_vm_row(db: Database, vm_name: str, platform: VMPlatform, ctx: RunContext) -> VMRow:
     vm = db.get_vm(vm_name)
     if vm is None:
@@ -239,6 +272,8 @@ def _prepare(
             raise ValidationError("Native VM operation requires a valid agent account") from error
     access = platform.build_native_execution_access(vm, ctx, owner=workflow.owner, custody=workflow.local_delivery)
     workflow.access = access
+    if access.native_configuration_check is not None:
+        access.native_configuration_check()
     power = access.observe_power(workflow.deadline)
     if workflow.deadline.expired:
         raise StateError("Native VM power observation exceeded its deadline", entity_kind="vm", entity_name=vm_name)
@@ -246,9 +281,9 @@ def _prepare(
         raise StateError("Native VM power cannot authorize activation", entity_kind="vm", entity_name=vm_name)
     if power in {VMStatus.STOPPED, VMStatus.DEALLOCATED} and vm.operator_stopped:
         raise StateError("Operator-stopped VM cannot be started automatically", entity_kind="vm", entity_name=vm_name)
-    access.prepare(power, workflow.deadline)
-    preparation = access.preparation
-    binding = access.binding
+    locator = access.ensure_available(power, workflow.deadline)
+    binding = access.prepare_native_route(workflow.deadline)
+    preparation = _prepare_target(workflow, vm, platform, locator, binding)
     result = preparation.guest_result if preparation is not None else None
     observation = result.observation if result is not None else None
     guest = observation.identity if observation is not None else None
@@ -263,6 +298,8 @@ def _prepare(
         )
     target = preparation.target
     assert target is not None
+    if access.guest_check is not None:
+        access.guest_check(guest)
 
     try:
         identity = prepare_target_identity(

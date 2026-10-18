@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from contextlib import contextmanager
+from copy import copy
 from threading import TIMEOUT_MAX, RLock
 from typing import TYPE_CHECKING
 
@@ -18,11 +19,6 @@ from agentworks.plugins.gcp._native_access import GCEOwnedRead
 from agentworks.plugins.gcp._native_identity import NativeIdentity
 from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_native_binding
 from agentworks.vms._ssh_native_exposure import OwnedSSHExposure
-from agentworks.vms.target_preparation import (
-    VMTargetPreparationControlFact,
-    VMTargetPreparationStatus,
-    prepare_managed_vm_target_from_platform,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -30,17 +26,18 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform.base import ProviderLocator
     from agentworks.db import VMRow
+    from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
+    from agentworks.execution.carriers.ssh import SSHSettings
     from agentworks.plugins.gcp._native_access import GCEInstanceObservation
     from agentworks.plugins.gcp._native_route import GCENativeRoute
     from agentworks.plugins.gcp._owned_auth import _OwnedAuth
     from agentworks.plugins.gcp.platform import GCEPlatform
-    from agentworks.vms.target_preparation import VMTargetPreparation
 
 
 class GCEOwnedAccess:
-    """Retain reads, start, route and partial guest facts under one VM claim.
+    """Retain reads, start and native route under one VM claim.
 
     Construction is passive. The caller owns the outer operation and local
     delivery lifetime. The finite reentrant transition permits the managed
@@ -59,7 +56,10 @@ class GCEOwnedAccess:
         self._platform = platform
         self._ctx = ctx
         self._owner = owner
-        self._identity = NativeIdentity.from_row(vm)
+        self._native_vm = copy(vm)
+        self._native_vm.platform_metadata = dict(vm.platform_metadata)
+        self._provider_identity = platform._locator_metadata(vm)
+        self._identity: NativeIdentity | None = None
         self._reader = GCEOwnedRead(vm, platform, ctx)
         self._auth: _OwnedAuth | None = None
         self._lock = RLock()
@@ -74,8 +74,22 @@ class GCEOwnedAccess:
         self._route: GCENativeRoute | None = None
         self._exposure: OwnedSSHExposure | None = None
         self._endpoint: str | None = None
+        self._available = False
+        self._route_used = False
+        self._route_ready = False
         self.binding: NativeExecutionBinding | None = None
-        self.preparation: VMTargetPreparation | None = None
+        self.guest_check: Callable[[VMGuestIdentity], None] | None = None
+        self._settings: SSHSettings | None = None
+
+    @property
+    def native_configuration_check(self) -> Callable[[], None]:
+        return self._validate_native_configuration
+
+    def _validate_native_configuration(self) -> None:
+        if self._settings is None:
+            self._settings = require_ssh_settings(self._native_vm, self._ctx, self._ctx.config)
+        if self._identity is None:
+            self._identity = NativeIdentity.from_row(self._native_vm)
 
     @contextmanager
     def _transition(self, deadline: Deadline) -> Iterator[None]:
@@ -114,26 +128,18 @@ class GCEOwnedAccess:
 
     @property
     def route_check(self) -> Callable[[Deadline], None] | None:
-        prepared = self.preparation
-        return (
-            self._check_route
-            if not self._closed
-            and self.binding is not None
-            and prepared is not None
-            and prepared.status is VMTargetPreparationStatus.PREPARED
-            else None
-        )
+        return self._check_route if not self._closed and self._route_ready else None
 
     def observe_power(self, deadline: Deadline) -> VMStatus:
         with self._transition(deadline):
             self._require_open()
-            require_ssh_settings(self._vm, self._ctx, self._ctx.config)
             self._auth = self._reader.borrow_auth(deadline)
             power = self._reader.observe_power(deadline)
             self._require_open()
             return power
 
     def _fresh_instance(self, deadline: Deadline, power: VMStatus) -> GCEInstanceObservation:
+        assert self._identity is not None
         current = self._reader.observe_instance(deadline, identity=self._identity)
         self._require_open()
         if current.power is not power:
@@ -144,8 +150,11 @@ class GCEOwnedAccess:
         """Fresh exact running-incarnation callback for managed guest admission."""
         with self._transition(deadline):
             self._require_open()
-            self._fresh_instance(deadline, VMStatus.RUNNING)
-            return self._identity.locator
+            current = self._reader.observe_availability(deadline)
+            self._require_open()
+            if current.power is not VMStatus.RUNNING:
+                raise StateError("GCE running provider locator is unavailable")
+            return current.locator
 
     def _pause(self, deadline: Deadline) -> None:
         remaining = provider_locator_remaining(deadline, vm_name=self._vm.name)
@@ -153,42 +162,39 @@ class GCEOwnedAccess:
         provider_locator_remaining(deadline, vm_name=self._vm.name)
 
     def _await_running(self, deadline: Deadline, stopped: str | None) -> GCEInstanceObservation:
-        """Request success still needs fresh running power and allocated NAT."""
-        running = False
+        """Request success still needs fresh running provider power."""
         while True:
-            current = self._reader.observe_instance(deadline, identity=self._identity)
+            current = self._reader.observe_availability(deadline)
             self._require_open()
             if current.power is VMStatus.RUNNING:
-                running = True
-                if current.endpoint is not None:
-                    return current
-            elif running or current.raw_power not in {"PROVISIONING", "STAGING", stopped}:
+                return current
+            elif current.raw_power not in {"PROVISIONING", "STAGING", stopped}:
                 raise StateError("GCE startup power observation is unknown or invalid")
             self._pause(deadline)
 
-    def prepare(self, power: VMStatus, deadline: Deadline) -> None:
-        """Prepare once, retaining each effect before its admission boundary."""
-        from agentworks.plugins.gcp._native_route import GCENativeRoute
-
+    def ensure_available(self, power: VMStatus, deadline: Deadline) -> ProviderLocator:
+        """Retain activation without selecting native ingress or guest delivery."""
         with self._transition(deadline):
             self._require_open()
             if self._used or type(power) is not VMStatus or power not in (VMStatus.RUNNING, VMStatus.STOPPED):
                 raise StateError("GCE native preparation cannot be admitted")
             self._used = True
-            settings = require_ssh_settings(self._vm, self._ctx, self._ctx.config)
             self._auth = self._reader.borrow_auth(deadline)
-            current = self._fresh_instance(deadline, power)
+            current = self._reader.observe_availability(deadline)
+            self._require_open()
+            if current.power is not power:
+                raise StateError("GCE availability power changed or is unavailable")
             if power is VMStatus.STOPPED:
-                identity = self._identity
+                project, zone, name, incarnation = self._provider_identity
                 self._start = GCEActivation(
                     self._owner,
                     self._vm.name,
                     self._auth,
-                    identity.project_id,
-                    identity.zone,
-                    identity.instance_name,
-                    identity.instance_id,
-                    identity.locator,
+                    project,
+                    zone,
+                    name,
+                    incarnation,
+                    current.locator,
                 )
                 self._start.start(deadline)
                 while self._start.state is ActivationState.PENDING:
@@ -200,6 +206,26 @@ class GCEOwnedAccess:
                 if self._start.state is not ActivationState.SUCCEEDED:
                     raise StateError("GCE start did not establish request success")
                 current = self._await_running(deadline, current.raw_power)
+            self._available = True
+            return current.locator
+
+    def prepare_native_route(self, deadline: Deadline) -> NativeExecutionBinding:
+        """Select native delivery under the retained available VM selection."""
+        from agentworks.plugins.gcp._native_route import GCENativeRoute
+
+        with self._transition(deadline):
+            self._require_open()
+            if not self._available or self._route_used:
+                raise StateError("GCE native route cannot be admitted")
+            self._route_used = True
+            self._validate_native_configuration()
+            settings = self._settings
+            assert settings is not None and self._identity is not None and self._auth is not None
+            current = self._fresh_instance(deadline, VMStatus.RUNNING)
+            if self._start is not None:
+                while current.endpoint is None:
+                    self._pause(deadline)
+                    current = self._fresh_instance(deadline, VMStatus.RUNNING)
             self._endpoint = current.endpoint
             self.binding = ssh_native_binding(
                 self._vm, self._endpoint, settings, independent_availability=_IndependentJobAvailability.NO_IDLE_STOP
@@ -217,22 +243,8 @@ class GCEOwnedAccess:
             provider_locator_remaining(deadline, vm_name=self._vm.name)
             self._require_open()
             self._check_route(deadline)
-            try:
-                self.preparation = prepare_managed_vm_target_from_platform(
-                    self._vm,
-                    self._platform,
-                    self._identity.locator,
-                    self.binding,
-                    deadline=deadline,
-                    owner=self._owner,
-                    observe_locator=self.observe_locator,
-                )
-            except BaseException as control:
-                if isinstance(control.__cause__, VMTargetPreparationControlFact):
-                    self.preparation = control.__cause__.preparation
-                raise
-            provider_locator_remaining(deadline, vm_name=self._vm.name)
-            self._require_open()
+            self._route_ready = True
+            return self.binding
 
     def _check_route(self, deadline: Deadline) -> None:
         with self._transition(deadline):
@@ -333,8 +345,6 @@ class GCEOwnedAccess:
                 raise control
             if ordinary is not None:
                 raise ordinary
-            if self.preparation is not None and self.preparation.requires_owner_retention:
-                settled = False
             if settled:
                 self._settled = self._reader.close(deadline)
             return self._settled

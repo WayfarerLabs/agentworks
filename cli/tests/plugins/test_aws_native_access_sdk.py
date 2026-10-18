@@ -28,6 +28,7 @@ from agentworks.plugins.aws.config import AwsAccessKeyAuth
 from agentworks.plugins.aws.network import EC2Error
 from agentworks.plugins.aws.platform import EC2Platform
 from tests.plugins.test_aws_activation_sdk import ACCOUNT, INSTANCE, Raw
+from tests.vms.native_stages import prepare_native
 
 REGION = "us-east-1"
 GROUP = "sg-0123456789abcdef0"
@@ -161,7 +162,7 @@ def native_aws(monkeypatch, tmp_path, inherited_aws):
         probe.preparations.append(binding)
         return SimpleNamespace(status="offline-guest-prepared")
 
-    monkeypatch.setattr(_native_access, "prepare_managed_vm_target_from_platform", prepare)
+    monkeypatch.setattr("agentworks.vms._native_operation.prepare_managed_vm_target_from_platform", prepare)
 
     def deny(*args, **kwargs):
         pytest.fail("unexpected real network")
@@ -306,8 +307,29 @@ def native_aws(monkeypatch, tmp_path, inherited_aws):
             owner=probe.owner,
             custody=LocalDeliveryCustody(),
         )
-        assert not probe.calls and probe.access.binding is None and probe.access.preparation is None
+        assert not probe.calls and probe.access.binding is None and probe.access.guest_check is None
         yield probe
+
+
+@pytest.mark.parametrize("power", [VMStatus.RUNNING, VMStatus.STOPPED])
+def test_availability_needs_no_public_endpoint_native_ingress_or_guest(native_aws, monkeypatch, power):
+    p = native_aws
+    p.state, p.endpoint = power.value, ""
+    p.access._ctx.config.operator.ssh = None
+
+    def deny(*args, **kwargs):
+        pytest.fail("availability selected native delivery")
+
+    monkeypatch.setattr(_native_access, "ssh_native_binding", deny)
+    monkeypatch.setattr(_native_access, "OwnedSSHExposure", deny)
+    monkeypatch.setattr("agentworks.vms._native_operation.prepare_managed_vm_target_from_platform", deny)
+    assert p.access.observe_power(p.deadline) is power
+    locator = p.access.ensure_available(power, p.deadline)
+    assert p.access.observe_locator(p.deadline) == locator
+    assert p.access.binding is None and p.access._route is None and p.access._exposure is None
+    assert not p.preparations and {call[0] for call in p.calls} <= {"DescribeInstances", "StartInstances"}
+    assert sum(call[0] == "StartInstances" for call in p.calls) == int(power is VMStatus.STOPPED)
+    assert p.access.settle(p.deadline)
 
 
 @pytest.mark.parametrize("power", [VMStatus.RUNNING, VMStatus.STOPPED])
@@ -315,8 +337,8 @@ def test_sdk_prepares_and_removes_only_owned_rule(native_aws, power):
     p = native_aws
     p.state = power.value
     assert p.access.observe_power(p.deadline) is power
-    p.access.prepare(power, p.deadline)
-    assert len(p.preparations) == 1 and p.access.preparation is not None
+    prepare_native(p, power, p.deadline)
+    assert len(p.preparations) == 1 and p.workflow.preparation is not None
     assert p.access.binding._independent_availability is _IndependentJobAvailability.NO_IDLE_STOP
     p.access.route_check(p.deadline)
     assert p.access.settle(p.deadline)
@@ -332,7 +354,7 @@ def test_sdk_duplicate_tuple_is_never_adopted_or_revoked(native_aws):
     p = native_aws
     p.rules.append({"id": RULE, "description": "somebody-else"})
     with pytest.raises(StateError):
-        p.access.prepare(VMStatus.RUNNING, p.deadline)
+        prepare_native(p, VMStatus.RUNNING, p.deadline)
     assert p.access.settle(p.deadline)
     assert len(p.rules) == 1
     assert not any(a in ("AuthorizeSecurityGroupIngress", "RevokeSecurityGroupIngress") for a, _ in p.calls)
@@ -342,7 +364,7 @@ def test_sdk_prefix_response_debt_blocks_route_and_settles_original_without_repl
     p = native_aws
     p.prefix_close_error = OSError("offline prefix response close")
     with pytest.raises(StateError):
-        p.access.prepare(VMStatus.RUNNING, p.deadline)
+        prepare_native(p, VMStatus.RUNNING, p.deadline)
     exposure = p.access._exposure
     assert exposure is not None and exposure.cleanup_incomplete
     assert p.access.cleanup_incomplete and p.access._route is None and not p.preparations
@@ -369,7 +391,7 @@ def test_sdk_missing_authorize_receipt_stays_possible_effect(native_aws, fault):
     p.malformed_authorize = fault == "malformed"
     expected = {"lost": EC2Error, "malformed": ValidationError, "control": KeyboardInterrupt}[fault]
     with pytest.raises(expected):
-        p.access.prepare(VMStatus.RUNNING, p.deadline)
+        prepare_native(p, VMStatus.RUNNING, p.deadline)
     p.rules.clear()
     assert not p.access.settle(p.deadline)
     row = p.owner.inspect_lifecycle_obligation(p.access._route._rules[0].obligation_id)
@@ -383,13 +405,13 @@ def test_sdk_foreign_identity_refuses_route_mutation(native_aws, field):
     p = native_aws
     setattr(p, field, "foreign")
     with pytest.raises((StateError, EC2Error)):
-        p.access.prepare(VMStatus.RUNNING, p.deadline)
+        prepare_native(p, VMStatus.RUNNING, p.deadline)
     assert not any(a == "AuthorizeSecurityGroupIngress" for a, _ in p.calls)
 
 
 def test_sdk_endpoint_change_does_not_rebind(native_aws):
     p = native_aws
-    p.access.prepare(VMStatus.RUNNING, p.deadline)
+    prepare_native(p, VMStatus.RUNNING, p.deadline)
     original = p.access.binding
     p.endpoint = "192.0.2.8"
     with pytest.raises(StateError):
@@ -400,7 +422,7 @@ def test_sdk_endpoint_change_does_not_rebind(native_aws):
 
 def test_sdk_failed_removal_observation_retains_route_debt(native_aws):
     p = native_aws
-    p.access.prepare(VMStatus.RUNNING, p.deadline)
+    prepare_native(p, VMStatus.RUNNING, p.deadline)
     p.keep_rule = True
     assert not p.access.settle(p.deadline)
     p.keep_rule = False
@@ -414,7 +436,7 @@ def test_sdk_original_client_debt_blocks_new_reads(native_aws):
     assert p.access.observe_power(p.deadline) is VMStatus.RUNNING
     original = p.access._read_client
     with pytest.raises(StateError):
-        p.access.prepare(VMStatus.RUNNING, p.deadline)
+        prepare_native(p, VMStatus.RUNNING, p.deadline)
     assert not p.access.settle(p.deadline)
     assert p.access._read_client is original
     p.close_error = None
@@ -437,7 +459,7 @@ def test_sdk_lost_start_resolution_reply_reconciles_exact_row(native_aws, monkey
 
     monkeypatch.setattr(p.repository, "resolve_lifecycle_obligation", resolve)
     with pytest.raises(ConnectionError):
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
     assert p.access._running is not None
     monkeypatch.setattr(p.access._activation, "reconcile", lambda deadline: pytest.fail("producer after resolution"))
     assert p.access.settle(p.deadline)
@@ -450,7 +472,7 @@ def test_sdk_nonrunning_cannot_resolve_acknowledged_start(native_aws, state):
     p.state = "stopped"
     p.after_send = lambda action: setattr(p, "state", state) if action == "StartInstances" else None
     with pytest.raises(LimitExceededError):
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
     row = p.owner.inspect_lifecycle_obligation(p.access._activation.obligation_id)
     assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
     assert p.deadline.expired and p.pauses and p.access._running is None
@@ -465,7 +487,7 @@ def test_sdk_late_running_is_never_completion(native_aws):
     p.state = "stopped"
     p.after_send = lambda action: p.clock.__setitem__(0, 106.0) if action == "StartInstances" else None
     with pytest.raises(TimeoutError):
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
     assert p.access._running is None
     p.after_send = lambda action: None
     assert p.access.settle(Deadline.after(5))
@@ -538,7 +560,7 @@ def test_sdk_same_role_helper_spans_reads_start_routes_and_cleanup(native_aws, m
     role = enable_role(p, monkeypatch)
     p.state = "stopped"
     assert p.access.observe_power(p.deadline) is VMStatus.STOPPED
-    p.access.prepare(VMStatus.STOPPED, p.deadline)
+    prepare_native(p, VMStatus.STOPPED, p.deadline)
     assert p.access._activation._role_auth is role and p.access._route._role_auth is role
     p.access.route_check(p.deadline)
     assert p.access.settle(p.deadline)
@@ -561,7 +583,7 @@ def test_actual_route_send_guard_after_suppressed_advisory(native_aws, monkeypat
     role = enable_role(p, monkeypatch, target=target, fault=fault)
     assert p.access.observe_power(p.deadline) is VMStatus.RUNNING
     with pytest.raises(LimitExceededError if fault == "expired" else StateError):
-        p.access.prepare(VMStatus.RUNNING, p.deadline)
+        prepare_native(p, VMStatus.RUNNING, p.deadline)
     assert not any(action == target for action, _ in p.calls)
     assert sum(action == "AssumeRole" for action, _ in p.calls) == 2
     p.sts_close_error = None
@@ -574,7 +596,7 @@ def test_missing_route_guard_counterfactual_reaches_forbidden_send(native_aws, m
     assert p.access.observe_power(p.deadline) is VMStatus.RUNNING
     monkeypatch.setattr(role, "guard_ec2_send", lambda **kwargs: None)
     with pytest.raises(LimitExceededError):
-        p.access.prepare(VMStatus.RUNNING, p.deadline)
+        prepare_native(p, VMStatus.RUNNING, p.deadline)
     assert sum(action == "AuthorizeSecurityGroupIngress" for action, _ in p.calls) == 1
 
 
@@ -590,7 +612,7 @@ def test_sdk_missing_start_ack_cannot_resolve_from_running(native_aws):
 
     p.after_send = lose_start
     with pytest.raises(EC2Error):
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
     p.after_send = lambda action: None
     assert p.state == "running"
     assert not p.access.settle(p.deadline)
@@ -609,7 +631,7 @@ def test_route_final_retirement_controls_execution_consumer_admission(native_aws
     p = native_aws
     if role:
         enable_role(p, monkeypatch)
-    p.access.prepare(VMStatus.RUNNING, p.deadline)
+    prepare_native(p, VMStatus.RUNNING, p.deadline)
     binding = p.access.binding
     consumer = _execution_operation.ExecutionOperation(
         p.owner,
@@ -663,7 +685,7 @@ def test_route_callback_refuses_deadline_crossed_by_successful_final_close(nativ
     p = native_aws
     if role:
         enable_role(p, monkeypatch)
-    p.access.prepare(VMStatus.RUNNING, p.deadline)
+    prepare_native(p, VMStatus.RUNNING, p.deadline)
     originals = []
 
     def close_hook(client):

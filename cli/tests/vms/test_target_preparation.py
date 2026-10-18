@@ -55,6 +55,7 @@ from agentworks.execution.carriers.wsl2 import WSL2Connection
 from agentworks.operations import OperationBorrow, OperationOwner, release_borrow_after_custody
 from agentworks.plugins.proxmox._native_access import ProxmoxOwnedNativePlatformAccess
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+from agentworks.vms._native_operation import _prepare_target, _Workflow
 from agentworks.vms.target_identity import compose_managed_vm_target_identity
 from agentworks.vms.target_preparation import (
     VMTargetPreparation,
@@ -846,7 +847,7 @@ def test_proxmox_preparation_uses_retained_observer_for_both_guest_observations(
     platform.site_name = vm.site
     platform.observe_provider_locator.return_value = _DEFAULT_LOCATOR
     carrier = TranscriptCarrier(_success_payload(), deadlines=[])
-    platform.resolve_native_execution_binding.return_value = _binding(carrier)
+    monkeypatch.setattr("agentworks.plugins.proxmox._native_access.proxmox_native_binding", lambda _: _binding(carrier))
     ctx = Mock(spec=RunContext)
     ctx.config = None
     custody = LocalDeliveryCustody()
@@ -854,9 +855,12 @@ def test_proxmox_preparation_uses_retained_observer_for_both_guest_observations(
     deadline = Deadline.after(10)
     observer = Mock(wraps=selected.observe_locator)
     monkeypatch.setattr(selected, "observe_locator", observer)
-    selected.prepare(VMStatus.RUNNING, deadline)
-    assert selected.preparation is not None
-    assert selected.preparation.status is VMTargetPreparationStatus.PREPARED
+    locator = selected.ensure_available(VMStatus.RUNNING, deadline)
+    binding = selected.prepare_native_route(deadline)
+    workflow = _Workflow(owner, deadline, access=selected)
+    preparation = _prepare_target(workflow, vm, platform, locator, binding)
+    assert workflow.preparation is preparation
+    assert preparation.status is VMTargetPreparationStatus.PREPARED
     assert observer.call_args_list == [call(deadline), call(deadline)]
     assert platform.observe_provider_locator.call_args_list == [call(vm, ctx, deadline=deadline, custody=custody)] * 3
     assert carrier.deadlines == [deadline]

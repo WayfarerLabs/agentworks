@@ -33,6 +33,7 @@ from agentworks.vms.target_preparation import (
 from tests.plugins.gcp.test_native_identity import native_selection
 from tests.plugins.gcp.test_native_instance import native_instance
 from tests.plugins.gcp.test_owned_read_sdk import sdk as sdk
+from tests.vms.native_stages import prepare_native
 
 
 class Control(BaseException):
@@ -87,7 +88,7 @@ def full(sdk, tmp_path, monkeypatch):
         def __init__(self, owner, name, auth, project, zone, instance, incarnation, locator):
             assert owner is p.owner and auth is p.access._auth is p.access._reader._auth
             assert (project, zone, instance, incarnation) == ("project", "us-central1-a", "backend", "123")
-            assert locator == p.access._identity.locator and name == vm.name
+            assert locator.token == "gcp-gce:project:us-central1-a:123" and name == vm.name
             self.state = ActivationState.UNKNOWN
             self.obligation = None
 
@@ -177,7 +178,7 @@ def full(sdk, tmp_path, monkeypatch):
                 raise p.prefix_error
 
     def guest(vm, platform, locator, binding, *, deadline, owner, observe_locator):
-        assert owner is p.owner and binding is p.access.binding and p.access.route_check is None
+        assert owner is p.owner and binding is p.access.binding and p.access.route_check is not None
         p.calls.append("guest-stub")
         assert observe_locator(deadline) == locator
         p.guest_hook()
@@ -191,7 +192,7 @@ def full(sdk, tmp_path, monkeypatch):
 
     monkeypatch.setattr(native, "GCEActivation", Start)
     monkeypatch.setattr(_native_route, "GCENativeRoute", Route)
-    monkeypatch.setattr(native, "prepare_managed_vm_target_from_platform", guest)
+    monkeypatch.setattr("agentworks.vms._native_operation.prepare_managed_vm_target_from_platform", guest)
     monkeypatch.setattr(native, "time", SimpleNamespace(sleep=pause))
     monkeypatch.setattr("agentworks.vms._ssh_native_exposure.urlopen", lambda *a, **k: Source())
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", tmp_path / "absent.toml")
@@ -203,10 +204,10 @@ def full(sdk, tmp_path, monkeypatch):
         p.deadline, p.cleanup_deadline = Deadline.after(2), None
         p.access = native.GCEOwnedAccess(vm, platform, ctx, owner=p.owner)
         original_read = p.access._reader.observe_instance
+        original_availability = p.access._reader.observe_availability
         original_close = p.access._reader.close
 
-        def observe(deadline, *, identity):
-            p.calls.append("instance-read")
+        def update(fields: str) -> None:
             if p.access._start is not None and p.startup:
                 state, endpoint = p.startup.pop(0)
                 p.current["status"] = state
@@ -214,8 +215,16 @@ def full(sdk, tmp_path, monkeypatch):
                 config.pop("natIP", None)
                 if endpoint is not None:
                     config["natIP"] = endpoint
-            sdk.fields, sdk.body = NATIVE_INSTANCE_FIELDS, json.dumps(p.current).encode()
+            sdk.fields, sdk.body = fields, json.dumps(p.current).encode()
+
+        def observe(deadline, *, identity):
+            p.calls.append("instance-read")
+            update(NATIVE_INSTANCE_FIELDS)
             return original_read(deadline, identity=identity)
+
+        def availability(deadline):
+            update(INSTANCE_FIELDS)
+            return original_availability(deadline)
 
         def close(deadline):
             p.calls.append("auth-close")
@@ -223,6 +232,7 @@ def full(sdk, tmp_path, monkeypatch):
             return original_close(deadline)
 
         monkeypatch.setattr(p.access._reader, "observe_instance", observe)
+        monkeypatch.setattr(p.access._reader, "observe_availability", availability)
         monkeypatch.setattr(p.access._reader, "close", close)
         yield p
 
@@ -231,8 +241,10 @@ def test_passive_factory_exact_claim_site_and_snapshot(full):
     p = full
     access = p.platform.build_native_execution_access(p.vm, p.ctx, owner=p.owner, custody=LocalDeliveryCustody())
     assert isinstance(access, native.GCEOwnedAccess) and p.sdk.adc_calls == [] and p.sdk.sends == []
-    assert access.binding is None and access.preparation is None and access.route_check is None
+    assert access.binding is None and access.guest_check is None and access.route_check is None
     p.vm.platform_metadata["instance_id"] = "124"
+    access.native_configuration_check()
+    assert access._identity is not None
     assert access._identity.instance_id == "123"
     p.vm.site = "foreign"
     with pytest.raises(ValidationError):
@@ -244,10 +256,34 @@ def test_passive_factory_exact_claim_site_and_snapshot(full):
 
 
 @pytest.mark.parametrize("power", [VMStatus.RUNNING, VMStatus.STOPPED])
+def test_availability_needs_no_native_topology_nat_ingress_or_guest(full, monkeypatch, power):
+    p = full
+    p.current["status"] = "RUNNING" if power is VMStatus.RUNNING else "TERMINATED"
+    p.current.pop("networkInterfaces")
+    p.current.pop("tags")
+    p.current.pop("serviceAccounts")
+    p.ctx.config.operator.ssh = None
+
+    def deny(*args, **kwargs):
+        pytest.fail("availability selected native delivery")
+
+    monkeypatch.setattr(p.access._reader, "observe_instance", deny)
+    monkeypatch.setattr(native, "ssh_native_binding", deny)
+    monkeypatch.setattr(native, "OwnedSSHExposure", deny)
+    monkeypatch.setattr("agentworks.vms._native_operation.prepare_managed_vm_target_from_platform", deny)
+    locator = p.access.ensure_available(power, p.deadline)
+    assert p.access.observe_locator(p.deadline) == locator
+    assert p.access.binding is None and p.access._route is None and p.access._exposure is None
+    assert "guest-stub" not in p.calls and "source-read" not in p.calls
+    assert p.calls.count("start-post") == int(power is VMStatus.STOPPED)
+    assert p.access.settle(p.deadline)
+
+
+@pytest.mark.parametrize("power", [VMStatus.RUNNING, VMStatus.STOPPED])
 def test_success_orders_refresh_reentry_route_and_auth_last(full, power):
     p = full
     p.current["status"] = "RUNNING" if power is VMStatus.RUNNING else "TERMINATED"
-    p.access.prepare(power, p.deadline)
+    prepare_native(p, power, p.deadline)
     assert p.access.binding._independent_availability is _IndependentJobAvailability.NO_IDLE_STOP
     assert p.calls.count("start-post") == int(power is VMStatus.STOPPED)
     assert p.calls.index("source-close") < p.calls.index("route-open") < p.calls.index("guest-stub")
@@ -262,18 +298,30 @@ def test_success_orders_refresh_reentry_route_and_auth_last(full, power):
     with pytest.raises(StateError):
         check(p.deadline)
     with pytest.raises(StateError):
-        p.access.prepare(power, p.deadline)
+        prepare_native(p, power, p.deadline)
 
 
-@pytest.mark.parametrize("method", ["observe_power", "prepare"])
-def test_explicit_ssh_required_before_provider_work(full, method):
+def test_availability_accepts_provider_metadata_without_native_network_selection(full):
+    p = full
+    p.vm.platform_metadata = {
+        key: p.vm.platform_metadata[key] for key in ("project_id", "zone", "instance_name", "instance_id")
+    }
+    p.access = native.GCEOwnedAccess(p.vm, p.platform, p.ctx, owner=p.owner)
+    p.sdk.fields, p.sdk.body = INSTANCE_FIELDS, json.dumps(p.current).encode()
+    locator = p.access.ensure_available(VMStatus.RUNNING, p.deadline)
+    assert p.access.observe_locator(p.deadline) == locator
+    sends = len(p.sdk.sends)
+    with pytest.raises(StateError):
+        p.access.native_configuration_check()
+    assert len(p.sdk.sends) == sends and p.calls == []
+    assert p.access.settle(p.deadline)
+
+
+def test_native_preflight_requires_ssh_before_provider_work(full):
     p = full
     p.ctx.config.operator.ssh = None
     with pytest.raises(ConfigError):
-        if method == "prepare":
-            p.access.prepare(VMStatus.RUNNING, p.deadline)
-        else:
-            p.access.observe_power(p.deadline)
+        prepare_native(p, VMStatus.RUNNING, p.deadline)
     assert p.sdk.sends == [] and p.sdk.adc_calls == [] and p.calls == []
     assert p.access.settle(p.deadline)
 
@@ -289,13 +337,13 @@ def test_power_uses_six_field_projection(full):
 @pytest.mark.parametrize("power", [VMStatus.DEALLOCATED, VMStatus.UNKNOWN, "running", None])
 def test_unsupported_power_refuses_before_provider_work(full, power):
     with pytest.raises(StateError):
-        full.access.prepare(power, full.deadline)
+        prepare_native(full, power, full.deadline)
     assert full.sdk.sends == []
 
 
 def test_changed_power_before_start_refuses_without_effect(full):
     with pytest.raises(StateError):
-        full.access.prepare(VMStatus.STOPPED, full.deadline)
+        prepare_native(full, VMStatus.STOPPED, full.deadline)
     assert "start-post" not in full.calls and "source-read" not in full.calls
     assert full.access.settle(full.deadline)
 
@@ -312,13 +360,13 @@ def test_fresh_endpoint_and_power_refused_before_next_boundary(full, stage):
     elif stage == "route":
         p.route_hook = change
     else:
-        p.access.prepare(VMStatus.RUNNING, p.deadline)
+        prepare_native(p, VMStatus.RUNNING, p.deadline)
         p.current["status"] = "STOPPING"
     with pytest.raises(StateError):
         if stage == "check":
             p.access.route_check(p.deadline)
         else:
-            p.access.prepare(VMStatus.RUNNING, p.deadline)
+            prepare_native(p, VMStatus.RUNNING, p.deadline)
     assert ("route-open" in p.calls) is (stage != "source")
     assert ("guest-stub" in p.calls) is (stage == "check")
     assert p.access.settle(p.deadline)
@@ -327,7 +375,7 @@ def test_fresh_endpoint_and_power_refused_before_next_boundary(full, stage):
 def test_source_discovery_refreshes_all_tags_before_route(full):
     p = full
     p.source_hook = lambda: p.current["tags"]["items"].append("new-tag")
-    p.access.prepare(VMStatus.RUNNING, p.deadline)
+    prepare_native(p, VMStatus.RUNNING, p.deadline)
     assert p.access.settle(p.deadline)
 
 
@@ -336,8 +384,8 @@ def test_startup_states_and_delayed_nat_allocation(full):
     p.current["status"] = "TERMINATED"
     p.startup = [(state, None) for state in ("TERMINATED", "PROVISIONING", "STAGING", "RUNNING")]
     p.startup.append(("RUNNING", "192.0.2.17"))
-    p.access.prepare(VMStatus.STOPPED, p.deadline)
-    assert not p.startup and p.calls.count("start-post") == 1 and p.sdk.now == 2
+    prepare_native(p, VMStatus.STOPPED, p.deadline)
+    assert not p.startup and p.calls.count("start-post") == 1 and p.sdk.now == 1.75
     assert p.access.settle(p.deadline)
 
 
@@ -347,7 +395,7 @@ def test_invalid_post_start_state_refuses_without_more_effects(full, state):
     p.current["status"] = "TERMINATED"
     p.startup = [(state, None)]
     with pytest.raises(StateError):
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
     assert p.calls.count("start-post") == 1 and "route-open" not in p.calls
     assert p.access.settle(p.deadline)
 
@@ -357,7 +405,7 @@ def test_losing_running_after_missing_nat_refuses(full):
     p.current["status"] = "STOPPED"
     p.startup = [("RUNNING", None), ("STAGING", None)]
     with pytest.raises(StateError):
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
     assert p.calls.count("start-post") == 1 and p.access.settle(p.deadline)
 
 
@@ -365,7 +413,7 @@ def test_pending_monitor_uses_fresh_cleanup_budget_before_terminal_close(full):
     p = full
     p.current["status"], p.monitor = "TERMINATED", []
     with pytest.raises(LimitExceededError):
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
     p.cleanup_deadline = Deadline.after(2)
     p.monitor = [ActivationState.PENDING, ActivationState.SUCCEEDED]
     assert p.access.settle(p.cleanup_deadline)
@@ -378,7 +426,7 @@ def test_start_failure_or_unknown_never_inferred_from_running(full, state):
     p = full
     p.current["status"], p.start_state = "TERMINATED", state
     with pytest.raises(StateError):
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
     assert p.access.settle(p.deadline) is (state is ActivationState.FAILED)
     assert p.calls.count("start-post") == 1 and "route-open" not in p.calls
 
@@ -397,15 +445,16 @@ def test_escaping_guest_control_retains_exact_partial_fact(full, retained):
     p.prep_error = Control("guest")
     p.prep_error.__cause__ = VMTargetPreparationControlFact(p.prep)
     with pytest.raises(Control) as caught:
-        p.access.prepare(VMStatus.RUNNING, p.deadline)
-    assert caught.value is p.prep_error and p.access.preparation is p.prep and p.access.route_check is None
-    assert p.access.settle(p.deadline) is not retained
+        prepare_native(p, VMStatus.RUNNING, p.deadline)
+    assert caught.value is p.prep_error and p.workflow.preparation is p.prep
+    assert p.workflow._components_settled() is not retained
+    assert p.access.settle(p.deadline)
 
 
 def test_cleanup_preserves_first_control_and_attempts_independent_children(full):
     p = full
     p.current["status"] = "TERMINATED"
-    p.access.prepare(VMStatus.STOPPED, p.deadline)
+    prepare_native(p, VMStatus.STOPPED, p.deadline)
     first = Control("route-close")
     p.route_close_error = first
     p.route_settle_error = Control("route-settle")
@@ -421,7 +470,7 @@ def test_cleanup_preserves_first_control_and_attempts_independent_children(full)
 
 def test_auth_close_retry_does_not_revisit_resolved_children(full, monkeypatch):
     p = full
-    p.access.prepare(VMStatus.RUNNING, p.deadline)
+    prepare_native(p, VMStatus.RUNNING, p.deadline)
     p.sdk.failed_close = "credential-session"
     assert not p.access.settle(p.deadline)
     assert not p.owner.list_pending_lifecycle_obligations()

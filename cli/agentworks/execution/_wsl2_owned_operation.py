@@ -217,12 +217,7 @@ class WSL2OwnedOperation:
 
     def start_and_prepare(self, deadline: Deadline) -> VMGuestIdentity | None:
         """Start once and prepare only under a durable READY claim."""
-        if self._used:
-            raise ValidationError(f"WSL2 owned {self._purpose} is single use")
-        self._used = True
-        ready = self.hold.start(deadline)
-        self.ready = ready
-        if not self._ready_is_durable(ready):
+        if not self.start_available(deadline):
             return None
         self.preparation = prepare_managed_vm_target_from_platform(
             self._vm,
@@ -235,7 +230,23 @@ class WSL2OwnedOperation:
         )
         if self.preparation.status is not VMTargetPreparationStatus.PREPARED:
             return None
-        return self._matching_ready_guest(ready, self.preparation)
+        assert self.ready is not None
+        return self._matching_ready_guest(self.ready, self.preparation)
+
+    def start_available(self, deadline: Deadline) -> bool:
+        """Acquire the actual platform hold and prove its durable READY claim."""
+        if self._used:
+            raise ValidationError(f"WSL2 owned {self._purpose} is single use")
+        self._used = True
+        ready = self.hold.start(deadline)
+        self.ready = ready
+        return self._ready_is_durable(ready)
+
+    def require_ready_guest(self, guest: VMGuestIdentity) -> None:
+        """Compare the common guest observation with the retained actual hold."""
+        anchor = self.ready.identity if self.ready is not None else None
+        if anchor is None or guest.boot_id != anchor.boot_id or guest.init_start_ticks != anchor.init_start_ticks:
+            raise ValidationError("WSL2 prepared guest does not match the held READY identity")
 
     def _ready_is_durable(self, ready: WSL2AnchorEvidence) -> bool:
         obligation = self.hold.obligation

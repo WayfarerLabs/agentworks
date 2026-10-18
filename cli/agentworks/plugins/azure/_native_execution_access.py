@@ -18,11 +18,6 @@ from agentworks.plugins.azure._incarnation_start_payload import TERMINAL_STATES,
 from agentworks.plugins.azure._native_access import AzureOwnedReadAccess
 from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_native_binding
 from agentworks.vms._ssh_native_exposure import OwnedSSHExposure
-from agentworks.vms.target_preparation import (
-    VMTargetPreparationControlFact,
-    VMTargetPreparationStatus,
-    prepare_managed_vm_target_from_platform,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -32,15 +27,16 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform.base import ProviderLocator
     from agentworks.db import VMRow
+    from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
+    from agentworks.execution.carriers.ssh import SSHSettings
     from agentworks.plugins.azure._native_route import AzureNativeRoute
     from agentworks.plugins.azure.platform import AzureVMPlatform
-    from agentworks.vms.target_preparation import VMTargetPreparation
 
 
 class AzureOwnedAccess:
-    """Retain reads, start, route and partial guest facts under one VM owner.
+    """Retain reads, start and native route under one VM owner.
 
     Construction is passive. The caller retains this object before work and
     owns outer operation and local delivery lifetime. One reentrant lock spans
@@ -70,8 +66,20 @@ class AzureOwnedAccess:
         self._route: AzureNativeRoute | None = None
         self._exposure: OwnedSSHExposure | None = None
         self._endpoint: object = None
+        self._available: VirtualMachine | None = None
+        self._route_used = False
+        self._route_ready = False
         self.binding: NativeExecutionBinding | None = None
-        self.preparation: VMTargetPreparation | None = None
+        self.guest_check: Callable[[VMGuestIdentity], None] | None = None
+        self._settings: SSHSettings | None = None
+
+    @property
+    def native_configuration_check(self) -> Callable[[], None]:
+        return self._validate_native_configuration
+
+    def _validate_native_configuration(self) -> None:
+        if self._settings is None:
+            self._settings = require_ssh_settings(self._vm, self._ctx, self._ctx.config)
 
     @contextmanager
     def _transition(self, deadline: Deadline) -> Iterator[None]:
@@ -110,20 +118,11 @@ class AzureOwnedAccess:
 
     @property
     def route_check(self) -> Callable[[Deadline], None] | None:
-        prepared = self.preparation
-        return (
-            self._check_route
-            if not self._closed
-            and self.binding is not None
-            and prepared is not None
-            and prepared.status is VMTargetPreparationStatus.PREPARED
-            else None
-        )
+        return self._check_route if not self._closed and self._route_ready else None
 
     def observe_power(self, deadline: Deadline) -> VMStatus:
         with self._transition(deadline):
             self._require_open()
-            require_ssh_settings(self._vm, self._ctx, self._ctx.config)
             power = self._reader.observe_power(deadline)
             self._require_open()
             return power
@@ -161,10 +160,8 @@ class AzureOwnedAccess:
                 raise StateError("Azure startup power observation is unknown or invalid")
             self._pause(deadline)
 
-    def prepare(self, power: VMStatus, deadline: Deadline) -> None:
-        """Prepare once, retaining each effect before its admission boundary."""
-        from agentworks.plugins.azure._native_route import AzureNativeRoute
-
+    def ensure_available(self, power: VMStatus, deadline: Deadline) -> ProviderLocator:
+        """Retain activation without selecting native ingress or guest delivery."""
         with self._transition(deadline):
             self._require_open()
             if (
@@ -174,7 +171,6 @@ class AzureOwnedAccess:
             ):
                 raise StateError("Azure native preparation cannot be admitted")
             self._used = True
-            settings = require_ssh_settings(self._vm, self._ctx, self._ctx.config)
             current = self._fresh_vm(deadline, power)
             if power in {VMStatus.STOPPED, VMStatus.DEALLOCATED}:
                 self._start = AzureIncarnationStart(
@@ -195,6 +191,22 @@ class AzureOwnedAccess:
                 if self._start.state is not StartState.SUCCEEDED:
                     raise StateError("Azure start did not establish request success")
                 current = self._await_running(deadline)
+            self._available = current
+            return self._reader.recorded_locator
+
+    def prepare_native_route(self, deadline: Deadline) -> NativeExecutionBinding:
+        """Select native delivery under the retained available VM selection."""
+        from agentworks.plugins.azure._native_route import AzureNativeRoute
+
+        with self._transition(deadline):
+            self._require_open()
+            if self._available is None or self._route_used:
+                raise StateError("Azure native route cannot be admitted")
+            self._route_used = True
+            current = self._available
+            self._validate_native_configuration()
+            settings = self._settings
+            assert settings is not None
             self._endpoint = self._reader.observe_public_endpoint(deadline)
             self._require_open()
             self.binding = ssh_native_binding(
@@ -218,22 +230,8 @@ class AzureOwnedAccess:
             provider_locator_remaining(deadline, vm_name=self._vm.name)
             self._require_open()
             self._check_route(deadline)
-            try:
-                self.preparation = prepare_managed_vm_target_from_platform(
-                    self._vm,
-                    self._platform,
-                    self._reader.recorded_locator,
-                    self.binding,
-                    deadline=deadline,
-                    owner=self._owner,
-                    observe_locator=self.observe_locator,
-                )
-            except BaseException as control:
-                if isinstance(control.__cause__, VMTargetPreparationControlFact):
-                    self.preparation = control.__cause__.preparation
-                raise
-            provider_locator_remaining(deadline, vm_name=self._vm.name)
-            self._require_open()
+            self._route_ready = True
+            return self.binding
 
     def _check_route(self, deadline: Deadline) -> None:
         with self._transition(deadline):
@@ -307,9 +305,6 @@ class AzureOwnedAccess:
                 raise control
             if ordinary is not None:
                 raise ordinary
-            preparation = self.preparation
-            if preparation is not None and preparation.requires_owner_retention:
-                settled = False
             if settled:
                 self._settled = self._reader.close(deadline)
             return self._settled

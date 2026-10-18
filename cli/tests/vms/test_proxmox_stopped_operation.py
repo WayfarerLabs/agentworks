@@ -16,6 +16,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.db import Database, LifecycleObligationState, OperationOwnership, VMStatus
 from agentworks.db.operations import LifecycleObligation, OperationRepository
 from agentworks.errors import StateError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._proxmox_activation import OBLIGATION_KIND, TaskOutcome, decode_activation_payload
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.proxmox import _ProxmoxWire
@@ -107,7 +108,7 @@ class Startup:
         row = self.activation_row()
         assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
         assert decode_activation_payload(row.payload).upid is None
-        assert self.route.resolutions == 1 and not self.route.guest.calls and not self.route.accounts.calls
+        assert self.route.resolutions == 0 and not self.route.guest.calls and not self.route.accounts.calls
         self.events.append("start")
         if isinstance(self.receipt, BaseException):
             raise self.receipt
@@ -147,6 +148,29 @@ class Startup:
             deadline=deadline,
             trusted_root=PurePosixPath(root),
         )
+
+
+def test_availability_activates_without_guest_info_binding_or_probe(database, monkeypatch):
+    startup = Startup(database, monkeypatch)
+
+    def deny(*args, **kwargs):
+        pytest.fail("availability selected native guest delivery")
+
+    monkeypatch.setattr("agentworks.plugins.proxmox._native_access.proxmox_native_binding", deny)
+    monkeypatch.setattr(_ProxmoxWire, "request_guest_info", deny)
+    vm = database.get_vm("box")
+    owner = OperationOwner.acquire(database.operations, _scope(), "availability")
+    custody = LocalDeliveryCustody()
+    deadline = Deadline.after(10)
+    access = startup.platform.build_native_execution_access(vm, RunContext(), owner=owner, custody=custody)
+    assert access.observe_power(deadline) is VMStatus.STOPPED
+    locator = access.ensure_available(VMStatus.STOPPED, deadline)
+    assert access.observe_locator(deadline) == locator
+    assert access.binding is None and startup.route.resolutions == 0 and startup.route.guest.calls == 0
+    assert startup.events == ["start", "task", "task", "power"]
+    workflow = native._Workflow(owner, deadline, local_delivery=custody, access=access)
+    workflow.close()
+    assert database.operations.inspect(_scope()) is None
 
 
 @pytest.mark.parametrize("outcome,expected", [("OK", TaskOutcome.OK), ("WARNINGS: 2", TaskOutcome.WARNINGS)])
@@ -400,7 +424,7 @@ def test_fresh_cleanup_observes_only_known_task_after_failed_read(database, tmp_
     fact.retry_cleanup(Deadline.after(10))
     assert startup.events[len(events) :] == ["task", "task"]
     assert startup.events.count("start") == 1
-    assert startup.route.resolutions == 1 and not startup.route.guest.calls
+    assert startup.route.resolutions == 0 and not startup.route.guest.calls
     assert database.operations.inspect(_scope()) is None
 
 

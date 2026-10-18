@@ -22,19 +22,19 @@ from agentworks.plugins.aws.config import AwsAmbientAuth
 from agentworks.plugins.aws.network import error_code, wrap_ec2_error
 from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_native_binding
 from agentworks.vms._ssh_native_exposure import OwnedSSHExposure
-from agentworks.vms.target_preparation import VMTargetPreparationControlFact, prepare_managed_vm_target_from_platform
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow
+    from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
+    from agentworks.execution.carriers.ssh import SSHSettings
     from agentworks.operations import OperationOwner
     from agentworks.plugins.aws._native_route import EC2NativeRoute
     from agentworks.plugins.aws.platform import EC2Platform
-    from agentworks.vms.target_preparation import VMTargetPreparation
 
 
 class EC2OwnedAccess:
@@ -64,29 +64,36 @@ class EC2OwnedAccess:
         self._lock = Lock()
         self._owner = owner
         self.binding: NativeExecutionBinding | None = None
-        self.preparation: VMTargetPreparation | None = None
+        self.guest_check: Callable[[VMGuestIdentity], None] | None = None
         self._activation: EC2Activation | None = None
         self._route: EC2NativeRoute | None = None
         self._exposure: OwnedSSHExposure | None = None
         self._locator: ProviderLocator | None = None
         self._endpoint: object = None
         self._used = False
+        self._available = False
+        self._route_used = False
         self._running: tuple[ProviderLocator, dict[str, Any]] | None = None
         self._effects_settled = False
+        self._settings: SSHSettings | None = None
+
+    @property
+    def native_configuration_check(self) -> Callable[[], None]:
+        return self._validate_native_configuration
+
+    def _validate_native_configuration(self) -> None:
+        if self._settings is None:
+            self._settings = require_ssh_settings(self._vm, self._ctx, self._ctx.config)
 
     @property
     def route_check(self) -> Callable[[Deadline], None] | None:
         return self._check_route if self.binding is not None else None
 
-    def prepare(self, power: VMStatus, deadline: Deadline) -> None:
-        """Retain each selected effect before the next preparation boundary."""
-        from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs
-        from agentworks.plugins.aws._native_route import EC2NativeRoute
-
+    def ensure_available(self, power: VMStatus, deadline: Deadline) -> ProviderLocator:
+        """Retain activation without selecting native ingress or guest delivery."""
         if self._used or self._owner is None or power not in (VMStatus.RUNNING, VMStatus.STOPPED):
             raise StateError("EC2 native preparation cannot be admitted")
         self._used = True
-        settings = require_ssh_settings(self._vm, self._ctx, self._ctx.config)
         locator, instance = self._read_exact_instance(deadline)
         self._locator = locator
         if power is VMStatus.STOPPED:
@@ -112,6 +119,21 @@ class EC2OwnedAccess:
                 provider_locator_remaining(deadline, vm_name=self._vm.name)
         else:
             self._require_running(instance)
+        self._available = True
+        return locator
+
+    def prepare_native_route(self, deadline: Deadline) -> NativeExecutionBinding:
+        """Select native delivery under the retained available VM selection."""
+        from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs
+        from agentworks.plugins.aws._native_route import EC2NativeRoute
+
+        if not self._available or self._route_used:
+            raise StateError("EC2 native route cannot be admitted")
+        self._route_used = True
+        assert self._owner is not None
+        self._validate_native_configuration()
+        settings = self._settings
+        assert settings is not None
         # A separate fresh endpoint read follows startup, even when it was already running.
         locator, instance = self._read_exact_instance(deadline)
         if locator != self._locator:
@@ -139,20 +161,7 @@ class EC2OwnedAccess:
             role_auth=self._role_auth,
         )
         self._active_transition(self._route.open, deadline)
-        try:
-            self.preparation = prepare_managed_vm_target_from_platform(
-                self._vm,
-                self._platform,
-                locator,
-                self.binding,
-                deadline=deadline,
-                owner=self._owner,
-                observe_locator=self.observe_locator,
-            )
-        except BaseException as control:
-            if isinstance(control.__cause__, VMTargetPreparationControlFact):
-                self.preparation = control.__cause__.preparation
-            raise
+        return self.binding
 
     def _active_transition(self, action: Any, deadline: Deadline) -> Any:
         """Serialize the same session's explicitly admitted credential interval."""
@@ -298,8 +307,6 @@ class EC2OwnedAccess:
         )
 
     def observe_power(self, deadline: Deadline) -> VMStatus:
-        if self._owner is not None:
-            require_ssh_settings(self._vm, self._ctx, self._ctx.config)
         _, instance = self._read_exact_instance(deadline)
         state = instance.get("State")
         name = state.get("Name") if isinstance(state, dict) else None

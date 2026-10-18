@@ -24,7 +24,7 @@ from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTar
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.ssh import SSHSettings
 from agentworks.operations import OperationOwner
-from agentworks.plugins.azure import _activation_client, _native_execution_access, _passive_clients, _route_client
+from agentworks.plugins.azure import _activation_client, _passive_clients, _route_client
 from agentworks.plugins.azure._activation import start_url
 from agentworks.plugins.azure._native_execution_access import AzureOwnedAccess
 from agentworks.plugins.azure.platform import AzureVMPlatform
@@ -44,6 +44,7 @@ from tests.plugins.azure.test_native_route import (
     VM_ID,
     RouteTransport,
 )
+from tests.vms.native_stages import prepare_native
 
 PIP = f"{LINK}/publicIPAddresses/actual-ip"
 ENDPOINT = "198.51.100.7"
@@ -201,13 +202,13 @@ def unified(request, tmp_path, monkeypatch):
         ):
             assert selected_vm is vm and selected_platform is platform and owner is probe.owner
             assert deadline is probe.deadline and locator == LOCATOR and binding is access.binding
-            assert access.route_check is None and observe_locator.__self__ is access
+            assert access.route_check is not None and observe_locator.__self__ is access
             assert observe_locator(deadline) == LOCATOR
             guest_calls.append(locator)
             target = ManagedTargetIdentity(ManagedTargetKind.VM, vm.name, "v1:" + "0" * 64, VM_ID)
             return VMTargetPreparation(VMTargetPreparationStatus.PREPARED, target, None)
 
-        monkeypatch.setattr(_native_execution_access, "prepare_managed_vm_target_from_platform", guest_stub)
+        monkeypatch.setattr("agentworks.vms._native_operation.prepare_managed_vm_target_from_platform", guest_stub)
         deadline = Deadline.after(5)
         probe = SimpleNamespace(
             access=access,
@@ -276,7 +277,7 @@ def test_actual_sdk_composition_keeps_exact_owner_and_credential_until_all_effec
     p = unified
     assert not p.constructions and not any(p.clients.values())
     assert p.access.observe_power(p.deadline) is p.power
-    p.access.prepare(p.power, p.deadline)
+    prepare_native(p, p.power, p.deadline)
     assert p.guest_calls == [LOCATOR] and p.access.route_check is not None
     assert len(p.owner.list_pending_lifecycle_obligations()) == 1
     assert p.credential.closed == 0 and p.source.closed == 1
@@ -310,11 +311,11 @@ def test_actual_route_response_close_failure_retains_owner_then_fresh_cleanup_fi
     p = unified
     assert p.access.observe_power(p.deadline) is VMStatus.RUNNING
     with pytest.raises(StateError):
-        p.access.prepare(VMStatus.RUNNING, p.deadline)
+        prepare_native(p, VMStatus.RUNNING, p.deadline)
     original = next(response for response in p.route.responses if response.request.method == "PUT")
     assert original.close_calls == 2 and not original.closed
     assert p.access.cleanup_incomplete and p.credential.closed == 0
-    assert not p.guest_calls and p.access.preparation is None and p.access.route_check is None
+    assert not p.guest_calls and p.workflow.preparation is None and p.access.route_check is None
     assert p.database.operations.inspect(p.owner.ownership.scope) is not None
     assert len(p.owner.list_pending_lifecycle_obligations()) == 1
     before = (len(p.compute.calls), len(p.network.calls), len(p.constructions))

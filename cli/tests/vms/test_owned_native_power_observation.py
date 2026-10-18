@@ -12,10 +12,12 @@ import pytest
 
 from agentworks.capabilities.base import OperationScope as ContextScope
 from agentworks.capabilities.base import RunContext, ScopeLevel
+from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import Database, OperationResourceKind, OperationScope, VMStatus
 from agentworks.errors import NotFoundError, StateError, ValidationError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
+from agentworks.execution.binding import NativeExecutionBinding
 from agentworks.execution.carrier import Deadline
 from agentworks.operations import OperationOwner
 from agentworks.plugins.proxmox._native_access import ProxmoxOwnedNativePlatformAccess
@@ -54,7 +56,8 @@ class _FailingAccess:
     events: list[str]
     retirement: str = "settled"
     binding = None
-    preparation = None
+    guest_check = None
+    native_configuration_check = None
     route_check = None
 
     def observe_power(self, deadline: Deadline) -> VMStatus:
@@ -64,8 +67,14 @@ class _FailingAccess:
         self.events.append("power")
         raise self.control
 
-    def prepare(self, power: VMStatus, deadline: Deadline) -> None:
+    def ensure_available(self, power: VMStatus, deadline: Deadline) -> ProviderLocator:
         pytest.fail("failed initial observation prepared a target")
+
+    def prepare_native_route(self, deadline: Deadline) -> NativeExecutionBinding:
+        pytest.fail("failed initial observation selected a route")
+
+    def observe_locator(self, deadline: Deadline) -> ProviderLocator:
+        pytest.fail("failed initial observation read a locator")
 
     def settle(self, deadline: Deadline) -> bool:
         assert self.custody.settled
@@ -282,7 +291,7 @@ def test_actual_owned_observer_delegates_exact_selection_without_preparation(
     assert len(calls) == 1
     assert all(actual is expected for actual, expected in zip(calls[0], (vm, ctx, deadline, custody), strict=True))
     assert access.owner is owner and access.custody is custody
-    assert access.binding is None and access.preparation is None and access.route_check is None
+    assert access.binding is None and access.guest_check is None and access.route_check is None
     assert not owner.list_pending_lifecycle_obligations()
     assert access.settle(deadline) and custody.settled
     if isinstance(access, WSL2OwnedNativePlatformAccess):
@@ -306,7 +315,7 @@ def test_actual_proxmox_factory_and_empty_settlement_are_passive(database: Datab
     assert isinstance(access, ProxmoxOwnedNativePlatformAccess)
     assert access.owner is owner and access.custody is custody
     assert access.activation is None and access.locator is None
-    assert access.binding is None and access.preparation is None and access.route_check is None
+    assert access.binding is None and access.guest_check is None and access.route_check is None
     assert access.settle(Deadline.after(10)) and custody.settled
     assert not owner.list_pending_lifecycle_obligations()
     owner.seal_lifecycle_obligations()

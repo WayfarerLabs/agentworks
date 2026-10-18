@@ -72,6 +72,7 @@ from agentworks.vms.target_preparation import (
     VMTargetPreparationControlFact,
     VMTargetPreparationFailure,
     VMTargetPreparationStatus,
+    prepare_managed_vm_target_from_platform,
 )
 from tests.execution.test_target_identity import SyntheticCarrier
 from tests.execution.test_wsl2_owned_download import GuestThenFileCarrier
@@ -130,6 +131,36 @@ def test_conflicting_claim_prevents_passive_provider_work(
     owner.close()
 
 
+def test_native_preflight_refusal_precedes_provider_reads_and_activation(database, tmp_path, monkeypatch):
+    platform = WSL2Platform("wsl2", {})
+    events = []
+
+    def refuse():
+        assert database.operations.inspect(_scope()) is not None
+        events.append("preflight")
+        raise ValidationError("native configuration unavailable")
+
+    def deny(*args, **kwargs):
+        pytest.fail("invalid native configuration admitted provider work")
+
+    access = SimpleNamespace(native_configuration_check=refuse, observe_power=deny, ensure_available=deny)
+
+    def settle(deadline):
+        events.append("settle")
+        return True
+
+    access.settle = settle
+    monkeypatch.setattr(platform, "build_native_execution_access", lambda *args, **kwargs: access)
+    with (
+        pytest.raises(ValidationError),
+        native_vm_operation(
+            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=_root(tmp_path)
+        ),
+    ):
+        pytest.fail("invalid native configuration admitted body")
+    assert events == ["preflight", "settle"] and database.operations.inspect(_scope()) is None
+
+
 def test_owned_access_factory_is_passive(database: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     platform = WSL2Platform("wsl2", {})
     owner = OperationOwner.acquire(database.operations, _scope(), "passive-access")
@@ -143,7 +174,7 @@ def test_owned_access_factory_is_passive(database: Database, monkeypatch: pytest
     access = platform.build_native_execution_access(vm, RunContext(), owner=owner, custody=custody)
     assert isinstance(access, WSL2OwnedNativePlatformAccess)
     assert access.owner is owner and access.custody is custody
-    assert access.selected is None and access.binding is None and access.preparation is None
+    assert access.selected is None and access.binding is None and access.guest_check is None
     assert access.route_check is None and not owner.list_pending_lifecycle_obligations()
     assert access.settle(Deadline.after(10)) and custody.settled
     owner.seal_lifecycle_obligations()
@@ -165,7 +196,8 @@ def test_root_retains_access_before_effects_and_independently_checks_ledger(
         owner: OperationOwner
         custody: LocalDeliveryCustody
         binding = None
-        preparation = None
+        guest_check = None
+        native_configuration_check = None
         route_check = None
         settled = False
 
@@ -175,7 +207,7 @@ def test_root_retains_access_before_effects_and_independently_checks_ledger(
                 database.get_vm("box"), RunContext(), deadline=deadline, custody=self.custody
             )
 
-        def prepare(self, power: VMStatus, deadline: Deadline) -> None:
+        def ensure_available(self, power: VMStatus, deadline: Deadline) -> ProviderLocator:
             nonlocal debt
             assert power is VMStatus.RUNNING and not deadline.expired
             assert database.operations.inspect(_scope()) is not None
@@ -191,6 +223,12 @@ def test_root_retains_access_before_effects_and_independently_checks_ledger(
                 self.owner.borrow()
             events.append("settle")
             return self.settled
+
+        def prepare_native_route(self, deadline: Deadline) -> NativeExecutionBinding:
+            pytest.fail("interrupted availability selected a route")
+
+        def observe_locator(self, deadline: Deadline) -> ProviderLocator:
+            pytest.fail("interrupted availability read a locator")
 
     access = Access()
 
@@ -341,7 +379,8 @@ def test_fresh_intent_and_power_gate_precedes_preparation_and_wake(
 
     class Access:
         binding = None
-        preparation = None
+        guest_check = None
+        native_configuration_check = None
         route_check = None
 
         def __init__(self, owner: OperationOwner, custody: LocalDeliveryCustody) -> None:
@@ -351,7 +390,7 @@ def test_fresh_intent_and_power_gate_precedes_preparation_and_wake(
         def observe_power(self, deadline: Deadline) -> VMStatus:
             return cast("VMStatus", observe(selected_vm, selected_ctx, deadline=deadline, custody=self.custody))
 
-        def prepare(self, observed_power: VMStatus, deadline: Deadline) -> None:
+        def ensure_available(self, observed_power: VMStatus, deadline: Deadline) -> ProviderLocator:
             claim = database.operations.inspect(_scope())
             assert claim is not None and claim.ownership == self.owner.ownership == observed_claim
             assert self.custody is observed_custody
@@ -531,13 +570,13 @@ def _install_route(
     database: Database, platform: WSL2Platform, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[_RouteCarrier, FakeNative, FakeObserver]:
     route = _RouteCarrier(database)
-    original_start = WSL2OwnedOperation.start_and_prepare
+    original_check = WSL2OwnedOperation.require_ready_guest
 
-    def start(selected: WSL2OwnedOperation, deadline: Deadline) -> VMGuestIdentity | None:
-        route.prepared_guest = original_start(selected, deadline)
-        return route.prepared_guest
+    def check(selected: WSL2OwnedOperation, guest: VMGuestIdentity) -> None:
+        original_check(selected, guest)
+        route.prepared_guest = guest
 
-    monkeypatch.setattr(WSL2OwnedOperation, "start_and_prepare", start)
+    monkeypatch.setattr(WSL2OwnedOperation, "require_ready_guest", check)
     native = FakeNative([])
     observer = FakeObserver([])
     connection = WSL2Connection("Ubuntu", "admin", "wsl.exe")
@@ -563,6 +602,45 @@ def _install_route(
         ),
     )
     return route, native, observer
+
+
+def test_actual_hold_ready_precedes_single_shared_guest_probe(database, tmp_path, monkeypatch):
+    platform = WSL2Platform("wsl2", {})
+    route, native, _ = _install_route(database, platform, monkeypatch)
+    original = prepare_managed_vm_target_from_platform
+    calls = []
+
+    def probe(*args, **kwargs):
+        access = kwargs["observe_locator"].__self__
+        assert isinstance(access, WSL2OwnedNativePlatformAccess)
+        selected = access.selected
+        assert selected is not None and selected.ready is not None
+        assert selected._ready_is_durable(selected.ready)
+        assert native.events.count("dispatch") == 1 and route.guest.calls == 0
+        calls.append(selected)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(_native_operation, "prepare_managed_vm_target_from_platform", probe)
+    with native_vm_operation(
+        database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=_root(tmp_path)
+    ):
+        assert len(calls) == 1 and route.guest.calls == 1
+    assert native.events.count("dispatch") == 1 and database.operations.inspect(_scope()) is None
+
+
+def test_shared_guest_must_match_actual_hold_ready(database, tmp_path, monkeypatch):
+    platform = WSL2Platform("wsl2", {})
+    route, native, _ = _install_route(database, platform, monkeypatch)
+    route.guest.init_ticks = 8192
+    with (
+        pytest.raises(ValidationError),
+        native_vm_operation(
+            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=_root(tmp_path)
+        ),
+    ):
+        pytest.fail("guest differing from held READY admitted body")
+    assert native.events.count("dispatch") == 1 and route.guest.calls == 1
+    assert not route.accounts.calls and database.operations.inspect(_scope()) is None
 
 
 def test_prepared_views_share_claim_and_clean_teardown(
@@ -929,24 +1007,22 @@ def test_interruption_after_selected_preparation_keeps_actual_child_custody(
 ) -> None:
     platform = WSL2Platform("wsl2", {})
     _install_route(database, platform, monkeypatch)
-    original = WSL2OwnedOperation.start_and_prepare
+    original = prepare_managed_vm_target_from_platform
     control = KeyboardInterrupt()
     prepared: VMTargetPreparation | None = None
 
-    def interrupted(selected: WSL2OwnedOperation, deadline: Deadline) -> VMGuestIdentity | None:
+    def interrupted(*args, **kwargs) -> VMTargetPreparation:
         nonlocal prepared
-        original(selected, deadline)
-        assert selected.preparation is not None
-        prepared = selected.preparation
-        selected.preparation = replace(
+        prepared = original(*args, **kwargs)
+        partial = replace(
             prepared,
             status=VMTargetPreparationStatus.UNCERTAIN,
             pending_remote_effects=True,
             requires_owner_retention=True,
         )
-        raise control
+        raise control from VMTargetPreparationControlFact(partial)
 
-    monkeypatch.setattr(WSL2OwnedOperation, "start_and_prepare", interrupted)
+    monkeypatch.setattr(_native_operation, "prepare_managed_vm_target_from_platform", interrupted)
     with (
         pytest.raises(KeyboardInterrupt) as caught,
         native_vm_operation(
@@ -959,13 +1035,12 @@ def test_interruption_after_selected_preparation_keeps_actual_child_custody(
     assert isinstance(fact, NativeVMOperationControlFact)
     access = fact._workflow.access
     assert isinstance(access, WSL2OwnedNativePlatformAccess) and access.selected is not None
-    assert access.preparation is access.selected.preparation
-    assert access.preparation is not None and access.preparation.pending_remote_effects
+    assert fact._workflow.preparation is not None and fact._workflow.preparation.pending_remote_effects
     assert database.operations.inspect(_scope()) is not None
     with pytest.raises(StateError):
         fact.retry_cleanup(Deadline.after(10))
     assert prepared is not None
-    access.selected.preparation = prepared
+    fact._workflow.preparation = prepared
     fact.retry_cleanup(Deadline.after(10))
     assert database.operations.inspect(_scope()) is None
 
@@ -1153,7 +1228,9 @@ def test_preparation_control_fact_survives_failed_teardown_handoff(
     def interrupt_preparation(*args: object, **kwargs: object) -> VMTargetPreparation:
         raise control from original_fact
 
-    monkeypatch.setattr(_wsl2_owned_operation, "prepare_managed_vm_target_from_platform", interrupt_preparation)
+    monkeypatch.setattr(
+        "agentworks.vms._native_operation.prepare_managed_vm_target_from_platform", interrupt_preparation
+    )
     with (
         pytest.raises(KeyboardInterrupt) as caught,
         native_vm_operation(

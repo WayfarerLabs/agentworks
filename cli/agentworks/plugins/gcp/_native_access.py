@@ -100,6 +100,10 @@ class GCEOwnedRead:
     def observe_locator(self, deadline: Deadline) -> ProviderLocator:
         return self._read_exact_instance(deadline).locator
 
+    def observe_availability(self, deadline: Deadline) -> GCEInstanceObservation:
+        """Read provider identity and power without native network topology."""
+        return self._read_exact_instance(deadline)
+
     def observe_instance(self, deadline: Deadline, *, identity: NativeIdentity) -> GCEInstanceObservation:
         return self._read_exact_instance(deadline, identity=identity)
 
@@ -334,7 +338,13 @@ class GCEOwnedRead:
                 body = self._read_body(deadline)
                 if identity is None:
                     locator, power = self._project(body)
-                    result = GCEInstanceObservation(locator, None, power, None, (), ())
+                    value = json.loads(body)
+                    raw_power = value.get("status")
+                    if raw_power is not None and (
+                        type(raw_power) is not str or re.fullmatch(r"[A-Z_]{1,64}", raw_power) is None
+                    ):
+                        raise ValidationError("GCE provider power observation is invalid")
+                    result = GCEInstanceObservation(locator, raw_power, power, None, (), ())
                 else:
                     result = self._project_instance(body, identity)
             except AgentworksError:

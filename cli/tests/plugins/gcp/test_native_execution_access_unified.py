@@ -30,7 +30,6 @@ from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTar
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.ssh import SSHSettings
 from agentworks.operations import OperationOwner
-from agentworks.plugins.gcp import _native_execution_access
 from agentworks.plugins.gcp._native_access import INSTANCE_FIELDS, NATIVE_INSTANCE_FIELDS
 from agentworks.plugins.gcp._native_execution_access import GCEOwnedAccess
 from agentworks.plugins.gcp.platform import GCEPlatform
@@ -38,6 +37,7 @@ from agentworks.vms.target_preparation import VMTargetPreparation, VMTargetPrepa
 from tests.plugins.gcp.test_native_instance import native_instance
 from tests.plugins.gcp.test_owned_auth_copy import run_copy
 from tests.plugins.gcp.test_owned_read_sdk import FreshCredential
+from tests.vms.native_stages import prepare_native
 
 ROOT = "https://compute.googleapis.com/compute/v1/projects/project"
 NETWORK = f"{ROOT}/global/networks/default"
@@ -309,7 +309,7 @@ def unified(request, tmp_path, monkeypatch):
 
         def guest_stub(vm, platform, locator, binding, *, deadline, owner, observe_locator):
             assert vm is p.vm and platform is p.platform and owner is p.owner and binding is p.access.binding
-            assert p.access.route_check is None and observe_locator.__self__ is p.access
+            assert p.access.route_check is not None and observe_locator.__self__ is p.access
             assert observe_locator(deadline) == locator == p.access._identity.locator
             p.guest_calls.append(locator)
             target = ManagedTargetIdentity(
@@ -317,7 +317,7 @@ def unified(request, tmp_path, monkeypatch):
             )
             return VMTargetPreparation(VMTargetPreparationStatus.PREPARED, target, None)
 
-        monkeypatch.setattr(_native_execution_access, "prepare_managed_vm_target_from_platform", guest_stub)
+        monkeypatch.setattr("agentworks.vms._native_operation.prepare_managed_vm_target_from_platform", guest_stub)
         p.deadline = Deadline.after(10)
         yield p
         assert database.operations.inspect(p.owner.ownership.scope) is None
@@ -363,8 +363,8 @@ def test_actual_composition_one_shot_route_and_start_with_guest_stub(unified, mo
     p = unified
     power = p.access.observe_power(p.deadline)
     assert power is (VMStatus.RUNNING if p.initial == "RUNNING" else VMStatus.STOPPED)
-    p.access.prepare(power, p.deadline)
-    assert len(p.guest_calls) == 1 and p.full_reads >= 4
+    prepare_native(p, power, p.deadline)
+    assert len(p.guest_calls) == 1 and p.full_reads == 3
     assert p.access.route_check is not None
     p.access.route_check(p.deadline)
     assert p.access.settle(Deadline.after(5))
@@ -376,7 +376,7 @@ def test_actual_returned_route_response_close_failure_then_fresh_cleanup(unified
     p = unified
     power = p.access.observe_power(p.deadline)
     with pytest.raises(StateError):
-        p.access.prepare(power, p.deadline)
+        prepare_native(p, power, p.deadline)
     original = p.failed_response
     assert original is not None and original.close_calls >= 1 and not original.closed_original
     assert not p.guest_calls and p.access.cleanup_incomplete and p.access.route_check is None
@@ -390,7 +390,7 @@ def test_actual_returned_route_response_close_failure_then_fresh_cleanup(unified
 @pytest.mark.parametrize("unified", [("RUNNING", False), ("TERMINATED", False)], indirect=True)
 def test_open_route_then_refresh_response_close_failure_recovers_without_reselection(unified, monkeypatch):
     p = unified
-    p.access.prepare(VMStatus.RUNNING if p.initial == "RUNNING" else VMStatus.STOPPED, p.deadline)
+    prepare_native(p, VMStatus.RUNNING if p.initial == "RUNNING" else VMStatus.STOPPED, p.deadline)
     assert p.rule is not None and len(p.guest_calls) == 1
     selected = p.access._auth._credential
     root_session = p.auth_session
@@ -416,7 +416,7 @@ def test_open_route_then_refresh_response_close_failure_recovers_without_reselec
 @pytest.mark.parametrize("debt", ["response", "session"])
 def test_open_route_then_completed_copy_close_failure_recovers_originals(unified, monkeypatch, debt):
     p = unified
-    p.access.prepare(VMStatus.RUNNING, p.deadline)
+    prepare_native(p, VMStatus.RUNNING, p.deadline)
     auth = p.access._auth
     selected = auth._credential
     auth.begin(Deadline.after(5))
@@ -447,7 +447,7 @@ def test_open_route_then_completed_copy_close_failure_recovers_originals(unified
 @pytest.mark.parametrize("unified", [("RUNNING", False)], indirect=True)
 def test_route_cleanup_refresh_creates_new_debt_after_positive_auth_retry(unified, monkeypatch):
     p = unified
-    p.access.prepare(VMStatus.RUNNING, p.deadline)
+    prepare_native(p, VMStatus.RUNNING, p.deadline)
     p.credential.token = None
     p.credential_close_failures = 1
     with pytest.raises(StateError):

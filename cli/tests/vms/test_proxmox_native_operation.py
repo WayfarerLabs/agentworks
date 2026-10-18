@@ -114,8 +114,9 @@ class _Route:
 def _install(database: Database, monkeypatch: pytest.MonkeyPatch) -> tuple[ProxmoxPlatform, _Route]:
     platform = ProxmoxPlatform("pve", {"api_url": "https://pve.test", "node": "node", "token_id": "token"})
     route = _Route(database)
+    connection = ProxmoxConnection("https://pve.test", "node", 101, "token", "secret")
     binding = NativeExecutionBinding(
-        ProxmoxCarrier(ProxmoxConnection("https://pve.test", "node", 101, "token", "secret")),
+        ProxmoxCarrier(connection),
         "root",
         RuntimeSelection(RuntimeTargetOS.LINUX),
     )
@@ -124,14 +125,16 @@ def _install(database: Database, monkeypatch: pytest.MonkeyPatch) -> tuple[Proxm
         assert database.operations.inspect(_scope()) is not None
         return route.locators.pop(0) if route.locators else ProviderLocator("pve:generation")
 
-    def resolve(vm, ctx, *, deadline, config, custody=None):
+    def resolve(selected):
         assert database.operations.inspect(_scope()) is not None
+        assert selected is connection
         route.resolutions += 1
         return binding
 
     monkeypatch.setattr(platform, "observe_execution_power", lambda *args, **kwargs: VMStatus.RUNNING)
+    monkeypatch.setattr(platform, "_execution_connection", lambda *args: connection)
     monkeypatch.setattr(platform, "observe_provider_locator", locator)
-    monkeypatch.setattr(platform, "resolve_native_execution_binding", resolve)
+    monkeypatch.setattr("agentworks.plugins.proxmox._native_access.proxmox_native_binding", resolve)
     monkeypatch.setattr(
         ProxmoxCarrier,
         "execute",
@@ -140,6 +143,44 @@ def _install(database: Database, monkeypatch: pytest.MonkeyPatch) -> tuple[Proxm
         ),
     )
     return platform, route
+
+
+def test_native_route_reuses_exact_available_api_connection(database, tmp_path, monkeypatch):
+    from agentworks.execution._runtime_prerequisite import HelperClosureExpectation
+    from agentworks.plugins.proxmox._native_binding import proxmox_native_binding
+
+    platform, _ = _install(database, monkeypatch)
+    connection = ProxmoxConnection("https://pve.test", "node", 101, "token", "secret", tmp_path / "ca.pem")
+    selections = []
+
+    def select(*args):
+        selections.append(connection)
+        assert len(selections) == 1
+        return connection
+
+    monkeypatch.setattr(platform, "_execution_connection", select)
+    monkeypatch.setattr("agentworks.plugins.proxmox._native_access.proxmox_native_binding", proxmox_native_binding)
+    owner = OperationOwner.acquire(database.operations, _scope(), "same-connection")
+    deadline = Deadline.after(10)
+    access = platform.build_native_execution_access(
+        database.get_vm("box"), RunContext(), owner=owner, custody=LocalDeliveryCustody()
+    )
+    access.ensure_available(VMStatus.RUNNING, deadline)
+    binding = access.prepare_native_route(deadline)
+    assert binding.delivery_account == "root"
+    assert isinstance(binding.carrier, ProxmoxCarrier) and binding.carrier._wire._connection is connection
+    assert binding._new_managed_delivery is not None and binding._new_helper_delivery is not None
+    first, second = binding._new_managed_delivery(), binding._new_managed_delivery()
+    assert first is not second
+    assert isinstance(first, ProxmoxCarrier) and isinstance(second, ProxmoxCarrier)
+    assert first._wire._connection is second._wire._connection is connection
+    expectation = HelperClosureExpectation("0" * 32, ("/usr/bin/python3",), None, None)
+    helper = binding._new_helper_delivery(expectation)
+    assert isinstance(helper, ProxmoxCarrier) and helper._wire._connection is connection
+    assert selections == [connection] and access.settle(deadline)
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
 
 
 def test_running_views_share_owner_bootstrap_and_settle(database, tmp_path, monkeypatch):
@@ -212,11 +253,9 @@ def test_native_direct_selects_closure_factory_and_finite_cleanup_before_finish(
     connection = ProxmoxConnection("https://pve.test", "node", 101, "token", "secret")
     monkeypatch.setattr(platform, "_execution_connection", lambda *_args: connection)
     # Invoke the real composition factory rather than the scripted preparation binding.
-    monkeypatch.setattr(
-        platform,
-        "resolve_native_execution_binding",
-        lambda vm, ctx, **kwargs: ProxmoxPlatform.resolve_native_execution_binding(platform, vm, ctx, **kwargs),
-    )
+    from agentworks.plugins.proxmox._native_binding import proxmox_native_binding
+
+    monkeypatch.setattr("agentworks.plugins.proxmox._native_access.proxmox_native_binding", proxmox_native_binding)
     deadline = Deadline.after(30)
     calls: list[tuple[str, str]] = []
     terminal: dict[str, object] = {}
@@ -367,7 +406,7 @@ def test_stopped_access_retains_single_activation_without_replay(database, tmp_p
     def factory(*args, **kwargs):
         access = original_factory(*args, **kwargs)
         assert isinstance(access, ProxmoxOwnedNativePlatformAccess)
-        assert access.activation is None and access.preparation is None and access.binding is None
+        assert access.activation is None and access.guest_check is None and access.binding is None
         selected.append(access)
         return access
 
@@ -413,9 +452,9 @@ def test_stopped_access_retains_single_activation_without_replay(database, tmp_p
         with native_vm_operation(
             database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=PurePosixPath(tmp_path)
         ):
-            assert selected[0].preparation is not None
+            assert selected[0].binding is not None
             with pytest.raises(StateError):
-                selected[0].prepare(VMStatus.STOPPED, Deadline.after(10))
+                selected[0].ensure_available(VMStatus.STOPPED, Deadline.after(10))
         assert calls == ["start", "poll"]
         assert database.operations.inspect(_scope()) is None
         return
@@ -429,9 +468,9 @@ def test_stopped_access_retains_single_activation_without_replay(database, tmp_p
     fact = caught.value.__cause__
     assert isinstance(fact, NativeVMOperationControlFact)
     assert fact._workflow.access is selected[0]
-    assert selected[0].activation is not None and selected[0].preparation is None
+    assert selected[0].activation is not None and fact._workflow.preparation is None
     with pytest.raises(StateError):
-        selected[0].prepare(VMStatus.STOPPED, Deadline.after(10))
+        selected[0].ensure_available(VMStatus.STOPPED, Deadline.after(10))
     assert database.operations.inspect(_scope()) is not None and route.guest.calls == 0
     for _ in range(2):
         with pytest.raises(StateError):
@@ -560,9 +599,9 @@ def test_preparation_control_retains_exact_facts(database, tmp_path, monkeypatch
     assert isinstance(workflow.access, ProxmoxOwnedNativePlatformAccess)
     assert workflow.access.locator == ProviderLocator("pve:generation")
     assert workflow.access.binding is not None
-    assert workflow.access.preparation is not None
+    assert workflow.preparation is not None
     if phase == "guest":
-        assert workflow.access.preparation.requires_owner_retention
+        assert workflow.preparation.requires_owner_retention
     else:
         assert workflow.identity is not None and workflow.identity.requires_owner_retention
     assert database.operations.inspect(_scope()) is not None
@@ -594,7 +633,7 @@ def test_unsettled_preparation_reply_retains_owner(database, tmp_path, monkeypat
     fact = caught.value.__cause__
     assert isinstance(fact, NativeVMOperationControlFact)
     assert isinstance(fact._workflow.access, ProxmoxOwnedNativePlatformAccess)
-    preparation = fact._workflow.identity if phase == "accounts" else fact._workflow.access.preparation
+    preparation = fact._workflow.identity if phase == "accounts" else fact._workflow.preparation
     assert preparation is not None and preparation.pending_remote_effects
     assert route.local.calls == 0
 
@@ -668,12 +707,12 @@ def test_settlement_failure_retains_observed_preparation_facts(database, tmp_pat
     assert isinstance(fact, NativeVMOperationControlFact)
     workflow = fact._workflow
     assert isinstance(workflow.access, ProxmoxOwnedNativePlatformAccess)
-    assert workflow.access.preparation is not None and workflow.access.preparation.guest_result is not None
+    assert workflow.preparation is not None and workflow.preparation.guest_result is not None
     if phase == "accounts":
         assert workflow.identity is not None and workflow.identity.delivery_result is not None
         assert workflow.identity.coordination_uncertain
     else:
-        assert workflow.access.preparation.coordination_uncertain
+        assert workflow.preparation.coordination_uncertain
     assert database.operations.inspect(_scope()) is not None
 
 
@@ -749,7 +788,7 @@ def test_locator_control_survives_borrow_release_failure(database, tmp_path, mon
     fact = control.__cause__
     assert isinstance(fact, NativeVMOperationControlFact)
     assert isinstance(fact._workflow.access, ProxmoxOwnedNativePlatformAccess)
-    preparation = fact._workflow.access.preparation
+    preparation = fact._workflow.preparation
     assert preparation is not None and preparation.requires_owner_retention
     assert preparation.guest_result is not None and preparation.guest_result.observation is not None
     assert preparation.guest_result.observation.identity == route.local.observed
@@ -784,7 +823,7 @@ def test_identity_borrow_release_failure_cannot_release_owner(database, tmp_path
     fact = control.__cause__
     assert isinstance(fact, NativeVMOperationControlFact)
     assert isinstance(fact._workflow.access, ProxmoxOwnedNativePlatformAccess)
-    assert fact._workflow.access.preparation is not None
+    assert fact._workflow.preparation is not None
     assert fact._workflow.identity is not None and fact._workflow.identity.delivery_result is not None
     assert fact._workflow.identity.coordination_uncertain
     assert database.operations.inspect(_scope()) is not None and route.local.calls == 0

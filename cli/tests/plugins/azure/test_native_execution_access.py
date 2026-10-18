@@ -30,6 +30,7 @@ from agentworks.vms.target_preparation import (
 )
 from tests.plugins.azure.test_native_access import NIC, RESOURCE, UUID
 from tests.plugins.azure.test_native_access import owned as owned
+from tests.vms.native_stages import prepare_native
 
 
 class Control(BaseException):
@@ -188,7 +189,7 @@ def full(owned, tmp_path, monkeypatch):
     def prepare(vm, platform, locator, binding, *, deadline, owner, observe_locator):
         event("guest-prepare", deadline)
         assert vm is owned.vm and platform is owned.platform and owner is p.owner
-        assert binding is p.access.binding and p.access.route_check is None
+        assert binding is p.access.binding and p.access.route_check is not None
         assert observe_locator(deadline) == locator
         if p.prep_error is not None:
             raise p.prep_error
@@ -203,7 +204,7 @@ def full(owned, tmp_path, monkeypatch):
 
     monkeypatch.setattr(native, "AzureIncarnationStart", Start)
     monkeypatch.setattr(_native_route, "AzureNativeRoute", Route)
-    monkeypatch.setattr(native, "prepare_managed_vm_target_from_platform", prepare)
+    monkeypatch.setattr("agentworks.vms._native_operation.prepare_managed_vm_target_from_platform", prepare)
     monkeypatch.setattr("agentworks.vms._ssh_native_exposure.urlopen", lambda *a, **k: Response())
     monkeypatch.setattr(native, "time", SimpleNamespace(sleep=pause))
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", tmp_path / "absent.toml")
@@ -229,7 +230,7 @@ def test_factory_is_passive_and_validates_exact_owner(full):
         p.read.platform, p.read.vm, p.read.ctx, owner=p.owner, custody=LocalDeliveryCustody()
     )
     assert isinstance(access, AzureOwnedAccess) and p.calls == []
-    assert access.binding is None and access.preparation is None and access.route_check is None
+    assert access.binding is None and access.guest_check is None and access.route_check is None
     p.read.vm.name = "foreign"
     with pytest.raises(ValidationError):
         AzureVMPlatform.build_native_execution_access(
@@ -239,12 +240,34 @@ def test_factory_is_passive_and_validates_exact_owner(full):
 
 
 @pytest.mark.parametrize("power", [VMStatus.RUNNING, VMStatus.STOPPED, VMStatus.DEALLOCATED])
+def test_availability_needs_no_public_endpoint_native_ingress_or_guest(full, monkeypatch, power):
+    p = full
+    select(p, power)
+    p.read.ctx.config.operator.ssh = None
+
+    def deny(*args, **kwargs):
+        pytest.fail("availability selected native delivery")
+
+    monkeypatch.setattr(p.access._reader, "observe_public_endpoint", deny)
+    monkeypatch.setattr(native, "ssh_native_binding", deny)
+    monkeypatch.setattr(native, "OwnedSSHExposure", deny)
+    monkeypatch.setattr("agentworks.vms._native_operation.prepare_managed_vm_target_from_platform", deny)
+    assert p.access.observe_power(p.deadline) is power
+    locator = p.access.ensure_available(power, p.deadline)
+    assert p.access.observe_locator(p.deadline) == locator
+    assert p.access.binding is None and p.access._route is None and p.access._exposure is None
+    assert "guest-prepare" not in p.calls and "source-read" not in p.calls
+    assert p.calls.count("start-post") == int(power is not VMStatus.RUNNING)
+    assert p.access.settle(p.deadline)
+
+
+@pytest.mark.parametrize("power", [VMStatus.RUNNING, VMStatus.STOPPED, VMStatus.DEALLOCATED])
 def test_success_orders_fresh_reads_route_guest_and_credential_last(full, power):
     p = full
     select(p, power)
     assert p.access.observe_power(p.deadline) is power
-    p.access.prepare(power, p.deadline)
-    assert p.access.preparation is p.prep and p.access.route_check is not None
+    prepare_native(p, power, p.deadline)
+    assert p.workflow.preparation is p.prep
     assert p.access.binding._independent_availability is _IndependentJobAvailability.NO_IDLE_STOP
     assert p.calls.index("prefix-close") < p.calls.index("route-open") < p.calls.index("guest-prepare")
     assert p.calls.count("start-post") == int(power is not VMStatus.RUNNING)
@@ -259,18 +282,14 @@ def test_success_orders_fresh_reads_route_guest_and_credential_last(full, power)
     with pytest.raises(StateError):
         check(p.deadline)
     with pytest.raises(StateError):
-        p.access.prepare(power, p.deadline)
+        prepare_native(p, power, p.deadline)
 
 
-@pytest.mark.parametrize("method", ["observe_power", "prepare"])
-def test_ssh_policy_required_before_auth_or_reads(full, method):
+def test_native_preflight_requires_ssh_before_provider_work(full):
     p = full
     p.read.ctx.config.operator.ssh = None
     with pytest.raises(ConfigError):
-        if method == "prepare":
-            p.access.prepare(VMStatus.RUNNING, p.deadline)
-        else:
-            p.access.observe_power(p.deadline)
+        prepare_native(p, VMStatus.RUNNING, p.deadline)
     assert p.calls == []
     assert p.access.settle(p.deadline)
 
@@ -278,7 +297,7 @@ def test_ssh_policy_required_before_auth_or_reads(full, method):
 @pytest.mark.parametrize("power", [VMStatus.UNKNOWN, "running", None])
 def test_unsupported_selection_refuses_before_provider_work(full, power):
     with pytest.raises(StateError):
-        full.access.prepare(power, full.deadline)
+        prepare_native(full, power, full.deadline)
     assert full.calls == []
 
 
@@ -287,7 +306,7 @@ def test_changed_initial_power_never_starts_or_opens_route(full, observed):
     p = full
     p.read.current.instance_view.statuses[0].code = "PowerState/" + observed
     with pytest.raises(StateError):
-        p.access.prepare(VMStatus.RUNNING, p.deadline)
+        prepare_native(p, VMStatus.RUNNING, p.deadline)
     assert "start-post" not in p.calls and "route-open" not in p.calls
     assert p.access.settle(p.deadline)
 
@@ -299,10 +318,10 @@ def test_async_completion_is_request_evidence_separate_from_availability(full, o
     p.start_state = StartState.PENDING
     p.monitor = [StartState.PENDING, outcome]
     if outcome is StartState.SUCCEEDED:
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
     else:
         with pytest.raises(StateError):
-            p.access.prepare(VMStatus.STOPPED, p.deadline)
+            prepare_native(p, VMStatus.STOPPED, p.deadline)
         assert p.access.binding is None and "route-open" not in p.calls
     assert p.calls.count("start-post") == 1 and p.calls.count("start-monitor") == 2
     assert p.pauses == [0.25]
@@ -315,7 +334,7 @@ def test_fresh_cleanup_finishes_existing_monitor_without_preparation_or_repost(f
     p.start_state = StartState.PENDING
     p.monitor = []
     with pytest.raises(LimitExceededError):
-        p.access.prepare(VMStatus.DEALLOCATED, p.deadline)
+        prepare_native(p, VMStatus.DEALLOCATED, p.deadline)
     assert p.access.binding is None and "route-open" not in p.calls
     p.cleanup_deadline = Deadline.after(5)
     p.monitor = [StartState.PENDING, StartState.SUCCEEDED]
@@ -330,14 +349,14 @@ def test_lost_ack_preserves_owner_and_credential_without_inventing_monitor(full)
     select(p, VMStatus.STOPPED)
     p.start_error = StateError("synthetic lost acknowledgment")
     with pytest.raises(StateError) as caught:
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
     assert caught.value is p.start_error
     assert not p.access.settle(p.deadline)
     assert p.owner.list_pending_lifecycle_obligations()
     assert "credential-close" not in p.calls and "start-monitor" not in p.calls
     assert p.calls.count("start-post") == 1
     with pytest.raises(StateError):
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
 
 
 @pytest.mark.parametrize("stage", ["read", "start", "route", "prefix"])
@@ -353,7 +372,7 @@ def test_retained_originals_keep_credential_until_positive_cleanup(full, stage):
     else:
         p.prefix_close_error = RuntimeError("synthetic source response close")
     with pytest.raises(StateError):
-        p.access.prepare(VMStatus.STOPPED if stage == "start" else VMStatus.RUNNING, p.deadline)
+        prepare_native(p, VMStatus.STOPPED if stage == "start" else VMStatus.RUNNING, p.deadline)
     assert not p.access.settle(p.deadline)
     assert "credential-close" not in p.calls
     p.read.compute_close_error = None
@@ -366,7 +385,7 @@ def test_retained_originals_keep_credential_until_positive_cleanup(full, stage):
 @pytest.mark.parametrize("change", ["uuid", "power", "endpoint", "nic"])
 def test_route_check_revalidates_fresh_identity_power_and_endpoint(full, change):
     p = full
-    p.access.prepare(VMStatus.RUNNING, p.deadline)
+    prepare_native(p, VMStatus.RUNNING, p.deadline)
     checks = p.calls.count("route-check")
     if change == "uuid":
         p.read.current.vm_id = "ffffffff-ffff-ffff-ffff-ffffffffffff"
@@ -398,7 +417,7 @@ def test_successful_request_waits_for_documented_startup_power_states(full, monk
         return original(deadline)
 
     monkeypatch.setattr(p.access._reader, "observe_vm", observe)
-    p.access.prepare(VMStatus.DEALLOCATED, p.deadline)
+    prepare_native(p, VMStatus.DEALLOCATED, p.deadline)
     assert states == [] and p.pauses == [0.25, 0.25]
     assert p.calls.count("start-post") == 1
     assert p.access.settle(p.deadline)
@@ -432,7 +451,7 @@ def test_successful_start_refuses_unknown_or_malformed_power_without_waiting(ful
 
     monkeypatch.setattr(p.access._reader, "observe_vm", observe)
     with pytest.raises(StateError):
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
     assert not p.pauses and p.calls.count("start-post") == 1 and "route-open" not in p.calls
     assert p.access.settle(p.deadline)
 
@@ -451,7 +470,7 @@ def test_startup_power_wait_rechecks_uuid_and_original_deadline(full, monkeypatc
 
     monkeypatch.setattr(p.access._reader, "observe_vm", observe)
     with pytest.raises(StateError):
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
     assert p.pauses == [0.25] and p.calls.count("start-post") == 1
     assert p.access.settle(p.deadline)
 
@@ -461,7 +480,7 @@ def test_startup_power_wait_expires_without_reposting_or_waiting_during_cleanup(
     select(p, VMStatus.STOPPED)
     p.after_start_power = "starting"
     with pytest.raises(LimitExceededError):
-        p.access.prepare(VMStatus.STOPPED, p.deadline)
+        prepare_native(p, VMStatus.STOPPED, p.deadline)
     assert p.deadline.expired and p.calls.count("start-post") == 1
     assert p.access.binding is None and "route-open" not in p.calls
     reads = p.calls.count("vm-get")
@@ -477,7 +496,7 @@ def test_invalid_endpoint_never_discovers_source_or_opens_route(full, endpoint):
         id=p.read.pip_id, properties=SimpleNamespace(ip_address=endpoint)
     )
     with pytest.raises(StateError):
-        p.access.prepare(VMStatus.RUNNING, p.deadline)
+        prepare_native(p, VMStatus.RUNNING, p.deadline)
     assert p.access.binding is None and p.access._exposure is None and p.access._route is None
     assert p.access.settle(p.deadline)
 
@@ -499,19 +518,20 @@ def test_partial_preparation_facts_are_retained_without_guest_admission(full, st
         p.prep_error = Control("synthetic guest control")
         p.prep_error.__cause__ = VMTargetPreparationControlFact(p.prep)
         with pytest.raises(Control) as caught:
-            p.access.prepare(VMStatus.RUNNING, p.deadline)
+            prepare_native(p, VMStatus.RUNNING, p.deadline)
         assert caught.value is p.prep_error
     else:
-        p.access.prepare(VMStatus.RUNNING, p.deadline)
-    assert p.access.preparation is p.prep and p.access.route_check is None
-    assert p.access.settle(p.deadline) is not retained
+        prepare_native(p, VMStatus.RUNNING, p.deadline)
+    assert p.workflow.preparation is p.prep and p.access.route_check is not None
+    assert p.workflow._components_settled() is not retained
+    assert p.access.settle(p.deadline)
 
 
 @pytest.mark.parametrize("first", [RuntimeError("synthetic route error"), Control("synthetic route control")])
 def test_cleanup_attempts_both_effects_and_preserves_first_escaping_control(full, first):
     p = full
     select(p, VMStatus.STOPPED)
-    p.access.prepare(VMStatus.STOPPED, p.deadline)
+    prepare_native(p, VMStatus.STOPPED, p.deadline)
     p.route_settle_error = first
     p.start_settle_error = Control("synthetic start cleanup control")
     with pytest.raises(Control) as caught:
@@ -525,7 +545,7 @@ def test_cleanup_attempts_both_effects_and_preserves_first_escaping_control(full
 
 def test_core_workflow_keeps_exact_owner_until_all_components_settle(full):
     p = full
-    p.access.prepare(VMStatus.RUNNING, p.deadline)
+    prepare_native(p, VMStatus.RUNNING, p.deadline)
     p.route_settled = False
     workflow = _Workflow(p.owner, p.deadline, access=p.access)
     with pytest.raises(StateError):
@@ -544,7 +564,7 @@ def test_core_workflow_keeps_exact_owner_until_all_components_settle(full):
 def test_final_credential_retirement_retry_does_not_revisit_settled_effects(full, monkeypatch, error):
     p = full
     select(p, VMStatus.STOPPED)
-    p.access.prepare(VMStatus.STOPPED, p.deadline)
+    prepare_native(p, VMStatus.STOPPED, p.deadline)
     original = p.read.credential.close
 
     def fail_close():
@@ -578,7 +598,7 @@ def test_cleanup_cannot_close_borrowed_credential_during_route_admission(full):
 
     def prepare():
         try:
-            p.access.prepare(VMStatus.RUNNING, p.deadline)
+            prepare_native(p, VMStatus.RUNNING, p.deadline)
         except BaseException as error:
             failures.append(error)
 

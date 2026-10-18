@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.db import LifecycleObligationState, VMStatus
 from agentworks.errors import StateError
 from agentworks.execution._proxmox_activation import ProxmoxActivation, TaskPhase
-from agentworks.vms.target_preparation import VMTargetPreparationControlFact, prepare_managed_vm_target_from_platform
+from agentworks.execution.carriers.proxmox import _ProxmoxWire
+from agentworks.plugins.proxmox._native_binding import proxmox_native_binding
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -19,17 +20,16 @@ if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform.base import ProviderLocatorObservation
     from agentworks.db import VMRow
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
+    from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
-    from agentworks.execution.carriers.proxmox import ProxmoxCarrier
     from agentworks.operations import OperationOwner
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-    from agentworks.vms.target_preparation import VMTargetPreparation
 
 
 @dataclass
 class ProxmoxOwnedNativePlatformAccess:
-    """Retain activation and preparation facts without stopping the VM at close."""
+    """Retain activation and route facts without stopping the VM at close."""
 
     vm: VMRow
     platform: ProxmoxPlatform
@@ -37,11 +37,15 @@ class ProxmoxOwnedNativePlatformAccess:
     owner: OperationOwner
     custody: LocalDeliveryCustody
     binding: NativeExecutionBinding | None = None
-    preparation: VMTargetPreparation | None = None
+    guest_check: Callable[[VMGuestIdentity], None] | None = None
+    native_configuration_check: Callable[[], None] | None = None
     locator: ProviderLocator | None = None
     activation: ProxmoxActivation | None = None
     route_check: Callable[[Deadline], None] | None = None
     _used: bool = field(default=False, init=False, repr=False)
+    _route_used: bool = field(default=False, init=False, repr=False)
+    _available: bool = field(default=False, init=False, repr=False)
+    _wire: _ProxmoxWire | None = field(default=None, init=False, repr=False)
 
     def observe_power(self, deadline: Deadline) -> VMStatus:
         return self.platform.observe_execution_power(self.vm, self.ctx, deadline=deadline, custody=self.custody)
@@ -50,7 +54,7 @@ class ProxmoxOwnedNativePlatformAccess:
         """Observe the retained selection under the caller's native custody."""
         return self.platform.observe_provider_locator(self.vm, self.ctx, deadline=deadline, custody=self.custody)
 
-    def prepare(self, power: VMStatus, deadline: Deadline) -> None:
+    def ensure_available(self, power: VMStatus, deadline: Deadline) -> ProviderLocator:
         if self._used:
             raise StateError("Owned Proxmox native access preparation is single use")
         self._used = True
@@ -62,32 +66,27 @@ class ProxmoxOwnedNativePlatformAccess:
         if type(locator) is not ProviderLocator:
             raise StateError("Native VM route is unavailable", entity_kind="vm", entity_name=self.vm.name)
         self.locator = locator
+        self._wire = _ProxmoxWire(self.platform._execution_connection(self.vm, self.ctx))
+        if power is VMStatus.STOPPED:
+            _activate_proxmox(self, locator, deadline)
+        self._available = True
+        return locator
+
+    def prepare_native_route(self, deadline: Deadline) -> NativeExecutionBinding:
+        if not self._available or self._route_used:
+            raise StateError("Owned Proxmox native route cannot be admitted")
+        self._route_used = True
         self.route_check = self._check_route
-        binding = self.platform.resolve_native_execution_binding(
-            self.vm, self.ctx, deadline=deadline, config=self.ctx.config
-        )
+        assert self._wire is not None
+        binding = proxmox_native_binding(self._wire._connection)
         if deadline.expired:
             raise StateError(
                 "Native VM binding resolution exceeded its deadline", entity_kind="vm", entity_name=self.vm.name
             )
         self.binding = binding
-        if power is VMStatus.STOPPED:
-            _activate_proxmox(self, binding, locator, deadline)
-        try:
-            preparation = prepare_managed_vm_target_from_platform(
-                self.vm,
-                self.platform,
-                locator,
-                binding,
-                deadline=deadline,
-                owner=self.owner,
-                observe_locator=self.observe_locator,
-            )
-        except BaseException as control:
-            if isinstance(control.__cause__, VMTargetPreparationControlFact):
-                self.preparation = control.__cause__.preparation
-            raise
-        self.preparation = preparation
+        if self.activation is not None:
+            _wait_guest_info(self, deadline)
+        return binding
 
     def _check_route(self, deadline: Deadline) -> None:
         """Re-observe the retained provider locator, not the guest boot identity."""
@@ -168,12 +167,11 @@ def _guest_info_responded(data: dict[str, object]) -> bool:
 
 def _activate_proxmox(
     access: ProxmoxOwnedNativePlatformAccess,
-    binding: NativeExecutionBinding,
     locator: ProviderLocator,
     deadline: Deadline,
 ) -> None:
-    carrier = cast("ProxmoxCarrier", binding.carrier)
-    wire = carrier._wire  # noqa: SLF001
+    wire = access._wire
+    assert wire is not None
     access.activation = ProxmoxActivation(
         access.owner,
         access.vm.name,
@@ -193,6 +191,11 @@ def _activate_proxmox(
     _remaining(deadline)
     if power.get("status") != "running":
         raise StateError("Native Proxmox activation did not establish running power")
+
+
+def _wait_guest_info(access: ProxmoxOwnedNativePlatformAccess, deadline: Deadline) -> None:
+    wire = access._wire
+    assert wire is not None
     while True:
         access.owner.list_pending_lifecycle_obligations()
         try:
