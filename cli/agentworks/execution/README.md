@@ -499,13 +499,14 @@ perform one-byte excess detection. `sudo=True` selects only the already bound el
 refuses before source validation or dispatch when absent. Every target is a normalized absolute
 POSIX path confined to the trusted root; the service rejects the filesystem root because the helper
 requires a nonempty leaf. The bound `download()` requires a concrete workstation `Path`, defaults to
-create-only `Create`, and permits explicit `Replace`. An optional positive byte limit bounds the
-held remote snapshot; `None` uses the snapshot protocol's representable size rather than a separate
-source-stat race or an application file-size ceiling. Only a verified transfer with settled remote
-cleanup may publish locally. Success returns the verified source metadata; absence and failures use
-the shared typed file errors without exposing partial content or raw local exceptions. The view
-remains private: there is no directory transfer, production factory or RunContext accessor. This
-bound assembly does not activate recipient grants or the core allowlist during coexistence.
+create-only `Create`, and permits explicit `Replace`. An optional nonnegative byte limit bounds the
+held remote snapshot; zero permits only an empty file. `None` uses the snapshot protocol's
+representable size rather than a separate source-stat race or an application file-size ceiling. Only
+a verified transfer with settled remote cleanup may publish locally. Success returns the verified
+source metadata; absence and failures use the shared typed file errors without exposing partial
+content or raw local exceptions. The view remains private: there is no directory transfer,
+production factory or RunContext accessor. This bound assembly does not activate recipient grants or
+the core allowlist during coexistence.
 
 `_local_file_io.py` supplies passive owners for a local source, bounded complete tree inventory and
 one-level destination directory creation. Core must retain each owner before I/O and close its
