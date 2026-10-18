@@ -154,6 +154,86 @@ def test_actual_live_helper_launches_and_delivers_before_input_eof(runtime: str,
 
 
 @pytest.mark.parametrize("runtime", [sys.executable, "/usr/bin/python3.11"])
+@pytest.mark.parametrize("deliver", [False, True])
+@pytest.mark.parametrize("status", [0, 1, 255])
+@pytest.mark.parametrize("prefix", [False, True], ids=["no-read", "prefix-consumer"])
+def test_actual_helper_finishes_without_application_input_eof(
+    runtime: str, deliver: bool, status: int, prefix: bool
+) -> None:
+    if not Path(runtime).is_file():
+        pytest.skip("compatibility interpreter unavailable")
+    code = "import os;" + ("assert os.read(0,1)==b'p';" if prefix else "")
+    code += f"os.write(1,b'out\\x00\\xff');os.write(2,b'err\\xff\\x00');raise SystemExit({status})"
+    request = encode_request_envelope(_manifest(code, live=True, deliver=deliver))
+    with subprocess.Popen(
+        _argv(runtime), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    ) as child:
+        assert child.stdin is not None and child.stdout is not None and child.stderr is not None
+        try:
+            child.stdin.write(request + (b"prefix-unread" if prefix else b""))
+            child.stdin.flush()
+            # The application and helper must finish while the supplier remains open.
+            wire = _wait_for_frame(child, FrameKind.FINISHED)
+            assert not child.stdin.closed
+            assert child.wait(timeout=5) == 0
+            wire += child.stdout.read()
+            diagnostics = child.stderr.read()
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=5)
+    frames = _frames(wire)
+    assert diagnostics == b"" and not any(frame.kind is FrameKind.FAILED for frame in frames)
+    assert b"".join(frame.body for frame in frames if frame.kind is FrameKind.STDOUT) == b"out\x00\xff"
+    assert b"".join(frame.body for frame in frames if frame.kind is FrameKind.STDERR) == b"err\xff\x00"
+    ends = [parse_stream_end(frame.body) for frame in frames if frame.kind is FrameKind.STREAM_END]
+    assert len(ends) == 2 and all(end.complete and not end.truncated for end in ends)
+    assert parse_wait(next(frame.body for frame in frames if frame.kind is FrameKind.WAITED)).value == status
+    assert frames[-1].kind is FrameKind.FINISHED
+
+
+@pytest.mark.parametrize("runtime", [sys.executable, "/usr/bin/python3.11"])
+def test_actual_helper_drains_output_after_consumer_closes_input(runtime: str, tmp_path: Path) -> None:
+    if not Path(runtime).is_file():
+        pytest.skip("compatibility interpreter unavailable")
+    release = tmp_path / "release-output"
+    code = (
+        "import os,time;from pathlib import Path;os.close(0);os.write(1,b'closed');"
+        f"p=Path({str(release)!r});expires=time.monotonic()+5\n"
+        "while not p.exists():\n assert time.monotonic()<expires\n time.sleep(0.01)\n"
+        "os.write(1,b'after-close');os.write(2,b'final-error');raise SystemExit(1)"
+    )
+    with subprocess.Popen(
+        _argv(runtime), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    ) as child:
+        assert child.stdin is not None and child.stdout is not None and child.stderr is not None
+        try:
+            child.stdin.write(encode_request_envelope(_manifest(code, live=True)))
+            child.stdin.flush()
+            first = _wait_for_frame(child, FrameKind.STDOUT)
+            assert child.poll() is None and not child.stdin.closed
+            # Offer more bytes after the application closed fd 0.
+            child.stdin.write(b"unread" * 1000)
+            child.stdin.flush()
+            release.touch()
+            assert child.wait(timeout=5) == 0
+            assert not child.stdin.closed
+            wire, diagnostics = first + child.stdout.read(), child.stderr.read()
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=5)
+    frames = _frames(wire)
+    assert diagnostics == b"" and not any(frame.kind is FrameKind.FAILED for frame in frames)
+    assert b"".join(frame.body for frame in frames if frame.kind is FrameKind.STDOUT) == b"closedafter-close"
+    assert b"".join(frame.body for frame in frames if frame.kind is FrameKind.STDERR) == b"final-error"
+    assert parse_wait(next(frame.body for frame in frames if frame.kind is FrameKind.WAITED)).value == 1
+    ends = [parse_stream_end(frame.body) for frame in frames if frame.kind is FrameKind.STREAM_END]
+    assert len(ends) == 2 and all(end.complete and not end.truncated for end in ends)
+    assert frames[-1].kind is FrameKind.FINISHED
+
+
+@pytest.mark.parametrize("runtime", [sys.executable, "/usr/bin/python3.11"])
 def test_actual_finite_input_live_output_has_no_capture_total_ceiling(runtime: str) -> None:
     if not Path(runtime).is_file():
         pytest.skip("compatibility interpreter unavailable")
