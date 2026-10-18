@@ -23,12 +23,13 @@ worker admission or native effects. Finite caller waits observe cleanup for an i
 allowance and can return with custody unsettled. Keep supplied terminal descriptors valid and retain
 that custody; a fresh finite `close()` retries cleanup on the original worker. Pending acquisition
 or construction can still use the terminal after the caller returns. The worker stops relay
-borrowing before native cleanup and restores modes only after native settlement. Permanent native
-loss finishes the worker without restoring the terminal; custody stays unsettled and refuses reuse.
-The worker is non-daemon, so pending construction or retryable cleanup can hold ordinary interpreter
-shutdown open. The worker also observes natural native settlement and restores when cleanup becomes
-safe, without another caller close or signal. A previously returned deadline result remains
-unchanged.
+borrowing before native cleanup and restores modes only after native settlement. Permanently
+unproved local cleanup finishes the worker without restoring the terminal; custody stays unsettled
+and refuses reuse. Exact POSIX wait loss keeps execution unknown but permits restoration after all
+original local capabilities are positively retired. The worker is non-daemon, so pending
+construction or retryable cleanup can hold ordinary interpreter shutdown open. The worker also
+observes natural native settlement and restores when cleanup becomes safe, without another caller
+close or signal. A previously returned deadline result remains unchanged.
 
 After observed natural client exit, output collection continues for a fixed 100 ms. Each unfinished
 pipe's unread byte count is then observed once. Already-collected bytes and that frozen prefix drain

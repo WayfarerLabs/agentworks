@@ -404,26 +404,68 @@ def test_nonblocking_setup_failure_cleans_without_guessing_dispatch(
     synthetic.assert_closed()
 
 
+@pytest.mark.parametrize("delayed_preflight", [None, "trust", "version"])
 def test_failed_cleanup_retains_custody_until_explicit_retry(
-    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, delayed_preflight: str | None
 ) -> None:
-    original = _process._cleanup
+    original_cleanup = _process._cleanup
+    original_pump = _process._pump_owned_pipes
+    refused: list[_process._ProcessStatus] = []
+    owners: list[_process.LocalProcessOwner] = []
 
     def cleanup(status):
         if len(synthetic.children) == 2 and status.process is synthetic.children[-1]:
+            refused.append(status)
             return False
-        return original(status)
+        return original_cleanup(status)
+
+    def pump(
+        owner: _process.LocalProcessOwner,
+        pipes: _process.LocalProcessPipes,
+        input_spec: _process.ProcessInput,
+        deadline: _process.Deadline,
+        stdout: _process._Output,
+        stderr: _process._Output,
+    ) -> tuple[_process.ProcessFailure | None, int | None]:
+        if len(synthetic.children) == 2:
+            child = synthetic.children[-1]
+            assert owner is synthetic.custody._owner
+            assert owner.snapshot().pipes is pipes
+            assert (pipes.stdin, pipes.stdout, pipes.stderr) == (child.stdin, child.stdout, child.stderr)
+            assert child.poll() is None
+            owners.append(owner)
+            # Only this command's pump expires, after actual native publication.
+            deadline = replace(deadline, expires_at=time.monotonic())
+        return original_pump(owner, pipes, input_spec, deadline, stdout, stderr)
 
     synthetic.command = "import time; time.sleep(30)"
     with monkeypatch.context() as context:
+        if delayed_preflight is not None:
+            name = "admit_connection" if delayed_preflight == "trust" else "check_client_version"
+            preflight = getattr(client, name)
+
+            def delayed(*args, **kwargs):
+                result = preflight(*args, **kwargs)
+                assert len(synthetic.children) == (0 if delayed_preflight == "trust" else 1)
+                time.sleep(0.2)
+                return result
+
+            context.setattr(client, name, delayed)
         context.setattr(_process, "_cleanup", cleanup)
-        report = synthetic.execute(seconds=0.1)
+        context.setattr(_process, "_pump_owned_pipes", pump)
+        report = synthetic.execute(seconds=10)
+    assert len(owners) == 1 and refused
+    owner = owners[0]
+    assert all(status is refused[0] and status.process is synthetic.children[-1] for status in refused)
     assert report.failure == Failure.OBSERVATION
     assert report.completion is None
     assert report.dispatch == Dispatch.UNKNOWN
     assert "secret-canary" not in repr(report)
     assert not synthetic.custody.settled
+    assert synthetic.custody._owner is owner
+    assert synthetic.children[-1].poll() is None
     assert synthetic.custody.close(Deadline.after(2))
+    assert synthetic.custody._owner is owner
     synthetic.assert_closed()
 
 
