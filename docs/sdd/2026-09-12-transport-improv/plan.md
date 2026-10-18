@@ -5111,8 +5111,8 @@ preparation wrapper, with explicit VM workflow integration. Local isolated check
 filesystem behavior, Bookworm Python, complete QGA request bounds and 274 selected helper/workflow
 cases; 54 focused checks follow test-only typing corrections, and strict typing covers 1,534
 sources. A broader VM run was deliberately interrupted for fixture capacity and is not a pass; its
-original view is retained. Independent reviews and lead composition gates remain pending, so neither
-checkbox below nor the broader account-lifecycle gate is completed by these worker results.
+original view is retained. At that checkpoint independent reviews and lead composition gates were
+pending; those worker results alone completed neither the unit below nor the broader lifecycle gate.
 
 Private review then identified no-effect interruption/refusal custody leaks and a mismatch between
 the codec limit and the database's 8,192-byte lifecycle envelope. Owner correction `29a2843c2`
@@ -5120,10 +5120,10 @@ reproduces those failures, recognizes only existing positive no-registration pro
 cleanup after fenced unused-borrow retirement without weakening uncertain registration retention.
 Admission now reserves the largest binding-added record before borrowing or root SETUP. The two
 derived persisted fields are removed. Its 67 focused cases, exact payload-boundary publication
-checks and strict typing pass locally; final lead composition and independent re-review remain
-required before completing the private unit below.
+checks and strict typing pass locally. Those owner results still required final lead composition and
+independent re-review before completing the private unit below.
 
-- [ ] Bind managed-UID namespace preparation into the new-stack VM operation. Reuse one exact owner,
+- [x] Bind managed-UID namespace preparation into the new-stack VM operation. Reuse one exact owner,
       selected route, verified root bootstrap and finite deadline. Register one durable row before
       root-gate SETUP, publish its exact binding before namespace effects, and retain the original
       borrow and cleanup custody on uncertainty. The fixed helper creates or verifies the UID
@@ -5135,6 +5135,13 @@ required before completing the private unit below.
       refusal, whole-workflow retention, Bookworm Python and complete provider-body bounds. This
       private unit does not settle account deletion, numeric UID reuse, native boot reconstruction
       or whole-owner recovery.
+
+The final private composition at `e30147620` clears independent project, complexity and generic
+correctness source reviews. Lead validation passes 287 namespace/helper/context cases, the complete
+1,293-case VM selection, strict typing across 1,534 sources and changed-file quality checks. The
+earlier interrupted broad worker run remains incomplete, not substituted for that completed lead
+run. This closes only the scoped private preparation unit; account lifecycle, UID reuse, native boot
+and credential proof, production adoption and whole-owner recovery remain open.
 
 The account lifecycle audit found the shared create/reinit seam in `create_agent_on_vm`, after
 `useradd` or account convergence and before agent-level SSH. Standalone deletion currently continues
