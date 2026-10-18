@@ -75,6 +75,8 @@ def test_possible_dispatch_receipt_reconnects_without_relaunch(tmp_path: Path) -
         output = read_bound_managed_output(
             repository,
             RUN,
+            offset=0,
+            count=262144,
             **_options(owner, output_carrier, stream=Stream.STDOUT),  # type: ignore[arg-type]
         )
         assert output.accepted
@@ -82,6 +84,8 @@ def test_possible_dispatch_receipt_reconnects_without_relaunch(tmp_path: Path) -
         stderr = read_bound_managed_output(
             repository,
             RUN,
+            offset=0,
+            count=262144,
             **_options(owner, output_carrier, stream=Stream.STDERR),  # type: ignore[arg-type]
         )
         assert stderr.accepted

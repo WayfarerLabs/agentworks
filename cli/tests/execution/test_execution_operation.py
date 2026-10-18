@@ -197,7 +197,7 @@ def test_host_without_managed_target_refuses_job_admission_before_effects(
         "access": lambda: owned.require_managed_access(ManagedRunIdentity(reference.run_id), **context),
         "run": lambda: owned.require_managed_run(ManagedRunIdentity(reference.run_id), **context),
         "observe": lambda: owned.observe_job(reference, carrier, deadline),
-        "read": lambda: owned.read_job(reference, carrier, deadline, "stdout"),
+        "read": lambda: owned.read_job(reference, carrier, deadline, "stdout", offset=0, count=4096),
         "wait": lambda: owned.wait_job(reference, carrier, deadline),
         "stop": lambda: owned.stop_job(reference, deadline),
         "dispose": lambda: owned.dispose_job(reference, carrier, deadline),

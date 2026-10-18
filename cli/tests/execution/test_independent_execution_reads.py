@@ -21,9 +21,11 @@ from agentworks.execution._managed_bound_run import ManagedDeadlineExpired, pref
 from agentworks.execution._managed_job_store import FactName, Stream
 from agentworks.execution._managed_job_wire import decode_fact, encode_fact
 from agentworks.execution._managed_observation_protocol import (
+    MAX_OUTPUT_PAGE_BYTES,
     ControllerObservation,
     ControllerState,
     ManagedOperation,
+    ManagedOutputRange,
     ManagedResultControl,
 )
 from agentworks.execution._managed_result import collect_bound_managed_result
@@ -90,11 +92,16 @@ class ResourceDelivery(Delivery):
                 )
                 data = encode_fact(value)
             facts.append(data)
+        output = b""
+        selected = None
+        if request.operation is ManagedOperation.READ_OUTPUT and "capture" in self.disposition:
+            output = self.content[request.offset : request.offset + request.count]
+            selected = ManagedOutputRange(request.offset, len(output), hashlib.sha256(output).hexdigest())
         return _records(
             request.nonce,
-            ManagedResultControl(names, controller),
+            ManagedResultControl(names, controller, selected),
             tuple(facts),
-            self.content if request.operation is ManagedOperation.READ_OUTPUT else b"",
+            output,
         )
 
 
@@ -470,6 +477,51 @@ def test_resource_output_preserves_policy_cursors_and_capture_completeness(obser
     assert result.stdout.data == main.content and result.stderr.data == main.content
     assert result.owned_cleanup_confirmed and operation.managed_runs == ()
     assert repository.inspect(identity).output_policy == launched.attempt.record.output_policy
+
+
+def test_public_reads_bound_default_and_oversized_requests_and_verify_empty_eof(observer):
+    _, repository, _, access, main, workflow = observer
+    page = MAX_OUTPUT_PAGE_BYTES
+    identity = ManagedRunIdentity("f" * 32)
+    main.content = bytes(range(256)) * (2 * page // 256) + b"tail"
+    main.disposition = "complete-capture"
+    _call(
+        repository,
+        workflow.owner,
+        StartCarrier(lambda request: start_records(request, receipt=True)),
+        identity=identity,
+        obligation_id="a" * 32,
+        run_owner=RESOURCE,
+        output=Output.capture(len(main.content)),
+    )
+    job = JobRef(identity.run_id)
+    first = access.read_output(job, stream=JobStream.STDOUT)
+    assert first.data == main.content[:4096] and first.next_cursor == 4096 and not first.eof
+    assert main.observe.request.count == 4096 and main.observe.request.offset == 0
+    full = access.read_output(job, stream=JobStream.STDOUT, max_bytes=1 << 100)
+    assert full.data == main.content[:page] and full.next_cursor == page and not full.eof
+    assert main.observe.request.count == page
+    last = access.read_output(job, stream=JobStream.STDOUT, cursor=2 * page)
+    assert last.data == b"tail" and last.eof and last.next_cursor == len(main.content)
+    eof = access.read_output(job, stream=JobStream.STDOUT, cursor=len(main.content))
+    assert eof.data == b"" and eof.eof and eof.capture_complete
+    calls = main.observe.calls
+    with pytest.raises(ValidationError):
+        access.read_output(job, stream=JobStream.STDOUT, cursor=len(main.content) + 1)
+    assert main.observe.calls == calls + 1
+    assert main.observe.request.offset == len(main.content) + 1
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [{"cursor": -1}, {"cursor": True}, {"cursor": 16777217}, {"max_bytes": 0}, {"max_bytes": -1}, {"max_bytes": True}],
+)
+def test_public_read_rejects_invalid_range_before_lookup_or_delivery(observer, changes):
+    _, repository, _, access, main, _ = observer
+    with patch.object(repository, "inspect", wraps=repository.inspect) as inspect, pytest.raises(ValidationError):
+        access.read_output(JobRef(RUN.run_id), stream=JobStream.STDOUT, **changes)
+    inspect.assert_not_called()
+    assert main.observe.calls == 0
 
 
 def test_stale_observer_generation_refuses_before_resource_borrow_or_delivery(observer):

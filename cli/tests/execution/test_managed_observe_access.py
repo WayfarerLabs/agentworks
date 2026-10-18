@@ -105,7 +105,7 @@ def _observe_and_reconcile(
 
 
 def _read(repository: ManagedRunRepository, owner: OperationOwner, carrier: ScriptedCarrier, **changes: object):  # type: ignore[no-untyped-def]
-    options = _options(owner, carrier, stream=Stream.STDOUT)
+    options = _options(owner, carrier, stream=Stream.STDOUT, offset=0, count=262144)
     options.update(changes)
     return read_bound_managed_output(
         repository,

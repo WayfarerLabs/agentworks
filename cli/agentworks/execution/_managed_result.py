@@ -13,11 +13,13 @@ from ._managed_job_protocol import (
     BoundaryEmptyFact,
     ManagedJobFactError,
     StreamDisposition,
+    StreamEndFact,
     WorkloadWaitFact,
     decode_managed_job_fact,
 )
 from ._managed_job_store import FactName, Stream
 from ._managed_observation_exchange import ManagedObservationState
+from ._managed_observation_protocol import MAX_OUTPUT_PAGE_BYTES
 from ._managed_observe_access import (
     ManagedObserveControlFact,
     ManagedObserveOutcome,
@@ -199,7 +201,9 @@ def collect_bound_managed_result(
             attempts.append(control.__cause__.outcome)
         if not attempts:
             raise
-        raise control from ManagedResultControlFact(tuple(attempts))
+        custody = ManagedResultControlFact(tuple(attempts))
+        custody.__cause__ = control.__cause__
+        raise control from custody
 
 
 def _reduce(
@@ -233,6 +237,7 @@ def _reduce(
         status = ExitCode(wait.exit_code) if wait.exit_code is not None else Signal(wait.signal)  # type: ignore[arg-type]
     state = ApplicationState.COMPLETED if status is not None else ApplicationState.UNKNOWN
     outputs: dict[Stream, ExecutionOutput] = {}
+    retrieved: set[Stream] = set()
     output_failure: ExecutionFailure | None = None
     refused_read = False
     for stream in Stream:
@@ -248,58 +253,78 @@ def _reduce(
             break
         if observed_end is None:
             continue
-        try:
-            read = read_bound_managed_output(
-                repository,
-                identity,
-                stream=stream,
-                target=target,
-                guest=guest,
-                root_plan=root_plan,
-                carrier=carrier,
-                runtime_selection=runtime_selection,
-                deadline=deadline,
-                owner=owner,
-                expected_resource_owner=expected_resource_owner,
-                execution_operation=execution_operation,
+        end = decode_managed_job_fact(observed_end)
+        assert isinstance(end, StreamEndFact)
+        if end.disposition is StreamDisposition.TRUNCATED_CAPTURE:
+            output_failure = ExecutionFailure.OUTPUT_LIMIT
+        prefix = bytearray()
+        accepted_page = False
+        while True:
+            if deadline.expired:
+                break
+            try:
+                read = read_bound_managed_output(
+                    repository,
+                    identity,
+                    stream=stream,
+                    offset=len(prefix),
+                    count=MAX_OUTPUT_PAGE_BYTES,
+                    target=target,
+                    guest=guest,
+                    root_plan=root_plan,
+                    carrier=carrier,
+                    runtime_selection=runtime_selection,
+                    deadline=deadline,
+                    owner=owner,
+                    expected_resource_owner=expected_resource_owner,
+                    execution_operation=execution_operation,
+                )
+            except ManagedDeadlineExpired as error:
+                # Expiry before borrowing preserves verified prior pages.
+                # Control carrying borrowed custody must still escape.
+                if error.__cause__ is not None:
+                    raise
+                break
+            attempts.append(read.attempt)
+            read_facts = (
+                read.attempt.candidate.observation.facts
+                if read.attempt.candidate is not None and read.attempt.candidate.observation is not None
+                else ()
             )
-        except ManagedDeadlineExpired as error:
-            # The bound reader refuses an expired deadline before borrowing.
-            # Preserve the prior observation as a partial result in that case;
-            # a failure carrying borrowed custody must still escape.
-            if error.__cause__ is not None:
-                raise
-            break
-        attempts.append(read.attempt)
-        read_facts = (
-            read.attempt.candidate.observation.facts
-            if read.attempt.candidate is not None and read.attempt.candidate.observation is not None
-            else ()
-        )
-        # A separately admitted read must match the exact end seen in the
-        # observation snapshot before it can settle this result.
-        if (
-            read.accepted
-            and observed_end is not None
-            and len(read_facts) == 2
-            and read_facts[1] == (end_name, observed_end)
+            if (
+                not read.accepted
+                or read.attempt.requires_owner_retention
+                or read.attempt.pending_remote_effects
+                or read.attempt.coordination_uncertain
+                or len(read_facts) != 2
+                or read_facts[1] != (end_name, observed_end)
+            ):
+                refused_read = True
+                break
+            accepted_page = True
+            if read.disposition in (StreamDisposition.DISCARDED, StreamDisposition.SUPPRESSED):
+                outputs[stream] = ExecutionOutput(
+                    b"",
+                    True,
+                    Retention.DISCARDED if read.disposition is StreamDisposition.DISCARDED else Retention.SUPPRESSED,
+                )
+                retrieved.add(stream)
+                break
+            assert read.output is not None
+            prefix.extend(read.output)
+            if len(prefix) == end.retained_bytes:
+                retrieved.add(stream)
+                break
+        if accepted_page and end.disposition in (
+            StreamDisposition.COMPLETE_CAPTURE,
+            StreamDisposition.TRUNCATED_CAPTURE,
         ):
-            if read.disposition is StreamDisposition.COMPLETE_CAPTURE:
-                outputs[stream] = ExecutionOutput(read.output or b"", True, Retention.CAPTURED)
-            elif read.disposition is StreamDisposition.TRUNCATED_CAPTURE:
-                outputs[stream] = ExecutionOutput(read.output or b"", False, Retention.CAPTURED)
-                output_failure = ExecutionFailure.OUTPUT_LIMIT
-            elif read.disposition is StreamDisposition.DISCARDED:
-                outputs[stream] = ExecutionOutput(b"", True, Retention.DISCARDED)
-            elif read.disposition is StreamDisposition.SUPPRESSED:
-                outputs[stream] = ExecutionOutput(b"", True, Retention.SUPPRESSED)
-        else:
-            refused_read = True
-        if (
-            read.attempt.requires_owner_retention
-            or read.attempt.pending_remote_effects
-            or read.attempt.coordination_uncertain
-        ):
+            outputs[stream] = ExecutionOutput(
+                bytes(prefix),
+                stream in retrieved and end.disposition is StreamDisposition.COMPLETE_CAPTURE,
+                Retention.CAPTURED,
+            )
+        if refused_read:
             break
 
     retention = (
@@ -326,8 +351,9 @@ def _reduce(
         or not settled
         or boundary is None
         or status is None
+        or refused_read
         else ExecutionFailure.OUTPUT
-        if len(outputs) != 2
+        if len(retrieved) != 2
         else output_failure
     )
     result = ExecutionResult(
@@ -353,7 +379,7 @@ def _reduce(
     awaiting_facts = (
         can_poll
         and (status is not None or boundary is None)
-        and (status is None or boundary is None or len(outputs) != 2)
+        and (status is None or boundary is None or len(retrieved) != 2)
     )
     if execution_operation is not None:
         if record.spec.lifetime is ManagedRunLifetime.OPERATION:

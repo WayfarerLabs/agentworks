@@ -527,8 +527,20 @@ class ManagedJobStore:
             raise
 
     def read_capture(self, stream: Stream, expected_launch: bytes) -> bytes | None:
+        """Read a closed capture for local store consumers."""
+        return self.read_capture_range(stream, expected_launch, offset=0, count=wire.MAX_CAPTURE_PREFIX_BYTES_V1)
+
+    def read_capture_range(self, stream: Stream, expected_launch: bytes, *, offset: int, count: int) -> bytes | None:
+        """Verify the entire persisted spool while retaining only the requested range."""
         if type(stream) is not Stream or type(expected_launch) is not bytes:
             raise StoreError("invalid capture read")
+        if (
+            type(offset) is not int
+            or offset < 0
+            or type(count) is not int
+            or not 0 < count <= wire.MAX_CAPTURE_PREFIX_BYTES_V1
+        ):
+            raise StoreError("invalid capture range")
         self._checked_fact(FactName.LAUNCH, expected_launch)
         launch = self.read_fact(FactName.LAUNCH)
         if launch is None or launch != expected_launch:
@@ -560,11 +572,23 @@ class ManagedJobStore:
                     raise StoreError("capture spool exceeds bound")
                 if os.fstat(fd).st_size != length:
                     raise StoreError("capture spool mismatch")
-                data = _read_all(fd, length)
+                digest = hashlib.sha256()
+                data = bytearray()
+                position = 0
+                while position < length:
+                    chunk = os.read(fd, min(65536, length - position))
+                    if not chunk:
+                        raise StoreError("capture spool mismatch")
+                    digest.update(chunk)
+                    start = max(offset - position, 0)
+                    stop = min(offset + count - position, len(chunk))
+                    if start < stop:
+                        data.extend(chunk[start:stop])
+                    position += len(chunk)
+                if os.read(fd, 1) or digest.hexdigest() != fact["retained_sha256"]:
+                    raise StoreError("capture spool mismatch")
             finally:
                 os.close(fd)
-            if len(data) != length or hashlib.sha256(data).hexdigest() != fact["retained_sha256"]:
-                raise StoreError("capture spool mismatch")
-            return data
+            return bytes(data)
         finally:
             os.close(directory)

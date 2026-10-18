@@ -72,6 +72,7 @@ class ManagedReadOutputOutcome:
     attempt: ManagedObserveOutcome
     disposition: StreamDisposition | None = None
     output: bytes | None = field(default=None, repr=False)
+    retained_bytes: int | None = None
 
     @property
     def accepted(self) -> bool:
@@ -176,6 +177,8 @@ def read_bound_managed_output(
     identity: ManagedRunIdentity,
     *,
     stream: Stream,
+    offset: int,
+    count: int,
     target: ManagedTargetIdentity,
     guest: VMGuestIdentity,
     root_plan: IdentityPlan,
@@ -201,13 +204,15 @@ def read_bound_managed_output(
         owner=owner,
         expected_resource_owner=expected_resource_owner,
         stream=stream,
+        offset=offset,
+        count=count,
         execution_operation=execution_operation,
     )
     try:
-        disposition, output = _admit_output(record, raw_candidate)
+        disposition, output, retained_bytes = _admit_output(record, raw_candidate)
     except BaseException as control:
         raise control from ManagedObserveControlFact(attempt)
-    return ManagedReadOutputOutcome(attempt, disposition, output)
+    return ManagedReadOutputOutcome(attempt, disposition, output, retained_bytes)
 
 
 def _bound_exchange(
@@ -224,6 +229,8 @@ def _bound_exchange(
     expected_resource_owner: ManagedRunOwner | None = None,
     stream: Stream | None,
     execution_operation: ExecutionOperation | None = None,
+    offset: int | None = None,
+    count: int | None = None,
 ) -> tuple[ManagedRunRecord, ManagedObservationCandidate | None, ManagedObserveOutcome]:
     record, expected_launch = preflight_bound_read(
         repository,
@@ -247,6 +254,8 @@ def _bound_exchange(
             deadline=deadline,
             guest=guest,
             stream=stream,
+            offset=offset,
+            count=count,
         )
         return record, managed_candidate, outcome
 
@@ -271,10 +280,13 @@ def _bound_exchange(
                 guest=guest,
             )
         else:
+            assert offset is not None and count is not None
             candidate = read_managed_output(
                 operation,
                 expected_launch=expected_launch,
                 stream=stream,
+                offset=offset,
+                count=count,
                 plan=root_plan,
                 deadline=deadline,
                 runtime_selection=runtime_selection,
@@ -289,7 +301,9 @@ def _bound_exchange(
             custody.coordination_uncertain,
             custody.requires_owner_retention,
         )
-        raise control from ManagedObserveControlFact(outcome)
+        fact = ManagedObserveControlFact(outcome)
+        fact.__cause__ = control.__cause__
+        raise control from fact
 
     custody, release_error = operation.release()
     outcome = ManagedObserveOutcome(
@@ -313,18 +327,18 @@ def _without_output(candidate: ManagedObservationCandidate | None) -> ManagedObs
 def _admit_output(
     record: ManagedRunRecord,
     candidate: ManagedObservationCandidate | None,
-) -> tuple[StreamDisposition | None, bytes | None]:
+) -> tuple[StreamDisposition | None, bytes | None, int | None]:
     if candidate is None or candidate.observation is None:
-        return None, None
+        return None, None, None
     observation = candidate.observation
     if observation.state not in (ManagedObservationState.AVAILABLE, ManagedObservationState.UNAVAILABLE):
-        return None, None
+        return None, None, None
     try:
         end = decode_managed_job_fact(observation.facts[1][1])
     except (ManagedJobFactError, IndexError):
-        return None, None
+        return None, None, None
     if not isinstance(end, StreamEndFact):
-        return None, None
+        return None, None, None
 
     policy = record.output_policy
     if policy.mode is ManagedOutputMode.CAPTURE:
@@ -336,7 +350,7 @@ def _admit_output(
             and policy.capture_prefix_bytes is not None
             and end.retained_bytes <= policy.capture_prefix_bytes
         ):
-            return end.disposition, output
+            return end.disposition, output, end.retained_bytes
     elif (
         observation.state is ManagedObservationState.UNAVAILABLE
         and observation.output is None
@@ -348,5 +362,5 @@ def _admit_output(
             )
         )
     ):
-        return end.disposition, None
-    return None, None
+        return end.disposition, None, end.retained_bytes
+    return None, None, None

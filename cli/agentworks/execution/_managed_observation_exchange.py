@@ -11,12 +11,13 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ValidationError
 
 from . import _managed_job_wire as wire
-from ._file_wire import MAX_RECORD_BODY_BYTES, FileRecord, FileRecordKind
+from ._file_wire import MAX_RECORD_BODY_BYTES, FileRecord, FileRecordKind, encode_file_record
 from ._file_wire_reader import FileRecordReader, FileWireError
 from ._managed_job_store import FactName, Stream
 from ._managed_observation_bundle import FIXED_BUNDLE
 from ._managed_observation_protocol import (
     FACT_ORDER,
+    MAX_CONTROL_BYTES,
     ControllerObservation,
     ManagedObservationError,
     ManagedObservationRequest,
@@ -28,6 +29,7 @@ from ._managed_observation_protocol import (
     encode_request,
 )
 from ._runtime_prerequisite import (
+    MAX_RUNTIME_RECORD_BYTES,
     HelperClosureExpectation,
     RuntimePrefixSink,
     RuntimePrerequisiteObservation,
@@ -38,9 +40,38 @@ from ._runtime_prerequisite import (
 )
 from .carrier import CarrierIO, Dispatch, Failure, FiniteInput, PreparedInvocation, Retention, SinkOutput
 
-_MAX_RESPONSE_RECORDS = (
-    2 + len(FACT_ORDER) + (wire.MAX_CAPTURE_PREFIX_BYTES_V1 + MAX_RECORD_BODY_BYTES - 1) // MAX_RECORD_BODY_BYTES
-)
+
+def _max_response_records(count: int) -> int:
+    return 2 + len(FACT_ORDER) + (count + MAX_RECORD_BODY_BYTES - 1) // MAX_RECORD_BODY_BYTES
+
+
+def _max_success_stdout_bytes(request: ManagedObservationRequest) -> int:
+    """Bound complete encoded records, facts and runtime before carrier admission."""
+    count = request.count or 0
+    sizes = [MAX_CONTROL_BYTES] + [MAX_RECORD_BODY_BYTES] * len(FACT_ORDER)
+    full, tail = divmod(count, MAX_RECORD_BODY_BYTES)
+    sizes.extend([MAX_RECORD_BODY_BYTES] * full)
+    if tail:
+        sizes.append(tail)
+    sizes.append(0)
+    return MAX_RUNTIME_RECORD_BYTES + sum(
+        len(
+            encode_file_record(
+                request.nonce,
+                FileRecord(
+                    index,
+                    FileRecordKind.FINISHED
+                    if index == len(sizes) - 1
+                    else FileRecordKind.RESULT
+                    if index == 0
+                    else FileRecordKind.DATA,
+                    bytes(size),
+                ),
+            )
+        )
+        for index, size in enumerate(sizes)
+    )
+
 
 if TYPE_CHECKING:
     from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
@@ -131,7 +162,7 @@ class _Collector:
         if self.issue is not None:
             return
         self.records += 1
-        if self.records > _MAX_RESPONSE_RECORDS:
+        if self.records > _max_response_records(self.request.count or 0):
             self._invalidate(ManagedObservationIssue.CONTENT)
             return
         if self.terminal:
@@ -146,6 +177,12 @@ class _Collector:
         if record.kind is FileRecordKind.RESULT and self.control is None and not self.failed:
             try:
                 control = decode_result(record.body)
+                if control.output_range is not None and (
+                    self.request.operation is not ManagedOperation.READ_OUTPUT
+                    or control.facts == (FactName.LAUNCH,)
+                    or control.output_range.offset != self.request.offset
+                ):
+                    raise ManagedObservationError("unexpected output range")
                 if control.controller is not None:
                     if self.request.operation is not ManagedOperation.OBSERVE:
                         raise ManagedObservationError("unexpected controller observation")
@@ -184,7 +221,16 @@ class _Collector:
                     if type(length) is not int or length > wire.MAX_CAPTURE_PREFIX_BYTES_V1:
                         self._invalidate(ManagedObservationIssue.CONTENT)
                         return
-                    self.expected_output_bytes = length
+                    selected = self.control.output_range
+                    assert self.request.offset is not None and self.request.count is not None
+                    expected_count = max(0, min(self.request.count, length - self.request.offset))
+                    if selected is None or selected.count != expected_count:
+                        self._invalidate(ManagedObservationIssue.CONTENT)
+                        return
+                    self.expected_output_bytes = expected_count
+                elif self.control.output_range is not None and name in (FactName.STDOUT_END, FactName.STDERR_END):
+                    self._invalidate(ManagedObservationIssue.CONTENT)
+                    return
             elif self.expected_output_bytes is not None:
                 if not record.body or len(record.body) > self.expected_output_bytes - len(self.output):
                     self._invalidate(ManagedObservationIssue.CONTENT)
@@ -249,10 +295,9 @@ class _Collector:
         if self.request.operation is ManagedOperation.READ_OUTPUT:
             state = ManagedObservationState.UNKNOWN
         if self.request.operation is ManagedOperation.READ_OUTPUT and len(self.facts) == 2:
-            end = checked_fact(self.facts[1][0], self.facts[1][1], self.request.expected_launch)
             if self.expected_output_bytes is None:
                 state = ManagedObservationState.UNAVAILABLE
-            elif end["retained_sha256"] != hashlib.sha256(self.output).hexdigest():
+            elif control.output_range is None or control.output_range.sha256 != hashlib.sha256(self.output).hexdigest():
                 self.abort()
                 return ManagedObservation(ManagedObservationState.INVALID, issue=ManagedObservationIssue.CONTENT)
             else:
@@ -307,12 +352,14 @@ def prepare_managed_read(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     guest: VMGuestIdentity,
+    offset: int | None = None,
+    count: int | None = None,
 ) -> PreparedManagedRead:
     if runtime_selection.target_os is not RuntimeTargetOS.LINUX or plan.expected.euid != 0:
         raise ValidationError("Managed observation requires a Linux root helper")
     try:
         request = ManagedObservationRequest(
-            secrets.token_hex(16), operation, expected_launch, plan.expected, guest, stream
+            secrets.token_hex(16), operation, expected_launch, plan.expected, guest, stream, offset, count
         )
         request_data = encode_request(request)
     except ManagedObservationError:
@@ -328,7 +375,9 @@ def prepare_managed_read(
     stderr = _DiagnosticSink()
     io = CarrierIO(
         input=FiniteInput(FIXED_BUNDLE.prefix + request_data, sensitive=True),
-        output=SinkOutput(runtime, stderr, require_live=False),
+        output=SinkOutput(
+            runtime, stderr, require_live=False, required_complete_stdout_bytes=_max_success_stdout_bytes(request)
+        ),
         sensitive=True,
     )
     return PreparedManagedRead(
@@ -397,6 +446,8 @@ def _exchange(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     guest: VMGuestIdentity,
+    offset: int | None = None,
+    count: int | None = None,
 ) -> ManagedObservationCandidate:
     prepared = prepare_managed_read(
         operation=operation,
@@ -406,6 +457,8 @@ def _exchange(
         deadline=deadline,
         runtime_selection=runtime_selection,
         guest=guest,
+        offset=offset,
+        count=count,
     )
     return execute_managed_read(carrier, prepared, deadline=deadline)
 
@@ -437,6 +490,8 @@ def read_managed_output(
     *,
     expected_launch: bytes,
     stream: Stream,
+    offset: int,
+    count: int,
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
@@ -448,6 +503,8 @@ def read_managed_output(
         operation=ManagedOperation.READ_OUTPUT,
         expected_launch=expected_launch,
         stream=stream,
+        offset=offset,
+        count=count,
         plan=plan,
         deadline=deadline,
         runtime_selection=runtime_selection,

@@ -80,6 +80,8 @@ def _read(
         deadline=deadline or qga.deadline,
         guest=GUEST,
         stream=stream,
+        offset=0 if stream is not None else None,
+        count=262144 if stream is not None else None,
     )
 
 
