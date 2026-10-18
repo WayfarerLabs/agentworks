@@ -385,6 +385,7 @@ def test_close_control_survives_later_cleanup_control(
 
 
 @pytest.mark.parametrize("control_type", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("final_close_failure", ["none", "io", "control"])
 @pytest.mark.parametrize(
     "interrupt_at,remaining",
     [("stage", "none"), ("record", "none"), ("stage", "stage"), ("stage", "record"), ("record", "record")],
@@ -394,35 +395,55 @@ def test_final_cleanup_reduces_interrupted_publication_to_latest_debt(
     parent: int,
     monkeypatch: pytest.MonkeyPatch,
     control_type: type[BaseException],
+    final_close_failure: str,
     interrupt_at: str,
     remaining: str,
 ) -> None:
     target = tmp_path / "target"
     target.write_bytes(b"old")
     ready = ready_scratch(parent, bytes(range(16)), b"new")
+    scratch_inode = next(path for path in tmp_path.iterdir() if path.is_dir()).stat().st_ino
     interrupt = control_type()
-    real_unlink = os.unlink
-    interrupted = False
+    later = SystemExit() if control_type is KeyboardInterrupt else KeyboardInterrupt()
+    real_unlink, real_close = os.unlink, os.close
+    attempts = 0
+    final_closed: list[int] = []
 
     def interrupt_then_cleanup(path: str, *args, **kwargs) -> None:
-        nonlocal interrupted
+        nonlocal attempts
         artifact = (
             "stage" if path.startswith(".agentworks-stage-") else "record" if path == "publication-receipt" else None
         )
-        if artifact == interrupt_at and not interrupted:
-            interrupted = True
-            raise interrupt
+        if artifact == interrupt_at:
+            attempts += 1
+            if attempts == 1:
+                raise interrupt
         if artifact == remaining:
             raise OSError(errno.EIO, "final cleanup")
         real_unlink(path, *args, **kwargs)
 
+    def fail_final_cleanup_close(descriptor: int) -> None:
+        is_scratch = os.fstat(descriptor).st_ino == scratch_inode
+        real_close(descriptor)
+        if is_scratch and attempts == 2:
+            final_closed.append(descriptor)
+            if final_close_failure == "control":
+                raise later
+            if final_close_failure == "io":
+                raise OSError(errno.EIO, "final cleanup close")
+
     with monkeypatch.context() as patch:
         patch.setattr(os, "unlink", interrupt_then_cleanup)
+        patch.setattr(os, "close", fail_final_cleanup_close)
         with pytest.raises(BaseException) as raised:
             publish_file(
                 parent, "target", ScratchFileSource(parent, ready), condition=Replace(), create_metadata=_metadata()
             )
-    assert raised.value is interrupt and interrupted
+    assert raised.value is interrupt and attempts == 2
+    assert len(final_closed) == 1
+    with pytest.raises(OSError) as closed:
+        os.fstat(final_closed[0])
+    assert closed.value.errno == errno.EBADF
     fact = raised.value.__cause__
     assert isinstance(fact, FilePublicationError)
     assert fact.kind is PublicationFailureKind.UNCERTAIN and fact.phase is PublicationPhase.PUBLICATION
@@ -450,17 +471,18 @@ def test_final_cleanup_reduces_interrupted_publication_to_latest_debt(
 
 
 @pytest.mark.parametrize("control_type", [KeyboardInterrupt, SystemExit])
-@pytest.mark.parametrize("cleanup_succeeds", [True, False])
+@pytest.mark.parametrize("cleanup_failure", ["none", "io", "control"])
 def test_final_cleanup_reduces_unrecorded_stage_debt(
     tmp_path: Path,
     parent: int,
     monkeypatch: pytest.MonkeyPatch,
     control_type: type[BaseException],
-    cleanup_succeeds: bool,
+    cleanup_failure: str,
 ) -> None:
     target = tmp_path / "target"
     target.write_bytes(b"old")
     interrupt = control_type()
+    later = SystemExit() if control_type is KeyboardInterrupt else KeyboardInterrupt()
     real_unlink = os.unlink
     attempts = 0
 
@@ -470,7 +492,9 @@ def test_final_cleanup_reduces_unrecorded_stage_debt(
             attempts += 1
             if attempts == 1:
                 raise interrupt
-            if not cleanup_succeeds:
+            if cleanup_failure == "control":
+                raise later
+            if cleanup_failure == "io":
                 raise OSError(errno.EIO, "final cleanup")
         real_unlink(path, *args, **kwargs)
 
@@ -484,7 +508,7 @@ def test_final_cleanup_reduces_unrecorded_stage_debt(
     assert fact.kind is PublicationFailureKind.UNCERTAIN and fact.phase is PublicationPhase.PUBLICATION
     assert target.read_bytes() == b"new"
     debt = fact.cleanup_debt
-    if cleanup_succeeds:
+    if cleanup_failure == "none":
         assert list(tmp_path.iterdir()) == [target]
         assert debt is None
     else:

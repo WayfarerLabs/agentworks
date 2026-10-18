@@ -911,6 +911,9 @@ def _cleanup_owned_stage(
                 cleanup_debt = receipt_error.cleanup_debt
             if isinstance(cleanup_debt, PublicationStageOwnership):
                 cleanup_debt = PublicationStageCleanupDebt(cleanup_debt, False)
+            if sys.platform == "darwin" and receipt_error is not None and prior is not None:
+                # Receipt cleanup reports current custody even if descriptor close failed.
+                prior = FilePublicationError(prior.kind, prior.phase, cleanup_debt=cleanup_debt)
             stage.publication = cleanup_debt
             if cleanup_debt is None:
                 stage.record_acquisition.identity = None
