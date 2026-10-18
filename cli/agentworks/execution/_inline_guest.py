@@ -66,9 +66,6 @@ class _SafeFailure(Exception):
         super().__init__(fact.code.value)
 
 
-_Emitter = FrameWriter
-
-
 @dataclass(frozen=True)
 class _Launch:
     argv: list[str]
@@ -134,7 +131,7 @@ def _retention(mode: OutputMode) -> StreamRetention:
 
 
 def _emit_stream(
-    emitter: _Emitter,
+    emitter: FrameWriter,
     manifest: InlineManifest,
     name: StreamName,
     result: StreamResult,
@@ -185,7 +182,7 @@ def _process_failure(result: ProcessResult) -> FailureFact | None:
     return FailureFact(FailurePhase.OBSERVE, code)
 
 
-def _finish_failure(emitter: _Emitter, failure: FailureFact) -> int:
+def _finish_failure(emitter: FrameWriter, failure: FailureFact) -> int:
     emitter.emit(FrameKind.FAILED, encode_failure(failure))
     emitter.emit(FrameKind.FINISHED, empty_body())
     return 0
@@ -227,7 +224,7 @@ def _read_request() -> InlineManifest:
 
 def main(nonce: str) -> int:
     """Run one manifest and report only bounded nonce-bound evidence."""
-    emitter = _Emitter(nonce)
+    emitter = FrameWriter(nonce)
     try:
         manifest = _read_request()
     except ManifestError as error:
