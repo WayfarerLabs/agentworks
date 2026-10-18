@@ -633,7 +633,7 @@ def test_shared_guest_must_match_actual_hold_ready(database, tmp_path, monkeypat
     route, native, _ = _install_route(database, platform, monkeypatch)
     route.guest.init_ticks = 8192
     with (
-        pytest.raises(ValidationError),
+        pytest.raises(StateError),
         native_vm_operation(
             database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=_root(tmp_path)
         ),

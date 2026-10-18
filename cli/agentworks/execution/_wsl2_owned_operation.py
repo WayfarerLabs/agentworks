@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Self
 from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorUnavailable
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import LifecycleObligationState, OperationResourceKind
-from agentworks.errors import ValidationError
+from agentworks.errors import StateError, ValidationError
 from agentworks.execution._runtime_prerequisite import RuntimeSelection
 from agentworks.execution._vm_guest_identity import VMGuestIdentityObservationState
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
@@ -246,7 +246,7 @@ class WSL2OwnedOperation:
         """Compare the common guest observation with the retained actual hold."""
         anchor = self.ready.identity if self.ready is not None else None
         if anchor is None or guest.boot_id != anchor.boot_id or guest.init_start_ticks != anchor.init_start_ticks:
-            raise ValidationError("WSL2 prepared guest does not match the held READY identity")
+            raise StateError("WSL2 prepared guest does not match the held READY identity")
 
     def _ready_is_durable(self, ready: WSL2AnchorEvidence) -> bool:
         obligation = self.hold.obligation
