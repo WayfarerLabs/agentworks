@@ -1817,9 +1817,9 @@ must not render private frame locals. Snapshot bytes and metadata remain hidden 
 representations.
 
 This is not production FileAccess or native platform acceptance. This read helper does not provide
-mutation, macOS support or a hard elapsed-time bound for filesystem reads. Metadata-only stat uses
-the separate object exchange below. Both assume a cooperative execution identity, not hostile
-same-user isolation.
+mutation or a hard elapsed-time bound for filesystem reads. Metadata-only stat uses the separate
+object exchange below. Both assume a cooperative execution identity, not hostile same-user
+isolation.
 
 `_file_memory_read.py` supplies a separate private in-memory read over the owned snapshot/chunk
 download through the shared `FileOperation`. Core retains unfinished download facts before final
@@ -1955,16 +1955,26 @@ does not expose FileAccess, publication or permission enforcement.
 
 On Linux x86-64 and AArch64, every descendant open uses `openat2` beneath the borrowed root with
 symlink, magic-link and mount crossings forbidden. Unsupported kernels or architectures refuse
-without a weaker fallback. Other POSIX platforms retain the separate component walk and `st_dev`
-checks, which do not detect same-filesystem bind mounts. Neither path contains a malicious same-user
-process or supplies external-writer compare-and-swap. Regular-file reads can block in the
-filesystem, so this primitive provides no hard elapsed-time bound. Complete helper delivery,
-operation coordination, platform guarantees and production composition remain separate work.
+without a weaker fallback. Darwin uses a readable-descriptor component walk and `st_dev` checks,
+which do not detect same-filesystem bind mounts. Other platforms refuse rather than inherit a weaker
+generic POSIX path. Neither path contains a malicious same-user process or supplies external-writer
+compare-and-swap. Regular-file reads can block in the filesystem, so this primitive provides no hard
+elapsed-time bound. Complete helper delivery, operation coordination, platform guarantees and
+production composition remain separate work.
 
 `read_revision` can observe regular-file metadata without retaining content or can include a
 bounded-memory content digest. Linux metadata-only observation uses a path-only descriptor and does
 not require file-read authority. `FileSnapshot.revision` carries the content-bound observation; its
 `stat` and `digest` properties expose those same values without duplicating them.
+
+The ordinary fixed file bundles also admit Darwin fresh-exec credentials. Darwin traversal opens
+readable directories and regular files without following links, rejects unexpected object kinds and
+checks held/named identity. Once below the selected root, descendant device changes refuse.
+Read-only traversal admits deny-only ancestor ACLs; mutation refuses unsupported ACLs, extended
+attributes, BSD flags and privilege bits instead of stripping them. Descriptor metadata changes use
+`fchown` and `fchmod`, not the Linux procfs path-only bridge. These helpers do not provide a host
+identity, host recovery fence or production platform-host context. Linux numeric VM bootstrap stays
+Linux-specific; native Darwin filesystem and account proof remains open.
 
 `_file_spool.py` copies one held regular source into private scratch in bounded chunks, returning a
 verified ready reference and the source's content-bound revision. It checks source length, EOF,
@@ -1985,23 +1995,27 @@ interruption acceptance remain production gates.
 
 ## Private file publication
 
-`_file_publication.py` supplies Linux same-directory publication beneath a borrowed parent
-descriptor. It accepts bytes or a borrowed verified scratch source. `Create` requires absence,
-`Replace` requires an existing regular file, and `Match` requires the supplied revision. A revision
-binds metadata and optionally content; matching a content-bound revision hashes bounded chunks
-without retaining the old file. Create-only publication uses `renameat2(RENAME_NOREPLACE)` without a
-fallback. Replacement rechecks its observed condition before rename. The caller supplies
-confinement, operation serialization and scratch cleanup. This primitive is not FileAccess or a
-remote upload helper.
+`_file_publication.py` supplies Linux rename and Darwin held-file publication beneath a borrowed
+parent descriptor. It accepts bytes or a borrowed verified scratch source. `Create` requires
+absence, `Replace` requires an existing regular file, and `Match` requires the supplied revision. A
+revision binds metadata and optionally content; matching a content-bound revision hashes bounded
+chunks without retaining the old file. Create-only publication uses Linux
+`renameat2(RENAME_NOREPLACE)` or Darwin `renameatx_np(RENAME_EXCL)` without a fallback. Replacement
+rechecks its observed condition before mutation. The caller supplies confinement, operation
+serialization and scratch cleanup. This primitive is not FileAccess or a remote upload helper.
 
 An exclusive sibling receives the content and required metadata before publication. Byte-backed
 publication chooses a fresh random name; scratch-backed publication derives its name from the
 core-generated scratch token and records its exact identity before copying content. New files retain
 the directory's inherited ACL behavior with the requested owner, group and mode. Replacement
 requires ordinary destination write authority and preserves UID, GID, permission bits and the Linux
-access ACL. Read authority is additionally needed for a content-bound match, not unconditional
-replacement. Observed links, multiply linked files, special objects, set-ID state and other visible
-extended attributes refuse. Unsupported metadata is not silently dropped.
+access ACL on Linux. Linux additionally needs read authority for a content-bound match, not
+unconditional replacement. Darwin replacement requires readable and writable access to its held
+regular file, verifies all staged content before mutation, then copies, truncates and syncs in
+place. It preserves the admitted inode and access metadata without promising atomic visibility.
+Later write, truncate, sync, close or deadline failure reports uncertainty, including possible
+partial content. Observed links, multiply linked files, special objects, set-ID state and other
+visible extended attributes refuse. Unsupported metadata is not silently dropped.
 
 Scratch publication checks declared length and digest while copying bounded ranges, including
 validation of empty sources. The caller retains ownership of the scratch object. Hash/copy loops
@@ -2021,7 +2035,7 @@ exceptions can race Python bookkeeping, including recording a descriptor returne
 Repeated interruption has no bounded cleanup guarantee. Complete helper lifecycle and interruption
 acceptance remain open.
 
-Atomic visibility does not imply directory-entry crash durability, an external-writer
+Linux rename's atomic visibility does not imply directory-entry crash durability, an external-writer
 compare-and-swap guarantee or a hard filesystem deadline. Native-platform acceptance and the
 complete file service remain separate work.
 
@@ -2419,11 +2433,12 @@ controller refuses an unresolved wrapper even after recovery support rows have b
 Availability support closure is not predecessor helper termination. This adapter does not establish
 generic native drain or all-platform recovery support.
 
-`_scratch_root.py` opens the fixed Linux `/tmp` directory without following symlinks and requires
-UID 0 and mode 01777. It creates and repairs nothing, ignores environment-selected temporary paths,
-and returns a caller-owned descriptor or a closed failure kind. Download snapshots can use this
-parent independently of read-only source authority. This private selection grants no access to
-arbitrary temporary-directory contents. macOS root selection is not implemented.
+`_scratch_root.py` opens Linux `/tmp` or Darwin `/private/tmp` without following symlinks and
+requires UID 0 and mode 01777. Darwin does not follow the `/tmp` symlink. Selection creates and
+repairs nothing, ignores environment-selected temporary paths, and returns a caller-owned descriptor
+or a closed failure kind. Download snapshots can use this parent independently of read-only source
+authority. This private selection grants no access to arbitrary temporary-directory contents. Native
+default-root acceptance remains open.
 
 ## Private root staged-helper loader
 
