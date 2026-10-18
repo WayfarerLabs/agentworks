@@ -191,8 +191,8 @@ class RunContext:
       ``secret`` reads the supplied resolved-secret reader.
 
     Construction and target access do not inspect, activate, or close
-    targets. The caller owns target/resource closure, and the target
-    enforces its lifetime. Permission enforcement is not active;
+    targets. The composition root owns target/resource closure, and
+    the target enforces its lifetime. Permission enforcement is not active;
     security activation remains deferred until the old stack is removed.
 
     The rule that goes with it: readiness's pre-resolve concerns read
