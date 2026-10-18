@@ -625,6 +625,7 @@ class FileAccess:
         entity_kind: str,
         entity_name: str,
         deadline: Callable[[], Deadline],
+        route_check: Callable[[Deadline], None] | None = None,
     ) -> None:
         if type(operation) is not FileOperation:
             raise ValidationError("File access requires an acquired file operation")
@@ -640,6 +641,8 @@ class FileAccess:
         validate_logical_entity_value(entity_name, "name", subject="File access")
         if not callable(deadline):
             raise ValidationError("File access requires a composition-owned deadline policy")
+        if route_check is not None and not callable(route_check):
+            raise ValidationError("File access requires a core-bound route check")
 
         self._operation = operation
         self._carrier = carrier
@@ -650,6 +653,7 @@ class FileAccess:
         self._entity_kind = entity_kind
         self._entity_name = entity_name
         self._deadline = deadline
+        self._route_check = route_check
 
     def read_file(self, path: PurePosixPath, *, max_bytes: int, sudo: bool = False) -> ReadResult | None:
         """Read one bounded regular-file snapshot."""
@@ -854,6 +858,7 @@ class FileAccess:
             entity_kind=self._entity_kind,
             entity_name=self._entity_name,
             deadline=lambda: deadline,
+            route_check=self._route_check,
         ), deadline
 
     def upload_directory(
@@ -1149,9 +1154,15 @@ class FileAccess:
         plan = self._select_plan(sudo)
         root, leaf = self._decompose(path)
         deadline = self._deadline()
+        self._admit_request(deadline)
+        return root, leaf, plan, deadline
+
+    def _admit_request(self, deadline: Deadline) -> None:
+        """Check the selected route only after local request validation."""
         if type(deadline) is not Deadline:
             raise ValidationError("File access deadline policy must return one deadline")
-        return root, leaf, plan, deadline
+        if not deadline.expired and self._route_check is not None:
+            self._route_check(deadline)
 
     def _select_plan(self, sudo: bool) -> IdentityPlan:
         if type(sudo) is not bool:

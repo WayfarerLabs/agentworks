@@ -21,8 +21,9 @@ from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
 from agentworks.execution.files import Create, JsonStrategy, NewMetadata
 from agentworks.execution.models import Command, Lifetime, Output, Script, Shell
 from agentworks.execution.profiles import Protection
+from agentworks.execution.target import ExecutionRoute
 from agentworks.operations import OperationBorrow, OperationOwner
-from agentworks.vms._native_operation import VMOperationControlFact, native_vm_operation
+from agentworks.vms._native_operation import VMOperationControlFact, _vm_operation
 from tests.execution.test_managed_execution_access import Delivery
 from tests.execution.test_wsl2_platform_hold import FakeObserver
 from tests.vms.test_native_operation import _install_route, _root, _scope
@@ -92,8 +93,14 @@ def test_prepared_facades_retire_only_the_unpublished_borrow(database, tmp_path,
         observer.presence = GuestAnchorPresence.UNKNOWN
     with (
         pytest.raises(KeyboardInterrupt) as caught,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=PurePosixPath(root)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(30),
+            trusted_root=PurePosixPath(root),
         ) as views,
     ):
         before = len(route.routes), route.local.calls
@@ -168,11 +175,12 @@ def test_early_guest_and_account_preparation_retire_orphan_and_prior_hold(
         observer.presence = GuestAnchorPresence.UNKNOWN
     with (
         pytest.raises(KeyboardInterrupt) as caught,
-        native_vm_operation(
+        _vm_operation(
             database,
             "box",
             platform,
             RunContext(),
+            route=ExecutionRoute.NATIVE,
             deadline=Deadline.after(30),
             trusted_root=_root(tmp_path),
             agent_name="worker",
@@ -212,8 +220,14 @@ def test_managed_facades_borrow_reply_loss_cleans_exact_native_workflow(database
         observer.presence = GuestAnchorPresence.UNKNOWN
     with (
         pytest.raises(KeyboardInterrupt) as caught,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=_root(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(30),
+            trusted_root=_root(tmp_path),
         ) as views,
     ):
         if phase in {"observe", "dispose"}:

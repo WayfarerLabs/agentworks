@@ -22,11 +22,12 @@ from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.proxmox import _ProxmoxWire
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
+from agentworks.execution.target import ExecutionRoute
 from agentworks.operations import OperationOwner
 from agentworks.plugins.proxmox import _native_access
 from agentworks.plugins.proxmox._native_access import ProxmoxOwnedNativePlatformAccess
 from agentworks.vms import _native_operation as native
-from agentworks.vms._native_operation import VMOperation, VMOperationControlFact, native_vm_operation
+from agentworks.vms._native_operation import VMOperation, VMOperationControlFact, _vm_operation
 from tests.vms.test_proxmox_native_operation import _install, _scope
 from tests.vms.test_proxmox_native_operation import database as database
 
@@ -140,11 +141,12 @@ class Startup:
         return response
 
     def operation(self, root, deadline) -> AbstractContextManager[VMOperation]:
-        return native_vm_operation(
+        return _vm_operation(
             self.database,
             "box",
             self.platform,
             RunContext(),
+            route=ExecutionRoute.NATIVE,
             deadline=deadline,
             trusted_root=PurePosixPath(root),
         )

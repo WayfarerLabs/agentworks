@@ -9,8 +9,9 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.execution.carrier import Deadline
+from agentworks.execution.target import ExecutionRoute
 from agentworks.operations import OperationBorrow
-from agentworks.vms._native_operation import native_vm_operation
+from agentworks.vms._native_operation import _vm_operation
 
 from .test_native_operation import _install_route, _root, _scope
 from .test_native_operation import database as database
@@ -23,8 +24,14 @@ def test_native_close_retires_lost_pristine_borrow_without_erasing_other_cleanup
     _, native, observer = _install_route(database, platform, monkeypatch)
     orphan: list[OperationBorrow] = []
     control = KeyboardInterrupt()
-    with native_vm_operation(
-        database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=_root(tmp_path)
+    with _vm_operation(
+        database,
+        "box",
+        platform,
+        RunContext(),
+        route=ExecutionRoute.NATIVE,
+        deadline=Deadline.after(30),
+        trusted_root=_root(tmp_path),
     ) as views:
         original = views.owner.borrow
 

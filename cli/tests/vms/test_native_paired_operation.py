@@ -29,8 +29,9 @@ from agentworks.execution._target_identity import (
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
+from agentworks.execution.target import ExecutionRoute
 from agentworks.vms import _native_operation
-from agentworks.vms._native_operation import VMOperationControlFact, native_vm_operation
+from agentworks.vms._native_operation import VMOperationControlFact, _vm_operation
 from tests.vms.test_native_operation import _install_route, _root, _scope
 from tests.vms.test_native_operation import database as database
 
@@ -60,8 +61,15 @@ def test_paired_views_share_operations_and_select_exact_ordinary_identity(
     monkeypatch.setattr(_native_operation, "prepare_target_identity", prepare)
     deadline = Deadline.after(30)
     root = _root(tmp_path)
-    with native_vm_operation(
-        database, "box", platform, RunContext(), deadline=deadline, trusted_root=root, agent_name="worker"
+    with _vm_operation(
+        database,
+        "box",
+        platform,
+        RunContext(),
+        route=ExecutionRoute.NATIVE,
+        deadline=deadline,
+        trusted_root=root,
+        agent_name="worker",
     ) as selected:
         assert len(preparations) == 2
         admin_arguments, admin_identity = preparations[0]
@@ -169,11 +177,12 @@ def test_agent_selection_refuses_under_claim_before_provider_access(
     error = {"missing": NotFoundError, "other-vm": StateError, "invalid-account": ValidationError}[selection]
     with (
         pytest.raises(error),
-        native_vm_operation(
+        _vm_operation(
             database,
             "box",
             platform,
             RunContext(),
+            route=ExecutionRoute.NATIVE,
             deadline=Deadline.after(30),
             trusted_root=_root(tmp_path),
             agent_name="worker",
@@ -191,8 +200,14 @@ def test_unselected_agent_keeps_admin_only_composition(
     platform = WSL2Platform("wsl2", {})
     route, _, _ = _install_route(database, platform, monkeypatch)
     monkeypatch.setattr(database, "get_agent", lambda name: pytest.fail("unrequested agent lookup"))
-    with native_vm_operation(
-        database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=_root(tmp_path)
+    with _vm_operation(
+        database,
+        "box",
+        platform,
+        RunContext(),
+        route=ExecutionRoute.NATIVE,
+        deadline=Deadline.after(30),
+        trusted_root=_root(tmp_path),
     ) as selected:
         assert selected.agent_target is None
         assert selected.target.files() is selected.files and selected.target.execution() is selected.execution
@@ -218,11 +233,12 @@ def test_agent_preparation_failure_never_admits_partial_pair(
         route.accounts.expire_on_account = "recorded-worker"
     with (
         pytest.raises(StateError) as caught,
-        native_vm_operation(
+        _vm_operation(
             database,
             "box",
             platform,
             RunContext(),
+            route=ExecutionRoute.NATIVE,
             deadline=Deadline.after(30),
             trusted_root=_root(tmp_path),
             agent_name="worker",
@@ -270,11 +286,12 @@ def test_each_agent_custody_fact_keeps_aggregate_claim(
     monkeypatch.setattr(_native_operation, "prepare_target_identity", prepare)
     with (
         pytest.raises(StateError) as caught,
-        native_vm_operation(
+        _vm_operation(
             database,
             "box",
             platform,
             RunContext(),
+            route=ExecutionRoute.NATIVE,
             deadline=Deadline.after(30),
             trusted_root=_root(tmp_path),
             agent_name="worker",
@@ -317,11 +334,12 @@ def test_interrupted_agent_lookup_preserves_control_partial_facts_and_claim(
     monkeypatch.setattr(route.accounts, "execute", interrupt)
     with (
         pytest.raises(KeyboardInterrupt) as caught,
-        native_vm_operation(
+        _vm_operation(
             database,
             "box",
             platform,
             RunContext(),
+            route=ExecutionRoute.NATIVE,
             deadline=Deadline.after(30),
             trusted_root=_root(tmp_path),
             agent_name="worker",

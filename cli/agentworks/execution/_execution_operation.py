@@ -865,6 +865,9 @@ class ExecutionOperation:
         sensitive: bool,
     ) -> ResourceStartAcknowledgement:
         """Start exact RESOURCE work without adopting its job lifetime."""
+        self.require_job_binding(carrier, runtime_selection)
+        if self._route_check is not None:
+            self._route_check(deadline)
         return start_resource_job(
             self,
             carrier,
@@ -895,6 +898,9 @@ class ExecutionOperation:
         live_io: ManagedLiveIO | None = None,
     ) -> JobRef:
         """Freeze a body, retain its run, then reserve and start exactly once."""
+        self.require_job_binding(carrier, runtime_selection)
+        if self._route_check is not None:
+            self._route_check(deadline)
         with self._admission_guard:
             binding, repository, bootstrap = self._native_binding, self._managed_repository, self._bootstrap
             if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
@@ -1377,9 +1383,15 @@ class ExecutionOperation:
             carrier.validate(prepared.invocation, io=prepared.io)
             if deadline.expired:
                 raise ValidationError("Inline execution deadline expired during preparation")
+            if self._finishing or self._finished:
+                raise StateError("Inline execution cannot admit new work")
+            if self._route_check is not None:
+                self._route_check(deadline)
             with self._admission_guard:
-                if self._finishing or self._active_inline_calls or self._unfinished_inline_executions:
+                if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
                     raise StateError("Inline execution cannot admit new work")
+                if deadline.expired:
+                    raise ValidationError("Inline execution deadline expired during route admission")
                 active = self._borrow_helper_call(carrier, prepared, inline=True)
                 operation = active.operation
         except BaseException:

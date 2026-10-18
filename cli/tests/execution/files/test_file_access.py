@@ -31,6 +31,8 @@ from agentworks.execution.files import (
     Change,
     Create,
     DirectoryLimit,
+    DirectoryTransferLimit,
+    ExistingFile,
     FileKind,
     JsonStrategy,
     Match,
@@ -48,6 +50,63 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the fixed file helpers require Linux")
+
+
+@pytest.mark.parametrize("invalid", ["path", "sudo", "deadline"])
+def test_route_admission_follows_local_request_validation(bound_access, monkeypatch, invalid) -> None:
+    access, root, owner, _ = bound_access
+    checks: list[Deadline] = []
+    monkeypatch.setattr(access, "_route_check", checks.append)
+    if invalid == "deadline":
+        monkeypatch.setattr(access, "_deadline", lambda: "invalid")
+    with pytest.raises(ValidationError):
+        access.stat(
+            PurePosixPath("relative") if invalid == "path" else PurePosixPath(root / "missing"),
+            sudo="invalid" if invalid == "sudo" else False,
+        )
+    assert checks == [] and not owner.list_pending_lifecycle_obligations()
+    owner.close()
+
+
+def test_directory_child_view_retains_explicit_route_check_and_deadline(bound_access, monkeypatch) -> None:
+    access, root, owner, _ = bound_access
+    deadline = Deadline.after(30)
+    checks: list[Deadline] = []
+    monkeypatch.setattr(access, "_route_check", checks.append)
+    monkeypatch.setattr(access, "_deadline", lambda: deadline)
+    child, selected = access._directory_view(
+        PurePosixPath(root / "missing"), root, DirectoryTransferLimit(max_bytes=1024), ExistingFile.ERROR, False
+    )
+    assert selected is deadline and checks == [deadline]
+    assert child.stat(PurePosixPath(root / "missing")) is None
+    assert checks == [deadline, deadline] and all(item is deadline for item in checks)
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+def test_expiry_during_file_route_check_uses_existing_deadline_outcome(bound_access, monkeypatch) -> None:
+    access, root, owner, _ = bound_access
+    checks = []
+    deadline = Deadline.after(30)
+
+    def check(selected):
+        checks.append(selected)
+        object.__setattr__(deadline, "expires_at", 0.0)
+
+    def deny_dispatch(*args, **kwargs):
+        pytest.fail("expired file admission dispatched a helper")
+
+    monkeypatch.setattr(access, "_deadline", lambda: deadline)
+    monkeypatch.setattr(access, "_route_check", check)
+    monkeypatch.setattr(access._carrier, "execute", deny_dispatch)
+    with pytest.raises(ExternalError) as caught:
+        access.stat(PurePosixPath(root / "missing"))
+    assert caught.value.details is not None and caught.value.details.reason.value == "deadline"
+    assert checks == [deadline]
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
 
 
 class ReentrantCarrier:

@@ -19,10 +19,11 @@ from agentworks.errors import NotFoundError, StateError, ValidationError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.binding import NativeExecutionBinding
 from agentworks.execution.carrier import Deadline
+from agentworks.execution.target import ExecutionRoute
 from agentworks.operations import OperationOwner
 from agentworks.plugins.proxmox._native_access import ProxmoxOwnedNativePlatformAccess
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.vms._native_operation import VMOperationControlFact, native_vm_operation
+from agentworks.vms._native_operation import VMOperationControlFact, _vm_operation
 from agentworks.vms._wsl2_native_access import WSL2OwnedNativePlatformAccess
 
 if TYPE_CHECKING:
@@ -132,8 +133,14 @@ def test_initial_failure_settles_or_retains_same_access(
     platform, retained = _install_failure(database, monkeypatch, deadline, control, events, retirement=retirement)
     with (
         pytest.raises(control_type) as caught,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=deadline, trusted_root=PurePosixPath(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=deadline,
+            trusted_root=PurePosixPath(tmp_path),
         ),
     ):
         pytest.fail("failed power read admitted a body")
@@ -196,8 +203,14 @@ def test_local_retirement_defers_same_access_until_retry(
     monkeypatch.setattr(_FailingAccess, "observe_power", observe)
     with (
         pytest.raises(control_type) as caught,
-        native_vm_operation(
-            database, "box", platform, RunContext(), deadline=deadline, trusted_root=PurePosixPath(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            RunContext(),
+            route=ExecutionRoute.NATIVE,
+            deadline=deadline,
+            trusted_root=PurePosixPath(tmp_path),
         ),
     ):
         pytest.fail("unsettled read admitted a body")
@@ -245,8 +258,14 @@ def test_selection_is_validated_before_factory_or_read(
     expected = NotFoundError if invalid == "missing" else StateError if invalid == "site" else ValidationError
     with (
         pytest.raises(expected),
-        native_vm_operation(
-            database, "box", platform, ctx, deadline=Deadline.after(10), trusted_root=PurePosixPath(tmp_path)
+        _vm_operation(
+            database,
+            "box",
+            platform,
+            ctx,
+            route=ExecutionRoute.NATIVE,
+            deadline=Deadline.after(10),
+            trusted_root=PurePosixPath(tmp_path),
         ),
     ):
         pytest.fail("invalid selection admitted a body")

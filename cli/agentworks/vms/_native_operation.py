@@ -410,8 +410,6 @@ def _prepare(
     def selected_deadline() -> Deadline:
         if workflow.body_admission_closed:
             raise StateError("VM operation no longer admits body work")
-        if route is ExecutionRoute.CANONICAL:
-            check_canonical(workflow.deadline)
         return workflow.deadline
 
     files = FileAccess(
@@ -424,6 +422,7 @@ def _prepare(
         entity_kind="vm",
         entity_name=vm_name,
         deadline=selected_deadline,
+        route_check=route_check,
     )
     execution = ExecutionAccess(
         execution_operation,
@@ -456,6 +455,7 @@ def _prepare(
             entity_kind="agent",
             entity_name=agent.name,
             deadline=selected_deadline,
+            route_check=route_check,
         )
         agent_execution = ExecutionAccess(
             execution_operation,
@@ -527,31 +527,6 @@ def _vm_operation(
             fact.__cause__ = primary.__cause__
             primary.__cause__ = fact
             primary.__suppress_context__ = True
-
-
-@contextmanager
-def native_vm_operation(
-    db: Database,
-    vm_name: str,
-    platform: VMPlatform,
-    ctx: RunContext,
-    *,
-    deadline: Deadline,
-    trusted_root: PurePosixPath,
-    agent_name: str | None = None,
-) -> Iterator[VMOperation]:
-    """Select native delivery inside the shared VM operation lifetime."""
-    with _vm_operation(
-        db,
-        vm_name,
-        platform,
-        ctx,
-        route=ExecutionRoute.NATIVE,
-        deadline=deadline,
-        trusted_root=trusted_root,
-        agent_name=agent_name,
-    ) as operation:
-        yield operation
 
 
 @contextmanager

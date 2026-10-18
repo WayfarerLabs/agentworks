@@ -211,6 +211,92 @@ def test_preparation_expiring_deadline_refuses_before_borrow(
     owner.close()
 
 
+@pytest.mark.parametrize("control_type", [StateError, RuntimeError, KeyboardInterrupt])
+def test_route_refusal_releases_preparation_before_borrow(
+    operation, plan, runtime_selection, monkeypatch, control_type
+) -> None:
+    database, owner, owned = operation
+    control = control_type("synthetic route refusal")
+    prepared = []
+    deadline = Deadline.after(30)
+
+    def prepare(*args, **kwargs):
+        candidate = prepare_inline_candidate(*args, **kwargs)
+        prepared.append(candidate)
+        return candidate
+
+    def route_check(selected):
+        assert selected is deadline
+        raise control
+
+    def deny_borrow():
+        pytest.fail("route refusal borrowed helper custody")
+
+    monkeypatch.setattr(execution_operation, "prepare_inline_candidate", prepare)
+    monkeypatch.setattr(owned, "_route_check", route_check)
+    monkeypatch.setattr(owner, "borrow", deny_borrow)
+    carrier = RecordingCarrier()
+    with pytest.raises(control_type) as caught:
+        _run(owned, carrier, plan, runtime_selection, deadline)
+    assert caught.value is control and control.__cause__ is None
+    assert len(prepared) == 1 and prepared[0].io == CarrierIO()
+    assert carrier.calls == 0 and owned.active_inline_calls == ()
+    assert not owner.list_pending_lifecycle_obligations()
+    assert database.operations.inspect(owner.ownership.scope).state is OperationClaimState.RESERVED
+    owned.finish()
+    owner.close()
+
+
+@pytest.mark.parametrize("close_during_check", [False, True])
+def test_route_admission_checks_closure_before_provider_and_again_before_borrow(
+    operation, plan, runtime_selection, monkeypatch, close_during_check
+) -> None:
+    _, owner, owned = operation
+    checked = []
+
+    def route_check(deadline):
+        checked.append(deadline)
+        owned.finish()
+
+    def deny_borrow():
+        pytest.fail("closing execution borrowed helper custody")
+
+    monkeypatch.setattr(owned, "_route_check", route_check)
+    monkeypatch.setattr(owner, "borrow", deny_borrow)
+    if not close_during_check:
+        owned.finish()
+    carrier = RecordingCarrier()
+    deadline = Deadline.after(30)
+    with pytest.raises(StateError):
+        _run(owned, carrier, plan, runtime_selection, deadline)
+    assert checked == ([deadline] if close_during_check else [])
+    assert carrier.calls == 0 and owned.active_inline_calls == ()
+    owner.close()
+
+
+def test_route_check_consuming_budget_refuses_before_borrow(operation, plan, runtime_selection, monkeypatch) -> None:
+    _, owner, owned = operation
+    checked = []
+    monkeypatch.setattr(time, "monotonic", lambda: 0.0)
+    deadline = Deadline(1.0)
+
+    def route_check(selected):
+        checked.append(selected)
+        monkeypatch.setattr(time, "monotonic", lambda: 2.0)
+
+    def deny_borrow():
+        pytest.fail("expired route admission borrowed helper custody")
+
+    monkeypatch.setattr(owned, "_route_check", route_check)
+    monkeypatch.setattr(owner, "borrow", deny_borrow)
+    carrier = RecordingCarrier()
+    with pytest.raises(ValidationError):
+        _run(owned, carrier, plan, runtime_selection, deadline)
+    assert checked == [deadline] and carrier.calls == 0 and owned.active_inline_calls == ()
+    owned.finish()
+    owner.close()
+
+
 def test_arms_durable_attempt_before_single_carrier_dispatch(
     operation: tuple[Database, OperationOwner, execution_operation.ExecutionOperation],
     plan: IdentityPlan,
