@@ -716,6 +716,38 @@ spool locally to avoid holding the selected bound during transfer, but construct
 `bytes` allocates at most that caller-selected amount. Workflows expecting unbounded data use
 FileAccess rather than stdout.
 
+#### Closed MANAGED capture ranges
+
+Use the existing managed run store and observation owner for closed captures, not a second scratch
+store or file-access grant. One `READ_OUTPUT` helper retrieves one explicit byte range, capped at
+256 KiB. The helper checks the protected spool's complete length and digest while retaining only the
+requested intersection of bounded read chunks. It emits no successful result until that whole check
+passes. The response includes the original launch and stream-end facts plus the returned offset,
+length and range digest. The collector checks those bindings and retains no more than the requested
+page. Its complete encoded stdout requirement includes framing, facts and the runtime prefix; the
+provider's capacity must be sufficient before dispatch.
+
+`read_output` may return fewer bytes than its positive `max_bytes` bound when a page reaches this
+transport ceiling. Its next cursor and retained-prefix EOF use the verified total retained length,
+not the page length. An exact EOF cursor succeeds with empty data; a cursor beyond the verified
+prefix remains a validation error. Discarded and suppressed streams remain distinct from empty
+captured streams and retain no output payload.
+
+Full result collection reads successive pages under the original deadline. Each page has its own
+ordinary helper borrow and outcome, matched against the exact stream-end fact first observed. Record
+every attempt before reducing its output; stop on failure, unresolved custody or expiry. Keep
+independently established application completion and any verified prefix in a normally returned
+result when later retrieval fails. Escaping controls keep their original propagation and custody
+cause; this does not introduce payload-carrying exceptions. A successful page alone never
+establishes complete output. There is no paging wrapper that claims several dispatches as one,
+renewed deadline, uncertain replay or new persistent read session.
+
+Repeated whole-spool hashing deliberately avoids indexes or caches. At the private 16 MiB retained
+ceiling, full retrieval needs 64 pages and scans 1 GiB per stream; a 1 MiB capture needs four pages
+and scans 4 MiB. Native usable completion within the caller's budget still requires proof. This
+closed-output work does not finish DIRECT spooling, the production capture default, active job
+output, helper staging or readiness's no-staging guarantee.
+
 ## Readiness and minimal substrate
 
 The composition root binds a private `inline_only=True` constraint to preflight/runup readiness
