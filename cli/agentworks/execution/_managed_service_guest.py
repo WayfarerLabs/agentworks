@@ -371,6 +371,7 @@ def _observe(
     stop_deadline: float | None = None
     boundary_done = False
     open_streams = {state.fd for state in states}
+    output_turn = Stream.STDOUT
     try:
         while True:
             if status is None:
@@ -462,7 +463,16 @@ def _observe(
                 return
             next_deadline = deadline if deadline is not None else stop_deadline
             timeout = 0.05 if next_deadline is None else min(0.05, max(0.0, next_deadline - time.monotonic()))
-            for key, events in selector.select(timeout):
+            ready = selector.select(timeout)
+            if live is not None and live.output_ready:
+                # Only one data frame fits. Prefer the other ready stream on
+                # each turn regardless of selector or descriptor ordering.
+                ready.sort(
+                    key=lambda event: (
+                        isinstance(event[0].data, _StreamState) and event[0].data.stream is not output_turn
+                    )
+                )
+            for key, events in ready:
                 if key.data is live and live is not None:
                     live.progress(key.fd, events)
                 elif key.data == "exec":
@@ -516,6 +526,7 @@ def _observe(
                         if live is not None and live.output_ready:
                             kind = FrameKind.STDOUT if state.stream is Stream.STDOUT else FrameKind.STDERR
                             live.queue(kind, chunk)
+                            output_turn = Stream.STDERR if state.stream is Stream.STDOUT else Stream.STDOUT
                     else:
                         selector.unregister(state.fd)
                         open_streams.remove(state.fd)

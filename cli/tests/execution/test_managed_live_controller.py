@@ -491,6 +491,118 @@ def test_stdlib_bundle_actual_socket_fork_and_exec(interpreter: str, tmp_path: P
     assert completed.stdout == completed.stderr == b""
 
 
+@pytest.mark.parametrize("interpreter", [sys.executable, "/usr/bin/python3.11"])
+@pytest.mark.parametrize("selector_name", ["DefaultSelector", "SelectSelector"])
+def test_continuous_stdout_cannot_starve_stderr_needed_for_exit(
+    interpreter: str,
+    selector_name: str,
+    tmp_path: Path,
+) -> None:
+    if not Path(interpreter).is_file():
+        pytest.skip("interpreter unavailable")
+    request = _request(input=False)
+    workload = textwrap.dedent("""
+        import os,threading
+        def stdout():
+            while True:
+                os.write(1,b'o'*1048576)
+        threading.Thread(target=stdout,daemon=True).start()
+        remaining=262144
+        while remaining:
+            remaining-=os.write(2,b'e'*remaining)
+        os._exit(0)
+        """)
+    loader = build_helper_modules("_test_live_fairness", bundle._MODULES)
+    source = loader + textwrap.dedent(f"""
+        import json,os,selectors,signal,socket,threading,time
+        from contextlib import suppress
+        from _test_live_fairness import _managed_service_guest as guest
+        from _test_live_fairness import _managed_job_request as requests
+        from _test_live_fairness import _managed_lease_wire as leases
+        from _test_live_fairness import _managed_job_wire as wire
+        from _test_live_fairness._managed_job_store import ManagedJobStore,FactName
+        from _test_live_fairness._evidence_wire import FrameReader,FrameKind
+        guest.selectors.DefaultSelector=getattr(selectors,{selector_name!r})
+        guest._STOP_GRACE_SECONDS=0.1
+        guest._CLEANUP_SECONDS=0.5
+        os.chmod({str(tmp_path)!r},0o700)
+        anchor=os.open({str(tmp_path)!r},os.O_RDONLY|os.O_DIRECTORY)
+        store=ManagedJobStore({RUN!r},_anchor_fd=anchor,_namespace='managed',_owner_uid=os.getuid())
+        os.close(anchor)
+        launch={request.launch!r}
+        request=requests.ManagedJobRequest(launch,'command',(sys.executable,'-c',{workload!r}),None,
+            'discard',None,(),b'',b'',leases.sampled_lease(launch,leases.boottime_ns()),
+            live_io=requests.ManagedLiveIO({NONCE!r},False,True))
+        store.publish_request(request)
+        class Boundary:
+            pid=None
+            def place(self,pid): self.pid=pid
+            def kill(self):
+                if self.pid is not None:
+                    with suppress(ProcessLookupError): os.kill(self.pid,signal.SIGKILL)
+            def empty(self): return True
+        boundary=Boundary()
+        counts={{'stdout':0,'stderr':0}}
+        bounded_stop=[]
+        errors=[]
+        workers=[]
+        finished=[]
+        def notify():
+            def peer():
+                directory=store.open_live_directory()
+                stopped=False
+                try:
+                    def record(frame):
+                        if frame.kind is FrameKind.STDOUT: counts['stdout']+=len(frame.body)
+                        if frame.kind is FrameKind.STDERR: counts['stderr']+=len(frame.body)
+                        if frame.kind is FrameKind.FINISHED: finished.append(True)
+                    with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as client:
+                        client.settimeout(2)
+                        client.connect('/proc/self/fd/'+str(directory)+'/live-io.sock')
+                        client.sendall(b'AGWL1 '+{NONCE.encode()!r}+b' 0 1\\n')
+                        client.shutdown(socket.SHUT_WR)
+                        reader=FrameReader({NONCE!r},record)
+                        deadline=time.monotonic()+2
+                        while chunk:=client.recv(65536):
+                            view=memoryview(chunk)
+                            while view: view=view[reader.try_write(view):]
+                            if not stopped and (counts['stdout']>=1048576 or time.monotonic()>=deadline):
+                                bounded_stop.append(dict(counts))
+                                store.publish_stop_request(launch)
+                                stopped=True
+                        reader.finish()
+                        assert reader.error is None
+                except BaseException as exc: errors.append(type(exc).__name__)
+                finally:
+                    with suppress(BaseException): store.publish_stop_request(launch)
+                    os.close(directory)
+            worker=threading.Thread(target=peer,daemon=True)
+            workers.append(worker)
+            worker.start()
+        try:
+            assert guest.run({RUN!r},_store=store,_boundary=boundary,_notify=notify,
+                _identity_check=False,_apply_identity=False)==0
+            workers[0].join(3)
+            assert not workers[0].is_alive() and not errors,errors
+            wait=store.read_fact(FactName.WAIT)
+            evidence={{'counts':counts,'bounded_stop':bounded_stop,'finished':bool(finished),
+                'wait':None if wait is None else wire.decode_fact(wait)}}
+            print(json.dumps(evidence,sort_keys=True))
+            assert not bounded_stop,evidence
+            assert counts['stderr']==262144 and finished,evidence
+            assert wait is not None and wire.decode_fact(wait)['exit_code']==0,evidence
+        finally:
+            boundary.kill()
+            if boundary.pid is not None:
+                with suppress(ChildProcessError): os.waitpid(boundary.pid,0)
+            store.close()
+        """)
+    completed = subprocess.run(
+        [interpreter, "-I", "-S", "-B", "-c", source], capture_output=True, check=False, timeout=10
+    )
+    assert completed.returncode == 0, (completed.stdout, completed.stderr)
+
+
 @pytest.mark.parametrize("object_type", ["file", "symlink", "fifo", "wrong-mode"])
 def test_disposal_refuses_wrong_fixed_socket_object(tmp_path: Path, object_type: str) -> None:
     from .test_managed_disposal import _terminal
