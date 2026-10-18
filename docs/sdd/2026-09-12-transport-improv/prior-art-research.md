@@ -71,6 +71,14 @@ native provider behavior or proof that a path-based selector atomically binds a 
 Source:
 [ARM asynchronous operation tracking](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/async-operations).
 
+Azure documents power state separately from request provisioning state, including `Starting` and a
+brief `Stopped` observation while starting a deallocated VM. Decision: after known request success,
+observe supported startup transitions under the original finite budget before requiring running
+state. Do not submit another start or turn malformed/unknown power evidence into readiness.
+
+Source:
+[Azure VM power states](https://learn.microsoft.com/en-us/azure/virtual-machines/states-billing).
+
 Azure also documents case-insensitive resource/group names and permits response casing to differ
 from the requested name. Decision: new creation admission compares the validated selected identity
 components case-insensitively and records the exact returned path. This does not normalize stored

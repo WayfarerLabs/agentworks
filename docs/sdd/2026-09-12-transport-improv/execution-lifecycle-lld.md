@@ -1559,9 +1559,13 @@ credential. An uncertain read close refuses the next mutation or guest operation
 Before activation, require a fresh matching incarnation and supported power state. For stopped or
 deallocated VMs, start once and observe only the retained request monitor under the original finite
 deadline. Request failure refuses guest preparation; request success still requires a separate fresh
-running observation, public endpoint and independent SSH trust binding. Already-running VMs require
-the same fresh endpoint and guest checks. Keep the exact original locator through preparation and
-repeat incarnation, running-state, endpoint and route checks before later guest admission.
+running observation, public endpoint and independent SSH trust binding. Observe documented starting
+or briefly stopped states under that same finite budget rather than submitting another start;
+unknown or conflicting power evidence refuses admission. Already-running VMs require the same fresh
+endpoint and guest checks. Keep the exact original locator through preparation and repeat
+incarnation, running-state, endpoint and route checks before later guest admission. Pass the fresh
+verified VM model into the route check so a changed NIC reference cannot hide behind an unchanged VM
+UUID or public endpoint. Repeat this check after opening the route and before guest preparation.
 
 Own one unpredictable nonce rule containing the selected IPv4 prefixes, not one rule per prefix or a
 whole-NSG rewrite. Follow the verified VM's actual NIC reference and that NIC's actual NSG
@@ -1586,17 +1590,21 @@ excluded from the mutation policy list. Verify the response request's exact meth
 bounded selected receipt fields and closed completion facts, never provider bodies or SDK exception
 messages. PUT accepts HTTP 200 or 201; operation headers take precedence over an apparent HTTP
 success, including on HTTP 200. Prefer the exact retained `Azure-AsyncOperation` monitor over
-`Location`. Without a monitor, a pending resource provisioning state is not completion. Prove the
-actual locked network SDK's final-send behavior; the compute start proof does not substitute.
+`Location`. Validate monitor subscription identity with the same ASCII casing rule, but keep the
+retained URL bytes exact for every subsequent GET and response identity check. Without a monitor, a
+pending resource provisioning state is not completion. Prove the actual locked network SDK's
+final-send behavior; the compute start proof does not substitute.
 
 Keep request completion separate from route removal. After any known terminal create result,
 including `Failed` or `Canceled`, a fresh matching owned rule can still require deletion. Failed
 provisioning does not imply that a network resource is absent or ineffective. Validate parent
 identity and exact nonce/rule content before deleting only that rule. Fresh absence after known
 completed creation can establish that it is already removed without sending DELETE. Once DELETE is
-sent, retain its own documented HTTP 200/202/204 receipt and observe any supplied monitor, even on
-HTTP 200, before using fresh absence to settle it. An absent rule cannot settle an unknown queued
-PUT or an unacknowledged DELETE. Do not replay either mutation to manufacture a receipt.
+sent, publish its exact cleanup intent before dispatch, retain its own documented HTTP 200/202/204
+receipt and observe any supplied monitor, even on HTTP 200. Any retained terminal DELETE result plus
+fresh absence can settle removal; a failed request with the rule still present cannot. An absent
+rule cannot settle an unknown queued PUT or an unacknowledged DELETE. Do not replay either mutation
+to manufacture a receipt.
 
 `close()` bars opening/checking and retries original public closes; explicit `settle()` remains
 allowed to observe retained monitors and remove the owned rule. The start producer's `settle()` is
