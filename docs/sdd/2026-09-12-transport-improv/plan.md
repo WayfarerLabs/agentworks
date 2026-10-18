@@ -5430,12 +5430,12 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
       missing receipts never grant activation or prove absence, and unresolved receipt-acquisition
       gaps remain explicit debt. Prove these together with the complete staging/late-lease gates
       above, not as a substitute for them.
-- [ ] Complete the pre-entry borrow-publication interruption seam across helper owners. A control
+- [x] Complete the pre-entry borrow-publication interruption seam across helper owners. A control
       that escapes after core admits a borrow but before its parent retains the returned handle must
       not strand same-process cleanup. Use a general exact admission or core-owned unused borrow
       drain, not adoption of an unidentified borrow by a particular stage. Process-loss recovery
       alone does not satisfy this continuation gate.
-- [ ] Add conservative token-only prepared-stage process-loss recovery. Establish an exact current
+- [x] Add conservative token-only prepared-stage process-loss recovery. Establish an exact current
       recovered, sealed owner and a pending ledger containing only this stage row before a new
       recovery span admits support. Other pending predecessor helper/activation rows refuse this
       path; neither caller booleans nor receipt presence substitutes for their closure. Every
@@ -5559,6 +5559,46 @@ dispatch/local custody through interrupted replies. Its worker selection passes 
 adjacent cases, with strict typing across 1,486 sources. Combined exact-head gates and independent
 review of both corrections remain pending. No full helper-owner audit, all-platform process-loss
 recovery, complete RunContext surface or PR acceptance is claimed.
+
+The conservative recovery and aggregate cleanup unit through `e425dcb46` clears project (Astra),
+complexity and generic correctness source review. The root combined selection at `4a39ea446` passes
+3,424 cases with 25 skips; final strict typing covers 1,487 sources and corrected changed-file
+quality checks pass. The final source delta removes three unused candidate-storage lines. These
+facts close the bounded conservative-recovery prerequisite, not generic native predecessor drain.
+
+The borrow-publication audit classifies all 21 acquisition sites. Thirty actual native-workflow
+composition cases inject a lost reply after core admission and before the returned handle reaches
+the helper owner. DIRECT, ordinary files, local upload/download, managed start/shell/observe/dispose
+and guest/admin/paired-agent preparation preserve original control and prove no selected helper
+entry. Each also exercises explicit aggregate retry with a retained platform hold. Existing stage
+BEGIN/CHUNK acquisition cases and core retirement tests cover their distinct mechanisms. Private
+gate-setup and standalone target/shell/read alternatives receive structural ordering review, not a
+new native-facade acceptance claim. The worker's corrected broad selection passes 2,755 cases with
+25 skips; clearing inherited setgid on its synthetic sandbox corrects the earlier environment
+failures without a production change. Root composition at `5efc5fd15` passes 229 cases and strict
+typing across 1,490 sources. This closes the specific pre-borrow-publication gate, not arbitrary
+bytecode interruption or loss after a complete parent call returns. Independent review of the new
+test-only audit and full-suite fixture corrections remains pending.
+
+The broader non-integration run at `e425dcb46` records 20,514 passes, 55 skips, 30 failures and six
+collection errors. It is not a green handoff. Provider module collisions are corrected with test
+package markers; all 2,797 provider tests then pass. Three outdated transport fixture modules are
+adapted without changing production behavior; their worker selection passes 702 cases with one skip.
+Reusing an existing environment refreshed to this checkout resolves missing installed CLI entry
+points; the corrected harness selection passes 121 cases with one skip, leaving only its offline
+packaging case. That packaging test separately passes with its real build dependencies. The
+shared-pump consumer-completion fixture request is posted on SSH #832. Two other SSH failures come
+from older carried fixtures already corrected in SSH's current head, not new #832 defects. Full
+joint exact-head validation remains required after composition, along with the native and
+complete-surface gates.
+
+- [ ] Bind the owning operation's copied, immutable final environment and sensitivity provenance to
+      execution views. Preserve core-protected values under per-call overrides and passive
+      `with_env` derivation, retain the exact identity/carrier/owner/deadline and combine
+      sensitivity monotonically across DIRECT/MANAGED and both lifetimes. Resolve no config or
+      secrets in this layer. Prove suppression versus explicit live presentation, value-free
+      diagnostics, pre-effect refusal and unchanged lifetime; keep production context population and
+      grant activation with their existing gates.
 
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
 one all-callers cutover. PR #830 publishes this design only. The following implementation PR adds
