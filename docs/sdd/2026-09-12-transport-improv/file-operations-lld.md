@@ -93,9 +93,13 @@ does not prove remote observation or grant authority.
 
 Every in-memory read has a positive caller-selected byte bound; a product default may be offered,
 but there is no universal total-file ceiling. Streaming upload declares its exact finite size, and
-download obtains a finite size from the held source snapshot before transferring. Chunk buffers
-remain bounded. Directory inventory defaults to 1,024 entries, depth 1, and 1 MiB encoded; reviewed
-callers may request up to 4,096 entries, depth 8, and 4 MiB encoded.
+download obtains a finite size from the held source snapshot before transferring. An explicit
+download byte limit may be zero: only a verified empty snapshot may publish under that bound. This
+allows ordinary directory copying to retain empty files after exhausting its aggregate byte budget,
+without a directory-only transfer path or an extra-byte allowance. Negative, Boolean and
+unrepresentable limits remain invalid. Chunk buffers remain bounded. Directory inventory defaults to
+1,024 entries, depth 1, and 1 MiB encoded; reviewed callers may request up to 4,096 entries, depth
+8, and 4 MiB encoded.
 
 Inventory retains one traversal and one canonical response. At its maximum encoded size, the current
 protocol emits at most 5,650,717 stdout bytes including data/control records and runtime prefix.

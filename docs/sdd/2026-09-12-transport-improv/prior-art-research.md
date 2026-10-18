@@ -59,6 +59,18 @@ Sources:
 [authentication challenge hook](https://learn.microsoft.com/en-us/python/api/azure-core/azure.core.pipeline.policies.bearertokencredentialpolicy?view=azure-python),
 [Azure start endpoint](https://learn.microsoft.com/en-us/rest/api/compute/virtual-machines/start?view=rest-compute-2026-04-01).
 
+The 2026-10-18 completion research distinguishes the documented start endpoint's HTTP 200 success
+from HTTP 202 acceptance. ARM documents two monitor forms: prefer `Azure-AsyncOperation` and read
+its bounded status object; otherwise a Location monitor uses HTTP completion status. Decision: the
+new exact-incarnation producer records request-specific terminal evidence, not completion inferred
+from a running VM. A synchronous 200 without a monitor can establish success; any supplied monitor
+must be observed. Pending, malformed or missing evidence cannot settle an uncertain start. Old
+path-only payloads remain separate. This is a source-backed implementation decision, not observed
+native provider behavior or proof that a path-based selector atomically binds a UUID.
+
+Source:
+[ARM asynchronous operation tracking](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/async-operations).
+
 ### AWS start submission proof
 
 The 2026-10-09 offline proof uses locked boto3 1.43.92 and botocore 1.43.93 with ordinary query

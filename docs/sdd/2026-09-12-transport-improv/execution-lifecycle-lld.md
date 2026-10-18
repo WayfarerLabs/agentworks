@@ -1490,6 +1490,51 @@ missing acknowledgment remains unknown. The
 completed middleware audit and the producer's separate scripted streamed-path evidence, with their
 remaining limits.
 
+### Exact-incarnation Azure start completion
+
+The path-only version-one producer above remains readable and unchanged. New admission uses a
+distinct version-two payload containing the recorded canonical VM UUID, complete ARM path, matching
+acknowledgment and optional closed terminal result. Its selected locator must match
+`azure-vm:v2:<canonical-uuid>:<complete-ARM-resource-path>` exactly. Never synthesize a path-only
+locator to reuse old admission or upgrade an old obligation with a current UUID observation.
+
+Record the returned creation model's path and canonical VM UUID during new provisioning, within its
+existing rollback-covered creation interval and before bootstrap admission. Missing, malformed or
+foreign creation identity fails that attempt. This establishes evidence for newly created VMs only;
+historical adoption remains unimplemented and requires operator disposition.
+
+Use Azure's documented request-completion evidence, not an AWS-style power-state inference. A
+validated start response with HTTP 200 and no operation headers records synchronous success. If an
+operation header is present, including on HTTP 200, observe that exact retained monitor URL instead.
+Prefer `Azure-AsyncOperation` over `Location`; never invent another endpoint or follow a redirect.
+The existing fixed-origin, selected-subscription URL validation still applies.
+
+Each explicit observation performs at most one streamed GET under the original finite deadline,
+using the public challenge-refusing policy list without retry, redirect, registration or generated
+polling middleware. Verify the response request's exact GET and URL. For `Azure-AsyncOperation`,
+accept HTTP 200 with a JSON object whose bounded status is `Succeeded`, `Failed`, `Canceled` or a
+pending provider value. Bound the streamed body to 16 KiB, reject duplicate status fields and
+malformed or oversized input, and retain only the closed terminal fact. Never persist or render the
+body, provider error text or credential-bearing exception chains. For a Location-only monitor, HTTP
+202 remains pending and HTTP 200 or 204 records success, without reading its body. Other HTTP
+statuses or malformed evidence cannot establish completion.
+
+Retain a terminal observation before ledger publication, handle cleanup or late-result refusal.
+Publish acknowledgment and completion through exact version/revision comparisons, reconciling a lost
+reply from the same retained evidence. A separate settlement call retries only original local
+closure and fenced bookkeeping; it never sends another POST or GET. It resolves possible effect only
+after the exact terminal fact is durably confirmed and all returned originals positively retire.
+`Failed` and `Canceled` establish request termination, not successful availability. A missing
+acknowledgment or terminal observation remains uncertain regardless of later power reads. An object
+closed before start admission has no start effect; an uncertain registration is not that case.
+Cleanup does not close the outer credential or operation owner.
+
+This is request settlement, not guest readiness. The complete access adapter must separately verify
+the recorded incarnation, fresh running state, endpoint, route and guest marker before admission.
+ARM's path-based start remains observationally fenced, not an atomic UUID selector. Keep native
+proof, full route ownership, aggregate release and RunContext exposure open until their complete
+implementation and acceptance.
+
 ### Owned GCP authentication boundary
 
 Keep stock public Application Default Credentials selection with the cloud-platform scope and the

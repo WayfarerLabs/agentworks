@@ -1330,6 +1330,14 @@ plus scoped lint/format. All three independent correction source-review lanes cl
 source/test files on the author's earlier base, not whole-composition or native acceptance. No
 historical identity adoption, new-VM recording or complete access is implied; keep this item open.
 
+- [ ] Implement and privately review the
+      [exact-incarnation Azure start boundary](execution-lifecycle-lld.md#exact-incarnation-azure-start-completion).
+      Preserve path-only version-one obligations, bind new version-two admission to recorded UUID
+      and path, and distinguish documented synchronous success from exact monitor completion. Prove
+      bounded one-observation GETs, no mutation replay, terminal-before-cleanup retention and exact
+      bookkeeping-only settlement through lost replies and uncertain original closure. Record newly
+      created VM identity inside the rollback-covered provisioning interval, without silently
+      adopting historical records. This does not close complete access or native acceptance.
 - [ ] Complete owned Azure access with reviewed request-specific startup settlement, fresh endpoint
       trust, selected route lifetime, exact guest preparation and aggregate release. Account
       explicitly for provider incarnation: current metadata and observations verify only the
@@ -4553,6 +4561,10 @@ the directory facade, native proof or complete R7 delivery.
       helper/source/publication replay. Retain readers for persisted versions three through six
       until their compatibility disposition is explicit; do not inspect or discard operator data to
       justify deletion. Preserve the distinct durable artifact ownership callback.
+- [ ] Allow an explicit zero-byte maximum throughout the ordinary download/snapshot path. Prove
+      verified empty-file publication, nonempty-source refusal before publication and unchanged
+      custody, including an empty source that grows after inventory. Keep in-memory read bounds
+      positive. This is a directory-composition prerequisite, not delivery of that facade.
 - [ ] Deliver bounded directory upload/download by composing ordinary successful child results under
       one original deadline. Define explicit existing-file conflict selection and bounded partial
       progress, including failed/uncertain current-child effects. Merge directory structure without
