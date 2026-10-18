@@ -648,6 +648,45 @@ availability: the approved early guest Python prerequisite still needs implement
 phase-specific proof. macOS hosts must supply the separately approved preinstalled compatible
 interpreter.
 
+### Late managed-start control
+
+Bulk transfer must precede the initial OPERATION lease sample. Source and stdin can each be 16 MiB;
+thousands of bounded transfer requests cannot consume that 60-second admission window. Do not
+increase the lease, renew it before settled start, lower the input limits or authorize a stale
+sample. The generic staged loader remains opaque to managed leases.
+
+The next private managed-start wire uses one version-two format for both inline and staged delivery:
+an immutable canonical body followed by a fixed 512-byte dispatch-control slot, using the existing
+`MAX_LEASE_BYTES`. The slot contains the existing canonical lease JSON padded with ASCII spaces, or
+padded literal `null` for independent lifetime. It needs no extra wrapper, version or base64 layer.
+The lease's closed schema has fixed quoting/escaping within one bound operation; space padding makes
+its total and complete HTTP-input length independent of clock digit count. Lifetime is fixed before
+preparation; the two lifetime modes need not have identical quote counts.
+
+The body contains the ordinary exact request assets without a lease. Reuse body-only validation and
+the existing complete-control lease headroom before any staging effect; a near-limit lease-free
+control alone does not prove that the reconstructed full control fits. Recalculate the outer request
+bound too. A body-only representation never produces a dispatchable request. The complete decoder
+rejects any lease already in the body, separates the exact final slot, validates canonical lease or
+null, reconstructs the control asset and uses the existing full request validator. There is no
+second staged grammar or compatibility decoder for the unreleased version-one start wire.
+
+Declare scratch length as packaged prefix plus immutable body plus that fixed slot. Transfer only
+the prefix/body before initial keeper sampling, stopping exactly at the slot offset without writing
+placeholder padding. After sampling, freeze one actual tail and append it in one existing bounded
+range. Hash it exactly once. No previously written range changes; a partial or uncertain append
+retains debt rather than permitting overwrite, resampling or activation replay. The small activation
+then uses the same whole-object loader and original bootstrap. Guest lease checks before and after
+request publication remain required: tail delivery, verification, decoding and service admission
+still consume the post-sample window.
+
+This ordering is unfinished implementation work. Prove stable body/total/envelope sizes, maximum
+control headroom, a real transfer lasting beyond one lease window followed by a fresh sample, wrong
+or missing tails, expired admission, exact launch binding, independent null control and uncertain
+append/activation/cleanup. Tokens precede creation, and owner/debt lifetime remains independent of
+lease validity and helper observation. Neither a timeout nor the loader's remaining allowance proves
+remote closure.
+
 Captured stdout and stderr spool separately. Each spool keeps at most `max_bytes + 1`; helper
 readers drain the remainder so a caller retention bound does not send SIGPIPE to the workload. The
 extra byte proves caller-bound truncation. Completion frames contain safe sizes and digests, then

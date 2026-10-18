@@ -2258,6 +2258,23 @@ and returns a caller-owned descriptor or a closed failure kind. Download snapsho
 parent independently of read-only source authority. This private selection grants no access to
 arbitrary temporary-directory contents. macOS root selection is not implemented.
 
+## Private root staged-helper loader
+
+`_staged_helper_bundle.py` binds a first-party `FixedFileHelperBundle` bootstrap to the existing
+root/full-guest checkpoint. Its bounded canonical control names an active STAGE reference, not a
+caller executable or source selector. `_staged_helper_guest.py` verifies the whole owned prepared
+input, duplicates a held verified descriptor onto stdin and invokes that original bootstrap. The
+bootstrap independently verifies its fixed code prefix before loading modules; remaining request
+bytes stay data. Scratch descriptor borrowing reuses receipt, object identity, timestamp and
+cleanup-debt checks without copying the whole input into memory. Stdin and argv are restored;
+integer `SystemExit` returns through outer admission cleanup, while other controls propagate.
+
+This root-only private foundation is not connected to managed-start delivery or FileAccess. Host
+staging obligations, transfer orchestration, lease ordering and cleanup remain unimplemented. Its
+remaining allowance bounds verification/admission cooperatively, not stalled envelope delivery or
+the invoked helper's complete lifetime. Envelope reading still requires EOF, and actual native
+helper closure remains separate evidence. Local packed-helper tests are not native acceptance.
+
 ## Private file snapshot exchanges
 
 `_file_snapshot_exchange.py` delivers snapshot creation, exact-range retrieval, historical ownership

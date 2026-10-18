@@ -5377,6 +5377,18 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
       Prove bounded admission, independent directions, lease/stop progress under pipe pressure, no
       retained live output, exact socket disposal and actual presentation in the foreground result.
       Local proof must not substitute for native root/cgroup/SSH acceptance.
+- [x] Compose private MANAGED OPERATION live execution through the existing ordinary helper owner,
+      settled launch and dedicated keeper. Validate before start effects, admit one relay attempt,
+      release endpoints and combine actual presentation with independent durable status before
+      checking. Privately review and prove pipe-failure preservation, retained custody without
+      overlapping polls, admission expiry and original output policy. This is a local prerequisite,
+      not native acceptance, active durable output or a complete additive RunContext handoff.
+- [x] Implement and privately review the root-only fixed staged-helper loader foundation. Validate
+      active receipt control and whole-object integrity, borrow its held verified descriptor and
+      enter the original independently prefix-checked bootstrap without compiling request bytes or
+      copying the whole input. Prove local packed Python 3.11 behavior, status/control preservation
+      and descriptor cleanup. Host orchestration, token obligations, lease ordering and native
+      acceptance remain separate gates.
 - [ ] Connect the planned chunked helper/request staging before public managed acceptance. Preserve
       the existing Proxmox 65,536-byte whole-POST floor and its 10,000-byte stdin regression test.
       Expanded inline helper source already exceeds that envelope in the local constructor proof;
@@ -5390,6 +5402,13 @@ checkpoint limits, not the proposed production 1 MiB per-stream default or bound
       before creation, retain uncertain stage/activation debt and preserve the original one-shot
       launch. Bulk preparation must not silently extend or reuse an expired operation lease; keep
       that ordering gate open until the complete orchestration is proved.
+- [ ] Implement and prove the
+      [late managed-start control](preparation-lld.md#late-managed-start-control) ordering: one
+      version-two body plus an existing-width lease/null tail, full control headroom before effects,
+      bulk transfer before initial sampling and one frozen small append afterward. Keep inline and
+      staged request grammar identical; preserve original lease freshness checks, bounds,
+      first-effect token ownership, partial-append debt and no replay. The codec alone does not
+      complete staged execution.
 
 The private pipe checkpoint at `6b8fe8128` passes 1,318 scoped tests with one skip and strict typing
 across 1,442 sources. Changed-file Python and Markdown quality checks pass. Project, complexity and
@@ -5432,6 +5451,15 @@ control facts. Unobserved outputs use the acknowledged run's retained policy wit
 The corrected selection passes 167 tests and strict typing across 1,460 sources; the earlier broad
 regression selection passes 1,396 tests with one existing skip. These remain local results, not
 resolution of the native envelope, staging or complete-surface gates.
+
+The staged-loader foundation at `9b4979081` clears all three private source-review lanes. Worker
+tests pass 152 cases with one skip, including actual packed Python 3.11. After composition at
+`24f3fcec9`, the lead's file/staging/managed selection passes 2,316 tests with 25 skips, strict
+typing passes across 1,465 sources, and changed-file quality gates pass. The representative complete
+Proxmox activation request measures 24,003 bytes, not a worst-case or native guarantee. The ordinary
+managed-start path still has its two unchanged envelope failures because host staging is not yet
+connected. Remaining allowance is not proof of bounded EOF delivery or complete helper lifetime;
+native closure custody, first-effect tokens, stage cleanup and the late-lease ordering remain owed.
 
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
 one all-callers cutover. PR #830 publishes this design only. The following implementation PR adds
