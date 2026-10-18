@@ -468,13 +468,15 @@ class ExecutionAccess:
             raise ValidationError("Foreground execution requires explicit profile and lifetime values")
         if lifetime is Lifetime.INDEPENDENT and profile is Protection.DIRECT:
             raise StateError("INDEPENDENT execution lifetime is unavailable")
-        if self._runtime_selection.target_os is not RuntimeTargetOS.LINUX:
+        if self._runtime_selection.target_os is RuntimeTargetOS.DARWIN and profile is Protection.MANAGED:
             raise StateError("Foreground execution is unavailable on this runtime")
         if type(request) not in {Command, Script}:
             raise ValidationError("Foreground execution requires a command or script")
         if type(stdin) is not Input or type(output) is not Output:
             raise ValidationError("Foreground execution requires explicit input and output values")
         live = stdin.source is not None or output.stdout is not None
+        if self._runtime_selection.target_os is RuntimeTargetOS.DARWIN and live:
+            raise StateError("Live foreground execution is unavailable on this runtime")
         if live and lifetime is not Lifetime.OPERATION:
             raise StateError("Live pipes require operation execution lifetime")
         if type(sudo) is not bool or type(sensitive) is not bool or type(check) is not bool:

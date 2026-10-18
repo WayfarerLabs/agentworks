@@ -1,15 +1,16 @@
-"""Destination entry point for the fixed private Linux inline helper."""
+"""Destination entry point for the fixed private POSIX inline helper."""
 
 from __future__ import annotations
 
 import hashlib
 import os
 import sys
+import threading
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass
 
 from ._evidence_wire import FrameKind
-from ._helper_identity import matches_current_identity
+from ._helper_identity import matches_current_identity, matches_fresh_exec_identity
 from ._inline_control import (
     FailureCode,
     FailureFact,
@@ -66,6 +67,97 @@ class _SafeFailure(Exception):
         super().__init__(fact.code.value)
 
 
+class _SourcePipe:
+    """Own one Darwin source pipe independently of application input.
+
+    Only the writer thread uses the nonblocking write end. Cancellation does
+    not depend on EPIPE: the parent and descendants can retain the read end.
+    Failed closure is retained without retrying an ambiguous descriptor close.
+    """
+
+    def __init__(self) -> None:
+        self.reader: int | None = None
+        self._writer: int | None = None
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
+        self._failed = threading.Event()
+        self._writer_closed = threading.Event()
+        self._writer_close_attempted = False
+        self._reader_close_attempted = False
+        self._reader_closed = False
+
+    def start(self, source: bytes) -> int:
+        try:
+            self.reader, self._writer = os.pipe()
+            os.set_blocking(self._writer, False)
+            self._thread = threading.Thread(target=self._write, args=(source,), daemon=True)
+            self._thread.start()
+        except (OSError, RuntimeError):
+            raise _SafeFailure(FailureFact(FailurePhase.PREPARE, FailureCode.SOURCE)) from None
+        return self.reader
+
+    def _close_writer(self) -> None:
+        if self._writer_close_attempted:
+            return
+        if self._writer is not None:
+            self._writer_close_attempted = True
+            try:
+                os.close(self._writer)
+            except OSError:
+                return
+        self._writer_closed.set()
+
+    def _write(self, source: bytes) -> None:
+        assert self._writer is not None
+        remaining = memoryview(source)
+        try:
+            while remaining and not self._stop.is_set():
+                try:
+                    written = os.write(self._writer, remaining[:65_536])
+                except BlockingIOError:
+                    self._stop.wait(0.01)
+                    continue
+                except BrokenPipeError:
+                    return
+                if written <= 0:
+                    raise OSError
+                remaining = remaining[written:]
+        except OSError:
+            self._failed.set()
+        finally:
+            self._close_writer()
+
+    @property
+    def failed(self) -> bool:
+        return self._failed.is_set()
+
+    def close(self) -> bool:
+        """Cancel and observe closure within 0.5 seconds, retaining uncertainty."""
+        self._stop.set()
+        if self._thread is not None:
+            try:
+                self._thread.join(0.5)
+            except RuntimeError:
+                # A thread whose admission failed has no proved native closure.
+                return False
+            if self._thread.is_alive():
+                return False
+        else:
+            self._close_writer()
+        if self.reader is not None and not self._reader_close_attempted:
+            self._reader_close_attempted = True
+            try:
+                os.close(self.reader)
+            except OSError:
+                return False
+            self._reader_closed = True
+        return self._writer_closed.is_set() and (self.reader is None or self._reader_closed)
+
+
+# Retain actual capabilities even when source cleanup cannot prove closure.
+_SOURCE_OWNER = _SourcePipe()
+
+
 @dataclass(frozen=True)
 class _Launch:
     argv: list[str]
@@ -113,8 +205,12 @@ def _prepare_launch(manifest: InlineManifest) -> _Launch:
         return _Launch(list(manifest.argv), None)
     assert manifest.source is not None
     shell_path, shell = _script_shell(manifest)
-    source_fd = _write_source(manifest.source)
-    source_path = f"/proc/self/fd/{source_fd}"
+    if sys.platform == "darwin":
+        source_fd = _SOURCE_OWNER.start(manifest.source)
+        source_path = f"/dev/fd/{source_fd}"
+    else:
+        source_fd = _write_source(manifest.source)
+        source_path = f"/proc/self/fd/{source_fd}"
     if shell is ScriptShell.BASH:
         return _Launch([shell_path, "--noprofile", "--norc", source_path], source_fd)
     return _Launch([shell_path, source_path], source_fd)
@@ -234,17 +330,22 @@ def main(nonce: str) -> int:
         return _finish_failure(emitter, FailureFact(FailurePhase.REQUEST, FailureCode.INVALID))
     if manifest.nonce != nonce:
         return _finish_failure(emitter, FailureFact(FailurePhase.REQUEST, FailureCode.NONCE))
-    if sys.platform != "linux" or not _supports_retrospective_completion():
+    if sys.platform not in {"linux", "darwin"} or not _supports_retrospective_completion():
         return _finish_failure(emitter, FailureFact(FailurePhase.PREPARE, FailureCode.RUNTIME))
-    if not matches_current_identity(manifest.identity):
+    matches_identity = matches_fresh_exec_identity if sys.platform == "darwin" else matches_current_identity
+    if not matches_identity(manifest.identity):
         return _finish_failure(emitter, FailureFact(FailurePhase.IDENTITY, FailureCode.MISMATCH))
 
     try:
         launch = _prepare_launch(manifest)
     except _SafeFailure as error:
+        if sys.platform == "darwin" and not _SOURCE_OWNER.close():
+            emitter.emit(FrameKind.FAILED, encode_failure(error.fact))
+            return 1
         return _finish_failure(emitter, error.fact)
 
     failure: FailureFact | None = None
+    source_closed = True
     try:
         emitter.emit(FrameKind.LAUNCHING, empty_body())
         stdout = StreamSink(emitter, StreamName.STDOUT) if manifest.output_mode is OutputMode.DELIVER else None
@@ -283,7 +384,13 @@ def main(nonce: str) -> int:
             emitter.emit(FrameKind.WAITED, encode_wait(_wait_fact(result.exit_status)))
             failure = _process_failure(result)
     finally:
-        if launch.source_fd is not None:
+        if sys.platform == "darwin" and launch.source_fd is not None:
+            source_closed = _SOURCE_OWNER.close()
+            if failure is None and not source_closed:
+                failure = FailureFact(FailurePhase.CLEANUP, FailureCode.RESOURCE)
+            elif failure is None and _SOURCE_OWNER.failed:
+                failure = FailureFact(FailurePhase.OBSERVE, FailureCode.INPUT)
+        elif launch.source_fd is not None:
             try:
                 os.close(launch.source_fd)
             except OSError:
@@ -291,5 +398,9 @@ def main(nonce: str) -> int:
                     failure = FailureFact(FailurePhase.CLEANUP, FailureCode.RESOURCE)
     if failure is not None:
         emitter.emit(FrameKind.FAILED, encode_failure(failure))
+    if sys.platform == "darwin" and launch.source_fd is not None and not source_closed:
+        # No terminal record or successful helper exit while source custody is
+        # uncertain. Application stream and wait facts above remain independent.
+        return 1
     emitter.emit(FrameKind.FINISHED, empty_body())
     return 0

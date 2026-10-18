@@ -207,7 +207,7 @@ def test_guest_identity_requires_real_effective_saved_and_exact_groups(
 @pytest.mark.parametrize(
     ("platform", "implementation", "version"),
     [
-        ("darwin", "cpython", (3, 12)),
+        ("freebsd", "cpython", (3, 12)),
         ("linux", "pypy", (3, 12)),
         ("linux", "cpython", (3, 10)),
         ("linux", "cpython", (3, 15)),
@@ -244,6 +244,7 @@ def test_inline_guest_refuses_unsupported_runtime_before_identity_or_workload_ac
     monkeypatch.setattr(sys, "implementation", SimpleNamespace(name=implementation))
     monkeypatch.setattr(sys, "version_info", version)
     monkeypatch.setattr(_inline_guest, "matches_current_identity", unexpected)
+    monkeypatch.setattr(_inline_guest, "matches_fresh_exec_identity", unexpected)
     monkeypatch.setattr(_inline_guest, "run_owned_process", unexpected)
 
     assert _inline_guest.main(prepared.nonce) == 0

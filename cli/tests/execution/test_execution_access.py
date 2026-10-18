@@ -310,7 +310,7 @@ def test_known_refusals_do_not_borrow_or_dispatch(
 
 
 @_LINUX_ONLY
-def test_script_startup_and_non_linux_refuse_before_dispatch(
+def test_script_startup_and_darwin_managed_refuse_before_dispatch(
     bound: Bound,
 ) -> None:
     _, owner, operation, carrier, access, deadline = bound
@@ -318,9 +318,42 @@ def test_script_startup_and_non_linux_refuse_before_dispatch(
         access.run(Script("true", Shell.SH, login=True), profile=Protection.DIRECT)
     non_linux = _access(operation, carrier, deadline, target_os=RuntimeTargetOS.DARWIN)
     with pytest.raises(StateError):
-        non_linux.run(Command(("/bin/true",)), profile=Protection.DIRECT)
+        non_linux.run(Command(("/bin/true",)), profile=Protection.MANAGED)
     assert carrier.calls == 0 and operation.active_inline_calls == ()
     assert deadline is not None
+    owner.close()
+
+
+def test_darwin_buffered_direct_reaches_carrier(bound: Bound) -> None:
+    _, _, operation, _, _, deadline = bound
+    carrier = UnknownCarrier()
+    access = _access(operation, carrier, deadline, target_os=RuntimeTargetOS.DARWIN)
+    result = access.run(Command(("/bin/true",)), profile=Protection.DIRECT)
+    assert carrier.calls == 1
+    assert result.dispatch is Dispatch.UNKNOWN
+    assert len(operation.unfinished_inline_executions) == 1
+
+
+@pytest.mark.parametrize("endpoint", ["input", "output"])
+def test_darwin_live_refuses_without_borrowing_endpoints(bound: Bound, endpoint: str) -> None:
+    class Source:
+        def try_read(self, limit: int) -> bytes | None:
+            pytest.fail("refused Darwin source was read")
+
+    class Sink:
+        def try_write(self, data: memoryview) -> int | None:
+            pytest.fail("refused Darwin sink was written")
+
+    _, owner, operation, carrier, _, deadline = bound
+    access = _access(operation, carrier, deadline, target_os=RuntimeTargetOS.DARWIN)
+    with pytest.raises(StateError):
+        access.run(
+            Command(("/bin/true",)),
+            profile=Protection.DIRECT,
+            stdin=Input.live(Source()) if endpoint == "input" else Input.eof(),
+            output=Output.live(Sink(), Sink()) if endpoint == "output" else Output.capture(),
+        )
+    assert carrier.calls == 0 and operation.active_inline_calls == ()
     owner.close()
 
 

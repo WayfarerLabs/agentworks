@@ -47,3 +47,17 @@ def matches_current_identity(expected: IdentityExpectation) -> bool:
         and os.getresgid() == (expected.egid, expected.egid, expected.egid)
         and actual_groups == expected.groups
     )
+
+
+def matches_fresh_exec_identity(expected: IdentityExpectation) -> bool:
+    """Check Darwin identity immediately after the fixed interpreter exec.
+
+    Darwin execve copies effective IDs to saved IDs. The isolated interpreter
+    and fixed loader must perform no credential changes before this check.
+    getgroups observes current Darwin access groups, not Linux drop containment.
+    """
+    return (
+        os.getuid() == os.geteuid() == expected.euid
+        and os.getgid() == os.getegid() == expected.egid
+        and tuple(sorted(set(os.getgroups()) | {os.getegid()})) == expected.groups
+    )
