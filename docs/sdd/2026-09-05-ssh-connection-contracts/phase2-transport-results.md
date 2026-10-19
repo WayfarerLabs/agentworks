@@ -83,3 +83,36 @@ particular, the earlier CA/KRL observer's missed SSH grandchildren are still unm
 fixture observations supply neither genuine provider creation nor production writer coexistence,
 persisted operator rollback, supported-workstation delivery or usable RunContext acceptance. Public
 terminal activation, full R1-R5 and the later migration/retirement sequence remain open.
+
+## Causal terminal custody fixture correction
+
+Fresh hosted run `39177029566` evaluates SSH `1cfdd832c6f92289ae41f646ece978b61aaa8502` through CI
+merge `fc7851504b8cb86ae7fb81ac890e0565798d3d6f` into owner `c0298ba16`. Linux Python 3.13 and 3.14
+each pass 21,739 tests with 309 skips and 51 warnings. Python 3.12 reports one failure, 21,738
+passes, 309 skips and 51 warnings: the SSH held-terminal cleanup/interruption fixture takes 1.070233
+seconds against its aggregate elapsed-under-one-second assertion. Its original control identity,
+cause and uncertainty-note checks already passed. The Windows job is still running when this
+correction is evaluated; no result or cancellation is inferred.
+
+The timer includes native child startup and the caller's separate finite cleanup observation. The
+exact hosted delay remains unattributed. Correction `54855b53f3cf3096d54bb3ffc72c4fd76b6c9412`
+records exit from the selected held boundary in a finally-set event. Caller return must occur while
+the release gate and boundary-exit event are both unset. The original six variants, request and
+cleanup deadlines, native owners, exception/status checks, descriptor retention and original
+worker/child/terminal cleanup assertions remain. No production behavior or timeout changes.
+
+The developer and independent project reviewer each pass all thirteen module cases. A controlled
+1.05-second construction delay fails the original timer and passes the revised fixture. Premature
+release and waiting past the unchanged three-second hold each fail the new causal assertion.
+Independent deletion testing confirms that removing only the boundary-exit check lets the latter
+violation escape detection. Original local child, worker, custody, PTY and retaining interpreter
+settlement are measured in those same executions. The lead fully reads all developer and review
+reports plus the original control receipts; all three private source lanes clear the composition.
+
+Evaluated runtime/test pin `a2e903d44008cfb7f7907b08b0fa309dad73d966` combines this fixture and the
+separately reviewed external CLI evidence. Its complete local suite passes 21,972 tests with 78
+skips and 51 warnings in 322.88 seconds. Full Ruff/format, strict typing across 1,541 sources,
+canonical file quality, Rulesync, locked-SDD and exact CI Typer isolation pass. Production CLI and
+the entire transport SDD remain byte-equal to owner `c0298ba16`. This working increment preserves
+all original hosted failures and does not resolve the older transport-owned Windows budget gap,
+activate the private terminal path or close full implementation/RunContext acceptance.

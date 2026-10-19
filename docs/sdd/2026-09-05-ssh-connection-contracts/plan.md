@@ -227,12 +227,12 @@ partial-update custody. Production writer coexistence and rollback through both 
 paths still require transport composition and native acceptance.
 
 Current public shared dependency: transport #833 at `c0298ba16f945ca4725145cefc39f3a6282acfaf`,
-incorporated into SSH evaluated runtime/test composition `1c901c857e89ede043de211c12710396069e78ba`.
+incorporated into SSH evaluated runtime/test composition `a2e903d44008cfb7f7907b08b0fa309dad73d966`.
 Production CLI source and the transport SDD match the owner head; the extra CLI changes are the
-reviewed SSH drain and generated-key permission fixtures. The complete combined local run passes
-21,972 tests with 78 skips. This working composition does not accept unfinished terminal,
-platform/FileAccess or RunContext work. The latest full native SSH testing pin remains
-`1fcabfe6082ab23b1e04eeac115e842f541eee95`; subsequent private Linux terminal component and
+reviewed SSH drain, generated-key permission and causal terminal-custody fixtures. The complete
+combined local run passes 21,972 tests with 78 skips. This working composition does not accept
+unfinished terminal, platform/FileAccess or RunContext work. The latest full native SSH testing pin
+remains `1fcabfe6082ab23b1e04eeac115e842f541eee95`; subsequent private Linux terminal component and
 trust/authentication fixture observations are separately scoped in the progress and trust workflow
 records. The [dependency chronology](phase2-results.md#historical-dependency-chronology) retains
 earlier pins, measurements and limits without changing completed plan records or the
