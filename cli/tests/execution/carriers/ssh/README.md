@@ -174,12 +174,13 @@ for observation in check_buffered_contract(carrier):
 
 The selected installed client must be OpenSSH 8.5 or newer. The initial shared vectors need Linux
 Bash 5.1 or newer, base64, GNU env with `--default-signal=PIPE`, and descriptor support on the
-destination; account-shell startup remains part of the live proof. The current candidate advertises
-live byte I/O but not terminals. Exercise the shared live source and sink cases through SSH in
-addition to the buffered vectors, then run the transport-required fault and interruption lanes.
-Record workstation OS/client separately from VM platform/server, selected authentication/trust
-policy, measured prerequisites, gaps, and independent cleanup. Retain safe observation fields; do
-not publish credentials, key contents or raw sensitive diagnostics.
+destination; account-shell startup remains part of the live proof. The internal working candidate
+advertises live byte I/O and a POSIX terminal path. Public production composition and complete
+supported-workstation terminal acceptance remain open. Exercise the shared live source and sink
+cases through SSH in addition to the buffered vectors, then run the transport-required fault and
+interruption lanes. Record workstation OS/client separately from VM platform/server, selected
+authentication/trust policy, measured prerequisites, gaps, and independent cleanup. Retain safe
+observation fields; do not publish credentials, key contents or raw sensitive diagnostics.
 
 Failures remain evidence for the owners. In particular, local status 255 is ambiguous, strict trust
 failure does not authorize enrollment, and timeout does not confirm remote cancellation. Re-run
@@ -236,7 +237,30 @@ stalls, fair duplex delivery, endpoint failures and unchanged borrowed resources
 server, operator terminal or infrastructure participates in these cases. Repeated geometry changes
 reach a synthetic child's stdin PTY through the actual process owner's SIGWINCH operation, with
 borrowed modes and descriptor flags independently checked. This proves local signal/dimension
-delivery, not remote SSH resize; the carrier terminal feature remains disabled.
+delivery, not remote SSH resize; public terminal acceptance remains open.
+
+`test_terminal_composition.py` reaches the real `SSHCarrier.execute` entrypoint on the internal
+POSIX working candidate, whose POSIX terminal capability is enabled for this implementation unit. It
+uses a synthetic installed-client executable, actual shared `prepare_terminal_handoff` and owned
+PTYs. The unchanged guest helper consumes the payload and executes an application that verifies
+binary source/environment, early keys and geometry before returning a distinctive nonzero status.
+Other cases cover common admission gates, the original deadline/custody, ambiguous local statuses,
+pending construction and control interruption. These tests use no SSH server, credentials or
+operator terminal. Fault cases exec one target in place; the preparation case records its inner
+child's exact wait/reap and independently checks PID absence. Privacy checks cover both literal and
+hex-encoded canaries in observed raw output and presentation. They do not establish native SSH,
+macOS or Windows acceptance, Windows owner/keyboard delivery, shared emulator sanitation or public
+production readiness.
+
+Run this synthetic composition unit from `cli/` in an owned frozen-lock environment, with a short
+private temporary root that has no inherited ACLs or SGID bit:
+
+<!-- cspell:ignore PYTHONPATH -->
+
+```sh
+env -u PYTHONPATH .venv/bin/python -m pytest tests/execution/carriers/ssh/test_terminal_composition.py \
+  -m 'not integration' -n 0 --basetemp=/tmp/authorized-terminal-synthetic/cases
+```
 
 Resize boundary faults cover finite notification expiry during bounded and unbounded operations,
 unknown outcomes, a late accepted signal, natural client exit races and control interruption. Unsent
@@ -311,7 +335,7 @@ timeout 360 .venv/bin/pytest tests/execution/carriers/ssh/test_terminal_installe
 ```
 
 Source checks and collection do not establish a native pass. These Linux loopback cases supply no
-macOS/Windows proof, production RunContext composition or enabled SSHCarrier terminal feature.
+macOS/Windows proof, production RunContext composition or public SSHCarrier terminal enablement.
 Readiness `finish()` is only collector finalization; shared presentation/emulator sanitation remains
 a separate open requirement. The refusal case does not cover the complete native interruption and
 restoration fault matrix.

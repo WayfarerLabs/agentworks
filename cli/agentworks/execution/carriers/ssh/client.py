@@ -1,4 +1,4 @@
-"""Independent byte delivery through an explicitly configured OpenSSH client."""
+"""Independent delivery through an explicitly configured OpenSSH client."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from agentworks.execution.carrier import (
     FiniteInput,
     LiveInput,
     Provenance,
+    TerminalInput,
 )
 from agentworks.execution.carriers._subprocess import output_retention
 from agentworks.execution.carriers.ssh._io import run_process
@@ -46,7 +47,7 @@ class SSHCarrier:
 
     def __init__(self, connection: SSHConnection) -> None:
         self._connection = connection
-        self._features = ChannelFeatures(live_stdio=True)
+        self._features = ChannelFeatures(live_stdio=True, terminal=os.name == "posix")
 
     @property
     def features(self) -> ChannelFeatures:
@@ -54,8 +55,11 @@ class SSHCarrier:
 
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         """Refuse input this adapter cannot deliver before effectful SSH admission."""
-        if not isinstance(io.input, EndOfInput | FiniteInput | LiveInput):
-            raise ValidationError("SSH byte delivery requires EOF, finite or live byte input")
+        if isinstance(io.input, TerminalInput):
+            if os.name != "posix":
+                raise ValidationError("SSH terminal delivery requires a supported native terminal adapter")
+        elif not isinstance(io.input, EndOfInput | FiniteInput | LiveInput):
+            raise ValidationError("SSH delivery requires EOF, finite, live or supported terminal input")
 
     def execute(
         self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody
@@ -84,7 +88,13 @@ class SSHCarrier:
 
         if deadline.expired:
             return _not_sent(io, Failure.DEADLINE)
-        argv = build_ssh_argv(self._connection, invocation, trust=trust, executable=executable)
+        argv = build_ssh_argv(
+            self._connection,
+            invocation,
+            trust=trust,
+            executable=executable,
+            terminal=isinstance(io.input, TerminalInput),
+        )
         result = run_process(argv, io=io, deadline=deadline, custody=custody)
         completion = (
             ExitStatus(code=result.exit_status)

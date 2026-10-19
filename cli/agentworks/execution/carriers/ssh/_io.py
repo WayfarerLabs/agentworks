@@ -1,4 +1,4 @@
-"""SSH environment policy and stream provenance for the shared subprocess pump."""
+"""SSH I/O selection, child environment policy and stream provenance."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import os
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from agentworks.execution.carrier import Provenance
+from agentworks.execution.carrier import Provenance, TerminalInput
 from agentworks.execution.carriers import _subprocess
 
 if TYPE_CHECKING:
@@ -29,7 +29,12 @@ def _child_environment() -> dict[str, str] | None:
 
 
 def run_process(argv: list[str], *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody) -> ProcessResult:
-    """Run an owned SSH client with isolated pipe settings and SSH provenance."""
+    """Select owned terminal delivery or the byte pump with SSH provenance."""
+    if isinstance(io.input, TerminalInput):
+        # POSIX dependencies must not affect Windows byte delivery or discovery.
+        from agentworks.execution.carriers.ssh._terminal_relay import run_terminal_relay_candidate
+
+        return run_terminal_relay_candidate(argv, io=io, deadline=deadline, custody=custody)
     result = _subprocess.run_process(
         argv,
         io=io,

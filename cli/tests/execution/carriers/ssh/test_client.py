@@ -104,7 +104,7 @@ def synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def test_inspection_is_passive(synthetic: SyntheticSSH) -> None:
     features = synthetic.carrier.features
     assert features.live_stdio
-    assert not features.terminal
+    assert features.terminal is (os.name == "posix")
     assert synthetic.carrier.features is features
     assert synthetic.calls == []
 
