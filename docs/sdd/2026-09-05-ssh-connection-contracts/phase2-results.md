@@ -3,17 +3,18 @@
 - Updated: 2026-10-19
 - PR: [#832](https://github.com/WayfarerLabs/agentworks/pull/832), draft
 - Main/contract base: `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (#830)
-- State: published `62c1e432` incorporates transport `284c128d` and the internal POSIX terminal
-  port. Its complete hosted run is red on the shared Linux terminal-capability assertion and Website
-  Chromium startup; Windows passes 2,195 cases with 80 skips. The earlier complete local run has
-  22,206 passes and 23 failures, all retained. Deferred fixture increment `37c7840c` now targets
-  actual `SSHCarrier.execute`, requires nonzero guest completion and retains failed evidence. All
-  three independent source reviews find no material defect; two controlled cases pass and two native
-  cases are collected only. Full style/typing and README checks pass. These checks supply no new
-  native proof or green combined run. Complete supported-platform terminal, positive host,
-  factories, both usable RunContext paths and R1-R5 acceptance remain open. The
-  [fixture and hosted records](phase2-transport-results.md#deferred-native-terminal-fixture-uses-the-actual-carrier)
-  preserve exact pins, failures and limits.
+- State: evaluated composition `6f1569e0` incorporates transport `dd5c7a8e`, including the shared
+  capability-qualified terminal fixture and partial Proxmox clone controller. All three source
+  reviews find no material defect; two optional simplifications stay with the transport owner. Root
+  passes 92 focused cases and all fifteen static/website entries. The full local run remains red
+  with 22,279 passes and 22 host-fixture failures; the stale terminal assertion is corrected.
+  Published `53ac54f6` CI is red on that older assertion, while its Windows, Website and static jobs
+  pass. All original failures remain retained without a universal cause attribution. No new native
+  proof follows: the actual-carrier terminal fixtures still have only controlled retention tests and
+  collection evidence. Complete supported-platform terminal, positive host, creation/writer
+  publication, factories, both usable RunContext paths and R1-R5 acceptance remain open. The
+  [current composition record](phase2-transport-results.md#clone-and-terminal-fixture-dependency-composition)
+  preserves exact pins, gates and limits.
 
 Earlier checkpoint evidence and dependency history live in separate files. The headings below retain
 existing plan links; the linked sections preserve the complete original records. Historical round 1

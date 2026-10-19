@@ -6,6 +6,70 @@ does not replace the SSH plan, shared transport contracts or full implementation
 Earlier records retain their original observations. New entries supersede only the gates they
 actually measure.
 
+## Clone and terminal-fixture dependency composition
+
+Evaluated join `6f1569e0fa435532f3ef53159f436c547ec770e6` incorporates transport
+`dd5c7a8e42ac13774062b6084ea17bede07c31de` over SSH `53ac54f6`. The eight-file owner contribution
+adds fixed Proxmox candidate-ID/clone wire operations, a retained one-shot clone controller, two
+test modules, two transport design records and the shared terminal compatibility correction. Non-SSH
+production and the complete transport SDD equal the owner. SSH production, existing fixtures and the
+complete SSH SDD are unchanged at this evaluated join.
+
+The capability-qualified fixture no longer assumes SSH must always refuse terminal input. It
+requires unsupported routes to refuse validation and execution before connection/client access.
+Supported POSIX routes receive passive validation only, with sentinel descriptors and guarded
+sources/sinks; the test does not execute against host stdin/stdout. The Windows marker and the other
+carriers' refusal cases remain unchanged. Root's focused selection passes all four module cases
+against the actual POSIX-capable SSH carrier, plus the sixteen real-preparation composition cases.
+This clears the stale assertion, not native terminal acceptance.
+
+The clone controller retains intent before one POST, matches the exact source-scoped task, and
+publishes fresh marked destination association before settling its clone obligation. It keeps the
+original owner/custody and does not release that owner or replay an uncertain clone. This is partial
+creation machinery, not configuration, resize/start, bootstrap, rollback, process-loss recovery,
+generation-based locator binding or usable production creation. Transport's design now places
+remaining key-free configuration on the prepared elevated shared executor after minimal helper
+prerequisites and before the sensitive join. Genuine provenance, retained SSH enrollment writer
+custody and complete trust-policy publication still have to compose before canonical strict use.
+
+All three independent source reviews find no material defect; root fully reads their complete signed
+reports. Complexity identifies two optional owner simplifications: use local obligation wrappers
+instead of retaining one that is always replaced, and serialize established intent without repeating
+validation at interior calls. Root acknowledges those owner suggestions and preserves
+transport-owned source unchanged. They establish no material failure or new permission to weaken
+external-data/ledger validation. Full creation and native proof remain open.
+
+Root's own frozen environment passes 92 focused cases in 5.15 seconds; same-process receipts check
+its lexical interpreter/prefix/cwd and all 399 loaded first-party origins. Full Ruff, formatting of
+1,603 files and typing of 1,565 sources pass. All fifteen static/website entries pass, including
+canonical file quality, Rulesync, locked-SDD, exact CI Typer isolation, 160 Python tests, 103 Node
+tests, four builds and two deterministic comparisons.
+
+The complete local selection is still red: 22 failures, 22,279 passes, 78 skips and 51 warnings in
+399.40 seconds, wrapper exit one in 400.035 seconds. The corrected terminal assertion passes. All
+remaining failures are the retained host-fixture families: sixteen preliminary command refusals, one
+JSON file refusal, two group-identity assertions, two upload variants and the configured host case
+that substitutes local execution for SSH. Root reads every assertion/error record and the complete
+distinct traces, preserving original output and failed views. The
+[bounded host investigation](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6279103229)
+explains why those reduced results do not prove a universal identity cause or an independently
+fixable SSH defect. The relevant host sources remain unchanged. No skip, identity override,
+account/group adjustment, retry-to-green or unrelated fix is applied.
+
+The preceding published SSH
+[run 39336891851](https://github.com/WayfarerLabs/agentworks/actions/runs/39336891851) tests
+`53ac54f6` through merge `6f4fa3c0006d1b524f8397844f35c4c9e6296ba5` into `284c128d`. Each Linux job
+fails only the old terminal assertion with 21,996 passes, 310 skips and 51 warnings; Python
+3.12/3.13/3.14 take 886.08/716.06/761.86 seconds. Windows Server 2025/Python 3.13.16 passes 2,195
+cases with 80 skips and 25 warnings in 1,133.16 seconds. Website and all static jobs pass. Root
+reads all four originating Python portions and all complete failures. Windows/Website passes do not
+diagnose earlier failures or clear local host/native acceptance.
+
+No new native campaign, public feedback round, ready/checkpoint signal, completed plan block or lock
+follows. Complete Linux/macOS/Windows terminal/fault evidence, shared sanitation, genuine creation
+and settled-writer publication, writer coexistence/rollback, factories, both usable additive
+RunContext paths and full R1-R5 acceptance remain required.
+
 ## Deferred native terminal fixture uses the actual carrier
 
 Fixture increment `37c7840c28386d7d26e3ba59202318299c5994c5` starts from published SSH
