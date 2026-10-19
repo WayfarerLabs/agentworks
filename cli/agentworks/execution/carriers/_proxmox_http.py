@@ -35,6 +35,31 @@ class _Endpoint(StrEnum):
     VM_START = "vm-start"
     TASK_STATUS = "task-status"
     GUEST_INFO = "guest-info"
+    NEXT_ID = "next-id"
+    VM_CLONE = "vm-clone"
+
+
+def _valid_clone_body(value: object) -> bool:
+    """Check the fixed clone schema at the HTTP worker input boundary."""
+    if type(value) is not dict or set(value) != {"newid", "name", "description", "storage", "pool", "full"}:
+        return False
+    return (
+        type(value["newid"]) is int
+        and value["newid"] > 0
+        and type(value["full"]) is int
+        and value["full"] == 1
+        and type(value["name"]) is str
+        and len(value["name"]) <= 253
+        and re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", value["name"]) is not None
+        and type(value["description"]) is str
+        and re.fullmatch(r"agentworks-instance:[0-9a-f]{32}", value["description"]) is not None
+        and all(
+            type(value[key]) is str
+            and len(value[key]) <= 128
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", value[key]) is not None
+            for key in ("storage", "pool")
+        )
+    )
 
 
 def _valid_control_timeout(value: object) -> bool:
@@ -109,6 +134,17 @@ def _request(payload: dict[str, Any]) -> bytes:
             _Endpoint.GUEST_INFO: "agent/info",
         }[endpoint]
         url = f"{base}/{route}"
+    elif endpoint is _Endpoint.NEXT_ID:
+        if suffix is not None or method != "GET" or body is not None:
+            raise ValueError("Candidate VM identifier requires a fixed body-free GET")
+        url = f"{origin}/api2/json/cluster/nextid"
+    elif endpoint is _Endpoint.VM_CLONE:
+        if suffix is not None or method != "POST" or type(body) is not str:
+            raise ValueError("Clone requires a fixed POST and exact public body")
+        clone = json.loads(body)
+        if not _valid_clone_body(clone) or clone["newid"] == connection["vmid"]:
+            raise ValueError("Invalid clone body")
+        url = f"{base}/clone"
     elif endpoint is _Endpoint.VM_START:
         if suffix is not None or method != "POST" or body is not None:
             raise ValueError("VM start requires a fixed body-free POST")
@@ -117,9 +153,13 @@ def _request(payload: dict[str, Any]) -> bytes:
         if method != "GET" or body is not None:
             raise ValueError("Task status requires a fixed body-free GET")
         url = f"{node_base}/tasks/{_task_component(suffix)}/status"
-    if endpoint in (_Endpoint.VM_START, _Endpoint.TASK_STATUS, _Endpoint.GUEST_INFO) and not _valid_control_timeout(
-        payload["timeout"]
-    ):
+    if endpoint in (
+        _Endpoint.VM_START,
+        _Endpoint.TASK_STATUS,
+        _Endpoint.GUEST_INFO,
+        _Endpoint.NEXT_ID,
+        _Endpoint.VM_CLONE,
+    ) and not _valid_control_timeout(payload["timeout"]):
         raise ValueError("VM control requires a positive finite timeout")
     request = urllib.request.Request(
         url, data=body.encode("ascii") if body is not None else None, method=payload["method"]
