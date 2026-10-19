@@ -287,10 +287,10 @@ Keep the stages and failure windows explicit:
    a fixed, core-owned bootstrap with explicit shell and actual native delivery identity; do not
    fabricate a prepared guest identity to authorize it. Install Python 3 and the public
    administrative/marker setup before invoking Python helpers. Establish the actual helper launch
-   prerequisites too: noninteractive root entry, required launch tools and a safe scratch root.
-   Keep this pre-helper bootstrap minimal; it need not deliver the entire guest configuration.
-   A package-list entry alone is not runtime proof. Bookworm compatibility and the separate
-   no-staging readiness path still apply.
+   prerequisites too: non-interactive root entry, required launch tools and a safe scratch root.
+   Keep this pre-helper bootstrap minimal; it need not deliver the entire guest configuration. A
+   package-list entry alone is not runtime proof. Bookworm compatibility and the separate no-staging
+   readiness path still apply.
 3. Persist the observed platform metadata under the same owner and prepare the guest and requested
    account using the existing new-stack machinery. Construct no second claim and do not reopen the
    existing-VM entry, which would reacquire ownership. Observe the installed runtime, marker and
