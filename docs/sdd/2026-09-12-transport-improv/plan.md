@@ -5883,7 +5883,7 @@ managed VM identity; managed jobs retain their actual target requirement. This c
 constructor checkbox only. Complete additive context delivery, host files and recovery, native
 acceptance and permission activation remain separate open gates.
 
-- [ ] Implement and privately prove the
+- [x] Implement and privately prove the
       [ordinary platform-host file binding](file-operations-lld.md#ordinary-platform-host-file-binding)
       using the existing exact PLATFORM_HOST operation scope, not fabricated VM incarnation/boot
       evidence. Retain original file/helper custody, path/metadata rules and same-process closing;
@@ -5892,6 +5892,25 @@ acceptance and permission activation remain separate open gates.
       real ordinary host file effects, lost replies, exact cleanup, codec separation and unchanged
       VM/gate behavior. Host context/factory composition, physical identity/epoch proof, native
       acceptance and automatic recovery remain separate gates, not completion claims of this unit.
+
+The private host-file checkpoint at `df0c310dc` includes worker `3f4d8ff48` and its namespace-import
+correction `9ecbf896e`. Three independent source-review lanes are clear. The worker passes 547
+focused/adjacent cases; correction checks pass 315, including the actual native/canonical context
+modules. Lead composition passes 884 tests and complete strict typing passes 1,554 sources. Both
+original broader-gate failures are retained: they found the shared VM namespace decoder caller
+missed by scoped checks. The correction restores its concrete signature and separates host target
+decoding without changing VM admission or recovery authority. This closes only the private binding
+unit, not host configuration/context composition, native Darwin or automatic recovery.
+
+- [ ] Implement and privately prove the
+      [ordinary platform-host context composer](execution-lifecycle-lld.md#ordinary-platform-host-context-composition).
+      Acquire the explicit shared host scope before preparation, deliver the existing command/file
+      views through RunContext, and retain one same-process aggregate lifetime through partial
+      construction, original control, uncertain work and exact cleanup retries. Prove conflict
+      before effects, no guest identity, explicit account/runtime/elevation choices, actual ordinary
+      helper/file use, closed-view refusal and unchanged VM composition. Keep host configuration,
+      native SSH/macOS proof, Remote Lima adoption/provisioning/rollback and process-loss recovery
+      under their complete production gates; this composer alone does not enable that route.
 
 - [x] Complete and privately review paired native admin/agent preparation using an explicit
       core-selected agent row on the same VM. Reuse one file operation, execution operation, numeric

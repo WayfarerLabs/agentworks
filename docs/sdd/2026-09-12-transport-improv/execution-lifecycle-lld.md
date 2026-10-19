@@ -228,6 +228,40 @@ Ctrl-C, terminal hangup, detach, local wait interruption and explicit stop need 
 policies. None is silently promoted into whole-workload cancellation. Terminal output is combined;
 non-terminal capture preserves separate guest streams and sensitive-output rules.
 
+### Ordinary platform-host context composition
+
+Add the private core composer `execution/_platform_host_context.py`. It receives the existing
+database, incoming RunContext and exact core-selected `OperationScope(PLATFORM_HOST, resource_key)`;
+an already selected carrier; explicit delivery/workload accounts and elevation-preparation choice;
+runtime selection, trusted file root and one finite deadline. These are composition inputs, not
+consumer-controlled grants. Do not infer a host key from an SSH endpoint, account, site or the
+incoming context's descriptive VM scope. Configuration and platform adoption must later supply the
+reviewed shared key and explicit connection/account/runtime policy before enabling this route.
+
+Acquire the host claim before account discovery or other effects. Use the existing account/runtime
+preparation without guest bootstrap, `ExecutionOperation(owner, None)` for DIRECT execution and the
+same owner's host-scoped `FileOperation`. Bind ordinary and explicitly prepared elevated plans to
+the existing access views and one `ExecutionTarget` with route `PLATFORM_HOST` and the actual
+prepared ordinary identity. Yield a fresh RunContext carrying that target while preserving the
+incoming guest/legacy bindings, descriptive scope and scoped secret reader. Do not create a VM row,
+managed host identity, registry, SSH runner or host setup service.
+
+One host lifetime retains partial preparation, both operations and their original helper custody.
+Closing stops body admission first, settles actual local delivery and retained helpers before
+cleanup exchanges, and uses the existing file bookkeeping and scratch cleanup paths. Release only
+after preparation, both operations and every lifecycle obligation are settled. Share concrete
+settlement predicates with VM composition where needed instead of copying its guest-specific
+aggregate. An interrupted release retries its exact owner reconciliation, not fresh preparation or
+application work. Preserve the original body exception and expose retained cleanup custody for a
+same-process retry under a fresh finite cleanup budget; that retry never reopens body admission.
+
+This first composer provides ordinary commands/files, not host MANAGED or independent jobs, durable
+host recovery, a Remote Lima guest hop or platform resource teardown. Keep unsupported managed
+profiles/job requests refused before effects. Linux/Darwin runtime preparation retains the existing
+prerequisite rules; a local helper fixture is not native macOS or installed SSH acceptance. Remote
+Lima remains the first adoption case, with its own provisioning/rollback cleanup and explicit host
+configuration. Other platforms can consume the same composer without importing Lima.
+
 ### Bound job controls and independent evidence
 
 `ExecutionAccess` owns `observe`, `read_output`, `wait`, `stop` and `dispose` as well as `run` and
