@@ -289,12 +289,16 @@ equivalence. Repeating a small declaration across sites does not justify a regis
 lifecycle. VM/host hierarchy and broader lock scopes retain their separately deferred plan.
 
 The initial Lima consumer deliberately uses the login account for both delivery and workload,
-without elevated preparation. It runs `limactl` as that account. Core supplies the trusted host file
-root `/`, subject to the ordinary account's actual OS access and existing conservative file rules;
-this is not recipient permission enforcement. Fixed scratch still selects `/tmp` on Linux or
-`/private/tmp` on Darwin, not an operator-selected staging location. No guest identity, implicit
-root entry, host MANAGED promise or automatic host recovery is introduced. Complete configuration,
-legacy-coexistence and native SSH/macOS workflow proof remain required before production adoption.
+without elevated preparation. It runs `limactl` as that account. The common SSH composer requires
+the existing explicit core-selected trusted file root and forwards it unchanged; endpoint selection
+does not impose `/` as a file namespace. Descendant operations retain their no-mount-crossing rule,
+while reaching the explicitly selected root permits mount crossings. The first Lima workflow uses
+paths beneath its OS-selected scratch parent, `/tmp` on Linux or `/private/tmp` on Darwin. Selecting
+that file root does not replace scratch-parent ownership/mode admission, grant additional OS access
+or enforce recipient permissions. Keep the root out of operator access configuration. No guest
+identity, implicit root entry, host MANAGED promise or automatic host recovery is introduced.
+Complete configuration, legacy-coexistence and native SSH/macOS workflow proof remain required
+before production adoption.
 
 ### Bound job controls and independent evidence
 

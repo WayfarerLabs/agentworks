@@ -5949,10 +5949,12 @@ configuration/adoption, automatic host recovery, native execution nor complete a
       and shared host coordination key. Reuse existing SSH policy/runtime preparation and the host
       context; no machine registry, ambient alias expansion, fallback or implicit elevation.
       Preserve legacy `placement.host` behavior and require the explicit new entry to refuse
-      incomplete configuration before effects. Prove cross-site shared-key conflict and independent
-      contexts, configuration/runtime failures, exact policy propagation and same-process cleanup.
-      Native SSH/macOS, Remote Lima provisioning/rollback and complete additive delivery remain
-      required under their existing gates; this configuration unit alone does not complete them.
+      incomplete configuration before effects. Forward the required core-selected file root without
+      imposing `/` or weakening descendant mount confinement. Prove real command/file content use
+      beneath that root, cross-site shared-key conflict and independent contexts,
+      configuration/runtime failures, exact policy propagation and same-process cleanup. Native
+      SSH/macOS, Remote Lima provisioning/rollback and complete additive delivery remain required
+      under their existing gates; this configuration unit alone does not complete them.
 
 - [x] Complete and privately review paired native admin/agent preparation using an explicit
       core-selected agent row on the same VM. Reuse one file operation, execution operation, numeric
