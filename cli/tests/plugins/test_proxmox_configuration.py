@@ -398,6 +398,43 @@ def test_corrupt_publication_never_resolves(owned: Owned, monkeypatch: pytest.Mo
     assert row is not None and row.state is LifecycleObligationState.POSSIBLE_EFFECT
 
 
+@pytest.mark.parametrize("effect", ["configuration", "resize"])
+def test_version_only_publication_corruption_retains_possible_effect_without_replay(
+    owned: Owned, monkeypatch: pytest.MonkeyPatch, effect: str
+) -> None:
+    if effect == "resize":
+        owned.stage.configure(Deadline.after(5))
+        owned.stage.resize(Deadline.after(5))
+    original = owned.repository.publish_lifecycle_obligation_payload
+
+    def corrupt_version(*args: Any, **kwargs: Any) -> LifecycleObligation:
+        value = json.loads(kwargs["payload"])
+        if (
+            effect == "configuration"
+            and value.get("acknowledged") is True
+            or (effect == "resize" and value.get("verified_disk") is not None)
+        ):
+            kwargs["payload_version"] = 2
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(owned.repository, "publish_lifecycle_obligation_payload", corrupt_version)
+    with pytest.raises(StateError):
+        (owned.stage.configure if effect == "configuration" else owned.stage.wait)(Deadline.after(5))
+    identifier = (
+        owned.stage.configuration_obligation_id if effect == "configuration" else owned.stage.resize_obligation_id
+    )
+    row = owned.owner.inspect_lifecycle_obligation(identifier)
+    assert row is not None and row.state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert row.payload_version == 2 and json.loads(row.payload)["version"] == 1
+    before = owned.calls.copy()
+    with pytest.raises(StateError):
+        owned.stage.reconcile(Deadline.after(5))
+    with pytest.raises(StateError):
+        (owned.stage.configure if effect == "configuration" else owned.stage.resize)(Deadline.after(5))
+    assert owned.calls == before
+    assert owned.calls.count("configure") == 1 and owned.calls.count("resize") == int(effect == "resize")
+
+
 def test_takeover_fences_observation_and_bookkeeping(owned: Owned) -> None:
     owned.stage.configure(Deadline.after(5))
     owned.stage.resize(Deadline.after(5))

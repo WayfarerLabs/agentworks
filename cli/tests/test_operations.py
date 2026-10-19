@@ -21,6 +21,7 @@ from agentworks.db import (
     OperationResourceKind,
     OperationScope,
 )
+from agentworks.db.operations import LifecycleObligation as PersistedLifecycleObligation
 from agentworks.db.operations import OperationRepository
 from agentworks.errors import StateError
 from agentworks.operations import (
@@ -1535,3 +1536,41 @@ def test_prepared_supplied_payload_stays_on_the_row_armed_for_dispatch(db: Datab
     assert row.payload_revision == 1
     attempt.settle()
     borrow.close()
+
+
+@pytest.mark.parametrize("field", ["payload_version", "payload"])
+def test_lifecycle_publication_rejects_mismatched_committed_identity(
+    db: Database, monkeypatch: pytest.MonkeyPatch, field: str
+) -> None:
+    repository = db.operations
+    owner = OperationOwner.acquire(repository, _scope(), "publication-proof")
+    obligation = owner.register_lifecycle_obligation("test-effect", payload_version=1, payload=b"initial")
+    obligation.mark_possible_effect()
+    original = repository.publish_lifecycle_obligation_payload
+
+    def substitute(*args: Any, **kwargs: Any) -> PersistedLifecycleObligation:
+        kwargs[field] = 2 if field == "payload_version" else b"substituted"
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(repository, "publish_lifecycle_obligation_payload", substitute)
+    with pytest.raises(StateError):
+        obligation.publish_payload(expected_revision=0, payload_version=1, payload=b"receipt")
+    row = owner.inspect_lifecycle_obligation(obligation.obligation_id)
+    assert row is not None and row.state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert row.payload_version == (2 if field == "payload_version" else 1)
+    assert row.payload == (b"substituted" if field == "payload" else b"receipt")
+    assert obligation._persisted_obligation == row
+    assert repository.inspect(owner.ownership.scope) is not None
+
+
+def test_lifecycle_publication_exact_repeat_keeps_existing_revision(db: Database) -> None:
+    owner = OperationOwner.acquire(db.operations, _scope(), "publication-proof")
+    obligation = owner.register_lifecycle_obligation("test-effect", payload_version=1, payload=b"initial")
+    obligation.mark_possible_effect()
+    initial = obligation.publish_payload(expected_revision=0, payload_version=1, payload=b"initial")
+    assert initial.payload_revision == 0
+    first = obligation.publish_payload(expected_revision=0, payload_version=2, payload=b"receipt")
+    repeated = obligation.publish_payload(expected_revision=0, payload_version=2, payload=b"receipt")
+    assert repeated == first and repeated.payload_revision == 1
+    assert repeated.state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert owner.inspect_lifecycle_obligation(obligation.obligation_id) == repeated
