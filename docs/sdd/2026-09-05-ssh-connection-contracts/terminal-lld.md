@@ -336,6 +336,92 @@ values. Native comparison values remain unobserved, and injected records cannot 
 numeric keypad input or the behavior of a different Windows binary. This selects no production
 decoder.
 
+### Windows keyboard decisions before implementation
+
+Keyboard acquisition and translation belong to SSH and can be designed before platform-host
+preparation or RunContext adoption. The Windows relay still requires transport to adopt its native
+terminal launch, pipes, status, resize and cleanup into the existing held process owner. The private
+ConPTY cell is not that adoption. This subsection selects no new reader or decoder and leaves the
+[shared ownership contract](../2026-09-12-transport-improv/carrier-io-lld.md#private-terminal-input-adapter)
+unchanged.
+
+The following table separates implementation requirements from evidence and unresolved choices.
+"Measured" refers only to the owned Server 2025 primitive recorded above. Source hypotheses are
+reasons to collect observations, not permission to infer another Windows binary's behavior.
+
+| Boundary                        | Implementation requirement                                                                                                                                                                                                 | Evidence and decision still needed                                                                                                                                                                                           |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Record acquisition              | Poll only the explicitly borrowed input handle on the retained native worker, after bootstrap EOF and pending bootstrap bytes drain. Bound each iteration and retained input.                                              | Measured `CONSOLE_READ_NOWAIT` polling returns empty, non-key and injected key records. Its five-second fixture assertion is not a production cancellation guarantee; establish the production call and cancellation bounds. |
+| Non-key records                 | Distinguish record kinds before interpreting key fields; do not invent keyboard bytes from resize or menu records. Keep geometry observation separate.                                                                     | Measured polling preserves injected menu and resize records. Selection and handling of other native record kinds remain to be specified.                                                                                     |
+| Ordinary key down               | Preserve the intended character or VT input once, with an explicit conversion from returned units to carrier bytes.                                                                                                        | Measured injected Unicode units include a surrogate pair. Neither their presence nor the comparison's Unicode control selects byte encoding or proves physical keyboard translation.                                         |
+| Key releases                    | Decide which releases contribute text from observed character semantics; neither discard every release nor forward every nonzero unit by assumption.                                                                       | Compare the ordinary release and unflagged Alt release with the key-down control in every comparison cell below. Their returned values remain unobserved.                                                                    |
+| Private-flagged Alt release     | Resolve whether the returned unit is Unicode or packed bytes, and which existing code page applies, before conversion. Never change borrowed code pages.                                                                   | The pinned host source suggests output-page conversion for private-flagged Alt releases. The comparison records both page references; it cannot establish physical Alt numeric-keypad behavior.                              |
+| VT sequences                    | Preserve sequence order and fragmentation without interpreting application or presentation bytes as keyboard state.                                                                                                        | Raw VT input mode is measured, but actual physical navigation/function/modifier key sequences are not. VT on/off in the injected comparison does not supply these vectors.                                                   |
+| Repeat count                    | Specify how native repeat counts contribute characters or sequences, including repeats spanning output batches, without unbounded expansion.                                                                               | Current injected vectors use repeat count one. Record/character equivalence for other counts and sequence repeats needs separate evidence.                                                                                   |
+| Partial UTF-16                  | Retain pending surrogate state across polling and output boundaries; choose malformed/unpaired-unit behavior explicitly.                                                                                                   | The primitive observes an injected pair. Split pairs, repeats involving pairs, interruption and client exit with a pending high surrogate are unproved; do not silently choose replacement or discard.                       |
+| Pending output and flow control | Retain unsent keyboard bytes and translation state in order; finish their partial writes before admitting more input beyond the selected bound.                                                                            | Short writes and stalls must exercise the actual transport-owned input endpoint. Define bounds for record batches, repeat state and pending bytes; pipe acceptance does not prove remote consumption.                        |
+| EOF and client exit             | Bootstrap EOF permanently grants keyboard handoff; it is not outgoing EOF. A raw Ctrl-D is ordinary remote input. Normal client exit after handoff ends keyboard borrowing without requiring keyboard EOF.                 | Windows console closure/EOF and malformed pending-unit behavior need native characterization and an explicit failure policy. An empty `CONSOLE_READ_NOWAIT` poll is not EOF.                                                 |
+| Errors and cancellation         | Preserve the first control exception, stop input borrowing, and expose local input/observation uncertainty while retaining independently known remote facts. Do not replay input or hide a blocked read in another thread. | Test failed polls/writes, deadline and interruption at acquisition, translation, partial write and cleanup. A supervised blocking comparison read does not establish production cancellation.                                |
+| Resource lifetime               | Bind cleanup custody before effects; keep the original worker, handles and pending state through unresolved native admission/cleanup. Restore borrowed input only after every borrower stops.                              | Mode restoration is measured for the primitive. Relay/client settlement, partial acquisition failure and restoration uncertainty still need integrated proof through the same held owner.                                    |
+
+#### Existing comparison cells and their interpretation
+
+The explicitly selected
+[`windows_input_comparison.py`](../../../cli/tests/execution/carriers/ssh/windows_input_comparison.py)
+fixture defines exactly six `(input page, output page)` pairs: `(1252, 437)`, `(932, 437)`,
+`(437, 1252)`, `(932, 1252)`, `(1252, 932)` and `(437, 932)`. Each pair runs with VT input off and
+on, with processed, line and echo input disabled. Each setting injects the following four vectors,
+giving **6 pairs x 2 VT states x 4 vectors = 48 observations**. Every candidate has repeat count one
+and is followed by an ordinary key-down `Z` sentinel, also with repeat count one.
+
+| Vector (`case` field)             | Candidate fields                                                                                                   | Question the collected character batches can answer                                                                         |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `private_flagged_vk_menu_release` | Release, virtual key `0x12`, control flag `0x04000000`; unit `0x82A0` when output page is 932, otherwise `0x0082`. | Does this injected private release produce text, and do its units match the output-page or input-page conversion reference? |
+| `unicode_vk_menu_release`         | Release, virtual key `0x12`, unit `0x03A9`, control state zero.                                                    | Does the unflagged Alt release contribute Unicode text in this mode and binary?                                             |
+| `unicode_ordinary_release`        | Release, virtual key `0x41`, unit `0x03A9`, control state zero.                                                    | Is its character contribution different from the Alt release and key-down control?                                          |
+| `unicode_keydown`                 | Key down, virtual key `0x41`, unit `0x03A9`, control state zero.                                                   | Does the control return the expected Unicode unit followed by the sentinel? This control is asserted by the fixture.        |
+
+For the private vector, `packed_bytes` is `[0x82, 0xA0]` only for output page 932, otherwise
+`[0x82]`. The source hypothesis requires an applicable lead byte for the two-byte case. Do not
+extend that vector to the other output pages without reviewing the native failure risk. The six
+pairs compare the same output page with two input pages and cover opposite page selections; this
+helps distinguish the proposed conversion boundary without changing the caller's pages.
+
+Inspect the actual scoped report using the
+[one-time command](../../../cli/tests/execution/carriers/ssh/README.md). For each observation,
+retain `case`, `input_page`, `output_page`, `input_mode`, `vt_input` and `injected` to identify the
+cell. `low_level_records` reports `kind`, `down`, `repeat`, `vkey`, `unit` and `control`;
+`read_console_w_batches` records character units from a separate injection of the identical vector.
+Compare flattened batches while retaining their boundaries and the sentinel. For the private vector,
+compare `native_page_reference_units` for both pages with `packed_bytes`. `remaining_records`,
+`nowait_seconds` and `read_console_w_seconds` preserve queue and timing observations; they do not
+establish cancellation bounds. The source's blocking character reader is supervised test machinery,
+not a production candidate. Only the key-down control's returned units are asserted; green captured
+output without the report does not decide the other three policies.
+
+#### Additional acceptance vectors
+
+Injected records cannot establish how a physical keyboard and the installed console host generate
+those records. Before selecting a production translation policy, obtain corresponding physical-key
+observations on supported Windows versions, recording the actual host/client binaries, modes, pages,
+layout and terminal host:
+
+- Ordinary ASCII, non-ASCII and supplementary characters; Alt numeric-keypad input with and without
+  leading zero under the distinct input/output pages above; Alt release without numeric input.
+- Navigation and function keys, modifiers, AltGr, dead keys and composed input with raw VT input
+  selected. Establish actual sequence bytes and ordering rather than synthesize escape sequences
+  from virtual-key names.
+- Held keys and repeats, including supplementary characters and VT sequences; early keys queued
+  after acquisition but before handoff, without flushing the queue or reading it during setup.
+
+Separately exercise split surrogate batches, malformed units, non-key-only polls, bounded pending
+input under partial writes/stalls, handle closure and cancellation at each retained-state boundary.
+Synthetic tests can establish chosen state transitions; physical input and the actual SSH relay must
+establish their native meaning and delivery. The comparison does not cover those cases,
+initial/changed remote geometry, sensitive preparation or presentation cleanup. Server 2022 and 2025
+acceptance, and the other supported workstation paths, remain required before feature enablement. No
+decoder, production owner or public terminal capability is enabled by this design.
+
 ## Remaining proof
 
 The host experiment used bounded small writes and captured output, not a production relay. The
