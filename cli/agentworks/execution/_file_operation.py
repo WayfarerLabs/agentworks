@@ -1813,6 +1813,42 @@ class FileOperation:
             self._owner.stop_admission()
             raise
 
+    def settle_completed_bookkeeping(self) -> None:
+        """Retire captured closed calls without recapture, debt publication or replay.
+
+        Missing outcomes, uncertain effects and outstanding attempts remain
+        retained for their own evidence-based settlement, not this retry.
+        """
+        registries: tuple[
+            dict[int, _ActiveFileStat]
+            | dict[int, _ActiveFileInventory]
+            | dict[int, _ActiveFileRemove]
+            | dict[int, _ActiveFileMetadata]
+            | dict[int, _ActiveFileJsonUpdate],
+            ...,
+        ] = (
+            self._active_stats,
+            self._active_inventories,
+            self._active_removals,
+            self._active_metadata,
+            self._active_json_updates,
+        )
+        for registry in registries:
+            for key in tuple(registry):
+                active = registry[key]
+                outcome = active.outcome
+                if (
+                    outcome is None
+                    or outcome.requires_owner_retention
+                    or outcome.pending_remote_effects
+                    or outcome.coordination_uncertain
+                    or active.borrow.has_outstanding_attempt
+                ):
+                    continue
+                if not active.borrow.closed:
+                    release_borrow_after_custody(active.borrow)
+                registry.pop(key)
+
     def settle_upload_bookkeeping(self) -> None:
         """Retry captured debt publication and closure without helper or source replay."""
         try:

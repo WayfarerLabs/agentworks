@@ -37,6 +37,7 @@ from tests.vms.test_native_operation import database as database
 
 if TYPE_CHECKING:
     from agentworks.config import Config
+    from agentworks.execution._file_operation import _ActiveFileJsonUpdate, _ActiveFileStat, _ActiveFileUpload
     from agentworks.execution.target import ExecutionTarget
     from agentworks.transports import Transport
 
@@ -443,12 +444,14 @@ def test_uncertain_cleanup_retains_original_control_cause_and_owner(
 
 
 @pytest.mark.parametrize("execution_route", [ExecutionRoute.NATIVE, ExecutionRoute.CANONICAL])
-def test_command_then_completed_upload_bookkeeping_retries_exact_call_without_replay(
+@pytest.mark.parametrize("file_call", ["upload", "stat", "json"])
+def test_command_then_completed_file_bookkeeping_retries_exact_call_without_replay(
     database: Database,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     prepared: list[VMOperation],
     execution_route: ExecutionRoute,
+    file_call: str,
 ) -> None:
     import grp
     import os
@@ -496,14 +499,38 @@ def test_command_then_completed_upload_bookkeeping_retries_exact_call_without_re
         assert result.ok and result.stdout.data == b"completed-command"
         operation = prepared[0]
         assert operation.execution_operation._dispatch_obligation is not None
+        if file_call != "upload":
+            Path(root / "published").write_bytes(b'{"before":1}')
         monkeypatch.setattr(OperationBorrow, "close", interrupted)
-        files.write_file(root / "published", b"published once", condition=Create(), create_metadata=metadata)
-    assert caught.value is control and Path(root / "published").read_bytes() == b"published once"
+        if file_call == "upload":
+            files.write_file(root / "published", b"published once", condition=Create(), create_metadata=metadata)
+        elif file_call == "stat":
+            files.stat(root / "published")
+        else:
+            from agentworks.execution.files import JsonStrategy
+
+            files.update_json(
+                root / "published",
+                {"after": 2},
+                strategy=JsonStrategy.MERGE_OVERWRITE,
+                create=False,
+                create_metadata=metadata,
+            )
+    assert caught.value is control
     fact = control.__cause__
     assert isinstance(fact, VMOperationControlFact) and fact.__cause__ is cause
     assert fact._workflow.views is operation
-    retained = operation.file_operation.active_uploads
-    assert len(retained) == 1 and retained[0].outcome is not None and retained[0].outcome.publication_confirmed
+    file_operation = operation.file_operation
+    retained: tuple[_ActiveFileUpload | _ActiveFileStat | _ActiveFileJsonUpdate, ...]
+    if file_call == "upload":
+        retained = file_operation.active_uploads
+    elif file_call == "stat":
+        retained = file_operation.active_stats
+    else:
+        retained = file_operation.active_json_updates
+    assert len(retained) == 1 and retained[0].outcome is not None
+    outcome = retained[0].outcome
+    assert not outcome.requires_owner_retention and not retained[0].borrow.closed
     claim = database.operations.inspect(_scope())
     assert claim is not None and claim.ownership == operation.owner.ownership
     calls = route.local.calls
@@ -514,5 +541,11 @@ def test_command_then_completed_upload_bookkeeping_retries_exact_call_without_re
     assert database.operations.inspect(_scope()) is None and not operation.file_operation.has_pending_custody
     assert route.local.calls == calls and native.events.count("dispatch") == dispatches
     assert route.accounts.calls == accounts and not list(scratch.iterdir())
+    assert retained[0].borrow.closed and retained[0].outcome is outcome
     assert result.ok and result.stdout.data == b"completed-command"
-    assert Path(root / "published").read_bytes() == b"published once"
+    if file_call == "upload":
+        assert Path(root / "published").read_bytes() == b"published once"
+    else:
+        assert json.loads(Path(root / "published").read_bytes()) == (
+            {"before": 1, "after": 2} if file_call == "json" else {"before": 1}
+        )
