@@ -213,15 +213,16 @@ names the exact vm-site field. A successful result may omit the Tailscale IP onl
 succeeded but IP discovery did not; the manager then performs IP-only rediscovery and Tailscale SSH
 verification.
 
-Version 2 also requires `observe_provider_locator(vm, ctx, *, deadline)`. It is a read-only provider
-observation returning an opaque `ProviderLocator` token, or empty `ProviderLocatorUnavailable` only
-when the platform deliberately cannot observe one. `Unavailable` does not prove that the target
-exists. Once provider observation begins, confirmed target absence and provider failures raise typed
-errors. A finite caller-owned `Deadline` covers the whole lookup: use `provider_locator_remaining`
-before provider I/O to set best-effort SDK or socket timeouts and again before return to reject a
-late result. This is not provider-call preemption. Core never parses or normalizes locator tokens,
-and this hook neither reads a guest marker nor constructs target identity. Contract versions are
-exact and have no adapter, so v1 implementations must migrate to v2 before they can register.
+Version 2 also requires `observe_provider_locator(vm, ctx, *, deadline, custody)`. It is a read-only
+provider observation returning an opaque `ProviderLocator` token, or empty
+`ProviderLocatorUnavailable` only when the platform deliberately cannot observe one. `Unavailable`
+does not prove that the target exists. Once provider observation begins, confirmed target absence
+and provider failures raise typed errors. A finite caller-owned `Deadline` covers the whole lookup:
+use `provider_locator_remaining` before provider I/O to set best-effort SDK or socket timeouts and
+again before return to reject a late result. This is not provider-call preemption. Core never parses
+or normalizes locator tokens, and this hook neither reads a guest marker nor constructs target
+identity. Contract versions are exact and have no adapter, so v1 implementations must migrate to v2
+before they can register.
 
 An operator-owned release catalog also overrides the pure `validate_create_release(release)` hook.
 Core calls it with the concrete selection before resolving secrets or running authenticated platform
