@@ -5557,7 +5557,7 @@ relaxing their assertions. Original failures remain retained. Packed privilege/s
 injected, not native VM/root/provider proof. The following staging, recovery and full handoff gates
 remain open.
 
-- [ ] Implement and privately review the first finite-input, finite-deadline Linux VM DIRECT capture
+- [x] Implement and privately review the first finite-input, finite-deadline Linux VM DIRECT capture
       composition described in the [capture design](preparation-lld.md#direct-capture-composition).
       Reuse bounded process capture and exact-length scratch, distinguish remote stream facts from
       verified local bytes, and retain known child status through publication, retrieval or cleanup
@@ -5566,6 +5566,15 @@ remain open.
       capture, explicit truncation, partial publication/retrieval, suppression, controls and
       complete carrier envelopes together with prepared input. Do not change the public default or
       claim host/live/unbounded, process-loss recovery or native acceptance from this private slice.
+
+The private capture checkpoint at `a21e137d1` clears independent project, complexity and correctness
+source reviews after correcting cross-resource closing order. A retained regression first observed
+an earlier stage dispatching again while capture-helper closure was unknown; closure-only settlement
+now precedes both normal cleanup loops. Corrupt-range tests exercise the actual framed parser, not
+invalid typed interior values. The lead's composed selection passes 1,341 tests and full strict
+typing covers 1,553 files. Failed original views remain retained. These checks establish the bounded
+private capture unit, not native privilege/provider evidence, process-loss recovery, a production
+default change or complete additive RunContext acceptance.
 
 - [ ] Connect the planned chunked helper/request staging before public managed acceptance. Preserve
       the existing Proxmox 65,536-byte whole-POST floor and its 10,000-byte stdin regression test.

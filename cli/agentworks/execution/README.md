@@ -1769,6 +1769,7 @@ local delivery settlement are prerequisites to capture cleanup, independent of a
 completion and artifact debt. Normal cleanup and a same-process fresh finite continuation use the
 original owner and exact tokens; missing receipts remain uncertainty. Prepared-input and capture
 cleanup share only actual closing-delivery mechanics, retaining their own row and protocol checks.
+Aggregate closing settles retained helpers across both resources before admitting fresh cleanup.
 This path does not change the production default to 1 MiB or complete host/Darwin, live/unbounded,
 process-loss recovery or native credential/provider acceptance.
 
