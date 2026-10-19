@@ -1,6 +1,7 @@
-"""Canonical recovery payloads for private file-call lifecycle obligations.
+"""Canonical custody payloads for private file-call lifecycle obligations.
 
-This codec retains only the identity needed to recover a possible file effect.
+This codec retains bounded coordination and possible-effect facts, not recovery
+authority. Host scopes do not establish physical host identity or drain proof.
 It deliberately does not retain file contents, JSON documents, source or sink
 objects, carrier details, diagnostics, commands, or replay instructions.
 """
@@ -13,7 +14,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import cast
 
-from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES
+from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES, OperationResourceKind, OperationScope
 from agentworks.errors import ValidationError
 from agentworks.execution._file_effect_gate import (
     FileEffectGateBinding,
@@ -50,6 +51,7 @@ UPLOAD_CHILD_OBLIGATION_PAYLOAD_VERSION = 3
 NUMERIC_UPLOAD_CHILD_OBLIGATION_PAYLOAD_VERSION = 4
 DOWNLOAD_CHILD_OBLIGATION_PAYLOAD_VERSION = 5
 NUMERIC_DOWNLOAD_CHILD_OBLIGATION_PAYLOAD_VERSION = 6
+HOST_FILE_CALL_OBLIGATION_PAYLOAD_VERSION = 7
 MAX_PACKAGE_UPLOAD_MEMBERS = 4096
 _TOKEN_BYTES = 16
 _MAX_JSON_ATTEMPTS = 8
@@ -60,6 +62,7 @@ _OPTIONAL_FIELDS = frozenset(
     {"attempt", "batch_index", "effect_gate", "gate_setup", "publication_cleanup_debt", "scratch", "token"}
 )
 _TARGET_FIELDS = frozenset({"boot_id", "incarnation", "kind", "name"})
+_HOST_TARGET_FIELDS = frozenset({"kind", "name"})
 _IDENTITY_FIELDS = frozenset({"egid", "euid", "groups", "mode"})
 _RUNTIME_FIELDS = frozenset({"explicit_path", "target_os"})
 _SCRATCH_FIELDS = frozenset({"cleanup_debt", "reference"})
@@ -192,10 +195,10 @@ def _validate_download_child(child: DownloadChildAssociation) -> None:
 
 @dataclass(frozen=True, slots=True, repr=False)
 class FileCallObligation:
-    """Typed recovery identity for one private file-call lifecycle obligation."""
+    """Typed retained identity for one private file-call lifecycle obligation."""
 
     family: FileCallFamily
-    target: ManagedTargetIdentity
+    target: ManagedTargetIdentity | OperationScope
     root: str
     relative_path: str
     identity_plan: IdentityPlan
@@ -221,6 +224,8 @@ class FileCallObligation:
     @property
     def payload_version(self) -> int:
         """Select the durable format without reinterpreting legacy records."""
+        if isinstance(self.target, OperationScope):
+            return HOST_FILE_CALL_OBLIGATION_PAYLOAD_VERSION
         if self.download_child is not None:
             return (
                 NUMERIC_DOWNLOAD_CHILD_OBLIGATION_PAYLOAD_VERSION
@@ -266,6 +271,7 @@ def encode_file_call_admission(obligation: FileCallObligation) -> bytes:
     encoded = encode_file_call_obligation(obligation)
     reserve = _FILE_CALL_RECOVERY_HEADROOM_BYTES[obligation.family]
     if obligation.gate_setup is not None:
+        assert isinstance(obligation.target, ManagedTargetIdentity)
         setup = obligation.gate_setup
         bound = FileEffectGateBinding(
             setup.path,
@@ -304,7 +310,14 @@ def decode_file_call_obligation(payload: bytes) -> FileCallObligation:
 
 
 def _validate_obligation(obligation: FileCallObligation) -> None:
-    if type(obligation.family) is not FileCallFamily or type(obligation.target) is not ManagedTargetIdentity:
+    if type(obligation.family) is not FileCallFamily:
+        raise FileCallObligationCodecError
+    if type(obligation.target) is OperationScope:
+        if obligation.target.resource_kind is not OperationResourceKind.PLATFORM_HOST or any(
+            item is not None for item in (obligation.bootstrap, obligation.effect_gate, obligation.gate_setup)
+        ):
+            raise FileCallObligationCodecError
+    elif type(obligation.target) is not ManagedTargetIdentity:
         raise FileCallObligationCodecError
     _validate_path(obligation.root, root=True)
     _validate_path(obligation.relative_path, root=False)
@@ -362,6 +375,7 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
     if obligation.effect_gate is not None:
         if (
             obligation.family not in FILE_EFFECT_GATE_FAMILIES
+            or not isinstance(obligation.target, ManagedTargetIdentity)
             or obligation.target.kind is not ManagedTargetKind.VM
             or obligation.runtime_selection.target_os is not RuntimeTargetOS.LINUX
             or type(obligation.effect_gate) is not FileEffectGateBinding
@@ -386,6 +400,7 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
         if (
             obligation.family not in FILE_EFFECT_GATE_FAMILIES
             or (obligation.family is FileCallFamily.PACKAGE_UPLOAD and obligation.batch_index != 0)
+            or not isinstance(obligation.target, ManagedTargetIdentity)
             or obligation.target.kind is not ManagedTargetKind.VM
             or obligation.runtime_selection.target_os is not RuntimeTargetOS.LINUX
             or obligation.effect_gate is not None
@@ -525,6 +540,12 @@ def _decode_obligation(value: object) -> FileCallObligation:
         required = _BASE_FIELDS | {"download_child", "download_child_complete"}
     elif value["version"] == NUMERIC_DOWNLOAD_CHILD_OBLIGATION_PAYLOAD_VERSION:
         required = _BASE_FIELDS | {"bootstrap", "download_child", "download_child_complete"}
+    elif value["version"] == HOST_FILE_CALL_OBLIGATION_PAYLOAD_VERSION:
+        required = _BASE_FIELDS
+        if "upload_child" in value or "upload_child_complete" in value:
+            required = required | {"upload_child", "upload_child_complete"}
+        if "download_child" in value or "download_child_complete" in value:
+            required = required | {"download_child", "download_child_complete"}
     else:
         raise FileCallObligationCodecError
     if not required <= set(value) <= required | _OPTIONAL_FIELDS:
@@ -552,7 +573,7 @@ def _decode_obligation(value: object) -> FileCallObligation:
         family = FileCallFamily(value["family"])
     except (TypeError, ValueError):
         raise FileCallObligationCodecError from None
-    target = _decode_target(value["target"])
+    target = _decode_target(value["target"], host=value["version"] == HOST_FILE_CALL_OBLIGATION_PAYLOAD_VERSION)
     root = _decode_path(value["root"], root=True)
     relative_path = _decode_path(value["path"], root=False)
     identity_plan = _decode_identity_plan(value["identity"])
@@ -642,6 +663,7 @@ def _validate_bootstrap(obligation: FileCallObligation) -> None:
     bootstrap = obligation.bootstrap
     if (
         type(bootstrap) is not _NumericGuestBootstrap
+        or not isinstance(obligation.target, ManagedTargetIdentity)
         or obligation.target.kind is not ManagedTargetKind.VM
         or obligation.runtime_selection.target_os is not RuntimeTargetOS.LINUX
         or obligation.runtime_selection.explicit_path not in (None, "/usr/bin/python3")
@@ -655,7 +677,9 @@ def _validate_bootstrap(obligation: FileCallObligation) -> None:
             raise FileCallObligationCodecError
 
 
-def _encode_target(target: ManagedTargetIdentity) -> dict[str, str]:
+def _encode_target(target: ManagedTargetIdentity | OperationScope) -> dict[str, str]:
+    if isinstance(target, OperationScope):
+        return {"kind": target.resource_kind.value, "name": target.resource_name}
     return {
         "boot_id": target.boot_id,
         "incarnation": target.incarnation,
@@ -664,7 +688,17 @@ def _encode_target(target: ManagedTargetIdentity) -> dict[str, str]:
     }
 
 
-def _decode_target(value: object) -> ManagedTargetIdentity:
+def _decode_target(value: object, *, host: bool) -> ManagedTargetIdentity | OperationScope:
+    if host:
+        if type(value) is not dict or set(value) != _HOST_TARGET_FIELDS:
+            raise FileCallObligationCodecError
+        try:
+            scope = OperationScope(OperationResourceKind(value["kind"]), cast("str", value["name"]))
+        except (TypeError, ValidationError, ValueError):
+            raise FileCallObligationCodecError from None
+        if scope.resource_kind is not OperationResourceKind.PLATFORM_HOST:
+            raise FileCallObligationCodecError
+        return scope
     if type(value) is not dict or set(value) != _TARGET_FIELDS:
         raise FileCallObligationCodecError
     try:

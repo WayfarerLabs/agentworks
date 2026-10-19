@@ -8,12 +8,13 @@ from dataclasses import replace
 
 import pytest
 
-from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES
+from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES, OperationResourceKind, OperationScope
 from agentworks.execution._file_effect_gate import FileEffectGateBinding, FileEffectGateError
 from agentworks.execution._file_gate_setup import FileEffectGateSetup, file_effect_gate_path
 from agentworks.execution._file_obligation import (
     _FILE_CALL_RECOVERY_HEADROOM_BYTES,
     FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+    DownloadChildAssociation,
     FileCallFamily,
     FileCallObligation,
     FileCallObligationCodecError,
@@ -64,6 +65,98 @@ _TARGET = ManagedTargetIdentity(
 _PLAN = IdentityPlan(IdentityExpectation(1001, 1002, (1002, 1003)), IdentityMode.DIRECT)
 _RUNTIME = RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
 _MAXIMUM = (1 << 64) - 1
+_HOST = OperationScope(OperationResourceKind.PLATFORM_HOST, "fixture-host")
+
+
+@pytest.mark.parametrize("family", list(FileCallFamily))
+def test_host_format_retains_exact_scope_and_largest_debt_without_guest_facts(family: FileCallFamily) -> None:
+    initial = replace(_obligation(family), target=_HOST)
+    retained = _maximum_recovery_obligation(family, initial=initial)
+    for call in (initial, retained):
+        encoded = encode_file_call_obligation(call)
+        value = json.loads(encoded)
+        assert call.payload_version == value["version"] == 7
+        assert value["target"] == {"kind": "platform-host", "name": "fixture-host"}
+        assert not {"bootstrap", "guest", "effect_gate", "gate_setup"} & value.keys()
+        assert decode_file_call_obligation(encoded) == call
+    assert encode_file_call_admission(initial) == encode_file_call_obligation(initial)
+    assert (
+        len(encode_file_call_obligation(retained)) - len(encode_file_call_obligation(initial))
+        == _FILE_CALL_RECOVERY_HEADROOM_BYTES[family]
+    )
+
+
+@pytest.mark.parametrize("family", [FileCallFamily.DOWNLOAD, FileCallFamily.UPLOAD])
+def test_host_children_completion_and_debt_updates_stay_version_seven(family: FileCallFamily) -> None:
+    initial = replace(_obligation(family), target=_HOST)
+    if family is FileCallFamily.DOWNLOAD:
+        initial = replace(initial, download_child=DownloadChildAssociation(b"d" * 16, 4095))
+        complete = replace(initial, download_child_complete=True)
+    else:
+        initial = replace(initial, upload_child=UploadChildAssociation(b"u" * 16, 4095))
+        complete = replace(initial, scratch_reference=_reference(family), upload_child_complete=True)
+    debt = _maximum_recovery_obligation(family, initial=initial)
+    for call in (initial, complete, debt):
+        assert call.payload_version == 7
+        assert decode_file_call_obligation(encode_file_call_obligation(call)) == call
+
+
+@pytest.mark.parametrize("version", range(1, 7))
+def test_host_target_cannot_be_relabelled_as_a_vm_format(version: int) -> None:
+    value = json.loads(encode_file_call_obligation(replace(_obligation(FileCallFamily.STAT), target=_HOST)))
+    value["version"] = version
+    with pytest.raises(FileCallObligationCodecError):
+        decode_file_call_obligation(json.dumps(value, separators=(",", ":"), sort_keys=True).encode())
+
+
+@pytest.mark.parametrize("field", ["bootstrap", "guest", "effect_gate", "gate_setup", "boot_id", "incarnation"])
+def test_host_format_rejects_mixed_guest_fields(field: str) -> None:
+    value = json.loads(encode_file_call_obligation(replace(_obligation(FileCallFamily.STAT), target=_HOST)))
+    value[field] = {}
+    with pytest.raises(FileCallObligationCodecError):
+        decode_file_call_obligation(json.dumps(value, separators=(",", ":"), sort_keys=True).encode())
+
+
+def test_host_format_rejects_vm_targets_vm_scopes_and_incomplete_child_pairs() -> None:
+    baseline = _obligation(FileCallFamily.UPLOAD)
+    value = json.loads(encode_file_call_obligation(baseline))
+    value["version"] = 7
+    with pytest.raises(FileCallObligationCodecError):
+        decode_file_call_obligation(json.dumps(value, separators=(",", ":"), sort_keys=True).encode())
+    with pytest.raises(FileCallObligationCodecError):
+        replace(baseline, target=OperationScope(OperationResourceKind.VM, "fixture-vm"))
+    host = json.loads(encode_file_call_obligation(replace(baseline, target=_HOST)))
+    for changes in (
+        {"target": {"kind": "vm", "name": "fixture-host"}},
+        {"target": {"kind": "platform-host", "name": "fixture-host", "boot_id": "invented"}},
+        {"upload_child_complete": False},
+        {"upload_child": {"transfer_id": "a" * 32, "member_ordinal": 0}},
+    ):
+        with pytest.raises(FileCallObligationCodecError):
+            decode_file_call_obligation(json.dumps(host | changes, separators=(",", ":"), sort_keys=True).encode())
+
+
+def test_host_scope_cannot_inherit_valid_guest_bootstrap_or_gate_objects() -> None:
+    from tests.execution.test_numeric_file_obligation import _numeric
+
+    for call in (_numeric(FileCallFamily.DOWNLOAD), _setup_download(), _maximum_bound_download(_setup_download())):
+        with pytest.raises(FileCallObligationCodecError):
+            replace(call, target=_HOST)
+
+
+@pytest.mark.parametrize("family", list(FileCallFamily))
+def test_host_admission_preserves_exact_bounded_recovery_envelope(family: FileCallFamily) -> None:
+    baseline = replace(_obligation(family), target=_HOST, root="/", relative_path="a")
+    growth = _FILE_CALL_RECOVERY_HEADROOM_BYTES[family]
+    padding = MAX_LIFECYCLE_PAYLOAD_BYTES - growth - len(encode_file_call_obligation(baseline))
+    admitted = replace(baseline, root="/" + "a" * (padding - 4095), relative_path="a" * 4096)
+    retained = _maximum_recovery_obligation(family, initial=admitted)
+    assert len(encode_file_call_admission(admitted)) == MAX_LIFECYCLE_PAYLOAD_BYTES - growth
+    assert len(encode_file_call_obligation(retained)) == MAX_LIFECYCLE_PAYLOAD_BYTES
+    with pytest.raises(FileCallObligationCodecError):
+        encode_file_call_admission(replace(admitted, root=admitted.root + "a"))
+    with pytest.raises(FileCallObligationCodecError):
+        encode_file_call_obligation(replace(retained, root=retained.root + "a"))
 
 
 def test_guest_gate_path_uses_posix_normalization_on_any_controller_os() -> None:
@@ -538,6 +631,7 @@ def _setup_download() -> FileCallObligation:
         relative_path="na\u00efve/file",
         identity_plan=plan,
     )
+    assert isinstance(initial.target, ManagedTargetIdentity)
     return replace(initial, gate_setup=FileEffectGateSetup.for_target(initial.target, maximum_uid, guest))
 
 
@@ -551,6 +645,7 @@ def test_package_gate_setup_requires_first_member() -> None:
 def _maximum_bound_download(setup: FileCallObligation) -> FileCallObligation:
     descriptor = setup.gate_setup
     assert descriptor is not None
+    assert isinstance(setup.target, ManagedTargetIdentity)
     binding = FileEffectGateBinding(
         descriptor.path,
         b"\0" * 16,
@@ -633,6 +728,7 @@ def test_gate_setup_decoder_refuses_unrecognized_or_replaced_identity() -> None:
 
 def test_download_gate_setup_and_binding_require_matching_guest_boot() -> None:
     setup = _setup_download()
+    assert isinstance(setup.target, ManagedTargetIdentity)
     assert setup.target.boot_id != _TARGET.boot_id
     bound = _maximum_bound_download(setup)
     for call in (setup, bound):

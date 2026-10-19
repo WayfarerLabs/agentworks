@@ -45,10 +45,13 @@ def bundles(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def held(tmp_path: Path) -> Iterator[HeldUpload]:
+def held(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[HeldUpload]:
     db = Database(tmp_path / "state.db")
-    owner = OperationOwner.acquire(db.operations, OperationScope(OperationResourceKind.VM, "child-vm"), "child-copy")
-    operation = FileOperation(owner, target_for_owner(owner))
+    kind = getattr(request, "param", OperationResourceKind.VM)
+    name = "child-vm" if kind is OperationResourceKind.VM else "child-host"
+    owner = OperationOwner.acquire(db.operations, OperationScope(kind, name), "child-copy")
+    target = owner.ownership.scope if kind is OperationResourceKind.PLATFORM_HOST else target_for_owner(owner)
+    operation = FileOperation(owner, target)
     root = tmp_path / "approved"
     root.mkdir()
     gid = os.getegid()
@@ -87,6 +90,7 @@ def upload(
     )
 
 
+@pytest.mark.parametrize("held", list(OperationResourceKind), indirect=True)
 def test_success_closes_original_admission_without_history(held, monkeypatch):
     db, owner, operation, root, _ = held
     carrier = ObligationInspectingCarrier(db, owner)
@@ -96,7 +100,10 @@ def test_success_closes_original_admission_without_history(held, monkeypatch):
     def closing(borrow):
         (row,) = owner.list_pending_lifecycle_obligations()
         observed.append(row)
-        assert row.payload_version == 1 and row.payload_revision == 0
+        assert row.payload_version == (
+            7 if owner.ownership.scope.resource_kind is OperationResourceKind.PLATFORM_HOST else 1
+        )
+        assert row.payload_revision == 0
         assert decode_file_call_obligation(row.payload).upload_child is None
         close(borrow)
 
@@ -118,6 +125,7 @@ def test_success_closes_original_admission_without_history(held, monkeypatch):
     [(True, fault) for fault in ["lost", "unconfirmed", "control", "committed-control", "close", "closed", "retention"]]
     + [(False, "close"), (False, "closed")],
 )
+@pytest.mark.parametrize("held", list(OperationResourceKind), indirect=True)
 def test_exact_bookkeeping_retry_without_helper_or_source_replay(held, monkeypatch, fault, debt):
     db, owner, operation, root, _ = held
     carrier = ObligationInspectingCarrier(db, owner)
@@ -181,7 +189,10 @@ def test_exact_bookkeeping_retry_without_helper_or_source_replay(held, monkeypat
     assert not operation.active_uploads
     assert len(operation.unfinished_uploads) == int(debt)
     row = obligation_receipt(owner, next(iter(carrier.receipt_ids)))
-    assert row.payload_revision == int(debt) and row.payload_version == 1
+    assert row.payload_revision == int(debt)
+    assert row.payload_version == (
+        7 if owner.ownership.scope.resource_kind is OperationResourceKind.PLATFORM_HOST else 1
+    )
     record = decode_file_call_obligation(row.payload)
     assert record.upload_child is None
     if debt:
@@ -254,6 +265,7 @@ def test_invalid_path_refuses_before_admission_and_source_read(held, path):
 
 
 @pytest.mark.parametrize("committed", [False, True])
+@pytest.mark.parametrize("held", list(OperationResourceKind), indirect=True)
 def test_original_control_survives_debt_publication_interruption(held, monkeypatch, committed):
     from agentworks.execution._file_upload import FileUploadControlFact
 
