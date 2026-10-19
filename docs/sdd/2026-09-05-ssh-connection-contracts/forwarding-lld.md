@@ -166,6 +166,10 @@ Installed-client tests must demonstrate actual forwarding and failure, not only 
 Windows and macOS need their own handle/lifetime evidence. Destination failure after readiness is
 reported honestly without retroactively claiming setup failed.
 
+[Current Linux component observations](phase2-transport-results.md#native-linux-caller-held-forwarding)
+record the eight original installed-client cases through caller-held custody. Native pending/control
+faults, other supported platforms and full production acceptance remain open.
+
 Source grounding:
 [OpenSSH 8.5 forwarding setup](https://github.com/openssh/openssh-portable/blob/V_8_5_P1/ssh.c),
 [listener creation](https://github.com/openssh/openssh-portable/blob/V_8_5_P1/channels.c), and

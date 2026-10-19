@@ -4,9 +4,10 @@
 - PR: [#832](https://github.com/WayfarerLabs/agentworks/pull/832), draft
 - Main/contract base: `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (#830)
 - State: the input corrections are integrated; the latest private transport composition passes the
-  full local suite. Twelve Linux native trust/authentication cases and eight external CLI commands
-  add scoped evidence. A causal terminal-custody fixture correction passes private review and local
-  gates after a hosted timing failure. Full terminal and production acceptance remain open
+  full local suite. Twelve Linux native trust/authentication cases, eight current caller-held
+  forwarding cases and eight external CLI commands add scoped evidence. A causal terminal-custody
+  fixture correction passes private review and local gates after a hosted timing failure. Full
+  terminal and production acceptance remain open
 
 Earlier checkpoint evidence and dependency history live in separate files. The headings below retain
 existing plan links; the linked sections preserve the complete original records. Historical round 1

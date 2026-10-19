@@ -121,3 +121,42 @@ The originating Windows Python 3.13 job subsequently passes 2,182 tests with 80 
 warnings in 1,530.27 seconds at that same `1cfdd832`/`fc7851504` source/merge. This does not resolve
 the earlier `a920eceb` budget-gap cause. The run retains its Linux 3.12 failure; fresh hosted
 verification of the causal correction remains separate.
+
+## Native Linux caller-held forwarding
+
+All eight original installed-forwarding cases pass once at public
+`33b6a4129620ca274b4457f3125d92b48dff22aa`, using Linux arm64, Python 3.12.13 and OpenSSH client
+9.2p1/server 9.2. This supplies current caller-held component observations after the earlier native
+proof at `8c3c4e5b`; it does not transfer old evidence to a new source or accept the whole
+forwarding fault matrix. Original bodies, fixtures, operands, assertions and five-second operation
+deadlines remain unchanged.
+
+The cases transfer exact binary bytes, refuse occupied first and second listener orderings,
+distinguish readiness from destination health, refuse IPv6/IPv4 partial success and preserve
+trust/identity/forced-command refusal with listener release. IPv6 runs without a skip. Every case
+admits and retains the same caller-held native session owner through settlement; none measures
+before-owner refusal. Readiness is observed only for binary transfer and destination-health cases.
+Expected failure statuses are 255 or one; successful held-session final status minus nine records
+explicit cleanup, never natural application completion zero.
+
+Each fresh owned loopback server has effective PAM/user-SSH-RC refusal, a positively checked owned
+shell-startup guard and a separate startup trust pin. All sixteen private keys are measured `0600`
+without a permission overlay. Actual checkout origins are positively gated before effects, six
+retired execution roots are unavailable, and original fixture/helper hashes match public source. The
+fully read signed report has SHA256
+`2ae7a5b5a3179bb9c424e4e03edbfb106f20771a7dec169d5c33d44c9ade5b81`; its original aggregate is
+`813989b79237384567939874353b2b388fb18be3b20c98b286935137fbd1903d`. The reviewed runner is
+`dc3a97685af78f9c1014d02c9bb5a6dcbfa7e59b5af623e069308fc9c3891ecc`.
+
+All eight original coordinator and delivery closes settle before server teardown. Fifty-six direct
+original process handles have known statuses, closed pipes and independent same-execution `ECHILD`
+observations. Nineteen independent endpoint rebinds cover all requested forwarding endpoints and
+owned server ports. The lead checks every individual receipt against the aggregate, source hashes
+and original child records, then independently confirms all eight exact disposable paths absent. No
+retry or unexpected failure occurs; no source or operator state changes.
+
+Cleanup is immediately positive in every case. Native pending construction, interrupted or failed
+cleanup, concurrent close and retry faults remain unmeasured, as do server-internal descendants.
+These Linux fixture observations supply neither other supported clients/platforms nor genuine
+provider/RunContext/writer integration. Full R1-R5, terminal activation and retirement gates remain
+open.
