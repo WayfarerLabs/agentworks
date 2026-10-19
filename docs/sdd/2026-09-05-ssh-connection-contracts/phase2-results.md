@@ -3,12 +3,14 @@
 - Updated: 2026-10-19
 - PR: [#832](https://github.com/WayfarerLabs/agentworks/pull/832), draft
 - Main/contract base: `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (#830)
-- State: transport's finite DIRECT capture and ordinary host-file increment is privately composed;
-  all three source reviews have no material findings and the full local suite passes 22,085 tests.
-  Twelve Linux native trust/authentication cases, eight caller-held forwarding cases, two controlled
-  forwarding lifetime probes and eight external CLI commands add scoped evidence. A causal
-  terminal-custody fixture correction passes private review and local gates after a hosted timing
-  failure. Full terminal and production acceptance remain open
+- State: transport's ordinary host context and completed-file bookkeeping correction are privately
+  composed at `b595937509014eb1e91f631761c98d9f96e384c5`, incorporating owner `d9cc9d882`. Fresh
+  integration reviews and gates are pending. The earlier capture/host-file composition passed 22,085
+  local tests; its hosted Windows managed-start failure remains unattributed. Twelve Linux native
+  trust/authentication cases, eight caller-held forwarding cases, two controlled forwarding lifetime
+  probes and eight external CLI commands add scoped evidence. A causal terminal-custody fixture
+  correction passes private review and local gates after a hosted timing failure. Full terminal and
+  production acceptance remain open
 
 Earlier checkpoint evidence and dependency history live in separate files. The headings below retain
 existing plan links; the linked sections preserve the complete original records. Historical round 1

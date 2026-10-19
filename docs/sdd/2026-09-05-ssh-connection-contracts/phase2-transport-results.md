@@ -3,8 +3,70 @@
 Historical and current integration observations are scoped to their exact source pins. This record
 does not replace the SSH plan, shared transport contracts or full implementation acceptance.
 
-The first section preserves the previous record verbatim. Later observations supersede only the
-gates they actually measure.
+Earlier records retain their original observations. New entries supersede only the gates they
+actually measure.
+
+## Ordinary host context and completed-file bookkeeping
+
+Private runtime/test composition `b595937509014eb1e91f631761c98d9f96e384c5` incorporates published
+transport `d9cc9d88243f57417443e64fa80f8dfe306edfb2`, including its preceding host-context increment
+`1eed4f5c7`. Production CLI and the complete transport SDD match the owner. Only the three prior SSH
+fixtures differ in CLI files; no shared carrier or SSH public delivery-mode change is made. Fresh
+integration reviews and local/hosted gates are pending at this checkpoint.
+
+The private ordinary platform-host context claims its explicit PLATFORM_HOST scope before actual
+account discovery. It composes existing command/file views with selected accounts, elevation,
+runtime, trusted root and deadline, preserving incoming RunContext views. Retained partial
+construction and original control carry same-process cleanup authority. It does not enable
+configured host adoption, Remote Lima, host MANAGED execution or automatic host recovery.
+
+Host and VM closeout now settle completed file bookkeeping before resolving dependent execution
+lifetime debt, after actual helper/delivery closure. The retry uses each original captured outcome
+and borrow. Missing outcomes, uncertain effects, outstanding attempts and JSON publication debt
+remain held. It neither recaptures outcomes nor republishes debt, replays helpers, reruns transforms
+or repeats file mutations. An already-committed borrow release can complete teardown while
+preserving the original exception and cause. The owner also removes the optional test-only capture
+decoder identified by the preceding complexity review; production encoding and exact retained
+payload comparison remain.
+
+The original Windows run at owner `1eed4f5c7`, CI merge `7d3001a258f019ae18ecf90b9e5d30281a51be4a`,
+reports 2,195 passes, 80 skips, 25 warnings and four collection errors in 1,137.63 seconds.
+Linux-only fixture globals construct a Linux runtime from a Windows interpreter path before the skip
+marker applies. Production POSIX-path validation correctly refuses. The correction moves runtime and
+Unix identity discovery into Linux-only execution; fresh hosted Windows collection must
+independently verify it.
+
+That failure is distinct from SSH `d6268311`, CI merge `9c7020c10b25ad43258ff393f43f7cd8b1ea8887`
+into owner `ff19ce4e0`: its Windows run reports one failure, 2,194 passes, 80 skips and 25 warnings
+in 1,270.04 seconds. The first managed start in
+`test_all_keeper_drains_attempted_before_any_guarded_finish[True]` fails before the intended cleanup
+assertions. The retained log does not expose which clean-start predicate failed. The independent
+source/log diagnostic confirms that fixture setup precedes the fresh five-second start budget and
+that cached bundle-prefix access does not rebuild bundles. Its exact cause remains unattributed; the
+separate green owner run does not refute it. Original logs and the complete signed diagnostic are
+[preserved publicly](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6276864836).
+
+An owned Linux SSH host-context probe is prepared but explicitly disabled. It uses the actual
+returned RunContext target, ordinary account/runtime preparation, one DIRECT command, stat and a
+bounded snapshot read. Four synthetic environment fields cover issue #845's percent-encoded JSON,
+literal percent tokens, quotes, backslashes, Unicode, multiline controls and an empty value. The
+same command echoes exact framed values plus 512 binary input bytes, for 794 planned stdout bytes
+under the unchanged 4,096-byte limit. This is source/data preparation, not a native result or the
+full fourteen-case/client/platform matrix.
+
+The reviewed driver has SHA256 `cf2636e1598ec1461c741dcb904ca490e654ef8e8ff652e9f9ad4e37d25a43f4`;
+its complete signed effect map is
+`1b91ed4640fafc64ed6c945b55ae5af60e7c62ba039a673d68e805e865c41781`. Root fully reads the original
+driver/map and exact environment-only refinement, compiles without invocation and independently
+checks synthetic framing. Earlier reviewed versions remain byte-identical in retained evidence. The
+real NSS/process-group mismatch may cause a correct helper refusal on this bed; no identity
+override, fallback or acceptance claim follows. A corrected source pin, quality clearance and final
+driver admission remain prerequisites. No native/helper/database effects have occurred.
+
+All completed SSH plan blocks and the migration/retirement sequence remain unchanged. Genuine
+creation/trust publication, writer coexistence/rollback, configured factories, both usable
+RunContext paths, terminal activation and R1-R5 acceptance remain open. This private composition
+starts no new feedback round, ready/review-requested signal, SDD lock or retirement step.
 
 ## Finite DIRECT capture and ordinary host-file composition
 

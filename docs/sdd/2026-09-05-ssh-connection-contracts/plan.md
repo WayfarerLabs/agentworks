@@ -1,6 +1,6 @@
 # Independent SSH Carrier: Staged Delivery Plan
 
-- Updated: 2026-10-18
+- Updated: 2026-10-19
 - Requirements: [frd.md](frd.md)
 - Architecture: [hla.md](hla.md)
 - Shared contract:
@@ -226,18 +226,22 @@ proves that restoring old TOML does not discard current managed policy, revocati
 partial-update custody. Production writer coexistence and rollback through both usable RunContext
 paths still require transport composition and native acceptance.
 
-Current public shared dependency: transport #833 at `ff19ce4e05616bddf4cce8a04eaba65451c15dac`,
-incorporated into evaluated SSH runtime/test composition `48c5a9e643246364c4fcd9a8d382d3e66249981a`.
-Production CLI source and the transport SDD match the owner head; the extra CLI changes are the
-reviewed SSH drain, generated-key permission and causal terminal-custody fixtures. This increment
-adds finite Linux VM DIRECT capture and ordinary host-file binding; all three source reviews have no
-material findings. The complete local run passes 22,085 tests with 78 skips; canonical and website
-gates pass. These bounded results do not accept unfinished terminal, host composition,
-platform/FileAccess or RunContext work. The latest full native SSH testing pin remains
-`1fcabfe6082ab23b1e04eeac115e842f541eee95`; subsequent private Linux terminal component and
-trust/authentication fixture observations are separately scoped in the progress and trust workflow
-records. The [dependency chronology](phase2-results.md#historical-dependency-chronology) retains
-earlier pins, measurements and limits without changing completed plan records or the
+The current private composition `b595937509014eb1e91f631761c98d9f96e384c5` incorporates transport
+#833 at `d9cc9d88243f57417443e64fa80f8dfe306edfb2`. Production CLI and the transport SDD match that
+owner; only the reviewed SSH drain, generated-key permission and causal terminal-custody fixtures
+differ in CLI files. This increment adds the private ordinary host context, completed-file
+bookkeeping retry and Linux-only fixture collection correction. Fresh integration reviews and gates
+are pending. Earlier composition `48c5a9e6` passed 22,085 local tests and canonical/website gates;
+its later hosted Windows managed-start failure remains unattributed. The newer owner fixture's
+collection correction requires its own hosted Windows result. No inherited green result accepts this
+new pin, unfinished terminal, configured host adoption, platform/FileAccess or RunContext work. The
+[current composition record](phase2-transport-results.md#ordinary-host-context-and-completed-file-bookkeeping)
+keeps those boundaries and the preparation-only native probe explicit. The latest full native SSH
+testing pin remains `1fcabfe6082ab23b1e04eeac115e842f541eee95`; subsequent private Linux terminal
+component and trust/authentication fixture observations are separately scoped in the progress and
+trust workflow records. The
+[dependency chronology](phase2-results.md#historical-dependency-chronology) retains earlier pins,
+measurements and limits without changing completed plan records or the
 [coordinated final stack](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6032839010).
 
 The [round 3 record](phase2-results.md#round-3-collected-feedback-and-corrections) preserves its
