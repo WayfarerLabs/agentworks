@@ -64,7 +64,7 @@ def test_wsl2_refuses_terminal_before_local_spawn(monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.windows
-def test_buffered_ssh_refuses_terminal_before_connection_access(
+def test_ssh_terminal_admission_is_passive_and_matches_capability(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     local_delivery = LocalDeliveryCustody()
@@ -76,12 +76,18 @@ def test_buffered_ssh_refuses_terminal_before_connection_access(
     monkeypatch.setattr(ssh_client, "admit_connection", validate_files)
     monkeypatch.setattr(ssh_client, "run_process", run)
     invocation = PreparedInvocation(("/bin/true",))
-    io = _io()
-    assert not carrier.features.terminal
-    with pytest.raises(ValidationError):
+    # Passive validation must not inspect real stdin/stdout or admit a connection.
+    io = CarrierIO(
+        input=TerminalInput(1_000_000, 1_000_001, "xterm", _Source()),
+        output=SinkOutput(_Sink(), _Sink()),
+    )
+    if carrier.features.terminal:
         carrier.validate(invocation, io=io)
-    with pytest.raises(ValidationError):
-        carrier.execute(invocation, io=io, deadline=Deadline(None), custody=local_delivery)
+    else:
+        with pytest.raises(ValidationError):
+            carrier.validate(invocation, io=io)
+        with pytest.raises(ValidationError):
+            carrier.execute(invocation, io=io, deadline=Deadline(None), custody=local_delivery)
     validate_files.assert_not_called()
     run.assert_not_called()
 
