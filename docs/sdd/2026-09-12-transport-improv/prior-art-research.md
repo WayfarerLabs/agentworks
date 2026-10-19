@@ -1098,6 +1098,28 @@ Sources:
 [PVE 9 info permission](https://github.com/proxmox/qemu-server/blob/80e0590e144359fd136a2ba1e3f44716bfc535b0/src/PVE/API2/Qemu/Agent.pm#L25-L37),
 [PVE 9 permission alternatives and envelope](https://github.com/proxmox/qemu-server/blob/80e0590e144359fd136a2ba1e3f44716bfc535b0/src/PVE/API2/Qemu/Agent.pm#L170-L240).
 
+### Proxmox clone association and incomplete configuration
+
+The October 19 audit reads the same PVE 8/9 source pins above. Clone receipts name the `qmclone`
+worker's **source** VMID, not the destination `newid`. Clone accepts a description and regenerates
+the SMBIOS UUID; it regenerates `vmgenid` only when the template already has that option.
+Intermediate disk-copy configuration includes the new description and UUID before the clone lock is
+removed. Their presence alone therefore proves neither task completion nor safe rollback.
+
+Decision for the first new creation slice: bind the exact submitted destination to its returned
+source-scoped receipt, require successful terminal task evidence, then validate fresh destination
+configuration and the core instance marker supplied as its description. Keep clone association
+separate from the existing `vmgenid` provider locator and prepared guest identity. A missing receipt
+remains uncertain; VMID, display name or description alone cannot authorize adoption or deletion.
+This is a source-grounded implementation candidate, not completed creation, process-loss recovery or
+native acceptance.
+
+Sources:
+[PVE 8 clone inputs and worker](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/API2/Qemu.pm#L4210-L4622),
+[PVE 9 clone inputs and worker](https://github.com/proxmox/qemu-server/blob/80e0590e144359fd136a2ba1e3f44716bfc535b0/src/PVE/API2/Qemu.pm#L4340-L4761).
+The pinned files were read through the official Proxmox Git service; these commit links identify the
+same upstream sources. Native API/task behavior on both majors remains a required gate.
+
 ### Decisions still required
 
 The new-guest package and preinstalled macOS host runtime choices are settled, but their

@@ -5972,6 +5972,14 @@ the corrected test through malformed disposal and closing/takeover checks. Asser
 fixtures and production deadlines are unchanged. This proves fixture sensitivity, not the exact
 cause of the published Windows scheduling delay; fresh hosted verification remains required.
 
+Hosted follow-up at `1936202d1` completes that verification in
+[CI run 39329774986](https://github.com/WayfarerLabs/agentworks/actions/runs/39329774986): Linux
+Python 3.12, 3.13 and 3.14 each pass 21,979 tests with 310 skips; Windows Python 3.13 passes 2,195
+with 80 skips. Static/website checks, the aggregate gate and the separate CodeQL run pass. The
+preceding `224aca065` run passes Windows but fails Linux on the newly added Lima access field's
+stale reference expectation, corrected at `1936202d1`; both results remain attributed to their
+actual sources. This closes neither native platform acceptance nor complete additive delivery.
+
 - [x] Complete and privately review paired native admin/agent preparation using an explicit
       core-selected agent row on the same VM. Reuse one file operation, execution operation, numeric
       guest bootstrap, carrier, owner and deadline; retain both account preparations and publish no
@@ -6022,6 +6030,28 @@ ownership are unchanged, so the broader additive RunContext and migration gates 
       without accepting legacy verification bypass. Existing private implementation checkpoints do
       not supply native evidence. Other platforms, provisioning-result integration and complete
       target identity composition remain part of the required gate above.
+- [ ] Implement the
+      [new-only creation entry and retained platform adapter](migration-strategy.md#new-only-creation-composition-2026-10-19)
+      first through a complete Proxmox vertical slice. Acquire the original exact VM owner before
+      provider dispatch, retain creation intent and actual delivery, establish public prerequisites
+      before Python helpers, and return only independent binding/opaque metadata. Reuse target
+      preparation without reacquiring ownership. Keep legacy create/result/callers unchanged and
+      prove the new path with retirement roots unavailable before registration.
+- [ ] Complete the creation acceptance and failure windows through the new RunContext: secret stdin
+      delivery, release attestation, canonical SSH preparation for Phase B and initialization,
+      gap-free availability and exact platform-bootstrap rollback versus subsequent failed-VM
+      retention. Preserve original control, uncertain effects, durable addressability and aggregate
+      closeout across both native and canonical routes without a second claim or premature owner
+      finalization. Prove metadata-publication failure and interruption on both sides of the
+      explicit platform-bootstrap rollback boundary; do not treat a successful leaf as
+      whole-workflow completion. For lost Proxmox clone replies, prove a concrete provider
+      association or retain uncertainty; a candidate VMID or display name cannot authorize adoption
+      or deletion.
+- [ ] Apply that complete creation path to WSL2, local Lima, configured SSH placement-host Lima,
+      AWS, Azure and GCP using platform-owned facts and existing shared custody. Establish WSL2
+      Python in the early package stage. Obtain native create/bootstrap/body/rollback and
+      operation-length availability evidence for each supported platform. New result fields or
+      existing-VM resolver tests alone do not close this gate.
 - [ ] Expose native binding resolution as an explicit preparation operation with a deadline, before
       passive target/RunContext construction. The remaining-platform inventory shows that cloud
       public-IP resolution requires provider reads; do not force stale metadata or hide those reads
