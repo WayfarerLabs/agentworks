@@ -142,25 +142,6 @@ def encode_clone_intent(intent: CloneIntent) -> bytes:
     return encoded
 
 
-def decode_clone_intent(data: bytes) -> CloneIntent:
-    """Reject corrupt or foreign persisted intent; this does not resume a clone."""
-    if type(data) is not bytes or len(data) > MAX_LIFECYCLE_PAYLOAD_BYTES:
-        raise ValidationError("Proxmox clone intent is invalid")
-    try:
-        value = json.loads(data.decode("ascii"))
-        if type(value) is not dict or type(value.pop("version")) is not int:
-            raise ValueError("invalid envelope")
-        request = value.pop("request")
-        if type(request) is not dict or request.pop("full") != 1:
-            raise ValueError("invalid clone request")
-        intent = CloneIntent(request=ProxmoxCloneRequest(**request), **value)
-        if encode_clone_intent(intent) != data:
-            raise ValueError("noncanonical intent")
-        return intent
-    except (KeyError, ValueError, TypeError, RecursionError, ValidationError):
-        raise ValidationError("Proxmox clone intent is invalid") from None
-
-
 def _task_state(data: dict[str, object], receipt: CloneReceipt) -> str:
     """Accept only exact provider task identity and literal successful completion."""
     base, separator, token = receipt.api_identity.partition("!")
@@ -227,7 +208,6 @@ class ProxmoxClone:
         self._attempted = False
         self._post_entered = False
         self._succeeded = False
-        self._association: CloneAssociation | None = None
 
     @property
     def intent(self) -> CloneIntent:
@@ -239,7 +219,9 @@ class ProxmoxClone:
 
     @property
     def association(self) -> CloneAssociation | None:
-        return self._association
+        intent = self.intent
+        uuid = intent.destination_smbios_uuid
+        return None if uuid is None else CloneAssociation(intent.node, intent.request.newid, uuid)
 
     @staticmethod
     def _remaining(deadline: Deadline) -> float:
@@ -305,7 +287,7 @@ class ProxmoxClone:
         if row.obligation_kind != OBLIGATION_KIND or row.payload_version != PAYLOAD_VERSION:
             raise StateError("Proxmox clone custody conflicts")
         revision = row.payload_revision
-        if not 0 <= revision < len(self._history) or decode_clone_intent(row.payload) != self._history[revision]:
+        if not 0 <= revision < len(self._history) or row.payload != encode_clone_intent(self._history[revision]):
             raise StateError("Proxmox clone custody conflicts")
         self._obligation = LifecycleObligation(self._owner, row)
         if not self._post_entered:
@@ -322,9 +304,11 @@ class ProxmoxClone:
                     payload_version=PAYLOAD_VERSION,
                     payload=encode_clone_intent(self._history[next_revision]),
                 )
-            if self._association is not None and self._custody.settled:
+            if self.association is not None and self._custody.settled:
                 self._obligation.resolve()
-        elif row.state is LifecycleObligationState.RESOLVED and self._association is None:
+        elif row.state is LifecycleObligationState.RESOLVED and (
+            self.association is None or revision != len(self._history) - 1
+        ):
             raise StateError("Proxmox clone custody was prematurely resolved")
 
     def wait(self, deadline: Deadline) -> CloneAssociation:
@@ -348,7 +332,7 @@ class ProxmoxClone:
                     time.sleep(min(0.1, self._remaining(deadline)))
                 else:
                     raise StateError("Proxmox clone task completion is unproved")
-            if self._association is None:
+            if self.association is None:
                 config = self._destination.request_current_config(
                     timeout=self._remaining(deadline), custody=self._custody
                 )
@@ -363,10 +347,11 @@ class ProxmoxClone:
                     or not self._custody.settled
                 ):
                     raise StateError("Proxmox clone destination association is unproved")
-                self._association = CloneAssociation(self.intent.node, self.intent.request.newid, uuid)
                 self._history.append(replace(self.intent, destination_smbios_uuid=uuid))
             self._reconcile_locked()
             self._remaining(deadline)
-            return self._association
+            association = self.association
+            assert association is not None
+            return association
         finally:
             self._lock.release()

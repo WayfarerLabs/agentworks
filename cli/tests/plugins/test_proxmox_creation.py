@@ -16,6 +16,7 @@ from agentworks.db import Database
 from agentworks.db.operations import (
     LifecycleObligation,
     LifecycleObligationState,
+    OperationOwnership,
     OperationRepository,
     OperationResourceKind,
     OperationScope,
@@ -29,7 +30,6 @@ from agentworks.plugins.proxmox._creation import (
     CloneAssociation,
     CloneIntent,
     ProxmoxClone,
-    decode_clone_intent,
     decode_clone_receipt,
     encode_clone_intent,
 )
@@ -84,9 +84,9 @@ def owned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[OwnedClon
             assert request is REQUEST and custody is clone._custody and 0 < timeout <= 5
             row = owner.inspect_lifecycle_obligation(clone.obligation_id)
             assert row is not None and row.state is LifecycleObligationState.POSSIBLE_EFFECT
-            intent = decode_clone_intent(row.payload)
-            assert intent.request.newid == 123 and intent.source_vmid == 9000 and intent.upid is None
-            assert intent.source_smbios_uuid == clone.intent.source_smbios_uuid
+            intent = json.loads(row.payload)
+            assert intent["request"]["newid"] == 123 and intent["source_vmid"] == 9000 and intent["upid"] is None
+            assert intent["source_smbios_uuid"] == clone.intent.source_smbios_uuid
             assert b"secret-sentinel" not in row.payload
             calls.append(("clone", request.newid))
             return UPID
@@ -111,6 +111,86 @@ def _row(owner: OperationOwner, clone: ProxmoxClone) -> LifecycleObligation:
     return row
 
 
+@pytest.mark.parametrize("retained", [False, True])
+def test_interrupted_destination_retention_never_resolves_without_durable_uuid(
+    owned: OwnedClone, monkeypatch: pytest.MonkeyPatch, retained: bool
+) -> None:
+    repository, owner, clone, calls = owned
+    clone.start(Deadline.after(5))
+    primary = KeyboardInterrupt("destination retention interrupted")
+
+    class InterruptedHistory(list[CloneIntent]):
+        armed = True
+
+        def append(self, value: CloneIntent) -> None:
+            if value.destination_smbios_uuid is None or not self.armed:
+                super().append(value)
+                return
+            self.armed = False
+            if retained:
+                super().append(value)
+            raise primary
+
+    clone._history = InterruptedHistory(clone._history)
+    original = repository.resolve_lifecycle_obligation
+    resolution_evidence: list[str | None] = []
+
+    def resolve(ownership: OperationOwnership, obligation_id: str) -> LifecycleObligation:
+        row = repository.inspect_lifecycle_obligation(ownership, obligation_id)
+        assert row is not None
+        uuid: object = json.loads(row.payload)["destination_smbios_uuid"]
+        assert uuid is None or isinstance(uuid, str)
+        resolution_evidence.append(uuid)
+        return original(ownership, obligation_id)
+
+    monkeypatch.setattr(repository, "resolve_lifecycle_obligation", resolve)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        clone.wait(Deadline.after(5))
+    assert caught.value is primary
+    clone.reconcile(Deadline.after(5))
+    row = _row(owner, clone)
+    if retained:
+        assert row.state is LifecycleObligationState.RESOLVED
+        assert json.loads(row.payload)["destination_smbios_uuid"] == DESTINATION_UUID
+    else:
+        assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
+        assert json.loads(row.payload)["destination_smbios_uuid"] is None
+        assert clone.association is None
+    assert clone.wait(Deadline.after(5)) == CloneAssociation("node1", 123, DESTINATION_UUID)
+    assert _row(owner, clone).state is LifecycleObligationState.RESOLVED
+    assert json.loads(_row(owner, clone).payload)["destination_smbios_uuid"] == DESTINATION_UUID
+    assert resolution_evidence == [DESTINATION_UUID]
+    assert calls.count(("clone", 123)) == 1
+
+
+@pytest.mark.parametrize("corruption", [None, {"version": 2}, {"source_vmid": True}, {"unknown": "field"}])
+def test_corrupt_persisted_clone_payload_refuses_reconciliation(
+    owned: OwnedClone, monkeypatch: pytest.MonkeyPatch, corruption: dict[str, object] | None
+) -> None:
+    repository, owner, clone, calls = owned
+    original = repository.publish_lifecycle_obligation_payload
+
+    def corrupt(*args: Any, **kwargs: Any) -> LifecycleObligation:
+        value = json.loads(kwargs["payload"])
+        kwargs["payload"] = json.dumps(
+            {"foreign": True} if corruption is None else {**value, **corruption}, sort_keys=True, separators=(",", ":")
+        ).encode("ascii")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(repository, "publish_lifecycle_obligation_payload", corrupt)
+    clone.start(Deadline.after(5))
+    with pytest.raises(StateError):
+        clone.reconcile(Deadline.after(5))
+    persisted = json.loads(_row(owner, clone).payload)
+    if corruption is None:
+        assert persisted == {"foreign": True}
+    else:
+        assert all(persisted[key] == value for key, value in corruption.items())
+    assert _row(owner, clone).state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert clone.association is None
+    assert calls == [("config", 9000), ("clone", 123)]
+
+
 def test_exact_clone_source_receipt_then_fresh_destination_association(owned: OwnedClone) -> None:
     repository, owner, clone, calls = owned
     assert calls == []
@@ -123,7 +203,7 @@ def test_exact_clone_source_receipt_then_fresh_destination_association(owned: Ow
     assert association == CloneAssociation("node1", 123, DESTINATION_UUID)
     row = _row(owner, clone)
     assert row.state is LifecycleObligationState.RESOLVED and row.payload_revision == 2
-    assert decode_clone_intent(row.payload).destination_smbios_uuid == DESTINATION_UUID
+    assert json.loads(row.payload)["destination_smbios_uuid"] == DESTINATION_UUID
     assert repository.inspect(owner.ownership.scope) is not None
     assert calls == [("config", 9000), ("clone", 123), ("task", UPID), ("config", 123)]
     clone.reconcile(Deadline.after(5))
@@ -384,7 +464,7 @@ def test_late_acknowledgment_is_retained_without_replay(owned: OwnedClone, monke
         clone.start(Deadline.after(5))
     assert clone.intent.upid == UPID
     clone.reconcile(Deadline.after(5))
-    assert decode_clone_intent(_row(owner, clone).payload).upid == UPID
+    assert json.loads(_row(owner, clone).payload)["upid"] == UPID
     assert calls.count(("clone", 123)) == 1
 
 
@@ -405,15 +485,13 @@ def test_template_without_smbios_uuid_still_requires_new_destination_uuid(
     assert clone.wait(Deadline.after(5)).smbios_uuid == DESTINATION_UUID
 
 
-def test_payload_and_receipt_reject_wrong_source_or_noncanonical_persisted_input() -> None:
+def test_payload_encoder_and_receipt_reject_inconsistent_identity() -> None:
     intent = CloneIntent(CONNECTION.api_url, "node1", 9000, CONNECTION.token_id, REQUEST)
-    assert decode_clone_intent(encode_clone_intent(intent)) == intent
+    assert json.loads(encode_clone_intent(intent))["request"]["newid"] == REQUEST.newid
     for upid in (UPID.replace(":9000:", ":123:"), UPID.replace("qmclone", "qmstart"), UPID + "x"):
         with pytest.raises(ValidationError):
             decode_clone_receipt(upid, intent)
-    value = json.loads(encode_clone_intent(intent))
-    for change in ({"version": 2}, {"source_vmid": True}, {"unknown": "field"}):
-        with pytest.raises(ValidationError):
-            decode_clone_intent(json.dumps({**value, **change}).encode())
+    with pytest.raises(ValidationError):
+        encode_clone_intent(replace(intent, source_vmid=True))
     with pytest.raises(ValidationError):
         encode_clone_intent(replace(intent, destination_smbios_uuid=DESTINATION_UUID))
