@@ -6033,7 +6033,8 @@ ownership are unchanged, so the broader additive RunContext and migration gates 
       delivery, release attestation, canonical SSH preparation for Phase B and initialization,
       gap-free availability and exact platform-bootstrap rollback versus subsequent failed-VM
       retention. Preserve original control, uncertain effects, durable addressability and aggregate
-      closeout across both native and canonical routes without a second claim or early finalizer.
+      closeout across both native and canonical routes without a second claim or premature owner
+      finalization.
       Prove metadata-publication failure and interruption on both sides of the explicit
       platform-bootstrap rollback boundary; do not treat a successful leaf as whole-workflow
       completion. For lost Proxmox clone replies, prove a concrete provider association or retain
