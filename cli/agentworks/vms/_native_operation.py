@@ -111,27 +111,7 @@ class _Workflow:
             return True
         files = views.file_operation
         execution = views.execution_operation
-        return not (
-            files.active_downloads
-            or files.unfinished_downloads
-            or files.has_unfinished_local_download_call
-            or files.has_unfinished_local_file_call
-            or files.retained_local_download_stage is not None
-            or files.active_uploads
-            or files.unfinished_uploads
-            or files.active_json_updates
-            or files.unfinished_json_updates
-            or files.active_stats
-            or files.active_inventories
-            or files.active_removals
-            or files.active_metadata
-            or files.unfinished_owned_files
-            or execution.active_inline_calls
-            or execution.unfinished_inline_executions
-            or execution._prepared_stages
-            or execution._captures
-            or any(not run.cleanup_complete for run in execution.managed_runs)
-        )
+        return not (files.has_pending_custody or execution.has_pending_custody)
 
     def close(self, *, cleanup_deadline: Deadline | None = None) -> None:
         """Stop body admission, then release only on aggregate exact settlement."""
