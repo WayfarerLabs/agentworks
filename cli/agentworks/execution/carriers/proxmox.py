@@ -41,7 +41,10 @@ from agentworks.execution.carriers._proxmox_http import (
     _MAX_RESPONSE_BYTES,
     _Endpoint,
     _valid_clone_body,
+    _valid_configuration_body,
     _valid_control_timeout,
+    _valid_digest,
+    _valid_resize_body,
     _valid_task_id,
 )
 from agentworks.execution.carriers._subprocess import run_process
@@ -128,6 +131,39 @@ class ProxmoxCloneRequest:
             raise ValidationError("Proxmox requires an exact public clone request")
 
 
+@dataclass(frozen=True, slots=True, repr=False)
+class ProxmoxConfigurationRequest:
+    """Public creation settings, with fixed boot, agent, CPU and DHCP policy."""
+
+    cores: int
+    memory_mib: int
+    admin_username: str
+    ssh_public_key: str
+    vmgenid: str
+
+    def __post_init__(self) -> None:
+        """Validate public inputs supplied by the creation composition boundary."""
+        if type(self.memory_mib) is not int or self.memory_mib <= 0:
+            raise ValidationError("Proxmox requires positive integer memory")
+        if type(self.ssh_public_key) is not str or not _valid_configuration_body(self.body("0" * 40)):
+            raise ValidationError("Proxmox requires exact public creation configuration")
+
+    def body(self, digest: str) -> dict[str, object]:
+        """Encode only the fixed provider schema, including its fresh digest guard."""
+        return {
+            "cores": self.cores,
+            "memory": str(self.memory_mib),
+            "ciuser": self.admin_username,
+            "sshkeys": urllib.parse.quote(self.ssh_public_key, safe=""),
+            "vmgenid": self.vmgenid,
+            "cpu": "host",
+            "agent": "enabled=1",
+            "boot": "order=scsi0",
+            "ipconfig0": "ip=dhcp",
+            "digest": digest,
+        }
+
+
 class _ResponseBuffer:
     """Private bounded parsing bytes, never carrier output retention."""
 
@@ -206,6 +242,49 @@ class _ProxmoxWire:
         data = self._exchange(_Endpoint.VM_START, "POST", None, custody=custody, body=None, timeout=timeout)
         if not _valid_task_id(data):
             raise _WireFailure("Proxmox returned an invalid start acknowledgment")
+        assert isinstance(data, str)
+        return data
+
+    def request_vm_configure(
+        self,
+        request: ProxmoxConfigurationRequest,
+        *,
+        digest: str,
+        custody: LocalDeliveryCustody,
+        timeout: float,
+    ) -> None:
+        """Apply one stopped-VM configuration, requiring the synchronous null reply."""
+        if type(request) is not ProxmoxConfigurationRequest or not _valid_control_timeout(timeout):
+            raise ValidationError("Proxmox configuration requires a public request and finite timeout")
+        if not _valid_digest(digest):
+            raise ValidationError("Proxmox configuration requires a fresh config digest")
+        body = request.body(digest)
+        data = self._exchange(
+            _Endpoint.VM_CONFIGURE,
+            "PUT",
+            None,
+            custody=custody,
+            body=json.dumps(body, ensure_ascii=True).encode("ascii"),
+            timeout=timeout,
+        )
+        if data is not None:
+            raise _WireFailure("Proxmox returned an invalid configuration acknowledgment")
+
+    def request_vm_resize(self, *, size_gib: int, digest: str, custody: LocalDeliveryCustody, timeout: float) -> str:
+        """Submit one absolute creation-disk resize, without relative increments or retries."""
+        body = {"disk": "scsi0", "size": f"{size_gib}G", "digest": digest}
+        if type(size_gib) is not int or not _valid_resize_body(body) or not _valid_control_timeout(timeout):
+            raise ValidationError("Proxmox resize requires an absolute size, digest and finite timeout")
+        data = self._exchange(
+            _Endpoint.VM_RESIZE,
+            "PUT",
+            None,
+            custody=custody,
+            body=json.dumps(body, ensure_ascii=True).encode("ascii"),
+            timeout=timeout,
+        )
+        if not _valid_task_id(data):
+            raise _WireFailure("Proxmox returned an invalid resize acknowledgment")
         assert isinstance(data, str)
         return data
 
