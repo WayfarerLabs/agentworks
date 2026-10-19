@@ -1,8 +1,24 @@
 # Installed OpenSSH carrier
 
 This internal adapter accepts explicit connection policy and a prepared invocation. It implements
-buffered and live byte delivery plus owned local forwarding. Terminal integration is not implemented
-yet. Production factories and RunContext still use the existing execution stack.
+buffered and live byte delivery plus owned local forwarding. This internal working candidate also
+composes POSIX terminal delivery through `SSHCarrier.execute`. Production factories and RunContext
+still use the existing execution stack.
+
+The internal candidate advertises terminal support on POSIX and routes concrete `TerminalInput`
+through the retained relay after the common validation, trust, client selection and version gates.
+It uses `build_ssh_argv(terminal=True)`, the original deadline and the caller's original custody;
+buffered/live input keeps the pipe adapter and common report reduction. Trusted shared preparation
+owns bootstrap sequencing and output filtering. SSH neither parses readiness nor captures terminal
+bootstrap or delivered output. Invalid terminal handles refuse before command launch; unsupported
+platforms refuse terminal mode during passive validation. POSIX imports remain lazy so Windows byte
+delivery does not load native terminal dependencies.
+
+The POSIX capability enables this internal execution path. Public production composition and
+complete supported-workstation acceptance remain open. Linux and macOS native acceptance, the
+Windows native owner/keyboard/relay implementation and acceptance, and shared presentation
+sanitation remain required before supported public terminal delivery. Windows terminal input is
+currently refused; its implementation remains required.
 
 The selected client must report OpenSSH 8.5 or newer. On native Windows, the version probe also
 requires the `OpenSSH_for_Windows_` family banner. MSYS/Cygwin clients, including Git for Windows'
@@ -15,7 +31,7 @@ The private `_terminal_posix` resource layer admits supplied readable terminal i
 geometry descriptor, allocates its own PTY and restores borrowed input modes after all users stop.
 One retained non-main worker owns acquisition, resize and release; other threads cannot mutate the
 resource. The geometry descriptor may be read-only. It starts no client or relay and does not enable
-terminal delivery.
+terminal delivery by itself.
 
 The private `_terminal_relay` candidate composes the shared `TerminalInput` with that resource and
 `LocalProcessOwner`. One retained worker owns admission, raw mode, the owned stdin PTY, bounded fair
@@ -61,8 +77,8 @@ observation uncertainty; an unsent notification uses fresh process and deadline 
 client exit needs no new geometry and still permits bounded output draining. Claimed notification
 custody remains with the shared owner through settlement before terminal release.
 
-It is not enabled by `SSHCarrier`; real SSH resize, native workstations and transport-owned
-presentation sanitation remain required.
+The private carrier composition reaches this relay; real SSH resize, native workstation acceptance
+and transport-owned presentation sanitation remain required.
 
 The private `_terminal_windows` resource layer translates supplied CRT descriptors to borrowed
 native console handles. It admits readable console input without consuming events and queries the
@@ -198,11 +214,11 @@ uses a fresh resource with the same creation identity and bundle after prior exc
 
 ## Delivery and forwarding
 
-`SSHCarrier.validate` accepts EOF, finite and live byte input without effects, and refuses input
-modes the adapter cannot deliver. Managed-start composition must call it before committing durable
-`possible-dispatch`; transport owns that shared wiring. Connection-file and trust admission,
-installed-client probing and process work stay in `execute`, which also calls the validator before
-those effects.
+`SSHCarrier.validate` accepts EOF, finite and live byte input and, in this internal candidate, POSIX
+terminal input without effects. It refuses input modes the adapter cannot deliver. Managed-start
+composition must call it before committing durable `possible-dispatch`; transport owns that shared
+wiring. Connection-file and trust admission, installed-client probing and process work stay in
+`execute`, which also calls the validator before those effects.
 
 `SSHCarrier.execute` requires caller-held `LocalDeliveryCustody` and dispatches once. The same store
 covers discovery and command delivery. Unsettled storage refuses admission; unfinished discovery

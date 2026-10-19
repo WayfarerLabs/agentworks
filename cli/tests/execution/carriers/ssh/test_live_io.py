@@ -86,11 +86,12 @@ def execute(monkeypatch: pytest.MonkeyPatch, script: str, io: CarrierIO, custody
     monkeypatch.setattr(client, "admit_connection", lambda unused: object())
     monkeypatch.setattr(client, "resolve_client_executable", lambda unused: sys.executable)
     monkeypatch.setattr(client, "check_client_version", lambda unused, *, deadline, custody: None)
-    monkeypatch.setattr(
-        client,
-        "build_ssh_argv",
-        lambda unused, invocation, *, trust, executable: [sys.executable, "-c", script],
-    )
+
+    def build(unused, invocation, *, trust, executable, terminal):
+        assert not terminal
+        return [sys.executable, "-c", script]
+
+    monkeypatch.setattr(client, "build_ssh_argv", build)
     return SSHCarrier(connection).execute(
         PreparedInvocation(("/synthetic/program",)),
         io=io,

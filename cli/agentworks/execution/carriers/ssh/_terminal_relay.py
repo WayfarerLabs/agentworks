@@ -1,7 +1,7 @@
 """Private POSIX terminal relay using the shared held-process owner.
 
-The SSH carrier does not enable this path yet. Local resize notification uses
-the shared process owner; real SSH and native platform acceptance remain open.
+The private POSIX carrier candidate selects this path. Local resize notification
+uses the shared process owner; real SSH and native platform acceptance remain open.
 Readiness interpretation and emulator sanitation remain preparation policy.
 """
 
@@ -555,7 +555,7 @@ def run_terminal_relay_candidate(
     deadline: Deadline,
     custody: LocalDeliveryCustody,
 ) -> ProcessResult:
-    """Exercise private relay custody while the carrier terminal gate remains shut.
+    """Deliver the private POSIX carrier candidate through retained relay custody.
 
     Geometry changes request a bounded notification from the same process owner;
     accepted local SIGWINCH does not prove remote resize. This candidate neither
