@@ -555,17 +555,27 @@ def test_resolution_callback_observes_durable_terminal_facts_without_owner_reent
     owned.bootstrap.start()
 
 
-@pytest.mark.parametrize("fact", ["acknowledgment", "terminal"])
+@pytest.mark.parametrize(
+    ("fact", "corruption"),
+    [("acknowledgment", "payload"), ("terminal", "payload"), ("acknowledgment", "version"), ("terminal", "version")],
+)
 def test_corrupt_persisted_payload_refuses_reconciliation(
     owned: Harness,
     monkeypatch: pytest.MonkeyPatch,
     fact: str,
+    corruption: str,
 ) -> None:
     original = owned.repository.publish_lifecycle_obligation_payload
+    published_payload: bytes | None = None
 
     def corrupt(*args: Any, **kwargs: Any) -> LifecycleObligation:
+        nonlocal published_payload
         if kwargs["expected_revision"] == (0 if fact == "acknowledgment" else 1):
-            kwargs["payload"] = b'{"foreign":true}'
+            published_payload = kwargs["payload"]
+            if corruption == "version":
+                kwargs["payload_version"] = 2
+            else:
+                kwargs["payload"] = b'{"foreign":true}'
         return original(*args, **kwargs)
 
     monkeypatch.setattr(owned.repository, "publish_lifecycle_obligation_payload", corrupt)
@@ -574,7 +584,10 @@ def test_corrupt_persisted_payload_refuses_reconciliation(
     with pytest.raises(StateError):
         owned.bootstrap.reconcile(Deadline.after(1))
     assert owned.calls.count("GET") == int(fact == "terminal")
-    assert owned.row().state is LifecycleObligationState.POSSIBLE_EFFECT
+    row = owned.row()
+    if corruption == "version":
+        assert row.payload_version == 2 and row.payload == published_payload
+    assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
 
 
 @pytest.mark.skipif(not Path("/bin/bash").exists(), reason="requires guest Bash syntax")
