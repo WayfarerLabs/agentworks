@@ -226,7 +226,17 @@ proves that restoring old TOML does not discard current managed policy, revocati
 partial-update custody. Production writer coexistence and rollback through both usable RunContext
 paths still require transport composition and native acceptance.
 
-The current private composition `b595937509014eb1e91f631761c98d9f96e384c5` incorporates
+The current private join `11fcf786a6fbbefe24196cecb2baa62b02b17474` incorporates transport
+`224aca065`: configured SSH host declarations and the isolated disposal fault-fixture clock
+correction. Shared carrier interfaces and public SSH delivery modes are unchanged. Independent
+composition reviews and fresh local gates are pending. The Windows keyboard decision document has
+both private reviews clear but selects no decoder or feature activation. The
+[configured-host record](phase2-transport-results.md#configured-ssh-platform-host-declaration-composition)
+keeps source/validation boundaries explicit. Public `d7048eaf` CI is active with a Website Chromium
+startup failure; it cannot inherit earlier local success. Native host preparation remains disabled,
+and complete factories, RunContext, platform/terminal and R1-R5 acceptance remain open.
+
+The preceding private composition `b595937509014eb1e91f631761c98d9f96e384c5` incorporates
 [transport PR #833](https://github.com/WayfarerLabs/agentworks/pull/833) at
 `d9cc9d88243f57417443e64fa80f8dfe306edfb2`. Production CLI and the transport SDD match that owner;
 only the reviewed SSH drain, generated-key permission and causal terminal-custody fixtures differ in

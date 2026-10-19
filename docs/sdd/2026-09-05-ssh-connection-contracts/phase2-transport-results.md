@@ -6,6 +6,48 @@ does not replace the SSH plan, shared transport contracts or full implementation
 Earlier records retain their original observations. New entries supersede only the gates they
 actually measure.
 
+## Configured SSH platform-host declaration composition
+
+Private join `11fcf786a6fbbefe24196cecb2baa62b02b17474` incorporates transport
+`224aca065eb0ade807ba686b7563bffc4d0f02e7`. Production CLI and the transport SDD match the owner;
+only the three prior SSH fixtures differ in CLI files. Shared carrier interfaces and public SSH
+delivery modes are unchanged. Independent SSH composition reviews and fresh local gates are pending.
+
+The optional complete Lima placement access declaration supplies a literal endpoint, login,
+Linux/Darwin runtime and explicit shared host coordination key. It reuses existing operator SSH
+policy and the ordinary host context. The key coordinates declared resources without proving
+physical identity. Legacy Lima destinations, readiness and production methods remain unchanged;
+declaration presence selects neither a stack nor fallback. Core supplies the required trusted file
+root, preserving existing descendant mount confinement. Actual Remote Lima adoption, provisioning,
+rollback, native SSH/macOS and both usable production RunContext paths remain open.
+
+The owner reports 168 host/file/VM-context cases, 129 disposal/read cases and strict typing across
+1,560 sources, with all three source lanes and both final-document lanes clear. These are attributed
+owner results, not this composition's validation. Its real ordinary local-helper case exercises
+command and file content beneath the selected root with synthetic SSH delivery. The current bed's
+previously observed identity/group mismatch remains a validation constraint, without an override.
+
+The isolated fault-fixture correction at `5978c6d4f` fixes monotonic observation only inside the two
+binding-reinstall cases. Assertions, shared fixtures, markers and production deadlines remain. The
+owner's controlled 5.25-second comparison establishes sensitivity to elapsed fixture time, not the
+exact original hosted delay. Original D9 failures remain in the preceding record below; fresh hosted
+verification of this correction is separate.
+
+Public SSH head `d7048eaf` has active CI run `39327127783`. Its Website Python step already fails
+one of 160 tests during Chromium DevTools endpoint discovery, before page assertions; later
+Node/build steps are not reached. Website/workflow bytes match protected main, without establishing
+the startup failure's cause. The
+[complete original failure](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6277709046)
+is retained. No rerun, timeout change or unrelated website fix is made here. Other jobs remain
+pending at this private checkpoint; earlier local passes do not clear it.
+
+The SSH-owned Windows keyboard decision document at `3ccc0404` has project and complexity reviews
+clear, including the accepted units-versus-bytes clarification. Root fully reads both complete
+reviews, both final-pin attestations and the author's correction/quality evidence. It maps existing
+comparison cells to unresolved choices and preserves required physical-key/relay proof. It selects
+no decoder, production owner or terminal activation. This private batch adds no completed SSH plan
+block, native probe admission, review signal, public feedback round or implementation acceptance.
+
 ## Ordinary host context and completed-file bookkeeping
 
 Private runtime/test composition `b595937509014eb1e91f631761c98d9f96e384c5` incorporates published
