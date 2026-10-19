@@ -319,6 +319,13 @@ class CaptureCleanup:
         self._closing, self._closing_result = None, None
         return True
 
+    def settle_closing_helper(self, deadline: Deadline) -> bool:
+        """Observe only retained closing custody, without starting token cleanup."""
+        if deadline.expires_at is None or deadline.expired:
+            raise ValidationError("Capture cleanup requires a finite live budget")
+        self._check()
+        return self._closing is None or self._settle_closing(deadline, observe=True)
+
     def finish(self, deadline: Deadline) -> bool:
         if deadline.expires_at is None or deadline.expired:
             raise ValidationError("Capture cleanup requires a finite live budget")

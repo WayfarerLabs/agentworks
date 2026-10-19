@@ -53,13 +53,7 @@ def _read(cleanup: CaptureCleanup, fact: CaptureStreamFact, deadline: Deadline) 
         ):
             break
         chunk = observation.chunk
-        if (
-            chunk is None
-            or chunk.offset != offset
-            or chunk.length != length
-            or len(chunk.data) != length
-            or hashlib.sha256(chunk.data).digest() != chunk.chunk_digest
-        ):
+        if chunk is None:
             break
         data.extend(chunk.data)
     verified = len(data) == fact.end.count and hashlib.sha256(data).digest() == fact.ready._digest

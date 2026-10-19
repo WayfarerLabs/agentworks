@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import sys
 from dataclasses import dataclass, replace
@@ -965,6 +966,51 @@ def test_tampered_or_truncated_chunk_transcript_releases_no_bytes(plan: Identity
         assert result_observation.state is FileSnapshotObservationState.UNCERTAIN
         assert result_observation.chunk is None
         assert repr(data) not in repr(result)
+
+
+@pytest.mark.parametrize("fault", ("offset", "length", "count", "digest"))
+def test_chunk_wire_range_and_digest_faults_release_no_typed_bytes(plan: IdentityPlan, fault: str) -> None:
+    data = b"private-binary\x00\xff"
+    ready = _ready(plan, length=len(data), digest=hashlib.sha256(data).digest())
+
+    def transcript(request: FileSnapshotRequest, raw: bytes) -> bytes:
+        assert isinstance(request, FileSnapshotChunkRequest)
+        block = data[:-1] if fault == "count" else data
+        body = json.dumps(
+            {
+                "offset": request.offset + (fault == "offset"),
+                "length": request.length + (fault == "length"),
+                "chunk_sha256": "0" * 64 if fault == "digest" else hashlib.sha256(block).hexdigest(),
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("ascii")
+        return b"".join(
+            encode_file_record(request.nonce, FileRecord(index, kind, payload))
+            for index, (kind, payload) in enumerate(
+                (
+                    (FileRecordKind.DATA, block),
+                    (FileRecordKind.RESULT, body),
+                    (FileRecordKind.FINISHED, empty_file_snapshot_body()),
+                )
+            )
+        )
+
+    carrier = TranscriptCarrier(transcript)
+    result = snapshot_chunk(
+        carrier,
+        token=_TOKEN,
+        ready=ready,
+        offset=0,
+        length=len(data),
+        plan=plan,
+        deadline=Deadline.after(15),
+        runtime_selection=runtime_selection(),
+    )
+    assert carrier.calls == 1 and result.observation is not None
+    assert result.observation.state is FileSnapshotObservationState.UNCERTAIN
+    assert result.observation.error is FileSnapshotObservationError.CONTROL
+    assert result.observation.chunk is None and repr(data) not in repr(result)
 
 
 def test_wrong_response_nonce_and_reflected_request_are_rejected_without_retention(plan: IdentityPlan) -> None:

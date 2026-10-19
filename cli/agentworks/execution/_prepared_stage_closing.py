@@ -126,6 +126,13 @@ class PreparedStageCleanup:
         self._active = None
         return True
 
+    def settle_closing_helper(self, deadline: Deadline) -> bool:
+        """Observe only the retained closing call, without admitting another exchange."""
+        if deadline.expires_at is None or deadline.expired:
+            raise ValidationError("Prepared stage closing requires a finite live deadline")
+        self._check_identity()
+        return self._active is None or self._settle(deadline, observe=True)
+
     def _dispatch(self, deadline: Deadline, *, cleanup: bool) -> bool:
         self._require_cleanup(deadline)
         assert self._active is None

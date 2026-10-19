@@ -384,3 +384,81 @@ def test_mixed_input_and_capture_cleanup_stops_at_pending_first_closing_helper(o
     retained[0].proven = True
     operation.finish_scratch_cleanup(fresh)
     assert not operation._prepared_stages and not operation._captures and carrier.activation_calls == 1
+
+
+@pytest.mark.parametrize("escape", [False, True], ids=["unknown", "control"])
+def test_pending_capture_closure_precedes_earlier_stage_artifact_retry(owned, escape):
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
+    from agentworks.execution.carrier import FiniteInput
+
+    from .test_prepared_stage_closing import ScriptedCarrier
+
+    owner, operation, carrier = owned
+    events: list[tuple[str, Deadline]] = []
+
+    class CaptureDelivery(ClosureDelivery):
+        def __init__(self, base: CaptureCarrier) -> None:
+            super().__init__(base)
+            self.may_close = False
+            self.control: BaseException | None = None
+            self.observed: list[tuple[Deadline, LocalDeliveryCustody]] = []
+
+        def execute(self, invocation, *, io, deadline, custody=None):
+            assert isinstance(io.input, FiniteInput)
+            self.activation = owner._close_requested.is_set() and b'"operation":"snapshot_cleanup"' in io.input.data
+            if self.activation:
+                self.closed = bool(closings)
+                closings.append(self)
+            return self.carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
+
+        def observe_closure(self, *, deadline: Deadline, custody: LocalDeliveryCustody) -> bool:
+            assert custody.settled
+            self.observed.append((deadline, custody))
+            events.append(("capture-observe", deadline))
+            if self.control is not None:
+                raise self.control
+            self.closed = self.may_close
+            return self.closed
+
+    closings: list[CaptureDelivery] = []
+    operation._native_binding = NativeExecutionBinding(
+        carrier, "private", RUNTIME, _new_helper_delivery=lambda expectation: CaptureDelivery(carrier)
+    )
+    carrier.fail_stage_cleanup = carrier.fail_cleanup = True
+    outcome = run(operation, carrier, limit=8192)
+    assert outcome.scratch_cleanup_pending and not operation.scratch_helper_pending
+    (stage_cleanup,), (capture,) = operation._prepared_stages, operation._captures
+    stage = stage_cleanup._stage
+    stage_carrier = ScriptedCarrier(owner)
+    stage_carrier.reference, stage_carrier.body_override = stage.reference, b"{}"
+    stage._carrier, stage._new_helper_delivery = stage_carrier, None
+    stage._before_dispatch = lambda deadline: events.append(("stage", deadline))
+    carrier.fail_stage_cleanup = carrier.fail_cleanup = False
+    owner.stop_admission()
+    operation.finish()
+    with pytest.raises(StateError):
+        operation.finish_scratch_cleanup(Deadline.after(30))
+    held = capture._closing
+    assert held is not None and held.delivery is closings[0] and capture.closing_helper_pending
+    assert not stage_cleanup.helper_pending and not stage.cleaned
+    before = len(stage_carrier.requests), len(carrier.snapshot_requests)
+    retry = Deadline.after(30)
+    cause, control = ValueError("prior cause"), KeyboardInterrupt()
+    control.__cause__ = cause
+    if escape:
+        closings[0].control = control
+        with pytest.raises(KeyboardInterrupt) as caught:
+            operation.finish_scratch_cleanup(retry)
+        assert caught.value is control and control.__cause__ is cause
+    else:
+        with pytest.raises(StateError):
+            operation.finish_scratch_cleanup(retry)
+    assert (len(stage_carrier.requests), len(carrier.snapshot_requests)) == before
+    assert capture._closing is held and closings[0].observed == [(retry, held.custody)]
+    closings[0].control, closings[0].may_close = None, True
+    stage_carrier.body_override = None
+    fresh, event_count = Deadline.after(30), len(events)
+    operation.finish_scratch_cleanup(fresh)
+    assert events[event_count:] == [("capture-observe", fresh), ("stage", fresh)]
+    assert closings[0].observed == [(retry, held.custody), (fresh, held.custody)]
+    assert not operation._prepared_stages and not operation._captures and carrier.activation_calls == 1

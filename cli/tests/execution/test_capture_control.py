@@ -158,8 +158,7 @@ def test_token_only_cleanup_binding_is_canonical_and_excludes_remote_references(
         decode_capture_obligation(payload + b" ")
 
 
-@pytest.mark.parametrize("damage", ["offset", "range_digest", "whole_digest"])
-def test_local_retrieval_checks_range_and_final_digest_without_fabricating_complete(monkeypatch, damage):
+def test_local_retrieval_checks_whole_digest_after_valid_ranges_without_fabricating_complete():
     data = b"a" * 262_144 + b"b" * 5
     remote = fact(data)
     calls: list[int] = []
@@ -172,16 +171,9 @@ def test_local_retrieval_checks_range_and_final_digest_without_fabricating_compl
             offset = 0 if not calls else 262_144
             block = data[offset : offset + 262_144]
             calls.append(offset)
-            digest = hashlib.sha256(block).digest()
             if len(calls) == 2:
-                if damage == "offset":
-                    offset += 1
-                elif damage == "range_digest":
-                    digest = bytes(32)
-                else:
-                    block = b"c" * len(block)
-                    digest = hashlib.sha256(block).digest()
-            chunk = FileSnapshotChunkResult(offset, len(block), block, digest)
+                block = b"c" * len(block)
+            chunk = FileSnapshotChunkResult(offset, len(block), block, hashlib.sha256(block).digest())
             return FileSnapshotCandidateResult(
                 Dispatch.SENT,
                 ExitStatus(0),
@@ -193,8 +185,7 @@ def test_local_retrieval_checks_range_and_final_digest_without_fabricating_compl
 
     output = reader._read(Cleanup(), remote, Deadline.after(30))
     assert output.data.startswith(data[:262_144]) and not output.verified and calls == [0, 262_144]
-    if damage != "whole_digest":
-        assert output.data == data[:262_144]
+    assert len(output.data) == len(data) and output.data != data
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux capture guest")

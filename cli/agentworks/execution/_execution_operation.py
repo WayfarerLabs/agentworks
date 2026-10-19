@@ -1181,6 +1181,13 @@ class ExecutionOperation:
 
     def finish_scratch_cleanup(self, deadline: Deadline) -> None:
         """Drain each exact helper before advancing independent scratch cleanup."""
+        closing_resources: tuple[PreparedStageCleanup | CaptureCleanup, ...] = (
+            *self._prepared_stages,
+            *self._captures,
+        )
+        for closing in closing_resources:
+            if closing.closing_helper_pending and not closing.settle_closing_helper(deadline):
+                raise StateError("Scratch cleanup retains helper custody")
         for cleanup in tuple(self._prepared_stages):
             if cleanup.finish(deadline):
                 self._prepared_stages.remove(cleanup)

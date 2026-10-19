@@ -237,6 +237,39 @@ def test_native_closure_false_then_true_reuses_exact_call_and_fresh_budget(owned
     assert len(deliveries) == 1 and len(delivery.requests) == 1
 
 
+def test_settle_closing_helper_never_dispatches_following_stage_cleanup(owned) -> None:
+    _, owner, carrier = owned
+    prepared = stage(owned)
+    assert prepared.begin()
+    prepared.cleanup_debt = None
+    deliveries: list[NativeDelivery] = []
+
+    def factory(expectation: HelperClosureExpectation) -> NativeDelivery:
+        delivery = NativeDelivery(carrier, expectation)
+        delivery.proven = bool(deliveries)
+        deliveries.append(delivery)
+        return delivery
+
+    prepared._new_helper_delivery = factory
+    cleanup = PreparedStageCleanup(prepared)
+    owner.stop_admission()
+    assert not cleanup.finish(Deadline.after(30))
+    first = deliveries[0]
+    assert isinstance(first.requests[0], FileStageReconcileRequest)
+    for deadline in (Deadline(None), Deadline.after(0)):
+        with pytest.raises(ValidationError):
+            cleanup.settle_closing_helper(deadline)
+    fresh = Deadline.after(30)
+    assert not cleanup.settle_closing_helper(fresh)
+    assert first.observed == [(fresh, first.custody)] and len(deliveries) == 1
+    first.proven = True
+    assert cleanup.settle_closing_helper(fresh)
+    assert not prepared.cleaned and cleanup._active is None and len(deliveries) == 1
+    assert len(first.requests) == 1 and prepared.cleanup_debt is not None
+    assert cleanup.finish(fresh) and prepared.cleaned
+    assert len(deliveries) == 2 and isinstance(deliveries[1].requests[0], FileStageCleanupRequest)
+
+
 def test_lost_cleanup_candidate_retries_removal_only_after_exact_native_closure(owned) -> None:
     _, owner, carrier = owned
     prepared = stage(owned)
