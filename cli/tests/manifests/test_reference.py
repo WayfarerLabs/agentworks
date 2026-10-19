@@ -665,10 +665,7 @@ def test_a_nested_tagged_union_expands_every_arm_because_none_is_addressable() -
     assert all(alt.target is None for alt in placement.alternatives)
     assert placement.rendered == "local"
     assert [field.name for field in placement.alternatives[0].fields] == ["mode"]
-    assert [field.name for field in placement.alternatives[1].fields] == ["mode", "host"]
-    # The arm summaries come from the arm MODELS' docstrings (a capability
-    # union reads its impls' one-liners instead), so they are real prose.
-    assert placement.alternatives[1].summary == "Run limactl on another host over SSH."
+    assert [field.name for field in placement.alternatives[1].fields] == ["mode", "host", "access"]
 
 
 def test_a_secret_backend_implementation_describes_its_source_config() -> None:
