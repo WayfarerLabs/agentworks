@@ -6,6 +6,71 @@ does not replace the SSH plan, shared transport contracts or full implementation
 Earlier records retain their original observations. New entries supersede only the gates they
 actually measure.
 
+## Deferred native terminal fixture uses the actual carrier
+
+Fixture increment `37c7840c28386d7d26e3ba59202318299c5994c5` starts from published SSH
+`62c1e432bea2cf5d925f761722b2af67e1b9ca4e`. Its three changed files are SSH test fixtures and their
+README; production, shared transport, workflows and contracts are unchanged. The existing two
+explicitly selected Linux integration cases now call actual `SSHCarrier.execute` with the original
+prepared invocation, operation deadline and delivery custody. They observe the launched client argv
+independently of terminal selection, require `-tt`, and exclude literal payload canaries. The
+positive guest exits 37; the assertions require SENT, `ExitStatus(code=37)`, local status 37 and no
+failure. Missing runtime must still withhold payload, keys and application entry; a normal selector
+exit is not application execution, and unobserved completion stays UNKNOWN.
+
+The fixture previously deleted its directory even after failure or uncertain guest absence. It now
+retains failed or uncertain directories, including private fixture keys and diagnostics, for
+separately authorized inspection and cleanup. Successful deletion follows the existing positive
+custody, client, descriptor, server and applicable guest checks. No new cleanup owner, signal or
+retry is added. Two controlled entry-failure cases require the original exception identity and
+retained binary evidence while forbidding subprocess and PTY admission. They prove that boundary,
+not late native cleanup or every interruption point.
+
+The developer's own frozen environment passes both controlled cases in 0.05 seconds and collects
+both native cases in 0.04 seconds without executing them. Root independently passes the controlled
+cases in 0.04 seconds and collects the native cases in 0.03 seconds; same-process receipts verify
+all 166 and 164 first-party origins respectively belong to root's composition checkout. Full Ruff,
+formatting of 1,600 files, typing of 1,562 sources and pinned README checks pass. The developer's
+initial empty Markdown-library invocation is invalid coverage; the corrected actual CLI checks one
+file with zero errors. Original failed evidence remains retained.
+
+All three independent source reviews find no material defect, and root fully reads their signed
+reports. Complexity independently passes the two controlled cases, then removes only the retention
+guard in memory: both cases fail at retained-file reads after preserving the original exception. Its
+initial scratch compiler error occurs before pytest and supplies no negative proof; the actual two
+failure traces and corrected driver remain preserved and are read by root.
+
+No native campaign runs in this increment. This bed's earlier owned sshd attempt failed remote PTY
+ownership with GID 5 and error 22 (invalid argument); its current group map still exposes only one
+mapped group. No account, group, namespace, service or permission workaround is attempted. A
+suitable bed and separately authorized startup-isolation/cleanup charter remain necessary.
+Collection and controlled cases do not prove native exit 37, resize, runtime refusal or complete
+lifetime/restoration behavior. macOS, Windows owner/input delivery, shared sanitation, production
+factories, both usable RunContext paths and full R1-R5 acceptance stay open. No completed plan
+block, lock, feedback round or review signal changes.
+
+## Complete hosted result at published POSIX head
+
+[CI run 39333022476](https://github.com/WayfarerLabs/agentworks/actions/runs/39333022476) tests SSH
+`62c1e432` through actual merge `8f87f07b59a5d48cf89c20968974efc589f38f82` into transport
+`284c128d`. Root reads originating checkout, interpreter, command and results for all four Python
+jobs, plus every complete failure trace. Each Linux selection has one failure, 21,994 passes, 310
+skips and 51 warnings: Python 3.12.3 takes 604.96 seconds, 3.13.16 takes 506.80 seconds and 3.14.8
+takes 505.69 seconds. All fail only the previously routed shared
+`test_buffered_ssh_refuses_terminal_before_connection_access` assertion that terminal capability is
+false on POSIX, before connection or native access. The shared fixture remains unchanged by SSH.
+These hosted selections do not explain or waive the 22 local host-fixture failures below.
+
+Windows Server 2025, Python 3.13.16 passes 2,195 cases, skips 80 and reports 25 warnings in 1,482.17
+seconds with the exact `windows and not integration` selection. This is that pin's hosted result,
+not native terminal acceptance or an attribution of earlier managed-start failures. Static Python,
+file quality, locked-SDD and Rulesync jobs pass. Website fails one of 160 Python tests in 92.863
+seconds: Chromium never exposes its DevTools endpoint before page assertions; subsequent Node and
+build steps are not reached. Root reads the complete failure, original command and fixture source;
+website/workflow inputs equal protected main. The cause remains unknown. No retry, timeout change or
+unrelated Website fix is applied. The complete run concludes failure; source reviews and other green
+results do not make it green.
+
 ## Current POSIX terminal leaf composition
 
 Working join `5c15f9fa1939ff542c172e95d0f915769aa440cc` combines transport

@@ -226,6 +226,16 @@ proves that restoring old TOML does not discard current managed policy, revocati
 partial-update custody. Production writer coexistence and rollback through both usable RunContext
 paths still require transport composition and native acceptance.
 
+The deferred native fixture increment at `37c7840c` uses actual `SSHCarrier.execute`, requires guest
+status 37 and retains failed or uncertain evidence. Three independent source lanes find no material
+defect; root independently passes two controlled retention cases and collects both native cases
+without running them. Full style/typing and fixture README checks pass. The
+[fixture evidence record](phase2-transport-results.md#deferred-native-terminal-fixture-uses-the-actual-carrier)
+preserves the native-bed restriction and all remaining full-scope obligations. Public `62c1e432` CI
+finishes red on the shared Linux terminal-capability assertion and Website Chromium startup, with
+Windows passing 2,195 cases and 80 skips. No ready/checkpoint edge, new public round, native
+acceptance or completed plan block follows from this private preparation.
+
 The current working POSIX join `5c15f9fa1939ff542c172e95d0f915769aa440cc` combines the owner's
 manifest-reference correction at `1936202d` with the refreshed eight-file SSH port at `09e6a56f`.
 The internal candidate now advertises POSIX terminal input; this is not supported public delivery or

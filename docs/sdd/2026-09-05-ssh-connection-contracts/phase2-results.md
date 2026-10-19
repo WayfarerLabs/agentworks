@@ -3,16 +3,17 @@
 - Updated: 2026-10-19
 - PR: [#832](https://github.com/WayfarerLabs/agentworks/pull/832), draft
 - Main/contract base: `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (#830)
-- State: working join `5c15f9fa1939ff542c172e95d0f915769aa440cc` combines transport's
-  manifest-reference correction at `1936202d` and the refreshed internal POSIX terminal port at
-  `09e6a56f`. All three source reviews at `24674afe` find no material defect. Its complete local run
-  has 22,206 passes and 23 failures: 22 host-fixture cases and one stale shared terminal-refusal
-  assertion. Original evidence is retained. All fifteen static/website entries pass after correcting
-  a spelling issue and repeating canonical file quality. Native/full implementation acceptance stays
-  open. Public D7048 CI finishes red on Windows managed-foreground startup and Website Chromium
-  startup; neither cause is inferred from source review or other green runs. Complete
-  supported-platform terminal, positive host, factories, both usable RunContext paths and R1-R5
-  acceptance remain open
+- State: published `62c1e432` incorporates transport `284c128d` and the internal POSIX terminal
+  port. Its complete hosted run is red on the shared Linux terminal-capability assertion and Website
+  Chromium startup; Windows passes 2,195 cases with 80 skips. The earlier complete local run has
+  22,206 passes and 23 failures, all retained. Deferred fixture increment `37c7840c` now targets
+  actual `SSHCarrier.execute`, requires nonzero guest completion and retains failed evidence. All
+  three independent source reviews find no material defect; two controlled cases pass and two native
+  cases are collected only. Full style/typing and README checks pass. These checks supply no new
+  native proof or green combined run. Complete supported-platform terminal, positive host,
+  factories, both usable RunContext paths and R1-R5 acceptance remain open. The
+  [fixture and hosted records](phase2-transport-results.md#deferred-native-terminal-fixture-uses-the-actual-carrier)
+  preserve exact pins, failures and limits.
 
 Earlier checkpoint evidence and dependency history live in separate files. The headings below retain
 existing plan links; the linked sections preserve the complete original records. Historical round 1
