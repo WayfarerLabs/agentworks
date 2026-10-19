@@ -6177,6 +6177,19 @@ whole-unit reviews and complete lead gates at `7145e4c2a`, recorded above, inclu
 work. Native Windows, other-platform binding/trust/provisioning, actual new-stack workflows and the
 complete additive RunContext remain open, so the broader factory checkbox is not completed.
 
+The private fresh-binding extension from worker `1a23e9143` and simplification `08c791c9f` keeps
+both existing import-order processes, the six retirement blockers and first-party origin checks.
+Those processes now resolve local Lima, AWS, Azure and GCP through their actual registry, resolver
+and binding factories as well as WSL2/Proxmox. Controlled SDK factories and tool output replace
+external observations, not the resolution under test. Missing SSH policy refuses before provider
+reads; Remote Lima still refuses an unowned host route. Four focused/adjacent cases pass locally,
+and the composed source at `20538a0e3` passes complete strict typing across 1,554 files and
+changed-file quality. Three independent private source reviews are clear; the optional exact Lima
+observation-count assertion is removed without weakening resolved account/directory checks. These
+Windows-selected tests have only been run locally on Linux. Native Windows, actual trust admission,
+provisioning, Remote Lima and complete platform/context workflows remain open; the broader factory
+checkbox stays unchecked.
+
 - [ ] Validate complete provisioning, native recovery without Tailscale, plugin operations, files,
       backup, host provisioning/rollback and interactive attachment through the new surface. Cover
       required operations, optional refusal, sensitivity and supported workstation/platform
