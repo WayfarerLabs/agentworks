@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from agentworks.errors import ValidationError
+from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES
 from agentworks.execution import _capture_read as reader
 from agentworks.execution._capture_cleanup import CaptureCleanup
 from agentworks.execution._capture_control import (
@@ -19,7 +19,6 @@ from agentworks.execution._capture_control import (
 )
 from agentworks.execution._capture_obligation import (
     CaptureObligation,
-    decode_capture_obligation,
     encode_capture_obligation,
 )
 from agentworks.execution._evidence_wire import Frame, FrameKind
@@ -149,13 +148,11 @@ def test_ordinary_stream_grammar_does_not_accept_scratch_records():
     assert observer.finish(None, carrier_stdout_complete=True).error is not None
 
 
-def test_token_only_cleanup_binding_is_canonical_and_excludes_remote_references():
+def test_cleanup_binding_retains_both_tokens_within_the_durable_payload_bound():
     binding = CaptureObligation(PreparedHelperObligation(TARGET, BOOTSTRAP, RUNTIME, TOKENS[0]), PLAN, TOKENS[1])
     payload = encode_capture_obligation(binding)
-    assert decode_capture_obligation(payload) == binding
-    assert set(json.loads(payload)) == {"version", "target", "bootstrap", "runtime", "workload", "tokens"}
-    with pytest.raises(ValidationError):
-        decode_capture_obligation(payload + b" ")
+    assert json.loads(payload)["tokens"] == {"stdout": TOKENS[0].hex(), "stderr": TOKENS[1].hex()}
+    assert len(payload) <= MAX_LIFECYCLE_PAYLOAD_BYTES
 
 
 def test_local_retrieval_checks_whole_digest_after_valid_ranges_without_fabricating_complete():

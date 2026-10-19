@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from agentworks.errors import ValidationError
-from agentworks.execution._capture_obligation import CAPTURE_OBLIGATION_KIND, decode_capture_obligation
+from agentworks.execution._capture_obligation import CAPTURE_OBLIGATION_KIND
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_snapshot_protocol import (
     FileSnapshotChunkRequest,
@@ -187,7 +187,14 @@ class CaptureCarrier(Carrier):
             ]
             assert len(rows) <= 1 and self.owner._active_borrow is not None
             if rows:
-                assert decode_capture_obligation(rows[0].payload).workload == PLAN
+                assert json.loads(rows[0].payload)["workload"] == {
+                    "mode": PLAN.mode.value,
+                    "identity": {
+                        "euid": PLAN.expected.euid,
+                        "egid": PLAN.expected.egid,
+                        "groups": list(PLAN.expected.groups),
+                    },
+                }
         path = self.tmp_path / "prepared-data"
         path.write_bytes(bytes(self.stage_data))
         rows = [
@@ -195,7 +202,7 @@ class CaptureCarrier(Carrier):
             for row in self.owner.list_pending_lifecycle_obligations()
             if row.obligation_kind == CAPTURE_OBLIGATION_KIND
         ]
-        binding = decode_capture_obligation(rows[0].payload) if rows else None
+        tokens = json.loads(rows[0].payload)["tokens"] if rows else None
         completed = subprocess.run(
             [
                 self.interpreter,
@@ -212,8 +219,8 @@ class CaptureCarrier(Carrier):
                     {
                         "guest": (GUEST.instance_marker, GUEST.boot_id, GUEST.init_start_ticks),
                         "fail_tokens": []
-                        if binding is None
-                        else [binding.tokens[index].hex() for index in self.fail_streams],
+                        if tokens is None
+                        else [tokens[("stdout", "stderr")[index]] for index in self.fail_streams],
                         "root_refusal": self.root_refusal,
                         "fail_write": self.fail_write,
                     }

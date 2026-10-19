@@ -8,11 +8,9 @@ from dataclasses import dataclass
 from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES
 from agentworks.errors import ValidationError
 
-from ._helper_identity import decode_identity
-from ._helper_launcher import IdentityMode, IdentityPlan, _validate_plan
+from ._helper_launcher import IdentityPlan, _validate_plan
 from ._prepared_helper_obligation import (
     PreparedHelperObligation,
-    decode_prepared_helper_obligation,
     encode_prepared_helper_obligation,
 )
 
@@ -55,34 +53,4 @@ def encode_capture_obligation(binding: CaptureObligation) -> bytes:
             raise ValueError
         return data
     except (ValueError, TypeError, AttributeError, ValidationError):
-        raise ValidationError("Invalid DIRECT capture cleanup identity") from None
-
-
-def decode_capture_obligation(data: bytes) -> CaptureObligation:
-    """Validate persisted cleanup bytes without granting activation or read authority."""
-    try:
-        value = json.loads(data)
-        if type(value) is not dict or set(value) != {"version", "target", "bootstrap", "runtime", "workload", "tokens"}:
-            raise ValueError
-        workload, tokens = value.pop("workload"), value.pop("tokens")
-        if (
-            type(workload) is not dict
-            or set(workload) != {"mode", "identity"}
-            or type(tokens) is not dict
-            or set(tokens) != {"stdout", "stderr"}
-        ):
-            raise ValueError
-        value["token"] = tokens["stdout"]
-        preparation = decode_prepared_helper_obligation(
-            json.dumps(value, separators=(",", ":"), sort_keys=True).encode("ascii")
-        )
-        result = CaptureObligation(
-            preparation,
-            IdentityPlan(decode_identity(workload["identity"]), IdentityMode(workload["mode"])),
-            bytes.fromhex(tokens["stderr"]),
-        )
-        if encode_capture_obligation(result) != data:
-            raise ValueError
-        return result
-    except (ValueError, TypeError, KeyError, AttributeError, ValidationError):
         raise ValidationError("Invalid DIRECT capture cleanup identity") from None
