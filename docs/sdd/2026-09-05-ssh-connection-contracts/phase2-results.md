@@ -3,17 +3,17 @@
 - Updated: 2026-10-19
 - PR: [#832](https://github.com/WayfarerLabs/agentworks/pull/832), draft
 - Main/contract base: `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (#830)
-- State: evaluated composition `6f1569e0` incorporates transport `dd5c7a8e`, including the shared
-  capability-qualified terminal fixture and partial Proxmox clone controller. All three source
-  reviews find no material defect; two optional simplifications stay with the transport owner. Root
-  passes 92 focused cases and all fifteen static/website entries. The full local run remains red
-  with 22,279 passes and 22 host-fixture failures; the stale terminal assertion is corrected.
-  Published `53ac54f6` CI is red on that older assertion, while its Windows, Website and static jobs
-  pass. All original failures remain retained without a universal cause attribution. No new native
-  proof follows: the actual-carrier terminal fixtures still have only controlled retention tests and
-  collection evidence. Complete supported-platform terminal, positive host, creation/writer
-  publication, factories, both usable RunContext paths and R1-R5 acceptance remain open. The
-  [current composition record](phase2-transport-results.md#clone-and-terminal-fixture-dependency-composition)
+- State: evaluated composition `63a076cc` incorporates transport `4bfb1747` and its retained
+  configuration/resize leaf. All three source reviews find no material defect; two optional data
+  simplifications stay with transport. Root passes 918 related cases and all fifteen static/website
+  entries. The last complete local run at `6f1569e0` remains red with 22 host-fixture failures and
+  22,279 passes. A once-run five-case diagnostic captures actual identity refusals before the
+  intended fault branches, without proving every original cause or positive acceptance. Published
+  `322256f0` has measured hosted Linux, Website and static passes at its original pin; no result
+  transfers to this private join. No new native or complete creation proof follows.
+  Supported-platform terminal, positive host, creation/writer publication, factories, both usable
+  RunContext paths and R1-R5 acceptance remain open. The
+  [current composition record](phase2-transport-results.md#configuration-and-resize-dependency-composition)
   preserves exact pins, gates and limits.
 
 Earlier checkpoint evidence and dependency history live in separate files. The headings below retain

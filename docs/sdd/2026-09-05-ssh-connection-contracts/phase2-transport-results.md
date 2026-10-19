@@ -6,6 +6,65 @@ does not replace the SSH plan, shared transport contracts or full implementation
 Earlier records retain their original observations. New entries supersede only the gates they
 actually measure.
 
+## Configuration and resize dependency composition
+
+Evaluated join `63a076cce154f0494f0cf56dc654c6cf42e20bd7` incorporates transport
+`4bfb17478a9b39a0eb3111214d3dd4b811417116` over published SSH `322256f0`. The seven-file owner
+contribution adds fixed configuration/resize wire operations, the retained two-effect controller,
+two test modules and two transport design records. Non-SSH production and the complete transport SDD
+equal the owner. SSH production, fixtures and the complete SSH SDD are unchanged at this join.
+
+Configuration retains and arms one digest-guarded PUT before dispatch, then records its actual
+synchronous null acknowledgment. Resize has a separate retained intent and one absolute PUT, exact
+destination-scoped task evidence, and fresh stopped association/settings/generation checks followed
+by same-volume, exact-integer-byte verification. Fraction-based parsing refuses decimal text that
+would round into false size evidence. Neither unknown acknowledgment nor matching desired state
+permits replay. Resolving these request obligations does not release the original owner, establish
+guest identity or authorize activation. Start, bootstrap, full creation, rollback, process-loss
+recovery and canonical SSH/enrollment publication remain unfinished.
+
+All three independent source reviews find no material defect; root fully reads their complete signed
+reports. Complexity identifies two optional transport-owner deletions: retain parsed disk volume and
+byte size without repeated raw provider text, and omit the final digest that has no current guard
+consumer. Root acknowledges and will relay both complete suggestions while preserving exact owner
+source. Pre-effect digest guards and all association/settings/task/volume/size checks remain
+required. Earlier optional clone suggestions retain their original disposition.
+
+Root's own frozen environment passes 918 related Proxmox and SSH cases in 23.66 seconds; the
+same-process receipt checks lexical interpreter/prefix/cwd and all 492 loaded first-party origins.
+Full Ruff, formatting of 1,606 files and typing of 1,568 sources pass. All fifteen static/website
+entries pass, including canonical file quality, Rulesync, locked-SDD, exact CI Typer isolation, 160
+Python tests in 36.379 seconds, 103 Node tests, four builds and two deterministic comparisons. No
+new complete local suite is claimed for this partial dependency unit. The last full local run at
+`6f1569e0` remains red with 22 host-fixture failures and 22,279 passes.
+
+A separately reviewed, once-run five-case serial diagnostic at public `322256f0` now records the
+actual prelaunch/read/stage identity-mismatch refusals. All five original call failures remain;
+setup/teardown pass, with no observer error or truncation. JSON stops on its first read before the
+selected fourth-call loss and records zero publication attempts. Upload without a preliminary
+command fails at stage begin with zero bytes consumed/staged and no confirmed publication before the
+original capture-close control. Root reads all five complete traces and 36 event records and checks
+all 386 loaded first-party origins. The
+[complete reports and original output](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6279670561)
+retain the serial instrumentation, unmeasured kernel credentials and limited-case boundaries. No
+universal cause for the original 22, source correction, native SSH proof or positive retry
+acceptance follows. All failed views remain retained; no identity/account/group override or retry is
+applied.
+
+Published SSH run `39341066215` tests `322256f0` through actual merge
+`14f25a56bde96f9b89a4abe264b76887648ad5eb` into `dd5c7a8e`. Its Linux Python 3.12/3.13/3.14 jobs
+each pass 22,067 cases with 310 skips and 51 warnings in 549.02/622.47/807.30 seconds. Website and
+static jobs pass. Root reads the originating completed job portions; this entry claims only those
+measured portions of the
+[hosted run](https://github.com/WayfarerLabs/agentworks/actions/runs/39341066215). They are evidence
+at the original pin, not a hosted result for the new configuration composition or an explanation or
+waiver of the retained local failures.
+
+Complete supported-platform terminal/fault/presentation, positive host and creation workflows,
+settled enrollment/trust-writer publication, writer coexistence/rollback, factories, both usable
+additive RunContext paths and full R1-R5 acceptance remain required. No public feedback round,
+ready/checkpoint signal, completed plan block or lock follows from this private progress.
+
 ## Clone and terminal-fixture dependency composition
 
 Evaluated join `6f1569e0fa435532f3ef53159f436c547ec770e6` incorporates transport

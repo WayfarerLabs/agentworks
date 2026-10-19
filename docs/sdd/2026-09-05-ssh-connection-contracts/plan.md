@@ -226,14 +226,15 @@ proves that restoring old TOML does not discard current managed policy, revocati
 partial-update custody. Production writer coexistence and rollback through both usable RunContext
 paths still require transport composition and native acceptance.
 
-Composition `6f1569e0` integrates transport `dd5c7a8e` and its shared terminal-fixture correction.
-Three source reviews find no material defect; two optional owner simplifications are recorded. Root
-passes 92 focused cases and all fifteen static/website gates. The full local run remains red with
-22,279 passes and 22 host-fixture failures; the old terminal assertion now passes. The
-[composition record](phase2-transport-results.md#clone-and-terminal-fixture-dependency-composition)
-retains the actual failures and partial-clone scope. It does not establish usable creation,
-native/Windows terminal, shared sanitation or both additive RunContext workflows. Full Phase 2 and
-R1-R5 acceptance stay open; no completion checkbox or lock changes.
+Composition `63a076cc` integrates transport `4bfb1747` and its retained configuration/resize leaf.
+Three source reviews find no material defect; two optional owner data simplifications are recorded.
+Root passes 918 related cases and all fifteen static/website entries. The last full local run at
+`6f1569e0` remains red with 22,279 passes and 22 host-fixture failures. The
+[composition record](phase2-transport-results.md#configuration-and-resize-dependency-composition)
+retains the partial-creation scope and new five-case identity-refusal diagnostic. These checks do
+not establish usable creation, native/Windows terminal, shared sanitation or both additive
+RunContext workflows. Full Phase 2 and R1-R5 acceptance stay open; no completion checkbox or lock
+changes.
 
 The deferred native fixture increment at `37c7840c` uses actual `SSHCarrier.execute`, requires guest
 status 37 and retains failed or uncertain evidence. Three independent source lanes find no material
