@@ -116,3 +116,8 @@ canonical file quality, Rulesync, locked-SDD and exact CI Typer isolation pass. 
 the entire transport SDD remain byte-equal to owner `c0298ba16`. This working increment preserves
 all original hosted failures and does not resolve the older transport-owned Windows budget gap,
 activate the private terminal path or close full implementation/RunContext acceptance.
+
+The originating Windows Python 3.13 job subsequently passes 2,182 tests with 80 skips and 25
+warnings in 1,530.27 seconds at that same `1cfdd832`/`fc7851504` source/merge. This does not resolve
+the earlier `a920eceb` budget-gap cause. The run retains its Linux 3.12 failure; fresh hosted
+verification of the causal correction remains separate.
