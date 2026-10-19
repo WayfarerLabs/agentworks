@@ -445,6 +445,7 @@ def test_uncertain_cleanup_retains_original_control_cause_and_owner(
 
 @pytest.mark.parametrize("execution_route", [ExecutionRoute.NATIVE, ExecutionRoute.CANONICAL])
 @pytest.mark.parametrize("file_call", ["upload", "stat", "json"])
+@pytest.mark.parametrize("committed", [False, True])
 def test_command_then_completed_file_bookkeeping_retries_exact_call_without_replay(
     database: Database,
     tmp_path: Path,
@@ -452,6 +453,7 @@ def test_command_then_completed_file_bookkeeping_retries_exact_call_without_repl
     prepared: list[VMOperation],
     execution_route: ExecutionRoute,
     file_call: str,
+    committed: bool,
 ) -> None:
     import grp
     import os
@@ -475,8 +477,24 @@ def test_command_then_completed_file_bookkeeping_retries_exact_call_without_repl
     control = KeyboardInterrupt()
     cause = ValueError("body cause")
     control.__cause__ = cause
+    captured: list[_ActiveFileUpload | _ActiveFileStat | _ActiveFileJsonUpdate] = []
+    close_observations: list[tuple[int, int, int]] = []
 
     def interrupted(borrow: OperationBorrow) -> None:
+        active: tuple[_ActiveFileUpload | _ActiveFileStat | _ActiveFileJsonUpdate, ...]
+        if file_call == "upload":
+            active = operation.file_operation.active_uploads
+        elif file_call == "stat":
+            active = operation.file_operation.active_stats
+        else:
+            active = operation.file_operation.active_json_updates
+        assert len(active) == 1 and active[0].borrow is borrow
+        assert active[0].outcome is not None and not active[0].outcome.requires_owner_retention
+        assert not borrow.has_outstanding_attempt
+        captured.append(active[0])
+        close_observations.append((route.local.calls, native.events.count("dispatch"), len(route.accounts.calls)))
+        if committed:
+            close(borrow)
         raise control
 
     with (
@@ -517,9 +535,6 @@ def test_command_then_completed_file_bookkeeping_retries_exact_call_without_repl
                 create_metadata=metadata,
             )
     assert caught.value is control
-    fact = control.__cause__
-    assert isinstance(fact, VMOperationControlFact) and fact.__cause__ is cause
-    assert fact._workflow.views is operation
     file_operation = operation.file_operation
     retained: tuple[_ActiveFileUpload | _ActiveFileStat | _ActiveFileJsonUpdate, ...]
     if file_call == "upload":
@@ -528,20 +543,31 @@ def test_command_then_completed_file_bookkeeping_retries_exact_call_without_repl
         retained = file_operation.active_stats
     else:
         retained = file_operation.active_json_updates
-    assert len(retained) == 1 and retained[0].outcome is not None
-    outcome = retained[0].outcome
-    assert not outcome.requires_owner_retention and not retained[0].borrow.closed
-    claim = database.operations.inspect(_scope())
-    assert claim is not None and claim.ownership == operation.owner.ownership
+    active = captured[0]
+    assert all(item is active for item in captured)
+    outcome = active.outcome
+    assert outcome is not None and not outcome.requires_owner_retention
+    assert retained == (() if committed else (active,))
+    assert active.borrow.closed is committed and not active.borrow.has_outstanding_attempt
     calls = route.local.calls
     dispatches = native.events.count("dispatch")
     accounts = list(route.accounts.calls)
+    assert all(observed == (calls, dispatches, len(accounts)) for observed in close_observations)
     monkeypatch.setattr(OperationBorrow, "close", close)
-    fact.retry_cleanup(Deadline.after(10))
+    if committed:
+        assert control.__cause__ is cause
+        assert database.operations.inspect(_scope()) is None
+    else:
+        fact = control.__cause__
+        assert isinstance(fact, VMOperationControlFact) and fact.__cause__ is cause
+        assert fact._workflow.views is operation
+        claim = database.operations.inspect(_scope())
+        assert claim is not None and claim.ownership == operation.owner.ownership
+        fact.retry_cleanup(Deadline.after(10))
     assert database.operations.inspect(_scope()) is None and not operation.file_operation.has_pending_custody
     assert route.local.calls == calls and native.events.count("dispatch") == dispatches
     assert route.accounts.calls == accounts and not list(scratch.iterdir())
-    assert retained[0].borrow.closed and retained[0].outcome is outcome
+    assert active.borrow.closed and active.outcome is outcome
     assert result.ok and result.stdout.data == b"completed-command"
     if file_call == "upload":
         assert Path(root / "published").read_bytes() == b"published once"
