@@ -40,6 +40,7 @@ from agentworks.execution.carrier import (
 from agentworks.execution.carriers._proxmox_http import (
     _MAX_RESPONSE_BYTES,
     _Endpoint,
+    _valid_clone_body,
     _valid_control_timeout,
     _valid_task_id,
 )
@@ -110,6 +111,23 @@ class _WireFailure(Exception):
     """A REST response is unavailable or cannot establish execution evidence."""
 
 
+@dataclass(frozen=True, slots=True)
+class ProxmoxCloneRequest:
+    """The complete public clone input, with no bootstrap or secret fields."""
+
+    newid: int
+    name: str
+    description: str
+    storage: str
+    pool: str
+    full: int = field(default=1, init=False)
+
+    def __post_init__(self) -> None:
+        """Validate inputs from the platform composition boundary."""
+        if not _valid_clone_body(asdict(self)):
+            raise ValidationError("Proxmox requires an exact public clone request")
+
+
 class _ResponseBuffer:
     """Private bounded parsing bytes, never carrier output retention."""
 
@@ -158,6 +176,28 @@ class _ProxmoxWire:
     def request_current_config(self, *, custody: LocalDeliveryCustody, timeout: float) -> dict[str, object]:
         """Read live provider configuration through one fixed, passive endpoint."""
         return self._request(_Endpoint.CURRENT_CONFIG, "GET", None, custody=custody, body=None, timeout=timeout)
+
+    def request_next_id(self, *, custody: LocalDeliveryCustody, timeout: float) -> int:
+        """Observe an available candidate, without claiming a reservation."""
+        if not _valid_control_timeout(timeout):
+            raise ValidationError("Proxmox candidate selection requires a positive finite timeout")
+        data = self._exchange(_Endpoint.NEXT_ID, "GET", None, custody=custody, body=None, timeout=timeout)
+        if type(data) is not int or data <= 0:
+            raise _WireFailure("Proxmox returned an invalid candidate VM identifier")
+        return data
+
+    def request_vm_clone(self, request: ProxmoxCloneRequest, *, custody: LocalDeliveryCustody, timeout: float) -> str:
+        """Submit one full clone from the selected source VM, without retries."""
+        if not _valid_control_timeout(timeout) or type(request) is not ProxmoxCloneRequest:
+            raise ValidationError("Proxmox clone requires a public request and positive finite timeout")
+        if request.newid == self._connection.vmid:
+            raise ValidationError("Proxmox clone destination must differ from its source")
+        body = json.dumps(asdict(request), ensure_ascii=True).encode("ascii")
+        data = self._exchange(_Endpoint.VM_CLONE, "POST", None, custody=custody, body=body, timeout=timeout)
+        if not _valid_task_id(data):
+            raise _WireFailure("Proxmox returned an invalid clone acknowledgment")
+        assert isinstance(data, str)
+        return data
 
     def request_vm_start(self, *, custody: LocalDeliveryCustody, timeout: float) -> str:
         """Submit one fixed start, returning only a bounded raw acknowledgment."""
