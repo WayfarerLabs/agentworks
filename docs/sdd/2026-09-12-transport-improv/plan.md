@@ -5972,6 +5972,14 @@ the corrected test through malformed disposal and closing/takeover checks. Asser
 fixtures and production deadlines are unchanged. This proves fixture sensitivity, not the exact
 cause of the published Windows scheduling delay; fresh hosted verification remains required.
 
+Hosted follow-up at `1936202d1` completes that verification in
+[CI run 39329774986](https://github.com/WayfarerLabs/agentworks/actions/runs/39329774986): Linux
+Python 3.12, 3.13 and 3.14 each pass 21,979 tests with 310 skips; Windows Python 3.13 passes 2,195
+with 80 skips. Static/website checks, the aggregate gate and the separate CodeQL run pass. The
+preceding `224aca065` run passes Windows but fails Linux on the newly added Lima access field's
+stale reference expectation, corrected at `1936202d1`; both results remain attributed to their
+actual sources. This closes neither native platform acceptance nor complete additive delivery.
+
 - [x] Complete and privately review paired native admin/agent preparation using an explicit
       core-selected agent row on the same VM. Reuse one file operation, execution operation, numeric
       guest bootstrap, carrier, owner and deadline; retain both account preparations and publish no
