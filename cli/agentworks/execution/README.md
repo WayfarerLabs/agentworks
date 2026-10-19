@@ -1749,11 +1749,11 @@ uses the small entry. Input staging and capture retention are separate choices.
 
 The private default capture limit remains 4,096 bytes per application stream. Explicitly larger
 finite capture on a numerically bound Linux VM uses a separate fixed capture entry under the same
-operation and original deadline. The existing process pump retains the selected prefix plus one
-byte while draining later output. After observing the child, the helper publishes each retained
-prefix through existing exact-length scratch creation, bounded writes and verification as the
-workload identity. Suppressed or discarded output creates no capture objects. Large input reuses
-prepared delivery; a small capture request need not stage its input.
+operation and original deadline. The existing process pump retains the selected prefix plus one byte
+while draining later output. After observing the child, the helper publishes each retained prefix
+through existing exact-length scratch creation, bounded writes and verification as the workload
+identity. Suppressed or discarded output creates no capture objects. Large input reuses prepared
+delivery; a small capture request need not stage its input.
 
 Each closed stream record carries either a verified scratch reference or explicit unavailable
 publication facts and creation uncertainty. Both records precede the actual wait, so handled

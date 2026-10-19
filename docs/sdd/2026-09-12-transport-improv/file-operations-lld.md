@@ -1096,8 +1096,8 @@ request codecs accept an optional exact gate, and their fixed guest handlers hol
 operation. The private pre-bound `FileOperation.upload()` path validates a supplied gate against the
 Linux VM scope, effective UID, deterministic path and derived guest boot, persist it in the current
 child row before dispatch, and pass it through stage and publication requests including cleanup. Its
-private path without a gate still exists; Linux VM production composition must explicitly require a gate,
-match the verified raw guest marker and selected provider locator, and never downgrade a bound
+private path without a gate still exists; Linux VM production composition must explicitly require a
+gate, match the verified raw guest marker and selected provider locator, and never downgrade a bound
 request. Read-only preflight is not an effect. An acknowledged generation advance under the same
 gate flock would wait for admitted old effects to leave and make delayed old-generation requests
 refuse before effects. That can replace a controller-side enumeration of queued SSH, QGA or WSL
@@ -1478,11 +1478,11 @@ the existing VM file constructor. Reuse the selected carrier, actual account/ide
 trusted root, file-call custody and ordinary filesystem checks. The host composer remains separate
 work; a passive RunContext accessor alone does not supply these facts or own their lifetime.
 
-The private file binding accepts either the existing managed VM target or that exact host scope.
-New ordinary host construction rejects a `ManagedTargetIdentity` labeled as a host. A host scope
-cannot carry a guest bootstrap, raw guest identity, effect gate or gate setup. Reject those
-combinations before borrowing or dispatch; do not weaken any bound Linux VM request. No host gate,
-administrator setup service or machine-wide lock is introduced.
+The private file binding accepts either the existing managed VM target or that exact host scope. New
+ordinary host construction rejects a `ManagedTargetIdentity` labeled as a host. A host scope cannot
+carry a guest bootstrap, raw guest identity, effect gate or gate setup. Reject those combinations
+before borrowing or dispatch; do not weaken any bound Linux VM request. No host gate, administrator
+setup service or machine-wide lock is introduced.
 
 Give host `file-call` records their own payload version, 7, with a target containing only
 `kind: platform-host` and the coordinated resource name. Preserve existing VM versions 1-6. Host
