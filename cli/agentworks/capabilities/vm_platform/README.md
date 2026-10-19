@@ -225,8 +225,8 @@ are local); Azure, EC2, GCE, and Proxmox use it:
   uses only `ExecTransport` for native bootstrap and recovery. `vm shell --platform` is the sole
   caller that requires the full subtype; it checks `native_shell_unavailable_hint` before route,
   credential, transport, or probe work.
-- `observe_provider_locator(vm, ctx, *, deadline) -> ProviderLocatorObservation`. The required
-  read-only observation returns either an opaque `ProviderLocator(token)` or an empty
+- `observe_provider_locator(vm, ctx, *, deadline, custody) -> ProviderLocatorObservation`. The
+  required read-only observation returns either an opaque `ProviderLocator(token)` or an empty
   `ProviderLocatorUnavailable` when this platform deliberately cannot obtain one. Core never parses
   or normalizes the token. `Unavailable` does not establish target presence and is not a substitute
   for a failed lookup: after lookup begins, target absence and provider failures raise their typed

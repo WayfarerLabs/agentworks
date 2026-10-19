@@ -5943,6 +5943,35 @@ configuration/adoption, automatic host recovery, native execution nor complete a
       process-loss recovery refused and native SSH/macOS, configuration/adoption, live/unbounded
       combinations and the production default under separate gates.
 
+- [x] Implement and privately prove
+      [configured SSH platform-host composition](execution-lifecycle-lld.md#configured-ssh-platform-host-composition)
+      using one complete optional placement access declaration, independent explicit endpoint/login
+      and shared host coordination key. Reuse existing SSH policy/runtime preparation and the host
+      context; no machine registry, ambient alias expansion, fallback or implicit elevation.
+      Preserve legacy `placement.host` behavior and require the explicit new entry to refuse
+      incomplete configuration before effects. Forward the required core-selected file root without
+      imposing `/` or weakening descendant mount confinement. Prove real command/file content use
+      beneath that root, cross-site shared-key conflict and independent contexts,
+      configuration/runtime failures, exact policy propagation and same-process cleanup. Native
+      SSH/macOS, Remote Lima provisioning/rollback and complete additive delivery remain required
+      under their existing gates; this configuration unit alone does not complete them.
+
+The private configured-host checkpoint at `5978c6d4f` includes worker `7bae6d22a` without changes.
+All three independent source-review lanes are clear. Lead validation passes 168 configured-host,
+file-bookkeeping and VM-context cases, 129 disposal/read cases, complete strict typing across 1,560
+sources and changed-file quality. Actual ordinary local helpers execute commands and write and read
+content beneath the supplied core root; SSH delivery remains synthetic. Earlier fixture and typing
+failures remain retained. The initial `/` root policy was corrected after real mount confinement
+refusals, not by weakening file rules. Legacy destinations and production methods stay unchanged.
+Native SSH/macOS, configured Remote Lima adoption/provisioning/rollback, process-loss host recovery
+and complete additive RunContext remain unproved.
+
+The same source includes the isolated disposal fault-test correction from worker `7d2215f6c`. An
+identical controlled 5.25-second delivery delay fails the original setup before disposal and passes
+the corrected test through malformed disposal and closing/takeover checks. Assertions, shared
+fixtures and production deadlines are unchanged. This proves fixture sensitivity, not the exact
+cause of the published Windows scheduling delay; fresh hosted verification remains required.
+
 - [x] Complete and privately review paired native admin/agent preparation using an explicit
       core-selected agent row on the same VM. Reuse one file operation, execution operation, numeric
       guest bootstrap, carrier, owner and deadline; retain both account preparations and publish no
