@@ -292,16 +292,22 @@ process/job timeout bounds fixture hangs; thread status after interrupted join i
 fact. Native macOS/Windows, real SSH terminal delivery and emulator sanitation require separate
 integration evidence.
 
-The integration-marked `test_terminal_installed.py` cases compose the private POSIX relay with
-transport's actual terminal handoff, strict connection admission, the installed-client version check
-and fixed SSH argv. They use one owned Linux loopback server and one connected SSH client per case,
-plus the offline client version check. Generated keys exist only during native execution. The
-successful case observes binary source/environment/argument canaries after the first gate, withholds
+The integration-marked `test_terminal_installed.py` cases call the actual `SSHCarrier.execute`
+entrypoint with transport's terminal handoff, the original operation deadline and delivery custody.
+Common carrier preflight performs strict connection admission and the installed-client version check
+before selecting the POSIX relay. The fixture records the actual launched argv to require `-tt` and
+exclude payload canaries. Each case uses one owned Linux loopback server and one connected SSH
+client, plus the offline version check. Generated keys belong only to the native fixture. The
+positive case observes binary source/environment/argument canaries after the first gate, withholds
 finite keyboard input until both handoff and application readiness, and checks initial guest
-geometry, two SIGWINCH-driven changes, natural completion and exact presentation delivery. The
-missing-runtime case requires withheld payload and keys. Both independently check local client
-reaping, relay PTY closure and restored borrowed input modes, file status and inheritable flags.
-Fixture observation is bounded and temporary; it adds no production sensitive-output retention.
+geometry, two SIGWINCH-driven changes and exact presentation delivery. The guest exits with status
+37; the carrier must report SENT dispatch, `ExitStatus(code=37)`, local status 37 and no failure.
+The missing-runtime case requires withheld payload and keys and a preparation prerequisite failure,
+independently of any observed client completion. A normal runtime-selector exit does not establish
+application execution; cleanup without known remote completion must retain UNKNOWN dispatch. Both
+independently check local client reaping, relay PTY closure and restored borrowed input modes, file
+status and inheritable flags. Fixture observation is bounded and temporary; it adds no production
+sensitive-output retention.
 
 Native execution requires a separately authorized tester charter, a tester-owned account/home or
 independently established configured shell with no startup/home hook access, and installed OpenSSH
@@ -314,8 +320,10 @@ and UID, with a 20-second observation bound from its first application report (1
 self-life plus five seconds for cleanup). Unknown, unobservable or remaining guest identity fails or
 adds explicit cleanup uncertainty to an existing failure; parent-server reaping supplies no
 guest-absence proof. No reported guest is signaled. A separate job timeout must still bound a hung
-test process. Use a short, private temporary parent with suitable ancestor permissions and no
-inherited ACLs.
+test process. Use a short, mode-0700 temporary parent with suitable ancestor permissions and no
+inherited ACLs. Private fixture keys have mode 0600. Successful cases remove their exact owned
+fixture directory after the applicable guest check; failed or uncertain cases retain it, including
+fixture keys and server diagnostics, for the tester's separately authorized inspection and cleanup.
 
 Collection performs no SSH, key generation, listener or PTY acquisition:
 
@@ -334,11 +342,11 @@ timeout 360 .venv/bin/pytest tests/execution/carriers/ssh/test_terminal_installe
   -m integration -n 0 --basetemp=/tmp/authorized-terminal-proof/cases
 ```
 
-Source checks and collection do not establish a native pass. These Linux loopback cases supply no
-macOS/Windows proof, production RunContext composition or public SSHCarrier terminal enablement.
-Readiness `finish()` is only collector finalization; shared presentation/emulator sanitation remains
-a separate open requirement. The refusal case does not cover the complete native interruption and
-restoration fault matrix.
+Source checks and collection do not establish a native pass. The internal POSIX carrier capability
+is enabled, but these deferred Linux loopback cases supply no macOS/Windows proof, production
+RunContext composition or complete supported-platform acceptance. Readiness `finish()` is only
+collector finalization; shared presentation/emulator sanitation remains a separate open requirement.
+The refusal case does not cover the complete native interruption and restoration fault matrix.
 
 ## Trust maintenance and forwarding fixtures
 

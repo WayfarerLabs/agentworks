@@ -23,11 +23,9 @@ from agentworks.execution._terminal_handoff import (
     TerminalHandoffFailure,
     prepare_terminal_handoff,
 )
-from agentworks.execution.carrier import Deadline, Failure, SinkOutput, TerminalInput
+from agentworks.execution.carrier import Deadline, Dispatch, ExitStatus, Failure, SinkOutput, TerminalInput
 from agentworks.execution.carriers.ssh._terminal_posix import PosixTerminal
-from agentworks.execution.carriers.ssh._terminal_relay import run_terminal_relay_candidate
-from agentworks.execution.carriers.ssh.client import check_client_version, resolve_client_executable
-from agentworks.execution.carriers.ssh.connection import admit_connection, build_ssh_argv
+from agentworks.execution.carriers.ssh.client import SSHCarrier
 from tests.execution.carriers.ssh._terminal_modes import assert_preserved_terminal_mode
 from tests.execution.carriers.ssh.enrollment_server import enrollment_server
 
@@ -76,6 +74,7 @@ try:
     emit({'keys':keyboard.hex(),'done':True})
 finally:
     termios.tcsetattr(0,termios.TCSANOW,saved)
+raise SystemExit(37)
 """
 
 
@@ -213,6 +212,7 @@ def run_case(root: Path, monkeypatch: pytest.MonkeyPatch, *, refusal: bool) -> N
     workdir = root / "terminal-fixture"
     workdir.mkdir(mode=0o700)
     clients: list[subprocess.Popen[bytes]] = []
+    client_argv: list[tuple[str, ...]] = []
     owned_fds: list[int] = []
     servers: list[subprocess.Popen[bytes]] = []
     server_logs: list[Any] = []
@@ -223,8 +223,9 @@ def run_case(root: Path, monkeypatch: pytest.MonkeyPatch, *, refusal: bool) -> N
 
     def launch(*args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
         process = cast("subprocess.Popen[bytes]", native_launch(*args, **kwargs))
-        if "-tt" in args[0]:
+        if "-F" in args[0]:
             clients.append(process)
+            client_argv.append(tuple(args[0]))
         elif "-D" in args[0] and "-f" in args[0]:
             servers.append(process)
             server_logs.append(kwargs["stderr"])
@@ -243,12 +244,6 @@ def run_case(root: Path, monkeypatch: pytest.MonkeyPatch, *, refusal: bool) -> N
             patch.setattr(PosixTerminal, "acquire", acquire)
             with enrollment_server(workdir / "server", "matching") as server:
                 assert not deadline.expired
-                trust = admit_connection(server.connection)
-                try:
-                    executable = resolve_client_executable(server.connection)
-                    assert check_client_version(executable, deadline=deadline, custody=custody) is None
-                finally:
-                    assert custody.close(Deadline.after(3))
                 with ExitStack() as endpoints:
                     master, slave = os.openpty()
                     before = termios.tcgetattr(slave), fcntl.fcntl(slave, fcntl.F_GETFL), os.get_inheritable(slave)
@@ -288,27 +283,39 @@ def run_case(root: Path, monkeypatch: pytest.MonkeyPatch, *, refusal: bool) -> N
                     )
                     assert isinstance(io.input, TerminalInput) and isinstance(io.output, SinkOutput)
                     io = replace(io, input=replace(io.input, bootstrap=trace), output=replace(io.output, stdout=trace))
-                    argv = build_ssh_argv(
-                        server.connection, prepared.invocation, trust=trust, executable=executable, terminal=True
-                    )
-                    assert all(tag.decode() not in arg for tag in (_SOURCE_TAG, _ENV_TAG, _ARG_TAG) for arg in argv)
                     prepared.claim()
                     try:
-                        result = run_terminal_relay_candidate(argv, io=io, deadline=deadline, custody=custody)
+                        result = SSHCarrier(server.connection).execute(
+                            prepared.invocation, io=io, deadline=deadline, custody=custody
+                        )
                     finally:
                         assert custody.close(Deadline.after(3))
                         # This is readiness finalization, never emulator sanitation.
                         prepared.stdout.finish()
                     trace.no_reflection()
-                    assert len(clients) == 1 and result.started
+                    assert len(clients) == len(client_argv) == 1
+                    assert "-tt" in client_argv[0] and "-T" not in client_argv[0]
+                    assert all(
+                        tag.decode() not in arg for tag in (_SOURCE_TAG, _ENV_TAG, _ARG_TAG) for arg in client_argv[0]
+                    )
+                    if result.local_status is not None:
+                        assert result.local_status == clients[0].returncode
                     assert result.stdout.data == result.stderr.data == b""
                     if refusal:
                         assert prepared.runtime_prerequisite.state is RuntimePrerequisiteState.MISSING
                         assert not prepared.handed_off and prepared.failure is TerminalHandoffFailure.PREREQUISITE
                         assert trace.payload_bytes == 0 and not trace.keys_written and not trace.records
                         assert result.failure is Failure.OUTPUT
+                        # The runtime selector can finish normally before the
+                        # collector refuses it. Client completion is not handoff.
+                        if result.completion is not None:
+                            assert result.dispatch is Dispatch.SENT
+                            assert result.completion == ExitStatus(code=0) and result.local_status == 0
+                        else:
+                            assert result.dispatch is Dispatch.UNKNOWN
                     else:
-                        assert result.exit_status == result.local_status == 0 and result.failure is None
+                        assert result.dispatch is Dispatch.SENT and result.completion == ExitStatus(code=37)
+                        assert result.local_status == 37 and result.failure is None
                         assert result.stdout.complete and result.stderr.complete
                         assert prepared.handed_off and prepared.failure is None and trace.keys_written
                         initial = next(record for record in trace.records if "initial" in record)
@@ -356,19 +363,18 @@ def run_case(root: Path, monkeypatch: pytest.MonkeyPatch, *, refusal: bool) -> N
         primary = error
         raise
     finally:
-        try:
-            if (
-                clients
-                and trace is not None
-                and trace.prepared is not None
-                and trace.prepared.runtime_prerequisite.state is not RuntimePrerequisiteState.MISSING
-            ):
-                try:
-                    _guest_absent(trace)
-                except BaseException:
-                    if primary is None:
-                        raise
-                    primary.add_note("Fixture guest cleanup remains uncertain")
-        finally:
+        if (
+            clients
+            and trace is not None
+            and trace.prepared is not None
+            and trace.prepared.runtime_prerequisite.state is not RuntimePrerequisiteState.MISSING
+        ):
+            try:
+                _guest_absent(trace)
+            except BaseException:
+                if primary is None:
+                    raise
+                primary.add_note("Fixture guest cleanup remains uncertain")
+        if primary is None:
             shutil.rmtree(workdir)
             assert not workdir.exists()
