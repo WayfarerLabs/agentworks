@@ -63,14 +63,22 @@ owner's controlled 5.25-second comparison establishes sensitivity to elapsed fix
 exact original hosted delay. Original D9 failures remain in the following record; fresh hosted
 verification of this correction is separate.
 
-Public SSH head `d7048eaf` has active CI run `39327127783`. Its Website Python step already fails
-one of 160 tests during Chromium DevTools endpoint discovery, before page assertions; later
-Node/build steps are not reached. Website/workflow bytes match protected main, without establishing
-the startup failure's cause. The
+Public SSH head `d7048eaf` finishes CI run `39327127783` with failure through actual merge
+`e081257528a3070ed26b4a56961272c4844f3f73` into D9. All three Linux jobs pass 21,919 tests each,
+with 310 skips and 51 warnings, in 879.44/790.55/731.70 seconds for Python 3.12/3.13/3.14. Windows
+Python 3.13.16 reports one failure, 2,194 passes, 80 skips and 25 warnings in 1,227.84 seconds:
+`test_checked_managed_nonzero_retains_exact_contextual_result[run]` gets an unacknowledged managed
+start before its intended checked-result assertion. The retained control fact preserves the
+originating operation. Its exact cause remains unproved and a source/log diagnostic is separate; it
+is not the previous keeper-drain or disposal fixture.
+
+The Website Python step fails one of 160 tests during Chromium DevTools endpoint discovery, before
+page assertions; later Node/build steps are not reached. Website/workflow bytes match protected
+main, without establishing the startup failure's cause. The
 [complete original failure](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6277709046)
-is retained. No rerun, timeout change or unrelated website fix is made here. All three Linux jobs
-pass 21,919 tests each with 310 skips and 51 warnings; Windows remains pending at this private
-checkpoint. Earlier local passes do not clear the Website failure.
+is retained. No rerun, timeout change or unrelated website fix is made here; earlier local passes do
+not clear it. Root reads all originating checkout/interpreter/results and every complete failed
+trace for this run.
 
 Owner run `39327927020`, actual merge `18a99f19f9d0997ebeb3fe2c89cc21539fe43693`, independently
 reports the same stale manifest-reference failure on Linux Python 3.13.16: one failure, 21,978

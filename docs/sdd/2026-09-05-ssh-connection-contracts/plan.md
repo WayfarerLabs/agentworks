@@ -234,9 +234,10 @@ host-fixture cases and the owner's stale manifest-reference field expectation. A
 website entries pass; this does not clear validation. The Windows keyboard decision document has
 both private reviews clear but selects no decoder or feature activation. The
 [configured-host record](phase2-transport-results.md#configured-ssh-platform-host-declaration-composition)
-keeps source/validation boundaries explicit. Public `d7048eaf` CI is active with a Website Chromium
-startup failure; it cannot inherit earlier local success. Native host preparation remains disabled,
-and complete factories, RunContext, platform/terminal and R1-R5 acceptance remain open.
+keeps source/validation boundaries explicit. Public `d7048eaf` CI finishes red with Windows
+managed-foreground startup and Website Chromium startup failures; it cannot inherit earlier local
+success. Native host preparation remains disabled, and complete factories, RunContext,
+platform/terminal and R1-R5 acceptance remain open.
 
 The preceding private composition `b595937509014eb1e91f631761c98d9f96e384c5` incorporates
 [transport PR #833](https://github.com/WayfarerLabs/agentworks/pull/833) at

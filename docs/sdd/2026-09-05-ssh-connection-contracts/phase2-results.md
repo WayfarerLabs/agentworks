@@ -4,13 +4,14 @@
 - PR: [#832](https://github.com/WayfarerLabs/agentworks/pull/832), draft
 - Main/contract base: `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (#830)
 - State: private join `11fcf786a6fbbefe24196cecb2baa62b02b17474` incorporates transport's configured
-  SSH host declaration and scoped fault-fixture clock correction at `224aca065`. Independent
-  composition reviews and local gates are pending. The keyboard decision document has both private
-  reviews clear; it selects no implementation. The last full local run at `c7436cc9` has 22,132
-  passes and 21 host-fixture failures, with one decoded identity/mismatch diagnostic. Public
-  `d7048eaf` CI is active and has a Chromium-startup Website failure. Owner D9's two Windows
-  disposal failures and earlier source-pinned evidence remain preserved. Full terminal, positive
-  host, configured factories, both usable RunContext paths and R1-R5 acceptance remain open
+  SSH host declaration and scoped fault-fixture clock correction at `224aca065`. All three source
+  reviews find no material defect. The full run at `38a6cf35` returns 22,190 passes and 23 failures:
+  22 host-fixture cases plus the owner's stale manifest-reference expectation. All 15 static/website
+  entries pass; validation remains red. The keyboard decision document has both private reviews
+  clear and selects no implementation. Public `d7048eaf` CI finishes red: Linux passes; Windows
+  fails a managed foreground start and Website fails Chromium startup. Earlier identity and
+  source-pinned failures remain preserved. Full terminal, positive host, configured factories, both
+  usable RunContext paths and R1-R5 acceptance remain open
 
 Earlier checkpoint evidence and dependency history live in separate files. The headings below retain
 existing plan links; the linked sections preserve the complete original records. Historical round 1
