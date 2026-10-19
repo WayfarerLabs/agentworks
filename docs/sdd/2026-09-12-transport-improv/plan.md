@@ -5902,7 +5902,7 @@ missed by scoped checks. The correction restores its concrete signature and sepa
 decoding without changing VM admission or recovery authority. This closes only the private binding
 unit, not host configuration/context composition, native Darwin or automatic recovery.
 
-- [ ] Implement and privately prove the
+- [x] Implement and privately prove the
       [ordinary platform-host context composer](execution-lifecycle-lld.md#ordinary-platform-host-context-composition).
       Acquire the explicit shared host scope before preparation, deliver the existing command/file
       views through RunContext, and retain one same-process aggregate lifetime through partial
@@ -5912,13 +5912,26 @@ unit, not host configuration/context composition, native Darwin or automatic rec
       native SSH/macOS proof, Remote Lima adoption/provisioning/rollback and process-loss recovery
       under their complete production gates; this composer alone does not enable that route.
 
-- [ ] Complete same-process bookkeeping retry for captured, closed stat, inventory, removal,
+- [x] Complete same-process bookkeeping retry for captured, closed stat, inventory, removal,
       metadata/directory and JSON file calls. Retire the exact completed call and its original
       serial borrow before dependent execution lifetime resolution, without repeating helper,
       source, transform or mutation work. Missing outcomes and uncertain effects must retain custody
       rather than acquire an inferred completion. Prove interrupted and already-committed borrow
       release through host and VM context cleanup. This corrects the existing file layer; the host
       composer alone does not complete it.
+
+The private source checkpoint at `8f5e89b67` completes these two units. Lead validation passes 108
+host, file-bookkeeping and VM-context cases, complete strict typing across 1,557 sources and
+changed-file quality. All three independent source-review lanes are clear. The preceding broader
+file/context selection passed 890 cases at `00c16a271`; subsequent changes remove two redundant
+captured-outcome checks and extend VM tests, retaining the live original-attempt guard. Eight file
+families cover interrupted and already-committed release; native and canonical VM contexts cover
+upload, stat and JSON in both positions without replay. Missing outcomes, uncertain completion and
+JSON publication debt without an outstanding attempt remain retained. Original failed fixtures
+remain, including the qualified initial JSON test assumption and strict-typing failures. The
+Linux-only fixture's import-time Windows runtime/identity bug is corrected in source; fresh hosted
+Windows verification remains required. These private completions establish neither full host
+configuration/adoption, automatic host recovery, native execution nor complete additive RunContext.
 
 - [ ] Implement and privately prove
       [host finite prepared input and capture](preparation-lld.md#host-finite-prepared-input-and-capture)

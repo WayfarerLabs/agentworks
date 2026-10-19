@@ -160,6 +160,7 @@ class _Workflow:
             # their bookkeeping before resolving the execution lifetime row.
             self.views.file_operation.settle_local_file_bookkeeping(budget)
             self.views.file_operation.settle_download_bookkeeping()
+            self.views.file_operation.settle_completed_bookkeeping()
             try:
                 self.views.execution_operation.finish()
             except BaseException as control:

@@ -110,6 +110,7 @@ class _HostLifetime:
         if self.files is not None:
             self.files.settle_local_file_bookkeeping(deadline)
             self.files.settle_download_bookkeeping()
+            self.files.settle_completed_bookkeeping()
         if execution is not None:
             try:
                 execution.finish()
