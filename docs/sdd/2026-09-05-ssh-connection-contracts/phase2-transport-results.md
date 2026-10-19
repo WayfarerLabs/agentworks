@@ -11,7 +11,37 @@ actually measure.
 Private join `11fcf786a6fbbefe24196cecb2baa62b02b17474` incorporates transport
 `224aca065eb0ade807ba686b7563bffc4d0f02e7`. Production CLI and the transport SDD match the owner;
 only the three prior SSH fixtures differ in CLI files. Shared carrier interfaces and public SSH
-delivery modes are unchanged. Independent SSH composition reviews and fresh local gates are pending.
+delivery modes are unchanged. All three independent source reviews find no material defect; root
+fully reads their complete signed reports. This is source clearance, not validation clearance.
+
+Evaluated runtime/test pin `38a6cf35eb6b60012528403a6bc07c01a907dab1` returns exit one in the
+complete local selection: 23 failures, 22,190 passes, 78 skips and 51 warnings in 408.45 seconds.
+Twenty-two failures belong to host-fixture families, including the new real local-helper case at
+preliminary command preparation before file transfer. Root reads all 23 assertion/error records and
+both new complete traces; original failed views and full output remain retained. The prior decoded
+identity/mismatch and differing NSS/inherited groups support a bed constraint without proving every
+case's cause. No override, skip or retry-to-green is applied.
+
+The other failure is the stale manifest-reference expectation at
+`tests/manifests/test_reference.py:668`: it expects only `mode` and `host`, while the new SSH
+placement correctly exposes `access` too. This source matches the owner and the required update
+belongs there. The
+[complete additional failure and reading](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6278021594)
+are public; SSH changes no transport test or renderer here.
+
+The project lane's own frozen environment passes 61 synthetic/configuration/fault cases,
+deliberately deselecting only the actual local-helper case. Complexity's own environment reports 63
+passes and one preliminary-command failure, with both scoped clock variants and the original
+budget/expiry checks passing. Generic correctness is source-only. These selections do not replace
+the red full suite. All 15 static/website entries pass: Ruff/format, strict typing across 1,560
+sources, canonical file quality, Rulesync, locked-SDD, exact CI Typer isolation, 160 Python and 103
+Node tests, four builds and two deterministic comparisons.
+
+A separate fresh-process passive check installs the existing six retirement-root blockers before any
+first-party import, imports the new host module and constructs only its explicit access model. It
+exits zero with 235 verified own-checkout module origins and no forbidden modules loaded. The
+context is never entered, so this proves no database, helper, SSH or native workflow. Its exact
+script and receipt remain retained separately from the test counts.
 
 The optional complete Lima placement access declaration supplies a literal endpoint, login,
 Linux/Darwin runtime and explicit shared host coordination key. It reuses existing operator SSH
@@ -30,7 +60,7 @@ previously observed identity/group mismatch remains a validation constraint, wit
 The isolated fault-fixture correction at `5978c6d4f` fixes monotonic observation only inside the two
 binding-reinstall cases. Assertions, shared fixtures, markers and production deadlines remain. The
 owner's controlled 5.25-second comparison establishes sensitivity to elapsed fixture time, not the
-exact original hosted delay. Original D9 failures remain in the preceding record below; fresh hosted
+exact original hosted delay. Original D9 failures remain in the following record; fresh hosted
 verification of this correction is separate.
 
 Public SSH head `d7048eaf` has active CI run `39327127783`. Its Website Python step already fails
@@ -38,8 +68,15 @@ one of 160 tests during Chromium DevTools endpoint discovery, before page assert
 Node/build steps are not reached. Website/workflow bytes match protected main, without establishing
 the startup failure's cause. The
 [complete original failure](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6277709046)
-is retained. No rerun, timeout change or unrelated website fix is made here. Other jobs remain
-pending at this private checkpoint; earlier local passes do not clear it.
+is retained. No rerun, timeout change or unrelated website fix is made here. All three Linux jobs
+pass 21,919 tests each with 310 skips and 51 warnings; Windows remains pending at this private
+checkpoint. Earlier local passes do not clear the Website failure.
+
+Owner run `39327927020`, actual merge `18a99f19f9d0997ebeb3fe2c89cc21539fe43693`, independently
+reports the same stale manifest-reference failure on Linux Python 3.13.16: one failure, 21,978
+passes, 310 skips and 51 warnings in 762.38 seconds. Root reads its originating
+source/interpreter/result and complete failure trace. Other owner jobs remain pending at this
+checkpoint; this is neither a green owner run nor a fresh SSH joint-head result.
 
 The SSH-owned Windows keyboard decision document at `3ccc0404` has project and complexity reviews
 clear, including the accepted units-versus-bytes clarification. Root fully reads both complete

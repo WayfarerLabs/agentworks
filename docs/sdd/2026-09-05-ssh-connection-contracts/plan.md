@@ -228,8 +228,10 @@ paths still require transport composition and native acceptance.
 
 The current private join `11fcf786a6fbbefe24196cecb2baa62b02b17474` incorporates transport
 `224aca065`: configured SSH host declarations and the isolated disposal fault-fixture clock
-correction. Shared carrier interfaces and public SSH delivery modes are unchanged. Independent
-composition reviews and fresh local gates are pending. The Windows keyboard decision document has
+correction. Shared carrier interfaces and public SSH delivery modes are unchanged. All three source
+reviews find no material defect. The full run at `38a6cf35` has 22,190 passes and 23 failures: 22
+host-fixture cases and the owner's stale manifest-reference field expectation. All 15 static and
+website entries pass; this does not clear validation. The Windows keyboard decision document has
 both private reviews clear but selects no decoder or feature activation. The
 [configured-host record](phase2-transport-results.md#configured-ssh-platform-host-declaration-composition)
 keeps source/validation boundaries explicit. Public `d7048eaf` CI is active with a Website Chromium
