@@ -1120,6 +1120,23 @@ Sources:
 The pinned files were read through the official Proxmox Git service; these commit links identify the
 same upstream sources. Native API/task behavior on both majors remains a required gate.
 
+### Proxmox configuration and resize completion
+
+Both pinned releases distinguish synchronous configuration PUT (null result) from resize PUT, which
+returns a `resize` task UPID even for an absolute target size. Retain and observe that task before
+starting the VM. Both endpoints accept a configuration digest. Setting `vmgenid=1` generates a fresh
+UUID; it is not a stable literal to replay after losing a reply. Configure only the freshly
+associated new VM and observe its actual generation before binding the existing provider locator.
+These source facts guide the remaining implementation; they establish no native result.
+
+Sources:
+[PVE 8 configuration and generation](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/API2/Qemu.pm#L2090-L2669),
+[PVE 8 resize task](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/API2/Qemu.pm#L5696-L5831),
+[PVE 9 configuration and generation](https://github.com/proxmox/qemu-server/blob/80e0590e144359fd136a2ba1e3f44716bfc535b0/src/PVE/API2/Qemu.pm#L2183-L2783),
+[PVE 9 resize task](https://github.com/proxmox/qemu-server/blob/80e0590e144359fd136a2ba1e3f44716bfc535b0/src/PVE/API2/Qemu.pm#L5949-L6084).
+The pinned files were read through the official Proxmox Git service. The independent adapter must
+not copy the legacy wrapper's discarded resize acknowledgment as a completion condition.
+
 ### Decisions still required
 
 The new-guest package and preinstalled macOS host runtime choices are settled, but their
