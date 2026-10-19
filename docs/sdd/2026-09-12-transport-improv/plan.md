@@ -5912,6 +5912,14 @@ unit, not host configuration/context composition, native Darwin or automatic rec
       native SSH/macOS proof, Remote Lima adoption/provisioning/rollback and process-loss recovery
       under their complete production gates; this composer alone does not enable that route.
 
+- [ ] Complete same-process bookkeeping retry for captured, closed stat, inventory, removal,
+      metadata/directory and JSON file calls. Retire the exact completed call and its original
+      serial borrow before dependent execution lifetime resolution, without repeating helper,
+      source, transform or mutation work. Missing outcomes and uncertain effects must retain
+      custody rather than acquire an inferred completion. Prove interrupted and already-committed
+      borrow release through host and VM context cleanup. This corrects the existing file layer;
+      the host composer alone does not complete it.
+
 - [ ] Implement and privately prove
       [host finite prepared input and capture](preparation-lld.md#host-finite-prepared-input-and-capture)
       through the existing host context. Reuse shared scratch transfer, fixed-prefix loading,
