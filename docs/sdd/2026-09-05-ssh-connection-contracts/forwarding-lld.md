@@ -167,8 +167,11 @@ Windows and macOS need their own handle/lifetime evidence. Destination failure a
 reported honestly without retroactively claiming setup failed.
 
 [Current Linux component observations](phase2-transport-results.md#native-linux-caller-held-forwarding)
-record the eight original installed-client cases through caller-held custody. Native pending/control
-faults, other supported platforms and full production acceptance remain open.
+record the eight original installed-client cases through caller-held custody. Separate
+[controlled lifetime probes](phase2-transport-results.md#native-linux-forwarding-lifetime-fault-probes)
+observe real clients retained through constructor-return delay and a published borrower hold with
+SIGINT. Genuine OS construction or native cleanup failure, concurrent close, other supported
+platforms and full production acceptance remain open.
 
 Source grounding:
 [OpenSSH 8.5 forwarding setup](https://github.com/openssh/openssh-portable/blob/V_8_5_P1/ssh.c),

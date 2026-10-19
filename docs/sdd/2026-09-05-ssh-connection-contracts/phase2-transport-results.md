@@ -160,3 +160,44 @@ cleanup, concurrent close and retry faults remain unmeasured, as do server-inter
 These Linux fixture observations supply neither other supported clients/platforms nor genuine
 provider/RunContext/writer integration. Full R1-R5, terminal activation and retirement gates remain
 open.
+
+## Native Linux forwarding lifetime fault probes
+
+Two separate controlled probes pass once at public `33b6a4129620ca274b4457f3125d92b48dff22aa`, using
+actual Linux OpenSSH 9.2 clients and the same caller-held forwarding implementation. These inject a
+post-construction return hold or a published drain hold; they are not genuine OS constructor
+failures or failed native cleanup/retry. No fake client, owner, status or close result is supplied.
+The eight original forwarding bodies above are not rerun or changed.
+
+The constructor-return probe propagates the original deadline error while the real client remains
+live, its valid pipes retained by the pending constructor and its owner's pipes unpublished. The
+other probe holds the exact published native pipe tuple, sends SIGINT only to its current process
+under the unchanged default Python handler, and traces the original exception in the actual
+readiness wait. That exact KeyboardInterrupt object reaches the caller with its original retention
+note.
+
+Both callers return while their measured boundary is still held; finally-set exit events and expiry
+flags forbid a fixture timeout from becoming pending-success evidence. A fresh finite close actually
+returns false, the original child/pipes remain live/open and valid, the same owner/storage stay
+retained, and replacement process admission refuses. Explicitly releasing only the fixture hold then
+permits fresh close of that exact same resource and owner. This supplies no remote-no-effect claim.
+
+The fully read signed report has SHA256
+`77820a36ad6f6091f2b3c8fbb2f78dc79f941dbaa5154b4174baee70585f27f5`; its aggregate is
+`a91891de5105b8ea4ba0d56a46f085651934314c053f2a592949c229f132176f`. The reviewed runner is
+`527c3b5f35d59b371fbf5e8aeb93882a8df7eee3f52dc4597a01fce22efd6c68`. Source origins and hashes, owned
+startup isolation and four private keys at `0600` are checked before native use, without a
+permission overlay. Product timeouts and original caller cleanup remain unchanged.
+
+All fourteen original direct process handles have known exits, closed pipes and independent
+same-execution `ECHILD` observations. Four requested endpoint rebinds pass. Both original caller and
+delivery stores settle before server teardown; the lead verifies individual receipts, source hashes
+and original primary traces, then independently confirms both exact fixture paths absent. Final
+forwarding/server status minus nine records cleanup, never natural completion zero. No unexpected
+failure, observation expiry or retry occurs.
+
+Genuine OS construction failure, actual native cleanup failure/retry, before-owner refusal,
+concurrent close, other platforms/controls and server descendants remain unmeasured. Genuine
+provider/RunContext/writer integration, full R1-R5 and retirement acceptance remain open. The
+earlier eight-case record retains its own immediately positive cleanup scope; these later controlled
+probes do not retroactively enlarge it.
