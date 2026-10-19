@@ -422,3 +422,13 @@ def test_finite_fresh_deadline_precedes_provider_reads(owned: Owned, deadline: D
 def test_ambiguous_or_unprovable_disk_is_not_size_evidence(raw: object) -> None:
     with pytest.raises(StateError):
         _disk({"scsi0": raw})
+
+
+def test_fractional_byte_disk_size_cannot_round_into_exact_target_evidence() -> None:
+    with pytest.raises(StateError):
+        _disk({"scsi0": "volume,size=39.999999999999999999999999999G"})
+
+
+def test_long_fraction_disk_size_preserves_exact_integer_bytes() -> None:
+    observed = _disk({"scsi0": "volume,size=39.999999999068677425384521484375G"})
+    assert observed.size_bytes == 40 * 1024**3 - 1

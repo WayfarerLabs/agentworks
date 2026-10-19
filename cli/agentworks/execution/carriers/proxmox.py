@@ -43,6 +43,7 @@ from agentworks.execution.carriers._proxmox_http import (
     _valid_clone_body,
     _valid_configuration_body,
     _valid_control_timeout,
+    _valid_digest,
     _valid_resize_body,
     _valid_task_id,
 )
@@ -255,9 +256,9 @@ class _ProxmoxWire:
         """Apply one stopped-VM configuration, requiring the synchronous null reply."""
         if type(request) is not ProxmoxConfigurationRequest or not _valid_control_timeout(timeout):
             raise ValidationError("Proxmox configuration requires a public request and finite timeout")
-        body = request.body(digest)
-        if not _valid_configuration_body(body):
+        if not _valid_digest(digest):
             raise ValidationError("Proxmox configuration requires a fresh config digest")
+        body = request.body(digest)
         data = self._exchange(
             _Endpoint.VM_CONFIGURE,
             "PUT",

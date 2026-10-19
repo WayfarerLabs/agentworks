@@ -10,7 +10,7 @@ import json
 import re
 import time
 from dataclasses import asdict, dataclass, replace
-from decimal import Decimal
+from fractions import Fraction
 from threading import TIMEOUT_MAX, Lock
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -119,10 +119,13 @@ def _disk(config: dict[str, object]) -> DiskObservation:
     if not volume or volume == "none" or properties.get("media") == "cdrom" or match is None:
         raise StateError("Proxmox creation disk lacks volume and size evidence")
     number, unit = match.groups()
-    byte_size = Decimal(number) * (1024 ** {"": 0, "K": 1, "M": 2, "G": 3, "T": 4}[unit])
-    if byte_size <= 0 or byte_size != int(byte_size):
+    try:
+        byte_size = Fraction(number) * (1024 ** {"": 0, "K": 1, "M": 2, "G": 3, "T": 4}[unit])
+    except ValueError:
+        raise StateError("Proxmox creation disk size is invalid") from None
+    if byte_size <= 0 or byte_size.denominator != 1:
         raise StateError("Proxmox creation disk size is invalid")
-    return DiskObservation(raw, volume, int(byte_size))
+    return DiskObservation(raw, volume, byte_size.numerator)
 
 
 def decode_resize_receipt(value: object, intent: ResizeIntent) -> ResizeReceipt:
@@ -208,19 +211,9 @@ class ProxmoxConfiguration:
         self._marker = validate_vm_instance_marker(instance_marker)
         if _canonical_uuid(association.smbios_uuid) != association.smbios_uuid:
             raise ValidationError("Proxmox clone association UUID is not canonical")
-        self._initial = ConfigurationIntent(
-            connection.api_url,
-            connection.node,
-            connection.vmid,
-            connection.token_id,
-            self._marker,
-            association.smbios_uuid,
-            request,
-            "0" * 40,
-            DiskObservation("", "", 0),
-        )
-        # Bound every public input before passive construction can be retained.
-        _encode(ResizeIntent(self._initial, DiskObservation("", "", 0), disk_gib, "0" * 40))
+        self._connection = connection
+        self._association = association
+        self._request = request
         self._owner = owner
         self._wire = _ProxmoxWire(connection)
         self._custody = custody
@@ -250,14 +243,14 @@ class ProxmoxConfiguration:
             or "lock" in config
             or power.get("status") != "stopped"
             or config.get("description") != f"agentworks-instance:{self._marker}"
-            or _smbios_uuid(config) != self._initial.smbios_uuid
+            or _smbios_uuid(config) != self._association.smbios_uuid
             or not _valid_digest(config.get("digest"))
         ):
             raise StateError("Proxmox stopped clone association is unproved")
         digest = config["digest"]
         assert isinstance(digest, str)
         if configured:
-            expected = self._initial.request.body(digest)
+            expected = self._request.body(digest)
             for key, value in expected.items():
                 actual = config.get(key)
                 if key in {"memory", "cores"}:
@@ -280,11 +273,24 @@ class ProxmoxConfiguration:
             disk = _disk(config)
             if disk.size_bytes > self._disk_gib * 1024**3:
                 raise StateError("Proxmox creation disk cannot shrink")
-            self._configuration_history.append(replace(self._initial, digest=digest, disk=disk))
+            connection = self._connection
+            intent = ConfigurationIntent(
+                connection.api_url,
+                connection.node,
+                connection.vmid,
+                connection.token_id,
+                self._marker,
+                self._association.smbios_uuid,
+                self._request,
+                digest,
+                disk,
+            )
+            payload = _encode(intent)
+            self._configuration_history.append(intent)
             obligation = self._owner.register_lifecycle_obligation(
                 CONFIGURATION_KIND,
                 payload_version=PAYLOAD_VERSION,
-                payload=_encode(self._configuration_history[-1]),
+                payload=payload,
                 obligation_id=self.configuration_obligation_id,
             )
             _remaining(deadline)
@@ -292,7 +298,7 @@ class ProxmoxConfiguration:
             remaining = _remaining(deadline)
             self._configuration_entered = True
             self._wire.request_vm_configure(
-                self._initial.request,
+                self._request,
                 digest=digest,
                 timeout=remaining,
                 custody=self._custody,
