@@ -283,14 +283,20 @@ Keep the stages and failure windows explicit:
    lost clone response. The first slice must establish the concrete provider association, or retain
    the unknown creation intent without claiming that resource reconciliation or rollback completed.
 2. Establish the public guest prerequisites through the independent native channel. This stage must
-   work before Python, the requested administrative account or a guest marker is available. Use only
-   a fixed, core-owned bootstrap with explicit shell and actual native delivery identity; do not
-   fabricate a prepared guest identity to authorize it. Install Python 3 and the public
-   administrative/marker setup before invoking Python helpers. Establish the actual helper launch
-   prerequisites too: non-interactive root entry, required launch tools and a safe scratch root.
-   Keep this pre-helper bootstrap minimal; it need not deliver the entire guest configuration. A
-   package-list entry alone is not runtime proof. Bookworm compatibility and the separate no-staging
-   readiness path still apply.
+   work before shared Python-runtime admission, the requested administrative account or a guest
+   marker is available. Use only a fixed, core-owned bootstrap with explicit shell and actual native
+   delivery identity; do not fabricate a prepared guest identity to authorize it. Install Python 3
+   and the public administrative/marker setup before invoking Python helpers. Establish the actual
+   helper launch prerequisites too: non-interactive root entry, required launch tools and a safe
+   scratch root. Keep this pre-helper bootstrap minimal; it need not deliver the entire guest
+   configuration. A package-list entry alone is not runtime proof. Bookworm compatibility and the
+   separate no-staging readiness path still apply. Existing platform boot prerequisites remain
+   distinct from the shared helper runtime. For Proxmox creation, use cloud-init's own completion
+   interface before package writes, not an interpretation of its version-specific systemd services.
+   Require successful wait and explicit completed status; disabled, degraded or broken cloud-init is
+   a prerequisite failure, not permission to install packages while its work is unproved. This does
+   not require the shared Python helpers or establish their runtime requirements, and supplies no
+   global guest-drain claim.
 3. Persist the observed platform metadata under the same owner and prepare the guest and requested
    account using the existing new-stack machinery. Construct no second claim and do not reopen the
    existing-VM entry, which would reacquire ownership. Observe the installed runtime, marker and

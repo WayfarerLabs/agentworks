@@ -1137,6 +1137,31 @@ Sources:
 The pinned files were read through the official Proxmox Git service. The independent adapter must
 not copy the legacy wrapper's discarded resize acknowledgment as a completion condition.
 
+Both releases also accept an explicit generation UUID without regenerating it. Decision: choose and
+retain a canonical nonzero UUID before configuring the associated new clone, then observe that exact
+generation. Keep synchronous configuration acknowledgment distinct from readiness for activation.
+Resize accepts a drive name, size and digest, not a `currentdisk` field; even an equal-size request
+returns a task. Retain the observed volume independently and verify it and the final byte size after
+exact task completion. These decisions do not authorize replay after an uncertain response.
+
+### Cloud-init completion before minimal guest bootstrap
+
+Bookworm's final service invokes cloud-init directly; Trixie's service delegates through a socket
+shim. Reconstructing their completion rules from service properties would duplicate cloud-init's own
+interface. Both inspected versions expose wait and explicit completed status. Decision: require a
+successful bounded `cloud-init status --wait`, then confirm `done` through a separate status query
+before package writes. Zero exit alone is insufficient because disabled cloud-init can return zero.
+Missing or broken cloud-init, including its existing interpreter, is an explicit
+platform-prerequisite failure. This uses no prepared Agentworks helper, account or marker and proves
+neither the later Python 3.11 requirements nor global guest quiescence. Native creation acceptance
+remains required.
+
+Sources:
+[Bookworm final service](https://sources.debian.org/src/cloud-init/22.4.2-1%2Bdeb12u4/systemd/cloud-final.service.tmpl/),
+[Trixie final service](https://sources.debian.org/src/cloud-init/25.1.4-1%2Bdeb13u1/systemd/cloud-final.service),
+[cloud-init 22.4.2 status](https://github.com/canonical/cloud-init/blob/22.4.2/cloudinit/cmd/status.py),
+[cloud-init 25.1.4 status](https://github.com/canonical/cloud-init/blob/25.1.4/cloudinit/cmd/status.py).
+
 ### Decisions still required
 
 The new-guest package and preinstalled macOS host runtime choices are settled, but their
