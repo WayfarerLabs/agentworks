@@ -296,13 +296,14 @@ Keep the stages and failure windows explicit:
    existing-VM entry, which would reacquire ownership. Observe the installed runtime, marker and
    account before ordinary target admission. Reuse the actual create-time binding rather than
    resolving its endpoint again through a legacy hook.
-4. Complete the remaining key-free public guest configuration through the prepared ExecutionAccess
-   with explicit Bash and ordinary shared input/output handling. Reuse the pure bootstrap generator
-   with its join deferred; do not build another pre-Python script-delivery or output-capture stack.
-   Then complete the secret-bearing join through that prepared target, keeping the Tailscale key on
-   sensitive stdin rather than embedding it in generated shell, provider data or a staging file.
-   Carrier closure alone proves neither join success nor guest completion. Keep uncertain public
-   configuration or join work and its original helper custody distinct from known completed work.
+4. Complete the remaining key-free public guest configuration through the prepared ExecutionAccess,
+   using its elevated plan with explicit Bash and ordinary shared input/output handling. Reuse the
+   pure bootstrap generator with its join deferred; do not build another pre-Python script-delivery
+   or output-capture stack. Then complete the secret-bearing join through that prepared target,
+   keeping the Tailscale key on sensitive stdin rather than embedding it in generated shell,
+   provider data or a staging file. Carrier closure alone proves neither join success nor guest
+   completion. Keep uncertain public configuration or join work and its original helper custody
+   distinct from known completed work.
 5. Close the platform bootstrap rollback window only after its required completion evidence and
    durable addressability are established. Keep this boundary explicit in the retained adapter.
    Before it, failed provisioning performs exact platform rollback or retains its unresolved
