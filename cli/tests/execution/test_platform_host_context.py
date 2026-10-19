@@ -45,8 +45,6 @@ from tests.execution.test_target_identity import SyntheticCarrier
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local ordinary helper proof requires Linux")
 _SCOPE = OperationScope(OperationResourceKind.PLATFORM_HOST, "explicit-shared-host")
-_RUNTIME = RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)
-_IDENTITY = IdentityExpectation(os.geteuid(), os.getegid(), tuple(sorted(set(os.getgroups()) | {os.getegid()})))
 
 
 @pytest.fixture
@@ -81,7 +79,7 @@ def fixture(tmp_path, monkeypatch):
             delivery_account=account,
             workload_account=account,
             include_elevated=False,
-            runtime_selection=_RUNTIME,
+            runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable),
             trusted_root=PurePosixPath(root),
             deadline=Deadline.after(30),
         )
@@ -102,12 +100,13 @@ def fixture(tmp_path, monkeypatch):
 @pytest.mark.parametrize("include_elevated", [False, True])
 def test_actual_context_command_files_identity_and_closed_derived_views(fixture, include_elevated):
     db, carrier, root, scratch, metadata, lifetimes, context = fixture
+    identity = IdentityExpectation(os.geteuid(), os.getegid(), tuple(sorted(set(os.getgroups()) | {os.getegid()})))
     with context(include_elevated=include_elevated) as ctx:
         lifetime = lifetimes[0]
         assert lifetime.owner.ownership.scope == _SCOPE
         target = ctx.platform_host_execution_target()
         assert target.route is ExecutionRoute.PLATFORM_HOST
-        assert target.identity == ExecutionIdentity(metadata.owner, _IDENTITY.euid, _IDENTITY.egid, _IDENTITY.groups)
+        assert target.identity == ExecutionIdentity(metadata.owner, identity.euid, identity.egid, identity.groups)
         assert target.features == carrier.features
         execution, files = target.execution(), target.files()
         derived = execution.with_env({"HOST_FIXTURE": "selected"})
@@ -119,7 +118,7 @@ def test_actual_context_command_files_identity_and_closed_derived_views(fixture,
             "import json,os; print(json.dumps([os.geteuid(),os.getegid(),sorted(set(os.getgroups())|{os.getegid()})]))"
         )
         result = execution.run(Command([sys.executable, "-I", "-S", "-B", "-c", code]), profile=Protection.DIRECT)
-        assert result.ok and json.loads(result.stdout.data) == [_IDENTITY.euid, _IDENTITY.egid, list(_IDENTITY.groups)]
+        assert result.ok and json.loads(result.stdout.data) == [identity.euid, identity.egid, list(identity.groups)]
         result = derived.run(
             Script('read value; printf "%s:%s" "$HOST_FIXTURE" "$value"; printf error >&2', Shell.SH),
             stdin=Input.bytes(b"finite\n"),
