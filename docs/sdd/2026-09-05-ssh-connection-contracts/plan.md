@@ -226,7 +226,16 @@ proves that restoring old TOML does not discard current managed policy, revocati
 partial-update custody. Production writer coexistence and rollback through both usable RunContext
 paths still require transport composition and native acceptance.
 
-The current private join `11fcf786a6fbbefe24196cecb2baa62b02b17474` incorporates transport
+The current private POSIX join `5c15f9fa1939ff542c172e95d0f915769aa440cc` combines the owner's
+manifest-reference correction at `1936202d` with the refreshed eight-file SSH port at `09e6a56f`.
+The internal candidate now advertises POSIX terminal input; this is not supported public delivery or
+completed Windows/platform acceptance. The developer passes 656 focused cases, including sixteen
+composition cases, with one stale shared refusal assertion left open for its owner. Independent
+current-composition reviews and full gates remain pending. The
+[current leaf-composition record](phase2-transport-results.md#current-posix-terminal-leaf-composition)
+preserves actual results, native limits and the unchanged full acceptance obligations.
+
+The preceding private join `11fcf786a6fbbefe24196cecb2baa62b02b17474` incorporates transport
 `224aca065`: configured SSH host declarations and the isolated disposal fault-fixture clock
 correction. Shared carrier interfaces and public SSH delivery modes are unchanged. All three source
 reviews find no material defect. The full run at `38a6cf35` has 22,190 passes and 23 failures: 22

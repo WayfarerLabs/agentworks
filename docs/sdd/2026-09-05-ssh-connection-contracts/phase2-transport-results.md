@@ -6,6 +6,37 @@ does not replace the SSH plan, shared transport contracts or full implementation
 Earlier records retain their original observations. New entries supersede only the gates they
 actually measure.
 
+## Current POSIX terminal leaf composition
+
+Private join `5c15f9fa1939ff542c172e95d0f915769aa440cc` combines transport
+`1936202d18341edc5dcc3310a886f15a2df40393` with SSH port `09e6a56f809cf9ff588ef4c7fef3977ccb90c438`.
+The owner correction changes only the stale manifest-reference field expectation and removes its
+adjacent authored-summary wording assertion. Original failures remain preserved. This correction
+does not clear the other host-fixture failures.
+
+The port changes exactly eight SSH-owned files. Its six Python diffs match the previously reviewed
+POSIX unit; README wording reflects the current working candidate. It accepts TerminalInput
+passively on POSIX, advertises that internal capability, selects the existing terminal argv and
+lazily routes to the retained relay. It changes no shared type, owner, helper, readiness parser or
+presentation policy. Current enrollment-key, causal-custody and drain fixtures remain intact.
+
+The developer's own frozen environment reports 656 passes, eleven expected Windows-host skips, 40
+authored integration deselections and one failure in 40.56 seconds. All sixteen synthetic
+composition cases pass, using actual shared preparation with an owned synthetic client rather than
+installed SSH. Scoped style/typing and both pinned README checks pass. Root fully reads the complete
+patch, developer handoff, original failure and selection/environment/cleanup receipts. Independent
+review of this new composition and full applicable gates remain pending.
+
+The open shared test `test_buffered_ssh_refuses_terminal_before_connection_access` still assumes
+terminal capability is false on every platform. The
+[complete failure and owner consideration](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6278181267)
+record the required capability-qualified refusal without changing or skipping that shared test.
+Public SSH remains at D7048; this candidate is private. Internal POSIX enablement is real, but it
+supplies no native macOS/Windows proof, complete Linux fault/lifetime acceptance, shared sanitation,
+public RunContext composition or full R1-R5 acceptance. Windows terminal implementation remains
+required. No completed SSH plan block, review signal, public round, native admission or lock
+changes.
+
 ## Configured SSH platform-host declaration composition
 
 Private join `11fcf786a6fbbefe24196cecb2baa62b02b17474` incorporates transport
