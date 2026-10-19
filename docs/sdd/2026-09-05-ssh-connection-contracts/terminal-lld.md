@@ -392,8 +392,10 @@ Inspect the actual scoped report using the
 retain `case`, `input_page`, `output_page`, `input_mode`, `vt_input` and `injected` to identify the
 cell. `low_level_records` reports `kind`, `down`, `repeat`, `vkey`, `unit` and `control`;
 `read_console_w_batches` records character units from a separate injection of the identical vector.
-Compare flattened batches while retaining their boundaries and the sentinel. For the private vector,
-compare `native_page_reference_units` for both pages with `packed_bytes`. `remaining_records`,
+Compare flattened batches while retaining their boundaries and distinguishing the appended `Z`
+sentinel from candidate character units. For the private vector, compare those observed candidate
+units with each page's `native_page_reference_units`. `packed_bytes` identifies the original input
+to those reference conversions, not character units to compare directly. `remaining_records`,
 `nowait_seconds` and `read_console_w_seconds` preserve queue and timing observations; they do not
 establish cancellation bounds. The source's blocking character reader is supervised test machinery,
 not a production candidate. Only the key-down control's returned units are asserted; green captured
