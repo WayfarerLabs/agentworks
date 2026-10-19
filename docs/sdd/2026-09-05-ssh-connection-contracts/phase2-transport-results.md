@@ -11,8 +11,39 @@ actually measure.
 Private runtime/test composition `b595937509014eb1e91f631761c98d9f96e384c5` incorporates published
 transport `d9cc9d88243f57417443e64fa80f8dfe306edfb2`, including its preceding host-context increment
 `1eed4f5c7`. Production CLI and the complete transport SDD match the owner. Only the three prior SSH
-fixtures differ in CLI files; no shared carrier or SSH public delivery-mode change is made. Fresh
-integration reviews and local/hosted gates are pending at this checkpoint.
+fixtures differ in CLI files; no shared carrier or SSH public delivery-mode change is made. All
+three source reviews find no material defect; this is not validation clearance.
+
+The complete local selection at evaluated runtime/test pin
+`c7436cc9db1329c5c71e8c7624f456e810fdd3a6` returns exit one: 22,132 passes, 21 failures, 78 skips
+and 51 warnings in 414.19 seconds. All failures belong to the new host fixture families. Sixteen
+completed-call cases stop at the preliminary command, two identity assertions show different groups,
+the JSON-debt case gets file refusal, and two upload cases stop before successful completion or find
+the expected published file absent. These do not exercise their intended positive retry branches.
+Original failed views, every failure's assertion/error lines and the full log remain retained.
+
+An independently owned project-review environment reports 13 passes and 17 failures in its focused
+selection. One additional diagnostic remains failed at the same preliminary command, with an actual
+decoded FailureFact of phase identity and code mismatch. Its requested UID/GID are 1021/1041 and its
+NSS-derived groups differ from the parent's inherited groups `{1041,65534}`. The parent UID/GID
+match, and the helper requires exact kernel identity. This supports the group-mismatch explanation
+without directly observing guest kernel metadata or establishing every failing case's cause. No
+account/group change, identity override, substitute helper, skip or retry-to-green is applied.
+
+Complexity's own selections report 30 passes and 21 host-related failures; all twelve simulated
+native/canonical VM closeout cases pass. Replacing only the completed-file bookkeeping method with
+an in-memory no-op makes both otherwise-passing VM stat cases fail during original cleanup retry:
+the retained file borrow blocks dependent execution-lifetime resolution. Root fully reads all three
+signed source reviews, the diagnostic driver/result and the complete deletion-control output. The
+generic structured name `selected-host` is an optional diagnostic-context question for the owner,
+not a custody or scope defect. Prior D1 is taken by the owner, as described below.
+
+Ruff/format, strict typing across 1,557 sources, Rulesync, locked-SDD and exact CI Typer isolation
+pass. Website checks pass 160 Python and 103 Node tests, four builds and both deterministic
+comparisons. Initial canonical file quality fails only the SSH plan's Markdown reference wrap;
+Prettier and spelling pass. The documentation-only correction passes repeated canonical file
+quality; the original failed views remain. Neither this correction nor source review makes the local
+suite green. Fresh hosted verification and applicable positive host coverage remain separate gates.
 
 The private ordinary platform-host context claims its explicit PLATFORM_HOST scope before actual
 account discovery. It composes existing command/file views with selected accounts, elevation,

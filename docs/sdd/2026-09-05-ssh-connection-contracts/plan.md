@@ -226,15 +226,20 @@ proves that restoring old TOML does not discard current managed policy, revocati
 partial-update custody. Production writer coexistence and rollback through both usable RunContext
 paths still require transport composition and native acceptance.
 
-The current private composition `b595937509014eb1e91f631761c98d9f96e384c5` incorporates transport
-#833 at `d9cc9d88243f57417443e64fa80f8dfe306edfb2`. Production CLI and the transport SDD match that
-owner; only the reviewed SSH drain, generated-key permission and causal terminal-custody fixtures
-differ in CLI files. This increment adds the private ordinary host context, completed-file
-bookkeeping retry and Linux-only fixture collection correction. Fresh integration reviews and gates
-are pending. Earlier composition `48c5a9e6` passed 22,085 local tests and canonical/website gates;
-its later hosted Windows managed-start failure remains unattributed. The newer owner fixture's
-collection correction requires its own hosted Windows result. No inherited green result accepts this
-new pin, unfinished terminal, configured host adoption, platform/FileAccess or RunContext work. The
+The current private composition `b595937509014eb1e91f631761c98d9f96e384c5` incorporates
+[transport PR #833](https://github.com/WayfarerLabs/agentworks/pull/833) at
+`d9cc9d88243f57417443e64fa80f8dfe306edfb2`. Production CLI and the transport SDD match that owner;
+only the reviewed SSH drain, generated-key permission and causal terminal-custody fixtures differ in
+CLI files. This increment adds the private ordinary host context, completed-file bookkeeping retry
+and Linux-only fixture collection correction. All three source reviews find no material defect. The
+full local run at `c7436cc9` reports 22,132 passes, 21 host-fixture failures, 78 skips and 51
+warnings; a single diagnostic observes an actual identity/mismatch refusal. This bed's NSS and
+inherited groups differ, and positive host workflow coverage remains incomplete. Static and website
+gates pass after the Markdown reference-wrap correction and repeated canonical file-quality check.
+Earlier composition `48c5a9e6` passed 22,085 local tests and canonical/website gates; its later
+hosted Windows managed-start failure remains unattributed. The newer owner fixture's collection
+correction requires its own hosted Windows result. No inherited green result accepts this new pin,
+unfinished terminal, configured host adoption, platform/FileAccess or RunContext work. The
 [current composition record](phase2-transport-results.md#ordinary-host-context-and-completed-file-bookkeeping)
 keeps those boundaries and the preparation-only native probe explicit. The latest full native SSH
 testing pin remains `1fcabfe6082ab23b1e04eeac115e842f541eee95`; subsequent private Linux terminal
