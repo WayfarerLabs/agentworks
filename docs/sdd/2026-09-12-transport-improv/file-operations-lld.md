@@ -1096,7 +1096,7 @@ request codecs accept an optional exact gate, and their fixed guest handlers hol
 operation. The private pre-bound `FileOperation.upload()` path validates a supplied gate against the
 Linux VM scope, effective UID, deterministic path and derived guest boot, persist it in the current
 child row before dispatch, and pass it through stage and publication requests including cleanup. Its
-private path without a gate still exists; production composition must explicitly require a gate,
+private path without a gate still exists; Linux VM production composition must explicitly require a gate,
 match the verified raw guest marker and selected provider locator, and never downgrade a bound
 request. Read-only preflight is not an effect. An acknowledged generation advance under the same
 gate flock would wait for admitted old effects to leave and make delayed old-generation requests
@@ -1468,6 +1468,37 @@ absent and conflicts on a different revision or kind. Regular files require link
 directories must be empty; sockets require `FileKind.SOCKET`. FileAccess performs no tmux liveness
 probe. The session owner supplies a revision only after its separately tested runtime-absence check.
 There is no recursive removal and no FIFO path.
+
+### Ordinary platform-host file binding
+
+Ordinary platform-host file work uses the exact core `OperationScope` with resource kind
+`PLATFORM_HOST`, shared with its actual `OperationOwner`. This is coordination identity, not proof
+of a physical host incarnation or boot. Do not manufacture a guest marker or boot UUID to satisfy
+the existing VM file constructor. Reuse the selected carrier, actual account/identity plan, runtime,
+trusted root, file-call custody and ordinary filesystem checks. The host composer remains separate
+work; a passive RunContext accessor alone does not supply these facts or own their lifetime.
+
+The private file binding accepts either the existing managed VM target or that exact host scope.
+New ordinary host construction rejects a `ManagedTargetIdentity` labeled as a host. A host scope
+cannot carry a guest bootstrap, raw guest identity, effect gate or gate setup. Reject those
+combinations before borrowing or dispatch; do not weaken any bound Linux VM request. No host gate,
+administrator setup service or machine-wide lock is introduced.
+
+Give host `file-call` records their own payload version, 7, with a target containing only
+`kind: platform-host` and the coordinated resource name. Preserve existing VM versions 1-6. Host
+child associations, exact scratch and cleanup debt, and uncertainty updates retain version 7 rather
+than falling into a legacy no-bootstrap version. The codec validates the complete bounded envelope,
+rejects mixed host/VM fields and version relabeling, and keeps file contents and connection details
+out of the ledger. Historical host-labeled records may remain decodable, but acquire no recovery
+authority from their old shape.
+
+Normal work and same-process closing use the original retained objects and actual helper evidence.
+Uncertain delivery, mutation, cleanup or bookkeeping retains the call and claim; it does not permit
+replay, a fresh route or takeover. All file recovery adapters refuse host records before rebinding
+or dispatch, including legacy host-labeled records, supplied VM contexts and synthetic drain facts.
+Automatic process-loss recovery remains unavailable until concrete host identity/epoch and
+no-further-effects evidence are designed and proved. This private prerequisite does not complete
+host provisioning/rollback, native Darwin behavior or the additive RunContext surface.
 
 ## Immediate mechanics versus deferred permission activation
 

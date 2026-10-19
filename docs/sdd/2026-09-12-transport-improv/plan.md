@@ -5874,6 +5874,16 @@ managed VM identity; managed jobs retain their actual target requirement. This c
 constructor checkbox only. Complete additive context delivery, host files and recovery, native
 acceptance and permission activation remain separate open gates.
 
+- [ ] Implement and privately prove the
+      [ordinary platform-host file binding](file-operations-lld.md#ordinary-platform-host-file-binding)
+      using the existing exact PLATFORM_HOST operation scope, not fabricated VM incarnation/boot
+      evidence. Retain original file/helper custody, path/metadata rules and same-process closing;
+      encode a bounded host-only version-7 record and preserve existing VM formats. Refuse guest
+      bootstrap/gate mixtures and all process-loss host recovery before rebind or dispatch. Prove
+      real ordinary host file effects, lost replies, exact cleanup, codec separation and unchanged
+      VM/gate behavior. Host context/factory composition, physical identity/epoch proof, native
+      acceptance and automatic recovery remain separate gates, not completion claims of this unit.
+
 - [x] Complete and privately review paired native admin/agent preparation using an explicit
       core-selected agent row on the same VM. Reuse one file operation, execution operation, numeric
       guest bootstrap, carrier, owner and deadline; retain both account preparations and publish no
