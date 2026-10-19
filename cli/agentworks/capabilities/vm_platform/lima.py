@@ -35,6 +35,7 @@ from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
 )
+from agentworks.capabilities.vm_platform.ssh_host import SSHPlatformHostAccessConfig
 from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
@@ -150,6 +151,13 @@ class LimaSshPlacement(AgwModel):
 
     host: NonEmptyStr = Field(examples=["me@gpu-box"])
     """The SSH host running ``limactl`` (e.g. ``user@host``)."""
+
+    access: SSHPlatformHostAccessConfig | None = None
+    """Complete declaration for explicit ordinary host composition.
+
+    Existing Lima operations continue to use ``host``. This block supplies
+    connection facts without selecting or falling back between execution paths.
+    """
 
 
 #: Where ``limactl`` runs. Distinct arms make SSH's required host visible to
