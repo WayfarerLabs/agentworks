@@ -1745,13 +1745,32 @@ transitions, VM scratch behavior and provider acceptance remain unproved.
 
 Prepared delivery does not yet support platform hosts, Darwin, unbounded execution budgets or live
 endpoints. Supported small inline calls retain their existing behavior. No-staging readiness still
-uses the small entry. The prepared entry expands input admission, not capture retention or output
-spooling.
+uses the small entry. Input staging and capture retention are separate choices.
 
-The current private inline access captures at most 4,096 bytes per application stream and defaults
-to that limit. This is a checkpoint-local helper bound, not the proposed production caller default
-of 1 MiB per stream or its bounded spooling behavior. Larger output currently fails within this
-private path; the production output contract remains open.
+The private default capture limit remains 4,096 bytes per application stream. Explicitly larger
+finite capture on a numerically bound Linux VM uses a separate fixed capture entry under the same
+operation and original deadline. The existing process pump retains the selected prefix plus one
+byte while draining later output. After observing the child, the helper publishes each retained
+prefix through existing exact-length scratch creation, bounded writes and verification as the
+workload identity. Suppressed or discarded output creates no capture objects. Large input reuses
+prepared delivery; a small capture request need not stage its input.
+
+Each closed stream record carries either a verified scratch reference or explicit unavailable
+publication facts and creation uncertainty. Both records precede the actual wait, so handled
+publication failure does not erase known child status. An earlier process failure remains primary;
+otherwise publication failure reports output failure. The workstation retrieves fixed ranges under
+the original budget, keeping remotely observed stream facts separate from verified local bytes.
+Normally returned retrieval failure preserves known status and verified prefixes without inventing
+complete output. Escaping controls preserve their original identity and cause through payload-free
+custody facts.
+
+One token-only lifecycle binding is retained before application dispatch. Actual helper closure and
+local delivery settlement are prerequisites to capture cleanup, independent of application
+completion and artifact debt. Normal cleanup and a same-process fresh finite continuation use the
+original owner and exact tokens; missing receipts remain uncertainty. Prepared-input and capture
+cleanup share only actual closing-delivery mechanics, retaining their own row and protocol checks.
+This path does not change the production default to 1 MiB or complete host/Darwin, live/unbounded,
+process-loss recovery or native credential/provider acceptance.
 
 ## Private file-helper delivery
 
