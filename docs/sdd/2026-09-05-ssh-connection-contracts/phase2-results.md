@@ -7,12 +7,14 @@
   composed at `b595937509014eb1e91f631761c98d9f96e384c5`, incorporating owner `d9cc9d882`. All three
   source reviews find no material defect. The full local run at `c7436cc9` has 22,132 passes and 21
   host-fixture failures; the decoded diagnostic is identity/mismatch, with NSS and inherited groups
-  differing. Positive host validation and fresh hosted gates remain open. The earlier
-  capture/host-file composition passed 22,085 local tests; its hosted Windows managed-start failure
-  remains unattributed. Twelve Linux native trust/authentication cases, eight caller-held forwarding
-  cases, two controlled forwarding lifetime probes and eight external CLI commands add scoped
-  evidence. A causal terminal-custody fixture correction passes private review and local gates after
-  a hosted timing failure. Full terminal and production acceptance remain open
+  differing. Owner CI passes all three Linux versions and Windows collection, but fails two Windows
+  disposal fixtures with an expired deadline before their intended branches. Positive host
+  validation and fresh joint-head gates remain open. The earlier capture/host-file composition
+  passed 22,085 local tests; its hosted Windows managed-start failure remains unattributed. Twelve
+  Linux native trust/authentication cases, eight caller-held forwarding cases, two controlled
+  forwarding lifetime probes and eight external CLI commands add scoped evidence. A causal
+  terminal-custody fixture correction passes private review and local gates after a hosted timing
+  failure. Full terminal and production acceptance remain open
 
 Earlier checkpoint evidence and dependency history live in separate files. The headings below retain
 existing plan links; the linked sections preserve the complete original records. Historical round 1

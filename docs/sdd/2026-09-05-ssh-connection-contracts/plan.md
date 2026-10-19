@@ -237,9 +237,11 @@ warnings; a single diagnostic observes an actual identity/mismatch refusal. This
 inherited groups differ, and positive host workflow coverage remains incomplete. Static and website
 gates pass after the Markdown reference-wrap correction and repeated canonical file-quality check.
 Earlier composition `48c5a9e6` passed 22,085 local tests and canonical/website gates; its later
-hosted Windows managed-start failure remains unattributed. The newer owner fixture's collection
-correction requires its own hosted Windows result. No inherited green result accepts this new pin,
-unfinished terminal, configured host adoption, platform/FileAccess or RunContext work. The
+hosted Windows managed-start failure remains unattributed. Current owner CI passes all three Linux
+versions and Windows collection, but fails two disposal fixtures with a reported deadline before
+their intended branches. Fresh joint-head gates remain separate. No inherited green result accepts
+this new pin, unfinished terminal, configured host adoption, platform/FileAccess or RunContext work.
+The
 [current composition record](phase2-transport-results.md#ordinary-host-context-and-completed-file-bookkeeping)
 keeps those boundaries and the preparation-only native probe explicit. The latest full native SSH
 testing pin remains `1fcabfe6082ab23b1e04eeac115e842f541eee95`; subsequent private Linux terminal

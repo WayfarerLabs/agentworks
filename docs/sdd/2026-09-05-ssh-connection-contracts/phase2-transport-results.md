@@ -43,7 +43,8 @@ pass. Website checks pass 160 Python and 103 Node tests, four builds and both de
 comparisons. Initial canonical file quality fails only the SSH plan's Markdown reference wrap;
 Prettier and spelling pass. The documentation-only correction passes repeated canonical file
 quality; the original failed views remain. Neither this correction nor source review makes the local
-suite green. Fresh hosted verification and applicable positive host coverage remain separate gates.
+suite green. Fresh joint-head verification and applicable positive host coverage remain separate
+gates.
 
 The private ordinary platform-host context claims its explicit PLATFORM_HOST scope before actual
 account discovery. It composes existing command/file views with selected accounts, elevation,
@@ -64,8 +65,18 @@ The original Windows run at owner `1eed4f5c7`, CI merge `7d3001a258f019ae18ecf90
 reports 2,195 passes, 80 skips, 25 warnings and four collection errors in 1,137.63 seconds.
 Linux-only fixture globals construct a Linux runtime from a Windows interpreter path before the skip
 marker applies. Production POSIX-path validation correctly refuses. The correction moves runtime and
-Unix identity discovery into Linux-only execution; fresh hosted Windows collection must
-independently verify it.
+Unix identity discovery into Linux-only execution. Owner run `39323682634`, actual CI merge
+`9ec49099344e191ce23dbfd3cba8971e5893a393` into base `cea5e8523`, has no collection errors. Linux
+3.12/3.13/3.14 each report 21,919 passes, 310 skips and 51 warnings in 871.07, 775.41 and 771.76
+seconds respectively. These are owner-head results, not fresh SSH joint-head verification.
+
+That owner run still fails on Windows 3.13.16: two failures, 2,193 passes, 80 skips and 25 warnings
+in 1,135.08 seconds. Both parameters of
+`test_prior_action_binding_reinstall_rechecks_takeover_and_closing_before_local_handoff` fail in
+`lose_response`, before the intended binding-reinstall branches. The expected unknown disposal is
+actually `disposed=False`, failure DEADLINE, with `deadline_exceeded=True`. The exact time-consuming
+phase is unobserved. Original checkout/interpreter/result portions and both complete failure traces
+are retained; no rerun, timeout extension or owner-source correction is made by SSH.
 
 That failure is distinct from SSH `d6268311`, CI merge `9c7020c10b25ad43258ff393f43f7cd8b1ea8887`
 into owner `ff19ce4e0`: its Windows run reports one failure, 2,194 passes, 80 skips and 25 warnings
