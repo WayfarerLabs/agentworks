@@ -5912,6 +5912,16 @@ unit, not host configuration/context composition, native Darwin or automatic rec
       native SSH/macOS proof, Remote Lima adoption/provisioning/rollback and process-loss recovery
       under their complete production gates; this composer alone does not enable that route.
 
+- [ ] Implement and privately prove
+      [host finite prepared input and capture](preparation-lld.md#host-finite-prepared-input-and-capture)
+      through the existing host context. Reuse shared scratch transfer, fixed-prefix loading,
+      bounded capture and exact same-process custody for Linux/Darwin without VM bootstrap or an
+      implicit root entry. Preserve VM version one and recovery-marker version two; bind host
+      version three to its exact scope, actual entry plan and runtime. Prove mixed-format refusal,
+      large source/stdin/output, original-budget controls, partial failure and no replay. Keep host
+      process-loss recovery refused and native SSH/macOS, configuration/adoption, live/unbounded
+      combinations and the production default under separate gates.
+
 - [x] Complete and privately review paired native admin/agent preparation using an explicit
       core-selected agent row on the same VM. Reuse one file operation, execution operation, numeric
       guest bootstrap, carrier, owner and deadline; retain both account preparations and publish no
