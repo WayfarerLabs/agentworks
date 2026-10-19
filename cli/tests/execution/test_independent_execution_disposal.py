@@ -698,7 +698,11 @@ def test_lost_idempotent_prior_action_install_reply_keeps_actual_unused_borrow(o
 
 @pytest.mark.parametrize("takeover", (False, True))
 @pytest.mark.windows
-def test_prior_action_binding_reinstall_rechecks_takeover_and_closing_before_local_handoff(observer, takeover):
+def test_prior_action_binding_reinstall_rechecks_takeover_and_closing_before_local_handoff(
+    observer, takeover, monkeypatch
+):
+    # Reach the interrupted disposal retry regardless of host scheduling or fixture I/O.
+    monkeypatch.setattr(time, "monotonic", lambda: 0.0)
     database, _, operation, _, main, workflow = observer
     identity = interrupt_retry_before_install(observer)
     original = OperationBorrow.install_dispatch_obligation
