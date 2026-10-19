@@ -3,14 +3,16 @@
 - Updated: 2026-10-19
 - PR: [#832](https://github.com/WayfarerLabs/agentworks/pull/832), draft
 - Main/contract base: `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (#830)
-- State: private join `5c15f9fa1939ff542c172e95d0f915769aa440cc` combines transport's
+- State: working join `5c15f9fa1939ff542c172e95d0f915769aa440cc` combines transport's
   manifest-reference correction at `1936202d` and the refreshed internal POSIX terminal port at
-  `09e6a56f`. The port's focused run has 656 passes and one stale shared refusal assumption; current
-  composition reviews and full gates are pending. The preceding configured-host source reviews are
-  clear, but its full run remains 23 failed and 22,190 passed, with original evidence retained.
-  Public D7048 CI finishes red on Windows managed-foreground startup and Website Chromium startup;
-  neither cause is inferred from source review or other green runs. Complete supported-platform
-  terminal, positive host, factories, both usable RunContext paths and R1-R5 acceptance remain open
+  `09e6a56f`. All three source reviews at `24674afe` find no material defect. Its complete local run
+  has 22,206 passes and 23 failures: 22 host-fixture cases and one stale shared terminal-refusal
+  assertion. Original evidence is retained. All fifteen static/website entries pass after correcting
+  a spelling issue and repeating canonical file quality. Native/full implementation acceptance stays
+  open. Public D7048 CI finishes red on Windows managed-foreground startup and Website Chromium
+  startup; neither cause is inferred from source review or other green runs. Complete
+  supported-platform terminal, positive host, factories, both usable RunContext paths and R1-R5
+  acceptance remain open
 
 Earlier checkpoint evidence and dependency history live in separate files. The headings below retain
 existing plan links; the linked sections preserve the complete original records. Historical round 1

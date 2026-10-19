@@ -226,12 +226,14 @@ proves that restoring old TOML does not discard current managed policy, revocati
 partial-update custody. Production writer coexistence and rollback through both usable RunContext
 paths still require transport composition and native acceptance.
 
-The current private POSIX join `5c15f9fa1939ff542c172e95d0f915769aa440cc` combines the owner's
+The current working POSIX join `5c15f9fa1939ff542c172e95d0f915769aa440cc` combines the owner's
 manifest-reference correction at `1936202d` with the refreshed eight-file SSH port at `09e6a56f`.
 The internal candidate now advertises POSIX terminal input; this is not supported public delivery or
 completed Windows/platform acceptance. The developer passes 656 focused cases, including sixteen
-composition cases, with one stale shared refusal assertion left open for its owner. Independent
-current-composition reviews and full gates remain pending. The
+composition cases, with one stale shared refusal assertion left open for its owner. All three source
+reviews at `24674afe` find no material defect; its full run remains red with 22,206 passes and 23
+failures, including that shared assertion and 22 host-fixture cases. All fifteen static/website
+entries pass after a spelling correction and repeated canonical file quality. The
 [current leaf-composition record](phase2-transport-results.md#current-posix-terminal-leaf-composition)
 preserves actual results, native limits and the unchanged full acceptance obligations.
 

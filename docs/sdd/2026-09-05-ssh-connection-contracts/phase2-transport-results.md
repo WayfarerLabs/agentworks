@@ -8,7 +8,7 @@ actually measure.
 
 ## Current POSIX terminal leaf composition
 
-Private join `5c15f9fa1939ff542c172e95d0f915769aa440cc` combines transport
+Working join `5c15f9fa1939ff542c172e95d0f915769aa440cc` combines transport
 `1936202d18341edc5dcc3310a886f15a2df40393` with SSH port `09e6a56f809cf9ff588ef4c7fef3977ccb90c438`.
 The owner correction changes only the stale manifest-reference field expectation and removes its
 adjacent authored-summary wording assertion. Original failures remain preserved. This correction
@@ -21,21 +21,38 @@ lazily routes to the retained relay. It changes no shared type, owner, helper, r
 presentation policy. Current enrollment-key, causal-custody and drain fixtures remain intact.
 
 The developer's own frozen environment reports 656 passes, eleven expected Windows-host skips, 40
-authored integration deselections and one failure in 40.56 seconds. All sixteen synthetic
+authored integration cases excluded and one failure in 40.56 seconds. All sixteen synthetic
 composition cases pass, using actual shared preparation with an owned synthetic client rather than
 installed SSH. Scoped style/typing and both pinned README checks pass. Root fully reads the complete
 patch, developer handoff, original failure and selection/environment/cleanup receipts. Independent
-review of this new composition and full applicable gates remain pending.
+review of evaluated pin `24674afe09a9487e42bbd661386ee91b594fa8f4` finds no material defect in all
+three lanes; root fully reads their complete signed reports. The project's own frozen environment
+reports 101 passes, two expected Windows skips, four excluded integration cases and the same shared
+failure in 8.81 seconds. Complexity reports 37 passes and that failure; forcing terminal argv off in
+memory makes the real-preparation composition fail. These are synthetic checks, not installed SSH or
+native workstation acceptance.
+
+The complete local selection at that pin returns exit one: 23 failures, 22,206 passes, 78 skips and
+51 warnings in 412.99 seconds. Twenty-two failures remain in host-fixture families; the other is the
+shared terminal-capability assertion below. The corrected manifest-reference case now passes. Root
+reads every failure's assertion/error record and the complete shared refusal trace, retaining the
+original full output and failed fixture views. The observed host failures do not establish one cause
+for all cases. No test is skipped, overridden or retried to obtain green results.
+
+All fifteen static/website entries pass, including strict typing across 1,561 sources, 160 Python
+and 103 Node tests, four builds and two deterministic comparisons. Canonical file quality passes
+after correcting one spelling issue in this record and formatting the updated progress documents.
+The original failed checks remain retained. No production or test source changes after the full run.
 
 The open shared test `test_buffered_ssh_refuses_terminal_before_connection_access` still assumes
 terminal capability is false on every platform. The
 [complete failure and owner consideration](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6278181267)
-record the required capability-qualified refusal without changing or skipping that shared test.
-Public SSH remains at D7048; this candidate is private. Internal POSIX enablement is real, but it
-supplies no native macOS/Windows proof, complete Linux fault/lifetime acceptance, shared sanitation,
-public RunContext composition or full R1-R5 acceptance. Windows terminal implementation remains
-required. No completed SSH plan block, review signal, public round, native admission or lock
-changes.
+record the required capability-qualified refusal without changing or skipping that shared test. This
+evaluation precedes the candidate's publication; public SSH was at D7048. Internal POSIX enablement
+is real, but it supplies no native macOS/Windows proof, complete Linux fault/lifetime acceptance,
+shared sanitation, public RunContext composition or full R1-R5 acceptance. Windows terminal
+implementation remains required. No completed SSH plan block, review signal, public round, native
+admission or lock changes.
 
 ## Configured SSH platform-host declaration composition
 
@@ -114,8 +131,18 @@ trace for this run.
 Owner run `39327927020`, actual merge `18a99f19f9d0997ebeb3fe2c89cc21539fe43693`, independently
 reports the same stale manifest-reference failure on Linux Python 3.13.16: one failure, 21,978
 passes, 310 skips and 51 warnings in 762.38 seconds. Root reads its originating
-source/interpreter/result and complete failure trace. Other owner jobs remain pending at this
-checkpoint; this is neither a green owner run nor a fresh SSH joint-head result.
+source/interpreter/result and complete failure trace. Its other Linux jobs also fail only that
+expectation; Windows independently passes 2,195 tests, with 80 skips and 25 warnings in 1,049.85
+seconds. Root reads all four originating checkout/interpreter/results and all three Linux failures.
+This red owner run neither accepts the SSH joint head nor explains D7048's distinct Windows failure.
+
+Newer owner run `39329774986` tests `1936202d` through actual merge
+`4a516b45579d6331142c18da7f724af1004c4c1b`. Linux Python 3.12/3.13/3.14 each pass 21,979 tests, with
+310 skips and 51 warnings, in 863.40/777.13/494.09 seconds. Root reads their originating
+checkout/interpreter/command/results. Windows Python 3.13.16 passes 2,195 tests, with 80 skips and
+25 warnings in 1,079.89 seconds. Root reads its originating checkout/interpreter/command/result; the
+run finishes green. These owner results do not replace the red current SSH composition or supply
+native terminal evidence.
 
 The SSH-owned Windows keyboard decision document at `3ccc0404` has project and complexity reviews
 clear, including the accepted units-versus-bytes clarification. Root fully reads both complete
