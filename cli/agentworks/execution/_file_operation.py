@@ -1837,11 +1837,7 @@ class FileOperation:
             for key in tuple(registry):
                 active = registry[key]
                 outcome = active.outcome
-                if (
-                    outcome is None
-                    or outcome.requires_owner_retention
-                    or active.borrow.has_outstanding_attempt
-                ):
+                if outcome is None or outcome.requires_owner_retention or active.borrow.has_outstanding_attempt:
                     continue
                 if not active.borrow.closed:
                     release_borrow_after_custody(active.borrow)
