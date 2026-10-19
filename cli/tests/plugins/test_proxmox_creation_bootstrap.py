@@ -30,7 +30,7 @@ from agentworks.execution.carriers.proxmox import ProxmoxConnection, _ProxmoxWir
 from agentworks.operations import OperationOwner
 from agentworks.plugins.proxmox import _creation_bootstrap as module
 from agentworks.plugins.proxmox._creation import CloneAssociation
-from agentworks.plugins.proxmox._creation_bootstrap import ProxmoxCreationBootstrap
+from agentworks.plugins.proxmox._creation_bootstrap import BootstrapIntent, ProxmoxCreationBootstrap
 
 MARKER = "a" * 32
 SMBIOS = "87654321-4321-4321-4321-cba987654321"
@@ -365,6 +365,29 @@ def test_interrupted_publication_reconciles_retained_facts_without_repeating_con
     assert owned.row().state is LifecycleObligationState.RESOLVED
 
 
+def test_interrupted_acknowledgment_retention_still_observes_original_pid(owned: Harness) -> None:
+    primary = KeyboardInterrupt("acknowledgment retention interrupted")
+
+    class InterruptedHistory(list[BootstrapIntent]):
+        armed = True
+
+        def append(self, value: BootstrapIntent) -> None:
+            super().append(value)
+            if self.armed and value.observation.pid is not None:
+                self.armed = False
+                raise primary
+
+    owned.bootstrap._history = InterruptedHistory(owned.bootstrap._history)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        owned.bootstrap.start()
+    assert caught.value is primary and owned.bootstrap.observation.pid == 321
+    assert owned.calls.count("POST") == 1 and owned.calls.count("GET") == 0
+    owned.bootstrap.reconcile(Deadline.after(1))
+    assert owned.bootstrap.observe(Deadline.after(1)).bootstrap_succeeded
+    assert owned.calls.count("POST") == owned.calls.count("GET") == 1
+    assert owned.row().state is LifecycleObligationState.RESOLVED
+
+
 @pytest.mark.parametrize("retained", [False, True])
 def test_interruption_around_terminal_retention_cannot_invent_another_qga_record(
     owned: Harness,
@@ -532,11 +555,17 @@ def test_resolution_callback_observes_durable_terminal_facts_without_owner_reent
     owned.bootstrap.start()
 
 
-def test_corrupt_persisted_payload_refuses_reconciliation(owned: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("fact", ["acknowledgment", "terminal"])
+def test_corrupt_persisted_payload_refuses_reconciliation(
+    owned: Harness,
+    monkeypatch: pytest.MonkeyPatch,
+    fact: str,
+) -> None:
     original = owned.repository.publish_lifecycle_obligation_payload
 
     def corrupt(*args: Any, **kwargs: Any) -> LifecycleObligation:
-        kwargs["payload"] = b'{"foreign":true}'
+        if kwargs["expected_revision"] == (0 if fact == "acknowledgment" else 1):
+            kwargs["payload"] = b'{"foreign":true}'
         return original(*args, **kwargs)
 
     monkeypatch.setattr(owned.repository, "publish_lifecycle_obligation_payload", corrupt)
@@ -544,7 +573,8 @@ def test_corrupt_persisted_payload_refuses_reconciliation(owned: Harness, monkey
         owned.bootstrap.start()
     with pytest.raises(StateError):
         owned.bootstrap.reconcile(Deadline.after(1))
-    assert owned.calls.count("GET") == 0 and owned.row().state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert owned.calls.count("GET") == int(fact == "terminal")
+    assert owned.row().state is LifecycleObligationState.POSSIBLE_EFFECT
 
 
 @pytest.mark.skipif(not Path("/bin/bash").exists(), reason="requires guest Bash syntax")
@@ -567,6 +597,94 @@ def test_full_wrapper_retains_root_failure_record_outside_redirected_function(ow
     )
     assert result.returncode == 1
     assert result.stdout == f"AGW_CREATION_BOOTSTRAP_1:{argv[-3]}:root:1\n"
+
+
+@pytest.mark.skipif(not Path("/bin/bash").exists(), reason="requires guest Bash behavior")
+@pytest.mark.parametrize(
+    ("account_exists", "group_exists"),
+    [(False, False), (False, True), (True, False)],
+    ids=["missing-group", "existing-group", "existing-account"],
+)
+def test_account_setup_reuses_existing_group_without_host_account_writes(
+    tmp_path: Path,
+    account_exists: bool,
+    group_exists: bool,
+) -> None:
+    log = tmp_path / "account-calls"
+    prefix = r"""set -euo pipefail
+log=$1
+admin=operator
+account_exists=$2
+group_exists=$3
+account_created=0
+group_created=0
+getent() {
+    [ "$#" -eq 2 ] && [ "$1" = passwd ] && [ "$2" = "$admin" ] || exit 99
+    if [ "$account_exists" = 1 ]; then return 0; fi
+    return 2
+}
+/usr/sbin/groupadd() {
+    printf 'groupadd %s\n' "$*" >> "$log"
+    [ "$1" = -f ] || return 99
+    shift
+    if [ "${1-}" = -- ]; then shift; fi
+    [ "$#" -eq 1 ] && [ "$1" = "$admin" ] || return 99
+    if [ "$group_exists" = 0 ]; then
+        group_exists=1
+        group_created=1
+    fi
+}
+/usr/sbin/useradd() {
+    printf 'useradd %s\n' "$*" >> "$log"
+    local primary_group=
+    local create_group=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -U) create_group=1; shift ;;
+            -m) shift ;;
+            -g) primary_group=$2; shift 2 ;;
+            -s) [ "$2" = /bin/bash ] || return 99; shift 2 ;;
+            --) shift; break ;;
+            *) return 99 ;;
+        esac
+    done
+    if [ "$create_group" = 1 ]; then
+        [ "$group_exists" = 0 ] || return 9
+        group_exists=1
+        group_created=1
+        primary_group=$admin
+    fi
+    [ "$primary_group" = "$admin" ] && [ "$#" -eq 1 ] && [ "$1" = "$admin" ] || return 99
+    [ "$group_exists" = 1 ] || return 6
+    [ "$account_exists" = 0 ] || return 9
+    account_exists=1
+    account_created=1
+}
+"""
+    report = '\nprintf "%s:%s:%s:%s\\n" "$account_exists" "$group_exists" "$account_created" "$group_created"'
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            "--noprofile",
+            "--norc",
+            "-c",
+            prefix + module._ACCOUNT_SETUP + report,
+            "account-test",
+            str(log),
+            str(int(account_exists)),
+            str(int(group_exists)),
+        ],
+        env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    expected_group = group_exists or not account_exists
+    expected_created = not account_exists
+    expected_new_group = not account_exists and not group_exists
+    assert result.stdout == f"1:{int(expected_group)}:{int(expected_created)}:{int(expected_new_group)}\n"
+    if account_exists:
+        assert not log.exists()
 
 
 @pytest.mark.skipif(not Path("/bin/bash").exists(), reason="requires guest Bash behavior")

@@ -41,6 +41,10 @@ _IO = CarrierIO(output=Capture(max_bytes=512))
 _CLOUD_INIT_GATE = r"""    /usr/bin/timeout --kill-after=5s "${cloud_wait}s" /usr/bin/cloud-init status --wait
     status=$(/usr/bin/timeout --kill-after=5s "${cloud_wait}s" /usr/bin/cloud-init status)
     [ "$status" = 'status: done' ]"""
+_ACCOUNT_SETUP = r"""    if ! getent passwd "$admin"; then
+        /usr/sbin/groupadd -f -- "$admin"
+        /usr/sbin/useradd -m -g "$admin" -s /bin/bash -- "$admin"
+    fi"""
 _SCRIPT = r"""set -euo pipefail
 nonce=$1
 admin=$2
@@ -72,9 +76,7 @@ __CLOUD_INIT_GATE__
     fi
 
     stage=account
-    if ! getent passwd "$admin"; then
-        /usr/sbin/useradd -m -U -s /bin/bash -- "$admin"
-    fi
+__ACCOUNT_SETUP__
     admin_uid=$(id -u "$admin")
     admin_gid=$(id -g "$admin")
     admin_groups=$(id -G "$admin")
@@ -111,7 +113,7 @@ __MARKER_INSTALLER__
     stage=complete
 }
 bootstrap >/dev/null 2>&1
-""".replace("__CLOUD_INIT_GATE__", _CLOUD_INIT_GATE)
+""".replace("__CLOUD_INIT_GATE__", _CLOUD_INIT_GATE).replace("__ACCOUNT_SETUP__", _ACCOUNT_SETUP)
 
 
 @dataclass(frozen=True, slots=True)
@@ -336,8 +338,8 @@ class ProxmoxCreationBootstrap:
     def acknowledge(self, pid: int) -> None:
         intent = self.intent
         assert intent is not None
-        self._history.append(replace(intent, observation=BootstrapObservation(pid=pid)))
         self._status_available = True
+        self._history.append(replace(intent, observation=BootstrapObservation(pid=pid)))
         self._reconcile_locked()
 
     def before_status(self) -> None:
@@ -432,4 +434,11 @@ class ProxmoxCreationBootstrap:
                 payload=_encode(self._history[next_revision]),
             )
         if can_resolve:
-            obligation.resolve()
+            latest = self._owner.inspect_lifecycle_obligation(self._obligation_id)
+            if (
+                latest is None
+                or latest.payload_revision != len(self._history) - 1
+                or latest.payload != _encode(self._history[-1])
+            ):
+                raise StateError("Proxmox creation bootstrap durable completion evidence conflicts")
+            LifecycleObligation(self._owner, latest).resolve()
