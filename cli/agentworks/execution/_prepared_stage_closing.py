@@ -2,59 +2,29 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks.db.operations import LifecycleObligationState
 from agentworks.errors import StateError, ValidationError
 
-from ._delivery_custody import LocalDeliveryCustody
+from ._closing_helper_delivery import ClosingHelperDelivery
 from ._file_stage_exchange import FileStageObservationState, stage_cleanup, stage_reconcile
 from ._prepared_helper_obligation import decode_prepared_helper_obligation
-from .carrier import Dispatch, ExitStatus
+from .carrier import Dispatch
 
 if TYPE_CHECKING:
     from ._file_stage_exchange import FileStageCandidateResult
-    from ._helper_closure import HelperClosureDelivery
     from ._prepared_helper_stage import PreparedHelperStage
     from ._runtime_prerequisite import HelperClosureExpectation
-    from .carrier import Carrier, CarrierIO, CarrierReport, ChannelFeatures, Deadline, PreparedInvocation
+    from .carrier import Deadline
 
 
 @dataclass(slots=True, repr=False)
 class _ClosingStageCall:
-    base_carrier: Carrier
-    carrier: Carrier
+    helper: ClosingHelperDelivery
     cleanup: bool
-    custody: LocalDeliveryCustody = field(default_factory=LocalDeliveryCustody)
-    delivery: HelperClosureDelivery | None = None
-    entered: bool = False
     candidate: FileStageCandidateResult | None = None
-
-
-class _ClosingCarrier:
-    """Private delivery used only by the two fixed cleanup exchanges below."""
-
-    def __init__(self, cleanup: PreparedStageCleanup, call: _ClosingStageCall) -> None:
-        self._cleanup, self._call = cleanup, call
-
-    @property
-    def features(self) -> ChannelFeatures:
-        return self._call.carrier.features
-
-    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
-        self._call.carrier.validate(invocation, io=io)
-
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        cleanup, call = self._cleanup, self._call
-        self.validate(invocation, io=io)
-        cleanup._require_cleanup(deadline)
-        if cleanup._active is not call or call.entered:
-            raise StateError("Prepared stage closing delivery is unavailable")
-        cleanup._route(deadline)
-        cleanup._require_cleanup(deadline)
-        call.entered = True
-        return call.carrier.execute(invocation, io=io, deadline=deadline, custody=call.custody)
 
 
 class PreparedStageCleanup:
@@ -107,24 +77,29 @@ class PreparedStageCleanup:
         if row is None or row.state is not LifecycleObligationState.POSSIBLE_EFFECT:
             raise StateError("Prepared stage closing obligation is not admitted")
         call = self._active
-        if call is not None and (
-            call.base_carrier is not stage._carrier
-            or (call.delivery is not None and call.carrier is not call.delivery)
-            or (call.delivery is None and call.carrier is not call.base_carrier)
-        ):
+        if call is not None and call.helper.base_carrier is not stage._carrier:
             raise StateError("Prepared stage closing helper binding changed")
+
+    @property
+    def helper_pending(self) -> bool:
+        return self._stage.helper_uncertain or (self._active is not None and self._active.helper.helper_pending)
+
+    @property
+    def closing_helper_pending(self) -> bool:
+        return self._active is not None and self._active.helper.helper_pending
+
+    def _require_delivery(self, helper: ClosingHelperDelivery, deadline: Deadline) -> None:
+        self._require_cleanup(deadline)
+        if self._active is None or self._active.helper is not helper:
+            raise StateError("Prepared stage closing delivery is unavailable")
 
     def _route(self, deadline: Deadline) -> None:
         if self._stage._before_dispatch is not None:
             self._stage._before_dispatch(deadline)
 
-    def _prepare_delivery(self, expectation: HelperClosureExpectation) -> _ClosingCarrier:
-        call = self._active
-        assert call is not None
-        if self._stage._new_helper_delivery is not None:
-            call.delivery = self._stage._new_helper_delivery(expectation)
-            call.carrier = call.delivery
-        return _ClosingCarrier(self, call)
+    def _prepare_delivery(self, expectation: HelperClosureExpectation) -> ClosingHelperDelivery:
+        assert self._active is not None
+        return self._active.helper.bind(expectation, self._stage._new_helper_delivery)
 
     def _settle(self, deadline: Deadline, *, observe: bool) -> bool:
         call = self._active
@@ -137,32 +112,9 @@ class PreparedStageCleanup:
                 self._stage.cleanup_debt = observation.cleanup_debt
             if observation.failure is not None and observation.failure.cleanup_debt is not None:
                 self._stage.cleanup_debt = observation.failure.cleanup_debt
-        if not call.custody.close(deadline):
+        if not call.helper.settle(deadline, observe=observe):
             return False
-        self._require_cleanup(deadline)
-        not_sent = candidate is not None and candidate.dispatch is Dispatch.NOT_SENT
-        if call.delivery is not None and call.entered and not not_sent and not call.delivery.closure_proven:
-            if not observe:
-                return False
-            self._route(deadline)
-            self._require_cleanup(deadline)
-            if not call.delivery.observe_closure(deadline=deadline, custody=call.custody):
-                return False
-            self._require_cleanup(deadline)
-        closed = (
-            not call.entered
-            or not_sent
-            or (
-                call.delivery.closure_proven
-                if call.delivery is not None
-                else candidate is not None
-                and candidate.dispatch is Dispatch.SENT
-                and candidate.carrier_completion == ExitStatus(0)
-            )
-        )
-        if not closed or not call.custody.settled:
-            return False
-        if not call.entered:
+        if not call.helper.entered:
             self._active = None
             return True
         if (
@@ -174,14 +126,23 @@ class PreparedStageCleanup:
         self._active = None
         return True
 
+    def settle_closing_helper(self, deadline: Deadline) -> bool:
+        """Observe only the retained closing call, without admitting another exchange."""
+        if deadline.expires_at is None or deadline.expired:
+            raise ValidationError("Prepared stage closing requires a finite live deadline")
+        self._check_identity()
+        return self._active is None or self._settle(deadline, observe=True)
+
     def _dispatch(self, deadline: Deadline, *, cleanup: bool) -> bool:
         self._require_cleanup(deadline)
         assert self._active is None
         stage = self._stage
-        self._active = _ClosingStageCall(stage._carrier, stage._carrier, cleanup)
+        self._active = _ClosingStageCall(
+            ClosingHelperDelivery(stage._carrier, self._require_delivery, self._route), cleanup
+        )
         arguments = stage._arguments(deadline)
         arguments["prepare_delivery"] = self._prepare_delivery
-        carrier = _ClosingCarrier(self, self._active)
+        carrier = self._active.helper
         if cleanup:
             assert stage.cleanup_debt is not None
             candidate = stage_cleanup(carrier, cleanup_debt=stage.cleanup_debt, **arguments)

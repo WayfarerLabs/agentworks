@@ -5557,7 +5557,7 @@ relaxing their assertions. Original failures remain retained. Packed privilege/s
 injected, not native VM/root/provider proof. The following staging, recovery and full handoff gates
 remain open.
 
-- [ ] Implement and privately review the first finite-input, finite-deadline Linux VM DIRECT capture
+- [x] Implement and privately review the first finite-input, finite-deadline Linux VM DIRECT capture
       composition described in the [capture design](preparation-lld.md#direct-capture-composition).
       Reuse bounded process capture and exact-length scratch, distinguish remote stream facts from
       verified local bytes, and retain known child status through publication, retrieval or cleanup
@@ -5566,6 +5566,15 @@ remain open.
       capture, explicit truncation, partial publication/retrieval, suppression, controls and
       complete carrier envelopes together with prepared input. Do not change the public default or
       claim host/live/unbounded, process-loss recovery or native acceptance from this private slice.
+
+The private capture checkpoint at `a21e137d1` clears independent project, complexity and correctness
+source reviews after correcting cross-resource closing order. A retained regression first observed
+an earlier stage dispatching again while capture-helper closure was unknown; closure-only settlement
+now precedes both normal cleanup loops. Corrupt-range tests exercise the actual framed parser, not
+invalid typed interior values. The lead's composed selection passes 1,341 tests and full strict
+typing covers 1,553 files. Failed original views remain retained. These checks establish the bounded
+private capture unit, not native privilege/provider evidence, process-loss recovery, a production
+default change or complete additive RunContext acceptance.
 
 - [ ] Connect the planned chunked helper/request staging before public managed acceptance. Preserve
       the existing Proxmox 65,536-byte whole-POST floor and its 10,000-byte stdin regression test.
@@ -5874,6 +5883,35 @@ managed VM identity; managed jobs retain their actual target requirement. This c
 constructor checkbox only. Complete additive context delivery, host files and recovery, native
 acceptance and permission activation remain separate open gates.
 
+- [x] Implement and privately prove the
+      [ordinary platform-host file binding](file-operations-lld.md#ordinary-platform-host-file-binding)
+      using the existing exact PLATFORM_HOST operation scope, not fabricated VM incarnation/boot
+      evidence. Retain original file/helper custody, path/metadata rules and same-process closing;
+      encode a bounded host-only version-7 record and preserve existing VM formats. Refuse guest
+      bootstrap/gate mixtures and all process-loss host recovery before rebind or dispatch. Prove
+      real ordinary host file effects, lost replies, exact cleanup, codec separation and unchanged
+      VM/gate behavior. Host context/factory composition, physical identity/epoch proof, native
+      acceptance and automatic recovery remain separate gates, not completion claims of this unit.
+
+The private host-file checkpoint at `df0c310dc` includes worker `3f4d8ff48` and its namespace-import
+correction `9ecbf896e`. Three independent source-review lanes are clear. The worker passes 547
+focused/adjacent cases; correction checks pass 315, including the actual native/canonical context
+modules. Lead composition passes 884 tests and complete strict typing passes 1,554 sources. Both
+original broader-gate failures are retained: they found the shared VM namespace decoder caller
+missed by scoped checks. The correction restores its concrete signature and separates host target
+decoding without changing VM admission or recovery authority. This closes only the private binding
+unit, not host configuration/context composition, native Darwin or automatic recovery.
+
+- [ ] Implement and privately prove the
+      [ordinary platform-host context composer](execution-lifecycle-lld.md#ordinary-platform-host-context-composition).
+      Acquire the explicit shared host scope before preparation, deliver the existing command/file
+      views through RunContext, and retain one same-process aggregate lifetime through partial
+      construction, original control, uncertain work and exact cleanup retries. Prove conflict
+      before effects, no guest identity, explicit account/runtime/elevation choices, actual ordinary
+      helper/file use, closed-view refusal and unchanged VM composition. Keep host configuration,
+      native SSH/macOS proof, Remote Lima adoption/provisioning/rollback and process-loss recovery
+      under their complete production gates; this composer alone does not enable that route.
+
 - [x] Complete and privately review paired native admin/agent preparation using an explicit
       core-selected agent row on the same VM. Reuse one file operation, execution operation, numeric
       guest bootstrap, carrier, owner and deadline; retain both account preparations and publish no
@@ -6138,6 +6176,19 @@ fresh-process cases on Linux, 13-file typing/style, file quality and whitespace 
 whole-unit reviews and complete lead gates at `7145e4c2a`, recorded above, include this registration
 work. Native Windows, other-platform binding/trust/provisioning, actual new-stack workflows and the
 complete additive RunContext remain open, so the broader factory checkbox is not completed.
+
+The private fresh-binding extension from worker `1a23e9143` and simplification `08c791c9f` keeps
+both existing import-order processes, the six retirement blockers and first-party origin checks.
+Those processes now resolve local Lima, AWS, Azure and GCP through their actual registry, resolver
+and binding factories as well as WSL2/Proxmox. Controlled SDK factories and tool output replace
+external observations, not the resolution under test. Missing SSH policy refuses before provider
+reads; Remote Lima still refuses an unowned host route. Four focused/adjacent cases pass locally,
+and the composed source at `20538a0e3` passes complete strict typing across 1,554 files and
+changed-file quality. Three independent private source reviews are clear; the optional exact Lima
+observation-count assertion is removed without weakening resolved account/directory checks. These
+Windows-selected tests have only been run locally on Linux. Native Windows, actual trust admission,
+provisioning, Remote Lima and complete platform/context workflows remain open; the broader factory
+checkbox stays unchecked.
 
 - [ ] Validate complete provisioning, native recovery without Tailscale, plugin operations, files,
       backup, host provisioning/rollback and interactive attachment through the new surface. Cover

@@ -7,6 +7,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol, cast
 
+from agentworks.db.operations import OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._file_download import (
     FileDownloadBinding,
@@ -275,26 +276,32 @@ class FileOperation:
     def __init__(
         self,
         owner: OperationOwner,
-        target: ManagedTargetIdentity,
+        target: ManagedTargetIdentity | OperationScope,
         *,
         bootstrap: _NumericGuestBootstrap | None = None,
         guest: VMGuestIdentity | None = None,
     ) -> None:
-        """Bind file calls to one exact owner scope and managed target."""
+        """Bind file calls to one managed VM or the exact ordinary host scope."""
         scope = owner.ownership.scope
-        if (
+        if type(target) is OperationScope:
+            if target.resource_kind is not OperationResourceKind.PLATFORM_HOST or target != scope:
+                raise ValidationError("File operation target must match its owner scope")
+            if bootstrap is not None or guest is not None:
+                raise ValidationError("Ordinary host file operations cannot carry guest identity")
+        elif (
             type(target) is not ManagedTargetIdentity
+            or target.kind is not ManagedTargetKind.VM
             or target.kind.value != scope.resource_kind.value
             or target.name != scope.resource_name
         ):
             raise ValidationError("File operation target must match its owner scope")
         if bootstrap is not None and (
-            target.kind is not ManagedTargetKind.VM or vm_guest_boot_id(bootstrap.guest) != target.boot_id
+            not isinstance(target, ManagedTargetIdentity) or vm_guest_boot_id(bootstrap.guest) != target.boot_id
         ):
             raise ValidationError("Numeric file bootstrap must match the selected VM boot")
         if guest is not None and (
             type(guest) is not VMGuestIdentity
-            or target.kind is not ManagedTargetKind.VM
+            or not isinstance(target, ManagedTargetIdentity)
             or vm_guest_boot_id(guest) != target.boot_id
             or (bootstrap is not None and guest != bootstrap.guest)
         ):
@@ -630,7 +637,9 @@ class FileOperation:
                 local_call.dispatched = True
             return self._run_prepared_download(active, prepared, local_call=local_call)
         if effect_gate is not None and (
-            self._target.kind is not ManagedTargetKind.VM or effect_gate.scope_name != self._target.name
+            not isinstance(self._target, ManagedTargetIdentity)
+            or self._target.kind is not ManagedTargetKind.VM
+            or effect_gate.scope_name != self._target.name
         ):
             raise ValidationError("Download effect gate must match the managed target")
         borrow = self._owner.borrow() if local_call is None else local_call.borrow
@@ -706,6 +715,7 @@ class FileOperation:
             if (
                 type(gate_setup) is not FileEffectGateSetup
                 or effect_gate is not None
+                or not isinstance(self._target, ManagedTargetIdentity)
                 or self._target.kind is not ManagedTargetKind.VM
                 or runtime_selection.target_os is not RuntimeTargetOS.LINUX
                 or type(gate_setup.guest) is not VMGuestIdentity
@@ -765,7 +775,7 @@ class FileOperation:
             operation=GateControlOperation.SETUP,
             path=gate_setup.path,
             guest=gate_setup.guest,
-            scope_name=self._target.name,
+            scope_name=self._owner.ownership.scope.resource_name,
             plan=binding.identity_plan,
             deadline=deadline,
             runtime_selection=binding.runtime_selection,
@@ -930,6 +940,7 @@ class FileOperation:
             if (
                 type(gate_setup) is not FileEffectGateSetup
                 or effect_gate is not None
+                or not isinstance(self._target, ManagedTargetIdentity)
                 or self._target.kind is not ManagedTargetKind.VM
                 or runtime_selection.target_os is not RuntimeTargetOS.LINUX
                 or type(gate_setup.guest) is not VMGuestIdentity
@@ -970,7 +981,7 @@ class FileOperation:
             operation=GateControlOperation.SETUP,
             path=gate_setup.path,
             guest=gate_setup.guest,
-            scope_name=self._target.name,
+            scope_name=self._owner.ownership.scope.resource_name,
             plan=binding.identity_plan,
             deadline=deadline,
             runtime_selection=binding.runtime_selection,
@@ -1018,6 +1029,11 @@ class FileOperation:
     ) -> FileEffectGateSetup | None:
         """Derive ordinary admission only from constructor-bound verified VM facts."""
         guest = self._guest
+        target = self._target
+        if isinstance(target, OperationScope):
+            if effect_gate is not None or setup is not None:
+                raise ValidationError("Ordinary host file operations cannot carry a guest effect gate")
+            return None
         if effect_gate is not None:
             if setup is not None or (guest is not None and effect_gate.guest != guest):
                 raise ValidationError("File gate must match the selected verified guest")
@@ -1026,7 +1042,7 @@ class FileOperation:
             if (
                 type(setup) is not FileEffectGateSetup
                 or (guest is not None and setup.guest != guest)
-                or vm_guest_boot_id(setup.guest) != self._target.boot_id
+                or vm_guest_boot_id(setup.guest) != target.boot_id
             ):
                 raise ValidationError("File gate setup must match the selected verified guest")
             return setup
@@ -1034,7 +1050,7 @@ class FileOperation:
             return None
         if runtime_selection.target_os is not RuntimeTargetOS.LINUX:
             raise ValidationError("Verified VM file gates require the selected Linux runtime")
-        return FileEffectGateSetup.for_target(self._target, plan.expected.euid, guest)
+        return FileEffectGateSetup.for_target(target, plan.expected.euid, guest)
 
     def _run_prepared_upload(self, active: _ActiveFileUpload, prepared: _PreparedUpload) -> FileUploadOutcome:
         try:
@@ -1059,7 +1075,8 @@ class FileOperation:
         if effect_gate is None:
             return
         if (
-            self._target.kind is not ManagedTargetKind.VM
+            not isinstance(self._target, ManagedTargetIdentity)
+            or self._target.kind is not ManagedTargetKind.VM
             or binding.runtime_selection.target_os is not RuntimeTargetOS.LINUX
             or effect_gate.euid != binding.identity_plan.expected.euid
             or effect_gate.proposed_generation is not None
@@ -1457,7 +1474,7 @@ class FileOperation:
                 operation=GateControlOperation.SETUP,
                 path=setup.path,
                 guest=setup.guest,
-                scope_name=self._target.name,
+                scope_name=self._owner.ownership.scope.resource_name,
                 plan=binding.identity_plan,
                 deadline=deadline,
                 runtime_selection=binding.runtime_selection,

@@ -119,7 +119,7 @@ class FileMutationFenceRecovery:
                 operation=GateControlOperation.ADVANCE,
                 path=gate.path,
                 guest=gate.guest,
-                scope_name=self._call.target.name,
+                scope_name=self._owner.ownership.scope.resource_name,
                 plan=plan,
                 deadline=deadline,
                 runtime_selection=self._call.runtime_selection,

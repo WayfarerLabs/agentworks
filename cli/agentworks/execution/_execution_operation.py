@@ -106,7 +106,9 @@ from agentworks.operations import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from agentworks.execution._capture_cleanup import CaptureCleanup
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
+    from agentworks.execution._file_snapshot_exchange import FileSnapshotCandidateResult
     from agentworks.execution._helper_closure import HelperClosureDelivery
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._managed_job_request import ManagedLiveIO
@@ -194,12 +196,14 @@ class _ActiveHelperCall:
         | DisposalCandidate
         | ManagedStartCandidate
         | WorkloadShellObservationResult
+        | FileSnapshotCandidateResult
         | None
     ) = None
     outcome: OwnedInlineOutcome | None = None
     disposal: ManagedDisposalBinding | None = None
     start: ManagedResourceStartBinding | None = None
     tracking_key: object = field(default_factory=object)
+    capture: CaptureCleanup | None = None
     input_stage: PreparedHelperStage | None = None
     input_delivery: LocalDeliveryCustody | None = None
 
@@ -255,6 +259,7 @@ class ExecutionOperation:
         self._route_check = route_check
         self._managed_runs: list[ManagedOperationRun] = []
         self._prepared_stages: list[PreparedStageCleanup] = []
+        self._captures: list[CaptureCleanup] = []
         self._active_inline_calls: dict[object, _ActiveHelperCall] = {}
         self._unfinished_inline_executions: list[UnfinishedInlineExecution] = []
         self._admission_guard = Lock()
@@ -281,7 +286,7 @@ class ExecutionOperation:
 
     @property
     def _scratch_cleanup_pending(self) -> bool:
-        return any(
+        return any(capture.pending for capture in self._captures) or any(
             cleanup._stage._begun and (not cleanup._stage.cleaned or cleanup._stage.cleanup_resolution_uncertain)
             for cleanup in self._prepared_stages
         )
@@ -1162,11 +1167,37 @@ class ExecutionOperation:
                 self._dispatch_obligation.resolve()
             self._finished = True
 
-    def finish_prepared_stages(self, deadline: Deadline) -> None:
-        """Remove only stages whose exact cleanup controller proves settlement."""
+    @property
+    def scratch_helper_pending(self) -> bool:
+        return any(cleanup.helper_pending for cleanup in self._prepared_stages) or any(
+            capture.helper_pending for capture in self._captures
+        )
+
+    @property
+    def closing_scratch_helper_pending(self) -> bool:
+        return any(cleanup.closing_helper_pending for cleanup in self._prepared_stages) or any(
+            capture.closing_helper_pending for capture in self._captures
+        )
+
+    def finish_scratch_cleanup(self, deadline: Deadline) -> None:
+        """Drain each exact helper before advancing independent scratch cleanup."""
+        closing_resources: tuple[PreparedStageCleanup | CaptureCleanup, ...] = (
+            *self._prepared_stages,
+            *self._captures,
+        )
+        for closing in closing_resources:
+            if closing.closing_helper_pending and not closing.settle_closing_helper(deadline):
+                raise StateError("Scratch cleanup retains helper custody")
         for cleanup in tuple(self._prepared_stages):
             if cleanup.finish(deadline):
                 self._prepared_stages.remove(cleanup)
+            if cleanup.helper_pending:
+                raise StateError("Prepared input cleanup retains helper custody")
+        for capture in tuple(self._captures):
+            if capture.finish(deadline):
+                self._captures.remove(capture)
+            if capture.helper_pending:
+                raise StateError("Capture cleanup retains helper custody")
 
     def retry_inline_bookkeeping(self) -> None:
         """Relinquish a failed call using exact bookkeeping, without dispatch.
@@ -1205,6 +1236,8 @@ class ExecutionOperation:
                         raise StateError("Inline helper closure remains unknown")
                     self._validate_closure_call(active)
                 note_input_activation_closed(active)
+                if active.capture is not None:
+                    active.capture.note_application(active)
                 active.operation.settle_helper_closure()
                 self._capture(active, OwnedInlineOutcome())
 
@@ -1287,6 +1320,8 @@ class ExecutionOperation:
         if not active.bookkeeping_retained:
             raise StateError("Inline execution still has an active call")
         note_input_activation_closed(active)
+        if active.capture is not None:
+            active.capture.note_application(active)
         operation = active.operation
         candidate = active.candidate
         if active.closure_delivery is not None and operation.outstanding_attempt is not None:
@@ -1352,7 +1387,8 @@ class ExecutionOperation:
         | ManagedStopCandidate
         | DisposalCandidate
         | ManagedStartCandidate
-        | WorkloadShellObservationResult,
+        | WorkloadShellObservationResult
+        | FileSnapshotCandidateResult,
     ) -> bool:
         return candidate.dispatch is Dispatch.NOT_SENT or (
             candidate.dispatch is Dispatch.SENT and candidate.carrier_completion == ExitStatus(code=0)
@@ -1391,6 +1427,7 @@ class ExecutionOperation:
         replacing: _ActiveHelperCall | None = None,
         preparation: object | None = None,
         input_stage: PreparedHelperStage | None = None,
+        capture: CaptureCleanup | None = None,
     ) -> _ActiveHelperCall:
         """Borrow and publish one helper call while its admission guard is held."""
         self._require_no_inline_preparation(preparation)
@@ -1412,6 +1449,7 @@ class ExecutionOperation:
                 start=start,
                 closure_delivery=delivery,
                 input_stage=input_stage,
+                capture=capture,
             )
             if replacing is not None:
                 active.tracking_key = replacing.tracking_key
@@ -1448,6 +1486,25 @@ class ExecutionOperation:
         stderr: ByteSink | None = None,
     ) -> OwnedInlineOutcome:
         """Choose delivery before exactly one ordinary helper attempt."""
+        if capture_limit is not None and type(capture_limit) is int and capture_limit > 4096:
+            from agentworks.execution._capture_operation import run_capture
+
+            return run_capture(
+                self,
+                carrier,
+                request,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=runtime_selection,
+                stdin=stdin,
+                env=env,
+                cwd=cwd,
+                capture_limit=capture_limit,
+                sensitive=sensitive,
+                source=source,
+                stdout=stdout,
+                stderr=stderr,
+            )
         return run_direct_input(
             self,
             carrier,
@@ -1472,6 +1529,7 @@ class ExecutionOperation:
         deadline: Deadline,
         reservation: object,
         stage: PreparedHelperStage | None,
+        capture: CaptureCleanup | None = None,
     ) -> OwnedInlineOutcome:
         """Transfer preparation admission into the actual tracked helper borrow."""
         if deadline.expired:
@@ -1487,7 +1545,7 @@ class ExecutionOperation:
             if deadline.expired:
                 raise ValidationError("Inline execution deadline expired during route admission")
             active = self._borrow_helper_call(
-                carrier, prepared, inline=True, preparation=reservation, input_stage=stage
+                carrier, prepared, inline=True, preparation=reservation, input_stage=stage, capture=capture
             )
             self._inline_preparation = None
             operation = active.operation
@@ -1503,6 +1561,8 @@ class ExecutionOperation:
                 candidate = execute_inline_candidate(operation, prepared, deadline=deadline)
                 active.candidate = candidate
                 note_input_activation_closed(active)
+                if active.capture is not None:
+                    active.capture.note_application(active)
                 completion = candidate.carrier_completion
                 if active.closure_delivery is not None and not active.closure_delivery.closure_proven:
                     completion = None
@@ -1571,6 +1631,8 @@ class ExecutionOperation:
             active.bookkeeping_retained = True
             try:
                 note_input_activation_closed(active)
+                if active.capture is not None:
+                    active.capture.note_application(active)
                 outcome = self._outcome(active, operation, deadline, include_candidate=False)
             except BaseException:
                 raise control from control.__cause__
@@ -1632,6 +1694,8 @@ class ExecutionOperation:
 
     def _capture(self, active: _ActiveHelperCall, outcome: OwnedInlineOutcome) -> None:
         note_input_activation_closed(active)
+        if active.capture is not None:
+            active.capture.note_application(active)
         if active.start is not None:
             capture_resource_start(self, active, outcome)
             return

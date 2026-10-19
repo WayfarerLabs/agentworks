@@ -13,7 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from agentworks.db import LifecycleObligationState
+from agentworks.db import LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError
 from agentworks.execution import _file_effect_gate_bundle as gate_bundle
 from agentworks.execution import _file_snapshot_bundle as snapshot_bundle
@@ -34,6 +34,7 @@ from agentworks.execution._file_obligation import (
     decode_file_call_obligation,
     encode_file_call_obligation,
 )
+from agentworks.execution._file_recovery_context import require_recovery_context
 from agentworks.execution._file_snapshot_protocol import (
     FileSnapshotCleanupRequest,
     decode_file_snapshot_request,
@@ -43,6 +44,7 @@ from agentworks.execution._file_snapshot_protocol import (
 )
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, encode_file_record
 from agentworks.execution._helper_launcher import IdentityMode
+from agentworks.execution._managed_runs import ManagedTargetKind
 from agentworks.execution._runtime_prerequisite import (
     RuntimeSelection,
     RuntimeTargetOS,
@@ -63,6 +65,50 @@ from tests.execution.test_wsl2_platform_hold import FakeNative, FakeObserver
 from tests.vms.test_recovery_vm_span import setup as setup
 
 pytestmark = pytest.mark.windows
+
+
+@pytest.mark.parametrize("family", ["download", "setup", "package"])
+@pytest.mark.parametrize("historical", [False, True])
+@pytest.mark.parametrize("vm_context", [False, True])
+def test_host_records_never_gain_recovery_from_vm_context_or_synthetic_drain(
+    setup, monkeypatch, family, historical, vm_context
+):
+    database, owner, old_id, _, carrier, _, _, span, routes = setup
+    span.open(Deadline.after(10))
+    with span.action(Deadline.after(10)) as context:
+        target = (
+            replace(context.target, kind=ManagedTargetKind.PLATFORM_HOST)
+            if historical
+            else OperationScope(OperationResourceKind.PLATFORM_HOST, "box")
+        )
+        call = FileCallObligation(
+            family=FileCallFamily.UPLOAD if family == "package" else FileCallFamily.DOWNLOAD,
+            target=target,
+            root="/srv/data",
+            relative_path="payload",
+            identity_plan=context.ordinary_plan,
+            runtime_selection=context.runtime_selection,
+            token=b"t" * 16,
+        )
+        payload = encode_file_call_obligation(call)
+        database.operations.publish_lifecycle_obligation_payload(
+            owner.ownership, old_id, expected_revision=0, payload_version=call.payload_version, payload=payload
+        )
+        row = obligation_receipt(owner, old_id)
+        assert decode_file_call_obligation(row.payload) == call
+        supplied = context if vm_context else None
+        before = list(carrier.calls), list(routes)
+        rebind = Mock(side_effect=AssertionError("host recovery rebound an obligation"))
+        monkeypatch.setattr(owner, "rebind_possible_effect_lifecycle_obligation", rebind)
+        with pytest.raises(StateError):
+            require_recovery_context(owner, call, supplied)
+        # _open supplies exact synthetic DOWNLOAD drain evidence. It is not
+        # host no-further-effects proof and cannot authorize host cleanup.
+        with pytest.raises(StateError):
+            _open(owner, row, supplied, family)
+        rebind.assert_not_called()
+        assert (carrier.calls, routes) == before
+        assert obligation_receipt(owner, old_id) == row
 
 
 class FileWire(_CapturedCarrier):

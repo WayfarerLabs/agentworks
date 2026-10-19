@@ -1745,13 +1745,33 @@ transitions, VM scratch behavior and provider acceptance remain unproved.
 
 Prepared delivery does not yet support platform hosts, Darwin, unbounded execution budgets or live
 endpoints. Supported small inline calls retain their existing behavior. No-staging readiness still
-uses the small entry. The prepared entry expands input admission, not capture retention or output
-spooling.
+uses the small entry. Input staging and capture retention are separate choices.
 
-The current private inline access captures at most 4,096 bytes per application stream and defaults
-to that limit. This is a checkpoint-local helper bound, not the proposed production caller default
-of 1 MiB per stream or its bounded spooling behavior. Larger output currently fails within this
-private path; the production output contract remains open.
+The private default capture limit remains 4,096 bytes per application stream. Explicitly larger
+finite capture on a numerically bound Linux VM uses a separate fixed capture entry under the same
+operation and original deadline. The existing process pump retains the selected prefix plus one byte
+while draining later output. After observing the child, the helper publishes each retained prefix
+through existing exact-length scratch creation, bounded writes and verification as the workload
+identity. Suppressed or discarded output creates no capture objects. Large input reuses prepared
+delivery; a small capture request need not stage its input.
+
+Each closed stream record carries either a verified scratch reference or explicit unavailable
+publication facts and creation uncertainty. Both records precede the actual wait, so handled
+publication failure does not erase known child status. An earlier process failure remains primary;
+otherwise publication failure reports output failure. The workstation retrieves fixed ranges under
+the original budget, keeping remotely observed stream facts separate from verified local bytes.
+Normally returned retrieval failure preserves known status and verified prefixes without inventing
+complete output. Escaping controls preserve their original identity and cause through payload-free
+custody facts.
+
+One token-only lifecycle binding is retained before application dispatch. Actual helper closure and
+local delivery settlement are prerequisites to capture cleanup, independent of application
+completion and artifact debt. Normal cleanup and a same-process fresh finite continuation use the
+original owner and exact tokens; missing receipts remain uncertainty. Prepared-input and capture
+cleanup share only actual closing-delivery mechanics, retaining their own row and protocol checks.
+Aggregate closing settles retained helpers across both resources before admitting fresh cleanup.
+This path does not change the production default to 1 MiB or complete host/Darwin, live/unbounded,
+process-loss recovery or native credential/provider acceptance.
 
 ## Private file-helper delivery
 
@@ -1866,10 +1886,12 @@ Fresh target, full guest, runtime, root and body UID/GID/complete groups must ma
 record. The fresh selected route may use different identity transition modes, but cannot substitute
 a different numeric authority or fall back to root. Current delivery uses its fresh root launcher;
 the old record's plans and version remain unchanged through intended debt/generation publications.
-Version one retains its original explicit carrier and plan semantics, with no inferred bootstrap or
-upgrade. DOWNLOAD still requires separate exact drain evidence; neither readiness nor a live action
-creates that evidence. SQLite/faked-native transcript tests establish this private composition, not
-native privilege transitions, predecessor drain or production recovery acceptance.
+Version-one VM records retain their original explicit carrier and plan semantics, with no inferred
+bootstrap or upgrade. All platform-host records, including historical host-labeled managed targets,
+are refused before recovery rebinding or dispatch. DOWNLOAD still requires separate exact drain
+evidence; neither readiness nor a live action creates that evidence. SQLite/faked-native transcript
+tests establish this private composition, not native privilege transitions, predecessor drain or
+production recovery acceptance.
 
 ## Private inline file reads
 
@@ -2233,6 +2255,15 @@ before dispatch and keeps its token/state reachable when child outcome capture f
 exceptional capture accepts only facts produced by that exact prepared call; failure to construct
 those facts preserves the original control and attached state. Completed custody records retain
 neither sources nor JSON content.
+
+Ordinary platform-host files bind the exact `OperationScope(PLATFORM_HOST, name)` held by the
+caller-supplied owner. They reject fabricated managed guest identity, guest bootstrap and VM effect
+gates before effects. Their bounded version-7 records contain only the host scope's kind/name as the
+target; child association and cleanup-debt updates retain that version. Existing VM formats remain
+unchanged. Original helper/file custody supports same-process closing, but this scope establishes
+coordination, not physical host identity or drain proof. Host context/factory composition, native
+Darwin acceptance and automatic process-loss host recovery remain incomplete; recovery adapters
+refuse both new and historical host records before rebinding or dispatch.
 
 Single-file calls attach their operation-specific binding and working state before the first
 exchange. The exchange validates its request before carrier dispatch. Metadata and directory calls

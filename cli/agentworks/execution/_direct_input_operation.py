@@ -16,6 +16,7 @@ from .carrier import Dispatch
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from ._capture_cleanup import CaptureCleanup
     from ._execution_operation import ExecutionOperation, OwnedInlineOutcome, _ActiveHelperCall
     from ._helper_launcher import IdentityPlan
     from ._runtime_prerequisite import RuntimeSelection
@@ -78,6 +79,7 @@ def run_direct_input(
     source: ByteSource | None,
     stdout: ByteSink | None,
     stderr: ByteSink | None,
+    capture: CaptureCleanup | None = None,
 ) -> OwnedInlineOutcome:
     """Reserve preparation, select complete delivery, then transfer into one attempt."""
     from ._execution_operation import InlineExecutionControlFact, OwnedInlineOutcome
@@ -113,6 +115,7 @@ def run_direct_input(
                 stderr=stderr,
                 runtime_selection=runtime_selection,
                 bootstrap=operation._bootstrap,
+                _capture_tokens=None if capture is None else capture.binding.tokens,
             )
             carrier.validate(prepared.invocation, io=prepared.io)
         except ValidationError:
@@ -141,6 +144,7 @@ def run_direct_input(
                 cwd=cwd,
                 capture_limit=capture_limit,
                 sensitive=sensitive,
+                capture_tokens=None if capture is None else capture.binding.tokens,
             )
             prepared = preparation.candidate
             binding = operation._native_binding
@@ -159,12 +163,16 @@ def run_direct_input(
             )
             cleanup = PreparedStageCleanup(stage)
             operation._prepared_stages.append(cleanup)
+            if capture is not None:
+                capture.register()
             if not stage.begin() or not stage.append(preparation.data):
                 raise StateError("Prepared DIRECT input could not be staged")
             preparation.activate(stage.prepare_activation(prepared.nonce, preparation.digest))
             preparation.clear()
             carrier.validate(prepared.invocation, io=prepared.io)
-        outcome = operation._run_inline_prepared(carrier, prepared, deadline, reservation, stage)
+        if capture is not None and not capture.registered:
+            capture.register()
+        outcome = operation._run_inline_prepared(carrier, prepared, deadline, reservation, stage, capture)
         if cleanup is not None:
             _cleanup_input(operation, cleanup, deadline)
         return replace(

@@ -191,7 +191,7 @@ def test_cleanup_failure_retains_status_output_and_separate_debt(owned):
     assert set(value) == {"bootstrap", "runtime", "target", "token", "version"}
     assert SCRIPT.encode() not in cleanup.payload and PAYLOAD not in cleanup.payload
     carrier.fail_cleanup = False
-    operation.finish_prepared_stages(Deadline.after(10))
+    operation.finish_scratch_cleanup(Deadline.after(10))
     assert not operation._prepared_stages and stage.cleaned
 
 
@@ -342,7 +342,7 @@ def test_expired_original_budget_never_activates_or_renews_preparation(owned, mo
     assert carrier.deadlines and all(value is deadline for value in carrier.deadlines)
     assert operation._scratch_cleanup_pending and len(operation._prepared_stages) == 1
     fresh = Deadline.after(10)
-    operation.finish_prepared_stages(fresh)
+    operation.finish_scratch_cleanup(fresh)
     assert not operation._prepared_stages and routed[-1] is fresh
 
 
@@ -449,7 +449,7 @@ def test_native_activation_custody_outlives_application_wait_and_escaping_contro
     carrier.activation_control = None
     operation.observe_inline_cleanup(Deadline.after(10))
     assert stage._activation_settled and not operation.active_inline_calls
-    operation.finish_prepared_stages(Deadline.after(10))
+    operation.finish_scratch_cleanup(Deadline.after(10))
     assert stage.cleaned and not operation._prepared_stages
     assert carrier.activation_calls == 1
     assert sum(value.observations for value in deliveries) == 1
@@ -473,9 +473,9 @@ def test_positive_native_closure_still_requires_actual_local_delivery_settlement
     assert not stage._activation_settled and owner._active_borrow is active.borrow
     count = len(carrier.requests)
     with pytest.raises(StateError):
-        operation.finish_prepared_stages(Deadline.after(10))
+        operation.finish_scratch_cleanup(Deadline.after(10))
     assert len(carrier.requests) == count
     operation.observe_inline_cleanup(Deadline.after(10))
     assert stage._activation_settled and not operation.active_inline_calls
-    operation.finish_prepared_stages(Deadline.after(10))
+    operation.finish_scratch_cleanup(Deadline.after(10))
     assert stage.cleaned and carrier.activation_calls == 1

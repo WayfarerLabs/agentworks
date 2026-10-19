@@ -111,6 +111,9 @@ def test_checked_managed_nonzero_retains_exact_contextual_result(view, monkeypat
 
 def test_foreground_budget_is_selected_once_and_shared(view, monkeypatch):
     _, workflow, access, main, _ = view
+    epoch = time.monotonic()
+    # This checks budget selection and sharing, not host coordination speed.
+    monkeypatch.setattr(carrier_module, "time", SimpleNamespace(monotonic=lambda: epoch))
     _status(monkeypatch, 0)
     phase_started = time.perf_counter()
     phase_timings = []

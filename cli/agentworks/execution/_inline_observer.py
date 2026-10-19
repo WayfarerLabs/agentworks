@@ -8,6 +8,8 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from ._capture_control import CaptureStreamFact
+    from ._helper_identity import IdentityExpectation
     from .carrier import ByteSink
 
 from ._evidence_wire import Frame, FrameKind, WireError
@@ -56,6 +58,7 @@ class InlineObservation:
     failure: FailureFact | None
     trusted_terminal: bool
     error: ObservationError | WireError | None
+    capture_facts: tuple[CaptureStreamFact, ...] = ()
 
 
 class InlineObserver:
@@ -68,6 +71,8 @@ class InlineObserver:
         *,
         stdout: ByteSink | None = None,
         stderr: ByteSink | None = None,
+        capture_tokens: tuple[bytes, bytes] | None = None,
+        capture_identity: IdentityExpectation | None = None,
     ) -> None:
         self._output_mode = output_mode
         self._capture_limit = capture_limit
@@ -75,6 +80,8 @@ class InlineObserver:
         self._saw_data = False
         self._data = {StreamName.STDOUT: bytearray(), StreamName.STDERR: bytearray()}
         self._streams: dict[StreamName, StreamObservation] = {}
+        self._captures: dict[StreamName, CaptureStreamFact] = {}
+        self._capture_tokens, self._capture_identity = capture_tokens, capture_identity
         self._wait: WaitFact | None = None
         self._failure: FailureFact | None = None
         self._terminal = False
@@ -84,6 +91,10 @@ class InlineObserver:
         self._offset = 0
         self._counts = {StreamName.STDOUT: 0, StreamName.STDERR: 0}
         self._hashes = {StreamName.STDOUT: hashlib.sha256(), StreamName.STDERR: hashlib.sha256()}
+
+    @property
+    def _stream_count(self) -> int:
+        return len(self._captures) if self._output_mode is OutputMode.SCRATCH_CAPTURE else len(self._streams)
 
     def drain(self) -> bool:
         """Offer the bounded decoded chunk outside the trusted decoder callback."""
@@ -129,17 +140,20 @@ class InlineObserver:
             return
         if frame.kind is FrameKind.LAUNCHING:
             parse_empty(frame.body)
-            if self._launching or self._failure is not None or self._streams or self._wait is not None:
+            if self._launching or self._failure is not None or self._stream_count or self._wait is not None:
                 self._error = ObservationError.ORDER
             else:
                 self._launching = True
             return
         if frame.kind is FrameKind.STREAM_END:
-            self._accept_stream_end(parse_stream_end(frame.body))
+            if self._output_mode is OutputMode.SCRATCH_CAPTURE:
+                self._accept_capture(frame.body)
+            else:
+                self._accept_stream_end(parse_stream_end(frame.body))
             return
         if frame.kind is FrameKind.WAITED:
             wait = parse_wait(frame.body)
-            if not self._launching or len(self._streams) != 2 or self._wait is not None or self._failure is not None:
+            if not self._launching or self._stream_count != 2 or self._wait is not None or self._failure is not None:
                 self._error = ObservationError.ORDER
             else:
                 self._wait = wait
@@ -155,6 +169,24 @@ class InlineObserver:
                 self._error = ObservationError.ORDER
             return
         self._error = ObservationError.ORDER
+
+    def _accept_capture(self, body: bytes) -> None:
+        from ._capture_control import CaptureCreation, parse_capture_fact
+
+        assert self._capture_tokens is not None and self._capture_identity is not None
+        fact = parse_capture_fact(body, self._capture_tokens, self._capture_identity, self._capture_limit)
+        if (
+            fact.end.stream in self._captures
+            or self._wait is not None
+            or self._failure is not None
+            or (
+                not self._launching
+                and (fact.ready is not None or fact.creation is not CaptureCreation.NOT_ENTERED or fact.end.count != 0)
+            )
+        ):
+            self._error = ObservationError.ORDER
+            return
+        self._captures[fact.end.stream] = fact
 
     def _accept_data(self, frame: Frame) -> None:
         stream = StreamName.STDOUT if frame.kind is FrameKind.STDOUT else StreamName.STDERR
@@ -234,13 +266,13 @@ class InlineObserver:
             self._launching
             and failure.phase is FailurePhase.LAUNCH
             and not self._saw_data
-            and not self._streams
+            and (self._stream_count == 2 if self._output_mode is OutputMode.SCRATCH_CAPTURE else not self._streams)
             and self._wait is None
         )
         post_wait = (
             self._launching
             and failure.phase in {FailurePhase.OBSERVE, FailurePhase.CLEANUP}
-            and len(self._streams) == 2
+            and self._stream_count == 2
             and self._wait is not None
         )
         if not (prelaunch or launch_failure or post_wait):
@@ -249,6 +281,21 @@ class InlineObserver:
         self._failure = failure
 
     def _valid_finish(self) -> bool:
+        if self._output_mode is OutputMode.SCRATCH_CAPTURE:
+            return self._stream_count == 2 and (
+                (
+                    self._wait is None
+                    and self._failure is not None
+                    and self._failure.phase
+                    in {
+                        FailurePhase.REQUEST,
+                        FailurePhase.IDENTITY,
+                        FailurePhase.PREPARE,
+                        FailurePhase.LAUNCH,
+                    }
+                )
+                or (self._launching and self._wait is not None)
+            )
         if not self._launching:
             return self._failure is not None
         if self._failure is not None and self._failure.phase is FailurePhase.LAUNCH:
@@ -269,4 +316,5 @@ class InlineObserver:
             failure=self._failure,
             trusted_terminal=trusted_terminal,
             error=error,
+            capture_facts=tuple(self._captures.values()),
         )

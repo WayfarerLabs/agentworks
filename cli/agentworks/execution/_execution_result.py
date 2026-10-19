@@ -121,12 +121,28 @@ def _outputs(candidate: InlineCandidateResult, completed: bool) -> tuple[Executi
     if not completed or candidate.observation is None:
         empty = _empty_output(candidate.requested_output)
         return empty, empty
+    if candidate.requested_output is OutputMode.SCRATCH_CAPTURE:
+        facts = {fact.end.stream.value: fact for fact in candidate.observation.capture_facts}
+        retrieved = candidate.retrieved_capture
+        outputs = []
+        for index, stream in enumerate(("stdout", "stderr")):
+            fact = facts.get(stream)
+            local = None if retrieved is None else retrieved[index]
+            outputs.append(
+                ExecutionOutput(
+                    b"" if local is None else local.data,
+                    complete=local is not None and local.verified and fact is not None and fact.end.complete,
+                    retention=Retention.CAPTURED,
+                )
+            )
+        return outputs[0], outputs[1]
     return _output(candidate.observation.stdout), _output(candidate.observation.stderr)
 
 
 def _empty_output(mode: OutputMode) -> ExecutionOutput:
     retention = {
         OutputMode.CAPTURE: Retention.CAPTURED,
+        OutputMode.SCRATCH_CAPTURE: Retention.CAPTURED,
         OutputMode.DISCARD: Retention.DISCARDED,
         OutputMode.SUPPRESS: Retention.SUPPRESSED,
         OutputMode.DELIVER: Retention.DELIVERED,
@@ -158,6 +174,17 @@ def _failure(candidate: InlineCandidateResult, completed: bool) -> ExecutionFail
     if observation is not None and observation.failure is not None:
         return _helper_failure(observation.failure.phase, observation.failure.code)
     if completed and observation is not None:
+        if candidate.requested_output is OutputMode.SCRATCH_CAPTURE:
+            if any(fact.end.truncated for fact in observation.capture_facts):
+                return ExecutionFailure.OUTPUT_LIMIT
+            if (
+                len(observation.capture_facts) != 2
+                or candidate.retrieved_capture is None
+                or any(not local.verified for local in candidate.retrieved_capture)
+                or any(not fact.end.complete for fact in observation.capture_facts)
+            ):
+                return ExecutionFailure.OUTPUT
+            return _carrier_failure(candidate.carrier_failure) if candidate.carrier_failure is not None else None
         streams = (observation.stdout, observation.stderr)
         if any(stream is not None and stream.truncated for stream in streams):
             return ExecutionFailure.OUTPUT_LIMIT

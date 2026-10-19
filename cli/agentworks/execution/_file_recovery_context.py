@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
+from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
 from agentworks.execution._runtime_prerequisite import _NumericGuestBootstrap
 from agentworks.vms._recovery_vm_span import RecoveryVMPreparedContext, RecoveryVMSpan
 
@@ -24,6 +25,8 @@ def require_recovery_context(
     deadline: Deadline | None = None,
 ) -> tuple[IdentityPlan, _NumericGuestBootstrap | None]:
     """Compare complete authority, retaining historical delivery-relative modes."""
+    if not isinstance(call.target, ManagedTargetIdentity) or call.target.kind is not ManagedTargetKind.VM:
+        raise StateError("Platform-host file recovery requires independent host identity and drain evidence")
     bootstrap = call.bootstrap
     if bootstrap is None:
         if context is not None:
