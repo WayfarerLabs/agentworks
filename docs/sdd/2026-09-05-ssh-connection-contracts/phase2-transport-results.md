@@ -27,13 +27,26 @@ identity, policy-selection count and cleanup/expiry assertions remain. This sepa
 budget-sharing proof from host scheduling; it neither changes product deadlines nor identifies the
 exact older hosted delay. The original red run and its measurements remain in the historical record.
 
-Independent project, complexity and correctness reviews and the new composition's gates are
-underway. Previous green local/hosted runs remain attributed to their original source and merge
-pins. Earlier native forwarding and lifetime probes below remain scoped to `33b6a412`; no new native
-or supported-platform result is claimed for this increment. Production creation/trust publication,
-writer coexistence/rollback, full terminal delivery, both usable RunContext paths and R1-R5
-acceptance remain open. This working composition starts no new public feedback round,
-review-requested/ready edge, SDD lock or retirement step.
+Evaluated runtime/test pin `48c5a9e643246364c4fcd9a8d382d3e66249981a` passes the complete local
+selection: 22,085 tests, 78 skips and 51 fork warnings in 398.23 seconds, exit zero. Ruff/format,
+strict typing across 1,554 sources, canonical file quality, Rulesync, locked-SDD and exact CI Typer
+isolation pass. Website checks pass 160 Python and 103 Node tests, four builds and both
+deterministic comparisons. Production CLI, the complete transport SDD and all 25 prior completed SSH
+plan blocks retain their independently checked boundaries.
+
+All three independent source reviews have no material findings and are fully read. Complexity's
+optional D1 identifies the stored-capture decoder's current test-only callers. The lead verifies
+that production compares retained encoded payload directly; this simplification remains with
+transport, without modifying owner source or blocking the bounded adoption. Removing only the
+seven-line all-resource closing sweep in the review experiment causes both expected ordering
+failures; its necessity is measured, not inferred from a passing suite alone.
+
+Previous hosted runs remain attributed to their original source and merge pins. Fresh combined-head
+hosted verification remains separate. Earlier native forwarding and lifetime probes below remain
+scoped to `33b6a412`; no new native or supported-platform result is claimed for this increment.
+Production creation/trust publication, writer coexistence/rollback, full terminal delivery, both
+usable RunContext paths and R1-R5 acceptance remain open. This working composition starts no new
+public feedback round, review-requested/ready edge, SDD lock or retirement step.
 
 ## Latest transport increment composition
 
