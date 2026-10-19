@@ -326,6 +326,26 @@ class FileOperation:
         self._unfinished_owned_files: list[UnfinishedOwnedFile] = []
 
     @property
+    def has_pending_custody(self) -> bool:
+        """Whether concrete file helpers, local calls or unfinished effects remain."""
+        return bool(
+            self.active_downloads
+            or self.unfinished_downloads
+            or self.has_unfinished_local_download_call
+            or self.has_unfinished_local_file_call
+            or self.retained_local_download_stage is not None
+            or self.active_uploads
+            or self.unfinished_uploads
+            or self.active_json_updates
+            or self.unfinished_json_updates
+            or self.active_stats
+            or self.active_inventories
+            or self.active_removals
+            or self.active_metadata
+            or self.unfinished_owned_files
+        )
+
+    @property
     def active_downloads(self) -> tuple[_ActiveFileDownload, ...]:
         return tuple(self._active_downloads.values())
 

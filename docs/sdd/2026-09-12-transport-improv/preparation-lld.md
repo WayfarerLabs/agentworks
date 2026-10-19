@@ -823,6 +823,50 @@ existing finite Linux VM input slice is the first composition target. Workload-i
 delivery, token cleanup/recovery, host/Darwin and live/unbounded combinations still require their
 own end-to-end proof before the production capture default or full surface is accepted.
 
+#### Host finite prepared input and capture
+
+The next buffered host composition covers Linux and Darwin, finite source/stdin, a finite execution
+budget and an explicit finite capture bound. Reuse the existing stage, verified fixed-prefix loader,
+capture publication, snapshot ranges and retained cleanup objects. Do not add an SSH-only output
+collector, another spool protocol, or a larger provisional inline ceiling. Ordinary inline and
+sensitive/discard behavior remain available without forcing scratch creation.
+
+Separate prepared-delivery authority from its current VM-only representation. Preserve the existing
+version-one VM cleanup record and numeric root/guest bootstrap unchanged. Add a host-only
+version-three record containing the exact owned PLATFORM_HOST scope, actual entry identity plan,
+runtime selection and token. Version two remains reserved for the existing in-flight recovery
+wrapper. Host records contain no fabricated VM incarnation, boot, guest bootstrap or effect gate.
+Their codec rejects mixed shapes, version relabeling and incompatible runtime/identity data before
+effects, with the same bounded ledger envelope. Capture reuses that binding plus its existing
+workload plan and two distinct stream tokens; child/debt updates retain the host format.
+
+For a host, stage and activation run under the execution call's actual selected ordinary/elevated
+plan, not an implicitly privileged root path. Use existing Linux `/tmp` or Darwin `/private/tmp`
+scratch admission and identity checks. Adapt the fixed loader to consume the verified held input
+under that host identity and the original trusted packaged prefix. It never compiles request bytes
+or uses a VM check as an invented host fence. Preserve complete envelope validation, original
+nonce/digest/length and one-shot activation, including separate source and sensitive stdin.
+
+Host capture uses the existing bounded process prefix and per-stream publication after actual child
+observation, then existing snapshot reads and cleanup under the workload identity. Preserve known
+wait/status on publication or retrieval failure, verified prefixes, suppression and per-token
+creation uncertainty. All exchanges use the original operation deadline; separately admitted fresh
+cleanup uses its supplied budget. Retain actual stage, capture, helper and delivery custody before
+effects, and settle closing helpers and completed-call bookkeeping before dependent cleanup or
+lifecycle resolution. No receipt or local SSH exit substitutes for remote helper closure.
+
+Keep automatic process-loss recovery refused for these host records before rebinding or dispatch.
+Same-process closing uses the exact original retained objects; a missing historical receipt is not
+absence or permission to activate again. Native host continuity and predecessor-drain proof remain
+separate requirements for later recovery, not prerequisites manufactured by this format.
+
+Prove large separate source/stdin and capture through the host context, Linux ordinary/elevated
+selection, Darwin codec/runtime/loader behavior, maximum controls, truncation, suppression, partial
+publication/retrieval and fresh cleanup without replay. Local Darwin-shaped fixtures are not native
+macOS evidence. Native SSH/macOS validation, host configuration/adoption and the full
+surface/default change remain open until their own acceptance. Live and explicitly unbounded staging
+retain separate gates.
+
 #### Closed MANAGED capture ranges
 
 Use the existing managed run store and observation owner for closed captures, not a second scratch

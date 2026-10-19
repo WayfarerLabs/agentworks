@@ -1520,6 +1520,30 @@ Run the local evidence from `cli/` with `uv run pytest tests/execution`. The reu
 does not establish SSH or live Proxmox compatibility. The native carrier is isolated from the plugin
 registry because importing that registry currently loads legacy execution modules.
 
+## Private ordinary platform-host contexts
+
+`_platform_host_context.platform_host_execution_context` claims an explicit shared host scope before
+account/runtime preparation, then supplies `RunContext.platform_host_execution_target()` with the
+existing command and file views. Core supplies the selected carrier, delivery/workload accounts,
+elevation-preparation choice, runtime, trusted file root and finite deadline. The target has the
+actual prepared ordinary identity and `PLATFORM_HOST` route. It preserves incoming guest and legacy
+bindings, descriptive scope and scoped secret reader; it does not derive host authority from them or
+manufacture VM identity.
+
+One retained lifetime stops body admission before closeout. It settles original helper/local
+delivery and existing file/scratch bookkeeping before releasing the claim. Unknown preparation or
+effects keep ownership. `PlatformHostContextControlFact` retains exact same-process cleanup for a
+fresh finite budget without preparing again, replaying application work or reopening body access.
+Retained and environment-derived views cannot outlive the owning context. Concrete
+`has_pending_custody` predicates are shared with VM composition; they describe retained resources,
+not permission, physical host identity or complete lifecycle settlement by themselves.
+
+This private composer supports ordinary inline DIRECT commands and file operations, not host
+MANAGED/independent jobs or automatic process-loss recovery. Host prepared input beyond inline
+admission and capture above 4,096 bytes remain incomplete. Explicit host configuration, platform
+factory/adoption, Remote Lima provisioning/rollback and native SSH/macOS acceptance are separate
+gates. Local helper and synthetic runtime-selection tests do not establish those guarantees.
+
 ## Private helper identity plans
 
 Buffered inline execution and file exchanges take one `IdentityPlan`, binding the expected account
@@ -2261,9 +2285,9 @@ caller-supplied owner. They reject fabricated managed guest identity, guest boot
 gates before effects. Their bounded version-7 records contain only the host scope's kind/name as the
 target; child association and cleanup-debt updates retain that version. Existing VM formats remain
 unchanged. Original helper/file custody supports same-process closing, but this scope establishes
-coordination, not physical host identity or drain proof. Host context/factory composition, native
-Darwin acceptance and automatic process-loss host recovery remain incomplete; recovery adapters
-refuse both new and historical host records before rebinding or dispatch.
+coordination, not physical host identity or drain proof. Production host configuration/factory
+composition, native Darwin acceptance and automatic process-loss host recovery remain incomplete;
+recovery adapters refuse both new and historical host records before rebinding or dispatch.
 
 Single-file calls attach their operation-specific binding and working state before the first
 exchange. The exchange validates its request before carrier dispatch. Metadata and directory calls

@@ -1139,6 +1139,17 @@ class ExecutionOperation:
         return observed.shell
 
     @property
+    def has_pending_custody(self) -> bool:
+        """Whether helpers, scratch or managed runs still require this lifetime."""
+        return bool(
+            self.active_inline_calls
+            or self.unfinished_inline_executions
+            or self._prepared_stages
+            or self._captures
+            or any(not run.cleanup_complete for run in self.managed_runs)
+        )
+
+    @property
     def active_inline_calls(self) -> tuple[_ActiveHelperCall, ...]:
         """Return calls whose borrow has not yet been relinquished."""
         return tuple(self._active_inline_calls.values())
