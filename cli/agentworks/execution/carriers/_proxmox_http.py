@@ -18,6 +18,9 @@ import urllib.request
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from agentworks.naming import VM_USER_RE
+from agentworks.ssh_identity import SSHIdentityReadError, parse_public_ssh_identity
+
 if TYPE_CHECKING:
     from http.client import HTTPMessage
 
@@ -37,6 +40,8 @@ class _Endpoint(StrEnum):
     GUEST_INFO = "guest-info"
     NEXT_ID = "next-id"
     VM_CLONE = "vm-clone"
+    VM_CONFIGURE = "vm-configure"
+    VM_RESIZE = "vm-resize"
 
 
 def _valid_clone_body(value: object) -> bool:
@@ -69,6 +74,63 @@ def _valid_control_timeout(value: object) -> bool:
         return math.isfinite(value) and value > 0
     except OverflowError:
         return False
+
+
+def _valid_digest(value: object) -> bool:
+    return type(value) is str and re.fullmatch(r"[0-9a-f]{40}", value) is not None
+
+
+def _valid_configuration_body(value: object) -> bool:
+    """Validate the public, fixed configuration at the worker input boundary."""
+    if type(value) is not dict or set(value) != {
+        "cores",
+        "memory",
+        "ciuser",
+        "sshkeys",
+        "vmgenid",
+        "cpu",
+        "agent",
+        "boot",
+        "ipconfig0",
+        "digest",
+    }:
+        return False
+    from uuid import UUID
+
+    try:
+        generation = UUID(value["vmgenid"])
+        public_key = urllib.parse.unquote(value["sshkeys"], errors="strict")
+        parse_public_ssh_identity(public_key)
+    except (ValueError, TypeError, AttributeError, SSHIdentityReadError):
+        return False
+    return (
+        type(value["cores"]) is int
+        and value["cores"] > 0
+        and type(value["memory"]) is str
+        and re.fullmatch(r"[1-9][0-9]*", value["memory"]) is not None
+        and type(value["ciuser"]) is str
+        and VM_USER_RE.fullmatch(value["ciuser"]) is not None
+        and generation.int != 0
+        and str(generation) == value["vmgenid"]
+        and urllib.parse.quote(public_key, safe="") == value["sshkeys"]
+        and value["cpu"] == "host"
+        and value["agent"] == "enabled=1"
+        and value["boot"] == "order=scsi0"
+        and value["ipconfig0"] == "ip=dhcp"
+        and _valid_digest(value["digest"])
+    )
+
+
+def _valid_resize_body(value: object) -> bool:
+    """Accept only a digest-guarded absolute size for the creation disk."""
+    return (
+        type(value) is dict
+        and set(value) == {"disk", "size", "digest"}
+        and value["disk"] == "scsi0"
+        and type(value["size"]) is str
+        and re.fullmatch(r"[1-9][0-9]*G", value["size"]) is not None
+        and _valid_digest(value["digest"])
+    )
 
 
 def _valid_task_id(value: object) -> bool:
@@ -149,6 +211,13 @@ def _request(payload: dict[str, Any]) -> bytes:
         if suffix is not None or method != "POST" or body is not None:
             raise ValueError("VM start requires a fixed body-free POST")
         url = f"{base}/status/start"
+    elif endpoint in (_Endpoint.VM_CONFIGURE, _Endpoint.VM_RESIZE):
+        if suffix is not None or method != "PUT" or type(body) is not str:
+            raise ValueError("Configuration requires a fixed PUT and exact public body")
+        validator = _valid_configuration_body if endpoint is _Endpoint.VM_CONFIGURE else _valid_resize_body
+        if not validator(json.loads(body)):
+            raise ValueError("Invalid public configuration body")
+        url = f"{base}/{'config' if endpoint is _Endpoint.VM_CONFIGURE else 'resize'}"
     else:
         if method != "GET" or body is not None:
             raise ValueError("Task status requires a fixed body-free GET")
@@ -159,6 +228,8 @@ def _request(payload: dict[str, Any]) -> bytes:
         _Endpoint.GUEST_INFO,
         _Endpoint.NEXT_ID,
         _Endpoint.VM_CLONE,
+        _Endpoint.VM_CONFIGURE,
+        _Endpoint.VM_RESIZE,
     ) and not _valid_control_timeout(payload["timeout"]):
         raise ValueError("VM control requires a positive finite timeout")
     request = urllib.request.Request(
