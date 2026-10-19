@@ -6030,11 +6030,14 @@ ownership are unchanged, so the broader additive RunContext and migration gates 
       preparation without reacquiring ownership. Keep legacy create/result/callers unchanged and
       prove the new path with retirement roots unavailable before registration.
 - [ ] Complete the creation acceptance and failure windows through the new RunContext: secret stdin
-      delivery, release attestation, initialization, gap-free availability and exact pre-acceptance
-      rollback versus post-acceptance failed-VM retention. Preserve original control, uncertain
-      effects, durable addressability and aggregate closeout. Prove metadata-publication failure and
-      interruption on both sides of the explicit bootstrap rollback boundary; do not treat a
-      successful leaf as whole-workflow completion.
+      delivery, release attestation, canonical SSH preparation for Phase B and initialization,
+      gap-free availability and exact platform-bootstrap rollback versus subsequent failed-VM
+      retention. Preserve original control, uncertain effects, durable addressability and aggregate
+      closeout across both native and canonical routes without a second claim or early finalizer.
+      Prove metadata-publication failure and interruption on both sides of the explicit
+      platform-bootstrap rollback boundary; do not treat a successful leaf as whole-workflow
+      completion. For lost Proxmox clone replies, prove a concrete provider association or retain
+      uncertainty; a candidate VMID or display name cannot authorize adoption or deletion.
 - [ ] Apply that complete creation path to WSL2, local Lima, configured SSH placement-host Lima,
       AWS, Azure and GCP using platform-owned facts and existing shared custody. Establish WSL2
       Python in the early package stage. Obtain native create/bootstrap/body/rollback and

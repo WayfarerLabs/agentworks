@@ -252,9 +252,10 @@ before native production cutover.
 The current-source audit at `224aca065` confirms a separate creation gap. Core generates and
 persists the provisional VM row and instance marker before `platform.create`, but that call returns
 only `ProvisionResult.native_transport`. Release attestation and Phase A still consume that legacy
-object. Returning an extra new binding alongside it would not prove an independent workflow:
-create-time bootstrap itself currently invokes legacy delivery on every platform. Do not close the
-creation gate with an existing-VM resolver or a mixed result.
+object. Returning an extra new binding alongside it would not prove an independent workflow: several
+create-time bootstrap paths already invoke legacy transports. Proxmox instead uses direct API/QGA
+helpers before constructing its legacy result; those helpers still lack the new shared delivery and
+lifecycle custody. Do not close the creation gate with an existing-VM resolver or a mixed result.
 
 Use one new core creation entry and a platform-owned retained creation adapter. The entry acquires
 the exact VM database claim before provider dispatch and owns it through public bootstrap, helper
@@ -277,7 +278,10 @@ Keep the stages and failure windows explicit:
    creation intent before dispatch; retain each actual SDK/process call under the original custody.
    A lost provider response requires platform observation of that intent, not automatic create
    replay, adoption by display name or a different resource name. An unproved result keeps the claim
-   and addressable provisional row.
+   and addressable provisional row. Proxmox's `next_id()` is not proved to reserve its candidate
+   VMID exclusively. Neither VMID nor display name alone authorizes adoption or deletion after a
+   lost clone response. The first slice must establish the concrete provider association, or retain
+   the unknown creation intent without claiming that resource reconciliation or rollback completed.
 2. Establish the public guest prerequisites through the independent native channel. This stage must
    work before Python, the requested administrative account or a guest marker is available. Use only
    a fixed, core-owned bootstrap with explicit shell and actual native delivery identity; do not
@@ -299,13 +303,17 @@ Keep the stages and failure windows explicit:
    resources; afterward, failed core acceptance/initialization retains an addressable failed VM for
    recovery or explicit deletion. Do not turn an arbitrary context-body exception into unconditional
    deletion of an already-accepted backend.
-6. Deliver the ordinary RunContext under the original aggregate owner. Platform availability and
-   route custody must span preparation and the complete body, with no gap at the transition from
-   creation. Closing stops body admission, settles command/file and platform work, and releases the
-   owner only after the complete aggregate is resolved. Creation, hold and route adapters report
-   their own facts; none independently seals or releases the owner. Preserve the original control
-   exception and retained cleanup on interruption. A fresh cleanup budget cannot replay creation,
-   secret delivery or initialization.
+6. Prepare the canonical Tailscale SSH target for Phase B under the original owner and continuous
+   platform availability, using the new SSH connection policy and independent target evidence.
+   Native bootstrap and release-attestation custody must remain retained across this transition;
+   canonical preparation must not reacquire the claim, replace unsettled native work or implicitly
+   fall back to the native route. Deliver the ordinary RunContext with the selected canonical
+   target. Reuse the concrete preparation/assembly, not either existing context entry unchanged:
+   those entries acquire and finalize their own owner. Closing stops body admission, settles both
+   routes' command/file and platform work, and releases the owner only after the complete aggregate
+   is resolved. Creation, hold and route adapters report their own facts; none independently seals
+   or releases the owner. Preserve the original control exception and retained cleanup on
+   interruption. A fresh cleanup budget cannot replay creation, secret delivery or initialization.
 
 Implement the first end-to-end native creation slice with Proxmox, then WSL2 and the other platforms
 against the same small composition boundary. Proxmox's existing QGA delivery supplies a concrete
