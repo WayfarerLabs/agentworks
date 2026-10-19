@@ -1886,10 +1886,12 @@ Fresh target, full guest, runtime, root and body UID/GID/complete groups must ma
 record. The fresh selected route may use different identity transition modes, but cannot substitute
 a different numeric authority or fall back to root. Current delivery uses its fresh root launcher;
 the old record's plans and version remain unchanged through intended debt/generation publications.
-Version one retains its original explicit carrier and plan semantics, with no inferred bootstrap or
-upgrade. DOWNLOAD still requires separate exact drain evidence; neither readiness nor a live action
-creates that evidence. SQLite/faked-native transcript tests establish this private composition, not
-native privilege transitions, predecessor drain or production recovery acceptance.
+Version-one VM records retain their original explicit carrier and plan semantics, with no inferred
+bootstrap or upgrade. All platform-host records, including historical host-labeled managed targets,
+are refused before recovery rebinding or dispatch. DOWNLOAD still requires separate exact drain
+evidence; neither readiness nor a live action creates that evidence. SQLite/faked-native transcript
+tests establish this private composition, not native privilege transitions, predecessor drain or
+production recovery acceptance.
 
 ## Private inline file reads
 
@@ -2253,6 +2255,15 @@ before dispatch and keeps its token/state reachable when child outcome capture f
 exceptional capture accepts only facts produced by that exact prepared call; failure to construct
 those facts preserves the original control and attached state. Completed custody records retain
 neither sources nor JSON content.
+
+Ordinary platform-host files bind the exact `OperationScope(PLATFORM_HOST, name)` held by the
+caller-supplied owner. They reject fabricated managed guest identity, guest bootstrap and VM effect
+gates before effects. Their bounded version-7 records contain only the host scope's kind/name as the
+target; child association and cleanup-debt updates retain that version. Existing VM formats remain
+unchanged. Original helper/file custody supports same-process closing, but this scope establishes
+coordination, not physical host identity or drain proof. Host context/factory composition, native
+Darwin acceptance and automatic process-loss host recovery remain incomplete; recovery adapters
+refuse both new and historical host records before rebinding or dispatch.
 
 Single-file calls attach their operation-specific binding and working state before the first
 exchange. The exchange validates its request before carrier dispatch. Metadata and directory calls
