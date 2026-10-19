@@ -262,6 +262,40 @@ prerequisite rules; a local helper fixture is not native macOS or installed SSH 
 Lima remains the first adoption case, with its own provisioning/rollback cleanup and explicit host
 configuration. Other platforms can consume the same composer without importing Lima.
 
+### Configured SSH platform-host composition
+
+Keep host-specific access facts on the platform placement, not in global SSH settings or a new
+machine registry. Remote Lima is the first consumer of the shared
+`capabilities/vm_platform/ssh_host.py` configuration shape and composer. Add one optional, complete
+`access` block to its SSH placement: a shared `resource_key`, literal `endpoint`, login `user`,
+`port`, explicit Linux/Darwin `target_os` and optional absolute `python_path`. Port defaults to 22;
+Python selection reuses the existing OS-specific candidates and explicit-path admission. A missing
+block refuses the explicitly selected new operation entry before effects. Presence supplies facts,
+not a stack selector: neither entry chooses the other stack or falls back to it.
+
+Leave legacy `placement.host` and all existing call sites unchanged during coexistence. Its
+`user@host` or SSH-config spelling is not a reliable independent endpoint/account declaration, so
+the new block carries its own endpoint rather than silently repurposing or splitting that string.
+Reuse the existing `SSHConnection` literal DNS/IP and account validation. A DNS spelling can also
+name an SSH-config alias; do not inspect ambient configuration to decide which the operator meant.
+The new connection always uses literal destination semantics without SSH-config expansion. Reuse the
+operator's independent SSH settings, managed trust and carrier, with endpoint-based host-key lookup
+and no invented alias, trust enrollment or new connection-policy layer.
+
+Core constructs `OperationScope(PLATFORM_HOST, resource_key)` from the explicit declaration before
+account discovery or dispatch. All sites sharing the same host must declare the same key. The key
+coordinates Agentworks operations; it proves neither physical machine identity nor alias
+equivalence. Repeating a small declaration across sites does not justify a registry or a host setup
+lifecycle. VM/host hierarchy and broader lock scopes retain their separately deferred plan.
+
+The initial Lima consumer deliberately uses the login account for both delivery and workload,
+without elevated preparation. It runs `limactl` as that account. Core supplies the trusted host file
+root `/`, subject to the ordinary account's actual OS access and existing conservative file rules;
+this is not recipient permission enforcement. Fixed scratch still selects `/tmp` on Linux or
+`/private/tmp` on Darwin, not an operator-selected staging location. No guest identity, implicit
+root entry, host MANAGED promise or automatic host recovery is introduced. Complete configuration,
+legacy-coexistence and native SSH/macOS workflow proof remain required before production adoption.
+
 ### Bound job controls and independent evidence
 
 `ExecutionAccess` owns `observe`, `read_output`, `wait`, `stop` and `dispose` as well as `run` and
