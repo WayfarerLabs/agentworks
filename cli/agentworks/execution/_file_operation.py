@@ -1840,8 +1840,6 @@ class FileOperation:
                 if (
                     outcome is None
                     or outcome.requires_owner_retention
-                    or outcome.pending_remote_effects
-                    or outcome.coordination_uncertain
                     or active.borrow.has_outstanding_attempt
                 ):
                     continue
