@@ -247,6 +247,83 @@ This inventory is source evidence, not native feasibility or acceptance. Its con
 their platforms. The explicit resolver and complete create-time/factory integration remain required
 before native production cutover.
 
+### New-only creation composition, 2026-10-19
+
+The current-source audit at `224aca065` confirms a separate creation gap. Core generates and
+persists the provisional VM row and instance marker before `platform.create`, but that call returns
+only `ProvisionResult.native_transport`. Release attestation and Phase A still consume that legacy
+object. Returning an extra new binding alongside it would not prove an independent workflow:
+create-time bootstrap itself currently invokes legacy delivery on every platform. Do not close the
+creation gate with an existing-VM resolver or a mixed result.
+
+Use one new core creation entry and a platform-owned retained creation adapter. The entry acquires
+the exact VM database claim before provider dispatch and owns it through public bootstrap, helper
+preparation, acceptance, initialization and applicable rollback. It uses the existing owner,
+delivery-custody, obligation and target-preparation mechanisms; it does not add another operation
+repository or a general provisioning workflow engine. Existing `create`, `ProvisionResult` and
+manager callers remain unchanged until their later consumer migration.
+
+The private composition boundary is `build_creation_access(request, ctx, owner, custody)`. Like
+`build_native_execution_access`, construction is passive and lets core retain the adapter before
+the first effect. Its provisioning operation receives the original finite deadline and returns a
+new-only result containing opaque platform metadata and an independent native binding. It must
+not construct or return `ExecTransport`. Platform-specific endpoints, actual delivery accounts,
+runtime choices, host access, trust and provider identifiers remain platform-owned. Core may
+persist the metadata but must not decode it or reconstruct connection facts from it.
+
+Keep the stages and failure windows explicit:
+
+1. Validate inputs and connection policy before mutation. Register the platform's exact bounded
+   creation intent before dispatch; retain each actual SDK/process call under the original custody.
+   A lost provider response requires platform observation of that intent, not automatic create
+   replay, adoption by display name or a different resource name. An unproved result keeps the
+   claim and addressable provisional row.
+2. Establish the public guest prerequisites through the independent native channel. This stage
+   must work before Python, the requested administrative account or a guest marker is available.
+   Use only a fixed, core-owned bootstrap with explicit shell and actual native delivery identity;
+   do not fabricate a prepared guest identity to authorize it. Install Python 3 and the public
+   administrative/marker setup before invoking Python helpers. A package-list entry alone is not
+   runtime proof. Bookworm compatibility and the separate no-staging readiness path still apply.
+3. Persist the observed platform metadata under the same owner and prepare the guest and requested
+   account using the existing new-stack machinery. Construct no second claim and do not reopen the
+   existing-VM entry, which would reacquire ownership. Observe the installed runtime, marker and
+   account before ordinary target admission. Reuse the actual create-time binding rather than
+   resolving its endpoint again through a legacy hook.
+4. Complete the secret-bearing bootstrap through that prepared target, keeping the Tailscale key
+   on sensitive stdin rather than embedding it in generated shell, provider data or a staging file.
+   Carrier closure alone proves neither join success nor guest completion. Keep an uncertain join
+   and its original helper custody distinct from a known completed join.
+5. Close the platform bootstrap rollback window only after its required completion evidence and
+   durable addressability are established. Keep this boundary explicit in the retained adapter.
+   Before it, failed provisioning performs exact platform rollback or retains its unresolved
+   resources; afterward, failed core acceptance/initialization retains an addressable failed VM
+   for recovery or explicit deletion. Do not turn an arbitrary context-body exception into
+   unconditional deletion of an already-accepted backend.
+6. Deliver the ordinary RunContext under the original aggregate owner. Platform availability and
+   route custody must span preparation and the complete body, with no gap at the transition from
+   creation. Closing stops body admission, settles command/file and platform work, and releases the
+   owner only after the complete aggregate is resolved. Creation, hold and route adapters report
+   their own facts; none independently seals or releases the owner. Preserve the original control
+   exception and retained cleanup on interruption. A fresh cleanup budget cannot replay creation,
+   secret delivery or initialization.
+
+Implement the first end-to-end native creation slice with Proxmox, then WSL2 and the other platforms
+against the same small composition boundary. Proxmox's existing QGA delivery supplies a concrete
+pre-Python root entry without inventing an SSH prerequisite. WSL2 must install Python in its early
+package stage, not rely on the later generated bootstrap. Local Lima and cloud provisioning may
+deliver the public prerequisite through their key-free provider startup mechanisms; the returned
+native binding still needs independent identity/runtime evidence. Remote Lima additionally retains
+the configured platform-host context before host provisioning and keeps separate host/guest
+completion and resource rollback. It is a consumer of the generic SSH-host pattern, not a special
+SSH carrier mode.
+
+Acceptance requires an actual new-only create/bootstrap/RunContext/close path with retirement roots
+unavailable before registration, plus fault coverage before dispatch, after provider effects, at
+metadata publication, during helper/secret handoff and at both sides of the rollback boundary.
+Native reports must prove provider resource disposition, guest prerequisites and operation-length
+availability. These are remaining implementation and validation tasks, not claims established by
+the audit or by existing-VM context tests.
+
 ### New-target composition inventory, 2026-09-21
 
 Read-only inspection at `449b297e` found that `VMPlatform.native_transport` and

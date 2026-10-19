@@ -6022,6 +6022,23 @@ ownership are unchanged, so the broader additive RunContext and migration gates 
       without accepting legacy verification bypass. Existing private implementation checkpoints do
       not supply native evidence. Other platforms, provisioning-result integration and complete
       target identity composition remain part of the required gate above.
+- [ ] Implement the [new-only creation entry and retained platform adapter](migration-strategy.md#new-only-creation-composition-2026-10-19)
+      first through a complete Proxmox vertical slice. Acquire the original exact VM owner before
+      provider dispatch, retain creation intent and actual delivery, establish public prerequisites
+      before Python helpers, and return only independent binding/opaque metadata. Reuse target
+      preparation without reacquiring ownership. Keep legacy create/result/callers unchanged and
+      prove the new path with retirement roots unavailable before registration.
+- [ ] Complete the creation acceptance and failure windows through the new RunContext: secret
+      stdin delivery, release attestation, initialization, gap-free availability and exact
+      pre-acceptance rollback versus post-acceptance failed-VM retention. Preserve original control,
+      uncertain effects, durable addressability and aggregate closeout. Prove metadata-publication
+      failure and interruption on both sides of the explicit bootstrap rollback boundary; do not
+      treat a successful leaf as whole-workflow completion.
+- [ ] Apply that complete creation path to WSL2, local Lima, configured SSH placement-host Lima,
+      AWS, Azure and GCP using platform-owned facts and existing shared custody. Establish WSL2
+      Python in the early package stage. Obtain native create/bootstrap/body/rollback and
+      operation-length availability evidence for each supported platform. New result fields or
+      existing-VM resolver tests alone do not close this gate.
 - [ ] Expose native binding resolution as an explicit preparation operation with a deadline, before
       passive target/RunContext construction. The remaining-platform inventory shows that cloud
       public-IP resolution requires provider reads; do not force stale metadata or hide those reads
