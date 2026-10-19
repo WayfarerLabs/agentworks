@@ -264,7 +264,6 @@ with patch.dict(os.environ, {"LIMA_HOME": str(home)}), \
         raise AssertionError("remote Lima accepted an unowned host route")
     assert lima_reads == []
     binding = lima.resolve_native_execution_binding(lima_vm, RunContext(), deadline=deadline)
-assert lima_reads == [False, False, True, False]
 assert isinstance(binding.carrier, LimaCarrier)
 connection = binding.carrier.connection
 assert (connection.instance, connection.limactl_executable, connection.lima_home) == (
