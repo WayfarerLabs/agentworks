@@ -24,7 +24,7 @@ from agentworks.execution._file_obligation import (
 )
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
-from agentworks.execution._managed_runs import ManagedTargetKind
+from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS, _NumericGuestBootstrap
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from tests.execution.test_file_obligation import _MAXIMUM, _maximum_recovery_obligation, _obligation
@@ -179,6 +179,7 @@ def _gated(family: FileCallFamily, state: str, body_uid: int = 1001) -> FileCall
         initial = replace(initial, identity_plan=plan)
     if state == "none":
         return initial
+    assert isinstance(initial.target, ManagedTargetIdentity)
     setup = FileEffectGateSetup.for_target(initial.target, initial.identity_plan.expected.euid, _GUEST)
     if state == "setup":
         return replace(initial, gate_setup=setup, batch_index=0 if family is FileCallFamily.PACKAGE_UPLOAD else None)
@@ -200,6 +201,7 @@ def _gated(family: FileCallFamily, state: str, body_uid: int = 1001) -> FileCall
 @pytest.mark.parametrize("state", ("setup", "bound", "proposed"))
 def test_bootstrap_requires_full_gate_guest_not_only_derived_boot(family: FileCallFamily, state: str) -> None:
     initial = _gated(family, state)
+    assert isinstance(initial.target, ManagedTargetIdentity)
     other_guest = replace(_GUEST, instance_marker="e" * 32)
     assert vm_guest_boot_id(other_guest) == initial.target.boot_id
     with pytest.raises(FileCallObligationCodecError):

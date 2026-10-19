@@ -439,6 +439,24 @@ def test_namespace_largest_supported_binding_fits_actual_publication(owned, monk
         decode_namespace_obligation(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
 
 
+@pytest.mark.parametrize(
+    "target",
+    [
+        {"kind": "platform-host", "name": "box"},
+        {"kind": "platform-host", "name": "box", "incarnation": _TARGET.incarnation, "boot_id": _TARGET.boot_id},
+    ],
+)
+def test_namespace_decoder_refuses_persisted_host_targets(
+    owned: tuple[Database, OperationOwner], target: dict[str, str]
+) -> None:
+    _, owner = owned
+    record = _preparation(owner)._record
+    value = json.loads(encode_namespace_obligation(record))
+    value["target"] = target
+    with pytest.raises(ValueError):
+        decode_namespace_obligation(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
+
+
 def test_durable_codec_is_closed_bounded_and_retains_exact_binding(owned, monkeypatch):
     _, owner = owned
     _install(monkeypatch, owner, NamespaceStatus.UNCERTAIN)

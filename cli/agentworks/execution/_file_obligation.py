@@ -573,7 +573,11 @@ def _decode_obligation(value: object) -> FileCallObligation:
         family = FileCallFamily(value["family"])
     except (TypeError, ValueError):
         raise FileCallObligationCodecError from None
-    target = _decode_target(value["target"], host=value["version"] == HOST_FILE_CALL_OBLIGATION_PAYLOAD_VERSION)
+    target = (
+        _decode_host_target(value["target"])
+        if value["version"] == HOST_FILE_CALL_OBLIGATION_PAYLOAD_VERSION
+        else _decode_target(value["target"])
+    )
     root = _decode_path(value["root"], root=True)
     relative_path = _decode_path(value["path"], root=False)
     identity_plan = _decode_identity_plan(value["identity"])
@@ -688,17 +692,19 @@ def _encode_target(target: ManagedTargetIdentity | OperationScope) -> dict[str, 
     }
 
 
-def _decode_target(value: object, *, host: bool) -> ManagedTargetIdentity | OperationScope:
-    if host:
-        if type(value) is not dict or set(value) != _HOST_TARGET_FIELDS:
-            raise FileCallObligationCodecError
-        try:
-            scope = OperationScope(OperationResourceKind(value["kind"]), cast("str", value["name"]))
-        except (TypeError, ValidationError, ValueError):
-            raise FileCallObligationCodecError from None
-        if scope.resource_kind is not OperationResourceKind.PLATFORM_HOST:
-            raise FileCallObligationCodecError
-        return scope
+def _decode_host_target(value: object) -> OperationScope:
+    if type(value) is not dict or set(value) != _HOST_TARGET_FIELDS:
+        raise FileCallObligationCodecError
+    try:
+        scope = OperationScope(OperationResourceKind(value["kind"]), cast("str", value["name"]))
+    except (TypeError, ValidationError, ValueError):
+        raise FileCallObligationCodecError from None
+    if scope.resource_kind is not OperationResourceKind.PLATFORM_HOST:
+        raise FileCallObligationCodecError
+    return scope
+
+
+def _decode_target(value: object) -> ManagedTargetIdentity:
     if type(value) is not dict or set(value) != _TARGET_FIELDS:
         raise FileCallObligationCodecError
     try:
