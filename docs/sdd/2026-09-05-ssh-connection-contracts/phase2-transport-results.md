@@ -6,6 +6,35 @@ does not replace the SSH plan, shared transport contracts or full implementation
 The first section preserves the previous record verbatim. Later observations supersede only the
 gates they actually measure.
 
+## Finite DIRECT capture and ordinary host-file composition
+
+Private runtime/test composition `65d1987c5b2a89def8941a6bd304e2d676c0cdfb` incorporates published
+transport `ff19ce4e05616bddf4cce8a04eaba65451c15dac` without conflicts. Production CLI and the
+complete transport SDD match that owner. Only the reviewed SSH drain, generated-key permission and
+causal terminal-custody fixtures differ in CLI files; no SSH carrier interface changes.
+
+The transport increment adds finite Linux VM DIRECT capture beyond 4,096 bytes per stream through
+owned verified scratch. Actual wait/status remains separate from output publication and artifact
+cleanup debt. Ordinary host files bind the exact PLATFORM_HOST operation scope with version-7
+custody, rather than a fabricated VM identity. Automatic host file recovery remains refused. Fresh
+process fixtures block retirement modules before actual shipped binding registration/resolution;
+provider and tool observations remain synthetic. Full host-context composition and Remote Lima
+adoption, provisioning and rollback are still open.
+
+The foreground-budget fixture now fixes its test-local monotonic observation, as its neighboring
+composition fixture already does. Requested three/five-second values, exact shared deadline
+identity, policy-selection count and cleanup/expiry assertions remain. This separates scripted
+budget-sharing proof from host scheduling; it neither changes product deadlines nor identifies the
+exact older hosted delay. The original red run and its measurements remain in the historical record.
+
+Independent project, complexity and correctness reviews and the new composition's gates are
+underway. Previous green local/hosted runs remain attributed to their original source and merge
+pins. Earlier native forwarding and lifetime probes below remain scoped to `33b6a412`; no new native
+or supported-platform result is claimed for this increment. Production creation/trust publication,
+writer coexistence/rollback, full terminal delivery, both usable RunContext paths and R1-R5
+acceptance remain open. This working composition starts no new public feedback round,
+review-requested/ready edge, SDD lock or retirement step.
+
 ## Latest transport increment composition
 
 Joint pin `442c067ccc80409a5b6ed5e372ab4cc3398cc6fb` incorporates published transport
