@@ -23,7 +23,12 @@ from agentworks.execution._execution_operation import ExecutionOperation
 from agentworks.execution._file_operation import FileOperation
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
-from agentworks.execution._target_identity import TargetIdentityControlFact, TargetIdentityStatus
+from agentworks.execution._target_identity import (
+    TargetIdentityControlFact,
+    TargetIdentityStatus,
+    prepare_target_identity,
+)
+from agentworks.execution.access import FileAccess
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.files import Create, NewMetadata
 from agentworks.execution.models import Command, Input, JobRef, Lifetime, Output, Script, Shell
@@ -269,7 +274,7 @@ def test_explicit_accounts_runtime_and_elevation_are_selected_without_bootstrap(
         identities={"delivery": IdentityExpectation(0, 0, (0,)), "worker": IdentityExpectation(1234, 1235, (1235,))}
     )
     runtime = RuntimeSelection(target_os, "/selected/python3")
-    prepare = host.prepare_target_identity
+    prepare = prepare_target_identity
 
     def checked(*args, **kwargs):
         assert db.operations.inspect(_SCOPE) is not None
@@ -290,7 +295,9 @@ def test_explicit_accounts_runtime_and_elevation_are_selected_without_bootstrap(
         trusted_root=PurePosixPath(root),
         deadline=Deadline.after(30),
     ) as ctx:
-        assert ctx.platform_host_execution_target().identity == ExecutionIdentity("worker", 1234, 1235, (1235,))
+        target = ctx.platform_host_execution_target()
+        assert target is not None
+        assert target.identity == ExecutionIdentity("worker", 1234, 1235, (1235,))
         assert carrier.calls == ["delivery", "worker"]
         assert lifetimes[0].identity.elevated_plan.expected.euid == 0
     assert db.operations.inspect(_SCOPE) is None
@@ -307,7 +314,7 @@ def test_partial_construction_preserves_control_identity_and_cause(fixture, monk
         raise control
 
     if phase == "context":
-        original = host.FileAccess
+        original = FileAccess
 
         def assembly(*args, **kwargs):
             files = original(*args, **kwargs)
@@ -480,10 +487,10 @@ def test_retained_actual_local_file_original_closes_on_exact_retry(fixture):
     source.write_bytes(b"retained original")
 
     class Original:
-        def __init__(self):
+        def __init__(self) -> None:
             self.file = source.open("rb")
             self.interrupted = False
-            self.deadlines = []
+            self.deadlines: list[Deadline] = []
 
         @property
         def settled(self):
@@ -567,7 +574,8 @@ def test_actual_account_helper_delivery_retains_exact_local_original(fixture, mo
         original.close()
 
 
-def test_completed_upload_bookkeeping_retry_keeps_original_call_without_replay(fixture, monkeypatch):
+@pytest.mark.parametrize("run_command", [False, True])
+def test_completed_upload_bookkeeping_retry_keeps_original_call_without_replay(fixture, monkeypatch, run_command):
     db, carrier, root, _, metadata, lifetimes, context = fixture
     control = KeyboardInterrupt()
     close = OperationBorrow.close
@@ -576,6 +584,11 @@ def test_completed_upload_bookkeeping_retry_keeps_original_call_without_replay(f
         raise control
 
     with pytest.raises(KeyboardInterrupt) as caught, context() as ctx:
+        execution = ctx.platform_host_execution_target().execution()
+        if run_command:
+            result = execution.run(Command(["/bin/sh", "-c", "printf completed-command"]), profile=Protection.DIRECT)
+            assert result.ok and result.stdout.data == b"completed-command"
+            assert lifetimes[0].execution._dispatch_obligation is not None
         monkeypatch.setattr(OperationBorrow, "close", interrupted)
         ctx.platform_host_execution_target().files().write_file(
             PurePosixPath(root / "published"), b"published once", condition=Create(), create_metadata=metadata
@@ -592,3 +605,5 @@ def test_completed_upload_bookkeeping_retry_keeps_original_call_without_replay(f
     fact.retry_cleanup(Deadline.after(10))
     assert not operation.has_pending_custody and db.operations.inspect(_SCOPE) is None
     assert carrier.calls == before and root.joinpath("published").read_bytes() == b"published once"
+    if run_command:
+        assert result.ok and result.stdout.data == b"completed-command"

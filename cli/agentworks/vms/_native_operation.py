@@ -156,6 +156,10 @@ class _Workflow:
                 raise StateError("VM operation retains unsettled helper delivery")
             if self.views.execution_operation.active_inline_calls:
                 self.views.execution_operation.observe_inline_cleanup(budget)
+            # Completed file calls can still hold the serial borrow. Retire
+            # their bookkeeping before resolving the execution lifetime row.
+            self.views.file_operation.settle_local_file_bookkeeping(budget)
+            self.views.file_operation.settle_download_bookkeeping()
             try:
                 self.views.execution_operation.finish()
             except BaseException as control:
@@ -174,8 +178,6 @@ class _Workflow:
         if self.views is not None:
             for run in self.views.execution_operation.managed_runs:
                 run.finish_cleanup(budget)
-            self.views.file_operation.settle_local_file_bookkeeping(budget)
-            self.views.file_operation.settle_download_bookkeeping()
         if not self._components_settled():
             raise StateError("VM operation retains unsettled work")
         access_settled = self.access is None or self.access.settle(budget)

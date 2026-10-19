@@ -25,7 +25,7 @@ from ._target_identity import (
     prepare_target_identity,
 )
 from .access import ExecutionAccess, FileAccess
-from .carrier import ChannelFeatures, Deadline
+from .carrier import Deadline
 from .target import ExecutionIdentity, ExecutionRoute, ExecutionTarget
 
 if TYPE_CHECKING:
@@ -103,9 +103,14 @@ class _HostLifetime:
         # Delivery closure alone says nothing about remote helper termination.
         if not self.owner.close_local_delivery(deadline):
             raise StateError("Platform-host context retains unsettled helper delivery")
+        if execution is not None and execution.active_inline_calls:
+            execution.observe_inline_cleanup(deadline)
+        # Completed file calls can still hold the serial borrow. Retire their
+        # exact bookkeeping before resolving the execution lifetime row.
+        if self.files is not None:
+            self.files.settle_local_file_bookkeeping(deadline)
+            self.files.settle_download_bookkeeping()
         if execution is not None:
-            if execution.active_inline_calls:
-                execution.observe_inline_cleanup(deadline)
             try:
                 execution.finish()
             except BaseException as control:
@@ -117,9 +122,6 @@ class _HostLifetime:
             execution.finish_scratch_cleanup(deadline)
         if not self.owner.close_local_delivery(deadline):
             raise StateError("Platform-host context retains unsettled local delivery")
-        if self.files is not None:
-            self.files.settle_local_file_bookkeeping(deadline)
-            self.files.settle_download_bookkeeping()
         if not self._components_settled() or self.owner.list_pending_lifecycle_obligations():
             raise StateError("Platform-host context retains unsettled work")
         self.owner.seal_lifecycle_obligations()
@@ -237,12 +239,6 @@ def platform_host_execution_context(
             encode_account_request(AccountRequest("0" * 32, account))
         except AccountRequestError as error:
             raise ValidationError("Platform-host composition requires valid account names") from error
-    if (
-        not isinstance(getattr(carrier, "features", None), ChannelFeatures)
-        or not callable(getattr(carrier, "validate", None))
-        or not callable(getattr(carrier, "execute", None))
-    ):
-        raise ValidationError("Platform-host composition requires a preselected carrier")
     owner = OperationOwner.acquire(db.operations, scope, "platform-host-execution-context")
     lifetime = _HostLifetime(owner, deadline)
     primary: BaseException | None = None

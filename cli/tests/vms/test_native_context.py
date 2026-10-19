@@ -26,7 +26,7 @@ from agentworks.execution.files import Create, NewMetadata
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
 from agentworks.execution.target import ExecutionIdentity, ExecutionRoute
-from agentworks.operations import OperationOwner
+from agentworks.operations import OperationBorrow, OperationOwner
 from agentworks.orchestration.secrets import ScopedSecrets
 from agentworks.vms import _native_operation
 from agentworks.vms._native_operation import VMOperation, VMOperationControlFact, vm_execution_context
@@ -440,3 +440,79 @@ def test_uncertain_cleanup_retains_original_control_cause_and_owner(
         observer.presence = GuestAnchorPresence.ABSENT_CONFIRMED
     fact.retry_cleanup(Deadline.after(10))
     assert database.operations.inspect(_scope()) is None and native.events.count("dispatch") == 1
+
+
+@pytest.mark.parametrize("execution_route", [ExecutionRoute.NATIVE, ExecutionRoute.CANONICAL])
+def test_command_then_completed_upload_bookkeeping_retries_exact_call_without_replay(
+    database: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    prepared: list[VMOperation],
+    execution_route: ExecutionRoute,
+) -> None:
+    import grp
+    import os
+    import pwd
+
+    platform = WSL2Platform("wsl2", {})
+    route, native, _ = _install_route(database, platform, monkeypatch)
+    incoming = RunContext()
+    if execution_route is ExecutionRoute.CANONICAL:
+        database.update_vm_tailscale("box", ADDRESS)
+        install_canonical_delivery(monkeypatch, route)
+        incoming = RunContext(config=canonical_config(tmp_path))
+    root = _root(tmp_path)
+    Path(root).mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir(mode=0o1777)
+    scratch.chmod(0o1777)
+    route.local.scratch = scratch
+    metadata = NewMetadata(pwd.getpwuid(os.geteuid()).pw_name, grp.getgrgid(os.getegid()).gr_name, 0o600)
+    close = OperationBorrow.close
+    control = KeyboardInterrupt()
+    cause = ValueError("body cause")
+    control.__cause__ = cause
+
+    def interrupted(borrow: OperationBorrow) -> None:
+        raise control
+
+    with (
+        pytest.raises(KeyboardInterrupt) as caught,
+        vm_execution_context(
+            database,
+            "box",
+            platform,
+            incoming,
+            deadline=Deadline.after(30),
+            route=execution_route,
+            trusted_root=root,
+        ) as ctx,
+    ):
+        target = ctx.admin_execution_target()
+        assert target is not None
+        execution, files = target.execution(), target.files()
+        assert execution is not None and files is not None
+        result = execution.run(Command(["/bin/sh", "-c", "printf completed-command"]), profile=Protection.DIRECT)
+        assert result.ok and result.stdout.data == b"completed-command"
+        operation = prepared[0]
+        assert operation.execution_operation._dispatch_obligation is not None
+        monkeypatch.setattr(OperationBorrow, "close", interrupted)
+        files.write_file(root / "published", b"published once", condition=Create(), create_metadata=metadata)
+    assert caught.value is control and Path(root / "published").read_bytes() == b"published once"
+    fact = control.__cause__
+    assert isinstance(fact, VMOperationControlFact) and fact.__cause__ is cause
+    assert fact._workflow.views is operation
+    retained = operation.file_operation.active_uploads
+    assert len(retained) == 1 and retained[0].outcome is not None and retained[0].outcome.publication_confirmed
+    claim = database.operations.inspect(_scope())
+    assert claim is not None and claim.ownership == operation.owner.ownership
+    calls = route.local.calls
+    dispatches = native.events.count("dispatch")
+    accounts = list(route.accounts.calls)
+    monkeypatch.setattr(OperationBorrow, "close", close)
+    fact.retry_cleanup(Deadline.after(10))
+    assert database.operations.inspect(_scope()) is None and not operation.file_operation.has_pending_custody
+    assert route.local.calls == calls and native.events.count("dispatch") == dispatches
+    assert route.accounts.calls == accounts and not list(scratch.iterdir())
+    assert result.ok and result.stdout.data == b"completed-command"
+    assert Path(root / "published").read_bytes() == b"published once"
