@@ -199,7 +199,7 @@ class _Workflow:
             raise StateError("VM operation retains unsettled local delivery")
         if not self._components_settled():
             raise StateError("VM operation retains unsettled work")
-        access_settled = self.access is None or self.access.settle(budget)
+        access_settled = self._settle_access(budget)
         obligations = self.owner.list_pending_lifecycle_obligations()
         if access_settled and self.local_delivery.settled and self._components_settled() and not obligations:
             self.owner.seal_lifecycle_obligations()
@@ -210,6 +210,10 @@ class _Workflow:
             self.owner.close()
             return
         raise StateError("VM operation retains unsettled work")
+
+    def _settle_access(self, deadline: Deadline) -> bool:
+        """Settle the retained platform after route and local delivery cleanup."""
+        return self.access is None or self.access.settle(deadline)
 
 
 def _prepare_target(

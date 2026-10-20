@@ -15,14 +15,16 @@ from agentworks.errors import AlreadyExistsError, ConfigError, StateError, Valid
 from agentworks.execution._account_protocol import AccountRequest, AccountRequestError, encode_account_request
 from agentworks.execution._file_paths import normalized_root
 from agentworks.execution.carrier import Deadline
+from agentworks.execution.carriers.ssh.connection import admit_connection
 from agentworks.execution.target import ExecutionRoute
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
 from agentworks.operations import OperationOwner
+from agentworks.secrets.line_safety import LineOrientedSecretUse, require_line_safe_secret
 from agentworks.vms._creation_access import VMCreationResult, creation_metadata_snapshot
 from agentworks.vms._creation_guest import attest_created_guest, bootstrap_created_guest
 from agentworks.vms._creation_trust import CreationSSHTrust
 from agentworks.vms._native_operation import VMOperationControlFact, _prepare_route, _Workflow
-from agentworks.vms._ssh_native_binding import ssh_execution_binding
+from agentworks.vms._ssh_native_binding import ssh_execution_binding, vm_ssh_connection
 from agentworks.vms.identity import validate_vm_instance_marker
 
 if TYPE_CHECKING:
@@ -82,7 +84,9 @@ class _CreationWorkflow(_Workflow):
         metadata = creation_metadata_snapshot(self.creation.platform_metadata)
         if metadata:
             with self.row_transaction() as vm:
-                if vm.platform_metadata and vm.platform_metadata != metadata:
+                if vm.platform_metadata == metadata:
+                    return
+                if vm.platform_metadata:
                     raise StateError("Created VM platform metadata changed")
                 self.db.update_vm_platform_metadata(self.vm_name, metadata)
 
@@ -111,32 +115,32 @@ class _CreationWorkflow(_Workflow):
             self.creation.complete_bootstrap(deadline)
             self.phase = _BootstrapPhase.TRANSFERRED
 
-    def _close(self, *, cleanup_deadline: Deadline | None = None) -> None:
-        if self.finalizing:
-            super()._close(cleanup_deadline=cleanup_deadline)
-            return
-        budget = self.deadline if cleanup_deadline is None else cleanup_deadline
+    def _settle_access(self, deadline: Deadline) -> bool:
+        # Common cleanup has already drained actual guest and local delivery.
+        # Checkpoint failures retain authority without keeping local processes alive.
+        if self.trust is not None and not self.trust.close(deadline):
+            raise StateError("Created VM retains SSH trust maintenance custody")
         if self.row_attempted:
             self._reconcile_address_publication()
-        if self.creation is not None:
-            self.persist_metadata()
-            if self.phase is _BootstrapPhase.PREPARING:
-                self.creation.request_rollback()
-            else:
-                self.transfer_bootstrap(budget)
-        if self.trust is not None and not self.trust.close(budget):
-            raise StateError("Created VM retains SSH trust maintenance custody")
+        if self.creation is None:
+            return True
+        self.persist_metadata()
+        if self.phase is _BootstrapPhase.PREPARING:
+            self.creation.request_rollback()
+        else:
+            self.transfer_bootstrap(deadline)
         try:
-            super()._close(cleanup_deadline=cleanup_deadline)
+            settled = self.creation.settle(deadline)
         except BaseException as control:
             # Settlement can establish a previously unknown provider association.
             # Preserve that addressability while the original claim is retained.
-            if not self.finalizing and self.creation is not None:
-                try:
-                    self.persist_metadata()
-                except BaseException:
-                    control.add_note("Created VM metadata publication remains unsettled")
+            try:
+                self.persist_metadata()
+            except BaseException:
+                control.add_note("Created VM metadata publication remains unsettled")
             raise
+        self.persist_metadata()
+        return settled
 
 
 def _require_standalone_database(db: Database) -> None:
@@ -184,6 +188,11 @@ def _prepare_created_context(
 ) -> RunContext:
     db, deadline = workflow.db, workflow.deadline
     vm = _insert_row(workflow, request, template, admin_template)
+    # Admit endpoint-independent local policy before provider effects. This
+    # passive unspecified-address connection is never used for delivery; the
+    # observed guest IPv4 and current policy are admitted again after bootstrap.
+    admit_connection(vm_ssh_connection(vm, "0.0.0.0", settings))
+    provider_locator_remaining(deadline, vm_name=workflow.vm_name)
     creation = platform.build_creation_access(request, ctx, owner=workflow.owner, custody=workflow.local_delivery)
     workflow.creation = creation
     workflow.access = creation
@@ -293,6 +302,7 @@ def vm_creation_context(
         raise ValidationError("VM creation requires a trusted normalized file root")
     validate_name(request.vm_name, max_length=MAX_VM_NAME_LENGTH)
     marker = validate_vm_instance_marker(request.instance_marker)
+    require_line_safe_secret(request.tailscale_auth_key, use=LineOrientedSecretUse.TAILSCALE)
     try:
         encode_account_request(AccountRequest("0" * 32, request.admin_username))
     except AccountRequestError as error:
