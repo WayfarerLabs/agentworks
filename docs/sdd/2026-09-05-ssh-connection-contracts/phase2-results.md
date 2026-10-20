@@ -1,20 +1,20 @@
 # SSH Phase 2 Implementation Progress
 
-- Updated: 2026-10-19
+- Updated: 2026-10-20
 - PR: [#832](https://github.com/WayfarerLabs/agentworks/pull/832), draft
 - Main/contract base: `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (#830)
-- State: evaluated composition `5799e1dd` incorporates transport `7073d220`: retained route cleanup,
-  its closed-helper START correction, explicit non-staging input and private creation access/guest
-  steps. Three source reviews find no material defect. Root passes 2,474 affected cases with 12
-  skips and all fifteen static/website entries. The preserved `86c20337` run is red with three
-  cleanup failures; owner CI confirms them and one stale Linux expectation, now corrected with
-  successor/claim/ledger/no-replay assertions. The last complete local run at `6f1569e0` remains red
-  with 22 host-fixture failures and 22,279 passes. Published `5dc29b86` CI is green at its older
-  exact composition; new owner CI is running. No new native or complete creation proof follows.
-  Supported-platform terminal, positive host, creation/writer publication, factories, both usable
-  RunContext paths and R1-R5 acceptance remain open. The
-  [current composition record](phase2-transport-results.md#retained-routes-cleanup-correction-and-creation-access-composition)
-  preserves exact pins, gates and limits.
+- State: evaluated composition `bb28089f` incorporates published transport `4fe56a0c`: retained
+  creation-to-canonical orchestration, durable checkpoints and settled enrollment/full-policy
+  publication. Three independent source reviews find no material defect. Root passes 2,537 affected
+  cases with 12 skips and all fifteen static/website entries. The new fixtures simulate provider,
+  guest and native delivery boundaries; actual rollback, complete native creation/trust, remaining
+  factories and production adoption are unfinished. Published `763e58bb` CI is green across all ten
+  jobs at its older exact `7073d220` composition, not this new join. The last complete local suite
+  retains 22 host-fixture failures and 22,279 passes. Supported-platform terminal/presentation,
+  Windows keyboard policy/evidence, writer coexistence/rollback, both usable additive RunContext
+  paths and full R1-R5 remain required. The
+  [current composition record](phase2-transport-results.md#creation-durable-publication-and-canonical-ssh-composition)
+  preserves exact pins, gates, original failures and limits.
 
 Earlier checkpoint evidence and dependency history live in separate files. The headings below retain
 existing plan links; the linked sections preserve the complete original records. Historical round 1

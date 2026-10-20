@@ -6,6 +6,92 @@ does not replace the SSH plan, shared transport contracts or full implementation
 Earlier records retain their original observations. New entries supersede only the gates they
 actually measure.
 
+## Creation, durable publication and canonical SSH composition
+
+Evaluated join `bb28089f6d92192a4741aef39668bc5c4eddd153` incorporates published transport
+`4fe56a0c147412e07427c1b4be38dcc11002d4b3` over published SSH `763e58bb`. Its CLI tree is
+`a1419c6e8d4792a116c1536a4f1b9c69039efc1d`. All eight changed files equal the exact owner blobs;
+non-SSH production and the complete transport SDD match that owner. SSH production, fixtures and
+requirements are unchanged. The owner also adopts existing SSH fixture correction `54855b53`, so
+that already-identical ninth owner path is not another composition change.
+
+The private new-only creation entry retains one original core owner across platform provisioning,
+native guest preparation, bootstrap, durable address publication, release attestation, enrollment
+and canonical SSH preparation. Endpoint-independent local identity/trust policy admission precedes
+provisional inventory insertion. That placeholder endpoint is never dispatched and is not a client
+version or native contact probe. The passive platform adapter is retained before provisioning; core
+copies and validates its opaque metadata without reconstructing provider identifiers.
+
+Standalone SQLite transactions read the exact selected VM row before the separate claim check.
+Identity mismatches and an intervening takeover refuse writes; a stale WAL snapshot cannot upgrade
+into a write after takeover. Metadata is published only from the retained adapter. Address-write
+intent is retained before commit, so a lost reply reconciles actual durable addressability without
+repeating bootstrap or the sensitive join. Transfer follows a confirmed durable address; subsequent
+attestation or canonical-preparation failure retains the addressable VM. This does not mark guest
+initialization complete.
+
+The trust consumer uses actual creation marker/endpoint provenance and retains separate enrollment
+writer and native delivery custody. Current owner admission precedes policy reads and contact. It
+closes the original candidate writer before publishing the complete known-host and revocation policy
+under the expected base generation. A returned complete new generation is recorded and its exact
+obligation resolved before canonical preparation borrows the same owner. Unknown global publication
+remains held after local cleanup; close neither replays refresh nor infers success from whatever
+policy generation is current later. Separate explicit maintenance is still needed to dispose of
+unknown publication; this increment supplies no process-loss recovery resolver.
+
+Both native and canonical route records remain retained. Closed-body selection checks can revalidate
+the same row, locator, running state and independent availability for cleanup; ordinary execution
+remains refused. Aggregate guest/local cleanup precedes cleanup-time metadata reconciliation and
+platform settlement. Normal address/release/status writes and the best-effort failure-status write
+have their own earlier workflow positions; failure of that status write cannot skip final cleanup.
+The new context supplies the canonical admin target and preserves host/config/scope/secrets without
+calling legacy execution. It does not yet adopt production consumers or prove both RunContext paths
+usable together.
+
+Three independent source reviews find no material defect; root fully reads every signed final
+report. Complexity offers two optional owner suggestions: remove the redundant retained delivery
+alias in the trust consumer, and narrow the owner's cleanup-before-checkpoints summary to
+cleanup-time settlement. Root acknowledges both while retaining exact owner bytes. Neither changes
+the required custody or establishes a source defect. Previous optional suggestions retain their
+disposition.
+
+Root's 56-path affected selection passes 2,537 cases with 12 skips and 43 cases not selected in
+218.99 seconds. Child and outer controller exit zero; controller time is 219.623 seconds. It
+includes both complete new creation modules, the preceding cleanup regression cases and all
+non-integration SSH cases. Same-process receipts verify the owned lexical interpreter, prefix/cwd,
+zero first-party imports before admission and all 678 first-party origins. The 400 MiB disk growth
+limit and 1 GiB reserve do not fire. Only two obsolete root-owned installed review environments are
+retired for headroom; their source/status and all reports and failed/uncertain fixtures remain. No
+product patch, extra skip, deadline extension, account/group override or retry obtains this pass.
+
+All fifteen static/website entries pass: Ruff, 1,620 formatted files, strict typing of 1,582
+sources, canonical file quality (491 Markdown and 464 spelling files), Rulesync, locked-SDD, exact
+CI Typer isolation, 160 Python website tests in 35.618 seconds, 103 Node tests in 4,912.981847 ms,
+four builds and two deterministic comparisons. Root reads all actual outputs. The focused log SHA256
+is `17f1b137ebdf0d8e07b618e2f0ec321be01072bc7ed6bae4f4da8d4ef0c94c4d`; the same-process receipt is
+`329a6a864322f5ad1a11c3e56327243e2c834484590556eecd00632c8b9d40f0`.
+
+Published SSH [run 39356419955](https://github.com/WayfarerLabs/agentworks/actions/runs/39356419955)
+is green across all ten jobs at older `763e58bb`, actual merge `199562a6` into exact `7073d220`.
+Linux Python 3.12/3.13/3.14 each pass 22,359 cases with 310 skips and 51 warnings; Windows Server
+2025/Python 3.13.16 passes 2,211 with 80 skips and 25 warnings. Root reads all four originating test
+results/provenance/warnings plus actual static/website output. The
+[complete result](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6281926975)
+retains raw hashes. It does not validate this newer composition. Older owner `7073d220` CI remains
+red on its older SSH stopwatch fixture; the already-reviewed causal fixture passes in the complete
+763e hosted suites. Neither a timing cause nor native acceptance follows from that difference.
+
+The new fixtures use real SQLite, common ownership/route cleanup and policy-file publication with
+provider/guest/native delivery boundaries simulated. They prove no actual resource deletion or
+installed-client creation workflow. Actual Proxmox rollback, remaining factories, native
+create/bootstrap/join/attestation/trust/canonical handoff, production adoption, retirement-root
+independence, writer coexistence/rollback, both usable additive RunContext paths, supported-platform
+terminal/presentation/fault behavior and full R1-R5 remain required. The last complete local suite's
+22 original host-fixture failures and failed views remain retained; no new native campaign runs.
+Windows keyboard decoder/native comparison/physical-key evidence and shared terminal ownership
+remain open. This progress changes no completed plan block, requirement, lock or public signal and
+opens no public feedback round. Later migration and retirement retain the agreed sequence.
+
 ## Retained routes, cleanup correction and creation access composition
 
 Evaluated join `5799e1ddb571e32e8eaaf6d84aaf0de3681ff2b0` incorporates published transport
