@@ -6,7 +6,6 @@ import io
 import json
 import subprocess
 import sys
-import urllib.parse
 import urllib.request
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler
@@ -26,12 +25,11 @@ from tests.execution.test_proxmox_trust import _Endpoint
 from tests.execution.test_proxmox_trust import endpoint as endpoint
 
 UPID = "UPID:node1:00000001:100000001:00000001:qmdestroy:123:user@pve!token:"
-ROUTES = ["stop", "destroy", "free", "log"]
+ROUTES = ["stop", "destroy", "free"]
 WORKER_ROUTES = [
     ("vm-stop", "POST", None),
     ("vm-destroy", "DELETE", None),
     ("vmid-free", "GET", None),
-    ("task-log", "GET", UPID),
 ]
 
 
@@ -79,22 +77,19 @@ def _call(wire: _ProxmoxWire, route: str, custody: LocalDeliveryCustody, *, time
         return wire.request_vm_stop(custody=custody, timeout=timeout)
     if route == "destroy":
         return wire.request_vm_destroy(custody=custody, timeout=timeout)
-    if route == "free":
-        return wire.request_vmid_free(custody=custody, timeout=timeout)
-    assert route == "log"
-    return wire.request_task_log(UPID, custody=custody, timeout=timeout)
+    assert route == "free"
+    return wire.request_vmid_free(custody=custody, timeout=timeout)
 
 
 def _reply(route: str) -> bytes:
     if route in ("stop", "destroy"):
         return json.dumps({"data": UPID}).encode()
-    if route == "free":
-        return b'{"data":123}'
-    return b'{"data":[{"n":1,"t":"TASK OK"}],"total":1}'
+    assert route == "free"
+    return b'{"data":123}'
 
 
 @pytest.mark.windows
-def test_owned_tls_fixed_rollback_routes_and_complete_log_envelope(
+def test_owned_tls_fixed_rollback_routes(
     rollback_endpoint: _ActivationEndpoint, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:1")
@@ -105,25 +100,12 @@ def test_owned_tls_fixed_rollback_routes_and_complete_log_envelope(
     for route in ROUTES:
         value.response = _reply(route)
         result = _call(value.wire, route, value.custody)
-        assert result == (
-            UPID
-            if route in ("stop", "destroy")
-            else None
-            if route == "free"
-            else {"lines": [{"n": 1, "t": "TASK OK"}], "total": 1}
-        )
+        assert result == (UPID if route in ("stop", "destroy") else None)
         assert value.custody.settled
-    encoded = urllib.parse.quote(UPID, safe="")
     assert value.requests == [
         ("POST", "/api2/json/nodes/node1/qemu/123/status/stop", b"", "PVEAPIToken=user@pve!token=secret-canary"),
         ("DELETE", "/api2/json/nodes/node1/qemu/123", b"", "PVEAPIToken=user@pve!token=secret-canary"),
         ("GET", "/api2/json/cluster/nextid?vmid=123", b"", "PVEAPIToken=user@pve!token=secret-canary"),
-        (
-            "GET",
-            f"/api2/json/nodes/node1/tasks/{encoded}/log?start=0&limit=4096",
-            b"",
-            "PVEAPIToken=user@pve!token=secret-canary",
-        ),
     ]
 
 
@@ -186,55 +168,6 @@ def test_malformed_worker_envelope_fails_once(monkeypatch: pytest.MonkeyPatch, r
     assert process.exchange.call_count == 1
 
 
-@pytest.mark.parametrize(
-    "envelope",
-    [
-        {"data": [{"n": 1, "t": "TASK OK"}]},
-        {"data": [], "total": 0},
-        {"data": [{"n": 2, "t": "TASK OK"}], "total": 5000},
-        {"data": None, "total": "untrusted"},
-        {"data": {"total": 1}, "total": None},
-    ],
-)
-def test_log_preserves_unproved_lines_and_total_for_controller(
-    monkeypatch: pytest.MonkeyPatch, envelope: dict[str, object]
-) -> None:
-    process = stub_process(monkeypatch, json.dumps(envelope).encode())
-    assert _call(_ProxmoxWire(connection()), "log", LocalDeliveryCustody(), timeout=1) == {
-        "lines": envelope["data"],
-        "total": envelope.get("total"),
-    }
-    assert process.exchange.call_count == 1
-
-
-def test_other_endpoints_still_return_only_data(monkeypatch: pytest.MonkeyPatch) -> None:
-    stub_process(monkeypatch, b'{"data":{"status":"stopped"},"total":999}')
-    assert _ProxmoxWire(connection()).request_task_status(UPID, custody=LocalDeliveryCustody(), timeout=1) == {
-        "status": "stopped"
-    }
-
-
-@pytest.mark.windows
-@pytest.mark.parametrize("upid", ["a/b?#%\r\n\0", "owner@realm!\u00e9", ".", "..", "a" * 255])
-def test_task_log_identifier_is_one_literal_component(rollback_endpoint: _ActivationEndpoint, upid: str) -> None:
-    value = rollback_endpoint
-    value.response = b'{"data":[],"total":0}'
-    assert value.wire.request_task_log(upid, custody=value.custody, timeout=30) == {"lines": [], "total": 0}
-    encoded = urllib.parse.quote(upid, safe="").replace(".", "%2E")
-    assert [(method, path, body) for method, path, body, _ in value.requests] == [
-        ("GET", f"/api2/json/nodes/node1/tasks/{encoded}/log?start=0&limit=4096", b"")
-    ]
-
-
-@pytest.mark.parametrize("upid", [None, "", b"bytes", 42, "a" * 256, "\u00e9" * 128, "\ud800"])
-def test_invalid_task_id_refuses_before_worker(monkeypatch: pytest.MonkeyPatch, upid: Any) -> None:
-    spawn = MagicMock()
-    monkeypatch.setattr(subprocess, "Popen", spawn)
-    with pytest.raises(ValidationError):
-        _ProxmoxWire(connection()).request_task_log(upid, custody=LocalDeliveryCustody(), timeout=1)
-    spawn.assert_not_called()
-
-
 @pytest.mark.parametrize("endpoint,method,suffix", WORKER_ROUTES)
 @pytest.mark.parametrize("change", [{"method": "PATCH"}, {"body": "{}"}, {"timeout": None}, {"timeout": True}])
 def test_worker_revalidates_fixed_route_and_deadline(
@@ -249,7 +182,7 @@ def test_worker_revalidates_fixed_route_and_deadline(
 
 
 @pytest.mark.parametrize("endpoint,method,suffix", WORKER_ROUTES)
-def test_worker_refuses_arbitrary_suffix_or_missing_task_id(
+def test_worker_refuses_arbitrary_suffix(
     monkeypatch: pytest.MonkeyPatch, endpoint: str, method: str, suffix: str | None
 ) -> None:
     build = MagicMock()
@@ -260,7 +193,7 @@ def test_worker_refuses_arbitrary_suffix_or_missing_task_id(
                 **worker_payload(),
                 "endpoint": endpoint,
                 "method": method,
-                "suffix": None if suffix else "?purge=1",
+                "suffix": "?purge=1",
                 "body": None,
             }
         )
@@ -331,6 +264,7 @@ def test_deadline_kills_and_reaps_original_worker_without_replay(monkeypatch: py
     assert all(pipe is not None and pipe.closed for pipe in (children[0].stdin, children[0].stdout, children[0].stderr))
 
 
+@pytest.mark.windows
 @pytest.mark.parametrize("route", ROUTES)
 @pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit, GeneratorExit])
 def test_interrupt_reaps_original_worker_and_preserves_control_exception(

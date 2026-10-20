@@ -40,7 +40,6 @@ class _Endpoint(StrEnum):
     VM_DESTROY = "vm-destroy"
     VMID_FREE = "vmid-free"
     TASK_STATUS = "task-status"
-    TASK_LOG = "task-log"
     GUEST_INFO = "guest-info"
     NEXT_ID = "next-id"
     VM_CLONE = "vm-clone"
@@ -232,16 +231,14 @@ def _request(payload: dict[str, Any]) -> bytes:
         url = f"{base}/{'config' if endpoint is _Endpoint.VM_CONFIGURE else 'resize'}"
     else:
         if method != "GET" or body is not None:
-            raise ValueError("Task observation requires a fixed body-free GET")
-        route = "status" if endpoint is _Endpoint.TASK_STATUS else "log?start=0&limit=4096"
-        url = f"{node_base}/tasks/{_task_component(suffix)}/{route}"
+            raise ValueError("Task status requires a fixed body-free GET")
+        url = f"{node_base}/tasks/{_task_component(suffix)}/status"
     if endpoint in (
         _Endpoint.VM_START,
         _Endpoint.VM_STOP,
         _Endpoint.VM_DESTROY,
         _Endpoint.VMID_FREE,
         _Endpoint.TASK_STATUS,
-        _Endpoint.TASK_LOG,
         _Endpoint.GUEST_INFO,
         _Endpoint.NEXT_ID,
         _Endpoint.VM_CLONE,

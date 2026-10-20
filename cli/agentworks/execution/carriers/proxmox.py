@@ -322,12 +322,6 @@ class _ProxmoxWire:
             raise ValidationError("Proxmox task status requires a bounded identifier and positive finite timeout")
         return self._request(_Endpoint.TASK_STATUS, "GET", upid, custody=custody, body=None, timeout=timeout)
 
-    def request_task_log(self, upid: str, *, custody: LocalDeliveryCustody, timeout: float) -> dict[str, object]:
-        """Read one bounded log page, preserving its unproved completeness metadata."""
-        if not _valid_control_timeout(timeout) or not _valid_task_id(upid):
-            raise ValidationError("Proxmox task log requires a bounded identifier and positive finite timeout")
-        return self._request(_Endpoint.TASK_LOG, "GET", upid, custody=custody, body=None, timeout=timeout)
-
     def request_guest_info(self, *, custody: LocalDeliveryCustody, timeout: float) -> dict[str, object]:
         """Read guest-agent information through one fixed, body-free endpoint."""
         if not _valid_control_timeout(timeout):
@@ -394,8 +388,6 @@ class _ProxmoxWire:
             raise _WireFailure("Proxmox returned invalid JSON")
         if not isinstance(parsed, dict) or "data" not in parsed:
             raise _WireFailure("Proxmox returned an invalid response envelope")
-        if endpoint is _Endpoint.TASK_LOG:
-            return {"lines": parsed["data"], "total": parsed.get("total")}
         return parsed["data"]
 
 
