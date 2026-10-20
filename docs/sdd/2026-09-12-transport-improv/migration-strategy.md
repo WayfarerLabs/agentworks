@@ -7,6 +7,61 @@
 
 ## Inventory and destination
 
+### Consumer ownership and deletion inventory, 2026-10-20
+
+Source inspection at private `09e4abfdc` confirms 24 legacy RunContext construction sites and three
+new-only composers. This is an inventory, not a claim of consumer migration. Paths below are
+relative to `cli/agentworks/`; line anchors identify that inspected snapshot.
+
+| Construction family | Sites | Required disposition |
+| --- | --- | --- |
+| Lead-owned admission and preflight | `vms/manager/boundary.py:46,155,259`, `vms/nodes.py:184`, `doctor.py:259` | Carry ownership before activation; keep target-free readiness/preflight contexts target-free. |
+| VM lifecycle and observation (A) | `vms/manager/lifecycle.py:312,331,892,910`, `vms/manager/power.py:422`, `vms/manager/inspect.py:652`, `vms/manager/_status.py:86` | Carry original creation/reinit/recovery ownership and distinguish passive observations from activation. |
+| Agent and workspace lifecycle (C) | `agents/manager/lifecycle.py:209,223,651,665`, `workspaces/manager/create.py:283` | Preserve admin-to-agent identity transition and standalone versus nested realization. |
+| Sessions and consoles (E) | `sessions/manager/_create.py:202`, `_create_roll.py:65,222,330`, `_lifecycle.py:746,880`, `_scope.py:413` | Preserve nested realization, scoped secrets, restart consent and explicit admin/agent selection. |
+| New-only composition, not migrated callers | `vms/_native_operation.py:624`, `vms/_creation_operation.py:276`, `execution/_platform_host_context.py:198` | Remain lead-owned; remove legacy-handle pass-through from the native and host composers at final removal. |
+
+The transport lead remains accountable for every batch. Before parallel migration starts, grant each
+worker one exclusive file scope from the table below and record that worker and its pinned base in
+the plan. These are implementation ownership boundaries, not authorization to begin migration before
+the complete additive-surface gate or a promise of independently mergeable PRs.
+
+| Batch | Exclusive source responsibility | High-risk edges and required production evidence |
+| --- | --- | --- |
+| A: VM operations | `vms/` except lead-owned admission/new composers; `debian.py` | Create-time `ProvisionResult.native_transport`, initialization, native recovery, rekey's mutable `.host` (`vms/manager/power.py:534`), interactive exec, backup's detached PID cancellation and raw scp (`vms/backup.py:388,467`). Prove create/reinit/recovery/rekey/exec/backup, both routes, sensitive join and retained rollback. |
+| B: Platforms and placement hosts | Concrete `capabilities/vm_platform/` implementations and platform/support modules in `plugins/{aws,azure,gcp,proxmox}/`; exclude the base contract and `azure/azdo.py` | Remote Lima's direct `ssh.run` (`capabilities/vm_platform/lima.py:284`), creation/native factories, host provisioning/cancellation, WSL availability and early prerequisites, pre-helper QGA. Prove actual create/native/lifecycle/delete and host/guest rollback for every supported platform, not just existing-VM resolution. |
+| C: Identities and workspaces | `agents/`, `workspaces/` | Pre-row account creation, stored Linux identity, ACLs/groups, standalone and session-nested realization, repair/rehome/delete. Cross-VM copy reads transport fields and constructs raw SSH (`workspaces/manager/copy.py:109-123`); own both VM operations, staging and partial-failure cleanup. |
+| D: Harness, artifacts and credentials | `harness_setup/`, `artifacts/`, `git_credentials/`, `sources.py`, `command_checks.py`, harness-integration and Git-credential capability implementations, `_harness_native/`, Claude/Codex/Grok harness/artifact modules, `azure/azdo.py` | Public setup/readiness runners, `NativeFiles` discovery/publication and `.runner/.remote/.slot` escapes (`plugins/_harness_native/native_cli.py:122-125`), JSON/TOML merges, generated sections, source delivery and sensitive credentials. Use file/identity observations without granting hidden exec; keep actual Git/harness CLI work explicit. |
+| E: Sessions and consoles | `sessions/` | Bound `.run` callables and `RunCommand`, cached status targets, tmux socket/configuration management, attachment and pane identity. Prove the common supervisor, preserved UUID/run identity, ordinary-descendant cleanup, restart consent and surviving legacy-run disposition. Attachment must not acquire ownership of the workload lifetime. |
+
+Shared signatures stay lead-owned: RunContext and its carried ownership, platform base hooks/results,
+new execution/file/job interfaces, and the admission/composition roots. D's setup/artifact/credential
+interfaces have A/C/E callers; A's account/initialization helpers have C callers; C's realizers/grants
+have E callers. Sequence independent new helper entry points or integrate coordinated caller changes;
+do not bridge new operations through legacy execution. A worker changes another scope only after an
+explicit ownership handoff. Preserve the original owner through preflight, activation, nested work,
+route transitions and retained cleanup.
+
+Each batch exits only after its real entries, type-only imports, aliases, direct field access,
+callable wrappers and failure paths have migrated and its required native evidence is reviewed.
+Final deletion waits for the union of those exits:
+
+| Retirement target | Required cleared consumers |
+| --- | --- |
+| `transports/` | A-E, legacy RunContext fields/accessors, platform result/hooks, aliases and wrappers. |
+| `ssh.py` | A-E plus lead-owned CLI/doctor logging, errors, constants and direct calls. Preserve log browsing under its replacement owner; `doctor_state.py:124` and `cli/commands/vm.py:411` are consumers. |
+| `remote_exec.py` | A's backup and B's Remote Lima provisioning/cancellation, including surviving jobs. |
+| `native_files.py` | D's settings/publication/discovery, exported path helpers/constants and runner/staging escapes, after A/C/E adopt the migrated domain interfaces. |
+| `harness_setup/runner.py` | D's producers and full-transport setup/readiness interfaces, plus their A/C/E callers. |
+| `plugins/proxmox/transport.py` | B's create/native factories and registration graph, plus A's creation-result consumers. |
+
+Recheck `subprocess_io.py` after those migrations: current runtime callers are retired SSH/transports
+and Lima's host runner (`capabilities/vm_platform/lima.py:295`). Delete it only if that complete
+caller inventory is empty and its required byte/newline behavior has a replacement. Do not delete
+`ssh_config.py` or `ssh_identity.py` merely because of their names. Installed-package startup,
+external-plugin compatibility, retained trust/configuration and surviving-state readers remain final
+removal gates. Permission enforcement follows physical removal, never these inventory counts.
+
 ### Additive implementation inventory, 2026-09-19
 
 At merged #830 (`cea5e852`), the independent package contains only the accepted buffered proof: 11
