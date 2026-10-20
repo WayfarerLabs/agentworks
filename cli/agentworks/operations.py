@@ -605,6 +605,12 @@ class LifecycleObligation:
                 payload_version=payload_version,
                 payload=payload,
             )
+            if self._obligation.payload_version != payload_version or self._obligation.payload != payload:
+                raise StateError(
+                    "operation lifecycle publication does not match its requested payload",
+                    entity_kind=owner._ownership.scope.resource_kind,  # noqa: SLF001
+                    entity_name=owner._ownership.scope.resource_name,  # noqa: SLF001
+                )
             return self._obligation
 
     @property

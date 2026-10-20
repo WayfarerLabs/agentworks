@@ -178,7 +178,8 @@ def test_corrupt_persisted_clone_payload_refuses_reconciliation(
         return original(*args, **kwargs)
 
     monkeypatch.setattr(repository, "publish_lifecycle_obligation_payload", corrupt)
-    clone.start(Deadline.after(5))
+    with pytest.raises(StateError):
+        clone.start(Deadline.after(5))
     with pytest.raises(StateError):
         clone.reconcile(Deadline.after(5))
     persisted = json.loads(_row(owner, clone).payload)
