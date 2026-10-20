@@ -99,7 +99,9 @@ def native_trust(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Na
             expected_generation: str | None,
         ) -> SSHTrustStatus:
             writes.append("publication")
-            return original_refresh(bundle, sources=sources, authority=authority, expected_generation=expected_generation)
+            return original_refresh(
+                bundle, sources=sources, authority=authority, expected_generation=expected_generation
+            )
 
         monkeypatch.setattr(composition, "vm_ssh_connection", selected)
         monkeypatch.setattr(composition, "enroll_new_target", enroll)
@@ -164,8 +166,9 @@ def test_changed_policy_refuses_without_new_first_contact(
     else:
         policy = tmp_path / "changed-policy"
         policy.write_bytes(
-            b"" if change == "missing" else b"@revoked " + selected.host_key_alias.encode() + b" "
-            + native_trust.server.host_public_key
+            b""
+            if change == "missing"
+            else b"@revoked " + selected.host_key_alias.encode() + b" " + native_trust.server.host_public_key
         )
         admitted = resolve_trust(selected.trust)
         refresh_trust(
@@ -197,9 +200,7 @@ def test_changed_key_refuses_before_command_without_reenrollment(native_trust: N
         other_policy = tmp_path / "other-policy"
         assert selected.host_key_alias is not None
         other_policy.write_bytes(selected.host_key_alias.encode() + b" " + other.host_public_key)
-        other_connection = replace(
-            selected, port=other.connection.port, identity_file=other.connection.identity_file
-        )
+        other_connection = replace(selected, port=other.connection.port, identity_file=other.connection.identity_file)
         positive = _run(replace(other_connection, trust=SSHTrustFiles((other_policy,))), tmp_path / "other-verified")
         assert positive.completion == ExitStatus(0) and positive.failure is None
         generation = trust_status(selected.trust).generation
