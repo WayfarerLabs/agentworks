@@ -187,13 +187,14 @@ def _prepare_created_context(
     admin_template: str | None,
 ) -> RunContext:
     db, deadline = workflow.db, workflow.deadline
-    vm = _insert_row(workflow, request, template, admin_template)
     # Admit endpoint-independent local policy before provider effects. This
     # passive unspecified-address connection is never used for delivery; the
     # observed guest IPv4 and current policy are admitted again after bootstrap.
     provider_locator_remaining(deadline, vm_name=workflow.vm_name)
-    admit_connection(vm_ssh_connection(vm, "0.0.0.0", settings))
+    workflow.owner.list_pending_lifecycle_obligations()
+    admit_connection(vm_ssh_connection(workflow.vm_name, workflow.admin_username, "0.0.0.0", settings))
     provider_locator_remaining(deadline, vm_name=workflow.vm_name)
+    vm = _insert_row(workflow, request, template, admin_template)
     creation = platform.build_creation_access(request, ctx, owner=workflow.owner, custody=workflow.local_delivery)
     workflow.creation = creation
     workflow.access = creation

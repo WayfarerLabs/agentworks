@@ -52,7 +52,7 @@ class CreationSSHTrust:
         if deadline.expires_at is None:
             raise ValidationError("SSH creation trust requires a finite deadline")
         marker = validate_vm_instance_marker(vm.instance_marker)
-        self._connection = vm_ssh_connection(vm, endpoint, settings)
+        self._connection = vm_ssh_connection(vm.name, vm.admin_username, endpoint, settings)
         self._bundle = ManagedSSHTrust(settings.trust_store)
         self._provenance = SSHCreationProvenance("vm:" + marker, endpoint)
         self._owner = owner

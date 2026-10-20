@@ -104,7 +104,8 @@ class _CreationAccess:
 def harness(tmp_path, monkeypatch, creation_request):
     with closing(Database(tmp_path / "state.db")) as db:
         settings = SSHSettings(tmp_path / "trust", tmp_path / "identity")
-        carrier = SSHCarrier(SSHConnection("127.0.0.1", "agentworks", settings.identity_file, SSHTrustFiles(())))
+        policy = SSHTrustFiles((tmp_path / "known-hosts",))
+        carrier = SSHCarrier(SSHConnection("127.0.0.1", "agentworks", settings.identity_file, policy))
         binding = NativeExecutionBinding(
             carrier,
             "agentworks",
@@ -152,8 +153,8 @@ def harness(tmp_path, monkeypatch, creation_request):
 
         def admit_policy(connection):
             assert connection.host == "0.0.0.0" and h.access is None
-            assert db.operations.inspect(_SCOPE) is not None and db.get_vm("created") is not None
-            return SSHTrustFiles(())
+            assert db.operations.inspect(_SCOPE) is not None
+            return policy
 
         monkeypatch.setattr(creation, "admit_connection", admit_policy)
 
@@ -212,7 +213,7 @@ def harness(tmp_path, monkeypatch, creation_request):
         class Trust:
             def __init__(self, owner, vm, endpoint, selected_settings, *, deadline):
                 assert owner is h.access.owner and deadline is h.deadline
-                vm_ssh_connection(vm, endpoint, selected_settings)
+                vm_ssh_connection(vm.name, vm.admin_username, endpoint, selected_settings)
 
             def prepare(self):
                 note("trust", h.deadline)
@@ -301,14 +302,31 @@ def test_refusals_precede_provider_effects_and_preserve_existing_rows(harness, r
         h.operation(),
     ):
         pytest.fail("refused creation admitted body")
-    if refusal not in {"identity", "client"}:
-        assert h.db.get_vm("created") == before
+    assert h.db.get_vm("created") == before
     assert not h.events
     if other is not None:
         assert h.db.operations.inspect(_SCOPE).ownership == other.ownership
         other.close()
     else:
         assert h.db.operations.inspect(_SCOPE) is None
+
+
+def test_local_policy_readiness_failure_leaves_no_row_and_allows_same_name_retry(harness, monkeypatch):
+    h = harness
+    admit = creation.admit_connection
+
+    def unavailable(connection):
+        raise ValidationError("fixture unreadable identity or blocked trust")
+
+    monkeypatch.setattr(creation, "admit_connection", unavailable)
+    with pytest.raises(ValidationError), h.operation():
+        pytest.fail("unavailable policy admitted creation")
+    assert h.db.get_vm("created") is None and h.db.operations.inspect(_SCOPE) is None
+    assert h.access is None and not h.events
+    monkeypatch.setattr(creation, "admit_connection", admit)
+    with h.operation():
+        assert h.db.get_vm("created").tailscale_host == _ADDRESS
+    assert h.db.operations.inspect(_SCOPE) is None
 
 
 def test_body_exception_after_bootstrap_retains_addressable_vm_without_initialization_claim(harness):

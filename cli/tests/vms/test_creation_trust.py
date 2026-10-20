@@ -126,7 +126,7 @@ def test_constructor_and_common_connection_builder_are_passive(fixture, monkeypa
         patch.setattr(Path, "is_file", forbidden)
         patch.setattr(composition, "trust_status", forbidden)
         consumer = fixture.consumer()
-        connection = binding.vm_ssh_connection(fixture.db.get_vm("box"), _HOST, fixture.settings)
+        connection = binding.vm_ssh_connection("box", "admin", _HOST, fixture.settings)
         assert connection.trust == fixture.bundle
         assert connection.host == _HOST and connection.user == "admin"
         assert isinstance(consumer._custody, SSHEnrollmentCustody)
@@ -137,7 +137,7 @@ def test_constructor_and_common_connection_builder_are_passive(fixture, monkeypa
 @pytest.mark.parametrize("endpoint", ["host.invalid", "2001:db8::1", "192.0.2.1:22", None])
 def test_common_connection_builder_requires_literal_ipv4(fixture, endpoint):
     with pytest.raises(StateError):
-        binding.vm_ssh_connection(fixture.db.get_vm("box"), endpoint, fixture.settings)
+        binding.vm_ssh_connection("box", "admin", endpoint, fixture.settings)
 
 
 @pytest.mark.parametrize("change", ["missing-marker", "wrong-scope", "unbounded"])
@@ -214,7 +214,7 @@ def test_complete_publication_closes_writer_then_strictly_readmits(fixture, monk
     assert "StrictHostKeyChecking=yes" in fixture.calls[1]
     assert all(budget is fixture.deadline for budget in fixture.budgets)
     assert all(_LEARNED not in selected for selected in fixture.ordinary_before_publication)
-    current = admit_connection(binding.vm_ssh_connection(fixture.db.get_vm("box"), _HOST, fixture.settings))
+    current = admit_connection(binding.vm_ssh_connection("box", "admin", _HOST, fixture.settings))
     assert tuple(path.read_bytes() for path in current.known_hosts) == (
         _LEARNED,
         b"existing-first-policy\n",
@@ -260,7 +260,7 @@ def test_successful_prepare_resolves_before_route_borrow_and_cleanup_is_passive(
 
 
 def test_execution_binding_preserves_selected_connection_policy(fixture, monkeypatch):
-    connection = binding.vm_ssh_connection(fixture.db.get_vm("box"), _HOST, fixture.settings)
+    connection = binding.vm_ssh_connection("box", "admin", _HOST, fixture.settings)
     monkeypatch.setattr(binding, "vm_ssh_connection", lambda *args: connection)
     result = binding.ssh_execution_binding(fixture.db.get_vm("box"), _HOST, fixture.settings)
     assert result.delivery_account == "admin"
