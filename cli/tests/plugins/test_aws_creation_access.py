@@ -180,7 +180,7 @@ def test_lost_creation_reply_remains_unresolved_without_name_adoption(owned, met
 
 @pytest.mark.parametrize("committed", [False, True])
 def test_lost_launch_receipt_publication_reconciles_without_replay(owned, monkeypatch, committed):
-    repository = owned.database.operations
+    repository = owned.owner._repository
     publish = repository.publish_lifecycle_obligation_payload
     failed = False
 
@@ -572,7 +572,7 @@ def test_interrupted_acknowledged_launch_can_observe_initial_attachments_during_
         return result
 
     monkeypatch.setattr(owned.session, "reply", without_attachments)
-    repository = owned.database.operations
+    repository = owned.owner._repository
     publish = repository.publish_lifecycle_obligation_payload
     interrupted = False
 
