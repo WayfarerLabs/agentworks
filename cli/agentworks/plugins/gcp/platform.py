@@ -96,6 +96,7 @@ if TYPE_CHECKING:
     from agentworks.execution.carrier import Deadline
     from agentworks.operations import OperationOwner
     from agentworks.transports import Transport
+    from agentworks.vms._creation_access import OwnedVMCreationAccess
     from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 
@@ -586,6 +587,19 @@ class GCEPlatform(VMPlatform):
     def display_backend_name(self, vm: VMRow) -> str:
         identity = _VMIdentity.from_row(vm)
         return f"{identity.instance_name}@{identity.zone}"
+
+    def build_creation_access(
+        self,
+        request: ProvisionRequest,
+        ctx: RunContext,
+        *,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
+    ) -> OwnedVMCreationAccess:
+        """Retain independent GCE creation before the first provider effect."""
+        from agentworks.plugins.gcp._creation_access import GCEOwnedCreationAccess
+
+        return GCEOwnedCreationAccess(request, self, ctx, owner=owner, custody=custody)
 
     def build_native_execution_access(
         self,
