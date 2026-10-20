@@ -13,6 +13,7 @@ from agentworks.vms._native_operation import VMOperationControlFact
 from tests.execution.test_independent_execution_reads import observer as observer
 from tests.execution.test_independent_execution_start import available as available
 from tests.execution.test_independent_staged_start import bulk_start
+from tests.execution.test_independent_staged_start import deadline_clock as deadline_clock
 from tests.execution.test_independent_staged_start import staged as staged
 
 pytestmark = pytest.mark.windows
