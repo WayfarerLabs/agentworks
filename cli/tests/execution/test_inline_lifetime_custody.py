@@ -564,10 +564,10 @@ def test_second_mark_retry_refusal_preserves_exact_custody(
 
 
 @pytest.mark.parametrize("attempt_started", [False, True])
-def test_predispatch_retry_refuses_successor_borrow(
+def test_predispatch_retry_retires_closed_call_without_changing_successor(
     owned, monkeypatch: pytest.MonkeyPatch, attempt_started: bool
 ) -> None:
-    _, owner, operation = owned
+    database, owner, operation = owned
     _patch_candidate_execution(monkeypatch)
     original = OperationBorrow.handoff_retained_effect
 
@@ -586,17 +586,30 @@ def test_predispatch_retry_refuses_successor_borrow(
     with pytest.raises(ValidationError):
         _run(operation, carrier)
     (active,) = operation.active_inline_calls
+    assert active.borrow.closed and not active.operation.delivery_started
     successor = owner.borrow()
     attempt = successor.begin_attempt() if attempt_started else None
-    with pytest.raises(StateError):
-        operation.retry_inline_bookkeeping()
-    assert operation.active_inline_calls == (active,)
-    assert not successor._closed
+    obligations = owner.list_pending_lifecycle_obligations()
+    assert obligations
+    claim = database.operations.inspect(owner.ownership.scope)
+    assert claim is not None
+    operation.retry_inline_bookkeeping()
+    assert operation.active_inline_calls == () and active.borrow.closed
+    assert owner._active_borrow is successor and not successor.closed
     assert owner._outstanding_attempt is attempt
+    assert owner.list_pending_lifecycle_obligations() == obligations
+    assert database.operations.inspect(owner.ownership.scope) == claim
+    assert operation.unfinished_inline_executions == ()
+    assert active.outcome is not None and not active.outcome.requires_owner_retention
     assert carrier.calls == 0
+    with pytest.raises(StateError):
+        operation.finish()
+    assert owner._active_borrow is successor and not successor.closed
+    assert owner._outstanding_attempt is attempt
+    assert owner.list_pending_lifecycle_obligations() == obligations
+    assert database.operations.inspect(owner.ownership.scope) == claim
     if attempt is None:
         attempt = successor.begin_attempt()
     attempt.settle()
     successor.close()
-    operation.retry_inline_bookkeeping()
     operation.finish()

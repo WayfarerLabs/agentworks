@@ -1363,14 +1363,8 @@ class ExecutionOperation:
             with self._owner._guard:  # noqa: SLF001
                 self._owner._reconcile_transition_locked()  # noqa: SLF001
                 attempt = self._owner._outstanding_attempt  # noqa: SLF001
-                if (
-                    operation.delivery_started
-                    and active.borrow._closed
-                    and (  # noqa: SLF001
-                        attempt is None
-                        or isinstance(attempt, OperationAttempt)
-                        and attempt._borrow is not active.borrow  # noqa: SLF001
-                    )
+                if active.borrow._closed and (  # noqa: SLF001
+                    attempt is None or isinstance(attempt, OperationAttempt) and attempt._borrow is not active.borrow  # noqa: SLF001
                 ):
                     operation.coordination_uncertain = False
                     return
