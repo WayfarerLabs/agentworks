@@ -12,6 +12,8 @@ import yaml
 
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_instance_marker_installer
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan, build_identity_argv
 from agentworks.execution.carrier import Capture, CarrierIO, ExitStatus, PreparedInvocation
 from agentworks.execution.carriers.ssh import SSHCarrier
 from agentworks.plugins.aws.config import _generate_ec2_user_data
@@ -28,6 +30,8 @@ def early_user_data(*, admin: str, public_key: str, hostname: str, marker: str) 
     config = yaml.safe_load(_generate_ec2_user_data(
         admin_username=admin, ssh_public_key=public_key, hostname=hostname, bootstrap_script=None
     ))
+    config["disable_root"] = admin != "root"
+    config["ssh_pwauth"] = False
     config["packages"] = ["python3", "sudo", "util-linux"]
     config["runcmd"] = [[
         "/bin/bash", "--noprofile", "--norc", "-c",
@@ -108,11 +112,15 @@ def observe_early_guest(
 /usr/bin/python3 -I -S -B -c 'import base64,bz2,hashlib,json,os,sys,types; assert sys.version_info >= (3,11)'
 printf '%s\n' "$3"
 """
-    invocation = PreparedInvocation((
-        "/usr/bin/sudo", "-n", "--user=#0", "--", "/usr/bin/env", "-i",
+    root_entry = IdentityPlan(
+        IdentityExpectation(0, 0, (0,)),
+        IdentityMode.DIRECT if connection.user == "root" else IdentityMode.SUDO_ROOT,
+    )
+    invocation = PreparedInvocation(build_identity_argv(root_entry, (
+        "/usr/bin/env", "-i",
         "PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C", "/bin/bash", "--noprofile", "--norc", "-c",
         source, "agentworks-aws-early-guest", VM_INSTANCE_MARKER_PATH, marker, nonce,
-    ))
+    )))
     report = SSHCarrier(connection).execute(
         invocation, io=CarrierIO(output=Capture(512)), deadline=deadline, custody=custody
     )

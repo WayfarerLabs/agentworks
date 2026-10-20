@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import re
 import time
+from dataclasses import replace
 from threading import TIMEOUT_MAX, Lock
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from agentworks.capabilities.vm_platform.base import provider_locator_remaining
@@ -21,7 +22,7 @@ from agentworks.execution.binding import NativeExecutionBinding, _EarlyGuestFact
 from agentworks.execution.carriers.ssh import SSHCarrier
 from agentworks.plugins.aws._creation import EC2Creation, identifier
 from agentworks.plugins.aws._creation_bootstrap import SSHReadiness, early_user_data, observe_early_guest
-from agentworks.plugins.aws._creation_rollback import rollback
+from agentworks.plugins.aws._creation_rollback import observe_attachments, rollback
 from agentworks.plugins.aws._native_route import EC2NativeRoute
 from agentworks.plugins.aws._owned_auth import _OwnedRoleSession
 from agentworks.plugins.aws.auth import _build_ambient_session
@@ -199,6 +200,11 @@ class EC2OwnedCreationAccess:
             or mappings[0].get("DeviceName") != root or type(mappings[0].get("Ebs")) is not dict
         ):
             raise StateError("EC2 creation requires one observed Debian EBS root device")
+        floor = mappings[0]["Ebs"].get("VolumeSize")
+        if type(floor) is not int or floor <= 0:
+            raise ValidationError("EC2 Debian root image has no valid volume size")
+        if self._disk < floor:
+            raise ValidationError("EC2 requested root disk is smaller than the Debian image volume")
         configured = self._platform.config.subnet_id
         query = {"SubnetIds": [configured]} if configured else {"Filters": [{"Name": "default-for-az", "Values": ["true"]}]}
         result = creation.call("ec2", "describe_subnets", deadline, **query)
@@ -236,7 +242,7 @@ class EC2OwnedCreationAccess:
             self._ordinary_admission()
             creation.launch(
                 deadline, account=account, backend=self._backend, nonce=self._nonce,
-                subnet=subnet, vpc=vpc, image=image, arguments={
+                subnet=subnet, vpc=vpc, image=image, root_device=root, arguments={
                     "ImageId": image, "InstanceType": self._selected.type, "MinCount": 1, "MaxCount": 1,
                     "ClientToken": self._nonce, "UserData": self._user_data,
                     "BlockDeviceMappings": [{"DeviceName": root, "Ebs": {
@@ -256,6 +262,7 @@ class EC2OwnedCreationAccess:
                 if state.get("Name") == "running" and instance.get("PublicIpAddress"):
                     break
                 time.sleep(min(0.1, self._remaining(deadline)))
+            observe_attachments(creation, instance, deadline, record_initial=True)
             endpoint = instance["PublicIpAddress"]
             connection = vm_ssh_connection(self._name, self._admin, endpoint, self._settings)
             self._locator, self._endpoint = locator, endpoint
@@ -295,7 +302,7 @@ class EC2OwnedCreationAccess:
         finally:
             self._lock.release()
 
-    def _route_transition(self, action: Callable[[Deadline], Any], deadline: Deadline) -> Any:
+    def _route_transition(self, action: Callable[[Deadline], bool | None], deadline: Deadline) -> bool | None:
         control: BaseException | None = None
         try:
             if self._role_auth is not None:
@@ -367,7 +374,7 @@ class EC2OwnedCreationAccess:
             self._validate_route(deadline)
             self.creation.reconcile()
             if not self.creation.intent.accepted:
-                self.creation.update(accepted=True)
+                self.creation.record(replace(self.creation.intent, accepted=True))
             self._remaining(deadline)
         finally:
             self._lock.release()

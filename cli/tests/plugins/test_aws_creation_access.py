@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import json
 from contextlib import closing
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -16,15 +17,17 @@ from agentworks.db import Database, OperationResourceKind, OperationScope, VMSta
 from agentworks.debian import DebianRelease
 from agentworks.errors import LimitExceededError, StateError, ValidationError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
+from agentworks.execution._helper_launcher import IdentityMode
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.ssh import SSHSettings
 from agentworks.operations import OperationOwner
 from agentworks.plugins.aws import _creation_access
+from agentworks.plugins.aws._creation import KIND
 from agentworks.plugins.aws._owned_auth import _OwnedRoleSession
 from agentworks.plugins.aws.platform import EC2Platform
 from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY
 from tests.plugins.test_aws_creation_support import (
-    ACCOUNT, INSTANCE, JOIN_KEY, REGION, Session,
+    ACCOUNT, INSTANCE, JOIN_KEY, NIC, REGION, VOLUME, Session,
 )
 
 @pytest.fixture
@@ -50,6 +53,9 @@ def owned(tmp_path, monkeypatch):
 
             def prepare(self):
                 assert session.nonce is not None and session.rules
+                resource = next(row for row in owner.list_pending_lifecycle_obligations() if row.obligation_kind == KIND)
+                recorded = json.loads(resource.payload)
+                assert recorded["volumes"] == [VOLUME] and recorded["interfaces"] == [NIC]
                 events.append("trust-prepared")
 
             def close(self, deadline):
@@ -99,7 +105,6 @@ def test_rollback_is_passive_then_exact_and_uses_existing_obligations(owned):
     owned.access.request_rollback()
     assert owned.session.calls == before
     owned.owner.stop_admission()
-    assert not owned.access.settle(Deadline.after(5))
     assert owned.access.settle(Deadline.after(5))
     assert not owned.owner.list_pending_lifecycle_obligations()
     assert owned.access.creation.obligation_id in original_ids
@@ -148,7 +153,6 @@ def test_lost_launch_receipt_publication_reconciles_without_replay(owned, monkey
     assert owned.access.platform_metadata["instance_id"] == INSTANCE
     owned.access.request_rollback()
     owned.owner.stop_admission()
-    assert not owned.access.settle(Deadline.after(5))
     assert owned.access.settle(Deadline.after(5))
     assert [method for method, _ in owned.session.calls].count("run_instances") == 1
 
@@ -208,7 +212,6 @@ def test_late_launch_receipt_is_retained_for_fresh_cleanup_only(owned, monkeypat
     assert owned.access.platform_metadata["instance_id"] == INSTANCE
     owned.access.request_rollback()
     owned.owner.stop_admission()
-    assert not owned.access.settle(Deadline.after(5))
     assert owned.access.settle(Deadline.after(5))
     assert [method for method, _ in owned.session.calls].count("run_instances") == 1
 
@@ -297,3 +300,136 @@ def test_foreign_owner_refused_before_effects(owned):
             owned.request, RunContext(config=owned.config), owner=owner, custody=owned.custody
         )
     assert not owned.session.calls
+
+
+@pytest.mark.parametrize("floor", [21, 0, None, True])
+def test_invalid_or_undersized_image_disk_refuses_before_resources(owned, floor):
+    owned.session.image_floor = floor
+    with pytest.raises(ValidationError):
+        owned.access.provision(Deadline.after(5))
+    methods = [method for method, _ in owned.session.calls]
+    assert "create_security_group" not in methods and "run_instances" not in methods
+    assert not owned.owner.list_pending_lifecycle_obligations()
+
+
+def test_image_floor_equal_request_preserves_exact_requested_disk(owned):
+    owned.session.image_floor = owned.request.disk_gib
+    owned.access.provision(Deadline.after(5))
+    launch = next(arguments for method, arguments in owned.session.calls if method == "run_instances")
+    assert launch["BlockDeviceMappings"][0]["Ebs"]["VolumeSize"] == owned.request.disk_gib
+
+
+def test_root_admin_creation_returns_direct_root_delivery(owned):
+    request = replace(owned.request, admin_username="root")
+    access = owned.platform.build_creation_access(
+        request, RunContext(config=owned.config), owner=owned.owner, custody=owned.custody
+    )
+    result = access.provision(Deadline.after(5))
+    assert result.binding.delivery_account == "root"
+    assert result.binding._early_guest_facts_route.account == "root"
+    assert result.binding._early_guest_facts_route.root_entry.mode is IdentityMode.DIRECT
+
+
+@pytest.mark.parametrize("field,replacement", [
+    ("volume", "vol-1123456789abcdef0"), ("interface", "eni-1123456789abcdef0"),
+])
+def test_replacement_attachment_is_not_adopted_for_rollback(owned, field, replacement):
+    owned.access.provision(Deadline.after(5))
+    assert owned.access.creation.intent.volumes == (VOLUME,)
+    assert owned.access.creation.intent.interfaces == (NIC,)
+    setattr(owned.session, field, replacement)
+    owned.access.request_rollback()
+    owned.owner.stop_admission()
+    with pytest.raises(StateError):
+        owned.access.settle(Deadline.after(5))
+    assert "terminate_instances" not in [method for method, _ in owned.session.calls]
+    assert owned.access.creation.intent.volumes == (VOLUME,)
+    assert owned.access.creation.intent.interfaces == (NIC,)
+
+
+@pytest.mark.parametrize("stage", ["provision", "rollback"])
+@pytest.mark.parametrize("tags", [[], [{"Key": "agentworks:creation", "Value": "foreign-creation"}]])
+def test_missing_or_foreign_volume_tags_refuse_guest_work_or_termination(owned, stage, tags):
+    if stage == "rollback":
+        owned.access.provision(Deadline.after(5))
+    owned.session.volume_tags = tags
+    if stage == "provision":
+        with pytest.raises(StateError):
+            owned.access.provision(Deadline.after(5))
+        assert not owned.events
+    owned.access.request_rollback()
+    owned.owner.stop_admission()
+    with pytest.raises(StateError):
+        owned.access.settle(Deadline.after(5))
+    assert "terminate_instances" not in [method for method, _ in owned.session.calls]
+
+
+def test_running_launch_records_attachments_when_receipt_has_not_populated_them(owned, monkeypatch):
+    reply = owned.session.reply
+
+    def without_attachments(method, arguments):
+        result = reply(method, arguments)
+        if method == "run_instances":
+            result["Instances"][0].pop("BlockDeviceMappings")
+            result["Instances"][0].pop("NetworkInterfaces")
+        return result
+
+    monkeypatch.setattr(owned.session, "reply", without_attachments)
+    owned.access.provision(Deadline.after(5))
+    assert owned.access.creation.intent.volumes == (VOLUME,)
+    assert owned.access.creation.intent.interfaces == (NIC,)
+    assert "prerequisites" in owned.events
+
+
+def test_one_settle_waits_for_shutdown_volume_nic_and_group_absence(owned, monkeypatch):
+    from agentworks.plugins.aws import _creation_rollback
+
+    clock = [100.0]
+    pauses = []
+
+    def pause(seconds):
+        pauses.append(seconds)
+        clock[0] += seconds
+
+    monkeypatch.setattr("agentworks.execution.carrier.time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(_creation_rollback, "time", SimpleNamespace(sleep=pause))
+    owned.access.provision(Deadline.after(5))
+    owned.session.termination_states = ["shutting-down", "shutting-down", "terminated"]
+    owned.session.volume_linger, owned.session.nic_linger, owned.session.group_linger = 2, 3, 2
+    owned.access.request_rollback()
+    owned.owner.stop_admission()
+    assert owned.access.settle(Deadline.after(5))
+    assert pauses and all(0 < seconds <= 0.1 for seconds in pauses)
+    assert not owned.owner.list_pending_lifecycle_obligations()
+    methods = [method for method, _ in owned.session.calls]
+    assert methods.count("terminate_instances") == methods.count("delete_security_group") == 1
+
+
+@pytest.mark.parametrize("pending", ["termination", "volume", "interface", "group"])
+def test_cleanup_deadline_retains_original_request_then_fresh_budget_observes(owned, monkeypatch, pending):
+    from agentworks.plugins.aws import _creation_rollback
+
+    clock = [100.0]
+    monkeypatch.setattr("agentworks.execution.carrier.time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(_creation_rollback, "time", SimpleNamespace(
+        sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds)
+    ))
+    owned.access.provision(Deadline.after(5))
+    owned.session.termination_states = [] if pending == "termination" else ["terminated"]
+    if pending == "volume":
+        owned.session.volume_linger = 100
+    elif pending == "interface":
+        owned.session.nic_linger = 100
+    elif pending == "group":
+        owned.session.group_linger = 100
+    owned.access.request_rollback()
+    owned.owner.stop_admission()
+    with pytest.raises(LimitExceededError):
+        owned.access.settle(Deadline.after(0.25))
+    assert owned.owner.list_pending_lifecycle_obligations()
+    owned.session.termination_states = ["terminated"]
+    owned.session.volume_linger = owned.session.nic_linger = owned.session.group_linger = 0
+    assert owned.access.settle(Deadline.after(5))
+    methods = [method for method, _ in owned.session.calls]
+    assert methods.count("run_instances") == methods.count("terminate_instances") == 1
+    assert methods.count("delete_security_group") == 1

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from agentworks.errors import StateError, ValidationError
@@ -13,8 +15,10 @@ if TYPE_CHECKING:
     from agentworks.plugins.aws._creation import EC2Creation
 
 
-def _attachments(creation: EC2Creation, instance: dict[str, Any], deadline: Deadline) -> None:
-    """Record all exact auto-deleting objects before termination can erase linkage."""
+def observe_attachments(
+    creation: EC2Creation, instance: dict[str, Any], deadline: Deadline, *, record_initial: bool = False,
+) -> None:
+    """Prove original launch objects before guest work, then refuse replacements."""
     mappings, interfaces = instance.get("BlockDeviceMappings"), instance.get("NetworkInterfaces")
     if type(mappings) is not list or len(mappings) != 1 or type(interfaces) is not list or len(interfaces) != 1:
         raise StateError("EC2 rollback requires the original root volume and primary interface")
@@ -25,16 +29,19 @@ def _attachments(creation: EC2Creation, instance: dict[str, Any], deadline: Dead
     if (
         type(ebs) is not dict or ebs.get("DeleteOnTermination") is not True
         or type(attachment) is not dict or attachment.get("DeleteOnTermination") is not True
-        or attachment.get("DeviceIndex") != 0 or interface.get("OwnerId") != creation.intent.account
+        or type(attachment.get("DeviceIndex")) is not int or attachment["DeviceIndex"] != 0
+        or interface.get("OwnerId") != creation.intent.account
+        or mapping.get("DeviceName") != creation.intent.root_device
     ):
         raise StateError("EC2 rollback attachment deletion is unproved")
     volumes = (identifier(ebs.get("VolumeId"), "vol"),)
     nics = (identifier(interface.get("NetworkInterfaceId"), "eni"),)
-    if creation.intent.volumes or creation.intent.interfaces:
-        if (creation.intent.volumes, creation.intent.interfaces) != (volumes, nics):
-            raise StateError("EC2 rollback attachment identities changed")
-    else:
-        creation.update(volumes=volumes, interfaces=nics)
+    attachment_id = identifier(attachment.get("AttachmentId"), "eni-attach")
+    intent = creation.intent
+    if (intent.volumes and intent.volumes != volumes) or (intent.interfaces and intent.interfaces != nics):
+        raise StateError("EC2 original launch attachment identities changed")
+    if not record_initial and (not intent.volumes or not intent.interfaces):
+        raise StateError("EC2 rollback has no recorded original launch attachments")
     volume_result = creation.call("ec2", "describe_volumes", deadline, VolumeIds=list(volumes))
     observed = volume_result.get("Volumes")
     if type(observed) is not list or len(observed) != 1 or type(observed[0]) is not dict:
@@ -45,6 +52,8 @@ def _attachments(creation: EC2Creation, instance: dict[str, Any], deadline: Dead
         or len(volume["Attachments"]) != 1 or type(volume["Attachments"][0]) is not dict
         or volume["Attachments"][0].get("InstanceId") != creation.intent.instance_id
         or volume["Attachments"][0].get("Device") != mapping.get("DeviceName")
+        or type(volume.get("Tags")) is not list
+        or any(volume["Tags"].count(tag) != 1 for tag in creation.tags())
     ):
         raise StateError("EC2 rollback volume belongs to another attachment")
     nic_result = creation.call("ec2", "describe_network_interfaces", deadline, NetworkInterfaceIds=list(nics))
@@ -57,10 +66,12 @@ def _attachments(creation: EC2Creation, instance: dict[str, Any], deadline: Dead
         or nic.get("VpcId") != creation.intent.vpc or nic.get("SubnetId") != creation.intent.subnet
         or type(nic.get("Attachment")) is not dict
         or nic["Attachment"].get("InstanceId") != creation.intent.instance_id
-        or nic["Attachment"].get("AttachmentId") != attachment.get("AttachmentId")
+        or nic["Attachment"].get("AttachmentId") != attachment_id
         or nic["Attachment"].get("DeleteOnTermination") is not True
     ):
         raise StateError("EC2 rollback interface belongs to another attachment")
+    if (intent.volumes, intent.interfaces) != (volumes, nics):
+        creation.record(replace(intent, volumes=volumes, interfaces=nics))
 
 
 def _absent(creation: EC2Creation, method: str, deadline: Deadline, code: str, **kwargs: Any) -> bool:
@@ -77,7 +88,7 @@ def _absent(creation: EC2Creation, method: str, deadline: Deadline, code: str, *
 
 
 def rollback(creation: EC2Creation, deadline: Deadline) -> bool:
-    """Observe original outcomes; send each destructive request at most once."""
+    """Poll original outcomes within this budget; submit each mutation only once."""
     creation.reconcile()
     intent = creation.intent
     if intent.accepted:
@@ -87,52 +98,62 @@ def rollback(creation: EC2Creation, deadline: Deadline) -> bool:
     if intent.group_id is None or (intent.launch_attempted and intent.instance_id is None):
         return False
     if intent.instance_id is not None:
-        _, instance = creation.instance(deadline)
-        state = instance.get("State")
-        if type(state) is not dict:
-            raise StateError("EC2 rollback power is unproved")
-        if state.get("Name") != "terminated":
-            if not intent.terminate_attempted:
-                _attachments(creation, instance, deadline)
-                creation.group(deadline)
-                creation.update(terminate_attempted=True)
-
-                def receipt(result: dict[str, Any]) -> None:
-                    changes = result.get("TerminatingInstances")
-                    if (
-                        type(changes) is not list or len(changes) != 1 or type(changes[0]) is not dict
-                        or changes[0].get("InstanceId") != creation.intent.instance_id
-                    ):
-                        raise ValidationError("EC2 rollback termination receipt is invalid")
-                    creation.update(terminate_receipt=result["ResponseMetadata"]["RequestId"])
-
-                creation.call(
-                    "ec2", "terminate_instances", deadline, record=receipt, InstanceIds=[intent.instance_id]
-                )
-            return False
-        # Terminal instance state cannot substitute for identities lost before termination.
         if not creation.intent.volumes or not creation.intent.interfaces:
             return False
-        for volume in creation.intent.volumes:
-            if not _absent(creation, "describe_volumes", deadline, "InvalidVolume.NotFound", VolumeIds=[volume]):
-                return False
-        for interface in creation.intent.interfaces:
-            if not _absent(
-                creation, "describe_network_interfaces", deadline, "InvalidNetworkInterfaceID.NotFound",
-                NetworkInterfaceIds=[interface],
-            ):
-                return False
+        while True:
+            _, instance = creation.instance(deadline)
+            state = instance.get("State")
+            if type(state) is not dict or state.get("Name") not in {
+                "pending", "running", "stopping", "stopped", "shutting-down", "terminated",
+            }:
+                raise StateError("EC2 rollback power is unproved")
+            if state["Name"] != "terminated":
+                if not creation.intent.terminate_attempted and state["Name"] != "shutting-down":
+                    observe_attachments(creation, instance, deadline)
+                    creation.group(deadline)
+                    creation.record(replace(creation.intent, terminate_attempted=True))
+
+                    def receipt(result: dict[str, Any]) -> None:
+                        changes = result.get("TerminatingInstances")
+                        if (
+                            type(changes) is not list or len(changes) != 1 or type(changes[0]) is not dict
+                            or changes[0].get("InstanceId") != creation.intent.instance_id
+                        ):
+                            raise ValidationError("EC2 rollback termination receipt is invalid")
+                        creation.record(replace(
+                            creation.intent, terminate_receipt=result["ResponseMetadata"]["RequestId"]
+                        ))
+
+                    creation.call(
+                        "ec2", "terminate_instances", deadline, record=receipt, InstanceIds=[intent.instance_id]
+                    )
+            else:
+                volumes_absent = all(_absent(
+                    creation, "describe_volumes", deadline, "InvalidVolume.NotFound", VolumeIds=[volume],
+                ) for volume in creation.intent.volumes)
+                nics_absent = all(_absent(
+                    creation, "describe_network_interfaces", deadline, "InvalidNetworkInterfaceID.NotFound",
+                    NetworkInterfaceIds=[interface],
+                ) for interface in creation.intent.interfaces)
+                if volumes_absent and nics_absent:
+                    break
+            time.sleep(min(0.1, creation.remaining(deadline)))
     if not creation.intent.group_delete_attempted:
+        if _absent(
+            creation, "describe_security_groups", deadline, "InvalidGroup.NotFound", GroupIds=[intent.group_id]
+        ):
+            creation.record(replace(creation.intent, removed=True))
+            return True
         creation.group(deadline)
-        creation.update(group_delete_attempted=True)
+        creation.record(replace(creation.intent, group_delete_attempted=True))
 
         def deleted(result: dict[str, Any]) -> None:
-            creation.update(group_delete_receipt=result["ResponseMetadata"]["RequestId"])
+            creation.record(replace(creation.intent, group_delete_receipt=result["ResponseMetadata"]["RequestId"]))
 
         creation.call("ec2", "delete_security_group", deadline, record=deleted, GroupId=intent.group_id)
-    if not _absent(
+    while not _absent(
         creation, "describe_security_groups", deadline, "InvalidGroup.NotFound", GroupIds=[intent.group_id]
     ):
-        return False
-    creation.update(removed=True)
+        time.sleep(min(0.1, creation.remaining(deadline)))
+    creation.record(replace(creation.intent, removed=True))
     return True

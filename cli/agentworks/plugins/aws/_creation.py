@@ -44,6 +44,7 @@ class ResourceIntent:
     subnet: str
     vpc: str
     image: str
+    root_device: str
     launch_sha256: str
     group_attempted: bool = False
     group_id: str | None = None
@@ -183,8 +184,8 @@ class EC2Creation:
             raise StateError("EC2 creation client retirement remains unproved")
         return result
 
-    def update(self, **changes: Any) -> None:
-        self.history.append(replace(self.intent, **changes))
+    def record(self, intent: ResourceIntent) -> None:
+        self.history.append(intent)
         self.reconcile()
 
     def reconcile(self) -> LifecycleObligation | None:
@@ -217,28 +218,29 @@ class EC2Creation:
 
     def launch(
         self, deadline: Deadline, *, account: str, backend: str, nonce: str,
-        subnet: str, vpc: str, image: str, arguments: dict[str, Any],
+        subnet: str, vpc: str, image: str, root_device: str, arguments: dict[str, Any],
     ) -> None:
         if self._registration_entered:
             raise StateError("EC2 creation was already attempted")
         public_arguments = {**arguments, "UserData": hashlib.sha256(arguments["UserData"]).hexdigest()}
         digest = hashlib.sha256(json.dumps(public_arguments, sort_keys=True).encode("ascii")).hexdigest()
-        self.history.append(ResourceIntent(account, self.region, backend, nonce, subnet, vpc, image, digest))
+        self.history.append(ResourceIntent(account, self.region, backend, nonce, subnet, vpc, image, root_device, digest))
         self._registration_entered = True
         obligation = self.owner.register_lifecycle_obligation(
             KIND, payload_version=1, payload=encode(self.intent), obligation_id=self.obligation_id
         )
         self.remaining(deadline)
         obligation.mark_possible_effect()
-        self.update(group_attempted=True)
+        self.record(replace(self.intent, group_attempted=True))
         self.remaining(deadline)
         self._group_entered = True
 
         def group_receipt(result: dict[str, Any]) -> None:
-            self.update(
+            self.record(replace(
+                self.intent,
                 group_id=identifier(result.get("GroupId"), "sg"),
                 group_receipt=result["ResponseMetadata"]["RequestId"],
-            )
+            ))
 
         self.call(
             "ec2", "create_security_group", deadline, record=group_receipt,
@@ -247,7 +249,7 @@ class EC2Creation:
         )
         if self.group(deadline).get("IpPermissions") != []:
             raise StateError("EC2 creation group does not have an empty ingress baseline")
-        self.update(launch_attempted=True)
+        self.record(replace(self.intent, launch_attempted=True))
         self.remaining(deadline)
 
         def launch_receipt(result: dict[str, Any]) -> None:
@@ -257,10 +259,24 @@ class EC2Creation:
             instance = instances[0]
             if type(instance) is not dict or instance.get("ClientToken") != nonce:
                 raise ValidationError("EC2 launch receipt has an invalid request association")
-            self.update(
+            # Keep the complete receipt in memory before any publication can fail.
+            # Attachments may not yet be populated in an asynchronous launch reply.
+            mappings, interfaces = instance.get("BlockDeviceMappings"), instance.get("NetworkInterfaces")
+            volumes: tuple[str, ...] = ()
+            nics: tuple[str, ...] = ()
+            if type(mappings) is list and len(mappings) == 1 and type(mappings[0]) is dict:
+                ebs = mappings[0].get("Ebs")
+                if type(ebs) is dict and ebs.get("VolumeId") is not None:
+                    volumes = (identifier(ebs["VolumeId"], "vol"),)
+            if type(interfaces) is list and len(interfaces) == 1 and type(interfaces[0]) is dict:
+                if interfaces[0].get("NetworkInterfaceId") is not None:
+                    nics = (identifier(interfaces[0]["NetworkInterfaceId"], "eni"),)
+            self.record(replace(
+                self.intent,
                 instance_id=identifier(instance.get("InstanceId"), "i"),
                 launch_receipt=result["ResponseMetadata"]["RequestId"],
-            )
+                volumes=volumes, interfaces=nics,
+            ))
 
         arguments = {**arguments, "NetworkInterfaces": [{
             "DeviceIndex": 0, "AssociatePublicIpAddress": True, "DeleteOnTermination": True,

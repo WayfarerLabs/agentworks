@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import gzip
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from agentworks.errors import StateError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
@@ -66,18 +68,20 @@ def test_listening_probe_retries_only_connections_inside_original_budget(monkeyp
 
 
 @pytest.mark.parametrize("failure", [None, "wrong_nonce", "nonzero", "incomplete", "late"])
-def test_prerequisite_gate_requires_complete_matching_strict_ssh_observation(monkeypatch, failure):
+@pytest.mark.parametrize("admin", ["root", "operator"])
+def test_prerequisite_gate_requires_complete_matching_strict_ssh_observation(monkeypatch, failure, admin):
     clock = [100.0]
     monkeypatch.setattr("agentworks.execution.carrier.time", SimpleNamespace(monotonic=lambda: clock[0]))
     custody = LocalDeliveryCustody()
     connection = SSHConnection(
-        "192.0.2.7", "operator", Path("/unused/identity"), ManagedSSHTrust(Path("/unused/trust"))
+        "192.0.2.7", admin, Path("/unused/identity"), ManagedSSHTrust(Path("/unused/trust"))
     )
     calls = []
 
     def execute(carrier, invocation, *, io, deadline, custody):
         calls.append((carrier, invocation))
         assert carrier._connection is connection and deadline.expires_at == 105.0
+        assert invocation.argv[0] == ("/usr/bin/env" if admin == "root" else "/usr/bin/sudo")
         nonce = invocation.argv[-1]
         output = "other-nonce" if failure == "wrong_nonce" else nonce
         if failure == "late":
@@ -94,3 +98,15 @@ def test_prerequisite_gate_requires_complete_matching_strict_ssh_observation(mon
         with pytest.raises(StateError):
             _creation_bootstrap.observe_early_guest(connection, "a" * 32, Deadline.after(5), custody)
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("admin", ["root", "operator"])
+def test_public_cloud_init_intentionally_selects_root_access_without_password_auth(admin):
+    payload = _creation_bootstrap.early_user_data(
+        admin=admin, public_key="ssh-ed25519 public-key", hostname="vm-one", marker="a" * 32,
+    )
+    config = yaml.safe_load(gzip.decompress(payload))
+    assert config["disable_root"] is (admin != "root")
+    assert config["ssh_pwauth"] is False
+    assert config["users"][0]["name"] == admin
+    assert config["users"][0]["ssh_authorized_keys"] == ["ssh-ed25519 public-key"]

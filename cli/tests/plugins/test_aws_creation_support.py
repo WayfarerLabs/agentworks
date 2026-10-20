@@ -41,6 +41,14 @@ class Session:
         self.fault = None
         self.account = ACCOUNT
         self.state = "running"
+        self.termination_states = ["shutting-down", "terminated"]
+        self.volume_linger = 0
+        self.nic_linger = 0
+        self.group_linger = 0
+        self.image_floor = 8
+        self.volume = VOLUME
+        self.interface = NIC
+        self.volume_tags = None
         self.deleted = False
         self.nonce = None
         self.rules = []
@@ -90,9 +98,9 @@ class Session:
             "State": {"Name": self.state}, "Tags": self.tags(),
             "SecurityGroups": [{"GroupId": GROUP}],
             "BlockDeviceMappings": [{"DeviceName": "/dev/xvda", "Ebs": {
-                "VolumeId": VOLUME, "DeleteOnTermination": True,
+                "VolumeId": self.volume, "DeleteOnTermination": True,
             }}],
-            "NetworkInterfaces": [{"NetworkInterfaceId": NIC, "OwnerId": ACCOUNT, "Attachment": {
+            "NetworkInterfaces": [{"NetworkInterfaceId": self.interface, "OwnerId": ACCOUNT, "Attachment": {
                 "AttachmentId": "eni-attach-0123456789abcdef0", "DeviceIndex": 0, "DeleteOnTermination": True,
             }}],
         }
@@ -110,7 +118,9 @@ class Session:
         if method == "describe_images":
             return receipt(Images=[{
                 "ImageId": IMAGE, "Architecture": "arm64", "RootDeviceType": "ebs", "RootDeviceName": "/dev/xvda",
-                "BlockDeviceMappings": [{"DeviceName": "/dev/xvda", "Ebs": {"SnapshotId": "snap-0123456789abcdef0"}}],
+                "BlockDeviceMappings": [{"DeviceName": "/dev/xvda", "Ebs": {
+                    "SnapshotId": "snap-0123456789abcdef0", "VolumeSize": self.image_floor,
+                }}],
             }])
         if method == "describe_subnets":
             return receipt(Subnets=[{"SubnetId": SUBNET, "VpcId": VPC, "OwnerId": ACCOUNT, "AvailabilityZone": "us-east-1a"}])
@@ -129,10 +139,15 @@ class Session:
             assert JOIN_KEY.encode() not in gzip.decompress(args["UserData"])
             return receipt(OwnerId=ACCOUNT, Instances=[self.instance()])
         if method == "describe_instances":
+            if self.state == "shutting-down" and self.termination_states:
+                self.state = self.termination_states.pop(0)
             return receipt(Reservations=[] if "Filters" in args else [{"OwnerId": self.account, "Instances": [self.instance()]}])
         if method == "describe_security_groups":
             if self.deleted:
-                raise absent("InvalidGroup.NotFound")
+                if self.group_linger:
+                    self.group_linger -= 1
+                else:
+                    raise absent("InvalidGroup.NotFound")
             return receipt(SecurityGroups=[{
                 "GroupId": GROUP, "OwnerId": ACCOUNT, "VpcId": VPC, "Tags": self.tags(), "IpPermissions": [],
             }])
@@ -155,20 +170,29 @@ class Session:
             return receipt(Return=True, SecurityGroupRules=[rule])
         if method == "describe_volumes":
             if self.state == "terminated":
-                raise absent("InvalidVolume.NotFound")
-            return receipt(Volumes=[{"VolumeId": VOLUME, "Attachments": [{"InstanceId": INSTANCE, "Device": "/dev/xvda"}]}])
+                if self.volume_linger:
+                    self.volume_linger -= 1
+                else:
+                    raise absent("InvalidVolume.NotFound")
+            return receipt(Volumes=[{
+                "VolumeId": self.volume, "Attachments": [{"InstanceId": INSTANCE, "Device": "/dev/xvda"}],
+                "Tags": self.tags() if self.volume_tags is None else self.volume_tags,
+            }])
         if method == "describe_network_interfaces":
             if self.state == "terminated":
-                raise absent("InvalidNetworkInterfaceID.NotFound")
+                if self.nic_linger:
+                    self.nic_linger -= 1
+                else:
+                    raise absent("InvalidNetworkInterfaceID.NotFound")
             return receipt(NetworkInterfaces=[{
-                "NetworkInterfaceId": NIC, "OwnerId": ACCOUNT, "VpcId": VPC, "SubnetId": SUBNET,
+                "NetworkInterfaceId": self.interface, "OwnerId": ACCOUNT, "VpcId": VPC, "SubnetId": SUBNET,
                 "Attachment": {"InstanceId": INSTANCE, "AttachmentId": "eni-attach-0123456789abcdef0", "DeleteOnTermination": True},
             }])
         if method == "terminate_instances":
             resource = next(row for row in self.owner.list_pending_lifecycle_obligations() if row.obligation_kind == KIND)
             intent = json.loads(resource.payload)
             assert intent["terminate_attempted"] and intent["volumes"] == [VOLUME] and intent["interfaces"] == [NIC]
-            self.state = "terminated"
+            self.state = "shutting-down"
             return receipt(TerminatingInstances=[{"InstanceId": INSTANCE}])
         if method == "delete_security_group":
             self.deleted = True
