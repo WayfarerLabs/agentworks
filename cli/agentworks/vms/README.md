@@ -15,10 +15,10 @@ deadline, with service retries disabled. Linked Azure resources may use other re
 the persisted subscription. SDK credential setup and authentication retries remain subject to the
 SDK's behavior; successful late results are rejected without replaying the read.
 
-Trust uses the configured managed directory and endpoint lookup with no host key alias. Identity,
-agent, client and keepalive selections come from `SSHSettings`. The early guest facts probe enters
-as root, directly for root delivery, otherwise through passwordless sudo to root, and resolves the
-named delivery account's actual identity. AWS, Azure and GCP explicitly supply the no-idle-stop
+Trust uses the configured managed directory and a stable VM marker-derived alias. Identity, agent,
+client and keepalive selections come from `SSHSettings`. The early guest facts probe enters as root,
+directly for root delivery, otherwise through passwordless sudo to root, and resolves the named
+delivery account's actual identity. AWS, Azure and GCP explicitly supply the no-idle-stop
 independent-job availability fact in both passive resolution and owned preparation. The shared SSH
 helper defaults to no guarantee; SSH connectivity alone says nothing about platform availability.
 This fact excludes explicit VM stop, reboot, host loss and external policy. Route activation,
@@ -51,6 +51,15 @@ later canonical calls. Native mode checks its selected route around initial gues
 preparation too. Native and canonical views report their actual semantic route; neither silently
 switches delivery. Full platform/native acceptance, creation/rollback and public surface completion
 remain separate gates.
+
+VM SSH connections use `agw-vm-<instance-marker>` as their host-key lookup identity across endpoints
+and accounts. The persisted core marker is required; ordinary connection construction never creates
+one. Creation enrolls `vm:<instance-marker>` once and retains its original endpoint as evidence. A
+platform's explicit successful-publication fact skips canonical enrollment, not verification:
+canonical preparation still admits current managed policy and connects strictly. Missing, blocked,
+revoked or mismatching trust never triggers another first contact. Existing address-only, hashed or
+certificate policy is not rewritten to match the alias automatically; explicit trust maintenance and
+applicable certificate principals are required before adoption.
 
 When a managed agent is selected, the private operation retains explicit UID-namespace preparation
 after numeric account identity and root bootstrap verification, before constructing its file view.
