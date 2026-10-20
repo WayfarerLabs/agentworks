@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import socket
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,7 +12,7 @@ import pytest
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import CapturedOutput, CarrierReport, Deadline, Dispatch, ExitStatus
-from agentworks.execution.carriers.ssh import ManagedSSHTrust, SSHConnection
+from agentworks.execution.carriers.ssh import ManagedSSHTrust, SSHCarrier, SSHConnection
 from agentworks.vms import _creation_ssh
 
 
@@ -29,11 +31,11 @@ def test_listening_probe_retains_the_original_socket(monkeypatch, fault):
             raise current_fault[0]
 
     original.close = close
-    monkeypatch.setattr(_creation_ssh.socket, "socket", lambda *args: original)
+    monkeypatch.setattr(socket, "socket", lambda *args: original)
     readiness = _creation_ssh.SSHReadiness()
     with pytest.raises(StateError if isinstance(fault, OSError) else KeyboardInterrupt):
         readiness.wait("192.0.2.7", Deadline.after(5))
-    assert readiness._socket is original
+    assert getattr(readiness, "_socket") is original
     with pytest.raises(StateError):
         readiness.wait("192.0.2.7", Deadline.after(5))
     assert sum(name == "connect" for name, _ in calls) == 1
@@ -45,9 +47,9 @@ def test_listening_probe_retries_only_connections_inside_original_budget(monkeyp
     clock = [100.0]
     sockets = []
     monkeypatch.setattr("agentworks.execution.carrier.time", SimpleNamespace(monotonic=lambda: clock[0]))
-    monkeypatch.setattr(_creation_ssh.time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    monkeypatch.setattr(time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
 
-    def socket(*args):
+    def make_socket(*args):
         original = SimpleNamespace(closed=False, settimeout=lambda seconds: None, connect_ex=lambda endpoint: 111)
 
         def close():
@@ -57,7 +59,7 @@ def test_listening_probe_retries_only_connections_inside_original_budget(monkeyp
         sockets.append(original)
         return original
 
-    monkeypatch.setattr(_creation_ssh.socket, "socket", socket)
+    monkeypatch.setattr(socket, "socket", make_socket)
     readiness = _creation_ssh.SSHReadiness()
     with pytest.raises(TimeoutError):
         readiness.wait("192.0.2.7", Deadline.after(0.25))
@@ -88,7 +90,7 @@ def test_prerequisite_gate_requires_complete_matching_strict_ssh_observation(mon
             stdout=CapturedOutput((output + "\n").encode("ascii"), complete=failure != "incomplete"),
         )
 
-    monkeypatch.setattr(_creation_ssh.SSHCarrier, "execute", execute)
+    monkeypatch.setattr(SSHCarrier, "execute", execute)
     if failure is None:
         _creation_ssh.observe_early_guest(
             connection, "a" * 32, Deadline.after(5), custody, bootstrap_check=_creation_ssh.CLOUD_INIT_CHECK
@@ -106,8 +108,8 @@ def test_invalid_budget_refuses_before_listening_or_ssh_delivery(monkeypatch, ex
     def forbidden(*args, **kwargs):
         pytest.fail("invalid budget reached native delivery")
 
-    monkeypatch.setattr(_creation_ssh.socket, "socket", forbidden)
-    monkeypatch.setattr(_creation_ssh.SSHCarrier, "execute", forbidden)
+    monkeypatch.setattr(socket, "socket", forbidden)
+    monkeypatch.setattr(SSHCarrier, "execute", forbidden)
     with pytest.raises(error):
         _creation_ssh.SSHReadiness().wait("192.0.2.7", Deadline(expires_at))
     connection = SSHConnection(
