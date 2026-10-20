@@ -114,18 +114,21 @@ def _install(db: Database, work: Path, scenario: str, patches: pytest.MonkeyPatc
         h.workflow = workflow
         h.ownership = workflow.owner.ownership
         h.custody = workflow.local_delivery
-        assert db.operations.inspect(h.ownership.scope).ownership == h.ownership
+        claim = db.operations.inspect(h.ownership.scope)
+        assert claim is not None and claim.ownership == h.ownership
         return prepare_context(workflow, *args, **kwargs)
 
     patches.setattr(creation, "_prepare_created_context", observe_workflow)
 
     def exchange(wire, endpoint, method, suffix, *, custody, body, timeout):
         workflow = h.workflow
-        assert db.operations.inspect(h.ownership.scope).ownership == h.ownership
+        claim = db.operations.inspect(h.ownership.scope)
+        assert claim is not None and claim.ownership == h.ownership
         assert custody is h.custody and custody.settled
         if h.provider is None:
             assert isinstance(workflow.creation, ProxmoxOwnedCreationAccess)
             row = db.get_vm(request.vm_name)
+            assert row is not None
             assert row.provisioning_status == ProvisioningStatus.IN_PROGRESS.value
             assert row.init_status == InitStatus.PENDING.value
             h.provider = Harness(
@@ -194,7 +197,10 @@ def _install(db: Database, work: Path, scenario: str, patches: pytest.MonkeyPatc
         def __init__(self, owner, *, vm_name, admin_username, instance_marker, endpoint, settings, deadline):
             assert owner is h.workflow.owner and deadline is h.deadline
             assert (vm_name, admin_username, instance_marker) == (request.vm_name, request.admin_username, MARKER)
-            assert db.get_vm(vm_name).tailscale_host == endpoint == _ADDRESS and settings is ctx.config.operator.ssh
+            row = db.get_vm(vm_name)
+            config = ctx.config
+            assert row is not None and config is not None
+            assert row.tailscale_host == endpoint == _ADDRESS and settings is config.operator.ssh
 
         def prepare(self):
             h.events.append("trust")
@@ -210,7 +216,8 @@ def _install(db: Database, work: Path, scenario: str, patches: pytest.MonkeyPatc
     def ssh_delivery(carrier, invocation, *, io, deadline, custody):
         assert carrier._connection.host == _ADDRESS and carrier._connection.user == request.admin_username
         assert deadline is h.deadline and custody.settled
-        assert db.operations.inspect(h.ownership.scope).ownership == h.ownership
+        claim = db.operations.inspect(h.ownership.scope)
+        assert claim is not None and claim.ownership == h.ownership
         active = h.workflow.routes[1].views.execution_operation.active_inline_calls
         assert len(active) == 1 and active[0].operation.outstanding_attempt.local_delivery is custody
         h.deliveries.append(custody)
@@ -234,7 +241,8 @@ def _assert_canonical(h: SimpleNamespace, ctx: RunContext, db: Database) -> None
     assert workflow.owner.ownership == h.ownership and workflow.deadline is h.deadline
     assert native.execution_operation._native_binding.carrier is access.binding.carrier
     assert isinstance(access.binding.carrier, ProxmoxCarrier)
-    assert ctx.admin_execution_target() is canonical.target and canonical.target.route is ExecutionRoute.CANONICAL
+    target = ctx.admin_execution_target()
+    assert target is not None and target is canonical.target and target.route is ExecutionRoute.CANONICAL
     assert ctx.config is h.context.config and ctx.operation_scope is h.context.operation_scope
     assert ctx.secret("pve-token") == h.context.secret("pve-token")
     assert ctx.agent_execution_target() is None and ctx.agent_execution_target_absence() is TargetAbsence.UNAVAILABLE
@@ -242,11 +250,13 @@ def _assert_canonical(h: SimpleNamespace, ctx: RunContext, db: Database) -> None
     with pytest.raises(StateError):
         native.execution.run(Command(("true",)), profile=Protection.DIRECT)
     row = db.get_vm("created")
+    assert row is not None
     assert row.provisioning_status == ProvisioningStatus.COMPLETE.value and row.init_status == InitStatus.PENDING.value
     assert row.tailscale_host == _ADDRESS and row.platform_metadata == {"vmid": "123", "node": "node1"}
     resource = h.provider.row()
     assert resource.state is LifecycleObligationState.RESOLVED and json.loads(resource.payload)["accepted"] is True
-    execution = ctx.admin_execution_target().execution()
+    execution = target.execution()
+    assert execution is not None
     result = execution.run(
         Command(("/bin/fixture-command", "argument with spaces")),
         profile=Protection.DIRECT,
@@ -255,7 +265,8 @@ def _assert_canonical(h: SimpleNamespace, ctx: RunContext, db: Database) -> None
     assert result.dispatch is Dispatch.SENT and result.status == ExitCode(23)
     assert result.stdout.data == b"canonical-result\x00\xff" and result.owned_cleanup_confirmed
     assert len(h.deliveries) == 1 and h.deliveries[0].settled
-    assert db.operations.inspect(h.ownership.scope).ownership == h.ownership
+    claim = db.operations.inspect(h.ownership.scope)
+    assert claim is not None and claim.ownership == h.ownership
 
 
 def exercise_creation(work: Path, scenario: str) -> None:
@@ -266,25 +277,32 @@ def exercise_creation(work: Path, scenario: str) -> None:
                 with h.operation() as ctx:
                     _assert_canonical(h, ctx, db)
             else:
-                with pytest.raises(KeyboardInterrupt) as caught, h.operation() as ctx:
+                with pytest.raises(KeyboardInterrupt) as body_failure, h.operation() as ctx:
                     _assert_canonical(h, ctx, db)
                     raise h.primary
-                assert caught.value is h.primary and h.primary.__cause__ is None
+                assert body_failure.value is h.primary and h.primary.__cause__ is None
             assert h.guest_routes == [False, True] and h.events == ["bootstrap", "attest", "trust", "trust-close"]
             assert h.rollback.alive and not h.rollback.mutations()
-            assert db.get_vm("created").provisioning_status == ProvisioningStatus.COMPLETE.value
-            assert db.get_vm("created").init_status == InitStatus.PENDING.value
+            row = db.get_vm("created")
+            assert row is not None
+            assert row.provisioning_status == ProvisioningStatus.COMPLETE.value
+            assert row.init_status == InitStatus.PENDING.value
             before = h.provider.calls.copy()
+            target = ctx.admin_execution_target()
+            assert target is not None
+            execution = target.execution()
+            assert execution is not None
             with pytest.raises(StateError):
-                ctx.admin_execution_target().execution().run(Command(("true",)), profile=Protection.DIRECT)
+                execution.run(Command(("true",)), profile=Protection.DIRECT)
             assert h.provider.calls == before and len(h.deliveries) == 1
         else:
             expected = StateError if scenario == "prebootstrap" else KeyboardInterrupt
-            with pytest.raises(expected) as caught, h.operation():
+            with pytest.raises(expected) as preparation_failure, h.operation():
                 raise AssertionError("failed preparation yielded a context")
             if scenario != "prebootstrap":
-                assert caught.value is h.primary
+                assert preparation_failure.value is h.primary
             row = db.get_vm("created")
+            assert row is not None
             assert row.provisioning_status == ProvisioningStatus.FAILED.value
             assert row.init_status == InitStatus.PENDING.value
             assert row.platform_metadata == {"vmid": "123", "node": "node1"}
@@ -306,13 +324,14 @@ def exercise_creation(work: Path, scenario: str) -> None:
                     assert h.guest_routes == [False]
                     _retry_unknown_rollback(h, db)
                 else:
-                    assert not h.guest_routes and not h.workflow.routes and caught.value.__cause__ is None
+                    assert not h.guest_routes and not h.workflow.routes and preparation_failure.value.__cause__ is None
                     assert h.provider.access.bootstrap.observation.completion is not None
                     assert not h.provider.access.bootstrap.observation.bootstrap_succeeded
                     with pytest.raises(StateError):
                         h.provider.access.complete_bootstrap(Deadline.after(1))
                 assert h.provider.access.rollback.state.phase is RollbackPhase.COMPLETE
         row = db.get_vm("created")
+        assert row is not None
         expected_status = (
             ProvisioningStatus.COMPLETE if scenario in {"success", "body-failure"} else ProvisioningStatus.FAILED
         )
@@ -326,7 +345,8 @@ def exercise_creation(work: Path, scenario: str) -> None:
 def _retry_unknown_rollback(h: SimpleNamespace, db: Database) -> None:
     fact = h.primary.__cause__
     assert type(fact) is VMOperationControlFact and fact._workflow is h.workflow
-    assert db.operations.inspect(h.ownership.scope).ownership == h.ownership
+    claim = db.operations.inspect(h.ownership.scope)
+    assert claim is not None and claim.ownership == h.ownership
     access = h.provider.access
     controllers = (access.clone, access.configuration, access.activation, access.bootstrap, access.rollback)
     resource = h.provider.row()
