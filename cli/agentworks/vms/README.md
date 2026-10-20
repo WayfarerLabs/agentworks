@@ -32,12 +32,15 @@ observation and the core operator-stopped decision. `ensure_available` owns acti
 platform hold and selects a provider locator without requiring native delivery. Native route
 preparation follows explicitly, including public endpoint and ingress work where needed.
 
-Core then retains the shared guest preparation and its escaping control facts before constructing
-account/file/execution views. A platform can check the observed guest against its availability
-evidence; WSL2 uses its actual hold READY. Aggregate teardown retains the original access and shared
-preparation until their effects and local custody settle. Neither a route switch nor an accessor can
-transfer or finalize that ownership. Creation/rollback integration remains unfinished; existing
-consumers are unchanged.
+Core retains each route's guest, account and namespace preparation before constructing its
+file/execution views. Common assembly accepts the retained platform access, locator and binding; it
+neither activates again nor acquires another claim. A platform can check the observed guest against
+its availability evidence; WSL2 uses its actual hold READY. Aggregate teardown retains all route
+records and the original access. It settles exact delivery and completed bookkeeping across routes
+before resolving any execution lifetime or starting fresh artifact cleanup. Retiring a closed call's
+local record does not settle another route's outstanding attempt. Only the outer workflow finalizes
+ownership after every component settles. Creation/rollback integration and the production
+native-to-canonical handoff remain unfinished; existing consumers are unchanged.
 
 `vm_execution_context(..., route=...)` selects native or canonical delivery explicitly under one
 shared `VMOperation` and cleanup fact. Canonical mode validates its stored literal endpoint/account
