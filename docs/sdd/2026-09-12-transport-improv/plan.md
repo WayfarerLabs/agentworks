@@ -6093,9 +6093,9 @@ admission closes. Known configuration acknowledgment supplies the expected gener
 failure instead captures the observed clone generation. Exact task receipts permit observation, not
 mutation replay. A single empty-resource preflight rejects a changed final configuration digest
 before destroy. Acceptance-append interruption tests distinguish actual unaccepted-resource cleanup
-from immutable accepted-resource retention. That private correction passes 125
-controller/access tests and complete strict typing across 1,584 files; project, complexity and
-generic correctness source reviews are clear. Provider, guest and SSH boundaries remain simulated.
+from immutable accepted-resource retention. That private correction passes 125 controller/access
+tests and complete strict typing across 1,584 files; project, complexity and generic correctness
+source reviews are clear. Provider, guest and SSH boundaries remain simulated.
 
 The subsequent composed gate at `ccd197791` passes 204 bootstrap, creation-access, rollback and
 creation-workflow cases, with complete strict typing across 1,586 files. Ten fresh-process cases
@@ -6107,10 +6107,10 @@ retention after canonical preparation failure. The composition exposed a real co
 invocation completion with settled original delivery resolves bootstrap invocation debt, while
 unsuccessful prerequisites still refuse creation and leave resource disposal to exact rollback.
 
-The shared trust consumer accepts explicit creation identity rather than requiring an inventory
-row. Endpoint-qualified provenance retains distinct first-contact evidence for public bootstrap and
-canonical access; actual policy-file tests preserve both host entries and existing revocations.
-The adjacent trust/core/staged-cleanup gate passes 93 cases. Hosted CI at the preceding `7a038c9f5`
+The shared trust consumer accepts explicit creation identity rather than requiring an inventory row.
+Endpoint-qualified provenance retains distinct first-contact evidence for public bootstrap and
+canonical access; actual policy-file tests preserve both host entries and existing revocations. The
+adjacent trust/core/staged-cleanup gate passes 93 cases. Hosted CI at the preceding `7a038c9f5`
 found a missing transitive clock fixture import, corrected separately without changing production
 deadlines. These results still simulate provider, guest and SSH delivery. Native PVE 8/9 response
 typing, effective permission and storage visibility, complete native creation-to-RunContext proof
