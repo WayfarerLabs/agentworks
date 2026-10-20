@@ -6086,7 +6086,7 @@ itself. Normal rollback will retain one bounded inventory, remove exact owned di
 and their observation permissions still exist, verify their logical disposition, then destroy the
 empty VM. Unsupported snapshots, pending allocations, lost acknowledgments and incomplete
 observations retain uncertainty; successful destroy or a warning-free task log is not volume
-absence proof. The fixed stop/destroy/task-log wire methods alone do not complete this gate.
+absence proof. The fixed stop/destroy wire methods alone do not complete this gate.
 
 - [ ] Enforce the explicit finite-input no-staging choice above carrier delivery. Preserve the
       existing default and independent sensitivity/output policy; a non-staging direct request must
