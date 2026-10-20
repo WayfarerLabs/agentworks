@@ -190,19 +190,21 @@ unsettled delivery. This is sequential handoff, not concurrent execution through
 
 Aggregate teardown must operate in passes across the retained routes, not close each route from
 start to finish. First revoke every body view and stop owner admission. Retire existing closing
-helpers before admitting fresh cleanup, drain managed keepers and settle actual delivery. Settle
-completed file and namespace bookkeeping across all routes before resolving any execution lifetime:
-a later route can hold the single owner-wide borrow needed by an earlier route's resolution. Then
-finish execution and artifact cleanup, verify preparation and identity custody, and settle platform
-work. Only the outer lifetime checks the complete ledger, seals obligations, records resolved
-effects and releases the claim. Interrupted final release retries the same owner without querying a
-claim that may already have been removed.
+helpers before admitting fresh cleanup, drain managed keepers and settle actual delivery. Observe
+retained inline helper closure, then settle completed execution, file and namespace bookkeeping
+across all routes before resolving any execution lifetime: a later route can hold the single
+owner-wide borrow needed by an earlier route's resolution. Closing retires an unarmed execution
+registration without arming or dispatching it. Then finish execution and artifact cleanup, verify
+preparation and identity custody, and settle platform work. Only the outer lifetime checks the
+complete ledger, seals obligations, records resolved effects and releases the claim. Interrupted
+final release retries the same owner without querying a claim that may already have been removed.
 
 The implementation proof needs two-route failures, not merely repeated single-route success:
-later-route file bookkeeping blocking earlier-route resolution, interrupted second-route namespace
-preparation, and a later-route closing helper preventing earlier-route fresh cleanup. Preserve both
-routes and the original control-fact chain when any pass remains unresolved. These are required
-composition mechanics, not a claim that creation or native acceptance is complete.
+later-route execution or file bookkeeping blocking earlier-route resolution, interrupted unarmed
+registration, interrupted second-route namespace preparation, and a later-route closing helper
+preventing earlier-route fresh cleanup. Preserve both routes and the original control-fact chain
+when any pass remains unresolved. These are required composition mechanics, not a claim that
+creation or native acceptance is complete.
 
 ### Local Lima composition
 
