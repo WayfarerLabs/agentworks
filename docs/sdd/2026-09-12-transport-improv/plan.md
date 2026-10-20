@@ -1,10 +1,12 @@
 # Transport Improvements: Design and Delivery Sequence
 
-- Status: Additive implementation started from merged #830; production execution factories and
-  RunContext remain unchanged. New-guest bootstrap installs distribution Python. The private
+- Status: Additive implementation started from merged #830; production orchestration still uses
+  legacy paths. New RunContext target accessors and new-only operation entry points are additive,
+  with complete supported-platform acceptance still open. New-guest bootstrap installs distribution
+  Python. The private
   destination-lock implementation and its setup have been removed under the coordination ruling
-  below. A database operation-ownership primitive is implemented but not yet wired into production
-  orchestration or RunContext; it does not yet prevent production operation conflicts.
+  below. Database operation ownership is composed into the new-only operation contexts, not migrated
+  production orchestration; it does not yet prevent conflicts in legacy production workflows.
 - Delivery vehicle: Design PR #830, then additive implementation, consumer migration PR(s), and
   final removal/activation PR; all labeled `sdd:transport-improv`
 - Requirements: [FRD](frd.md)
@@ -6108,13 +6110,52 @@ invocation completion with settled original delivery resolves bootstrap invocati
 unsuccessful prerequisites still refuse creation and leave resource disposal to exact rollback.
 
 The shared trust consumer accepts explicit creation identity rather than requiring an inventory row.
-Endpoint-qualified provenance retains distinct first-contact evidence for public bootstrap and
-canonical access; actual policy-file tests preserve both host entries and existing revocations. The
-adjacent trust/core/staged-cleanup gate passes 93 cases. Hosted CI at the preceding `7a038c9f5`
+Its endpoint-qualified provenance records separate first contacts, but that does not establish key
+continuity and conflicts with SSH's unchanged stable-creation identity and strict endpoint-change
+contract. This is an unresolved transport composition defect, not an authorized two-enrollment
+design. Creation must enroll once and strictly verify subsequent endpoints against the already
+trusted identity or applicable CA policy before production adoption. Actual policy-file tests
+preserving both host entries and revocations do not prove that requirement. The adjacent
+trust/core/staged-cleanup gate passes 93 cases. Hosted CI at the preceding `7a038c9f5`
 found a missing transitive clock fixture import, corrected separately without changing production
 deadlines. These results still simulate provider, guest and SSH delivery. Native PVE 8/9 response
 typing, effective permission and storage visibility, complete native creation-to-RunContext proof
 and the remaining platform factories still gate additive acceptance. No checkbox is completed here.
+
+### Cloud creation integration checkpoint, 2026-10-20
+
+The private branch adds AWS, Azure and GCP creation factories beneath the existing core creation
+workflow, leaving legacy creation and production callers unchanged. Each owns provider requests and
+resource receipts, publishes copied partial addressability, prepares a scoped public SSH route and
+closes its platform rollback window only after core bootstrap acceptance. The shared SSH listening
+and prerequisite observation does not enroll trust or replace provider-specific bootstrap checks.
+Core metadata publication now permits only additive facts: an already published key cannot change
+or disappear, including during cleanup after partial failure.
+
+At `7e54f3530`, the AWS/shared-probe/core selection passes 87 tests. The earlier GCP/shared-probe/core
+selection at `89bf479f3` passes 74 tests. These are scripted provider and SSH boundary tests with
+actual local ownership and database composition, not native cloud acceptance. Full strict typing
+still reports 32 errors in five Azure/GCP files; those corrections and the identified cleanup
+defects remain under private implementation and review. The first AWS runtime run exposed six
+interruption tests attached to a newly constructed repository wrapper instead of the owner's actual
+retained repository. Correcting those hooks makes the before/after-publication cases execute and
+pass. Initial security-group invisibility now retains custody until exact validated visibility
+permits the single delete; it is not treated as proof of resource removal.
+
+Independent project and complexity reviews require fresh finite cleanup budgets for retained Azure
+and GCP work, without reopening provisioning or ordinary body admission. Azure must also require
+successful original-handle retirement and obligation reconciliation before marking its adapter
+settled. GCP must reuse the existing named firewall projection rather than a second positional
+parser; the duplicated parser incorrectly refuses unrelated IPv6 allow rules. These corrections
+require new integrated gates and review before publication. The SSH key-continuity defect above,
+native workflows, remaining platform-host composition and all broader additive acceptance gates
+remain open. No completion checkbox or lockfile is advanced by this checkpoint.
+
+Hosted CI for published `f2dae36ae` is now terminal successful in
+[run 39364470906](https://github.com/WayfarerLabs/agentworks/actions/runs/39364470906), including all
+four Linux/Windows test jobs and the required static and website checks. It does not cover the
+private cloud additions or resolve the trust requirement. The PR remains draft with no new public
+review or tester signal; feedback/fix round 1 of 3 remains open.
 
 - [ ] Enforce the explicit finite-input no-staging choice above carrier delivery. Preserve the
       existing default and independent sensitivity/output policy; a non-staging direct request must
