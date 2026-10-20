@@ -109,6 +109,15 @@ target-delivered input and target-owned capture/discard output; caller-owned liv
 endpoints are refused before dispatch. A later `attach` call can borrow a terminal for a supported
 durable endpoint without owning the job's lifetime.
 
+Finite input may explicitly forbid Agentworks-controlled guest input staging with
+`Input.bytes(data, allow_staging=False)` or `Input.sensitive(data, allow_staging=False)`. The
+default permits staging. This choice is independent of sensitivity: suppression does not prevent
+input storage. A no-staging request must fit complete direct delivery or refuse before effects; it
+cannot silently switch to staged input. The initial MANAGED implementation persists its input and
+therefore refuses this choice for both `run` and `start` before preparation effects. This does not
+prohibit independently selected output retention, prevent the workload writing its own input, or
+promise that a provider retains no transport payload.
+
 Output defaults to bounded capture, with explicit discard or direct-streaming modes. Effective
 sensitivity combines bound environment metadata, an input sensitivity marker, and the request-wide
 `sensitive=True` option for caller-supplied source, environment or other payloads. A call can add

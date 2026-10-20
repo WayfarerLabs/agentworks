@@ -1806,6 +1806,53 @@ behind. Decision: the local publisher must own its temporary names and handle li
 cleanup debt on failure, and prove access metadata on Windows itself. Linux helper tests and Windows
 command serialization are not that evidence.
 
+## Tailscale join input
+
+Tailscale's
+[v1.104.1 CLI](https://github.com/tailscale/tailscale/blob/v1.104.1/cmd/tailscale/cli/up.go#L213-L250)
+resolves `file:` auth-key arguments by reading the named path, then trimming whitespace. The new
+Linux guest join can use the inherited stdin descriptor through `/dev/stdin`, keeping the actual key
+out of command arguments and avoiding a named key file. This is an integration candidate, not a
+native join result or proof for every preinstalled CLI version. Validate it with the complete
+prepared request and refuse unsupported delivery without staging or replay. Reading stdin through
+the CLI does not stop the provider from transporting it or establish provider-side retention policy.
+The earlier shell-variable expansion keeps the secret out of shell source but still puts it into the
+child argument vector; do not use it for the new path.
+
+## Proxmox creation rollback evidence
+
+The pinned PVE 8 and PVE 9 destroy endpoints accept no expected generation or configuration digest.
+An earlier association read is therefore not an atomic deletion precondition. The task identifies
+the destination VMID, node and API identity, not an independently enforced incarnation. Sources:
+[PVE 8 destroy](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/API2/Qemu.pm#L2672-L2790)
+and
+[PVE 9 destroy](https://github.com/proxmox/qemu-server/blob/80e0590e144359fd136a2ba1e3f44716bfc535b0/src/PVE/API2/Qemu.pm#L2786-L2906).
+
+Both deletion implementations catch disk-removal errors and continue to configuration removal. PVE 8
+emits ordinary warnings; PVE 9 uses counted warnings for disk-free failures. Consequently, even
+exact task success and missing VM configuration do not prove that all associated volumes were
+removed. Neither a failed configuration read nor authentication failure proves absence. Sources:
+[PVE 8 deletion internals](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/QemuServer.pm#L2219-L2303)
+and
+[PVE 9 deletion internals](https://github.com/proxmox/qemu-server/blob/80e0590e144359fd136a2ba1e3f44716bfc535b0/src/PVE/QemuServer.pm#L1838-L1926).
+
+Design consequence: retain exact creation association and resource-cleanup debt separately from
+request completion. Do not enable deletion after an unknown clone reply using its candidate VMID,
+add unsupported conditional fields, or clear volume debt from task success alone. Proving cleanup
+requires supported observations of the actual retained resources. This source audit supplies no
+native rollback result or process-loss reconciliation guarantee.
+
+Storage content listing is not that proof by itself. Both audited versions silently omit volumes
+whose per-volume permission check fails. The normal setup grants VM disk access through the pool;
+destroying the VM removes that membership. A surviving volume can therefore disappear from the
+token's listing without being deleted. Exact-volume lookup applies permission checks before the
+backend lookup and supplies no uniform absent-volume result. Sources:
+[PVE 8 content API](https://github.com/proxmox/pve-storage/blob/9aab8f6f52b314fda5e2aceef6472ffd21b7d5b3/src/PVE/API2/Storage/Content.pm#L152-L166),
+[PVE 9 content API](https://github.com/proxmox/pve-storage/blob/75b36a49f57fa7119a45bb69118c8c6eb58102d7/src/PVE/API2/Storage/Content.pm#L166-L180)
+and
+[PVE 9 access removal](https://github.com/proxmox/pve-access-control/blob/dff26b458651b4e1141ff0a41a296d2904b16228/src/PVE/AccessControl.pm#L1898-L1919).
+Adding those reads does not justify clearing debt or implicitly broadening operator permissions.
+
 ## Claims not relied upon
 
 - A common API makes every backend interactive.

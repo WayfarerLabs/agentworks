@@ -173,6 +173,37 @@ retain the same lifetime and reject closed admission before provider reads. Thes
 do not establish native acceptance, all-platform composition, public RunContext completion or
 general process-loss recovery.
 
+### Creation-to-canonical route lifetime
+
+Creation retains one outer VM lifetime across native bootstrap and canonical SSH preparation. That
+lifetime owns the original claim, deadline, platform access, actual platform delivery custody and
+finalization lock. Each selected route has a separate retained record for guest preparation, account
+preparation, namespace and file/execution views. Retain the record before its first preparation
+effect. A failed canonical preparation must not overwrite native cleanup evidence. The common
+preparation and view assembly accepts the already-selected binding and locator; it does not rebuild
+platform access, activate again or enter another claim-owning context.
+
+Route body admission and owner admission are different lifetimes. Revoke the native body views
+before admitting canonical work, without releasing availability or sealing the original owner. Do
+not perform a second route's preparation while an earlier route retains an active borrow or
+unsettled delivery. This is sequential handoff, not concurrent execution through both routes.
+
+Aggregate teardown must operate in passes across the retained routes, not close each route from
+start to finish. First revoke every body view and stop owner admission. Retire existing closing
+helpers before admitting fresh cleanup, drain managed keepers and settle actual delivery. Settle
+completed file and namespace bookkeeping across all routes before resolving any execution lifetime:
+a later route can hold the single owner-wide borrow needed by an earlier route's resolution. Then
+finish execution and artifact cleanup, verify preparation and identity custody, and settle platform
+work. Only the outer lifetime checks the complete ledger, seals obligations, records resolved
+effects and releases the claim. Interrupted final release retries the same owner without querying a
+claim that may already have been removed.
+
+The implementation proof needs two-route failures, not merely repeated single-route success:
+later-route file bookkeeping blocking earlier-route resolution, interrupted second-route namespace
+preparation, and a later-route closing helper preventing earlier-route fresh cleanup. Preserve both
+routes and the original control-fact chain when any pass remains unresolved. These are required
+composition mechanics, not a claim that creation or native acceptance is complete.
+
 ### Local Lima composition
 
 Explicit local preparation pins the installed client and absolute Lima home. Provider observation
