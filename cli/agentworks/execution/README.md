@@ -1773,9 +1773,9 @@ endpoints. Supported small inline calls retain their existing behavior. `Input.b
 `allow_staging=False` refuses complete requests that require Agentworks to stage input or its
 envelope in the guest filesystem; MANAGED execution always requires that staging and refuses this
 choice before effects. DIRECT uses the small entry or refuses before dispatch. Sensitivity controls
-output and diagnostics independently of storage. This input policy permits output capture files
-and does not prevent pipe, kernel or provider memory, provider retention, or a workload writing its
-own stdin. Input staging and capture retention are separate choices.
+output and diagnostics independently of storage. This input policy permits output capture files and
+does not prevent pipe, kernel or provider memory, provider retention, or a workload writing its own
+stdin. Input staging and capture retention are separate choices.
 
 The private default capture limit remains 4,096 bytes per application stream. Explicitly larger
 finite capture on a numerically bound Linux VM uses a separate fixed capture entry under the same
