@@ -191,6 +191,7 @@ def _prepare_created_context(
     # Admit endpoint-independent local policy before provider effects. This
     # passive unspecified-address connection is never used for delivery; the
     # observed guest IPv4 and current policy are admitted again after bootstrap.
+    provider_locator_remaining(deadline, vm_name=workflow.vm_name)
     admit_connection(vm_ssh_connection(vm, "0.0.0.0", settings))
     provider_locator_remaining(deadline, vm_name=workflow.vm_name)
     creation = platform.build_creation_access(request, ctx, owner=workflow.owner, custody=workflow.local_delivery)
