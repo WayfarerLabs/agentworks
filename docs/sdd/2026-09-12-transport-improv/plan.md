@@ -26,7 +26,29 @@ transport-side implementation, local tests and successive joint live reports. Th
 [proof evidence](proof-lld.md) records acceptance of the finite-input slice and its limits. No
 broad-build or production-cutover gate is completed by those measurements.
 
-## Current acceptance checkpoint, 2026-10-06
+## Current acceptance checkpoint, 2026-10-20
+
+PR #833 remains draft, without `review-requested`, in public feedback/fix round 1 of the
+operator-authorized 3. Its published head is `f2dae36ae`. No new public handoff or native acceptance
+is claimed by private verification.
+
+The clean private candidate `09e4abfdc` passes 289 local cloud-creation and adjacent composition
+tests, full strict typing across 1,609 source files, and lint/format checks for the 29 changed Python
+files. The run uses the existing isolated tool environment, blocks external networking, verifies
+normal and isolated imports against candidate source hashes, and confirms source, runner,
+environment, HEAD and worktree status remain unchanged. Its measured retained output is 42,808 KiB;
+earlier failed fixtures remain preserved. This closes the local verification gap for the Azure
+test-transport calling-convention correction, not real AWS, Azure or GCP provisioning acceptance.
+
+The independent architecture, requirements and operability assessments identify unfinished cleanup
+and recovery composition, not grounds for discarding the interface or its implementation. Exact
+retained upload cleanup, successor handling of prepared-stage in-flight markers, and supported
+native recovery that restores ordinary admission remain open. So do SSH first-contact continuity,
+complete supported-platform evidence, production caller migration and physical legacy removal.
+None of those gates is completed by passing the cloud selection, and this checkpoint changes no
+requirement, delivery boundary or permission-enforcement ruling.
+
+### Public round-1 starting checkpoint, 2026-10-06
 
 Public feedback/fix round 1 of the operator-authorized 3 began after the one-hour collection window
 and the complete
