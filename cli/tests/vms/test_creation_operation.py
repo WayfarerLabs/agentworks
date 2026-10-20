@@ -341,6 +341,22 @@ def test_body_exception_after_bootstrap_retains_addressable_vm_without_initializ
     assert h.access.transferred and not h.access.rollback and h.db.operations.inspect(_SCOPE) is None
 
 
+def test_closing_keeps_provider_selection_checks_available_without_reopening_body(harness):
+    h = harness
+    with h.operation():
+        canonical = h.routes[1]
+        check = canonical.execution_operation._route_check
+        assert check is not None
+        h.workflow.body_admission_closed = True
+        h.access.owner.stop_admission()
+        fresh = Deadline.after(30)
+        check(fresh)
+        assert h.events[-2:] == [("power", fresh), ("locator", fresh)]
+        with pytest.raises(StateError):
+            canonical.execution.run(Command(("true",)), profile=Protection.DIRECT, deadline=fresh)
+    assert h.db.operations.inspect(_SCOPE) is None
+
+
 @pytest.mark.parametrize("committed", [False, True])
 def test_address_write_failure_reconciles_actual_commit_without_bootstrap_replay(harness, monkeypatch, committed):
     h = harness

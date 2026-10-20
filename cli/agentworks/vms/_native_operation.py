@@ -310,8 +310,7 @@ def _prepare(
 
     def check_canonical(deadline: Deadline) -> None:
         """Revalidate the retained provider and pinned canonical selection without activation."""
-        if workflow.body_admission_closed:
-            raise StateError("VM operation no longer admits body work")
+        # Cleanup retains this selection check after public body admission closes.
         provider_locator_remaining(deadline, vm_name=vm_name)
         claim = db.operations.inspect(workflow.owner.ownership.scope)
         if claim is None or claim.ownership != workflow.owner.ownership:

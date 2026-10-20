@@ -36,7 +36,7 @@ class CreationSSHTrust:
     """Enroll once, publish complete policy, and retain exact local writer debt.
 
     Construction is passive. The outer workflow retains this object before
-    prepare and closes it before route cleanup. Successful preparation settles
+    prepare and closes it after route cleanup but before owner release. Successful preparation settles
     its own obligation before the canonical route borrows the owner. Uncertain
     global publication stays unresolved after writer cleanup; close never replays it.
     """

@@ -237,8 +237,8 @@ def _prepare_created_context(
     selected_metadata = dict(vm.platform_metadata)
 
     def check_canonical(budget: Deadline) -> None:
-        if workflow.body_admission_closed:
-            raise StateError("VM creation no longer admits body work")
+        # Selection evidence also authorizes retained cleanup after body admission
+        # closes. Public interfaces separately reject new body operations.
         provider_locator_remaining(budget, vm_name=workflow.vm_name)
         with workflow.row_transaction() as current:
             if current.tailscale_host != workflow.address or current.platform_metadata != selected_metadata:
