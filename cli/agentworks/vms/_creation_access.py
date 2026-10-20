@@ -16,6 +16,16 @@ if TYPE_CHECKING:
     from agentworks.execution.carrier import Deadline
 
 
+def creation_metadata_snapshot(metadata: Mapping[str, str]) -> dict[str, str]:
+    """Copy metadata crossing the independently implemented platform boundary."""
+    if not isinstance(metadata, Mapping):
+        raise ValidationError("VM creation metadata must map strings to strings")
+    snapshot = dict(metadata)
+    if any(not isinstance(key, str) or not isinstance(value, str) for key, value in snapshot.items()):
+        raise ValidationError("VM creation metadata must map strings to strings")
+    return snapshot
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class VMCreationResult:
     """Observed public addressability and delivery, never a legacy transport.
@@ -30,13 +40,10 @@ class VMCreationResult:
     locator: ProviderLocator
 
     def __post_init__(self) -> None:
-        if not isinstance(self.platform_metadata, Mapping) or any(
-            not isinstance(key, str) or not isinstance(value, str) for key, value in self.platform_metadata.items()
-        ):
-            raise ValidationError("VM creation metadata must map strings to strings")
+        metadata = creation_metadata_snapshot(self.platform_metadata)
         if type(self.binding) is not NativeExecutionBinding or type(self.locator) is not ProviderLocator:
             raise ValidationError("VM creation requires an independent binding and observed provider locator")
-        object.__setattr__(self, "platform_metadata", MappingProxyType(dict(self.platform_metadata)))
+        object.__setattr__(self, "platform_metadata", MappingProxyType(metadata))
 
 
 class OwnedVMCreationAccess(OwnedVMPlatformAccess, Protocol):
