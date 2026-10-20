@@ -68,6 +68,10 @@ class _Secrets:
         return TOKEN
 
 
+def _ready_guest_info() -> dict[str, object]:
+    return {"result": {"version": "9.0", "supported_commands": []}}
+
+
 @dataclass
 class Harness:
     database: Database
@@ -79,9 +83,7 @@ class Harness:
     access: ProxmoxOwnedCreationAccess
     clock: list[float] = field(default_factory=lambda: [100.0])
     guest_info: list[dict[str, object] | BaseException] = field(default_factory=list)
-    default_guest_info: dict[str, object] | BaseException = field(
-        default_factory=lambda: {"result": {"version": "9.0", "supported_commands": []}}
-    )
+    default_guest_info: dict[str, object] | BaseException = field(default_factory=_ready_guest_info)
     calls: list[tuple[_Endpoint, str, int]] = field(default_factory=list)
     bodies: list[tuple[_Endpoint, bytes]] = field(default_factory=list)
     power: str = "stopped"
@@ -301,7 +303,7 @@ def owned(database: Database, request: pytest.FixtureRequest, monkeypatch: pytes
 
 def test_passive_factory_then_public_bootstrap_retains_exact_owner_and_connection(owned: Harness) -> None:
     access = owned.access
-    assert owned.calls == owned.secrets.calls == [] and access.platform_metadata == {} and owned.row() is None
+    assert not owned.calls and not owned.secrets.calls and access.platform_metadata == {} and owned.row() is None
     assert JOIN_KEY not in repr(access) and TOKEN not in repr(access)
     result = access.provision(Deadline.after(5))
     assert owned.secrets.calls == ["pve-token"]
@@ -536,7 +538,7 @@ def test_pure_input_refusal_precedes_secret_delivery(owned: Harness, invalid: st
         platform.build_creation_access(
             provision, RunContext(secrets=owned.secrets), owner=owned.owner, custody=owned.custody
         )
-    assert owned.calls == owned.secrets.calls == []
+    assert not owned.calls and not owned.secrets.calls
 
 
 def test_unused_rollback_is_passive_and_settles_without_resource_adoption(owned: Harness) -> None:
@@ -545,7 +547,7 @@ def test_unused_rollback_is_passive_and_settles_without_resource_adoption(owned:
         owned.access.provision(Deadline.after(5))
     owned.owner.stop_admission()
     assert owned.access.settle(Deadline.after(1))
-    assert owned.access.platform_metadata == {} and owned.row() is None and owned.calls == owned.secrets.calls == []
+    assert owned.access.platform_metadata == {} and owned.row() is None and not owned.calls and not owned.secrets.calls
 
 
 @pytest.mark.parametrize("committed", [False, True])
@@ -705,7 +707,7 @@ def test_provision_fences_actual_owner_before_secret_delivery_or_candidate_read(
     try:
         with pytest.raises(StateError):
             access.provision(Deadline.after(5))
-        assert owned.calls == owned.secrets.calls == []
+        assert not owned.calls and not owned.secrets.calls
         assert access.clone is None and access.platform_metadata == {} and access._resource_history == []
         if successor is not None:
             claim = repository.inspect(owner.ownership.scope)
