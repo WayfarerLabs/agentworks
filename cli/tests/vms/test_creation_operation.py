@@ -207,6 +207,7 @@ def harness(tmp_path, monkeypatch, creation_request):
 
         monkeypatch.setattr(_native_operation, "prepare_managed_vm_target_from_platform", prepare)
         monkeypatch.setattr(_native_operation, "prepare_target_identity", identity)
+        h.prepare_target = prepare
         h.prepare_identity = identity
         assemble = _native_operation._prepare_route
 
@@ -230,6 +231,7 @@ def harness(tmp_path, monkeypatch, creation_request):
 
         monkeypatch.setattr(creation, "bootstrap_created_guest", bootstrap)
         monkeypatch.setattr(creation, "attest_created_guest", attest)
+        h.attest_guest = attest
 
         class Trust:
             def __init__(
@@ -307,8 +309,9 @@ def test_creation_result_requires_exact_publication_fact(harness, fact):
     h = harness
     with pytest.raises(ValidationError):
         VMCreationResult({}, h.binding, h.locator, ssh_trust_published=fact)
+    unchecked_constructor: Callable[..., VMCreationResult] = VMCreationResult
     with pytest.raises(TypeError):
-        VMCreationResult({}, h.binding, h.locator)
+        unchecked_constructor({}, h.binding, h.locator)
     assert not h.events and h.access is None
 
 
@@ -322,8 +325,7 @@ def test_public_publication_has_one_writer_and_canonical_readmits_current_strict
     h.ctx.config.operator.ssh = p.settings
     h.ssh_trust_published = True
     provision, settle = _CreationAccess.provision, _CreationAccess.settle
-    prepare = _native_operation.prepare_managed_vm_target_from_platform
-    attest = creation.attest_created_guest
+    prepare, attest = h.prepare_target, h.attest_guest
     publications, retained, canonical_admissions = [], [], []
 
     def publish(*args, **kwargs):

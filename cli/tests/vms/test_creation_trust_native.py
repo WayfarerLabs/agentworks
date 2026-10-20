@@ -23,6 +23,7 @@ from agentworks.execution.carriers.ssh.enrollment import (
     SSHCreationProvenance,
     SSHEnrollmentCandidate,
     SSHEnrollmentCustody,
+    enroll_new_target,
 )
 from agentworks.execution.carriers.ssh.trust import (
     SSHTrustStatus,
@@ -66,7 +67,7 @@ def native_trust(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Na
             db.operations, OperationScope(OperationResourceKind.VM, "box"), "native-creation-trust"
         )
         writes: list[str] = []
-        original_enroll, original_refresh = composition.enroll_new_target, composition.refresh_trust
+        original_enroll, original_refresh = enroll_new_target, refresh_trust
 
         def selected(
             vm_name: str,

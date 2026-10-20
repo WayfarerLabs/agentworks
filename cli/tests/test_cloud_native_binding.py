@@ -167,6 +167,7 @@ def cloud(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> An
             ],
         )
         platform._clients = NS(client=lambda *a: NS(get=lambda **kw: read("vm", **kw)))
+    vm.instance_marker = "c" * 32
     return NS(kind=request.param, platform=platform, vm=vm, data=data, calls=calls)
 
 
@@ -194,7 +195,12 @@ def test_explicit_passive_binding_and_fresh_delivery(cloud: Any, account: str) -
     cloud.vm.admin_username = account
     binding = _resolve(cloud)
     connection = binding.carrier._connection
-    assert (connection.host, connection.port, connection.user, connection.host_key_alias) == (IP, 22, account, None)
+    assert (connection.host, connection.port, connection.user, connection.host_key_alias) == (
+        IP,
+        22,
+        account,
+        "agw-vm-" + cloud.vm.instance_marker,
+    )
     assert connection.identity_file == SETTINGS.identity_file
     assert connection.trust == ManagedSSHTrust(SETTINGS.trust_store)
     assert (connection.agent_socket, connection.ssh_executable) == (SETTINGS.agent_socket, SETTINGS.ssh_executable)
