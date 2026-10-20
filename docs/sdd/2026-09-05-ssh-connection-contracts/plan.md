@@ -226,17 +226,16 @@ proves that restoring old TOML does not discard current managed policy, revocati
 partial-update custody. Production writer coexistence and rollback through both usable RunContext
 paths still require transport composition and native acceptance.
 
-Composition `bb28089f` integrates published transport `4fe56a0c`: one retained creation owner across
-native bootstrap, durable publication, settled enrollment/full-policy publication and canonical SSH
-preparation. Three source reviews find no material defect. Root passes 2,537 affected cases with 12
-skips and all fifteen static/website entries. The
-[current composition record](phase2-transport-results.md#creation-durable-publication-and-canonical-ssh-composition)
-retains exact pins, original red evidence and simulation limits. Published `763e58bb` CI passes all
-ten jobs at its older `7073d220` composition; it does not validate the new join. The last complete
-local run at `6f1569e0` retains 22 host-fixture failures and 22,279 passes. Actual rollback,
-complete native creation/trust, writer coexistence, factories, production adoption,
-terminal/presentation and both usable additive RunContext paths remain required. Full Phase 2 and
-R1-R5 acceptance stay open; no completion checkbox or lock changes.
+Composition `b7bd45ed` adds published transport `5d008f99` fixed Proxmox rollback wire operations
+and explicit setup-role guidance. It preserves the preceding one-owner creation/trust/canonical
+composition but implements no rollback controller. Three source reviews find no material defect.
+Root passes 1,223 affected cases without skips and all fifteen static/website entries. The
+[current composition record](phase2-transport-results.md#proxmox-rollback-wire-composition) retains
+exact pins, component-only scope and original red evidence. The last complete local run at
+`6f1569e0` retains 22 host-fixture failures and 22,279 passes. Actual rollback, complete native
+creation/trust, writer coexistence, factories, production adoption, terminal/presentation and both
+usable additive RunContext paths remain required. Full Phase 2 and R1-R5 acceptance stay open; no
+completion checkbox or lock changes.
 
 The deferred native fixture increment at `37c7840c` uses actual `SSHCarrier.execute`, requires guest
 status 37 and retains failed or uncertain evidence. Three independent source lanes find no material

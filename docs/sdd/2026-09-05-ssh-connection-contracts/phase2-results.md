@@ -3,17 +3,15 @@
 - Updated: 2026-10-20
 - PR: [#832](https://github.com/WayfarerLabs/agentworks/pull/832), draft
 - Main/contract base: `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (#830)
-- State: evaluated composition `bb28089f` incorporates published transport `4fe56a0c`: retained
-  creation-to-canonical orchestration, durable checkpoints and settled enrollment/full-policy
-  publication. Three independent source reviews find no material defect. Root passes 2,537 affected
-  cases with 12 skips and all fifteen static/website entries. The new fixtures simulate provider,
-  guest and native delivery boundaries; actual rollback, complete native creation/trust, remaining
-  factories and production adoption are unfinished. Published `763e58bb` CI is green across all ten
-  jobs at its older exact `7073d220` composition, not this new join. The last complete local suite
-  retains 22 host-fixture failures and 22,279 passes. Supported-platform terminal/presentation,
-  Windows keyboard policy/evidence, writer coexistence/rollback, both usable additive RunContext
-  paths and full R1-R5 remain required. The
-  [current composition record](phase2-transport-results.md#creation-durable-publication-and-canonical-ssh-composition)
+- State: evaluated composition `b7bd45ed` incorporates published transport `5d008f99`: fixed Proxmox
+  rollback wire operations and explicit setup-role guidance, preserving the preceding retained
+  creation-to-canonical workflow. Root passes 1,223 affected cases without skips and all fifteen
+  static/website entries. No production rollback caller or native resource-deletion proof follows.
+  Complete native creation/trust, actual rollback, remaining factories, production adoption, writer
+  coexistence/rollback, both usable additive RunContext paths, supported-platform
+  terminal/presentation, Windows keyboard evidence and full R1-R5 remain required. The last full
+  local suite retains 22 host-fixture failures and 22,279 passes. The
+  [current composition record](phase2-transport-results.md#proxmox-rollback-wire-composition)
   preserves exact pins, gates, original failures and limits.
 
 Earlier checkpoint evidence and dependency history live in separate files. The headings below retain

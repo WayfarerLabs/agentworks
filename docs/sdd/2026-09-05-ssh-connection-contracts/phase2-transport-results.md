@@ -6,6 +6,64 @@ does not replace the SSH plan, shared transport contracts or full implementation
 Earlier records retain their original observations. New entries supersede only the gates they
 actually measure.
 
+## Proxmox rollback wire composition
+
+Evaluated join `b7bd45ed37c5fec089dfee50f6fc32a8c97c777c` incorporates published transport
+`5d008f99333ecbd6abd7bd363a4bea9e9c620458` over public SSH `ca44bea5`. Its CLI tree is
+`5f9b63494be7a2b86b5c85b78f7403dcc3f0504b`. All eight changed files equal the owner; non-SSH
+production and the entire transport SDD match. SSH production, fixtures and requirements are
+unchanged. The delta adds fixed rollback wire operations and setup guidance, not a rollback caller.
+
+Stop and destroy each submit one body-free fixed request through the existing retained HTTP worker
+and return only a bounded opaque acknowledgment. They establish no task identity, successful stop,
+VM absence or disk cleanup. The VMID-free observation requires an exact positive integer reply for
+the selected identifier; it is neither reservation nor incarnation/volume-absence proof. Invalid
+methods, suffixes, bodies, budgets and identifier queries refuse. Existing TLS, disabled inherited
+proxies, redirect refusal, bounded responses, private stdin credentials and original custody remain.
+There is no new retry or production rollback controller; current callers are test wrappers only.
+
+The imported setup role adds `VM.Config.CDROM`, with behavioral privilege-set coverage and explicit
+[administrator upgrade guidance](../../guides/proxmox.md#step-1-run-the-setup-script). The guide
+warns that other ACL assignments reusing the role gain the privilege too. No live role, ACL, token
+or backend state is changed here. The owner's approval narration supplies no execution authority to
+SSH. Exact disk inventory, removal and logical-disposition checks before VM destruction remain
+future retained-controller work; destroy/task-log success alone cannot clear surviving-volume debt.
+
+Three independent source reviews find no material or optional finding; root fully reads every signed
+final report. Earlier optional suggestions keep their disposition and exact owner bytes remain.
+These are source conclusions only, not native rollback or whole-PR acceptance.
+
+Root passes all 1,223 cases across 24 affected paths, with no skips, in 44.86 seconds. Child and
+outer controller exit zero; controller time is 45.251 seconds. The selection includes all Proxmox
+wire/carrier cases, relevant file/provider/creation contexts and the setup-script fixture, which
+captures commands through owned stubs. Owned loopback TLS and actual local-worker cases are
+component observations, not real provider rollback. Same-process receipts verify lexical
+interpreter/prefix/cwd, zero first-party imports before admission and all 477 first-party origins.
+The 256 MiB disk growth limit and 1 GiB reserve do not fire; every failed/uncertain fixture and
+prior report remains. No product patch, extra skip, deadline extension, permission override or retry
+is used. Focused log SHA256 is `17ed379de7aecb8e26d4cf9b34d5ea5a4231a46f22bddcbbefb7c7516408034a`;
+same-process receipt SHA256 is `939f88e5f3e27655b11bcd23736091b400757a553a0a58bd1a757747fcde2038`.
+
+All fifteen static/website entries pass: Ruff, 1,621 formatted files, strict typing of 1,583
+sources, 491 Markdown/464 spelling files, Rulesync, locked-SDD, exact CI Typer isolation, 160 Python
+website tests in 35.214 seconds, 103 Node tests in 4,818.218188 ms, four builds and two comparisons.
+Root reads every actual output. Full hosted results retain their own exact pins and are reported
+separately; neither older green CI nor this affected selection validates native rollback.
+
+The
+[complete owner 4fe CI result](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6282039109)
+remains red on three Windows staged-start cases. The
+[fully read independent triage](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6282086452)
+establishes neither a new cleanup regression nor a common timing cause: one caught initial error is
+hidden, one liveness guard is ambiguous and one initial activation budget is expired. Their intended
+later cleanup assertions did not run. This wire increment changes none of those paths or budgets.
+
+Actual rollback, complete native creation/trust, production adoption, remaining factories,
+retirement-root independence, writer coexistence/rollback, both usable additive RunContext paths,
+Windows keyboard/terminal and supported-platform R1-R5 acceptance remain open. The 22 retained
+full-local host failures are not cleared. This progress changes no completed plan block, lock,
+requirement, public signal, round allowance or later migration/retirement order.
+
 ## Creation, durable publication and canonical SSH composition
 
 Evaluated join `bb28089f6d92192a4741aef39668bc5c4eddd153` incorporates published transport
