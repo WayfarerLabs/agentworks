@@ -359,11 +359,15 @@ def test_fresh_cleanup_transfers_known_completion_and_removes_only_exact_allow(o
         p.clock[0] = 192.0
     p.access.complete_bootstrap(Deadline.after(60))
     p.access.request_rollback()
+    allow = p.access._resources.resources["allow"]
+    delete_request = allow.delete_request
     assert p.access.settle(Deadline.after(60))
     assert ZONAL + "/instances/sample" in p.api.live and result.platform_metadata["boot_disk"] in p.api.live
     assert len([method for method, _path in p.api.calls if method == "POST"]) == 3
     deletes = [path for method, path in p.api.calls if method == "DELETE"]
-    assert deletes == [GLOBAL + "/firewalls/" + result.platform_metadata["allow_rule"]]
+    assert allow.path == GLOBAL + "/firewalls/" + result.platform_metadata["allow_rule"]
+    assert allow.delete_request == delete_request
+    assert deletes == [allow.path + "?requestId=" + delete_request]
     assert GLOBAL + "/firewalls/" + result.platform_metadata["deny_rule"] in p.api.live
     assert not p.owner.list_pending_lifecycle_obligations()
 

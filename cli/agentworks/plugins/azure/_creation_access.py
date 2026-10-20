@@ -14,7 +14,6 @@ from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs
 from agentworks.db import OperationResourceKind, VMRow, VMStatus
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution.binding import _IndependentJobAvailability
-from agentworks.execution.carrier import Deadline
 from agentworks.operations import OperationOwner
 from agentworks.plugins.azure._creation_request import AzureCreationRequests, remaining
 from agentworks.plugins.azure._creation_resources import planned_disk_id, resource_plan
@@ -34,6 +33,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform.base import ProvisionRequest
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.binding import NativeExecutionBinding
+    from agentworks.execution.carrier import Deadline
     from agentworks.plugins.azure.platform import AzureVMPlatform
     from agentworks.vms._creation_ssh import SSHReadiness
 

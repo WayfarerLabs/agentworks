@@ -18,7 +18,6 @@ from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution.binding import NativeExecutionBinding, _EarlyGuestFactsRoute, _IndependentJobAvailability
-from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.ssh import SSHCarrier
 from agentworks.operations import OperationOwner
 from agentworks.plugins.gcp._creation_api import CreationAPI, remaining
@@ -47,6 +46,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform.base import ProvisionRequest
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
+    from agentworks.execution.carrier import Deadline
     from agentworks.plugins.gcp.platform import GCEPlatform
 
 
