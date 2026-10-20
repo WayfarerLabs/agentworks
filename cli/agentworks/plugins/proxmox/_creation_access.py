@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import time
 from dataclasses import asdict, dataclass, replace
@@ -11,7 +10,6 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.db import LifecycleObligationState, OperationResourceKind, VMStatus
 from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES
 from agentworks.errors import ConfigError, StateError, ValidationError
@@ -37,6 +35,7 @@ from agentworks.plugins.proxmox._creation import (
 from agentworks.plugins.proxmox._creation_bootstrap import ProxmoxCreationBootstrap
 from agentworks.plugins.proxmox._native_access import _guest_info_responded
 from agentworks.plugins.proxmox._native_binding import proxmox_native_binding
+from agentworks.plugins.proxmox._provider_locator import proxmox_provider_locator
 from agentworks.secrets.line_safety import LineOrientedSecretUse, require_line_safe_secret
 from agentworks.vms._creation_access import VMCreationResult
 from agentworks.vms.identity import validate_vm_instance_marker
@@ -45,7 +44,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from agentworks.capabilities.base import RunContext
-    from agentworks.capabilities.vm_platform.base import ProvisionRequest
+    from agentworks.capabilities.vm_platform.base import ProviderLocator, ProvisionRequest
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
     from agentworks.execution.binding import NativeExecutionBinding
@@ -66,7 +65,6 @@ class _ResourceIntent:
     instance_marker: str
     vmgenid: str
     smbios_uuid: str | None = None
-    provisioned: bool = False
     accepted: bool = False
 
 
@@ -149,8 +147,6 @@ class ProxmoxOwnedCreationAccess:
         self._lock = Lock()
         self._used = False
         self._rollback_requested = False
-        self._accepted = False
-        self._deadline: Deadline | None = None
         self._wire: _ProxmoxWire | None = None
         self._binding: NativeExecutionBinding | None = None
         self._locator: ProviderLocator | None = None
@@ -199,7 +195,13 @@ class ProxmoxOwnedCreationAccess:
         try:
             if self._used or self._rollback_requested:
                 raise StateError("Proxmox creation cannot be admitted again")
-            self._used, self._deadline = True, deadline
+            self._used = True
+            with self._owner._guard:
+                self._owner._reconcile_transition_locked()
+                self._owner._require_dispatch_admission_locked()
+                self._owner._require_no_active_work_locked()
+                if self._owner._obligations_sealed or self._owner._recovery_owner:
+                    raise StateError("Proxmox creation requires an unsealed ordinary operation owner")
             token = require_line_safe_secret(
                 self._ctx.secret(self._token_name),
                 use=LineOrientedSecretUse.PROXMOX_API,
@@ -270,12 +272,8 @@ class ProxmoxOwnedCreationAccess:
                 custody=self._custody,
                 deadline=deadline,
             )
-            observation = self.bootstrap.start()
-            if not observation.bootstrap_succeeded:
-                raise StateError("Proxmox creation bootstrap completion is unproved")
+            self.bootstrap.start()
             self._result = VMCreationResult(self.platform_metadata, self._binding, self._locator)
-            self._resource_history.append(replace(self._resource_history[-1], provisioned=True))
-            self._reconcile_resource()
             _remaining(deadline)
             return self._result
         finally:
@@ -305,13 +303,8 @@ class ProxmoxOwnedCreationAccess:
         assert self._wire is not None
         connection = self._wire._connection
         generation = _canonical_uuid(config.get("vmgenid"))
-        framed = json.dumps(
-            ("agentworks.proxmox.provider-locator.v1", connection.api_url, connection.vmid, generation),
-            ensure_ascii=True,
-            separators=(",", ":"),
-        ).encode("ascii")
         _remaining(deadline)
-        return ProviderLocator("proxmox:v1:" + hashlib.sha256(framed).hexdigest())
+        return proxmox_provider_locator(connection.api_url, connection.vmid, generation)
 
     def observe_power(self, deadline: Deadline) -> VMStatus:
         self._current_config(deadline)
@@ -378,7 +371,7 @@ class ProxmoxOwnedCreationAccess:
         ):
             raise StateError("Proxmox created-resource custody conflicts")
         unused = self.clone is None or not self.clone.wire_effect_possible
-        can_resolve = self._custody.settled and (unused or self._accepted)
+        can_resolve = self._custody.settled and (unused or self._resource_history[-1].accepted)
         if row.state is LifecycleObligationState.RESOLVED:
             if not can_resolve or revision != len(self._resource_history) - 1:
                 raise StateError("Proxmox created-resource custody was prematurely resolved")
@@ -438,8 +431,7 @@ class ProxmoxOwnedCreationAccess:
             if self._rollback_requested or self._result is None or not self._settle_controllers(deadline):
                 raise StateError("Proxmox bootstrap resource transfer is unproved")
             self._reconcile_resource()
-            if not self._accepted:
-                self._accepted = True
+            if not self._resource_history[-1].accepted:
                 self._resource_history.append(replace(self._resource_history[-1], accepted=True))
             self._reconcile_resource()
             _remaining(deadline)
@@ -448,7 +440,7 @@ class ProxmoxOwnedCreationAccess:
 
     def request_rollback(self) -> None:
         with self._lock:
-            if self._accepted:
+            if self._resource_history and self._resource_history[-1].accepted:
                 raise StateError("Proxmox bootstrap rollback window has closed")
             self._rollback_requested = True
 

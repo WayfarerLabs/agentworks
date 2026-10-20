@@ -30,7 +30,7 @@ from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers._proxmox_http import _Endpoint
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, _ProxmoxWire, _WireFailure
 from agentworks.operations import OperationOwner
-from agentworks.plugins.proxmox._creation_access import RESOURCE_KIND, ProxmoxOwnedCreationAccess
+from agentworks.plugins.proxmox._creation_access import RESOURCE_KIND, ProxmoxOwnedCreationAccess, _ResourceIntent
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY
 
@@ -413,7 +413,7 @@ def test_lost_wire_reply_keeps_actual_controller_and_original_control_without_re
 def test_clone_ack_bookkeeping_retains_same_controller_and_observes_without_replay(
     owned: Harness, monkeypatch: pytest.MonkeyPatch, committed: bool
 ) -> None:
-    repository = owned.database.operations
+    repository = owned.owner._repository
     original = repository.publish_lifecycle_obligation_payload
     primary = KeyboardInterrupt("clone acknowledgment bookkeeping")
 
@@ -463,7 +463,8 @@ def test_acceptance_reply_loss_cannot_reopen_rollback(
     owned: Harness, monkeypatch: pytest.MonkeyPatch, committed: bool
 ) -> None:
     owned.access.provision(Deadline.after(5))
-    original = owned.database.operations.resolve_lifecycle_obligation
+    repository = owned.owner._repository
+    original = repository.resolve_lifecycle_obligation
     primary = KeyboardInterrupt("transfer resolve reply")
 
     def lost(ownership: OperationOwnership, obligation_id: str) -> LifecycleObligation:
@@ -473,13 +474,13 @@ def test_acceptance_reply_loss_cannot_reopen_rollback(
             raise primary
         return original(ownership, obligation_id)
 
-    monkeypatch.setattr(owned.database.operations, "resolve_lifecycle_obligation", lost)
+    monkeypatch.setattr(repository, "resolve_lifecycle_obligation", lost)
     with pytest.raises(KeyboardInterrupt) as caught:
         owned.access.complete_bootstrap(Deadline.after(1))
     assert caught.value is primary
     with pytest.raises(StateError):
         owned.access.request_rollback()
-    monkeypatch.setattr(owned.database.operations, "resolve_lifecycle_obligation", original)
+    monkeypatch.setattr(repository, "resolve_lifecycle_obligation", original)
     before = owned.calls.copy()
     owned.owner.stop_admission()
     assert owned.access.settle(Deadline.after(1)) and owned.calls == before
@@ -551,7 +552,8 @@ def test_unused_rollback_is_passive_and_settles_without_resource_adoption(owned:
 def test_resource_arm_interruption_before_clone_wire_can_discharge_unused_intent(
     owned: Harness, monkeypatch: pytest.MonkeyPatch, committed: bool
 ) -> None:
-    original = owned.database.operations.mark_lifecycle_obligation_possible_effect
+    repository = owned.owner._repository
+    original = repository.mark_lifecycle_obligation_possible_effect
     primary = KeyboardInterrupt("resource arm reply")
 
     def lost(ownership: OperationOwnership, obligation_id: str) -> LifecycleObligation:
@@ -560,14 +562,14 @@ def test_resource_arm_interruption_before_clone_wire_can_discharge_unused_intent
             original(ownership, obligation_id)
         raise primary
 
-    monkeypatch.setattr(owned.database.operations, "mark_lifecycle_obligation_possible_effect", lost)
+    monkeypatch.setattr(repository, "mark_lifecycle_obligation_possible_effect", lost)
     with pytest.raises(KeyboardInterrupt) as caught:
         owned.access.provision(Deadline.after(5))
     assert caught.value is primary
     clone = owned.access.clone
     assert clone is not None and not clone.wire_effect_possible and clone.association is None
     assert owned.access.platform_metadata == {}
-    monkeypatch.setattr(owned.database.operations, "mark_lifecycle_obligation_possible_effect", original)
+    monkeypatch.setattr(repository, "mark_lifecycle_obligation_possible_effect", original)
     owned.access.request_rollback()
     owned.owner.stop_admission()
     assert owned.access.settle(Deadline.after(1))
@@ -581,7 +583,8 @@ def test_acceptance_publication_loss_preserves_closed_window_and_exact_transfer(
     owned: Harness, monkeypatch: pytest.MonkeyPatch, committed: bool
 ) -> None:
     owned.access.provision(Deadline.after(5))
-    original = owned.database.operations.publish_lifecycle_obligation_payload
+    repository = owned.owner._repository
+    original = repository.publish_lifecycle_obligation_payload
     primary = KeyboardInterrupt("transfer publication reply")
 
     def lost(
@@ -603,13 +606,13 @@ def test_acceptance_publication_loss_preserves_closed_window_and_exact_transfer(
             )
         raise primary
 
-    monkeypatch.setattr(owned.database.operations, "publish_lifecycle_obligation_payload", lost)
+    monkeypatch.setattr(repository, "publish_lifecycle_obligation_payload", lost)
     with pytest.raises(KeyboardInterrupt) as caught:
         owned.access.complete_bootstrap(Deadline.after(1))
     assert caught.value is primary
     with pytest.raises(StateError):
         owned.access.request_rollback()
-    monkeypatch.setattr(owned.database.operations, "publish_lifecycle_obligation_payload", original)
+    monkeypatch.setattr(repository, "publish_lifecycle_obligation_payload", original)
     before = owned.calls.copy()
     owned.owner.stop_admission()
     assert owned.access.settle(Deadline.after(1)) and owned.calls == before
@@ -670,3 +673,103 @@ def test_unavailable_readiness_with_unsettled_actual_delivery_cannot_retry(
         owned.access.provision(Deadline.after(5))
     assert len(attempts) == 1 and not owned.custody.settled
     assert owned.clock[0] == 100.0 and owned.access.bootstrap is None
+
+
+@pytest.mark.parametrize(
+    "state", ["closing", "closed", "closed-successor", "stale-recovery", "borrowed", "sealed", "recovery"]
+)
+def test_provision_fences_actual_owner_before_secret_delivery_or_candidate_read(owned: Harness, state: str) -> None:
+    owner, access = owned.owner, owned.access
+    repository = owner._repository
+    borrowed = None
+    successor = None
+    if state == "closing":
+        owner.stop_admission()
+    elif state in {"closed", "closed-successor"}:
+        owner.close()
+        if state == "closed-successor":
+            successor = OperationOwner.acquire(repository, owner.ownership.scope, "successor")
+    elif state in {"stale-recovery", "recovery"}:
+        generation = "b" * 32 if owner.ownership.generation_id != "b" * 32 else "c" * 32
+        successor = OperationOwner.recover(repository, owner.ownership, generation)
+        if state == "recovery":
+            recovered_access = owned.platform.build_creation_access(
+                owned.request, RunContext(secrets=owned.secrets), owner=successor, custody=owned.custody
+            )
+            assert isinstance(recovered_access, ProxmoxOwnedCreationAccess)
+            access = recovered_access
+    elif state == "borrowed":
+        borrowed = owner.borrow()
+    else:
+        owner.seal_lifecycle_obligations()
+    try:
+        with pytest.raises(StateError):
+            access.provision(Deadline.after(5))
+        assert owned.calls == owned.secrets.calls == []
+        assert access.clone is None and access.platform_metadata == {} and access._resource_history == []
+        if successor is not None:
+            claim = repository.inspect(owner.ownership.scope)
+            assert claim is not None and claim.ownership == successor.ownership
+    finally:
+        if borrowed is not None:
+            borrowed.close()
+
+
+class _InterruptedAcceptance(list[_ResourceIntent]):
+    def __init__(self, values: list[_ResourceIntent], primary: BaseException, *, committed: bool) -> None:
+        super().__init__(values)
+        self.primary = primary
+        self.committed = committed
+
+    def append(self, intent: _ResourceIntent) -> None:
+        if not intent.accepted:
+            super().append(intent)
+            return
+        if self.committed:
+            super().append(intent)
+        raise self.primary
+
+
+@pytest.mark.parametrize("committed", [False, True])
+def test_acceptance_append_interruption_has_one_retained_source_of_authority(
+    owned: Harness, monkeypatch: pytest.MonkeyPatch, committed: bool
+) -> None:
+    owned.access.provision(Deadline.after(5))
+    primary = KeyboardInterrupt("acceptance append interrupted")
+    cause = RuntimeError("original append cause")
+    primary.__cause__ = cause
+    owned.access._resource_history = _InterruptedAcceptance(
+        owned.access._resource_history, primary, committed=committed
+    )
+    before = owned.calls.copy()
+    with pytest.raises(KeyboardInterrupt) as caught:
+        owned.access.complete_bootstrap(Deadline.after(1))
+    assert caught.value is primary and caught.value.__cause__ is cause
+    assert owned.access._resource_history[-1].accepted is committed
+    row = owned.row()
+    assert row is not None and row.state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert json.loads(row.payload)["accepted"] is False
+    repository = owned.owner._repository
+    original = repository.resolve_lifecycle_obligation
+
+    def resolve(ownership: OperationOwnership, obligation_id: str) -> LifecycleObligation:
+        if obligation_id == owned.access._resource_id:
+            durable = repository.inspect_lifecycle_obligation(ownership, obligation_id)
+            assert durable is not None and json.loads(durable.payload)["accepted"] is True
+        return original(ownership, obligation_id)
+
+    monkeypatch.setattr(repository, "resolve_lifecycle_obligation", resolve)
+    if committed:
+        with pytest.raises(StateError):
+            owned.access.request_rollback()
+        owned.access.complete_bootstrap(Deadline.after(1))
+        owned.access.complete_bootstrap(Deadline.after(1))
+    else:
+        owned.access.request_rollback()
+    owned.owner.stop_admission()
+    assert owned.access.settle(Deadline.after(1)) is committed
+    assert owned.calls == before
+    row = owned.row()
+    assert row is not None
+    assert row.state is (LifecycleObligationState.RESOLVED if committed else LifecycleObligationState.POSSIBLE_EFFECT)
+    assert json.loads(row.payload)["accepted"] is committed
