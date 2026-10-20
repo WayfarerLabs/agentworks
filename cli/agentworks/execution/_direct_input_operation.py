@@ -79,6 +79,7 @@ def run_direct_input(
     source: ByteSource | None,
     stdout: ByteSink | None,
     stderr: ByteSink | None,
+    allow_staging: bool = True,
     capture: CaptureCleanup | None = None,
 ) -> OwnedInlineOutcome:
     """Reserve preparation, select complete delivery, then transfer into one attempt."""
@@ -123,7 +124,8 @@ def run_direct_input(
                 prepared.release()
                 prepared = None
             if (
-                bootstrap is None
+                not allow_staging
+                or bootstrap is None
                 or deadline.expires_at is None
                 or source is not None
                 or stdout is not None

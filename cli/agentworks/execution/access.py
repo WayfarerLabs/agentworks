@@ -423,6 +423,8 @@ class ExecutionAccess:
             raise StateError("Managed execution is unavailable on this runtime")
         if type(request) not in {Command, Script} or type(stdin) is not Input or type(output) is not Output:
             raise ValidationError("Managed start requires finite invocation, input and output values")
+        if not stdin.allow_staging:
+            raise ValidationError("Managed execution requires input staging")
         if stdin.source is not None or output.stdout is not None:
             raise StateError("Live pipes are unavailable for managed start")
         if type(sudo) is not bool or type(sensitive) is not bool:
@@ -492,6 +494,8 @@ class ExecutionAccess:
             raise ValidationError("Foreground execution requires a command or script")
         if type(stdin) is not Input or type(output) is not Output:
             raise ValidationError("Foreground execution requires explicit input and output values")
+        if profile is Protection.MANAGED and not stdin.allow_staging:
+            raise ValidationError("Managed execution requires input staging")
         live = stdin.source is not None or output.stdout is not None
         if self._runtime_selection.target_os is RuntimeTargetOS.DARWIN and live:
             raise StateError("Live foreground execution is unavailable on this runtime")
@@ -583,6 +587,7 @@ class ExecutionAccess:
             cwd=cwd,
             capture_limit=output.max_bytes,
             sensitive=effective_sensitive,
+            allow_staging=stdin.allow_staging,
         )
         if check:
             return check_owned_inline_result(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)

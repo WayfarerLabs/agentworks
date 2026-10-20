@@ -56,6 +56,7 @@ def run_capture(
     source: ByteSource | None,
     stdout: ByteSink | None,
     stderr: ByteSink | None,
+    allow_staging: bool = True,
 ) -> OwnedInlineOutcome:
     """Admit all fixed controls before any scratch creation or application dispatch."""
     from ._execution_operation import InlineExecutionControlFact, OwnedInlineOutcome
@@ -75,6 +76,7 @@ def run_capture(
             cwd=cwd,
             capture_limit=4096,
             sensitive=True,
+            allow_staging=allow_staging,
             source=source,
             stdout=stdout,
             stderr=stderr,
@@ -112,6 +114,7 @@ def run_capture(
             cwd=cwd,
             capture_limit=capture_limit,
             sensitive=False,
+            allow_staging=allow_staging,
             source=None,
             stdout=None,
             stderr=None,

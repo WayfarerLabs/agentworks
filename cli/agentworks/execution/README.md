@@ -1768,8 +1768,14 @@ cleanup and later aggregate retries. Packed tests inject privileged admission, s
 transitions, VM scratch behavior and provider acceptance remain unproved.
 
 Prepared delivery does not yet support platform hosts, Darwin, unbounded execution budgets or live
-endpoints. Supported small inline calls retain their existing behavior. No-staging readiness still
-uses the small entry. Input staging and capture retention are separate choices.
+endpoints. Supported small inline calls retain their existing behavior. `Input.bytes` and
+`Input.sensitive` accept the keyword-only `allow_staging` choice, which defaults to `True`.
+`allow_staging=False` refuses complete requests that require Agentworks to stage input or its
+envelope in the guest filesystem; MANAGED execution always requires that staging and refuses this
+choice before effects. DIRECT uses the small entry or refuses before dispatch. Sensitivity controls
+output and diagnostics independently of storage. This input policy permits output capture files
+and does not prevent pipe, kernel or provider memory, provider retention, or a workload writing its
+own stdin. Input staging and capture retention are separate choices.
 
 The private default capture limit remains 4,096 bytes per application stream. Explicitly larger
 finite capture on a numerically bound Linux VM uses a separate fixed capture entry under the same
