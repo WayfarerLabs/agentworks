@@ -12,11 +12,13 @@ import pytest
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _managed_start_exchange as exchange_module
 from agentworks.execution import _managed_start_preparation as preparation_module
+from agentworks.execution import carrier as carrier_module
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._execution_operation import ManagedExecutionControlFact
 from agentworks.execution._managed_runs import ManagedLaunchState, ManagedRunIdentity
 from agentworks.execution._managed_start_bundle import FIXED_BUNDLE
 from agentworks.execution._managed_start_protocol import decode_request
+from agentworks.execution._prepared_helper_stage import PreparedHelperStage
 from agentworks.execution._staged_helper_protocol import decode_request as decode_activation
 from agentworks.execution.carrier import (
     CapturedOutput,
@@ -145,12 +147,27 @@ class NativeDelivery:
 
 
 @pytest.fixture
-def staged(available):
+def deadline_clock():
+    class Clock:
+        now = carrier_module.time.monotonic()
+
+        def monotonic(self):
+            return self.now
+
+    return Clock()
+
+
+@pytest.fixture
+def staged(available, deadline_clock):
     database, repository, operation, access, main, workflow = available
     carrier = IndependentCarrier(workflow.owner)
     operation._native_binding = replace(operation._native_binding, carrier=carrier)
     access._carrier = carrier
-    return database, repository, operation, access, carrier, workflow, main
+    # Staging exercises real encoding and SQLite work without spending wall-clock budget.
+    # Own this patch separately so a test's monkeypatch.undo() cannot remove it.
+    with pytest.MonkeyPatch.context() as clock_patch:
+        clock_patch.setattr(carrier_module, "time", deadline_clock)
+        yield database, repository, operation, access, carrier, workflow, main
 
 
 def bulk_start(access: ExecutionAccess) -> JobRef:
@@ -235,6 +252,40 @@ def test_final_preparation_refusal_retains_cleanup_without_actual_start(staged, 
     assert cleanup._stage.cleaned and workflow.owner._released
 
 
+@pytest.mark.parametrize(
+    ("preparation_type", "method"),
+    [(preparation_module.ManagedStartPreparation, "freeze_tail"), (PreparedHelperStage, "prepare_activation")],
+)
+def test_original_deadline_expiry_before_activation_retains_owned_cleanup(
+    staged, deadline_clock, monkeypatch, preparation_type, method
+):
+    _, repository, operation, access, carrier, workflow, _ = staged
+    budget = Deadline.after(5)
+    access._deadline = lambda: budget
+    original = getattr(preparation_type, method)
+    reached = []
+
+    def expire(self, *args, **kwargs):
+        assert not budget.expired
+        reached.append(method)
+        deadline_clock.now = budget.expires_at
+        assert budget.expired and budget.remaining() == 0
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(preparation_type, method, expire)
+    monkeypatch.setattr(repository, "reserve", lambda *args, **kwargs: pytest.fail("reservation"))
+    monkeypatch.setattr(operation, "_borrow_helper_call", lambda *args, **kwargs: pytest.fail("actual START borrow"))
+    with pytest.raises(StateError):
+        bulk_start(access)
+    assert reached == [method]
+    assert carrier.events and "activate" not in carrier.events and carrier.activation_custody is None
+    assert operation.active_inline_calls == () and workflow.owner._active_borrow is None
+    (cleanup,) = operation._prepared_stages
+    assert not cleanup._stage._activation_prepared and not cleanup._stage.cleaned
+    workflow.close(cleanup_deadline=Deadline.after(5))
+    assert cleanup._stage.cleaned and operation._prepared_stages == [] and workflow.owner._released
+
+
 @pytest.mark.parametrize("native", [False, True])
 def test_closed_helper_with_unknown_launch_releases_borrow_and_cleans_exact_stage(staged, native):
     _, repository, operation, access, carrier, workflow, _ = staged
@@ -243,6 +294,7 @@ def test_closed_helper_with_unknown_launch_releases_borrow_and_cleans_exact_stag
         operation._native_binding = replace(operation._native_binding, _new_helper_delivery=carrier.new_delivery)
     with pytest.raises(StateError):
         bulk_start(access)
+    assert carrier.events.count("activate") == 1 and carrier.activation_custody is not None
     (active,) = operation.active_inline_calls
     assert active.borrow.closed and active.start.local_delivery is carrier.activation_custody
     assert repository.inspect(active.start.receipt.identity).launch_state is ManagedLaunchState.POSSIBLE_DISPATCH
@@ -269,8 +321,11 @@ def test_closing_bookkeeping_retains_closed_unknown_start_until_finish(staged, n
         operation._native_binding = replace(operation._native_binding, _new_helper_delivery=carrier.new_delivery)
     with pytest.raises(StateError):
         bulk_start(access)
+    assert carrier.events.count("activate") == 1 and carrier.activation_custody is not None
     (active,) = operation.active_inline_calls
+    assert active.start.local_delivery is carrier.activation_custody
     record = repository.inspect(active.start.receipt.identity)
+    assert record.launch_state is ManagedLaunchState.POSSIBLE_DISPATCH
     obligations = workflow.owner.list_pending_lifecycle_obligations()
     events = list(carrier.events)
     with pytest.raises(StateError):
