@@ -6029,14 +6029,15 @@ ownership are unchanged, so the broader additive RunContext and migration gates 
       old-hook behavior. Proxmox uses the configured CA for both platform API and new QGA delivery,
       without accepting legacy verification bypass. Existing private implementation checkpoints do
       not supply native evidence. Other platforms, provisioning-result integration and complete
-      target identity composition remain part of the required gate above. The private creation
-      composition at `728a96763` now supplies a concrete core entry through native bootstrap,
-      durable address publication, release attestation and canonical SSH RunContext delivery under
-      one retained owner. Its trust consumer closes enrollment custody before publishing the
-      complete known-host and revocation policy; unknown publication stays unresolved without
-      replay. Policy refusal precedes provisional inventory insertion. Aggregate route and local
-      cleanup precedes creation checkpoints, and retained cleanup can revalidate provider selection
-      after body admission closes without reopening ordinary execution.
+      target identity composition remain part of the required gate above.
+
+The private creation composition at `728a96763` now supplies a concrete core entry through native
+bootstrap, durable address publication, release attestation and canonical SSH RunContext delivery
+under one retained owner. Its trust consumer closes enrollment custody before publishing the
+complete known-host and revocation policy; unknown publication stays unresolved without replay.
+Policy refusal precedes provisional inventory insertion. Aggregate route and local cleanup precedes
+creation checkpoints, and retained cleanup can revalidate provider selection after body admission
+closes without reopening ordinary execution.
 
 The exact private gate passes 109 tests, changed-file lint/format and complete strict typing across
 1,580 source files. The creation tests use real SQLite, ownership, route assembly and aggregate
