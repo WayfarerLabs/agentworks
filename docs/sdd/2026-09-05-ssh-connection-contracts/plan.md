@@ -226,16 +226,18 @@ proves that restoring old TOML does not discard current managed policy, revocati
 partial-update custody. Production writer coexistence and rollback through both usable RunContext
 paths still require transport composition and native acceptance.
 
-Composition `f63b28b1` integrates transport `cf3035e5`, its public prerequisite bootstrap and the
-shared exact-publication guard. Three source reviews find no material defect; an optional duplicate
-fingerprint remains a transport-owner suggestion. Root passes 2,617 related cases with 12 skips and
-all fifteen static/website entries. The last complete local run at `6f1569e0` remains red with
-22,279 passes and 22 host-fixture failures. The
-[composition record](phase2-transport-results.md#prerequisite-bootstrap-and-publication-dependency-composition)
-retains exact pins, the corrected measurement-runner evidence and the leaf's limits. Published
-`b110221b` CI is green at its own earlier composition. These results do not establish usable
-creation, native/Windows terminal, shared sanitation or both additive RunContext workflows. Full
-Phase 2 and R1-R5 acceptance stay open; no completion checkbox or lock changes.
+Composition `5799e1dd` integrates transport `7073d220`: retained route cleanup and its closed-helper
+START correction, explicit non-staging input and private creation access/guest steps. Three source
+reviews find no material defect. Root passes 2,474 affected cases with 12 skips and all fifteen
+static/website entries. The preserved `86c20337` focused run has three cleanup failures; owner CI
+confirms those and one stale Linux expectation. The correction preserves unknown START/owner custody
+and exact successor authority. The last complete local run at `6f1569e0` remains red with 22,279
+passes and 22 host-fixture failures. The
+[composition record](phase2-transport-results.md#retained-routes-cleanup-correction-and-creation-access-composition)
+retains exact pins, original red evidence and the corrected leaf's limits. Published `5dc29b86` CI
+is green at its older composition; new owner CI is running. These results do not establish usable
+creation/rollback, native/Windows terminal, shared sanitation or both additive RunContext workflows.
+Full Phase 2 and R1-R5 acceptance stay open; no completion checkbox or lock changes.
 
 The deferred native fixture increment at `37c7840c` uses actual `SSHCarrier.execute`, requires guest
 status 37 and retains failed or uncertain evidence. Three independent source lanes find no material

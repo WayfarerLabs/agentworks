@@ -6,6 +6,99 @@ does not replace the SSH plan, shared transport contracts or full implementation
 Earlier records retain their original observations. New entries supersede only the gates they
 actually measure.
 
+## Retained routes, cleanup correction and creation access composition
+
+Evaluated join `5799e1ddb571e32e8eaaf6d84aaf0de3681ff2b0` incorporates published transport
+`7073d220177cd29492e31548a3482e0befc26557` over the preserved private join `86c20337` and published
+SSH `5dc29b86`. Its CLI tree is `24bdaf2d6529fbdfcdea90a0453135e79baf8c94`. All fourteen files
+changed since the private join equal the owner's exact blobs. Non-SSH production and the complete
+transport SDD equal the owner. SSH production and fixtures are unchanged; this progress record
+changes no requirement, completed plan block, carrier interface or lock.
+
+The preceding owner `8d040579` adds retained preparation for multiple routes under the original
+workflow owner and cleanup budget, plus explicit finite `Input.allow_staging`. The latter defaults
+to allowing staging; false requires complete inline DIRECT delivery or refusal before staging and
+refuses MANAGED input before effects. It propagates through capture and common adapters. These
+policies remain independent of sensitivity, output retention and provider retention. Aggregate
+cleanup preserves cross-route helper, keeper, local delivery and bookkeeping ordering before
+lifetime resolution. The controlled second-route fixture is not actual creation followed by
+canonical SSH or production RunContext adoption.
+
+That initial join `86c20337` fails its focused run: three failures, 2,035 passes, 12 skips and 43
+cases not selected in 189.24 seconds. The early bookkeeping pass raises on a closed helper's unknown
+START before the existing independently safe input-stage cleanup handler. All three source lanes
+corroborate the material cleanup defect; the
+[original red output](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6280951651)
+and [complete reports](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6280951264)
+remain published. Owner `8d040579` full CI confirms the same three cases on Windows and all Linux
+versions, with one additional stale Linux refusal expectation. The
+[complete owner result](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6281172182)
+records four failures and 22,284 passes on each Linux version; Windows has three failures and 2,206
+passes. These failed views remain evidence for the old source.
+
+The correction lets closing bookkeeping retain an uncertain START only after positive original
+borrow/helper closure; ordinary retries still refuse. `finish()` explicitly refuses remaining active
+calls. The existing exception guard can therefore clean the exact consumed input stage while the
+unknown launch, START obligation and owner remain held. No unknown attempt is settled, launch
+acknowledged or claim released. The stale test for refusal before dispatch now checks successful
+old-record retirement with unchanged successor borrow/attempt, exact claim and ledger, zero carrier
+entry and continued refusal to finalize over the successor. The matching-original lost-begin
+negative remains.
+
+The new creation boundary returns copied opaque metadata, an independent delivery binding and an
+observed provider locator. Its Proxmox implementation retains the actual clone, configuration,
+resize, activation and public prerequisite-bootstrap controllers under the caller's original owner
+and delivery custody. Current owner admission precedes secret delivery and candidate reads. A
+separate created-resource obligation survives unaccepted creation, with one retained acceptance
+history controlling transfer and rollback refusal across interrupted publication. Settlement never
+replays mutation and does not pretend to destroy an unaccepted resource. The additive factory
+refuses unsupported providers; existing manager creation remains unchanged.
+
+Prepared guest steps run an explicit public Bash script through MANAGED execution, omitting the join
+key. A separate DIRECT join uses sensitive, non-staging input and the same finite deadline; checked
+address and release observations use prepared execution. Reusing pure script generation and release
+parsing introduces no legacy execution delegation. Mock call policy and scripted provider
+transcripts do not prove a native join or complete creation. Actual resource rollback, core durable
+publication, canonical SSH trust and the complete creation caller remain unfinished.
+
+All three independent source lanes find no material defect at the corrected join; root fully reads
+their complete signed reports. Generic correctness offers one optional fixture improvement: snapshot
+the native-closure transcript count across bookkeeping retry. Its traced source path admits no
+replay. Root acknowledges and relays the complete suggestion to transport while preserving exact
+owner bytes. Earlier optional clone/configuration/bootstrap suggestions keep their disposition.
+
+Root's 54-path affected selection passes 2,474 cases with 12 skips and 43 cases not selected in
+203.16 seconds; child and outer controller both exit zero, with controller time 203.808 seconds. It
+includes the original cleanup failures, inline-lifetime successor cases, new creation modules,
+related provider/controller cases and all non-integration SSH cases. The same-process receipt
+verifies the owned lexical interpreter, prefix and cwd and all 674 first-party module origins. The
+400 MiB disk growth limit and 1 GiB reserve do not fire. Only obsolete owned installed review
+environments are retired for headroom; all source, reports and failed or uncertain fixtures remain.
+The measurement applies no product patch, additional skip, deadline extension, group/account
+override or retry.
+
+All fifteen static/website entries pass: Ruff, formatting of 1,616 files, strict typing of 1,578
+sources, canonical file quality, Rulesync, locked-SDD, exact CI Typer isolation, 160 Python website
+tests in 35.552 seconds, 103 Node tests, four builds and two deterministic comparisons. Root reads
+the actual outputs. This focused evidence does not clear the last complete local run's 22 retained
+host-fixture failures, its limited five-case diagnostic or unobserved native-platform behavior.
+
+Published SSH [run 39349234448](https://github.com/WayfarerLabs/agentworks/actions/runs/39349234448)
+passes all ten jobs at `5dc29b86`, through actual merge `863f93a7` into `cf3035e5`. Linux Python
+3.12/3.13/3.14 each pass 22,259 cases with 310 skips; Windows Server 2025/Python 3.13.16 passes
+2,201 with 80 skips. Root reads the originating test results and Website/static portions. This older
+green result does not validate the new join. New owner
+[run 39354365042](https://github.com/WayfarerLabs/agentworks/actions/runs/39354365042) is still
+running when this record is written; its result and the future published SSH head require their own
+exact-pin evidence.
+
+Complete new-only creation/configuration/rollback, settled enrollment and trust-writer publication,
+writer coexistence/rollback, supported-platform terminal/fault/presentation, factories, both usable
+additive RunContext paths and full R1-R5 acceptance remain required. Windows keyboard policy still
+has no selected production decoder or native comparison/physical-key acceptance. No ready or
+checkpoint signal, new public feedback round, completed plan block or lock follows from this
+increment. Later consumer migration and retirement retain the operator's agreed order.
+
 ## Prerequisite bootstrap and publication dependency composition
 
 Evaluated join `f63b28b1b93eefd5aab35a2d62fa43d5261b0bf0` incorporates transport

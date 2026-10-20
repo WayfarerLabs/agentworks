@@ -3,17 +3,17 @@
 - Updated: 2026-10-19
 - PR: [#832](https://github.com/WayfarerLabs/agentworks/pull/832), draft
 - Main/contract base: `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (#830)
-- State: evaluated composition `f63b28b1` incorporates transport `cf3035e5`, its retained public
-  prerequisite bootstrap and the shared exact-publication guard. All three source reviews find no
-  material defect; one optional duplicate fingerprint stays with transport. Root passes 2,617
-  related cases with 12 skips and all fifteen static/website entries. The initial scratch runner
-  re-entered pytest through multiprocessing; its interrupted output supplies no product result. The
-  corrected guarded runner passes with its own provenance receipt. The last complete local run at
-  `6f1569e0` remains red with 22 host-fixture failures and 22,279 passes. Published `b110221b` CI is
-  green at its earlier exact composition, without transferring to this private join. No new native
-  or complete creation proof follows. Supported-platform terminal, positive host, creation/writer
-  publication, factories, both usable RunContext paths and R1-R5 acceptance remain open. The
-  [current composition record](phase2-transport-results.md#prerequisite-bootstrap-and-publication-dependency-composition)
+- State: evaluated composition `5799e1dd` incorporates transport `7073d220`: retained route cleanup,
+  its closed-helper START correction, explicit non-staging input and private creation access/guest
+  steps. Three source reviews find no material defect. Root passes 2,474 affected cases with 12
+  skips and all fifteen static/website entries. The preserved `86c20337` run is red with three
+  cleanup failures; owner CI confirms them and one stale Linux expectation, now corrected with
+  successor/claim/ledger/no-replay assertions. The last complete local run at `6f1569e0` remains red
+  with 22 host-fixture failures and 22,279 passes. Published `5dc29b86` CI is green at its older
+  exact composition; new owner CI is running. No new native or complete creation proof follows.
+  Supported-platform terminal, positive host, creation/writer publication, factories, both usable
+  RunContext paths and R1-R5 acceptance remain open. The
+  [current composition record](phase2-transport-results.md#retained-routes-cleanup-correction-and-creation-access-composition)
   preserves exact pins, gates and limits.
 
 Earlier checkpoint evidence and dependency history live in separate files. The headings below retain
