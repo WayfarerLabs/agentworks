@@ -6082,11 +6082,23 @@ Legacy create/results/callers remain unchanged, and no completion checkbox is ad
 
 The operator approved adding pool-scoped `VM.Config.CDROM` to the setup role and documenting the
 explicit administrator update. No live permission change is authorized by the implementation itself.
-Normal rollback will retain one bounded inventory, remove exact owned disks while the VM and their
-observation permissions still exist, verify their logical disposition, then destroy the empty VM.
-Unsupported snapshots, pending allocations, lost acknowledgments and incomplete observations retain
-uncertainty; successful destroy or a warning-free task log is not volume absence proof. The fixed
-stop/destroy wire methods alone do not complete this gate.
+The private candidate retains one bounded inventory, removes exact owned disks while the VM and
+their observation permissions still exist, verifies their logical disposition, then destroys the
+empty VM. Unsupported snapshots, pending allocations, lost acknowledgments and incomplete
+observations retain uncertainty; successful destroy or a warning-free task log is not volume absence
+proof. The fixed stop/destroy wire methods alone do not complete this gate.
+
+The retained controller and creation access now share the original resource obligation after body
+admission closes. Known configuration acknowledgment supplies the expected generation; an earlier
+failure instead captures the observed clone generation. Exact task receipts permit observation, not
+mutation replay. A single empty-resource preflight rejects a changed final configuration digest
+before destroy. Acceptance-append interruption tests distinguish actual unaccepted-resource cleanup
+from immutable accepted-resource retention. The final private correction passes 125
+controller/access tests and complete strict typing across 1,584 files; project, complexity and
+generic correctness source reviews are clear. Provider, guest and SSH boundaries remain simulated.
+Native PVE 8/9 response typing, effective permission and storage visibility, complete
+creation-to-RunContext proof and the remaining platform factories still gate additive acceptance. No
+checkbox is completed here.
 
 - [ ] Enforce the explicit finite-input no-staging choice above carrier delivery. Preserve the
       existing default and independent sensitivity/output policy; a non-staging direct request must

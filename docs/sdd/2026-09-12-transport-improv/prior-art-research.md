@@ -1853,6 +1853,24 @@ and
 [PVE 9 access removal](https://github.com/proxmox/pve-access-control/blob/dff26b458651b4e1141ff0a41a296d2904b16228/src/PVE/AccessControl.pm#L1898-L1919).
 Adding those reads does not justify clearing debt or implicitly broadening operator permissions.
 
+The selected candidate verifies logical disk disposition before deleting the VM. Both pinned
+configuration APIs accept asynchronous `POST` with exact `delete` keys, `force=1` and a
+configuration `digest`. Omitting `background_delay` preserves the `qmconfig` task acknowledgment; a
+synchronous response lost during disk deletion would otherwise supply no task to observe. Stopped-VM
+pending application errors become worker failures, not successful disk-removal receipts. Sources:
+[PVE 8 configuration API](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/API2/Qemu.pm)
+and
+[PVE 9 configuration API](https://github.com/proxmox/qemu-server/blob/80e0590e144359fd136a2ba1e3f44716bfc535b0/src/PVE/API2/Qemu.pm).
+
+The bounded protocol retains exact config-backed images, rejects snapshots and pending changes,
+checks effective observation permissions around image reads, removes exact keys, and verifies
+logical absence while VM membership remains. A zero propagation flag represents a grant, not a
+denial. Attached cloud-init removal also requires `VM.Config.CDROM`; the operator approved its setup
+role addition, not an automatic live role update. A changed final config digest aborts destruction.
+Separate reads still provide no atomic snapshot, conditional destroy, physical reclamation or
+process-loss proof. Native response types and visibility on both supported majors remain acceptance
+requirements, not facts established by the scripted tests.
+
 ## Claims not relied upon
 
 - A common API makes every backend interactive.
