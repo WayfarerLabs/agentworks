@@ -87,6 +87,7 @@ if TYPE_CHECKING:
     from agentworks.execution.carrier import Deadline
     from agentworks.operations import OperationOwner
     from agentworks.transports import Transport
+    from agentworks.vms._creation_access import OwnedVMCreationAccess
     from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 
@@ -705,6 +706,19 @@ class EC2Platform(VMPlatform):
             return vm.name
         region = vm.platform_metadata.get("region")
         return f"{instance_id}@{region}" if region else instance_id
+
+    def build_creation_access(
+        self,
+        request: ProvisionRequest,
+        ctx: RunContext,
+        *,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
+    ) -> OwnedVMCreationAccess:
+        """Build passive independent AWS creation under the caller's exact owner."""
+        from agentworks.plugins.aws._creation_access import EC2OwnedCreationAccess
+
+        return EC2OwnedCreationAccess(request, self, ctx, owner, custody)
 
     def build_native_execution_access(
         self,
