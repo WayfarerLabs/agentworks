@@ -1172,7 +1172,7 @@ class ExecutionOperation:
                 return
             if self._active_inline_calls:
                 self._retry_bookkeeping(finishing=True)
-            if self._unfinished_inline_executions:
+            if self._active_inline_calls or self._unfinished_inline_executions:
                 raise StateError("Inline execution retains unsettled work")
             if self._dispatch_obligation is not None:
                 self._dispatch_obligation.resolve()
@@ -1220,6 +1220,7 @@ class ExecutionOperation:
         The retained call supplies its original borrow and candidate evidence.
         Unknown helper attempts remain recovery custody and cannot be settled.
         Closing retries retire unused registrations without arming them.
+        A closed helper can leave its independent START action for finish to refuse.
         """
         with self._admission_guard:
             self._retry_bookkeeping(finishing=finishing or self._finishing)
@@ -1303,7 +1304,11 @@ class ExecutionOperation:
             self._settle_retained_helper(active)
             if active.start is not None:
                 self._capture(active, OwnedInlineOutcome())
-                if active.tracking_key in self._active_inline_calls:
+                # Closure retires the serial borrow before aggregate scratch
+                # cleanup, without proving the independent launch or its START.
+                if active.tracking_key in self._active_inline_calls and (
+                    not finishing or not self._borrow_closed(active) or active.operation.requires_owner_retention
+                ):
                     raise StateError("Managed start retains unresolved launch custody")
                 continue
             if active.disposal is not None:
@@ -1358,8 +1363,14 @@ class ExecutionOperation:
             with self._owner._guard:  # noqa: SLF001
                 self._owner._reconcile_transition_locked()  # noqa: SLF001
                 attempt = self._owner._outstanding_attempt  # noqa: SLF001
-                if active.borrow._closed and (  # noqa: SLF001
-                    attempt is None or isinstance(attempt, OperationAttempt) and attempt._borrow is not active.borrow  # noqa: SLF001
+                if (
+                    operation.delivery_started
+                    and active.borrow._closed
+                    and (  # noqa: SLF001
+                        attempt is None
+                        or isinstance(attempt, OperationAttempt)
+                        and attempt._borrow is not active.borrow  # noqa: SLF001
+                    )
                 ):
                     operation.coordination_uncertain = False
                     return
