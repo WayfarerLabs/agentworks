@@ -82,9 +82,14 @@ class FirewallShape:
 
 def shape(value: dict[str, Any], identity: NativeIdentity) -> FirewallShape:
     """Validate the provider's complete selected behavioral firewall projection."""
+    return shape_for_project(value, identity.project_id)
+
+
+def shape_for_project(value: dict[str, Any], project_id: str) -> FirewallShape:
+    """Validate provider firewall behavior within the selected project."""
     try:
         result = FirewallShape(
-            network=canonical_path(value.get("network"), project_id=identity.project_id, kind="network"),
+            network=canonical_path(value.get("network"), project_id=project_id, kind="network"),
             direction=value.get("direction", "INGRESS"),
             disabled=value.get("disabled", False),
             priority=value.get("priority", 1000),

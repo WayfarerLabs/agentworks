@@ -34,16 +34,14 @@ def sdk(monkeypatch):
     session_factory = requests.Session
     close_response = requests.Response.close
 
-    class Response(requests.Response):
-        @property
-        def content(self):
-            pytest.fail("creation response bypassed bounded raw ingestion")
+    def content(self):
+        pytest.fail("creation response bypassed bounded raw ingestion")
 
-        def close(self):
-            if p.close_failures:
-                p.close_failures -= 1
-                raise RuntimeError("original response close failed")
-            return close_response(self)
+    def close(self):
+        if p.close_failures:
+            p.close_failures -= 1
+            raise RuntimeError("original response close failed")
+        return close_response(self)
 
     class Raw(HTTPResponse):
         def read(self, amt=None, decode_content=None, cache_content=False):
@@ -57,7 +55,7 @@ def sdk(monkeypatch):
 
     def send(adapter, request, **kwargs):
         p.sends.append(request)
-        response = Response()
+        response = requests.Response()
         response.status_code = p.status
         response.request = request
         response.url = request.url
@@ -71,6 +69,8 @@ def sdk(monkeypatch):
         return FreshCredential(), "unused-detected-project"
 
     monkeypatch.setattr(requests, "Session", session)
+    monkeypatch.setattr(requests.Response, "content", property(content))
+    monkeypatch.setattr(requests.Response, "close", close)
     monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", send)
     monkeypatch.setattr(google.auth, "default", default)
     p.api = CreationAPI(
@@ -131,9 +131,11 @@ def test_control_in_receipt_consumer_preserves_same_control_and_custody(sdk):
     p = sdk
     primary = KeyboardInterrupt("original consumer control")
     p.close_failures = 1
-    with pytest.raises(KeyboardInterrupt) as caught:
-        with p.api.exchange("POST", "projects/project/global/firewalls", Deadline.after(5), body={}):
-            raise primary
+    with (
+        pytest.raises(KeyboardInterrupt) as caught,
+        p.api.exchange("POST", "projects/project/global/firewalls", Deadline.after(5), body={}),
+    ):
+        raise primary
     assert caught.value is primary and p.api._response is p.responses[0]
     assert len(p.sends) == 1
     assert p.api.settle(Deadline.after(5), final=True)
@@ -143,6 +145,8 @@ def test_only_explicit_missing_get_accepts_not_found(sdk):
     p = sdk
     p.status = 404
     assert p.api.get("projects/project/global/firewalls/rule", Deadline.after(5), missing=True) is None
-    with pytest.raises(ValidationError):
-        with p.api.exchange("DELETE", "projects/project/global/firewalls/rule", Deadline.after(5), missing=True):
-            pytest.fail("DELETE 404 was admitted as absence proof")
+    with (
+        pytest.raises(ValidationError),
+        p.api.exchange("DELETE", "projects/project/global/firewalls/rule", Deadline.after(5), missing=True),
+    ):
+        pytest.fail("DELETE 404 was admitted as absence proof")

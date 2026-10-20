@@ -407,11 +407,11 @@ class GCEOwnedCreationAccess:
                 return False
             resources = self._resources
             if resources is not None:
-                # A maintenance budget can retire local originals and publish
-                # known facts. Provider observations/deletes keep the original bound.
+                # Cleanup uses this supplied finite budget to observe original
+                # receipts and dispose exact resources, without replaying creation.
                 resources.reconcile(deadline)
                 if not resources.disposition_complete:
-                    budget = self._budget(deadline)
+                    budget = deadline
                     if resources.accepted:
                         resources.accept(deadline)
                         if not resources.delete("allow", budget):

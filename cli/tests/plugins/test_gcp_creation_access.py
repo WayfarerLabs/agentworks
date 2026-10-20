@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import closing, contextmanager
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -23,6 +24,7 @@ from agentworks.plugins.gcp import _creation_access as creation
 from agentworks.plugins.gcp._creation_api import ROOT
 from agentworks.plugins.gcp._creation_resources import CreationResources
 from agentworks.plugins.gcp.platform import GCEPlatform
+from agentworks.vms._ssh_native_exposure import OwnedSSHExposure
 from tests.plugins.test_gcp_creation_resources import GLOBAL, NETWORK, ZONAL, ScriptedAPI
 from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY
 
@@ -44,7 +46,7 @@ class Progress:
 
 
 class ProviderAPI(ScriptedAPI):
-    def get(self, path, deadline, *, missing=False):
+    def get(self, path: str, deadline: Deadline, *, missing: bool = False) -> dict[str, Any] | None:
         self.calls.append(("GET", path))
         if path == "projects/project":
             return {"kind": "compute#project", "name": "project"}
@@ -137,7 +139,7 @@ def owned(tmp_path, monkeypatch):
             fail_probe=None,
         )
         monkeypatch.setattr(creation, "CreationAPI", lambda *args: api)
-        monkeypatch.setattr(creation.OwnedSSHExposure, "resolve", lambda *args: ("192.0.2.1/32",))
+        monkeypatch.setattr(OwnedSSHExposure, "resolve", lambda *args: ("192.0.2.1/32",))
 
         def resources(owner, api, selected):
             controller = CreationResources(owner, api, selected)
@@ -211,7 +213,7 @@ def test_passive_factory_then_new_result_and_accepted_retention(owned):
     assert ZONAL + "/instances/sample" in p.api.live and result.platform_metadata["boot_disk"] in p.api.live
     assert not p.owner.list_pending_lifecycle_obligations()
     assert p.database.operations.inspect(p.owner.ownership.scope) is not None
-    assert not p.access.platform_metadata is result.platform_metadata
+    assert p.access.platform_metadata is not result.platform_metadata
 
 
 def test_public_prerequisite_failure_rolls_back_exact_unaccepted_resources(owned):
@@ -243,14 +245,59 @@ def test_partial_receipt_metadata_extends_without_changing_prior_snapshots(owned
     assert len([method for method, _path in p.api.calls if method == "POST"]) == 2
 
 
-def test_original_deadline_cannot_be_extended_for_resource_rollback(owned):
+def test_fresh_cleanup_budget_rolls_back_after_original_provision_expiry(owned):
     p = owned
     p.access.provision(p.deadline)
     p.access.request_rollback()
     p.access._deadline = Deadline(0)
-    with pytest.raises(TimeoutError):
-        p.access.settle(Deadline.after(60))
-    assert not any(method == "DELETE" for method, _path in p.api.calls)
+    assert p.access.settle(Deadline.after(60))
+    assert not p.api.live and not p.owner.list_pending_lifecycle_obligations()
+    assert len([method for method, _path in p.api.calls if method == "POST"]) == 3
+    assert len([method for method, _path in p.api.calls if method == "DELETE"]) == 3
+
+
+def test_fresh_cleanup_budget_removes_accepted_allow_without_vm_rollback(owned):
+    p = owned
+    result = p.access.provision(p.deadline)
+    p.access.complete_bootstrap(p.deadline)
+    p.access._deadline = Deadline(0)
+    p.access.request_rollback()
+    assert p.access.settle(Deadline.after(60))
+    assert ZONAL + "/instances/sample" in p.api.live and result.platform_metadata["boot_disk"] in p.api.live
+    assert len([method for method, _path in p.api.calls if method == "POST"]) == 3
+    deletes = [path for method, path in p.api.calls if method == "DELETE"]
+    assert len(deletes) == 1 and "/firewalls/" in deletes[0]
+    assert not p.owner.list_pending_lifecycle_obligations()
+
+
+def test_fresh_cleanup_observes_original_pending_receipt_without_insert_replay(owned, monkeypatch):
+    p = owned
+    p.api.insert_pending = True
+    original = p.api.exchange
+    primary = KeyboardInterrupt("original operation observation")
+    interrupted = False
+
+    @contextmanager
+    def exchange(method, path, deadline, **kwargs):
+        nonlocal interrupted
+        if method == "GET" and path.endswith("/operations/Insert_instance") and not interrupted:
+            interrupted = True
+            raise primary
+        with original(method, path, deadline, **kwargs) as value:
+            yield value
+
+    monkeypatch.setattr(p.api, "exchange", exchange)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        p.access.provision(p.deadline)
+    assert caught.value is primary
+    instance = p.access._resources.resources["instance"]
+    assert instance.create_operation == "Insert_instance" and instance.resource_id == "103"
+    p.access._deadline = Deadline(0)
+    p.access.request_rollback()
+    assert p.access.settle(Deadline.after(60))
+    assert not p.api.live and not p.owner.list_pending_lifecycle_obligations()
+    assert len([method for method, _path in p.api.calls if method == "POST"]) == 3
+    assert ("GET", ZONAL + "/operations/Insert_instance") in p.api.calls
 
 
 def test_creation_public_payload_and_durable_intent_exclude_join_secret(owned):
@@ -325,3 +372,39 @@ def test_exact_random_boot_disk_collision_refuses_before_mutation(owned):
         p.access.provision(p.deadline)
     assert not any(method in ("POST", "DELETE") for method, _path in p.api.calls)
     assert not p.owner.list_pending_lifecycle_obligations()
+
+
+@pytest.mark.parametrize(
+    "source,denied,port,refused",
+    [
+        ("2001:db8::/64", False, "80", False),
+        ("2001:db8::/64", True, "22", False),
+        ("192.0.2.0/24", True, "22", True),
+    ],
+)
+def test_creation_policy_ignores_irrelevant_ipv6_and_refuses_applicable_ipv4_ssh_deny(
+    owned, source, denied, port, refused
+):
+    p = owned
+    path = GLOBAL + "/firewalls/other-rule"
+    rule = {
+        "kind": "compute#firewall",
+        "name": "other-rule",
+        "id": "999",
+        "selfLink": ROOT + path,
+        "network": NETWORK,
+        "direction": "INGRESS",
+        "priority": 1000,
+        "sourceRanges": [source],
+        "denied" if denied else "allowed": [{"IPProtocol": "tcp", "ports": [port]}],
+    }
+    p.api.live[path] = rule
+    if refused:
+        with pytest.raises(StateError):
+            p.access.provision(p.deadline)
+        assert not any(method == "POST" for method, _path in p.api.calls)
+    else:
+        p.access.provision(p.deadline)
+        p.access.request_rollback()
+        assert p.access.settle(p.deadline)
+    assert p.api.live == {path: rule}

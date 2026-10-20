@@ -6,6 +6,7 @@ import copy
 import json
 from contextlib import closing, contextmanager
 from types import SimpleNamespace
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -31,19 +32,19 @@ NETWORK = f"{GLOBAL}/networks/default"
 class ScriptedAPI:
     cleanup_incomplete = False
 
-    def __init__(self, owner):
+    def __init__(self, owner: OperationOwner) -> None:
         self.owner = owner
-        self.controller = None
-        self.live = {}
-        self.calls = []
-        self.operations = {}
-        self.fault = None
-        self.primary = KeyboardInterrupt("original provider request")
+        self.controller: CreationResources | None = None
+        self.live: dict[str, dict[str, Any]] = {}
+        self.calls: list[tuple[str, str]] = []
+        self.operations: dict[str, dict[str, Any]] = {}
+        self.fault: tuple[str, str] | None = None
+        self.primary: BaseException = KeyboardInterrupt("original provider request")
         self.preserve_disk = False
         self.insert_pending = False
-        self.delete_target = None
+        self.delete_target: str | None = None
 
-    def get(self, path, deadline, *, missing=False):
+    def get(self, path: str, deadline: Deadline, *, missing: bool = False) -> dict[str, Any] | None:
         assert not deadline.expired
         self.calls.append(("GET", path))
         value = self.live.get(path)
@@ -157,7 +158,7 @@ def owned(tmp_path, monkeypatch):
         )
 
 
-def insert_all(p):
+def insert_all(p: SimpleNamespace) -> None:
     p.controller.register(p.deadline)
     for key in ("deny", "allow", "instance"):
         p.controller.insert(key, p.deadline)
