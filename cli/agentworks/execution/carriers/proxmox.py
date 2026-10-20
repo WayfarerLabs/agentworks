@@ -245,6 +245,34 @@ class _ProxmoxWire:
         assert isinstance(data, str)
         return data
 
+    def request_vm_stop(self, *, custody: LocalDeliveryCustody, timeout: float) -> str:
+        """Submit one fixed stop, returning only a bounded raw acknowledgment."""
+        if not _valid_control_timeout(timeout):
+            raise ValidationError("Proxmox stop requires a positive finite timeout")
+        data = self._exchange(_Endpoint.VM_STOP, "POST", None, custody=custody, body=None, timeout=timeout)
+        if not _valid_task_id(data):
+            raise _WireFailure("Proxmox returned an invalid stop acknowledgment")
+        assert isinstance(data, str)
+        return data
+
+    def request_vm_destroy(self, *, custody: LocalDeliveryCustody, timeout: float) -> str:
+        """Submit one fixed destroy, without asserting resource cleanup."""
+        if not _valid_control_timeout(timeout):
+            raise ValidationError("Proxmox destroy requires a positive finite timeout")
+        data = self._exchange(_Endpoint.VM_DESTROY, "DELETE", None, custody=custody, body=None, timeout=timeout)
+        if not _valid_task_id(data):
+            raise _WireFailure("Proxmox returned an invalid destroy acknowledgment")
+        assert isinstance(data, str)
+        return data
+
+    def request_vmid_free(self, *, custody: LocalDeliveryCustody, timeout: float) -> None:
+        """Observe that this exact VMID is free, without claiming a reservation."""
+        if not _valid_control_timeout(timeout):
+            raise ValidationError("Proxmox VM identifier observation requires a positive finite timeout")
+        data = self._exchange(_Endpoint.VMID_FREE, "GET", None, custody=custody, body=None, timeout=timeout)
+        if type(data) is not int or data != self._connection.vmid:
+            raise _WireFailure("Proxmox did not establish that the selected VM identifier is free")
+
     def request_vm_configure(
         self,
         request: ProxmoxConfigurationRequest,
@@ -293,6 +321,12 @@ class _ProxmoxWire:
         if not _valid_control_timeout(timeout) or not _valid_task_id(upid):
             raise ValidationError("Proxmox task status requires a bounded identifier and positive finite timeout")
         return self._request(_Endpoint.TASK_STATUS, "GET", upid, custody=custody, body=None, timeout=timeout)
+
+    def request_task_log(self, upid: str, *, custody: LocalDeliveryCustody, timeout: float) -> dict[str, object]:
+        """Read one bounded log page, preserving its unproved completeness metadata."""
+        if not _valid_control_timeout(timeout) or not _valid_task_id(upid):
+            raise ValidationError("Proxmox task log requires a bounded identifier and positive finite timeout")
+        return self._request(_Endpoint.TASK_LOG, "GET", upid, custody=custody, body=None, timeout=timeout)
 
     def request_guest_info(self, *, custody: LocalDeliveryCustody, timeout: float) -> dict[str, object]:
         """Read guest-agent information through one fixed, body-free endpoint."""
@@ -360,6 +394,8 @@ class _ProxmoxWire:
             raise _WireFailure("Proxmox returned invalid JSON")
         if not isinstance(parsed, dict) or "data" not in parsed:
             raise _WireFailure("Proxmox returned an invalid response envelope")
+        if endpoint is _Endpoint.TASK_LOG:
+            return {"lines": parsed["data"], "total": parsed.get("total")}
         return parsed["data"]
 
 
