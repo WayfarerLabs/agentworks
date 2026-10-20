@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from agentworks.execution.carriers.proxmox import ProxmoxConnection
     from agentworks.operations import OperationOwner
     from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
+    from agentworks.vms._creation_access import OwnedVMCreationAccess
     from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 
@@ -624,6 +625,19 @@ class ProxmoxPlatform(VMPlatform):
         locator = ProviderLocator("proxmox:v1:" + hashlib.sha256(framed).hexdigest())
         provider_locator_remaining(deadline, vm_name=vm.name)
         return locator
+
+    def build_creation_access(
+        self,
+        request: ProvisionRequest,
+        ctx: RunContext,
+        *,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
+    ) -> OwnedVMCreationAccess:
+        """Retain passive new-only creation under the caller's exact owner."""
+        from agentworks.plugins.proxmox._creation_access import ProxmoxOwnedCreationAccess
+
+        return ProxmoxOwnedCreationAccess(request, self, ctx, owner, custody)
 
     def build_native_execution_access(
         self,
