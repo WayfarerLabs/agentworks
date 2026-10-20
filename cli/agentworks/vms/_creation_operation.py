@@ -230,7 +230,15 @@ def _prepare_created_context(
     with workflow.row_transaction() as current:
         vm = current
     assert workflow.address is not None
-    workflow.trust = CreationSSHTrust(workflow.owner, vm, workflow.address, settings, deadline=deadline)
+    workflow.trust = CreationSSHTrust(
+        workflow.owner,
+        vm_name=vm.name,
+        admin_username=vm.admin_username,
+        instance_marker=workflow.marker,
+        endpoint=workflow.address,
+        settings=settings,
+        deadline=deadline,
+    )
     workflow.trust.prepare()
     availability = creation.independent_availability
     binding = ssh_execution_binding(vm, workflow.address, settings, independent_availability=availability)

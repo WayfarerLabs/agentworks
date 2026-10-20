@@ -26,7 +26,6 @@ from agentworks.db import (
     OperationResourceKind,
     OperationScope,
     ProvisioningStatus,
-    VMRow,
     VMStatus,
 )
 from agentworks.errors import AgentworksError, AlreadyExistsError, ConfigError, StateError, ValidationError
@@ -229,14 +228,17 @@ def harness(tmp_path, monkeypatch, creation_request):
             def __init__(
                 self,
                 owner: OperationOwner,
-                vm: VMRow,
-                endpoint: str,
-                selected_settings: SSHSettings,
                 *,
+                vm_name: str,
+                admin_username: str,
+                instance_marker: str,
+                endpoint: str,
+                settings: SSHSettings,
                 deadline: Deadline,
             ) -> None:
                 assert owner is h.access.owner and deadline is h.deadline
-                vm_ssh_connection(vm.name, vm.admin_username, endpoint, selected_settings)
+                assert instance_marker == h.request.instance_marker
+                vm_ssh_connection(vm_name, admin_username, endpoint, settings)
 
             def prepare(self) -> None:
                 note("trust", h.deadline)

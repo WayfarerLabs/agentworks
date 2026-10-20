@@ -23,7 +23,6 @@ from agentworks.vms._ssh_native_binding import vm_ssh_connection
 from agentworks.vms.identity import validate_vm_instance_marker
 
 if TYPE_CHECKING:
-    from agentworks.db import VMRow
     from agentworks.execution.carrier import Deadline
     from agentworks.execution.carriers.ssh import SSHSettings
     from agentworks.operations import OperationOwner
@@ -42,19 +41,29 @@ class CreationSSHTrust:
     """
 
     def __init__(
-        self, owner: OperationOwner, vm: VMRow, endpoint: str, settings: SSHSettings, *, deadline: Deadline
+        self,
+        owner: OperationOwner,
+        *,
+        vm_name: str,
+        admin_username: str,
+        instance_marker: str,
+        endpoint: str,
+        settings: SSHSettings,
+        deadline: Deadline,
     ) -> None:
         if (
             owner.ownership.scope.resource_kind is not OperationResourceKind.VM
-            or owner.ownership.scope.resource_name != vm.name
+            or owner.ownership.scope.resource_name != vm_name
         ):
             raise ValidationError("SSH creation trust requires exact VM ownership")
         if deadline.expires_at is None:
             raise ValidationError("SSH creation trust requires a finite deadline")
-        marker = validate_vm_instance_marker(vm.instance_marker)
-        self._connection = vm_ssh_connection(vm.name, vm.admin_username, endpoint, settings)
+        marker = validate_vm_instance_marker(instance_marker)
+        self._connection = vm_ssh_connection(vm_name, admin_username, endpoint, settings)
         self._bundle = ManagedSSHTrust(settings.trust_store)
-        self._provenance = SSHCreationProvenance("vm:" + marker, endpoint)
+        # Public bootstrap and canonical access can enroll different endpoints
+        # for the same creation. Each retains its own first-contact evidence.
+        self._provenance = SSHCreationProvenance(f"vm:{marker}:endpoint:{endpoint}", endpoint)
         self._owner = owner
         self._deadline = deadline
         self._delivery = LocalDeliveryCustody()

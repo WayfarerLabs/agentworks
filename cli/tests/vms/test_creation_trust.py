@@ -42,6 +42,7 @@ class Fixture:
     settings: SSHSettings
     deadline: Deadline
     base: str
+    endpoint: str = _HOST
     calls: list[list[str]] = field(default_factory=list)
     budgets: list[Deadline] = field(default_factory=list)
     ordinary_before_publication: list[tuple[bytes, ...]] = field(default_factory=list)
@@ -52,13 +53,23 @@ class Fixture:
         return ManagedSSHTrust(self.settings.trust_store)
 
     @property
+    def resource_id(self) -> str:
+        return f"vm:{_MARKER}:endpoint:{self.endpoint}"
+
+    @property
     def candidate(self) -> Path:
-        digest = hashlib.sha256(("vm:" + _MARKER).encode()).hexdigest()
+        digest = hashlib.sha256(self.resource_id.encode()).hexdigest()
         return self.settings.trust_store / ("enrollment-" + digest) / "known-hosts"
 
     def consumer(self) -> composition.CreationSSHTrust:
         return composition.CreationSSHTrust(
-            self.owner, self.db.get_vm("box"), _HOST, self.settings, deadline=self.deadline
+            self.owner,
+            vm_name="box",
+            admin_username="admin",
+            instance_marker=_MARKER,
+            endpoint=self.endpoint,
+            settings=self.settings,
+            deadline=self.deadline,
         )
 
     def run(
@@ -69,7 +80,7 @@ class Fixture:
         rows = self.owner.list_pending_lifecycle_obligations()
         assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
         document = json.loads(rows[0].payload)
-        assert document["resource_id"] == "vm:" + _MARKER
+        assert document["resource_id"] == self.resource_id
         assert document["base_generation"] == self.base
         assert document["phase"] == "enrollment"
         self.calls.append(argv)
@@ -78,7 +89,7 @@ class Fixture:
             tuple(path.read_bytes() for path in resolve_trust(self.bundle).known_hosts)
         )
         if "StrictHostKeyChecking=accept-new" in argv:
-            self.candidate.write_bytes(_LEARNED)
+            self.candidate.write_bytes(_LEARNED.replace(_HOST.encode(), self.endpoint.encode()))
         if self.controls:
             raise self.controls.pop(0)
         nonce = re.search(r"agw-enroll-[a-f0-9]{32}", argv[-1])
@@ -151,7 +162,15 @@ def test_constructor_rejects_invalid_core_provenance(fixture, change):
     else:
         deadline = Deadline.after(None)
     with pytest.raises(ValidationError):
-        composition.CreationSSHTrust(fixture.owner, vm, _HOST, fixture.settings, deadline=deadline)
+        composition.CreationSSHTrust(
+            fixture.owner,
+            vm_name=vm.name,
+            admin_username=vm.admin_username,
+            instance_marker=vm.instance_marker,
+            endpoint=_HOST,
+            settings=fixture.settings,
+            deadline=deadline,
+        )
 
 
 @pytest.mark.parametrize("state", ["closed", "stale", "sealed", "recovery", "borrowed", "resolved"])
@@ -185,6 +204,39 @@ def test_owner_refusal_precedes_policy_io(fixture, monkeypatch, state):
     assert consumer.close(Deadline.after(3))
 
 
+def test_public_and_canonical_endpoints_retain_distinct_evidence(fixture):
+    first_candidate = fixture.candidate
+    first = fixture.consumer()
+    first.prepare()
+    assert first.close(Deadline.after(3))
+    generation = trust_status(fixture.bundle).generation
+    assert generation is not None and generation != fixture.base
+
+    fixture.base = generation
+    fixture.endpoint = "100.64.0.24"
+    second_candidate = fixture.candidate
+    second = fixture.consumer()
+    second.prepare()
+    assert second.close(Deadline.after(3))
+
+    learned = _LEARNED.replace(_HOST.encode(), fixture.endpoint.encode())
+    assert first_candidate != second_candidate
+    assert first_candidate.read_bytes() == _LEARNED
+    assert second_candidate.read_bytes() == learned
+    current = admit_connection(binding.vm_ssh_connection("box", "admin", fixture.endpoint, fixture.settings))
+    assert tuple(path.read_bytes() for path in current.known_hosts) == (
+        learned,
+        _LEARNED,
+        b"existing-first-policy\n",
+        b"existing-second-policy\n",
+    )
+    assert current.revoked_host_keys is not None
+    assert current.revoked_host_keys.read_bytes() == b"fixture-revocation-bytes\x00\xff"
+    assert len(fixture.calls) == 4
+    assert not fixture.owner.list_pending_lifecycle_obligations()
+    assert fixture.db.operations.inspect(fixture.owner.ownership.scope).ownership == fixture.owner.ownership
+
+
 def test_complete_publication_closes_writer_then_strictly_readmits(fixture, monkeypatch):
     consumer = fixture.consumer()
     original_close = consumer._custody.close
@@ -201,7 +253,7 @@ def test_complete_publication_closes_writer_then_strictly_readmits(fixture, monk
         assert events == ["writer-closed"]
         assert consumer._custody._closed and consumer._custody._settled
         assert kwargs["expected_generation"] == fixture.base
-        assert kwargs["authority"] == "core-creation:vm:" + _MARKER
+        assert kwargs["authority"] == "core-creation:" + fixture.resource_id
         events.append("publication")
         return refresh_trust(*args, **kwargs)
 
