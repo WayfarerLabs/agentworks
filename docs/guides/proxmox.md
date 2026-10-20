@@ -94,6 +94,21 @@ The `AgentworksVM` role uses `VM.Monitor` for QEMU Guest Agent access on Proxmox
 network inspection and file-write endpoints Agentworks uses. The setup script selects the matching
 role from the installed Proxmox VE major version and refuses unknown major versions.
 
+The role also includes `VM.Config.CDROM`, alongside `VM.Config.Cloudinit`, because Proxmox requires
+both to remove an attached cloud-init disk. This privilege follows the role's existing pool ACL;
+it does not grant access to VMs outside that pool. If you have reused the role in other ACLs, those
+assignments also gain the privilege, so inspect them before updating it.
+
+For an existing installation, an administrator must explicitly update the role on the Proxmox host:
+
+```bash
+pveum role modify AgentworksVM --append 1 --privs VM.Config.CDROM
+```
+
+This appends the privilege without replacing the role's other privileges or rotating the API token.
+The current setup script also includes it when creating or updating the role. Agentworks does not
+change live roles or ACLs automatically.
+
 ### Manual setup
 
 If you prefer to set things up manually, see the script source for the exact commands. The key
