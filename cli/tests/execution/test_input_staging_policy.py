@@ -52,7 +52,6 @@ def test_input_storage_choice_requires_exact_bool(invalid):
             factory(b"input", allow_staging=invalid)
 
 
-@pytest.mark.windows
 @_LINUX_ONLY
 @pytest.mark.parametrize("sensitive", [False, True])
 def test_small_input_survives_bound_environment_with_exact_delivery(bound, sensitive, monkeypatch):
@@ -76,7 +75,6 @@ def test_small_input_survives_bound_environment_with_exact_delivery(bound, sensi
     assert carrier.calls == 1 and not operation._prepared_stages and owner._active_borrow is None
 
 
-@pytest.mark.windows
 @_LINUX_ONLY
 @pytest.mark.parametrize("sensitive", [False, True])
 @pytest.mark.parametrize("capture_limit", [4096, 8192])
@@ -208,7 +206,6 @@ def test_private_managed_body_refuses_before_snapshotting_environment(sensitive,
         )
 
 
-@pytest.mark.windows
 @_LINUX_ONLY
 def test_no_input_staging_still_allows_large_output_capture(captured):
     owner, operation, carrier = captured

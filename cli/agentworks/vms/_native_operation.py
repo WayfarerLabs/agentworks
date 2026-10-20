@@ -127,8 +127,6 @@ class _Workflow:
     def close(self, *, cleanup_deadline: Deadline | None = None) -> None:
         """Stop body admission, then release only on aggregate exact settlement."""
         self.body_admission_closed = True
-        for route in self.routes:
-            route.body_admission_closed = True
         self.owner.stop_admission()
         if not self._cleanup_lock.acquire(blocking=False):
             raise StateError("VM operation cleanup is already active")
