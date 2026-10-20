@@ -168,8 +168,9 @@ class ProxmoxCreationBootstrap:
     """Retain before start; submit one fixed root bootstrap under original custody.
 
     Fresh observation budgets can read only an acknowledged, still available QGA
-    record. An uncertain GET is never retried. Nonzero completion does not settle
-    possible guest effects, and this controller never seals or releases its owner.
+    record. An uncertain GET is never retried. Terminal completion settles only
+    this invocation; failed prerequisites still refuse admission and retain the
+    separate resource obligation for rollback. This controller never releases its owner.
     """
 
     def __init__(
@@ -369,7 +370,7 @@ class ProxmoxCreationBootstrap:
         try:
             self._reconcile_locked()
             observation = self.observation
-            if observation.bootstrap_succeeded or not self._status_available or observation.pid is None:
+            if observation.completion is not None or not self._status_available or observation.pid is None:
                 return observation
             if not self._custody.settled:
                 raise StateError("Proxmox creation bootstrap retains unsettled local delivery")
@@ -414,8 +415,9 @@ class ProxmoxCreationBootstrap:
         ):
             raise StateError("Proxmox creation bootstrap custody conflicts")
         obligation = LifecycleObligation(self._owner, row)
+        # Invocation completion does not establish prerequisites or discharge the resource.
         can_resolve = self._custody.settled and (
-            not self._execute_entered or self._not_sent or self.observation.bootstrap_succeeded
+            not self._execute_entered or self._not_sent or self.observation.completion is not None
         )
         if row.state is LifecycleObligationState.RESOLVED:
             if not can_resolve or revision != len(self._history) - 1:

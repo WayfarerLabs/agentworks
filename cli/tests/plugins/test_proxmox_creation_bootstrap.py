@@ -256,28 +256,33 @@ def test_exact_serialized_body_limit_refuses_before_arming(owned: Harness, monke
 
 
 @pytest.mark.parametrize(
-    "terminal",
+    "terminal,settled",
     [
-        {"exited": True, "exitcode": 1},
-        {"exited": True, "signal": 15},
-        {"exited": True, "exitcode": 0, "out-data": ""},
-        {"exited": True, "exitcode": 0, "out-data": "non-ascii \u00e9"},
-        {"exited": True, "exitcode": 0, "out-truncated": True},
-        {"exited": False, "exitcode": 0},
-        {"exited": "yes"},
+        ({"exited": True, "exitcode": 1}, True),
+        ({"exited": True, "signal": 15}, True),
+        ({"exited": True, "exitcode": 0, "out-data": ""}, True),
+        ({"exited": True, "exitcode": 0, "out-data": "non-ascii \u00e9"}, True),
+        ({"exited": True, "exitcode": 0, "out-truncated": True}, True),
+        ({"exited": False, "exitcode": 0}, False),
+        ({"exited": "yes"}, False),
+        ({"exited": True}, False),
     ],
 )
-def test_nonzero_malformed_or_missing_record_retains_effects_without_another_get(
+def test_failed_or_unknown_prerequisites_settle_only_observed_invocations_without_another_get(
     owned: Harness,
     terminal: dict[str, object],
+    settled: bool,
 ) -> None:
     owned.statuses.append(terminal)
     with pytest.raises(StateError):
         owned.bootstrap.start()
-    assert not owned.bootstrap.observation.bootstrap_succeeded
-    assert owned.row().state is LifecycleObligationState.POSSIBLE_EFFECT
+    observation = owned.bootstrap.observation
+    assert not observation.bootstrap_succeeded
+    assert (owned.row().state is LifecycleObligationState.RESOLVED) is settled
     owned.bootstrap.reconcile(Deadline.after(1))
-    owned.bootstrap.observe(Deadline.after(1))
+    assert owned.bootstrap.observe(Deadline.after(1)) is observation
+    assert (owned.row().state is LifecycleObligationState.RESOLVED) is settled
+    assert owned.repository.inspect(owned.owner.ownership.scope) is not None
     assert owned.calls.count("POST") == owned.calls.count("GET") == 1
 
 
@@ -303,7 +308,11 @@ def test_wrong_nonce_or_incomplete_script_never_succeeds(
     )
     with pytest.raises(StateError):
         owned.bootstrap.start()
-    assert owned.row().state is LifecycleObligationState.POSSIBLE_EFFECT
+    observation = owned.bootstrap.observation
+    assert not observation.bootstrap_succeeded
+    assert owned.row().state is LifecycleObligationState.RESOLVED
+    assert owned.bootstrap.observe(Deadline.after(1)) is observation
+    assert owned.calls.count("POST") == owned.calls.count("GET") == 1
 
 
 @pytest.mark.parametrize("method", ["POST", "GET"])
@@ -501,7 +510,8 @@ def test_success_record_cannot_override_nonzero_qga_completion(owned: Harness) -
     with pytest.raises(StateError):
         owned.bootstrap.start()
     assert owned.bootstrap.observation.completion == ExitStatus(code=1)
-    assert owned.row().state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert not owned.bootstrap.observation.bootstrap_succeeded
+    assert owned.row().state is LifecycleObligationState.RESOLVED
 
 
 def test_stale_owner_cannot_read_provider_during_cleanup(owned: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -523,7 +533,10 @@ def test_cleanup_refuses_replaced_generation_before_pid_observation(
     assert owned.calls.count("GET") == 0 and owned.calls.count("POST") == 1
 
 
-def test_success_waits_for_local_custody_before_resolution(owned: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("successful", [False, True])
+def test_terminal_completion_waits_for_local_custody_before_resolution(
+    owned: Harness, monkeypatch: pytest.MonkeyPatch, successful: bool
+) -> None:
     original = owned.bootstrap.record_status
     settled = [True]
     monkeypatch.setattr(LocalDeliveryCustody, "settled", property(lambda _: settled[0]))
@@ -533,7 +546,13 @@ def test_success_waits_for_local_custody_before_resolution(owned: Harness, monke
         original(status)
 
     monkeypatch.setattr(owned.bootstrap, "record_status", retained)
-    assert owned.bootstrap.start().bootstrap_succeeded
+    if successful:
+        assert owned.bootstrap.start().bootstrap_succeeded
+    else:
+        owned.statuses.append({"exited": True, "exitcode": 1})
+        with pytest.raises(StateError):
+            owned.bootstrap.start()
+        assert not owned.bootstrap.observation.bootstrap_succeeded
     assert owned.row().state is LifecycleObligationState.POSSIBLE_EFFECT
     settled[0] = True
     owned.bootstrap.reconcile(Deadline.after(1))
