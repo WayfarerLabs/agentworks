@@ -49,8 +49,13 @@ class AzureOwnedCreationAccess:
     """
 
     def __init__(
-        self, request: ProvisionRequest, platform: AzureVMPlatform, ctx: RunContext,
-        *, owner: OperationOwner, custody: LocalDeliveryCustody,
+        self,
+        request: ProvisionRequest,
+        platform: AzureVMPlatform,
+        ctx: RunContext,
+        *,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
     ) -> None:
         if (
             type(owner) is not OperationOwner
@@ -59,11 +64,23 @@ class AzureOwnedCreationAccess:
         ):
             raise ValidationError("Azure creation requires exact VM ownership")
         self._vm = VMRow(
-            name=request.vm_name, site=platform.site_name, template=None, admin_template=None,
-            extra_packages=[], provisioning_status="in-progress", init_status="pending", tailscale_host=None,
-            cpus=request.cpus, memory_gib=request.memory_gib, disk_gib=request.disk_gib,
-            swap_gib=request.swap_gib, admin_username=request.admin_username, hostname=request.hostname,
-            created_at="", last_seen_at=None, instance_marker=request.instance_marker,
+            name=request.vm_name,
+            site=platform.site_name,
+            template=None,
+            admin_template=None,
+            extra_packages=[],
+            provisioning_status="in-progress",
+            init_status="pending",
+            tailscale_host=None,
+            cpus=request.cpus,
+            memory_gib=request.memory_gib,
+            disk_gib=request.disk_gib,
+            swap_gib=request.swap_gib,
+            admin_username=request.admin_username,
+            hostname=request.hostname,
+            created_at="",
+            last_seen_at=None,
+            instance_marker=request.instance_marker,
         )
         self._settings = require_ssh_settings(self._vm, ctx, ctx.config)
         self._marker = request.instance_marker
@@ -155,7 +172,8 @@ class AzureOwnedCreationAccess:
     def _power(value: dict[str, Any]) -> VMStatus:
         statuses = value.get("properties", {}).get("instanceView", {}).get("statuses", [])
         codes = [
-            item.get("code") for item in statuses
+            item.get("code")
+            for item in statuses
             if type(item) is dict and str(item.get("code")).startswith("PowerState/")
         ]
         return VMStatus.RUNNING if codes == ["PowerState/running"] else VMStatus.UNKNOWN
@@ -165,7 +183,8 @@ class AzureOwnedCreationAccess:
         props = value["properties"]
         refs = props.get("networkProfile", {}).get("networkInterfaces", [])
         return SimpleNamespace(
-            id=value["id"], vm_id=canonical_vm_id(props.get("vmId")),
+            id=value["id"],
+            vm_id=canonical_vm_id(props.get("vmId")),
             network_profile=SimpleNamespace(network_interfaces=[SimpleNamespace(id=ref.get("id")) for ref in refs]),
         )
 
@@ -255,8 +274,14 @@ class AzureOwnedCreationAccess:
             except (KeyError, ValueError, TypeError):
                 raise StateError("Azure creation requires one literal public IPv4 address") from None
             self._route = AzureNativeRoute(
-                self._owner, self._vm.name, self._credential(deadline), self._metadata["resource_id"],
-                self._metadata["vm_id"], self._locator(), self._route_model(current), prefixes,
+                self._owner,
+                self._vm.name,
+                self._credential(deadline),
+                self._metadata["resource_id"],
+                self._metadata["vm_id"],
+                self._locator(),
+                self._route_model(current),
+                prefixes,
             )
             self._route.open(deadline)
             self._check_route(deadline)
@@ -264,19 +289,29 @@ class AzureOwnedCreationAccess:
             self._readiness.wait(self._endpoint, deadline)
             self._check_route(deadline)
             self._trust = CreationSSHTrust(
-                self._owner, vm_name=self._vm.name, admin_username=self._vm.admin_username,
-                instance_marker=self._marker, endpoint=self._endpoint,
-                settings=self._settings, deadline=deadline,
+                self._owner,
+                vm_name=self._vm.name,
+                admin_username=self._vm.admin_username,
+                instance_marker=self._marker,
+                endpoint=self._endpoint,
+                settings=self._settings,
+                deadline=deadline,
             )
             self._trust.prepare()
             self._check_route(deadline)
             observe_early_guest(
                 vm_ssh_connection(self._vm.name, self._vm.admin_username, self._endpoint, self._settings),
-                self._marker, deadline, self._custody, bootstrap_check=_CLOUD_INIT_CHECK,
+                self._marker,
+                deadline,
+                self._custody,
+                bootstrap_check=_CLOUD_INIT_CHECK,
             )
             self._check_route(deadline)
             self._binding = ssh_execution_binding(
-                self._vm, self._endpoint, self._settings, independent_availability=self.independent_availability,
+                self._vm,
+                self._endpoint,
+                self._settings,
+                independent_availability=self.independent_availability,
             )
             self._route_ready = True
             self._result = VMCreationResult(self._metadata, self._binding, self._locator())
@@ -308,7 +343,8 @@ class AzureOwnedCreationAccess:
             ordinary: Exception | None = None
             control: BaseException | None = None
             actions: list[Callable[[], bool]] = [
-                lambda: self._requests.close(deadline), lambda: self._exposure.close(deadline),
+                lambda: self._requests.close(deadline),
+                lambda: self._exposure.close(deadline),
             ]
             if self._readiness is not None:
                 actions.append(self._readiness.close)

@@ -107,15 +107,18 @@ class Transport(HttpTransport):
 @pytest.fixture
 def owned(tmp_path, monkeypatch):
     for target, method in (
-        (socket.socket, "connect"), (socket.socket, "connect_ex"),
-        (socket, "create_connection"), (socket, "getaddrinfo"),
+        (socket.socket, "connect"),
+        (socket.socket, "connect_ex"),
+        (socket, "create_connection"),
+        (socket, "getaddrinfo"),
     ):
         monkeypatch.setattr(target, method, deny)
     transport = Transport()
     credential = Credential()
     original = _route_client.network_route_client
     monkeypatch.setattr(
-        _route_client, "network_route_client",
+        _route_client,
+        "network_route_client",
         lambda selected, subscription: original(selected, subscription, transport=transport),
     )
     with closing(Database(tmp_path / "creation.db")) as database:

@@ -37,7 +37,7 @@ def public_startup(admin_username: str, marker: str) -> str:
         "[ ! -L /tmp ] && [ -d /tmp ]\n"
         "chown 0:0 /tmp\nchmod 1777 /tmp\n"
         f"admin={shlex.quote(admin_username)}\n"
-        "id -- \"$admin\" >/dev/null\n"
+        'id -- "$admin" >/dev/null\n'
         "[ ! -L /etc/sudoers.d ] && [ -d /etc/sudoers.d ]\n"
         "[ ! -L /etc/sudoers.d/agentworks-creation ]\n"
         "printf '%s ALL=(ALL) NOPASSWD:ALL\\n' \"$admin\" > /etc/sudoers.d/agentworks-creation\n"
@@ -101,52 +101,72 @@ def resource_plan(request: ProvisionRequest, config: AzureVMConfig) -> tuple[Cre
         CreationResource(
             nsg, {**common, "properties": {"securityRules": [{"name": "deny-all-inbound", "properties": baseline}]}}
         ),
-        CreationResource(vnet, {
-            **common,
-            "properties": {
-                "addressSpace": {"addressPrefixes": ["10.0.0.0/16"]},
-                "subnets": [{"name": "default", "properties": {"addressPrefix": "10.0.0.0/24"}}],
-            },
-        }),
-        CreationResource(nic, {
-            **common,
-            "properties": {
-                "networkSecurityGroup": {"id": nsg},
-                "ipConfigurations": [{
-                    "name": "default",
-                    "properties": {"subnet": {"id": vnet + "/subnets/default"}, "publicIPAddress": {"id": ip}},
-                }],
-            },
-        }),
-        CreationResource(vm, {
-            **common,
-            "properties": {
-                "hardwareProfile": {"vmSize": size.name},
-                "storageProfile": {
-                    "imageReference": {
-                        "publisher": image.publisher, "offer": image.offer,
-                        "sku": image.sku, "version": image.version,
-                    },
-                    "osDisk": {
-                        "name": disk_name, "createOption": "FromImage",
-                        "diskSizeGB": max(request.disk_gib, image.os_disk_floor_gib), "deleteOption": "Delete",
-                        "managedDisk": {"storageAccountType": "StandardSSD_LRS"},
-                    },
+        CreationResource(
+            vnet,
+            {
+                **common,
+                "properties": {
+                    "addressSpace": {"addressPrefixes": ["10.0.0.0/16"]},
+                    "subnets": [{"name": "default", "properties": {"addressPrefix": "10.0.0.0/24"}}],
                 },
-                "osProfile": {
-                    "computerName": request.hostname, "adminUsername": request.admin_username,
-                    "customData": base64.b64encode(startup.encode()).decode("ascii"),
-                    "linuxConfiguration": {
-                        "disablePasswordAuthentication": True,
-                        "ssh": {"publicKeys": [{
-                            "path": f"/home/{request.admin_username}/.ssh/authorized_keys",
-                            "keyData": request.ssh_public_key,
-                        }]},
-                    },
-                },
-                "networkProfile": {"networkInterfaces": [{"id": nic}]},
             },
-        }),
+        ),
+        CreationResource(
+            nic,
+            {
+                **common,
+                "properties": {
+                    "networkSecurityGroup": {"id": nsg},
+                    "ipConfigurations": [
+                        {
+                            "name": "default",
+                            "properties": {"subnet": {"id": vnet + "/subnets/default"}, "publicIPAddress": {"id": ip}},
+                        }
+                    ],
+                },
+            },
+        ),
+        CreationResource(
+            vm,
+            {
+                **common,
+                "properties": {
+                    "hardwareProfile": {"vmSize": size.name},
+                    "storageProfile": {
+                        "imageReference": {
+                            "publisher": image.publisher,
+                            "offer": image.offer,
+                            "sku": image.sku,
+                            "version": image.version,
+                        },
+                        "osDisk": {
+                            "name": disk_name,
+                            "createOption": "FromImage",
+                            "diskSizeGB": max(request.disk_gib, image.os_disk_floor_gib),
+                            "deleteOption": "Delete",
+                            "managedDisk": {"storageAccountType": "StandardSSD_LRS"},
+                        },
+                    },
+                    "osProfile": {
+                        "computerName": request.hostname,
+                        "adminUsername": request.admin_username,
+                        "customData": base64.b64encode(startup.encode()).decode("ascii"),
+                        "linuxConfiguration": {
+                            "disablePasswordAuthentication": True,
+                            "ssh": {
+                                "publicKeys": [
+                                    {
+                                        "path": f"/home/{request.admin_username}/.ssh/authorized_keys",
+                                        "keyData": request.ssh_public_key,
+                                    }
+                                ]
+                            },
+                        },
+                    },
+                    "networkProfile": {"networkInterfaces": [{"id": nic}]},
+                },
+            },
+        ),
     )
 
 

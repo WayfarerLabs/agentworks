@@ -33,14 +33,30 @@ VM_ID = "11234567-89ab-0cde-0123-456789abcdef"
 def owned(tmp_path, monkeypatch):
     monkeypatch.setattr(_OwnedAzureCredential, "credential", deny)
     monkeypatch.setattr(AzureCreationRequests, "call", deny)
-    platform = AzureVMPlatform("site", {
-        "name": "azure-vm", "subscription_id": SUB, "resource_group": "group", "region": "eastus",
-    })
+    platform = AzureVMPlatform(
+        "site",
+        {
+            "name": "azure-vm",
+            "subscription_id": SUB,
+            "resource_group": "group",
+            "region": "eastus",
+        },
+    )
     request = ProvisionRequest(
-        vm_name="vm", debian_release=DebianRelease.BOOKWORM, hostname="project-vm", system_slug="project",
-        instance_marker="a" * 32, admin_username="operator", ssh_public_key=TEST_SSH_PUBLIC_KEY,
-        ssh_private_key=None, tailscale_auth_key="join-secret-sentinel", progress=SimpleNamespace(),
-        cpus=2, memory_gib=4, disk_gib=40, swap_gib=0,
+        vm_name="vm",
+        debian_release=DebianRelease.BOOKWORM,
+        hostname="project-vm",
+        system_slug="project",
+        instance_marker="a" * 32,
+        admin_username="operator",
+        ssh_public_key=TEST_SSH_PUBLIC_KEY,
+        ssh_private_key=None,
+        tailscale_auth_key="join-secret-sentinel",
+        progress=SimpleNamespace(),
+        cpus=2,
+        memory_gib=4,
+        disk_gib=40,
+        swap_gib=0,
     )
     config = SimpleNamespace(operator=SimpleNamespace(ssh=SSHSettings(tmp_path / "trust", tmp_path / "identity")))
     context = RunContext(config=config)
@@ -48,7 +64,12 @@ def owned(tmp_path, monkeypatch):
         owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm"), "proof")
         access = platform.build_creation_access(request, context, owner=owner, custody=LocalDeliveryCustody())
         yield SimpleNamespace(
-            access=access, owner=owner, platform=platform, request=request, context=context, database=database,
+            access=access,
+            owner=owner,
+            platform=platform,
+            request=request,
+            context=context,
+            database=database,
         )
 
 
@@ -67,7 +88,10 @@ def test_factory_refuses_foreign_owner_before_effects(owned):
     owned.request.vm_name = "other"
     with pytest.raises(ValidationError):
         owned.platform.build_creation_access(
-            owned.request, owned.context, owner=owned.owner, custody=LocalDeliveryCustody(),
+            owned.request,
+            owned.context,
+            owner=owned.owner,
+            custody=LocalDeliveryCustody(),
         )
 
 

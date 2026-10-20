@@ -147,9 +147,13 @@ class AzureCreationRequests:
         payload = json.dumps(
             {
                 "resources": [asdict(item) for item in self.resources],
-                "disk_id": self.disk_id, "observed_disk_id": self.observed_disk_id, "accepted": self.accepted,
+                "disk_id": self.disk_id,
+                "observed_disk_id": self.observed_disk_id,
+                "accepted": self.accepted,
             },
-            sort_keys=True, ensure_ascii=True, separators=(",", ":"),
+            sort_keys=True,
+            ensure_ascii=True,
+            separators=(",", ":"),
         ).encode("ascii")
         if len(payload) > MAX_LIFECYCLE_PAYLOAD_BYTES:
             raise ValidationError("Azure creation evidence exceeds lifecycle bound")
@@ -167,7 +171,8 @@ class AzureCreationRequests:
                 raise StateError("Azure creation registration remains uncertain")
             return not self.cleanup_incomplete
         if (
-            row.obligation_kind != KIND or row.payload_version != 1
+            row.obligation_kind != KIND
+            or row.payload_version != 1
             or not 0 <= row.payload_revision < len(self._history)
             or row.payload != self._history[row.payload_revision]
             or (any(item.sent for item in self.resources) and row.state is LifecycleObligationState.REGISTERED)
@@ -201,8 +206,14 @@ class AzureCreationRequests:
         )
 
     def call(
-        self, credential: object, method: str, url: str, deadline: Deadline,
-        *, body: dict[str, Any] | None = None, create_only: bool = False,
+        self,
+        credential: object,
+        method: str,
+        url: str,
+        deadline: Deadline,
+        *,
+        body: dict[str, Any] | None = None,
+        create_only: bool = False,
     ) -> Any:
         from azure.core.rest import HttpRequest
 
@@ -312,7 +323,11 @@ class AzureCreationRequests:
         self.reconcile(deadline)
         url = resource_url(item.resource_id)
         response = self.call(
-            credential, "PUT", url, deadline, body=request.body,
+            credential,
+            "PUT",
+            url,
+            deadline,
+            body=request.body,
             create_only="/virtualMachines/" in item.resource_id,
         )
         item.create_ack = _sdk(lambda: acknowledgment(response, "PUT", url, self.subscription))
