@@ -245,6 +245,34 @@ class _ProxmoxWire:
         assert isinstance(data, str)
         return data
 
+    def request_vm_stop(self, *, custody: LocalDeliveryCustody, timeout: float) -> str:
+        """Submit one fixed stop, returning only a bounded raw acknowledgment."""
+        if not _valid_control_timeout(timeout):
+            raise ValidationError("Proxmox stop requires a positive finite timeout")
+        data = self._exchange(_Endpoint.VM_STOP, "POST", None, custody=custody, body=None, timeout=timeout)
+        if not _valid_task_id(data):
+            raise _WireFailure("Proxmox returned an invalid stop acknowledgment")
+        assert isinstance(data, str)
+        return data
+
+    def request_vm_destroy(self, *, custody: LocalDeliveryCustody, timeout: float) -> str:
+        """Submit one fixed destroy, without asserting resource cleanup."""
+        if not _valid_control_timeout(timeout):
+            raise ValidationError("Proxmox destroy requires a positive finite timeout")
+        data = self._exchange(_Endpoint.VM_DESTROY, "DELETE", None, custody=custody, body=None, timeout=timeout)
+        if not _valid_task_id(data):
+            raise _WireFailure("Proxmox returned an invalid destroy acknowledgment")
+        assert isinstance(data, str)
+        return data
+
+    def request_vmid_free(self, *, custody: LocalDeliveryCustody, timeout: float) -> None:
+        """Observe that this exact VMID is free, without claiming a reservation."""
+        if not _valid_control_timeout(timeout):
+            raise ValidationError("Proxmox VM identifier observation requires a positive finite timeout")
+        data = self._exchange(_Endpoint.VMID_FREE, "GET", None, custody=custody, body=None, timeout=timeout)
+        if type(data) is not int or data != self._connection.vmid:
+            raise _WireFailure("Proxmox did not establish that the selected VM identifier is free")
+
     def request_vm_configure(
         self,
         request: ProxmoxConfigurationRequest,

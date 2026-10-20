@@ -36,6 +36,9 @@ class _Endpoint(StrEnum):
     POWER = "power"
     CURRENT_CONFIG = "current-config"
     VM_START = "vm-start"
+    VM_STOP = "vm-stop"
+    VM_DESTROY = "vm-destroy"
+    VMID_FREE = "vmid-free"
     TASK_STATUS = "task-status"
     GUEST_INFO = "guest-info"
     NEXT_ID = "next-id"
@@ -196,10 +199,14 @@ def _request(payload: dict[str, Any]) -> bytes:
             _Endpoint.GUEST_INFO: "agent/info",
         }[endpoint]
         url = f"{base}/{route}"
-    elif endpoint is _Endpoint.NEXT_ID:
+    elif endpoint in (_Endpoint.NEXT_ID, _Endpoint.VMID_FREE):
         if suffix is not None or method != "GET" or body is not None:
             raise ValueError("Candidate VM identifier requires a fixed body-free GET")
         url = f"{origin}/api2/json/cluster/nextid"
+        if endpoint is _Endpoint.VMID_FREE:
+            if type(connection["vmid"]) is not int or connection["vmid"] <= 0:
+                raise ValueError("VM identifier observation requires a positive integer identifier")
+            url += f"?vmid={connection['vmid']}"
     elif endpoint is _Endpoint.VM_CLONE:
         if suffix is not None or method != "POST" or type(body) is not str:
             raise ValueError("Clone requires a fixed POST and exact public body")
@@ -207,10 +214,14 @@ def _request(payload: dict[str, Any]) -> bytes:
         if not _valid_clone_body(clone) or clone["newid"] == connection["vmid"]:
             raise ValueError("Invalid clone body")
         url = f"{base}/clone"
-    elif endpoint is _Endpoint.VM_START:
+    elif endpoint in (_Endpoint.VM_START, _Endpoint.VM_STOP):
         if suffix is not None or method != "POST" or body is not None:
-            raise ValueError("VM start requires a fixed body-free POST")
-        url = f"{base}/status/start"
+            raise ValueError("VM power control requires a fixed body-free POST")
+        url = f"{base}/status/{'start' if endpoint is _Endpoint.VM_START else 'stop'}"
+    elif endpoint is _Endpoint.VM_DESTROY:
+        if suffix is not None or method != "DELETE" or body is not None:
+            raise ValueError("VM destroy requires a fixed body-free DELETE")
+        url = base
     elif endpoint in (_Endpoint.VM_CONFIGURE, _Endpoint.VM_RESIZE):
         if suffix is not None or method != "PUT" or type(body) is not str:
             raise ValueError("Configuration requires a fixed PUT and exact public body")
@@ -224,6 +235,9 @@ def _request(payload: dict[str, Any]) -> bytes:
         url = f"{node_base}/tasks/{_task_component(suffix)}/status"
     if endpoint in (
         _Endpoint.VM_START,
+        _Endpoint.VM_STOP,
+        _Endpoint.VM_DESTROY,
+        _Endpoint.VMID_FREE,
         _Endpoint.TASK_STATUS,
         _Endpoint.GUEST_INFO,
         _Endpoint.NEXT_ID,

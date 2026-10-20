@@ -37,7 +37,7 @@ TOKEN_NAME="agentworks"
 IMAGE_URL="https://cloud.debian.org/images/cloud/${RELEASE}/latest/debian-${DEBIAN_VERSION}-generic-amd64.qcow2"
 TEMPLATE_NAME="debian-${DEBIAN_VERSION}-template"
 TEMPLATE_TAGS="agentworks;debian-${RELEASE}"
-VM_LIFECYCLE_PRIVS="VM.Allocate VM.Config.CPU VM.Config.Memory VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Options VM.Config.Network VM.PowerMgmt VM.Audit"
+VM_LIFECYCLE_PRIVS="VM.Allocate VM.Config.CPU VM.Config.Memory VM.Config.Cloudinit VM.Config.CDROM VM.Config.Disk VM.Config.HWType VM.Config.Options VM.Config.Network VM.PowerMgmt VM.Audit"
 
 PVE_VERSION=$(pveversion 2>/dev/null || true)
 if [[ "$PVE_VERSION" =~ ^pve-manager/([0-9]+)\. ]]; then

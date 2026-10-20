@@ -19,6 +19,7 @@ pytestmark = requires_posix_shell
 _LIFECYCLE_PRIVILEGES = {
     "VM.Allocate",
     "VM.Audit",
+    "VM.Config.CDROM",
     "VM.Config.CPU",
     "VM.Config.Cloudinit",
     "VM.Config.Disk",
