@@ -87,7 +87,7 @@ def test_prerequisite_gate_requires_complete_matching_strict_ssh_observation(mon
             clock[0] = 106.0
         return CarrierReport(
             Dispatch.NOT_SENT if failure == "not_sent" else Dispatch.SENT,
-            completion=ExitStatus(code=1 if failure == "nonzero" else 0),
+            completion=None if failure == "not_sent" else ExitStatus(code=1 if failure == "nonzero" else 0),
             stdout=CapturedOutput((output + "\n").encode("ascii"), complete=failure != "incomplete"),
         )
 
