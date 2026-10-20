@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from dataclasses import replace
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
@@ -149,7 +150,7 @@ class NativeDelivery:
 @pytest.fixture
 def deadline_clock():
     class Clock:
-        now = carrier_module.time.monotonic()
+        now = time.monotonic()
 
         def monotonic(self):
             return self.now
