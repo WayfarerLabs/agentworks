@@ -21,7 +21,7 @@ from agentworks.errors import StateError, ValidationError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import CapturedOutput, CarrierIO, Deadline, Failure
 from agentworks.execution.carriers._subprocess import ProcessResult
-from agentworks.execution.carriers.ssh import ManagedSSHTrust, SSHSettings, SSHTrustFiles
+from agentworks.execution.carriers.ssh import ManagedSSHTrust, SSHCarrier, SSHSettings, SSHTrustFiles
 from agentworks.execution.carriers.ssh import enrollment as ssh_enrollment
 from agentworks.execution.carriers.ssh.connection import admit_connection
 from agentworks.execution.carriers.ssh.enrollment import SSHEnrollmentCustody, SSHEnrollmentError
@@ -259,18 +259,12 @@ def test_successful_prepare_resolves_before_route_borrow_and_cleanup_is_passive(
     assert len(fixture.calls) == 2
 
 
-def test_execution_binding_consumes_common_passive_connection(fixture, monkeypatch):
+def test_execution_binding_preserves_selected_connection_policy(fixture, monkeypatch):
     connection = binding.vm_ssh_connection(fixture.db.get_vm("box"), _HOST, fixture.settings)
-    selections = []
-
-    def select(vm, endpoint, settings):
-        selections.append((vm.name, endpoint, settings))
-        return connection
-
-    monkeypatch.setattr(binding, "vm_ssh_connection", select)
+    monkeypatch.setattr(binding, "vm_ssh_connection", lambda *args: connection)
     result = binding.ssh_execution_binding(fixture.db.get_vm("box"), _HOST, fixture.settings)
     assert result.delivery_account == "admin"
-    assert selections == [("box", _HOST, fixture.settings)]
+    assert isinstance(result.carrier, SSHCarrier) and result.carrier._connection is connection
     assert not fixture.calls
 
 
