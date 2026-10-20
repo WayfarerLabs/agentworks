@@ -306,10 +306,13 @@ Keep the stages and failure windows explicit:
    using its elevated plan with explicit Bash and ordinary shared input/output handling. Reuse the
    pure bootstrap generator with its join deferred; do not build another pre-Python script-delivery
    or output-capture stack. Then complete the secret-bearing join through that prepared target,
-   keeping the Tailscale key on sensitive stdin rather than embedding it in generated shell,
-   provider data or a staging file. Carrier closure alone proves neither join success nor guest
-   completion. Keep uncertain public configuration or join work and its original helper custody
-   distinct from known completed work.
+   keeping the Tailscale key on explicitly non-staging sensitive stdin rather than embedding it in
+   generated shell, workload arguments, persisted provider configuration or a staging file. A native
+   carrier necessarily transports that input; this is not a provider-retention guarantee. Use the
+   upstream CLI's file-backed input form against its inherited stdin descriptor, not shell
+   substitution that expands the key into argv. Carrier closure alone proves neither join success
+   nor guest completion. Keep uncertain public configuration or join work and its original helper
+   custody distinct from known completed work.
 5. Close the platform bootstrap rollback window only after its required completion evidence and
    durable addressability are established. Keep this boundary explicit in the retained adapter.
    Before it, failed provisioning performs exact platform rollback or retains its unresolved

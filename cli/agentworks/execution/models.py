@@ -56,10 +56,14 @@ class Input:
     data: builtins.bytes | None
     is_sensitive: bool = False
     source: ByteSource | None = field(default=None, repr=False, kw_only=True)
+    allow_staging: bool = field(default=True, kw_only=True)
 
     def __post_init__(self) -> None:
+        """Validate caller-authored input and its independent storage policy."""
         if type(self.is_sensitive) is not bool or (self.data is not None and type(self.data) is not builtins.bytes):
             raise ValidationError("Execution input requires bytes and a sensitivity choice")
+        if type(self.allow_staging) is not bool:
+            raise ValidationError("Execution input staging choice must be a boolean")
         if self.data is None:
             _endpoint(self.source, "try_read")
         elif self.source is not None:
@@ -70,12 +74,12 @@ class Input:
         return cls(b"")
 
     @classmethod
-    def bytes(cls, data: builtins.bytes, *, sensitive: bool = False) -> Input:
-        return cls(data, sensitive)
+    def bytes(cls, data: builtins.bytes, *, sensitive: bool = False, allow_staging: bool = True) -> Input:
+        return cls(data, sensitive, allow_staging=allow_staging)
 
     @classmethod
-    def sensitive(cls, data: builtins.bytes) -> Input:
-        return cls(data, True)
+    def sensitive(cls, data: builtins.bytes, *, allow_staging: bool = True) -> Input:
+        return cls(data, True, allow_staging=allow_staging)
 
     @classmethod
     def live(cls, source: ByteSource, *, sensitive: bool = False) -> Input:

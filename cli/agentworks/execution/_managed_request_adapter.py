@@ -74,6 +74,8 @@ def compose_managed_body(
         or type(spec) is not ManagedRunSpec
     ):
         raise ValidationError("Invalid managed body")
+    if not input.allow_staging:
+        raise ValidationError("Managed execution requires input staging")
     live_input, live_output = input.source is not None, output.stdout is not None
     if live_io is None:
         if live_input or live_output:

@@ -107,8 +107,8 @@ def test_failed_namespace_admits_no_views_and_retains_exact_workflow_as_needed(d
         return
     assert isinstance(caught.value.__cause__, VMOperationControlFact)
     workflow = caught.value.__cause__._workflow
-    assert workflow.views is None and workflow.namespace is not None
-    preparation = workflow.namespace
+    assert workflow.routes[0].views is None and workflow.routes[0].namespace is not None
+    preparation = workflow.routes[0].namespace
     row = next(
         row
         for row in workflow.owner.list_pending_lifecycle_obligations()

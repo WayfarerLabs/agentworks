@@ -500,7 +500,7 @@ def test_stopped_access_retains_single_activation_without_replay(database, tmp_p
     fact = caught.value.__cause__
     assert isinstance(fact, VMOperationControlFact)
     assert fact._workflow.access is selected[0]
-    assert selected[0].activation is not None and fact._workflow.preparation is None
+    assert selected[0].activation is not None and not fact._workflow.routes
     with pytest.raises(StateError):
         selected[0].ensure_available(VMStatus.STOPPED, Deadline.after(10))
     assert database.operations.inspect(_scope()) is not None and route.guest.calls == 0
@@ -629,7 +629,7 @@ def test_changed_guest_after_plausible_accounts_blocks_body(database, tmp_path, 
                 views.execution.run(Command(["/usr/bin/touch", str(effect)]), profile=Protection.DIRECT, check=True)
     assert not effect.exists() and database.operations.inspect(_scope()) is not None
     assert isinstance(retained.value.__cause__, VMOperationControlFact)
-    assert retained.value.__cause__._workflow.views is views
+    assert retained.value.__cause__._workflow.routes[0].views is views
 
 
 @pytest.mark.parametrize("phase", ["guest", "accounts"])
@@ -661,11 +661,11 @@ def test_preparation_control_retains_exact_facts(database, tmp_path, monkeypatch
     assert isinstance(workflow.access, ProxmoxOwnedNativePlatformAccess)
     assert workflow.access.locator == ProviderLocator("pve:generation")
     assert workflow.access.binding is not None
-    assert workflow.preparation is not None
+    assert workflow.routes[0].preparation is not None
     if phase == "guest":
-        assert workflow.preparation.requires_owner_retention
+        assert workflow.routes[0].preparation.requires_owner_retention
     else:
-        assert workflow.identity is not None and workflow.identity.requires_owner_retention
+        assert workflow.routes[0].identity is not None and workflow.routes[0].identity.requires_owner_retention
     assert database.operations.inspect(_scope()) is not None
     with pytest.raises(StateError):
         workflow.owner.borrow()
@@ -701,7 +701,7 @@ def test_unsettled_preparation_reply_retains_owner(database, tmp_path, monkeypat
     fact = caught.value.__cause__
     assert isinstance(fact, VMOperationControlFact)
     assert isinstance(fact._workflow.access, ProxmoxOwnedNativePlatformAccess)
-    preparation = fact._workflow.identity if phase == "accounts" else fact._workflow.preparation
+    preparation = fact._workflow.routes[0].identity if phase == "accounts" else fact._workflow.routes[0].preparation
     assert preparation is not None and preparation.pending_remote_effects
     assert route.local.calls == 0
 
@@ -793,12 +793,12 @@ def test_settlement_failure_retains_observed_preparation_facts(database, tmp_pat
     assert isinstance(fact, VMOperationControlFact)
     workflow = fact._workflow
     assert isinstance(workflow.access, ProxmoxOwnedNativePlatformAccess)
-    assert workflow.preparation is not None and workflow.preparation.guest_result is not None
+    assert workflow.routes[0].preparation is not None and workflow.routes[0].preparation.guest_result is not None
     if phase == "accounts":
-        assert workflow.identity is not None and workflow.identity.delivery_result is not None
-        assert workflow.identity.coordination_uncertain
+        assert workflow.routes[0].identity is not None and workflow.routes[0].identity.delivery_result is not None
+        assert workflow.routes[0].identity.coordination_uncertain
     else:
-        assert workflow.preparation.coordination_uncertain
+        assert workflow.routes[0].preparation.coordination_uncertain
     assert database.operations.inspect(_scope()) is not None
 
 
@@ -886,7 +886,7 @@ def test_locator_control_survives_borrow_release_failure(database, tmp_path, mon
     fact = control.__cause__
     assert isinstance(fact, VMOperationControlFact)
     assert isinstance(fact._workflow.access, ProxmoxOwnedNativePlatformAccess)
-    preparation = fact._workflow.preparation
+    preparation = fact._workflow.routes[0].preparation
     assert preparation is not None and preparation.requires_owner_retention
     assert preparation.guest_result is not None and preparation.guest_result.observation is not None
     assert preparation.guest_result.observation.identity == route.local.observed
@@ -927,9 +927,11 @@ def test_identity_borrow_release_failure_cannot_release_owner(database, tmp_path
     fact = control.__cause__
     assert isinstance(fact, VMOperationControlFact)
     assert isinstance(fact._workflow.access, ProxmoxOwnedNativePlatformAccess)
-    assert fact._workflow.preparation is not None
-    assert fact._workflow.identity is not None and fact._workflow.identity.delivery_result is not None
-    assert fact._workflow.identity.coordination_uncertain
+    assert fact._workflow.routes[0].preparation is not None
+    assert (
+        fact._workflow.routes[0].identity is not None and fact._workflow.routes[0].identity.delivery_result is not None
+    )
+    assert fact._workflow.routes[0].identity.coordination_uncertain
     assert database.operations.inspect(_scope()) is not None and route.local.calls == 0
     with pytest.raises(StateError):
         fact._workflow.owner.borrow()

@@ -65,7 +65,7 @@ from agentworks.execution.profiles import Protection
 from agentworks.execution.result import ApplicationState, ExecutionFailure
 from agentworks.execution.target import ExecutionIdentity, ExecutionRoute, ExecutionTarget
 from agentworks.operations import OperationBorrow
-from agentworks.vms._native_operation import VMOperation, _Workflow
+from agentworks.vms._native_operation import VMOperation, _RoutePreparation, _Workflow
 
 from . import test_managed_disposal as disposal_tests
 from . import test_managed_observation as observation_tests
@@ -216,7 +216,9 @@ def view(bound):
         ExecutionRoute.NATIVE,
     )
     workflow = _Workflow(
-        owner, Deadline.after(5), views=VMOperation(owner, file_access, access, files, operation, target)
+        owner,
+        Deadline.after(5),
+        routes=[_RoutePreparation(views=VMOperation(owner, file_access, access, files, operation, target))],
     )
     try:
         yield database, workflow, access, main, keeper
@@ -238,7 +240,7 @@ def test_bound_ack_and_normal_aggregate_close(view, invocation):
         output=Output.discard(),
     )
     assert isinstance(reference, JobRef)
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     assert run.receipt.identity.run_id == reference.run_id and run.acknowledged
     assert main.start.calls == 1 and keeper.clock.calls >= 1
     assert run.keeper._carrier is keeper and main is not keeper
@@ -309,7 +311,7 @@ def test_actual_file_calls_mix_with_lifetime_job_reads(view, tmp_path, monkeypat
         IdentityMode.DIRECT,
     )
     files = FileAccess(
-        FileOperation(workflow.owner, workflow.views.execution_operation.managed_runs[0].receipt.spec.target),
+        FileOperation(workflow.owner, workflow.routes[0].views.execution_operation.managed_runs[0].receipt.spec.target),
         LocalCarrier(),
         trusted_root=PurePosixPath(tmp_path),
         runtime_selection=runtime_selection(sys.executable),
@@ -345,7 +347,7 @@ def test_operation_row_mismatch_refused_before_job_effects(view, monkeypatch, fa
     reference = access.start(
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
-    operation = workflow.views.execution_operation
+    operation = workflow.routes[0].views.execution_operation
     record = operation._managed_repository.inspect(operation.managed_runs[0].receipt.identity)
     if fault == "workload":
         record = replace(record, spec=replace(record.spec, workload=IdentityExpectation(111, 111, (111,))))
@@ -378,7 +380,7 @@ def test_active_disposal_keeps_keeper_live(view):
     main.facts = (FactName.LAUNCH,)
     outcome = access.dispose(reference)
     assert outcome.disposed is False and main.dispose.calls == keeper.stop.calls == 0
-    assert not workflow.views.execution_operation.managed_runs[0].keeper._stop.is_set()
+    assert not workflow.routes[0].views.execution_operation.managed_runs[0].keeper._stop.is_set()
     workflow.close(cleanup_deadline=Deadline.after(5))
 
 
@@ -400,7 +402,7 @@ def test_stop_drains_only_selected_keeper(view):
     first = access.start(
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
-    operation = workflow.views.execution_operation
+    operation = workflow.routes[0].views.execution_operation
     second_keeper = Delivery()
     operation._native_binding = replace(operation._native_binding, _new_managed_delivery=lambda: second_keeper)
     second = access.start(
@@ -468,7 +470,7 @@ def test_confirmed_disposal_retains_proof_for_aggregate_close(view):
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
     assert access.dispose(reference).disposed
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     assert run.disposal_confirmed and run.terminal_observation is not None
     assert keeper.stop.calls == keeper.observe.calls == 0
     main.facts = ()
@@ -484,7 +486,7 @@ def test_known_terminated_lost_disposal_reply_reuses_exact_obligation(view):
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
     main.dispose.response = lambda request: b""
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     old_id = run.disposal_obligation_id
     first = access.dispose(reference)
     assert first.disposed is None and first.failure is ExecutionFailure.OBSERVATION
@@ -508,7 +510,7 @@ def test_disposal_clean_refusal_uses_new_row_on_later_explicit_attempt(view, ref
     reference = access.start(
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
-    run = workflow.views.execution_operation.managed_runs[0]
+    run = workflow.routes[0].views.execution_operation.managed_runs[0]
     old_id = run.disposal_obligation_id
     if refusal == "not-sent":
         main.dispose.dispatch = Dispatch.NOT_SENT
@@ -539,7 +541,7 @@ def test_unknown_disposal_helper_blocks_retry_and_aggregate_release(view):
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
     main.dispose.code = None
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     old_id = run.disposal_obligation_id
     outcome = access.dispose(reference)
     assert outcome.disposed is None
@@ -610,7 +612,7 @@ def test_real_controller_without_wait_can_close_operation(view, tmp_path, argv):
     reference = access.start(
         Command(list(argv)), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     launch = encode_managed_job_fact(run.receipt)
     assert run.keeper.drain(Deadline.after(2)).drained
     tmp_path.chmod(0o700)
@@ -682,7 +684,7 @@ def test_wait_deadline_preserves_job_and_keeper(view, monkeypatch):
     assert result.job == reference and result.deadline_exceeded
     assert result.failure is ExecutionFailure.DEADLINE
     assert keeper.stop.calls == 0
-    assert not workflow.views.execution_operation.managed_runs[0].keeper._stop.is_set()
+    assert not workflow.routes[0].views.execution_operation.managed_runs[0].keeper._stop.is_set()
     workflow.close(cleanup_deadline=Deadline.after(5))
 
 
@@ -708,7 +710,7 @@ def test_read_lost_bookkeeping_reply_reuses_retained_lifetime_row(view, monkeypa
         patch.setattr(OperationBorrow, transition, interrupted)
         with pytest.raises(KeyboardInterrupt):
             access.observe(reference)
-    operation = workflow.views.execution_operation
+    operation = workflow.routes[0].views.execution_operation
     operation.retry_inline_bookkeeping()
     access.observe(reference)
     rows = database.operations.list_pending_lifecycle_obligations(workflow.owner.ownership)
@@ -724,10 +726,10 @@ def test_uncommitted_reservation_interruption_is_not_a_launched_run(view, monkey
     def reserve(*args, **kwargs):
         raise control
 
-    monkeypatch.setattr(workflow.views.execution_operation._managed_repository, "reserve", reserve)
+    monkeypatch.setattr(workflow.routes[0].views.execution_operation._managed_repository, "reserve", reserve)
     with pytest.raises(KeyboardInterrupt) as caught:
         access.start(Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION)
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     assert caught.value is control and run.reservation_started and not run.reservation_uncertain
     assert run.reservation_observation is None and run.reserved is None
     assert keeper.clock.calls == main.start.calls == 0
@@ -741,7 +743,7 @@ def test_known_failed_clock_never_claims_start_and_normal_close_resolves_only_pr
     with pytest.raises(StateError) as caught:
         access.start(Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION)
     assert isinstance(caught.value.__cause__, ManagedExecutionControlFact)
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     assert run.start_outcome is None and not run.acknowledged and run.keeper.last_clock is not None
     assert main.start.calls == 0 and run.keeper._worker is None
     workflow.close(cleanup_deadline=Deadline.after(2))
@@ -763,14 +765,14 @@ def test_invalid_admission_has_no_reservation_or_clock(view, change):
     if change == "body":
         args["env"] = {"BAD=NAME": "value"}
     if change == "unsupported":
-        workflow.views.execution_operation._native_binding = replace(
-            workflow.views.execution_operation._native_binding, _new_managed_delivery=None
+        workflow.routes[0].views.execution_operation._native_binding = replace(
+            workflow.routes[0].views.execution_operation._native_binding, _new_managed_delivery=None
         )
     if change == "closed":
         workflow.owner.stop_admission()
     with pytest.raises((StateError, ValidationError)):
         access.start(invocation, **args)
-    assert not workflow.views.execution_operation.managed_runs
+    assert not workflow.routes[0].views.execution_operation.managed_runs
     assert main.start.calls == keeper.clock.calls == 0
     assert database._conn.execute("SELECT COUNT(*) FROM execution_runs").fetchone()[0] == 0
     workflow.close(cleanup_deadline=Deadline.after(2))
@@ -797,7 +799,7 @@ def test_all_keeper_drains_attempted_before_any_guarded_finish(view, monkeypatch
     _, workflow, access, _, _ = view
     access.start(Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION)
     # The platform factory must supply a new dedicated delivery for each run.
-    operation = workflow.views.execution_operation
+    operation = workflow.routes[0].views.execution_operation
     operation._native_binding = replace(operation._native_binding, _new_managed_delivery=Delivery)
     access.start(Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION)
     first, second = operation.managed_runs
@@ -831,7 +833,7 @@ def test_unknown_start_keeps_independent_debt_even_with_terminal_store(view):
     main.start.code = None
     with pytest.raises(StateError) as caught:
         access.start(Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION)
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     assert isinstance(caught.value.__cause__, ManagedExecutionControlFact)
     assert caught.value.__cause__.reference.run_id == run.receipt.identity.run_id
     assert not run.acknowledged and run.keeper._worker is None
@@ -876,7 +878,7 @@ def test_pure_closing_preparation_refusal_does_not_arm_exchange(view, monkeypatc
     monkeypatch.setattr(keeper.stop, "validate", refuse)
     with pytest.raises(KeyboardInterrupt) as caught:
         workflow.close(cleanup_deadline=Deadline.after(2))
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     assert caught.value is control and not run.keeper._closing_pending and keeper.stop.calls == 0
     monkeypatch.setattr(keeper.stop, "validate", validate)
     workflow.close(cleanup_deadline=Deadline.after(2))
@@ -885,7 +887,7 @@ def test_pure_closing_preparation_refusal_does_not_arm_exchange(view, monkeypatc
 def test_current_unknown_helper_cannot_be_cleared_by_old_cleanup_reply(view, monkeypatch):
     _, workflow, access, _, keeper = view
     access.start(Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION)
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     workflow.owner.stop_admission()
     assert run.keeper.drain(Deadline.after(2)).drained
     run.keeper.request_stop(Deadline.after(2))
@@ -895,7 +897,9 @@ def test_current_unknown_helper_cannot_be_cleared_by_old_cleanup_reply(view, mon
         run.keeper.request_stop(Deadline.after(2))
     assert run.keeper._closing_pending and run.keeper.last_cleanup is not None
     assert run.keeper.drain(Deadline.after(2)).drained
-    monkeypatch.setattr(workflow.views.execution_operation, "finish", lambda: pytest.fail("finish before remote gate"))
+    monkeypatch.setattr(
+        workflow.routes[0].views.execution_operation, "finish", lambda: pytest.fail("finish before remote gate")
+    )
     with pytest.raises(StateError):
         workflow.close(cleanup_deadline=Deadline.after(2))
     assert keeper.stop.calls == 2 and keeper.observe.calls == 1
@@ -908,7 +912,7 @@ def test_interrupted_known_cleanup_bookkeeping_is_retryable(view, monkeypatch, b
 
     database, workflow, access, _, keeper = view
     access.start(Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION)
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     control = KeyboardInterrupt("cleanup bookkeeping interrupted")
     if boundary == "resolution":
         original_resolve = LifecycleObligation.resolve
@@ -954,7 +958,7 @@ def test_escaping_initial_clock_retains_original_and_safe_reference(view):
     with pytest.raises(KeyboardInterrupt) as caught:
         access.start(Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION)
     assert caught.value is control and isinstance(control.__cause__, ManagedExecutionControlFact)
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     assert control.__cause__.reference.run_id == run.receipt.identity.run_id
     assert run.keeper.failed and run.reserved is not None and main.start.calls == 0
     assert run.keeper._worker is None
@@ -976,7 +980,7 @@ def test_bound_renewal_during_serial_ordinary_command_attempt(view, monkeypatch)
             with workflow.owner._guard:
                 assert workflow.owner._active_borrow is not None
                 assert workflow.owner._outstanding_attempt is not None
-            workflow.views.execution_operation.managed_runs[0].keeper._stop.set()
+            workflow.routes[0].views.execution_operation.managed_runs[0].keeper._stop.set()
             published.set()
         return lease_success(request)
 

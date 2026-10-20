@@ -85,7 +85,7 @@ def start(access: ExecutionAccess, **kwargs: Any) -> JobRef:
 
 def no_run(view: Any) -> None:
     database, workflow, _, main, keeper = view
-    assert not workflow.views.execution_operation.managed_runs
+    assert not workflow.routes[0].views.execution_operation.managed_runs
     assert main.start.calls == keeper.clock.calls == 0
     assert database._conn.execute("SELECT COUNT(*) FROM execution_runs").fetchone()[0] == 0
 
@@ -93,7 +93,7 @@ def no_run(view: Any) -> None:
 @pytest.mark.parametrize("bootstrap_bound", [False, True])
 def test_owned_shell_lookup_forwards_exact_operation_bootstrap(view, lookup, monkeypatch, bootstrap_bound):
     _, workflow, _, carrier, _ = view
-    operation = workflow.views.execution_operation
+    operation = workflow.routes[0].views.execution_operation
     original_bootstrap = operation._bootstrap
     bootstrap = (
         _NumericGuestBootstrap(
@@ -160,7 +160,7 @@ def test_default_shell_uses_selected_identity_and_persists_frozen_body(view, loo
             **args,
         )
         reference = result.job
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     selected = access._elevated_plan if sudo else ordinary
     assert requests[0].identity == selected.expected and deadlines == [budget]
     assert run.receipt.spec.workload == selected.expected
@@ -229,7 +229,7 @@ def test_lookup_failure_never_launches_and_uncertainty_retains_owner(view, looku
             with pytest.raises(StateError):
                 workflow.close(cleanup_deadline=Deadline.after(2))
         assert database.operations.inspect(workflow.owner.ownership.scope) is not None
-        assert workflow.views.execution_operation.unfinished_inline_executions
+        assert workflow.routes[0].views.execution_operation.unfinished_inline_executions
     else:
         workflow.close(cleanup_deadline=Deadline.after(2))
     assert shell.calls == 1
@@ -266,7 +266,7 @@ def test_lost_local_reply_retries_exact_bookkeeping_without_lookup_replay(view, 
     no_run(view)
     calls = lookup[0].calls
     monkeypatch.setattr(cls, method, original)
-    workflow.views.execution_operation.retry_inline_bookkeeping()
+    workflow.routes[0].views.execution_operation.retry_inline_bookkeeping()
     workflow.close(cleanup_deadline=Deadline.after(2))
     assert lookup[0].calls == calls
 
@@ -307,14 +307,14 @@ def test_fact_allocation_failure_keeps_original_control_and_custody(view, lookup
         start(access)
     assert caught.value is control and control.__cause__ is cause
     no_run(view)
-    assert workflow.views.execution_operation.unfinished_inline_executions
+    assert workflow.routes[0].views.execution_operation.unfinished_inline_executions
     with pytest.raises(StateError):
         workflow.close(cleanup_deadline=Deadline.after(2))
 
 
 def test_fallback_allocation_failure_preserves_control_and_tracked_custody(view, lookup, monkeypatch):
     database, workflow, access, _, _ = view
-    operation = workflow.views.execution_operation
+    operation = workflow.routes[0].views.execution_operation
     cause = ValueError("original lookup cause")
     control = KeyboardInterrupt()
 
@@ -352,7 +352,7 @@ def test_fallback_allocation_failure_preserves_control_and_tracked_custody(view,
 @pytest.mark.parametrize("closing", [False, True])
 def test_lookup_cannot_start_body_after_budget_expiry_or_close(view, lookup, monkeypatch, closing):
     _, workflow, access, _, _ = view
-    operation = workflow.views.execution_operation
+    operation = workflow.routes[0].views.execution_operation
     original = operation._observe_workload_shell
     budget = Deadline.after(5)
 
@@ -452,7 +452,7 @@ def test_literal_and_explicit_shell_skip_lookup(view, lookup, invocation):
 @pytest.mark.parametrize("refuse", [False, True])
 def test_selected_route_is_rechecked_before_lookup_and_start(view, lookup, refuse, monkeypatch):
     _, workflow, access, main, _ = view
-    operation = workflow.views.execution_operation
+    operation = workflow.routes[0].views.execution_operation
     calls = []
     checkpoints = []
     budget = Deadline.after(5)
@@ -501,7 +501,7 @@ def test_real_fixed_lookup_under_current_numeric_identity(view, lookup, monkeypa
         IdentityMode.DIRECT,
     )
     runtime = RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)
-    operation = workflow.views.execution_operation
+    operation = workflow.routes[0].views.execution_operation
     operation._bootstrap = None
 
     def execute(invocation, *, io, deadline, custody):

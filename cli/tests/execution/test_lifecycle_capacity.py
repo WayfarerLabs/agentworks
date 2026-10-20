@@ -43,7 +43,7 @@ def test_300_completed_managed_runs_keep_only_current_debt(view, framed_stream_r
     for _ in range(300):
         result = access.run(Command(["/bin/true"]), profile=Protection.MANAGED, output=Output.discard())
         assert result.ok and result.job is not None
-        run = workflow.views.execution_operation.managed_runs[-1]
+        run = workflow.routes[0].views.execution_operation.managed_runs[-1]
         assert access.dispose(result.job).disposed is True
         run.finish_cleanup(Deadline.after(5))
         assert run.keeper._worker_done.is_set()
@@ -91,7 +91,7 @@ def test_existing_keeper_and_shared_reads_survive_other_admission_at_capacity(vi
     job = access.start(
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
-    run = workflow.views.execution_operation.managed_runs[0]
+    run = workflow.routes[0].views.execution_operation.managed_runs[0]
     access.observe(job)
     debts = [
         workflow.owner.register_lifecycle_obligation("concurrent-work", payload_version=1, payload=b"retained")
@@ -120,7 +120,7 @@ def test_real_pending_cap_managed_refusal_retains_no_phantom_keeper_or_start(vie
     ]
     with pytest.raises(StateError):
         access.run(Command(["/bin/true"]), profile=Protection.MANAGED, output=Output.discard())
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     assert not run.keeper.admission_uncertain and not run.reservation_uncertain and not run.acknowledged
     assert main.start.calls == main.observe.calls == 0
     assert keeper.clock.calls == (1 if pending_count == 127 else 0)
@@ -164,7 +164,7 @@ def test_true_pending_cap_direct_refusal_releases_its_unused_helper_custody(view
         for _ in range(128)
     ]
     carrier = RecordingCarrier(CarrierReport(Dispatch.NOT_SENT))
-    operation = workflow.views.execution_operation
+    operation = workflow.routes[0].views.execution_operation
     with pytest.raises(StateError) as caught:
         operation.run_inline(
             carrier, Command(["/bin/true"]), plan=PLAN, deadline=Deadline.after(5), runtime_selection=RUNTIME
@@ -209,7 +209,7 @@ def test_keeper_registration_unknown_or_present_custody_is_not_erased(view, monk
         with pytest.raises(BaseException) as caught:
             access.run(Command(["/bin/true"]), profile=Protection.MANAGED, output=Output.discard())
     assert caught.value is control
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     assert run.keeper.admission_uncertain and run.keeper.obligation is None
     assert main.start.calls == main.observe.calls == keeper.clock.calls == 0
     assert run.keeper.drain(Deadline.after(5)).drained
@@ -234,7 +234,7 @@ def test_control_during_absence_inspection_keeps_original_registration_context_a
             access.run(Command(["/bin/true"]), profile=Protection.MANAGED, output=Output.discard())
     assert caught.value is control and control.__context__ is primary
     assert not _is_pre_registration_refusal(primary) and not _is_pre_registration_refusal(control)
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     assert run.keeper.admission_uncertain and run.keeper.obligation is None
     assert main.start.calls == main.observe.calls == keeper.clock.calls == 0
     assert run.keeper.drain(Deadline.after(5)).drained
@@ -276,7 +276,7 @@ def test_keeper_keeps_unknown_admission_after_snapshot_takeover_and_receipt_rele
             with pytest.raises(OSError) as caught:
                 access.run(Command(["/bin/true"]), profile=Protection.MANAGED, output=Output.discard())
         assert raced and caught.value is primary and not _is_pre_registration_refusal(primary)
-        (run,) = workflow.views.execution_operation.managed_runs
+        (run,) = workflow.routes[0].views.execution_operation.managed_runs
         assert run.keeper.admission_uncertain and run.keeper.obligation is None
         assert main.start.calls == main.observe.calls == keeper.clock.calls == 0
         assert run.keeper.drain(Deadline.after(5)).drained

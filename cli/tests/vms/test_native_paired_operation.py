@@ -251,10 +251,16 @@ def test_agent_preparation_failure_never_admits_partial_pair(
         fact = caught.value.__cause__
         assert isinstance(fact, VMOperationControlFact)
         workflow = fact._workflow
-        assert workflow.views is None
-        assert workflow.identity is not None and workflow.identity.status is TargetIdentityStatus.PREPARED
-        assert workflow.agent_identity is not None and workflow.agent_identity.workload_result is not None
-        assert workflow.agent_identity.status is not TargetIdentityStatus.PREPARED
+        assert workflow.routes[0].views is None
+        assert (
+            workflow.routes[0].identity is not None
+            and workflow.routes[0].identity.status is TargetIdentityStatus.PREPARED
+        )
+        assert (
+            workflow.routes[0].agent_identity is not None
+            and workflow.routes[0].agent_identity.workload_result is not None
+        )
+        assert workflow.routes[0].agent_identity.status is not TargetIdentityStatus.PREPARED
         assert database.operations.inspect(_scope()) is not None
         if failure == "uncertain":
             assert not workflow._components_settled()
@@ -301,15 +307,15 @@ def test_each_agent_custody_fact_keeps_aggregate_claim(
     fact = caught.value.__cause__
     assert isinstance(fact, VMOperationControlFact)
     workflow = fact._workflow
-    assert workflow.identity is observed[0] and workflow.views is None
-    assert workflow.agent_identity is not None
-    assert workflow.agent_identity.delivery_result is observed[1].delivery_result
-    assert workflow.agent_identity.workload_result is observed[1].workload_result
+    assert workflow.routes[0].identity is observed[0] and workflow.routes[0].views is None
+    assert workflow.routes[0].agent_identity is not None
+    assert workflow.routes[0].agent_identity.delivery_result is observed[1].delivery_result
+    assert workflow.routes[0].agent_identity.workload_result is observed[1].workload_result
     assert not workflow._components_settled()
     with pytest.raises(StateError):
         fact.retry_cleanup(Deadline.after(10))
     assert database.operations.inspect(_scope()) is not None
-    workflow.agent_identity = observed[1]
+    workflow.routes[0].agent_identity = observed[1]
     fact.retry_cleanup(Deadline.after(10))
     assert database.operations.inspect(_scope()) is None
 
@@ -353,10 +359,15 @@ def test_interrupted_agent_lookup_preserves_control_partial_facts_and_claim(
     assert isinstance(account_fact, TargetIdentityControlFact)
     assert account_fact.__cause__ is underlying
     workflow = aggregate._workflow
-    assert workflow.identity is not None and workflow.identity.status is TargetIdentityStatus.PREPARED
-    assert workflow.agent_identity is account_fact.preparation
-    assert workflow.agent_identity.delivery_result is not None and workflow.agent_identity.workload_result is None
-    assert workflow.agent_identity.status is TargetIdentityStatus.UNCERTAIN
-    assert workflow.views is None and not workflow._components_settled()
+    assert (
+        workflow.routes[0].identity is not None and workflow.routes[0].identity.status is TargetIdentityStatus.PREPARED
+    )
+    assert workflow.routes[0].agent_identity is account_fact.preparation
+    assert (
+        workflow.routes[0].agent_identity.delivery_result is not None
+        and workflow.routes[0].agent_identity.workload_result is None
+    )
+    assert workflow.routes[0].agent_identity.status is TargetIdentityStatus.UNCERTAIN
+    assert workflow.routes[0].views is None and not workflow._components_settled()
     assert database.operations.inspect(_scope()) is not None
     assert route.local.calls == 0

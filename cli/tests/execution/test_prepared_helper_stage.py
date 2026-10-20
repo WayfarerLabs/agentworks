@@ -113,7 +113,12 @@ class Carrier:
         self.requests.append(request)
         assert request.root_path == "/tmp" and request.relative_path == "prepared-input" and request.effect_gate is None
         rows = self.owner.list_pending_lifecycle_obligations()
-        cleanup = [row for row in rows if row.obligation_kind == PREPARED_HELPER_OBLIGATION_KIND]
+        cleanup = [
+            row
+            for row in rows
+            if row.obligation_kind == PREPARED_HELPER_OBLIGATION_KIND
+            and decode_prepared_helper_obligation(row.payload).token == request.token
+        ]
         assert len(cleanup) == 1 and cleanup[0].state is LifecycleObligationState.POSSIBLE_EFFECT
         assert decode_prepared_helper_obligation(cleanup[0].payload).token == request.token
         assert any(row.obligation_kind == "carrier-dispatch" for row in rows)

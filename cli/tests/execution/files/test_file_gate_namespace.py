@@ -43,7 +43,7 @@ from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm
 from agentworks.execution.carrier import CarrierIO, Deadline, Dispatch, ExitStatus, FiniteInput, PreparedInvocation
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from agentworks.operations import OperationBorrow, OperationOwner
-from agentworks.vms._native_operation import _Workflow
+from agentworks.vms._native_operation import _RoutePreparation, _Workflow
 from tests.execution.files.test_file_operations import SyntheticCarrier, _report
 
 if TYPE_CHECKING:
@@ -144,7 +144,7 @@ def test_lost_reply_and_partial_effect_keep_exact_borrow_and_workflow(owned, mon
     _, owner = owned
     events = _install(monkeypatch, owner, status)
     preparation = _preparation(owner)
-    workflow = _Workflow(owner, Deadline.after(10), namespace=preparation)
+    workflow = _Workflow(owner, Deadline.after(10), routes=[_RoutePreparation(namespace=preparation)])
     with pytest.raises(StateError):
         preparation.prepare()
     row = owner.list_pending_lifecycle_obligations()[0]
@@ -185,14 +185,14 @@ def test_control_escape_retains_wrapper_original_borrow_and_row(owned, monkeypat
             namespace, "exchange_file_effect_gate" if phase == "setup" else "exchange_namespace", interrupt
         )
     preparation = _preparation(owner)
-    workflow = _Workflow(owner, Deadline.after(10), namespace=preparation)
+    workflow = _Workflow(owner, Deadline.after(10), routes=[_RoutePreparation(namespace=preparation)])
     with pytest.raises(KeyboardInterrupt) as caught:
         preparation.prepare()
     assert caught.value is control
     with pytest.raises(StateError):
         workflow.close()
     rows = owner.list_pending_lifecycle_obligations()
-    assert len(rows) == 1 and not preparation.settled and workflow.namespace is preparation
+    assert len(rows) == 1 and not preparation.settled and workflow.routes[0].namespace is preparation
     assert preparation._borrow is not None
 
 
@@ -251,7 +251,7 @@ def test_local_delivery_must_settle_before_unused_or_positive_child_retires(owne
         preparation.prepare()
     row = owner.list_pending_lifecycle_obligations()[0]
     borrow = preparation._borrow
-    workflow = _Workflow(owner, Deadline.after(10), namespace=preparation)
+    workflow = _Workflow(owner, Deadline.after(10), routes=[_RoutePreparation(namespace=preparation)])
     with pytest.raises(StateError):
         workflow.close()
     assert owner.list_pending_lifecycle_obligations()[0] == row and preparation._borrow is borrow
@@ -276,7 +276,7 @@ def test_registration_commit_reply_loss_keeps_original_identity_before_setup(own
     preparation = _preparation(owner)
     with pytest.raises(KeyboardInterrupt):
         preparation.prepare()
-    workflow = _Workflow(owner, Deadline.after(10), namespace=preparation)
+    workflow = _Workflow(owner, Deadline.after(10), routes=[_RoutePreparation(namespace=preparation)])
     with pytest.raises(StateError):
         workflow.close()
     rows = owner.list_pending_lifecycle_obligations()
@@ -304,7 +304,7 @@ def test_positive_result_survives_lost_durable_close_reply_without_replay(owned,
     with pytest.raises(KeyboardInterrupt):
         preparation.prepare()
     assert preparation._borrow is not None and not preparation.settled
-    workflow = _Workflow(owner, Deadline.after(10), namespace=preparation)
+    workflow = _Workflow(owner, Deadline.after(10), routes=[_RoutePreparation(namespace=preparation)])
     workflow.close()
     assert preparation.settled and preparation.prepared and len(events) == 2
     assert owned[0].operations.inspect(owner.ownership.scope) is None
@@ -337,7 +337,7 @@ def test_absent_registration_refusal_retires_exact_unused_borrow_and_retries(own
         preparation.prepare()
     assert caught.value is (cleanup if preserves_cleanup else refusal)
     assert not events and not owner.list_pending_lifecycle_obligations()
-    workflow = _Workflow(owner, Deadline.after(10), namespace=preparation)
+    workflow = _Workflow(owner, Deadline.after(10), routes=[_RoutePreparation(namespace=preparation)])
     workflow.close()
     assert preparation.settled and not preparation.prepared
     assert preparation._borrow is not None and preparation._borrow.closed
@@ -366,7 +366,7 @@ def test_unproved_registration_stays_retained_after_cleanup_retry(owned, monkeyp
     with pytest.raises(type(control)) as caught:
         preparation.prepare()
     assert caught.value is control
-    workflow = _Workflow(owner, Deadline.after(10), namespace=preparation)
+    workflow = _Workflow(owner, Deadline.after(10), routes=[_RoutePreparation(namespace=preparation)])
     for _ in range(2):
         with pytest.raises(StateError):
             workflow.close(cleanup_deadline=Deadline.after(10))

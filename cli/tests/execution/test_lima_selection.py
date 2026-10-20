@@ -458,8 +458,8 @@ def test_prepared_target_retains_full_guest_boot_fence(local, monkeypatch, field
     install_guest(monkeypatch, payload=encode_vm_guest_identity_success("0" * 32, guest))
     power = access.observe_power(Deadline.after(5))
     workflow = prepare_native(access, power, Deadline.after(5))
-    assert workflow.preparation is not None and workflow.preparation.target is not None
-    original = workflow.preparation.target
+    assert workflow.routes[0].preparation is not None and workflow.routes[0].preparation.target is not None
+    original = workflow.routes[0].preparation.target
     assert access.settle(Deadline.after(5))
     changed = replace(guest, **{field: "00000000-0000-4000-8000-000000000002" if field == "boot_id" else 1235})
     install_guest(monkeypatch, payload=encode_vm_guest_identity_success("0" * 32, changed))
@@ -469,8 +469,10 @@ def test_prepared_target_retains_full_guest_boot_fence(local, monkeypatch, field
     try:
         power = fresh.observe_power(Deadline.after(5))
         fresh_workflow = prepare_native(fresh, power, Deadline.after(5))
-        assert fresh_workflow.preparation is not None and fresh_workflow.preparation.target is not None
-        assert fresh_workflow.preparation.target.incarnation == original.incarnation
-        assert fresh_workflow.preparation.target.boot_id != original.boot_id
+        assert (
+            fresh_workflow.routes[0].preparation is not None and fresh_workflow.routes[0].preparation.target is not None
+        )
+        assert fresh_workflow.routes[0].preparation.target.incarnation == original.incarnation
+        assert fresh_workflow.routes[0].preparation.target.boot_id != original.boot_id
     finally:
         assert fresh.settle(Deadline.after(5))

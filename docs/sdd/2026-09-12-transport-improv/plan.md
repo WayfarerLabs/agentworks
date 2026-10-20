@@ -6047,6 +6047,27 @@ ownership are unchanged, so the broader additive RunContext and migration gates 
       whole-workflow completion. For lost Proxmox clone replies, prove a concrete provider
       association or retain uncertainty; a candidate VMID or display name cannot authorize adoption
       or deletion.
+- [ ] Prove the
+      [retained two-route lifetime](execution-lifecycle-lld.md#creation-to-canonical-route-lifetime)
+      under one original owner and platform access. Register each route before preparation effects,
+      revoke native body admission without sealing the owner, and settle cross-route helper, file
+      and namespace bookkeeping before execution-lifetime resolution. Include a later-route borrow,
+      interrupted second-route preparation and closing-helper ordering; retain both routes and
+      original control facts on failure. This is part of complete creation composition, not a
+      separate production-completion claim.
+- [ ] Prove exact Proxmox rollback resource observations independently of task completion. The
+      [pinned provider audit](prior-art-research.md#proxmox-creation-rollback-evidence) finds no
+      incarnation-conditional destroy request and disk-removal failures can outlive configuration
+      deletion. Keep unknown clone association and unproved volume cleanup as explicit retained
+      debt; do not infer absence from failed reads or use VMID-only unreferenced-disk sweeps as
+      exact ownership proof. Obtain native rollback evidence on both supported provider majors.
+- [ ] Enforce the explicit finite-input no-staging choice above carrier delivery. Preserve the
+      existing default and independent sensitivity/output policy; a non-staging direct request must
+      fit the complete request or refuse before effects, including large capture paths. Refuse the
+      initial MANAGED input-storage implementation before preparation rather than downgrade the
+      profile. Use this choice for creation's secret join, with a fixed CLI argument reading
+      inherited stdin rather than expanding the key into argv. Prove no input artifacts, byte-exact
+      small delivery, refusal without debt, and subsequent valid admission.
 - [ ] Apply that complete creation path to WSL2, local Lima, configured SSH placement-host Lima,
       AWS, Azure and GCP using platform-owned facts and existing shared custody. Establish WSL2
       Python in the early package stage. Obtain native create/bootstrap/body/rollback and

@@ -249,7 +249,7 @@ def test_active_ordinary_borrow_refuses_disposal_before_observation(observer):
 @pytest.mark.windows
 def test_file_borrow_overlap_preserves_exact_existing_custody(observer, outstanding):
     _, _, _, access, main, workflow = observer
-    borrow = workflow.views.file_operation._owner.borrow()
+    borrow = workflow.routes[0].views.file_operation._owner.borrow()
     attempt = borrow.begin_attempt() if outstanding else None
     try:
         with pytest.raises(StateError):

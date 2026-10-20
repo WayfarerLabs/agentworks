@@ -55,7 +55,7 @@ from agentworks.execution.carriers.wsl2 import WSL2Connection
 from agentworks.operations import OperationBorrow, OperationOwner, release_borrow_after_custody
 from agentworks.plugins.proxmox._native_access import ProxmoxOwnedNativePlatformAccess
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.vms._native_operation import _prepare_target, _Workflow
+from agentworks.vms._native_operation import _prepare_target, _RoutePreparation, _Workflow
 from agentworks.vms.target_identity import compose_managed_vm_target_identity
 from agentworks.vms.target_preparation import (
     VMTargetPreparation,
@@ -858,8 +858,10 @@ def test_proxmox_preparation_uses_retained_observer_for_both_guest_observations(
     locator = selected.ensure_available(VMStatus.RUNNING, deadline)
     binding = selected.prepare_native_route(deadline)
     workflow = _Workflow(owner, deadline, access=selected)
-    preparation = _prepare_target(workflow, vm, platform, locator, binding)
-    assert workflow.preparation is preparation
+    retained = _RoutePreparation()
+    workflow.routes.append(retained)
+    preparation = _prepare_target(workflow, retained, vm, platform, locator, binding)
+    assert workflow.routes[0].preparation is preparation
     assert preparation.status is VMTargetPreparationStatus.PREPARED
     assert observer.call_args_list == [call(deadline), call(deadline)]
     assert platform.observe_provider_locator.call_args_list == [call(vm, ctx, deadline=deadline, custody=custody)] * 3

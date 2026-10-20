@@ -1190,8 +1190,8 @@ class ExecutionOperation:
             capture.closing_helper_pending for capture in self._captures
         )
 
-    def finish_scratch_cleanup(self, deadline: Deadline) -> None:
-        """Drain each exact helper before advancing independent scratch cleanup."""
+    def settle_closing_scratch_helpers(self, deadline: Deadline) -> None:
+        """Drain retained closing helpers without admitting fresh scratch cleanup."""
         closing_resources: tuple[PreparedStageCleanup | CaptureCleanup, ...] = (
             *self._prepared_stages,
             *self._captures,
@@ -1199,6 +1199,10 @@ class ExecutionOperation:
         for closing in closing_resources:
             if closing.closing_helper_pending and not closing.settle_closing_helper(deadline):
                 raise StateError("Scratch cleanup retains helper custody")
+
+    def finish_scratch_cleanup(self, deadline: Deadline) -> None:
+        """Drain each exact helper before advancing independent scratch cleanup."""
+        self.settle_closing_scratch_helpers(deadline)
         for cleanup in tuple(self._prepared_stages):
             if cleanup.finish(deadline):
                 self._prepared_stages.remove(cleanup)
@@ -1210,14 +1214,15 @@ class ExecutionOperation:
             if capture.helper_pending:
                 raise StateError("Capture cleanup retains helper custody")
 
-    def retry_inline_bookkeeping(self) -> None:
+    def retry_inline_bookkeeping(self, *, finishing: bool = False) -> None:
         """Relinquish a failed call using exact bookkeeping, without dispatch.
 
         The retained call supplies its original borrow and candidate evidence.
         Unknown helper attempts remain recovery custody and cannot be settled.
+        Closing retries retire unused registrations without arming them.
         """
         with self._admission_guard:
-            self._retry_bookkeeping(finishing=self._finishing)
+            self._retry_bookkeeping(finishing=finishing or self._finishing)
 
     def observe_inline_cleanup(self, deadline: Deadline) -> None:
         """Observe only retained exact helpers, without resuming application output."""
@@ -1348,13 +1353,19 @@ class ExecutionOperation:
                 operation.settle(candidate.dispatch, candidate.carrier_completion)
             operation.coordination_uncertain = False
         elif not operation.pending_remote_effects and operation.outstanding_attempt is None:
-            # A lost begin reply precedes entry into the actual carrier.
+            # A completed handoff does not depend on another route's borrower.
+            # A lost begin reply still requires its original actual attempt.
             with self._owner._guard:  # noqa: SLF001
                 self._owner._reconcile_transition_locked()  # noqa: SLF001
+                attempt = self._owner._outstanding_attempt  # noqa: SLF001
+                if active.borrow._closed and (  # noqa: SLF001
+                    attempt is None or isinstance(attempt, OperationAttempt) and attempt._borrow is not active.borrow  # noqa: SLF001
+                ):
+                    operation.coordination_uncertain = False
+                    return
                 borrower = self._owner._active_borrow  # noqa: SLF001
                 if borrower is not active.borrow and (borrower is not None or not active.borrow._closed):  # noqa: SLF001
                     raise StateError("Inline call no longer owns its admission borrow")
-                attempt = self._owner._outstanding_attempt  # noqa: SLF001
                 if attempt is not None and (
                     not isinstance(attempt, OperationAttempt) or attempt._borrow is not active.borrow  # noqa: SLF001
                 ):
@@ -1492,6 +1503,7 @@ class ExecutionOperation:
         cwd: str | None = None,
         capture_limit: int | None = 4_096,
         sensitive: bool = False,
+        allow_staging: bool = True,
         source: ByteSource | None = None,
         stdout: ByteSink | None = None,
         stderr: ByteSink | None = None,
@@ -1512,6 +1524,7 @@ class ExecutionOperation:
                 cwd=cwd,
                 capture_limit=capture_limit,
                 sensitive=sensitive,
+                allow_staging=allow_staging,
                 source=source,
                 stdout=stdout,
                 stderr=stderr,
@@ -1528,6 +1541,7 @@ class ExecutionOperation:
             cwd=cwd,
             capture_limit=capture_limit,
             sensitive=sensitive,
+            allow_staging=allow_staging,
             source=source,
             stdout=stdout,
             stderr=stderr,

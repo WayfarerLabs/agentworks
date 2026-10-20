@@ -361,12 +361,12 @@ def test_interrupted_shared_preparation_keeps_exact_core_custody(canonical, data
         pytest.fail("interrupted guest preparation admitted body")
     assert caught.value is control and isinstance(control.__cause__, VMOperationControlFact)
     fact = control.__cause__
-    assert fact._workflow.preparation is partial
+    assert fact._workflow.routes[0].preparation is partial
     assert database.operations.inspect(_scope()) is not None
     with pytest.raises(StateError):
         fact.retry_cleanup(Deadline.after(10))
     assert partial is not None
-    fact._workflow.preparation = replace(
+    fact._workflow.routes[0].preparation = replace(
         partial,
         status=VMTargetPreparationStatus.PREPARED,
         pending_remote_effects=False,

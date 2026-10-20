@@ -446,7 +446,7 @@ def test_escaping_guest_control_retains_exact_partial_fact(full, retained):
     p.prep_error.__cause__ = VMTargetPreparationControlFact(p.prep)
     with pytest.raises(Control) as caught:
         prepare_native(p, VMStatus.RUNNING, p.deadline)
-    assert caught.value is p.prep_error and p.workflow.preparation is p.prep
+    assert caught.value is p.prep_error and p.workflow.routes[0].preparation is p.prep
     assert p.workflow._components_settled() is not retained
     assert p.access.settle(p.deadline)
 
