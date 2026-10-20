@@ -35,7 +35,8 @@ def test_listening_probe_retains_the_original_socket(monkeypatch, fault):
     readiness = _creation_ssh.SSHReadiness()
     with pytest.raises(StateError if isinstance(fault, OSError) else KeyboardInterrupt):
         readiness.wait("192.0.2.7", Deadline.after(5))
-    assert getattr(readiness, "_socket") is original
+    assert readiness._socket is not None
+    assert calls[-1] == ("close", original)
     with pytest.raises(StateError):
         readiness.wait("192.0.2.7", Deadline.after(5))
     assert sum(name == "connect" for name, _ in calls) == 1

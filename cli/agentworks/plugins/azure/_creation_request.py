@@ -295,7 +295,7 @@ class AzureCreationRequests:
             if ack is None or ack.monitor is None:
                 raise StateError("Azure creation request completion remains uncertain")
             response = self.call(credential, "GET", ack.monitor, deadline)
-            state = _sdk(lambda: monitor_state(response, ack, lambda: remaining(deadline)))
+            state = _sdk(lambda response=response: monitor_state(response, ack, lambda: remaining(deadline)))
             if deleting:
                 item.delete_state = state
             else:
@@ -387,7 +387,9 @@ class AzureCreationRequests:
                 self.reconcile(deadline)
                 url = resource_url(item.resource_id)
                 response = self.call(credential, "DELETE", url, deadline)
-                item.delete_ack = _sdk(lambda: acknowledgment(response, "DELETE", url, self.subscription))
+                item.delete_ack = _sdk(
+                    lambda response=response, url=url: acknowledgment(response, "DELETE", url, self.subscription)
+                )
                 if item.delete_ack.monitor is None:
                     item.delete_state = "Succeeded"
                 self.reconcile(deadline)

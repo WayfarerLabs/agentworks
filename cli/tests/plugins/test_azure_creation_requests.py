@@ -232,9 +232,8 @@ def test_retained_disk_prevents_false_rollback_success(owned, monkeypatch):
         "agentworks.plugins.azure._creation_request.time.sleep", lambda delay: clock.__setitem__(0, 110.0)
     )
     deadline = Deadline(105.0)
-    with owned.requests.custody(deadline):
-        with pytest.raises(CreationDeadlineExpired):
-            owned.requests.rollback(owned.credential, deadline)
+    with owned.requests.custody(deadline), pytest.raises(CreationDeadlineExpired):
+        owned.requests.rollback(owned.credential, deadline)
     assert owned.owner.list_pending_lifecycle_obligations()
     assert resource_url(DISK) in owned.transport.values
 
