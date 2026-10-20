@@ -1214,14 +1214,15 @@ class ExecutionOperation:
             if capture.helper_pending:
                 raise StateError("Capture cleanup retains helper custody")
 
-    def retry_inline_bookkeeping(self) -> None:
+    def retry_inline_bookkeeping(self, *, finishing: bool = False) -> None:
         """Relinquish a failed call using exact bookkeeping, without dispatch.
 
         The retained call supplies its original borrow and candidate evidence.
         Unknown helper attempts remain recovery custody and cannot be settled.
+        Closing retries retire unused registrations without arming them.
         """
         with self._admission_guard:
-            self._retry_bookkeeping(finishing=self._finishing)
+            self._retry_bookkeeping(finishing=finishing or self._finishing)
 
     def observe_inline_cleanup(self, deadline: Deadline) -> None:
         """Observe only retained exact helpers, without resuming application output."""

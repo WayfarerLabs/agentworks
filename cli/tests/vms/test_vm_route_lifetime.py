@@ -11,7 +11,8 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.errors import StateError
-from agentworks.execution._execution_operation import ExecutionOperation
+from agentworks.execution._execution_operation import ExecutionOperation, InlineExecutionControlFact
+from agentworks.execution._execution_result import reduce_owned_inline_result
 from agentworks.execution._file_gate_namespace import NamespacePreparation
 from agentworks.execution._file_operation import FileOperation
 from agentworks.execution._helper_identity import IdentityExpectation
@@ -20,6 +21,7 @@ from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.wsl2 import WSL2Carrier
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
+from agentworks.execution.result import ExitCode
 from agentworks.operations import OperationBorrow, OperationOwner
 from agentworks.vms import _native_operation as native
 from agentworks.vms._native_operation import VMOperation, _RoutePreparation, _Workflow
@@ -32,6 +34,8 @@ from tests.execution.files.test_upload_bookkeeping import held as held
 from tests.execution.files.test_upload_bookkeeping import upload
 from tests.execution.test_prepared_stage_closing import TARGET, NativeDelivery, ScriptedCarrier, stage
 from tests.execution.test_prepared_stage_closing import owned as owned
+from tests.execution.test_proxmox_inline_closure import _run as run_proxmox
+from tests.execution.test_proxmox_inline_closure import scenario as scenario
 from tests.vms.test_native_operation import _install_route, _root, _RouteCarrier, _scope
 from tests.vms.test_native_operation import database as database
 
@@ -55,6 +59,26 @@ def _prepared(database, tmp_path, monkeypatch):
         workflow, database, "box", platform, RunContext(), _root(tmp_path), None, native.ExecutionRoute.NATIVE
     )
     return workflow, platform, carrier, host, observer
+
+
+def _completed_inline_routes(scenario):
+    _, owner, later_operation, _, plan, runtime, qga, _ = scenario
+    earlier = _record(owner, target=later_operation._target)
+    carrier = LocalCarrier()
+    outcome = earlier.views.execution_operation.run_inline(
+        carrier,
+        Command(("/bin/true",)),
+        plan=plan,
+        runtime_selection=runtime,
+        deadline=qga.deadline,
+    )
+    assert reduce_owned_inline_result(outcome).status == ExitCode(0)
+    assert not outcome.requires_owner_retention and not earlier.views.execution_operation.active_inline_calls
+    assert earlier.views.execution_operation._dispatch_obligation is not None
+    later = _RoutePreparation(
+        views=VMOperation(owner, None, None, FileOperation(owner, later_operation._target), later_operation, None)
+    )
+    return _Workflow(owner, qga.deadline, routes=[earlier, later]), carrier
 
 
 def _next_route(workflow, database, platform, first, tmp_path, monkeypatch, *, agent=None):
@@ -125,6 +149,85 @@ def test_later_route_completed_file_borrow_retires_before_earlier_execution_life
     assert not files.active_uploads and carrier.calls == requests
     assert earlier.views.execution_operation._finished
     assert database.operations.inspect(owner.ownership.scope) is None
+
+
+@pytest.mark.parametrize("committed", [False, True])
+def test_completed_later_inline_handoff_retires_before_earlier_lifetime(scenario, monkeypatch, committed):
+    database, owner, operation, _, _, _, qga, deliveries = scenario
+    workflow, earlier_carrier = _completed_inline_routes(scenario)
+    earlier = workflow.routes[0].views.execution_operation
+    qga.running = False
+    control = KeyboardInterrupt("later route handoff reply lost")
+    cause = ValueError("original handoff cause")
+    control.__cause__ = cause
+    original = OperationBorrow.handoff_retained_effect
+
+    def interrupt(borrow):
+        if committed:
+            original(borrow)
+        raise control
+
+    with monkeypatch.context() as patch:
+        patch.setattr(OperationBorrow, "handoff_retained_effect", interrupt)
+        with pytest.raises(KeyboardInterrupt) as caught:
+            run_proxmox(scenario)
+        assert caught.value is control and control.__cause__ is cause
+        (active,) = operation.active_inline_calls
+        assert active.bookkeeping_retained and deliveries[0].closure_proven
+        assert active.prepared is None and active.candidate is None
+        assert active.outcome is not None and active.outcome.candidate is None
+        assert active.operation.outstanding_attempt is None and not active.borrow.has_outstanding_attempt
+        assert active.borrow.closed is committed
+        calls = list(qga.calls)
+        earlier_calls = earlier_carrier.calls
+        assert calls and database.operations.inspect(owner.ownership.scope) is not None
+        if not committed:
+            with pytest.raises(KeyboardInterrupt) as refused:
+                workflow.close()
+            assert refused.value is control and control.__cause__ is cause
+            assert not earlier._finished and operation.active_inline_calls == (active,)
+            assert database.operations.inspect(owner.ownership.scope) is not None
+            assert qga.calls == calls and earlier_carrier.calls == earlier_calls
+    workflow.close(cleanup_deadline=Deadline.after(2))
+    assert not operation.active_inline_calls and not earlier.active_inline_calls
+    assert qga.calls == calls and earlier_carrier.calls == earlier_calls
+    assert database.operations.inspect(owner.ownership.scope) is None
+    assert caught.value is control and control.__cause__ is cause
+
+
+def test_closing_later_unarmed_registration_retires_without_admission(scenario, monkeypatch):
+    database, owner, operation, _, _, _, qga, _ = scenario
+    workflow, earlier_carrier = _completed_inline_routes(scenario)
+    control = KeyboardInterrupt("later registration reply lost")
+    cause = ValueError("original registration cause")
+    control.__cause__ = cause
+    original = OperationBorrow.install_dispatch_obligation
+
+    def register_then_interrupt(borrow, *args, **kwargs):
+        original(borrow, *args, **kwargs)
+        raise control
+
+    with monkeypatch.context() as patch:
+        patch.setattr(OperationBorrow, "install_dispatch_obligation", register_then_interrupt)
+        with pytest.raises(KeyboardInterrupt) as caught:
+            run_proxmox(scenario)
+    assert caught.value is control and isinstance(control.__cause__, InlineExecutionControlFact)
+    assert control.__cause__.__cause__ is cause
+    (active,) = operation.active_inline_calls
+    assert active.bookkeeping_retained and not active.installed and not active.armed
+    assert active.operation.outstanding_attempt is None and not active.borrow.closed
+    assert not qga.calls
+    earlier_calls = earlier_carrier.calls
+
+    def forbidden(borrow):
+        pytest.fail("aggregate cleanup armed an unused registration")
+
+    monkeypatch.setattr(OperationBorrow, "arm_dispatch_obligation", forbidden)
+    workflow.close(cleanup_deadline=Deadline.after(2))
+    assert active.borrow.closed and not operation.active_inline_calls
+    assert not qga.calls and earlier_carrier.calls == earlier_calls
+    assert database.operations.inspect(owner.ownership.scope) is None
+    assert caught.value is control and control.__cause__.__cause__ is cause
 
 
 @pytest.mark.parametrize("phase", ["target", "namespace"])

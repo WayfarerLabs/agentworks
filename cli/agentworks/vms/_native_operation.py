@@ -167,6 +167,10 @@ class _Workflow:
         for view in views:
             if view.execution_operation.active_inline_calls:
                 view.execution_operation.observe_inline_cleanup(budget)
+        # Proven helper closure can still retain a completed handoff's borrow.
+        # Retire every route before resolving lifetimes or dispatching cleanup.
+        for view in views:
+            view.execution_operation.retry_inline_bookkeeping(finishing=True)
         # Retire every route's completed file and namespace borrow before any
         # execution lifetime resolution, which also needs the shared borrow.
         for view in views:
