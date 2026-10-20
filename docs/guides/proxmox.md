@@ -95,8 +95,8 @@ network inspection and file-write endpoints Agentworks uses. The setup script se
 role from the installed Proxmox VE major version and refuses unknown major versions.
 
 The role also includes `VM.Config.CDROM`, alongside `VM.Config.Cloudinit`, because Proxmox requires
-both to remove an attached cloud-init disk. This privilege follows the role's existing pool ACL;
-it does not grant access to VMs outside that pool. If you have reused the role in other ACLs, those
+both to remove an attached cloud-init disk. This privilege follows the role's existing pool ACL; it
+does not grant access to VMs outside that pool. If you have reused the role in other ACLs, those
 assignments also gain the privilege, so inspect them before updating it.
 
 For an existing installation, an administrator must explicitly update the role on the Proxmox host:
