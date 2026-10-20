@@ -8,6 +8,7 @@ import pytest
 from agentworks.capabilities.vm_platform.base import ProvisionRequest
 from agentworks.debian import DebianRelease
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution.access import ExecutionAccess
 from agentworks.execution.carrier import Deadline, Dispatch
 from agentworks.execution.models import Command, Script, Shell
 from agentworks.execution.profiles import Protection
@@ -54,9 +55,15 @@ def _completed(data: bytes = b"") -> ExecutionResult:
     )
 
 
+def _operation() -> MagicMock:
+    operation = MagicMock(spec=VMOperation)
+    operation.execution = MagicMock(spec=ExecutionAccess)
+    return operation
+
+
 def test_bootstrap_uses_public_bash_and_nonstaging_secret_input(creation_request: ProvisionRequest) -> None:
     request = creation_request
-    operation = MagicMock(spec=VMOperation)
+    operation = _operation()
     operation.execution.run.side_effect = [_completed(), _completed(), _completed(b"100.64.0.1\n")]
     deadline = Deadline.after(30)
     assert bootstrap_created_guest(operation, request, deadline) == "100.64.0.1"
@@ -82,7 +89,7 @@ def test_bootstrap_does_not_continue_or_replay_after_execution_failure(
     creation_request: ProvisionRequest, step: int
 ) -> None:
     request = creation_request
-    operation = MagicMock(spec=VMOperation)
+    operation = _operation()
     failure = CheckedExecutionError(replace(_completed(), status=ExitCode(1)))
     operation.execution.run.side_effect = [*[_completed() for _ in range(step)], failure]
     with pytest.raises(CheckedExecutionError) as caught:
@@ -93,7 +100,7 @@ def test_bootstrap_does_not_continue_or_replay_after_execution_failure(
 @pytest.mark.parametrize("data", [b"", b"100.64.0.1\n100.64.0.2\n", b"::1\n", b"\xff"])
 def test_bootstrap_refuses_invalid_address(creation_request: ProvisionRequest, data: bytes) -> None:
     request = creation_request
-    operation = MagicMock(spec=VMOperation)
+    operation = _operation()
     operation.execution.run.side_effect = [_completed(), _completed(), _completed(data)]
     with pytest.raises(StateError):
         bootstrap_created_guest(operation, request, Deadline.after(30))
@@ -102,7 +109,7 @@ def test_bootstrap_refuses_invalid_address(creation_request: ProvisionRequest, d
 
 def test_invalid_join_input_refuses_before_public_configuration(creation_request: ProvisionRequest) -> None:
     request = creation_request
-    operation = MagicMock(spec=VMOperation)
+    operation = _operation()
     request.tailscale_auth_key = "bad\nkey"
     with pytest.raises(ValidationError):
         bootstrap_created_guest(operation, request, Deadline.after(30))
@@ -111,7 +118,7 @@ def test_invalid_join_input_refuses_before_public_configuration(creation_request
 
 @pytest.mark.parametrize("invalid", [False, True])
 def test_release_attestation_uses_prepared_execution_and_pure_parser(invalid: bool) -> None:
-    operation = MagicMock(spec=VMOperation)
+    operation = _operation()
     data = b"ID=debian\nVERSION_ID=12\nVERSION_CODENAME=bookworm\n" if not invalid else b"\xff"
     operation.execution.run.return_value = _completed(data)
     deadline = Deadline.after(30)
