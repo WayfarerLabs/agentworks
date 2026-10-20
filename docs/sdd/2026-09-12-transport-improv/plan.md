@@ -29,24 +29,33 @@ broad-build or production-cutover gate is completed by those measurements.
 ## Current acceptance checkpoint, 2026-10-20
 
 PR #833 remains draft, without `review-requested`, in public feedback/fix round 1 of the
-operator-authorized 3. Its published head is `f2dae36ae`. No new public handoff or native acceptance
-is claimed by private verification.
+operator-authorized 3. Draft WIP publications do not constitute a new public handoff or native
+acceptance.
 
-The clean private candidate `09e4abfdc` passes 289 local cloud-creation and adjacent composition
-tests, full strict typing across 1,609 source files, and lint/format checks for the 29 changed
-Python files. The run uses the existing isolated tool environment, blocks external networking,
-verifies normal and isolated imports against candidate source hashes, and confirms source, runner,
-environment, HEAD and worktree status remain unchanged. Its measured retained output is 42,808 KiB;
-earlier failed fixtures remain preserved. This closes the local verification gap for the Azure
-test-transport calling-convention correction, not real AWS, Azure or GCP provisioning acceptance.
+The reviewed code candidate `63e64d8e4` passes 614 local cloud-creation, trust and adjacent
+composition tests, full strict typing across 1,610 source files, and lint/format checks for the 40
+changed Python files. These include fresh-process retirement blockers. The run uses the existing
+isolated tool environment, blocks external networking, verifies normal and isolated imports against
+candidate source hashes, and confirms source, runner, environment, HEAD and worktree status remain
+unchanged. Earlier failed fixtures remain preserved. GCP retained observations and GCP/Azure known
+completion handoffs now use their supplied finite cleanup budgets without replaying provisioning.
+
+SSH first contact now uses the VM marker as its stable enrollment identity and host-key lookup
+alias. Successful publication is an explicit creation-result fact, so canonical composition skips
+another enrollment and instead verifies the canonical connection strictly. Twenty-two tests using
+actual installed OpenSSH pass at `375f5e5f0`; production and native-test bytes are unchanged at
+`63e64d8e4`. They prove changed delivery spelling, missing/blocked/revoked trust refusal and
+changed-key refusal, not actual public-to-tailnet cloud creation. Project, complexity and
+independent correctness source reviews clear the final candidate. Existing trust is not migrated or
+rewritten implicitly, and the SSH package is unchanged.
 
 The independent architecture, requirements and operability assessments identify unfinished cleanup
 and recovery composition, not grounds for discarding the interface or its implementation. Exact
 retained upload cleanup, successor handling of prepared-stage in-flight markers, and supported
-native recovery that restores ordinary admission remain open. So do SSH first-contact continuity,
-complete supported-platform evidence, production caller migration and physical legacy removal. None
-of those gates is completed by passing the cloud selection, and this checkpoint changes no
-requirement, delivery boundary or permission-enforcement ruling.
+native recovery that restores ordinary admission remain open. So do complete supported-platform
+creation and factory evidence, production caller migration and physical legacy removal. None of
+those gates is completed by passing the local selection or installed-client proof, and this
+checkpoint changes no requirement, delivery boundary or permission-enforcement ruling.
 
 ### Public round-1 starting checkpoint, 2026-10-06
 
