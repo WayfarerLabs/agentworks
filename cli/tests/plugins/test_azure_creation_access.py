@@ -168,19 +168,30 @@ def test_acceptance_never_reopens_rollback_even_after_publication_failure(
         access.request_rollback()
 
 
-def test_acceptance_cannot_extend_original_provisioning_deadline(
-    owned: FactoryHarness, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("budget", [Deadline(105.0), Deadline(None)])
+def test_invalid_supplied_acceptance_budget_refuses_before_publication(
+    owned: FactoryHarness, monkeypatch: pytest.MonkeyPatch, budget: Deadline
 ) -> None:
     access = owned.access
-    access._deadline = Deadline(105.0)
+    access._result = VMCreationResult(
+        {},
+        ssh_execution_binding(access._vm, "192.0.2.10", access._settings),
+        ProviderLocator("creation-test"),
+    )
     monkeypatch.setattr("agentworks.execution.carrier.time.monotonic", lambda: 110.0)
-    with pytest.raises(CreationDeadlineExpired):
-        access.complete_bootstrap(Deadline(120.0))
+
+    def refuse(deadline: Deadline) -> bool:
+        pytest.fail("invalid budget entered acceptance publication")
+
+    monkeypatch.setattr(access._requests, "reconcile", refuse)
+    with pytest.raises((CreationDeadlineExpired, ValidationError)):
+        access.complete_bootstrap(budget)
     assert not access._requests.accepted
 
 
+@pytest.mark.parametrize("lost_reply", [False, True])
 def test_public_route_readiness_trust_and_probe_precede_binding_and_transfer(
-    owned: FactoryHarness, monkeypatch: pytest.MonkeyPatch
+    owned: FactoryHarness, monkeypatch: pytest.MonkeyPatch, lost_reply: bool
 ) -> None:
     from agentworks.plugins.azure import _creation_access as module
     from agentworks.vms import _creation_ssh
@@ -190,10 +201,14 @@ def test_public_route_readiness_trust_and_probe_precede_binding_and_transfer(
     models: dict[str, dict[str, Any]] = {}
     events: list[str] = []
     credential = object()
+    clock = [100.0]
+    monkeypatch.setattr("agentworks.execution.carrier.time.monotonic", lambda: clock[0])
     deadline = Deadline.after(10)
+    creates: list[int] = []
     monkeypatch.setattr(_OwnedAzureCredential, "credential", lambda self, budget: credential)
 
     def create(index: int, selected: object, budget: Deadline) -> dict[str, Any]:
+        creates.append(index)
         assert selected is credential and budget is deadline
         assert owned.owner.list_pending_lifecycle_obligations()
         if not requests._marked:
@@ -281,10 +296,34 @@ def test_public_route_readiness_trust_and_probe_precede_binding_and_transfer(
     assert result.binding is access.binding and result.binding.delivery_account == "operator"
     assert result.platform_metadata["vm_id"] == VM_ID
     assert result.locator.token == f"azure-vm:v2:{VM_ID}:{requests.resources[-1].resource_id}"
-    access.complete_bootstrap(deadline)
+    clock[0] = 111.0
+    assert deadline.expired
+    owned.owner.stop_admission()
+    fresh = Deadline.after(10)
+    with pytest.raises(StateError):
+        access.provision(fresh)
+    original = LifecycleObligation.publish_payload
+
+    def publish(self: LifecycleObligation, **kwargs: Any) -> None:
+        original(self, **kwargs)
+        raise KeyboardInterrupt("acceptance publication reply lost")
+
+    if lost_reply:
+        monkeypatch.setattr(LifecycleObligation, "publish_payload", publish)
+        with pytest.raises(KeyboardInterrupt):
+            access.complete_bootstrap(fresh)
+        assert requests.accepted
+        with pytest.raises(StateError):
+            access.request_rollback()
+        monkeypatch.setattr(LifecycleObligation, "publish_payload", original)
+        clock[0] = 122.0
+        fresh = Deadline.after(10)
+    access.complete_bootstrap(fresh)
     with pytest.raises(StateError):
         access.request_rollback()
-    assert access.settle(deadline)
+    assert access.settle(fresh)
+    assert creates == list(range(5))
+    assert all(not item.delete_sent and not item.absent for item in requests.resources)
     assert owned.owner.list_pending_lifecycle_obligations() == ()
 
 

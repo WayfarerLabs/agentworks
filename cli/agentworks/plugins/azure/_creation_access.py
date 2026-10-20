@@ -88,7 +88,6 @@ class AzureOwnedCreationAccess:
         self._owner, self._custody, self._ctx = owner, custody, ctx
         self._lock = RLock()
         self._used = self._closed = self._rollback = self._settled = False
-        self._deadline: Deadline | None = None
         self._metadata: dict[str, str] = {}
         self._result: VMCreationResult | None = None
         self._binding: NativeExecutionBinding | None = None
@@ -137,12 +136,6 @@ class AzureOwnedCreationAccess:
             yield
         finally:
             self._lock.release()
-
-    def _budget(self, deadline: Deadline) -> Deadline:
-        assert self._deadline is not None and self._deadline.expires_at is not None
-        if deadline.expires_at is None:
-            raise ValidationError("Azure creation requires a finite deadline")
-        return Deadline(min(self._deadline.expires_at, deadline.expires_at))
 
     def _credential(self, deadline: Deadline) -> object:
         return self._auth.credential(deadline)
@@ -238,7 +231,7 @@ class AzureOwnedCreationAccess:
             self._assert_open()
             if self._used:
                 raise StateError("Azure creation is single use")
-            self._used, self._deadline = True, deadline
+            self._used = True
             with self._owner._guard:  # noqa: SLF001
                 self._owner._reconcile_transition_locked()  # noqa: SLF001
                 self._owner._require_dispatch_admission_locked()  # noqa: SLF001
@@ -316,8 +309,7 @@ class AzureOwnedCreationAccess:
             return self._result
 
     def complete_bootstrap(self, deadline: Deadline) -> None:
-        if self._deadline is not None:
-            deadline = self._budget(deadline)
+        # Core may transfer known completion under a fresh cleanup budget.
         with self._transition(deadline):
             if self._rollback or self._result is None or self._closed:
                 raise StateError("Azure bootstrap resource transfer is unproved")

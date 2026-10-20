@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from contextlib import closing, contextmanager
 from dataclasses import replace
 from types import SimpleNamespace
@@ -19,7 +20,7 @@ from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.binding import NativeExecutionBinding
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.ssh import SSHSettings
-from agentworks.operations import OperationOwner
+from agentworks.operations import LifecycleObligation, OperationOwner
 from agentworks.plugins.gcp import _creation_access as creation
 from agentworks.plugins.gcp._creation_api import ROOT
 from agentworks.plugins.gcp._creation_resources import CreationResources
@@ -96,6 +97,8 @@ class ProviderAPI(ScriptedAPI):
 
 @pytest.fixture
 def owned(tmp_path, monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr("agentworks.execution.carrier.time.monotonic", lambda: clock[0])
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", tmp_path / "absent.toml")
     settings = SSHSettings(tmp_path / "trust", tmp_path / "identity")
     config = Config(
@@ -136,6 +139,7 @@ def owned(tmp_path, monkeypatch):
             custody=LocalDeliveryCustody(),
             settings=settings,
             deadline=Deadline.after(30),
+            clock=clock,
             fail_probe=None,
         )
         monkeypatch.setattr(creation, "CreationAPI", lambda *args: api)
@@ -249,24 +253,118 @@ def test_fresh_cleanup_budget_rolls_back_after_original_provision_expiry(owned):
     p = owned
     p.access.provision(p.deadline)
     p.access.request_rollback()
-    p.access._deadline = Deadline(0)
+    p.clock[0] = 131.0
+    assert p.deadline.expired
     assert p.access.settle(Deadline.after(60))
     assert not p.api.live and not p.owner.list_pending_lifecycle_obligations()
     assert len([method for method, _path in p.api.calls if method == "POST"]) == 3
     assert len([method for method, _path in p.api.calls if method == "DELETE"]) == 3
 
 
-def test_fresh_cleanup_budget_removes_accepted_allow_without_vm_rollback(owned):
+def test_retained_observations_use_fresh_cleanup_budget_after_original_expiry(owned):
     p = owned
     result = p.access.provision(p.deadline)
-    p.access.complete_bootstrap(p.deadline)
-    p.access._deadline = Deadline(0)
+    route_check = p.access.route_check
+    assert route_check is not None
+    p.clock[0] = 131.0
+    assert p.deadline.expired
+    p.owner.stop_admission()
+    before = len(p.api.calls)
+    deadline = Deadline.after(60)
+    route_check(deadline)
+    assert p.access.observe_power(deadline) is VMStatus.RUNNING
+    assert p.access.observe_locator(deadline) == result.locator
+    observed = p.api.calls[before:]
+    assert observed.count(("GET", ZONAL + "/instances/sample")) == 3
+    assert ("GET", NETWORK) in observed
+    assert any(method == "GET" and path.startswith(GLOBAL + "/firewalls?") for method, path in observed)
+    assert all(method == "GET" for method, _path in observed)
+
+
+@pytest.mark.parametrize("budget", [Deadline(130.0), Deadline(None)])
+def test_invalid_supplied_budget_refuses_observation_and_transfer_before_io(owned, budget):
+    p = owned
+    p.access.provision(p.deadline)
+    route_check = p.access.route_check
+    assert route_check is not None
+    p.clock[0] = 131.0
+    before = list(p.api.calls)
+    for action in (route_check, p.access.observe_power, p.access.observe_locator, p.access.complete_bootstrap):
+        with pytest.raises((TimeoutError, ValidationError)):
+            action(budget)
+    assert not p.access._resources.accepted
+    assert p.api.calls == before
+
+
+def test_fresh_observation_still_refuses_replaced_vm_after_original_expiry(owned):
+    p = owned
+    p.access.provision(p.deadline)
+    route_check = p.access.route_check
+    assert route_check is not None
+    p.clock[0] = 131.0
+    p.api.live[ZONAL + "/instances/sample"]["id"] = "999"
+    before = len(p.api.calls)
+    for observe in (route_check, p.access.observe_power, p.access.observe_locator):
+        with pytest.raises(StateError):
+            observe(Deadline.after(60))
+    assert p.api.calls[before:] == [("GET", ZONAL + "/instances/sample")] * 3
+
+
+def test_fresh_observation_retains_exact_owner_fence_before_provider_io(owned, monkeypatch):
+    p = owned
+    p.access.provision(p.deadline)
+    route_check = p.access.route_check
+    assert route_check is not None
+    p.clock[0] = 131.0
+    before = list(p.api.calls)
+    primary = StateError("original owner is unavailable")
+
+    def refuse():
+        raise primary
+
+    monkeypatch.setattr(p.owner, "list_pending_lifecycle_obligations", refuse)
+    for observe in (route_check, p.access.observe_power, p.access.observe_locator):
+        with pytest.raises(StateError) as caught:
+            observe(Deadline.after(60))
+        assert caught.value is primary
+    assert p.api.calls == before
+
+
+@pytest.mark.parametrize("lost_reply", [False, True])
+def test_fresh_cleanup_transfers_known_completion_and_removes_only_exact_allow(owned, monkeypatch, lost_reply):
+    p = owned
+    result = p.access.provision(p.deadline)
+    p.clock[0] = 131.0
+    assert p.deadline.expired
+    p.owner.stop_admission()
+    before = list(p.api.calls)
+    with pytest.raises(StateError):
+        p.access.provision(Deadline.after(60))
+    assert p.api.calls == before
+    original = LifecycleObligation.publish_payload
+
+    def publish(self, **kwargs):
+        original(self, **kwargs)
+        if json.loads(kwargs["payload"])["accepted"]:
+            raise KeyboardInterrupt("acceptance publication reply lost")
+
+    if lost_reply:
+        monkeypatch.setattr(LifecycleObligation, "publish_payload", publish)
+        with pytest.raises(KeyboardInterrupt):
+            p.access.complete_bootstrap(Deadline.after(60))
+        assert p.access._resources.accepted
+        p.access.request_rollback()
+        assert not p.access._rollback
+        monkeypatch.setattr(LifecycleObligation, "publish_payload", original)
+        p.clock[0] = 192.0
+    p.access.complete_bootstrap(Deadline.after(60))
     p.access.request_rollback()
     assert p.access.settle(Deadline.after(60))
     assert ZONAL + "/instances/sample" in p.api.live and result.platform_metadata["boot_disk"] in p.api.live
     assert len([method for method, _path in p.api.calls if method == "POST"]) == 3
     deletes = [path for method, path in p.api.calls if method == "DELETE"]
-    assert len(deletes) == 1 and "/firewalls/" in deletes[0]
+    assert deletes == [GLOBAL + "/firewalls/" + result.platform_metadata["allow_rule"]]
+    assert GLOBAL + "/firewalls/" + result.platform_metadata["deny_rule"] in p.api.live
     assert not p.owner.list_pending_lifecycle_obligations()
 
 
@@ -292,7 +390,8 @@ def test_fresh_cleanup_observes_original_pending_receipt_without_insert_replay(o
     assert caught.value is primary
     instance = p.access._resources.resources["instance"]
     assert instance.create_operation == "Insert_instance" and instance.resource_id == "103"
-    p.access._deadline = Deadline(0)
+    p.clock[0] = 131.0
+    assert p.deadline.expired
     p.access.request_rollback()
     assert p.access.settle(Deadline.after(60))
     assert not p.api.live and not p.owner.list_pending_lifecycle_obligations()
@@ -338,7 +437,8 @@ def test_known_disposition_bookkeeping_can_finish_after_original_budget(owned, m
         p.access.settle(p.deadline)
     assert caught.value is primary and resources.disposition_complete
     provider_calls = list(p.api.calls)
-    p.access._deadline = Deadline(0)
+    p.clock[0] = 131.0
+    assert p.deadline.expired
     assert p.access.settle(Deadline.after(60))
     assert p.api.calls == provider_calls
 

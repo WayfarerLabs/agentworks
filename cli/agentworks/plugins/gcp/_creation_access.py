@@ -90,7 +90,6 @@ class GCEOwnedCreationAccess:
         self._resources: CreationResources | None = None
         self._selection: CreationSelection | None = None
         self._prefixes: tuple[str, ...] = ()
-        self._deadline: Deadline | None = None
         self._binding: NativeExecutionBinding | None = None
         self._locator: ProviderLocator | None = None
         self._endpoint: str | None = None
@@ -118,15 +117,6 @@ class GCEOwnedCreationAccess:
         self._publish_metadata()
         return MappingProxyType(dict(self._metadata))
 
-    def _budget(self, deadline: Deadline) -> Deadline:
-        remaining(deadline)
-        if self._deadline is None:
-            raise StateError("GCE creation has no original finite budget")
-        assert deadline.expires_at is not None and self._deadline.expires_at is not None
-        selected = Deadline(min(deadline.expires_at, self._deadline.expires_at))
-        remaining(selected)
-        return selected
-
     @contextmanager
     def _transition(self, deadline: Deadline) -> Iterator[None]:
         if not self._lock.acquire(timeout=min(remaining(deadline), TIMEOUT_MAX)):
@@ -152,6 +142,8 @@ class GCEOwnedCreationAccess:
             raise StateError("GCE creation access cannot admit work")
 
     def _observe(self, deadline: Deadline) -> tuple[VMStatus, str | None]:
+        remaining(deadline)
+        self._owner.list_pending_lifecycle_obligations()
         assert self._resources is not None and self._selection is not None
         resource = self._resources.resources["instance"]
         if resource.resource_id is None:
@@ -185,6 +177,8 @@ class GCEOwnedCreationAccess:
             "REPAIRING",
         }:
             raise ValidationError("GCE created VM power observation is invalid")
+        self._owner.list_pending_lifecycle_obligations()
+        remaining(deadline)
         return (
             VMStatus.RUNNING
             if power == "RUNNING"
@@ -227,7 +221,7 @@ class GCEOwnedCreationAccess:
             self._open()
             if self._used or self._rollback:
                 raise StateError("GCE creation provisioning is single use")
-            self._used, self._deadline = True, deadline
+            self._used = True
             with self._owner._guard:  # noqa: SLF001
                 self._owner._reconcile_transition_locked()  # noqa: SLF001
                 self._owner._require_dispatch_admission_locked()  # noqa: SLF001
@@ -347,21 +341,20 @@ class GCEOwnedCreationAccess:
     def observe_power(self, deadline: Deadline) -> VMStatus:
         with self._transition(deadline):
             self._open()
-            return self._observe(self._budget(deadline))[0]
+            return self._observe(deadline)[0]
 
     def observe_locator(self, deadline: Deadline) -> ProviderLocator:
         with self._transition(deadline):
             self._open()
-            power, _endpoint = self._observe(self._budget(deadline))
+            power, _endpoint = self._observe(deadline)
             if power is not VMStatus.RUNNING or self._locator is None:
                 raise StateError("GCE created VM running locator is unavailable")
             return self._locator
 
     def _check_route(self, deadline: Deadline) -> None:
         with self._transition(deadline):
-            budget = self._budget(deadline)
             self._open()
-            power, endpoint = self._observe(budget)
+            power, endpoint = self._observe(deadline)
             if power is not VMStatus.RUNNING or endpoint != self._endpoint:
                 raise StateError("GCE created VM public route changed")
             assert self._selection is not None and self._resources is not None
@@ -376,17 +369,20 @@ class GCEOwnedCreationAccess:
                 self._selection.network,
                 self._names.network_tag,
                 self._prefixes,
-                budget,
+                deadline,
                 owned=owned,
             )
+            self._owner.list_pending_lifecycle_obligations()
+            remaining(deadline)
 
     def complete_bootstrap(self, deadline: Deadline) -> None:
+        # Core may transfer known completion under a fresh cleanup budget.
         with self._transition(deadline):
             self._open()
             if self._resources is None or self._locator is None or self._rollback:
                 raise StateError("GCE creation cannot transfer an unproved resource")
             self.observe_locator(deadline)
-            self._resources.accept(self._budget(deadline))
+            self._resources.accept(deadline)
 
     def request_rollback(self) -> None:
         if self._resources is None or not self._resources.accepted:
