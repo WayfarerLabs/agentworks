@@ -9,6 +9,7 @@ disposition nor native bootstrap, credential, secret delivery or availability pr
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from contextlib import closing, contextmanager, nullcontext
 from dataclasses import replace
 from pathlib import PurePosixPath
@@ -19,10 +20,20 @@ import pytest
 from agentworks.capabilities.base import OperationScope as ContextScope
 from agentworks.capabilities.base import RunContext, ScopeLevel, TargetAbsence
 from agentworks.capabilities.vm_platform.base import ProviderLocator
-from agentworks.db import Database, InitStatus, OperationResourceKind, OperationScope, ProvisioningStatus, VMStatus
-from agentworks.errors import AlreadyExistsError, ConfigError, StateError, ValidationError
+from agentworks.db import (
+    Database,
+    InitStatus,
+    OperationResourceKind,
+    OperationScope,
+    ProvisioningStatus,
+    VMRow,
+    VMStatus,
+)
+from agentworks.errors import AgentworksError, AlreadyExistsError, ConfigError, StateError, ValidationError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._process import LocalProcessOwner
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._target_identity import TargetIdentityPreparation, TargetIdentityStatus
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
@@ -32,7 +43,7 @@ from agentworks.execution.carriers.ssh import SSHCarrier, SSHConnection, SSHSett
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
 from agentworks.execution.target import ExecutionIdentity, ExecutionRoute, ExecutionTarget
-from agentworks.operations import OperationOwner
+from agentworks.operations import LifecycleObligation, OperationBorrow, OperationOwner
 from agentworks.vms import _creation_operation as creation
 from agentworks.vms import _native_operation
 from agentworks.vms._creation_access import VMCreationResult
@@ -54,45 +65,46 @@ class _CreationAccess:
     route_check = None
     independent_availability = _IndependentJobAvailability.NO_IDLE_STOP
 
-    def __init__(self, harness, owner, custody):
+    def __init__(self, harness: SimpleNamespace, owner: OperationOwner, custody: LocalDeliveryCustody) -> None:
         self.harness, self.owner, self.custody = harness, owner, custody
-        self.binding = harness.binding
-        self.platform_metadata = {}
-        self.debt = None
+        self.binding: NativeExecutionBinding = harness.binding
+        self.locator: ProviderLocator = harness.locator
+        self.platform_metadata: dict[str, str] = {}
+        self.debt: LifecycleObligation | None = None
         self.settled = True
         self.resolve_debt = True
-        self.failure = None
+        self.failure: BaseException | None = None
         self.transferred = False
         self.rollback = False
 
-    def provision(self, deadline):
+    def provision(self, deadline: Deadline) -> VMCreationResult:
         self.harness.note("provision", deadline)
         self.debt = self.owner.register_lifecycle_obligation("fixture-creation", payload_version=1, payload=b"{}")
         self.debt.mark_possible_effect()
         self.platform_metadata = {"opaque/receipt": "provider-owned:not-a-candidate-id"}
         if self.failure is not None:
             raise self.failure
-        return VMCreationResult(self.platform_metadata, self.binding, self.harness.locator)
+        return VMCreationResult(self.platform_metadata, self.binding, self.locator)
 
-    def complete_bootstrap(self, deadline):
+    def complete_bootstrap(self, deadline: Deadline) -> None:
         self.harness.note("transfer", deadline)
         assert not self.transferred and not self.rollback
         assert self.harness.db.get_vm("created").tailscale_host == _ADDRESS
         self.transferred = True
 
-    def request_rollback(self):
+    def request_rollback(self) -> None:
         assert not self.transferred
         self.rollback = True
 
-    def observe_power(self, deadline):
+    def observe_power(self, deadline: Deadline) -> VMStatus:
         self.harness.note("power", deadline)
         return VMStatus.RUNNING
 
-    def observe_locator(self, deadline):
+    def observe_locator(self, deadline: Deadline) -> ProviderLocator:
         self.harness.note("locator", deadline)
-        return self.harness.locator
+        return self.locator
 
-    def settle(self, deadline):
+    def settle(self, deadline: Deadline) -> bool:
         self.harness.note("settle", deadline)
         assert self.custody.settled
         if self.settled and self.resolve_debt and self.debt is not None:
@@ -138,7 +150,7 @@ def harness(tmp_path, monkeypatch, creation_request):
             secrets=h.secrets,
         )
 
-        def note(event, deadline):
+        def note(event: str, deadline: Deadline) -> None:
             assert type(deadline) is Deadline and deadline.expires_at is not None and not deadline.expired
             h.events.append((event, deadline))
 
@@ -160,8 +172,10 @@ def harness(tmp_path, monkeypatch, creation_request):
 
         def build(request, ctx, *, owner, custody):
             assert request is h.request and ctx is h.ctx
-            assert db.operations.inspect(_SCOPE).ownership == owner.ownership
-            assert db.get_vm("created").provisioning_status == ProvisioningStatus.IN_PROGRESS.value
+            claim = db.operations.inspect(_SCOPE)
+            vm = db.get_vm("created")
+            assert claim is not None and claim.ownership == owner.ownership
+            assert vm is not None and vm.provisioning_status == ProvisioningStatus.IN_PROGRESS.value
             assert h.access is None
             h.access = _CreationAccess(h, owner, custody)
             h.events.append(("build", h.deadline))
@@ -187,7 +201,8 @@ def harness(tmp_path, monkeypatch, creation_request):
 
         monkeypatch.setattr(_native_operation, "prepare_managed_vm_target_from_platform", prepare)
         monkeypatch.setattr(_native_operation, "prepare_target_identity", identity)
-        assemble = creation._prepare_route
+        h.prepare_identity = identity
+        assemble = _native_operation._prepare_route
 
         def route(workflow, *args, **kwargs):
             h.workflow = workflow
@@ -211,14 +226,22 @@ def harness(tmp_path, monkeypatch, creation_request):
         monkeypatch.setattr(creation, "attest_created_guest", attest)
 
         class Trust:
-            def __init__(self, owner, vm, endpoint, selected_settings, *, deadline):
+            def __init__(
+                self,
+                owner: OperationOwner,
+                vm: VMRow,
+                endpoint: str,
+                selected_settings: SSHSettings,
+                *,
+                deadline: Deadline,
+            ) -> None:
                 assert owner is h.access.owner and deadline is h.deadline
                 vm_ssh_connection(vm.name, vm.admin_username, endpoint, selected_settings)
 
-            def prepare(self):
+            def prepare(self) -> None:
                 note("trust", h.deadline)
 
-            def close(self, deadline):
+            def close(self, deadline: Deadline) -> bool:
                 note("trust-close", deadline)
                 return True
 
@@ -272,7 +295,7 @@ def test_claim_precedes_row_and_two_routes_share_owner_and_original_budget(harne
 def test_refusals_precede_provider_effects_and_preserve_existing_rows(harness, refusal):
     h = harness
     other = None
-    expected = StateError
+    expected: type[AgentworksError] = StateError
     if refusal == "claim":
         other = OperationOwner.acquire(h.db.operations, _SCOPE, "conflict")
     elif refusal == "row":
@@ -313,17 +336,16 @@ def test_refusals_precede_provider_effects_and_preserve_existing_rows(harness, r
 
 def test_local_policy_readiness_failure_leaves_no_row_and_allows_same_name_retry(harness, monkeypatch):
     h = harness
-    admit = creation.admit_connection
 
     def unavailable(connection):
         raise ValidationError("fixture unreadable identity or blocked trust")
 
-    monkeypatch.setattr(creation, "admit_connection", unavailable)
-    with pytest.raises(ValidationError), h.operation():
-        pytest.fail("unavailable policy admitted creation")
+    with monkeypatch.context() as policy_patch:
+        policy_patch.setattr(creation, "admit_connection", unavailable)
+        with pytest.raises(ValidationError), h.operation():
+            pytest.fail("unavailable policy admitted creation")
     assert h.db.get_vm("created") is None and h.db.operations.inspect(_SCOPE) is None
     assert h.access is None and not h.events
-    monkeypatch.setattr(creation, "admit_connection", admit)
     with h.operation():
         assert h.db.get_vm("created").tailscale_host == _ADDRESS
     assert h.db.operations.inspect(_SCOPE) is None
@@ -420,7 +442,7 @@ def test_preparation_faults_respect_the_bootstrap_transfer_boundary(harness, mon
         raise control
 
     if stage == "canonical-account":
-        prepare = _native_operation.prepare_target_identity
+        prepare: Callable[..., TargetIdentityPreparation] = h.prepare_identity
 
         def second_account(*args, **kwargs):
             if len(h.workflow.routes) == 2:
@@ -446,11 +468,12 @@ def test_metadata_failure_still_retires_real_local_custody_and_unused_borrow(har
     h = harness
     update = h.db.update_vm_platform_metadata
     control = StateError("fixture checkpoint failure")
-    retained = []
+    retained: tuple[LocalProcessOwner, OperationBorrow] | None = None
 
     def fail_checkpoint(*args):
-        if not retained:
-            retained.extend((h.access.custody.begin_process(), h.access.owner.borrow()))
+        nonlocal retained
+        if retained is None:
+            retained = (h.access.custody.begin_process(), h.access.owner.borrow())
         raise control
 
     monkeypatch.setattr(h.db, "update_vm_platform_metadata", fail_checkpoint)
@@ -459,8 +482,10 @@ def test_metadata_failure_still_retires_real_local_custody_and_unused_borrow(har
     assert caught.value is control
     fact = control.__cause__
     assert isinstance(fact, VMOperationControlFact)
+    assert retained is not None
     process, borrow = retained
-    assert process.snapshot().terminal.cleaned and borrow.closed and h.access.custody.settled
+    terminal = process.snapshot().terminal
+    assert terminal is not None and terminal.cleaned and borrow.closed and h.access.custody.settled
     assert h.db.operations.inspect(_SCOPE) is not None
     assert not any(event == "settle" for event, _ in h.events)
     monkeypatch.setattr(h.db, "update_vm_platform_metadata", update)
@@ -535,10 +560,12 @@ def test_exact_row_and_owner_fences_prevent_metadata_writes(harness, monkeypatch
         with pytest.raises(sqlite3.OperationalError if change == "snapshot-takeover" else StateError) as caught:
             workflow.persist_metadata()
         if change == "snapshot-takeover":
+            assert isinstance(caught.value, sqlite3.OperationalError)
             assert caught.value.sqlite_errorcode == sqlite3.SQLITE_BUSY_SNAPSHOT
         assert h.db.get_vm("created").platform_metadata == {} and not h.db._conn.in_transaction
         if successor is not None:
-            assert second.operations.inspect(_SCOPE).ownership == successor.ownership != owner.ownership
+            claim = second.operations.inspect(_SCOPE)
+            assert claim is not None and claim.ownership == successor.ownership != owner.ownership
             successor.seal_lifecycle_obligations()
             successor.record_effects_resolved()
             successor.close()
