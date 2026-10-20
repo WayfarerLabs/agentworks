@@ -220,6 +220,7 @@ def test_complete_publication_closes_writer_then_strictly_readmits(fixture, monk
         b"existing-first-policy\n",
         b"existing-second-policy\n",
     )
+    assert current.revoked_host_keys is not None
     assert current.revoked_host_keys.read_bytes() == b"fixture-revocation-bytes\x00\xff"
     assert fixture.candidate.read_bytes() == _LEARNED
     assert not fixture.owner.list_pending_lifecycle_obligations()
@@ -372,7 +373,7 @@ def test_exact_ledger_fault_reconciliation_never_replays_native_work(fixture, mo
     }[transition]
     original = getattr(repository, method)
     control = KeyboardInterrupt()
-    faults = []
+    faults: list[bool] = []
 
     def fault(*args, **kwargs):
         selected = transition not in ("pending-payload", "complete-payload") or (
@@ -434,7 +435,7 @@ def test_generation_change_before_publication_never_falls_back(fixture, monkeypa
 
 def test_candidate_generation_must_match_retained_snapshot(fixture, monkeypatch):
     consumer = fixture.consumer()
-    original = composition.enroll_new_target
+    original = ssh_enrollment.enroll_new_target
 
     def enroll(*args, **kwargs):
         return replace(original(*args, **kwargs), base_generation="d" * 32)
@@ -449,9 +450,9 @@ def test_candidate_generation_must_match_retained_snapshot(fixture, monkeypatch)
 
 def test_original_budget_expiry_after_enrollment_prevents_publication(fixture, monkeypatch):
     consumer = fixture.consumer()
-    original = composition.enroll_new_target
+    original = ssh_enrollment.enroll_new_target
     remaining = Deadline.remaining
-    expired = []
+    expired: list[bool] = []
 
     def budget(deadline):
         return 0.0 if expired and deadline is fixture.deadline else remaining(deadline)
