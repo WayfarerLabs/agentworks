@@ -127,6 +127,7 @@ def test_passive_factory_then_independent_result_and_acceptance(owned):
     assert not owned.access.platform_metadata and owned.access.binding is None
     deadline = Deadline.after(5)
     result = owned.access.provision(deadline)
+    assert result.ssh_trust_published is True
     assert result.binding is owned.access.binding
     assert result.locator.token == f"aws-ec2:{ACCOUNT}:{REGION}:{INSTANCE}"
     assert dict(result.platform_metadata) == dict(owned.access.platform_metadata)

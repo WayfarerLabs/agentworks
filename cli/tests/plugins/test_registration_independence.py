@@ -192,7 +192,7 @@ with ExitStack() as patches:
     patches.enter_context(patch.object(azure, "_native_network_client", azure_network))
     patches.enter_context(patch.object(gcp._clients, "client", gce_client))
     for platform, endpoint, metadata in clouds:
-        vm = SimpleNamespace(name="fixture-cloud", admin_username="fixture-admin",
+        vm = SimpleNamespace(name="fixture-cloud", admin_username="fixture-admin", instance_marker="a" * 32,
                              platform_metadata=metadata)
         before = list(reads)
         try:
@@ -208,7 +208,7 @@ with ExitStack() as patches:
         assert (connection.host, connection.port, connection.user) == (endpoint, 22, "fixture-admin")
         assert connection.identity_file == settings.identity_file
         assert connection.trust == ManagedSSHTrust(settings.trust_store)
-        assert connection.host_key_alias is None
+        assert connection.host_key_alias == "agw-vm-" + vm.instance_marker
         assert binding.delivery_account == "fixture-admin"
         assert binding.runtime_selection == RuntimeSelection(RuntimeTargetOS.LINUX)
         assert binding._independent_availability is _IndependentJobAvailability.NO_IDLE_STOP

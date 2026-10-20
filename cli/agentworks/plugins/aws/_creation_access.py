@@ -89,7 +89,7 @@ class EC2OwnedCreationAccess:
             raise ValidationError("EC2 creation requires explicit operator SSH settings")
         self._settings = ctx.config.operator.ssh
         # Validate endpoint-independent policy without admitting local files.
-        vm_ssh_connection(self._name, self._admin, "0.0.0.0", self._settings)
+        vm_ssh_connection(self._name, self._admin, "0.0.0.0", self._settings, instance_marker=self._marker)
         self._nonce = uuid4().hex
         self._lock = Lock()
         self._used = False
@@ -314,7 +314,9 @@ class EC2OwnedCreationAccess:
                 time.sleep(min(0.1, self._remaining(deadline)))
             observe_attachments(creation, instance, deadline, record_initial=True)
             endpoint = instance["PublicIpAddress"]
-            connection = vm_ssh_connection(self._name, self._admin, endpoint, self._settings)
+            connection = vm_ssh_connection(
+                self._name, self._admin, endpoint, self._settings, instance_marker=self._marker
+            )
             self._locator, self._endpoint = locator, endpoint
             self._route = EC2NativeRoute(
                 self._owner,
@@ -361,7 +363,7 @@ class EC2OwnedCreationAccess:
                 _new_managed_delivery=lambda: SSHCarrier(connection),
                 _independent_availability=self.independent_availability,
             )
-            self._result = VMCreationResult(self.platform_metadata, self.binding, locator)
+            self._result = VMCreationResult(self.platform_metadata, self.binding, locator, ssh_trust_published=True)
             self._remaining(deadline)
             return self._result
         finally:

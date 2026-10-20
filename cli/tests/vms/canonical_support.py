@@ -41,7 +41,8 @@ def install_canonical_delivery(monkeypatch: pytest.MonkeyPatch, route: _RouteCar
     ) -> CarrierReport:
         connection = carrier._connection
         connections.append(connection)
-        assert connection.host == ADDRESS and connection.user == "admin" and connection.host_key_alias is None
+        assert connection.host == ADDRESS and connection.user == "admin"
+        assert connection.host_key_alias == "agw-vm-" + route.guest.database.get_vm("box").instance_marker
         user = "root" if route.guest.calls == 0 else "admin"
         selected = WSL2Carrier(WSL2Connection("Ubuntu", user, "wsl.exe"))
         return route.execute(selected, invocation, io=io, deadline=deadline, custody=custody)

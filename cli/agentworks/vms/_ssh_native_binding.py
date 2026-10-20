@@ -11,6 +11,7 @@ from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution.binding import NativeExecutionBinding, _EarlyGuestFactsRoute, _IndependentJobAvailability
 from agentworks.execution.carriers.ssh import ManagedSSHTrust, SSHCarrier, SSHConnection
+from agentworks.vms.identity import validate_vm_instance_marker
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
@@ -32,8 +33,16 @@ def require_ssh_settings(vm: VMRow, ctx: RunContext, config: Config | None) -> S
     return settings
 
 
-def vm_ssh_connection(vm_name: str, admin_username: str, endpoint: object, settings: SSHSettings) -> SSHConnection:
+def vm_ssh_connection(
+    vm_name: str,
+    admin_username: str,
+    endpoint: object,
+    settings: SSHSettings,
+    *,
+    instance_marker: str | None,
+) -> SSHConnection:
     """Construct passive connection policy for a core-selected literal VM endpoint."""
+    marker = validate_vm_instance_marker(instance_marker)
     try:
         if not isinstance(endpoint, str):
             raise ValueError
@@ -50,7 +59,7 @@ def vm_ssh_connection(vm_name: str, admin_username: str, endpoint: object, setti
         user=admin_username,
         identity_file=settings.identity_file,
         trust=ManagedSSHTrust(settings.trust_store),
-        host_key_alias=None,
+        host_key_alias="agw-vm-" + marker,
         agent_socket=settings.agent_socket,
         ssh_executable=settings.ssh_executable,
         keepalive_interval=settings.keepalive_interval,
@@ -66,7 +75,7 @@ def ssh_execution_binding(
     independent_availability: _IndependentJobAvailability | None = None,
 ) -> NativeExecutionBinding:
     """Bind one selected literal IPv4 without admitting local files."""
-    connection = vm_ssh_connection(vm.name, vm.admin_username, endpoint, settings)
+    connection = vm_ssh_connection(vm.name, vm.admin_username, endpoint, settings, instance_marker=vm.instance_marker)
     carrier = SSHCarrier(connection)
     root_entry = IdentityPlan(
         IdentityExpectation(0, 0, (0,)),

@@ -306,6 +306,7 @@ def test_passive_factory_then_public_bootstrap_retains_exact_owner_and_connectio
     assert not owned.calls and not owned.secrets.calls and access.platform_metadata == {} and owned.row() is None
     assert JOIN_KEY not in repr(access) and TOKEN not in repr(access)
     result = access.provision(Deadline.after(5))
+    assert result.ssh_trust_published is False
     assert owned.secrets.calls == ["pve-token"]
     assert result.platform_metadata == access.platform_metadata == {"vmid": "123", "node": "node1"}
     assert result.binding is access.binding and result.binding.delivery_account == "root"

@@ -203,6 +203,7 @@ def test_passive_factory_then_new_result_and_accepted_retention(owned):
     p = owned
     assert not p.api.calls and not p.events and not p.owner.list_pending_lifecycle_obligations()
     result = p.access.provision(p.deadline)
+    assert result.ssh_trust_published is True
     assert type(result.binding) is NativeExecutionBinding
     assert result.locator == ProviderLocator("gcp-gce:project:us-central1-a:103")
     assert p.events == ["tcp", "trust", "probe"]

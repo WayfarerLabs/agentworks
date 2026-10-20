@@ -37,14 +37,16 @@ from agentworks.execution._runtime_prerequisite import RuntimeSelection, Runtime
 from agentworks.execution._target_identity import TargetIdentityPreparation, TargetIdentityStatus
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 from agentworks.execution.binding import NativeExecutionBinding, _IndependentJobAvailability
-from agentworks.execution.carrier import Deadline
+from agentworks.execution.carrier import Deadline, PreparedInvocation
 from agentworks.execution.carriers.ssh import SSHCarrier, SSHConnection, SSHSettings, SSHTrustFiles
+from agentworks.execution.carriers.ssh.connection import admit_connection, build_ssh_argv
+from agentworks.execution.carriers.ssh.trust import block_trust, refresh_trust, resolve_trust, trust_status
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
 from agentworks.execution.target import ExecutionIdentity, ExecutionRoute, ExecutionTarget
 from agentworks.operations import LifecycleObligation, OperationBorrow, OperationOwner
 from agentworks.vms import _creation_operation as creation
-from agentworks.vms import _native_operation
+from agentworks.vms import _creation_trust, _native_operation
 from agentworks.vms._creation_access import VMCreationResult
 from agentworks.vms._native_operation import VMOperationControlFact
 from agentworks.vms._ssh_native_binding import vm_ssh_connection
@@ -52,6 +54,7 @@ from agentworks.vms.target_identity import compose_managed_vm_target_identity
 from agentworks.vms.target_preparation import VMTargetPreparation, VMTargetPreparationStatus
 from tests.plugins._fixtures import FixtureVMPlatform
 from tests.vms.test_creation_guest import creation_request as creation_request
+from tests.vms.test_creation_trust import fixture as fixture
 
 _ADDRESS = "100.64.0.7"
 _SCOPE = OperationScope(OperationResourceKind.VM, "created")
@@ -83,7 +86,9 @@ class _CreationAccess:
         self.platform_metadata = {"opaque/receipt": "provider-owned:not-a-candidate-id"}
         if self.failure is not None:
             raise self.failure
-        return VMCreationResult(self.platform_metadata, self.binding, self.locator)
+        return VMCreationResult(
+            self.platform_metadata, self.binding, self.locator, ssh_trust_published=self.harness.ssh_trust_published
+        )
 
     def complete_bootstrap(self, deadline: Deadline) -> None:
         self.harness.note("transfer", deadline)
@@ -141,6 +146,7 @@ def harness(tmp_path, monkeypatch, creation_request):
             host=host,
             secrets={"provider": "resolved-fixture-value"},
             workflow=None,
+            ssh_trust_published=False,
         )
         h.ctx = RunContext(
             config=SimpleNamespace(operator=SimpleNamespace(ssh=settings)),
@@ -164,6 +170,7 @@ def harness(tmp_path, monkeypatch, creation_request):
 
         def admit_policy(connection):
             assert connection.host == "0.0.0.0" and h.access is None
+            assert connection.host_key_alias == "agw-vm-" + h.request.instance_marker
             assert db.operations.inspect(_SCOPE) is not None
             return policy
 
@@ -238,7 +245,7 @@ def harness(tmp_path, monkeypatch, creation_request):
             ) -> None:
                 assert owner is h.access.owner and deadline is h.deadline
                 assert instance_marker == h.request.instance_marker
-                vm_ssh_connection(vm_name, admin_username, endpoint, settings)
+                vm_ssh_connection(vm_name, admin_username, endpoint, settings, instance_marker=instance_marker)
 
             def prepare(self) -> None:
                 note("trust", h.deadline)
@@ -254,8 +261,10 @@ def harness(tmp_path, monkeypatch, creation_request):
         yield h
 
 
-def test_claim_precedes_row_and_two_routes_share_owner_and_original_budget(harness, monkeypatch):
+@pytest.mark.parametrize("ssh_trust_published", [False, True])
+def test_claim_precedes_row_and_two_routes_share_owner_and_original_budget(harness, monkeypatch, ssh_trust_published):
     h = harness
+    h.ssh_trust_published = ssh_trust_published
     insert = h.db.insert_vm
 
     def insert_claimed(*args, **kwargs):
@@ -284,11 +293,108 @@ def test_claim_precedes_row_and_two_routes_share_owner_and_original_budget(harne
             native.execution.run(Command(("true",)), profile=Protection.DIRECT)
         assert canonical.execution._deadline() is h.deadline
         assert h.db.get_vm("created").init_status == InitStatus.PENDING.value
+        assert (h.workflow.trust is None) is ssh_trust_published
+        assert [event for event, _ in h.events].count("trust") == (0 if ssh_trust_published else 1)
     assert all(budget is h.deadline for _, budget in h.events)
     assert h.db.operations.inspect(_SCOPE) is None
     assert h.access.transferred and not h.access.rollback
     with pytest.raises(StateError):
         canonical.execution.run(Command(("true",)), profile=Protection.DIRECT)
+
+
+@pytest.mark.parametrize("fact", [None, 0, 1, "false"])
+def test_creation_result_requires_exact_publication_fact(harness, fact):
+    h = harness
+    with pytest.raises(ValidationError):
+        VMCreationResult({}, h.binding, h.locator, ssh_trust_published=fact)
+    with pytest.raises(TypeError):
+        VMCreationResult({}, h.binding, h.locator)
+    assert not h.events and h.access is None
+
+
+@pytest.mark.parametrize("policy", ["published", "refreshed", "blocked"])
+def test_public_publication_has_one_writer_and_canonical_readmits_current_strict_policy(
+    harness, fixture, monkeypatch, policy
+):
+    h, p = harness, fixture
+    h.request.instance_marker = p.resource_id.removeprefix("vm:")
+    h.settings = p.settings
+    h.ctx.config.operator.ssh = p.settings
+    h.ssh_trust_published = True
+    provision, settle = _CreationAccess.provision, _CreationAccess.settle
+    prepare = _native_operation.prepare_managed_vm_target_from_platform
+    attest = creation.attest_created_guest
+    publications, retained, canonical_admissions = [], [], []
+
+    def publish(*args, **kwargs):
+        publications.append(kwargs["authority"])
+        return refresh_trust(*args, **kwargs)
+
+    def provision_public(self, deadline):
+        result = provision(self, deadline)
+        p.db, p.owner = h.db, self.owner
+        trust = _creation_trust.CreationSSHTrust(
+            self.owner,
+            vm_name=h.request.vm_name,
+            admin_username=h.request.admin_username,
+            instance_marker=h.request.instance_marker,
+            endpoint=p.endpoint,
+            settings=p.settings,
+            deadline=deadline,
+        )
+        retained.append(trust)
+        trust.prepare()
+        h.binding = self.binding = replace(h.binding, carrier=SSHCarrier(trust._connection))
+        return replace(result, binding=self.binding)
+
+    def settle_public(self, deadline):
+        assert retained[0].close(deadline)
+        return settle(self, deadline)
+
+    def attest_and_update(*args):
+        release = attest(*args)
+        generation = trust_status(p.bundle).generation
+        if policy == "blocked":
+            block_trust(p.bundle, expected_generation=generation)
+        elif policy == "refreshed":
+            refresh_trust(
+                p.bundle, sources=resolve_trust(p.bundle), authority="fixture-update", expected_generation=generation
+            )
+        return release
+
+    def prepare_strict(vm, platform, locator, selected_binding, **kwargs):
+        if selected_binding is not h.binding:
+            connection = selected_binding.carrier._connection
+            assert connection.host == _ADDRESS and connection.host != p.endpoint
+            assert connection.host_key_alias == retained[0]._connection.host_key_alias
+            assert connection.trust == p.bundle
+            current = admit_connection(connection)
+            assert current == resolve_trust(p.bundle)
+            argv = build_ssh_argv(connection, PreparedInvocation(("true",)), trust=current, executable="/fixture/ssh")
+            assert "StrictHostKeyChecking=yes" in argv
+            assert "StrictHostKeyChecking=accept-new" not in argv
+            canonical_admissions.append(current)
+        return prepare(vm, platform, locator, selected_binding, **kwargs)
+
+    def no_canonical_enrollment(*args, **kwargs):
+        pytest.fail("published instance attempted a second SSH enrollment")
+
+    monkeypatch.setattr(_CreationAccess, "provision", provision_public)
+    monkeypatch.setattr(_CreationAccess, "settle", settle_public)
+    monkeypatch.setattr(_creation_trust, "refresh_trust", publish)
+    monkeypatch.setattr(creation, "CreationSSHTrust", no_canonical_enrollment)
+    monkeypatch.setattr(creation, "attest_created_guest", attest_and_update)
+    monkeypatch.setattr(_native_operation, "prepare_managed_vm_target_from_platform", prepare_strict)
+    outcome = pytest.raises(StateError) if policy == "blocked" else nullcontext()
+    with outcome, h.operation() as ctx:
+        assert policy != "blocked"
+        assert ctx.admin_execution_target().route is ExecutionRoute.CANONICAL
+    assert len(canonical_admissions) == (0 if policy == "blocked" else 1)
+    assert publications == ["core-creation:" + p.resource_id]
+    assert len(p.calls) == 2
+    assert sum("StrictHostKeyChecking=accept-new" in argv for argv in p.calls) == 1
+    assert h.workflow.trust is None and h.access.transferred and not h.access.rollback
+    assert p.candidate.exists() and h.db.operations.inspect(_SCOPE) is None
 
 
 @pytest.mark.parametrize(

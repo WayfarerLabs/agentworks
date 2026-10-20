@@ -33,16 +33,22 @@ class VMCreationResult:
     Platform implementations can construct this outside static typing. Core
     stores the copied metadata without interpreting its provider-owned fields.
     This result does not close the platform bootstrap rollback window.
+    SSH trust publication records completed enrollment for the instance marker;
+    false means no SSH enrollment was attempted. Current trust still requires
+    fresh admission and strict verification on every route.
     """
 
     platform_metadata: Mapping[str, str]
     binding: NativeExecutionBinding
     locator: ProviderLocator
+    ssh_trust_published: bool
 
     def __post_init__(self) -> None:
         metadata = creation_metadata_snapshot(self.platform_metadata)
         if type(self.binding) is not NativeExecutionBinding or type(self.locator) is not ProviderLocator:
             raise ValidationError("VM creation requires an independent binding and observed provider locator")
+        if type(self.ssh_trust_published) is not bool:
+            raise ValidationError("VM creation requires an explicit SSH trust publication fact")
         object.__setattr__(self, "platform_metadata", MappingProxyType(metadata))
 
 

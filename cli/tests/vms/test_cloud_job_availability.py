@@ -22,7 +22,9 @@ def test_unproved_binding_refuses_before_shell_reservation_and_dispatch(
     observer, monkeypatch, tmp_path, platform, user_default
 ):
     _, repository, operation, access, main, workflow = observer
-    vm = SimpleNamespace(name="vm-one", admin_username="root", platform_metadata={"distro_name": "recorded"})
+    vm = SimpleNamespace(
+        name="vm-one", admin_username="root", instance_marker="a" * 32, platform_metadata={"distro_name": "recorded"}
+    )
     if platform == "ssh":
         binding = ssh_execution_binding(vm, "198.51.100.2", SSHSettings(tmp_path / "trust", tmp_path / "key"))
     elif platform == "wsl2":

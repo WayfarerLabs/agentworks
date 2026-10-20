@@ -32,7 +32,7 @@ from agentworks.vms import _ssh_native_binding as binding
 
 _MARKER = "c" * 32
 _HOST = "192.0.2.24"
-_LEARNED = b"192.0.2.24 ssh-ed25519 fixture-learned-key\n"
+_LEARNED = ("agw-vm-" + _MARKER + " ssh-ed25519 fixture-learned-key\n").encode()
 
 
 @dataclass
@@ -54,7 +54,7 @@ class Fixture:
 
     @property
     def resource_id(self) -> str:
-        return f"vm:{_MARKER}:endpoint:{self.endpoint}"
+        return f"vm:{_MARKER}"
 
     @property
     def candidate(self) -> Path:
@@ -77,10 +77,16 @@ class Fixture:
     ) -> ProcessResult:
         claim = self.db.operations.inspect(self.owner.ownership.scope)
         assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
-        rows = self.owner.list_pending_lifecycle_obligations()
+        rows = [
+            row
+            for row in self.owner.list_pending_lifecycle_obligations()
+            if row.obligation_kind == "vm-creation-ssh-trust"
+        ]
         assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
         document = json.loads(rows[0].payload)
         assert document["resource_id"] == self.resource_id
+        assert document["host"] == self.endpoint and document["port"] == 22
+        assert document["host_key_alias"] == "agw-vm-" + _MARKER
         assert document["base_generation"] == self.base
         assert document["phase"] == "enrollment"
         self.calls.append(argv)
@@ -89,7 +95,7 @@ class Fixture:
             tuple(path.read_bytes() for path in resolve_trust(self.bundle).known_hosts)
         )
         if "StrictHostKeyChecking=accept-new" in argv:
-            self.candidate.write_bytes(_LEARNED.replace(_HOST.encode(), self.endpoint.encode()))
+            self.candidate.write_bytes(_LEARNED)
         if self.controls:
             raise self.controls.pop(0)
         nonce = re.search(r"agw-enroll-[a-f0-9]{32}", argv[-1])
@@ -137,7 +143,7 @@ def test_constructor_and_common_connection_builder_are_passive(fixture, monkeypa
         patch.setattr(Path, "is_file", forbidden)
         patch.setattr(composition, "trust_status", forbidden)
         consumer = fixture.consumer()
-        connection = binding.vm_ssh_connection("box", "admin", _HOST, fixture.settings)
+        connection = binding.vm_ssh_connection("box", "admin", _HOST, fixture.settings, instance_marker=_MARKER)
         assert connection.trust == fixture.bundle
         assert connection.host == _HOST and connection.user == "admin"
         assert isinstance(consumer._custody, SSHEnrollmentCustody)
@@ -148,7 +154,30 @@ def test_constructor_and_common_connection_builder_are_passive(fixture, monkeypa
 @pytest.mark.parametrize("endpoint", ["host.invalid", "2001:db8::1", "192.0.2.1:22", None])
 def test_common_connection_builder_requires_literal_ipv4(fixture, endpoint):
     with pytest.raises(StateError):
-        binding.vm_ssh_connection("box", "admin", endpoint, fixture.settings)
+        binding.vm_ssh_connection("box", "admin", endpoint, fixture.settings, instance_marker=_MARKER)
+
+
+@pytest.mark.parametrize("marker", [None, "", "invalid", "A" * 32])
+def test_common_connection_and_binding_require_core_marker(fixture, marker):
+    with pytest.raises(ValidationError):
+        binding.vm_ssh_connection("box", "admin", _HOST, fixture.settings, instance_marker=marker)
+    with pytest.raises(ValidationError):
+        binding.ssh_execution_binding(
+            replace(fixture.db.get_vm("box"), instance_marker=marker), _HOST, fixture.settings
+        )
+    assert not fixture.calls
+
+
+def test_connection_alias_tracks_instance_not_endpoint_name_or_account(fixture):
+    connections = [
+        binding.vm_ssh_connection(name, user, host, fixture.settings, instance_marker=_MARKER)
+        for name, user, host in (("box", "admin", _HOST), ("renamed", "root", "100.64.0.24"))
+    ]
+    assert connections[0].host != connections[1].host and connections[0].user != connections[1].user
+    assert connections[0].host_key_alias == connections[1].host_key_alias == "agw-vm-" + _MARKER
+    replacement = binding.vm_ssh_connection("box", "admin", _HOST, fixture.settings, instance_marker="d" * 32)
+    assert replacement.host_key_alias != connections[0].host_key_alias
+    assert not fixture.calls
 
 
 @pytest.mark.parametrize("change", ["missing-marker", "wrong-scope", "unbounded"])
@@ -204,35 +233,39 @@ def test_owner_refusal_precedes_policy_io(fixture, monkeypatch, state):
     assert consumer.close(Deadline.after(3))
 
 
-def test_public_and_canonical_endpoints_retain_distinct_evidence(fixture):
+def test_same_instance_cannot_enroll_again_at_canonical_endpoint(fixture):
     first_candidate = fixture.candidate
     first = fixture.consumer()
     first.prepare()
     assert first.close(Deadline.after(3))
     generation = trust_status(fixture.bundle).generation
     assert generation is not None and generation != fixture.base
+    first_state = (first_candidate.parent / "state.json").read_bytes()
+    assert json.loads(first_state)["host"] == _HOST and json.loads(first_state)["port"] == 22
 
     fixture.base = generation
     fixture.endpoint = "100.64.0.24"
     second_candidate = fixture.candidate
     second = fixture.consumer()
-    second.prepare()
+    with pytest.raises(SSHEnrollmentError):
+        second.prepare()
     assert second.close(Deadline.after(3))
 
-    learned = _LEARNED.replace(_HOST.encode(), fixture.endpoint.encode())
-    assert first_candidate != second_candidate
+    assert first_candidate == second_candidate
     assert first_candidate.read_bytes() == _LEARNED
-    assert second_candidate.read_bytes() == learned
-    current = admit_connection(binding.vm_ssh_connection("box", "admin", fixture.endpoint, fixture.settings))
+    assert (first_candidate.parent / "state.json").read_bytes() == first_state
+    assert trust_status(fixture.bundle).generation == generation
+    current = admit_connection(
+        binding.vm_ssh_connection("renamed", "other-admin", fixture.endpoint, fixture.settings, instance_marker=_MARKER)
+    )
     assert tuple(path.read_bytes() for path in current.known_hosts) == (
-        learned,
         _LEARNED,
         b"existing-first-policy\n",
         b"existing-second-policy\n",
     )
     assert current.revoked_host_keys is not None
     assert current.revoked_host_keys.read_bytes() == b"fixture-revocation-bytes\x00\xff"
-    assert len(fixture.calls) == 4
+    assert len(fixture.calls) == 2
     assert not fixture.owner.list_pending_lifecycle_obligations()
     assert fixture.db.operations.inspect(fixture.owner.ownership.scope).ownership == fixture.owner.ownership
 
@@ -266,7 +299,9 @@ def test_complete_publication_closes_writer_then_strictly_readmits(fixture, monk
     assert "StrictHostKeyChecking=yes" in fixture.calls[1]
     assert all(budget is fixture.deadline for budget in fixture.budgets)
     assert all(_LEARNED not in selected for selected in fixture.ordinary_before_publication)
-    current = admit_connection(binding.vm_ssh_connection("box", "admin", _HOST, fixture.settings))
+    current = admit_connection(
+        binding.vm_ssh_connection("box", "admin", _HOST, fixture.settings, instance_marker=_MARKER)
+    )
     assert tuple(path.read_bytes() for path in current.known_hosts) == (
         _LEARNED,
         b"existing-first-policy\n",
@@ -312,8 +347,8 @@ def test_successful_prepare_resolves_before_route_borrow_and_cleanup_is_passive(
 
 
 def test_execution_binding_preserves_selected_connection_policy(fixture, monkeypatch):
-    connection = binding.vm_ssh_connection("box", "admin", _HOST, fixture.settings)
-    monkeypatch.setattr(binding, "vm_ssh_connection", lambda *args: connection)
+    connection = binding.vm_ssh_connection("box", "admin", _HOST, fixture.settings, instance_marker=_MARKER)
+    monkeypatch.setattr(binding, "vm_ssh_connection", lambda *args, **kwargs: connection)
     result = binding.ssh_execution_binding(fixture.db.get_vm("box"), _HOST, fixture.settings)
     assert result.delivery_account == "admin"
     assert isinstance(result.carrier, SSHCarrier) and result.carrier._connection is connection

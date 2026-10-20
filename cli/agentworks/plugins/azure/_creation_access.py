@@ -291,7 +291,9 @@ class AzureOwnedCreationAccess:
             self._trust.prepare()
             self._check_route(deadline)
             observe_early_guest(
-                vm_ssh_connection(self._vm.name, self._vm.admin_username, self._endpoint, self._settings),
+                vm_ssh_connection(
+                    self._vm.name, self._vm.admin_username, self._endpoint, self._settings, instance_marker=self._marker
+                ),
                 self._marker,
                 deadline,
                 self._custody,
@@ -305,7 +307,7 @@ class AzureOwnedCreationAccess:
                 independent_availability=self.independent_availability,
             )
             self._route_ready = True
-            self._result = VMCreationResult(self._metadata, self._binding, self._locator())
+            self._result = VMCreationResult(self._metadata, self._binding, self._locator(), ssh_trust_published=True)
             return self._result
 
     def complete_bootstrap(self, deadline: Deadline) -> None:

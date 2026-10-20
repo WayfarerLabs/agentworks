@@ -310,7 +310,11 @@ class GCEOwnedCreationAccess:
             self._owner.list_pending_lifecycle_obligations()
             self._check_route(deadline)
             connection = vm_ssh_connection(
-                self._request.vm_name, self._request.admin_username, endpoint, self._settings
+                self._request.vm_name,
+                self._request.admin_username,
+                endpoint,
+                self._settings,
+                instance_marker=self._marker,
             )
             observe_early_guest(
                 connection,
@@ -336,7 +340,7 @@ class GCEOwnedCreationAccess:
                 _new_managed_delivery=lambda: SSHCarrier(connection),
                 _independent_availability=self.independent_availability,
             )
-            return VMCreationResult(self.platform_metadata, self._binding, self._locator)
+            return VMCreationResult(self.platform_metadata, self._binding, self._locator, ssh_trust_published=True)
 
     def observe_power(self, deadline: Deadline) -> VMStatus:
         with self._transition(deadline):

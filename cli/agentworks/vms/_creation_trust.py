@@ -59,11 +59,11 @@ class CreationSSHTrust:
         if deadline.expires_at is None:
             raise ValidationError("SSH creation trust requires a finite deadline")
         marker = validate_vm_instance_marker(instance_marker)
-        self._connection = vm_ssh_connection(vm_name, admin_username, endpoint, settings)
+        self._connection = vm_ssh_connection(vm_name, admin_username, endpoint, settings, instance_marker=marker)
         self._bundle = ManagedSSHTrust(settings.trust_store)
-        # Public bootstrap and canonical access can enroll different endpoints
-        # for the same creation. Each retains its own first-contact evidence.
-        self._provenance = SSHCreationProvenance(f"vm:{marker}:endpoint:{endpoint}", endpoint)
+        self._provenance = SSHCreationProvenance(
+            f"vm:{marker}", endpoint, self._connection.port, self._connection.host_key_alias
+        )
         self._owner = owner
         self._deadline = deadline
         self._delivery = LocalDeliveryCustody()

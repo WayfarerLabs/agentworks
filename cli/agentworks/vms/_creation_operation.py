@@ -191,7 +191,11 @@ def _prepare_created_context(
     # observed guest IPv4 and current policy are admitted again after bootstrap.
     provider_locator_remaining(deadline, vm_name=workflow.vm_name)
     workflow.owner.list_pending_lifecycle_obligations()
-    admit_connection(vm_ssh_connection(workflow.vm_name, workflow.admin_username, "0.0.0.0", settings))
+    admit_connection(
+        vm_ssh_connection(
+            workflow.vm_name, workflow.admin_username, "0.0.0.0", settings, instance_marker=workflow.marker
+        )
+    )
     provider_locator_remaining(deadline, vm_name=workflow.vm_name)
     vm = _insert_row(workflow, request, template, admin_template)
     creation = platform.build_creation_access(request, ctx, owner=workflow.owner, custody=workflow.local_delivery)
@@ -229,16 +233,17 @@ def _prepare_created_context(
     with workflow.row_transaction() as current:
         vm = current
     assert workflow.address is not None
-    workflow.trust = CreationSSHTrust(
-        workflow.owner,
-        vm_name=vm.name,
-        admin_username=vm.admin_username,
-        instance_marker=workflow.marker,
-        endpoint=workflow.address,
-        settings=settings,
-        deadline=deadline,
-    )
-    workflow.trust.prepare()
+    if not result.ssh_trust_published:
+        workflow.trust = CreationSSHTrust(
+            workflow.owner,
+            vm_name=vm.name,
+            admin_username=vm.admin_username,
+            instance_marker=workflow.marker,
+            endpoint=workflow.address,
+            settings=settings,
+            deadline=deadline,
+        )
+        workflow.trust.prepare()
     availability = creation.independent_availability
     binding = ssh_execution_binding(vm, workflow.address, settings, independent_availability=availability)
     selected_metadata = dict(vm.platform_metadata)

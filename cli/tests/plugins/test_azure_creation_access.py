@@ -160,6 +160,7 @@ def test_acceptance_never_reopens_rollback_even_after_publication_failure(
         {},
         ssh_execution_binding(access._vm, "192.0.2.10", access._settings),
         ProviderLocator("creation-test"),
+        ssh_trust_published=True,
     )
     monkeypatch.setattr(access._requests, "reconcile", lambda deadline: (_ for _ in ()).throw(OSError("lost reply")))
     with pytest.raises(OSError):
@@ -177,6 +178,7 @@ def test_invalid_supplied_acceptance_budget_refuses_before_publication(
         {},
         ssh_execution_binding(access._vm, "192.0.2.10", access._settings),
         ProviderLocator("creation-test"),
+        ssh_trust_published=True,
     )
     monkeypatch.setattr("agentworks.execution.carrier.time.monotonic", lambda: 110.0)
 
@@ -292,6 +294,7 @@ def test_public_route_readiness_trust_and_probe_precede_binding_and_transfer(
     monkeypatch.setattr(_creation_ssh, "SSHReadiness", Ready)
     monkeypatch.setattr(_creation_ssh, "observe_early_guest", probe)
     result = access.provision(deadline)
+    assert result.ssh_trust_published is True
     assert events == ["route", "listening", "trust", "probe"]
     assert result.binding is access.binding and result.binding.delivery_account == "operator"
     assert result.platform_metadata["vm_id"] == VM_ID

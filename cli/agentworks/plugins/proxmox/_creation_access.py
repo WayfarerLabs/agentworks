@@ -284,7 +284,9 @@ class ProxmoxOwnedCreationAccess:
                 deadline=deadline,
             )
             self.bootstrap.start()
-            self._result = VMCreationResult(self.platform_metadata, self._binding, self._locator)
+            self._result = VMCreationResult(
+                self.platform_metadata, self._binding, self._locator, ssh_trust_published=False
+            )
             _remaining(deadline)
             return self._result
         finally:
