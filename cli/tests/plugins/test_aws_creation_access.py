@@ -25,10 +25,17 @@ from agentworks.plugins.aws import _creation_access
 from agentworks.plugins.aws._creation import KIND
 from agentworks.plugins.aws._owned_auth import _OwnedRoleSession
 from agentworks.plugins.aws.platform import EC2Platform
-from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY
 from tests.plugins.test_aws_creation_support import (
-    ACCOUNT, INSTANCE, JOIN_KEY, NIC, REGION, VOLUME, Session,
+    ACCOUNT,
+    INSTANCE,
+    JOIN_KEY,
+    NIC,
+    REGION,
+    VOLUME,
+    Session,
 )
+from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY
+
 
 @pytest.fixture
 def owned(tmp_path, monkeypatch):
@@ -39,10 +46,20 @@ def owned(tmp_path, monkeypatch):
         config = SimpleNamespace(operator=SimpleNamespace(ssh=settings, ssh_allow_cidrs=[]))
         platform = EC2Platform("offline", {"region": REGION, "auth": {"mode": "ambient"}})
         request = ProvisionRequest(
-            vm_name="vm-one", debian_release=DebianRelease.TRIXIE, hostname="system-vm-one", system_slug="system",
-            instance_marker="a" * 32, admin_username="operator", ssh_public_key=TEST_SSH_PUBLIC_KEY,
-            ssh_private_key=None, tailscale_auth_key=JOIN_KEY, progress=SimpleNamespace(),
-            cpus=2, memory_gib=2, disk_gib=20, swap_gib=0,
+            vm_name="vm-one",
+            debian_release=DebianRelease.TRIXIE,
+            hostname="system-vm-one",
+            system_slug="system",
+            instance_marker="a" * 32,
+            admin_username="operator",
+            ssh_public_key=TEST_SSH_PUBLIC_KEY,
+            ssh_private_key=None,
+            tailscale_auth_key=JOIN_KEY,
+            progress=SimpleNamespace(),
+            cpus=2,
+            memory_gib=2,
+            disk_gib=20,
+            swap_gib=0,
         )
         events = []
 
@@ -53,7 +70,9 @@ def owned(tmp_path, monkeypatch):
 
             def prepare(self):
                 assert session.nonce is not None and session.rules
-                resource = next(row for row in owner.list_pending_lifecycle_obligations() if row.obligation_kind == KIND)
+                resource = next(
+                    row for row in owner.list_pending_lifecycle_obligations() if row.obligation_kind == KIND
+                )
                 recorded = json.loads(resource.payload)
                 assert recorded["volumes"] == [VOLUME] and recorded["interfaces"] == [NIC]
                 events.append("trust-prepared")
@@ -71,8 +90,15 @@ def owned(tmp_path, monkeypatch):
         custody = LocalDeliveryCustody()
         access = platform.build_creation_access(request, RunContext(config=config), owner=owner, custody=custody)
         yield SimpleNamespace(
-            database=database, owner=owner, session=session, access=access, request=request, platform=platform,
-            custody=custody, events=events, config=config,
+            database=database,
+            owner=owner,
+            session=session,
+            access=access,
+            request=request,
+            platform=platform,
+            custody=custody,
+            events=events,
+            config=config,
         )
 
 
@@ -275,10 +301,18 @@ def test_configured_role_is_retained_and_never_falls_back_to_ambient(owned, monk
 
     monkeypatch.setattr(_OwnedRoleSession, "build_session", session)
     monkeypatch.setattr(_creation_access, "_build_ambient_session", ambient)
-    platform = EC2Platform("offline", {"region": REGION, "auth": {
-        "mode": "access-key", "access_key_id": "fake-key", "access_key_secret": "aws-secret",
-        "assume_role_arn": "arn:aws:iam::123456789012:role/creation",
-    }})
+    platform = EC2Platform(
+        "offline",
+        {
+            "region": REGION,
+            "auth": {
+                "mode": "access-key",
+                "access_key_id": "fake-key",
+                "access_key_secret": "aws-secret",
+                "assume_role_arn": "arn:aws:iam::123456789012:role/creation",
+            },
+        },
+    )
     ctx = RunContext(config=owned.config, secrets=SimpleNamespace(get=lambda name: "access-key-secret"))
     access = platform.build_creation_access(owned.request, ctx, owner=owned.owner, custody=owned.custody)
     access.provision(Deadline.after(5))
@@ -330,9 +364,13 @@ def test_root_admin_creation_returns_direct_root_delivery(owned):
     assert result.binding._early_guest_facts_route.root_entry.mode is IdentityMode.DIRECT
 
 
-@pytest.mark.parametrize("field,replacement", [
-    ("volume", "vol-1123456789abcdef0"), ("interface", "eni-1123456789abcdef0"),
-])
+@pytest.mark.parametrize(
+    "field,replacement",
+    [
+        ("volume", "vol-1123456789abcdef0"),
+        ("interface", "eni-1123456789abcdef0"),
+    ],
+)
 def test_replacement_attachment_is_not_adopted_for_rollback(owned, field, replacement):
     owned.access.provision(Deadline.after(5))
     assert owned.access.creation.intent.volumes == (VOLUME,)
@@ -411,9 +449,9 @@ def test_cleanup_deadline_retains_original_request_then_fresh_budget_observes(ow
 
     clock = [100.0]
     monkeypatch.setattr("agentworks.execution.carrier.time", SimpleNamespace(monotonic=lambda: clock[0]))
-    monkeypatch.setattr(_creation_rollback, "time", SimpleNamespace(
-        sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds)
-    ))
+    monkeypatch.setattr(
+        _creation_rollback, "time", SimpleNamespace(sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    )
     owned.access.provision(Deadline.after(5))
     owned.session.termination_states = [] if pending == "termination" else ["terminated"]
     if pending == "volume":

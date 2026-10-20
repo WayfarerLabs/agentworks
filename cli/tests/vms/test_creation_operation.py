@@ -415,6 +415,63 @@ def test_address_write_failure_reconciles_actual_commit_without_bootstrap_replay
     assert h.db.operations.inspect(_SCOPE) is None
 
 
+def test_newly_proved_metadata_extends_addressability_without_replacing_prior_facts(harness):
+    h = harness
+    with h.operation():
+        original = dict(h.db.get_vm("created").platform_metadata)
+        ownership = h.workflow.owner.ownership
+        h.access.platform_metadata = {**original, "later/receipt": "another-proved-resource"}
+        h.workflow.persist_metadata()
+        assert h.db.get_vm("created").platform_metadata == h.access.platform_metadata
+        assert h.db.operations.inspect(_SCOPE).ownership == ownership
+
+
+@pytest.mark.parametrize("change", ["replace", "remove", "clear"])
+def test_published_metadata_cannot_be_replaced_or_removed(harness, change):
+    h = harness
+    with h.operation():
+        original = dict(h.db.get_vm("created").platform_metadata)
+        if change == "replace":
+            h.access.platform_metadata = {"opaque/receipt": "different-resource"}
+        elif change == "remove":
+            h.access.platform_metadata = {"different/key": "cannot-hide-prior-resource"}
+        else:
+            h.access.platform_metadata = {}
+        try:
+            with pytest.raises(StateError):
+                h.workflow.persist_metadata()
+            assert h.db.get_vm("created").platform_metadata == original
+            assert h.db.operations.inspect(_SCOPE).ownership == h.workflow.owner.ownership
+        finally:
+            h.access.platform_metadata = original
+
+
+def test_cleanup_publishes_newly_observed_addressability_before_retaining_control(harness, monkeypatch):
+    h = harness
+    settle = _CreationAccess.settle
+    control = StateError("interrupted resource observation")
+    interrupted = False
+
+    def observe(access, deadline):
+        nonlocal interrupted
+        access.platform_metadata = {**access.platform_metadata, "later/receipt": "proved-during-cleanup"}
+        if not interrupted:
+            interrupted = True
+            raise control
+        return settle(access, deadline)
+
+    monkeypatch.setattr(_CreationAccess, "settle", observe)
+    with pytest.raises(StateError) as caught, h.operation():
+        pass
+    assert caught.value is control
+    assert h.db.get_vm("created").platform_metadata == h.access.platform_metadata
+    fact = control.__cause__
+    assert type(fact) is VMOperationControlFact
+    assert h.db.operations.inspect(_SCOPE).ownership == h.workflow.owner.ownership
+    fact.retry_cleanup(Deadline.after(5))
+    assert h.db.operations.inspect(_SCOPE) is None
+
+
 def test_partial_provision_failure_persists_only_adapter_proved_opaque_metadata(harness, monkeypatch):
     h = harness
     provision = _CreationAccess.provision

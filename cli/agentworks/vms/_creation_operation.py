@@ -82,13 +82,12 @@ class _CreationWorkflow(_Workflow):
         if self.creation is None:
             return
         metadata = creation_metadata_snapshot(self.creation.platform_metadata)
-        if metadata:
-            with self.row_transaction() as vm:
-                if vm.platform_metadata == metadata:
-                    return
-                if vm.platform_metadata:
-                    raise StateError("Created VM platform metadata changed")
-                self.db.update_vm_platform_metadata(self.vm_name, metadata)
+        with self.row_transaction() as vm:
+            if vm.platform_metadata == metadata:
+                return
+            if any(metadata.get(key) != value for key, value in vm.platform_metadata.items()):
+                raise StateError("Created VM platform metadata changed")
+            self.db.update_vm_platform_metadata(self.vm_name, metadata)
 
     def publish_address(self, address: str) -> None:
         # Arm reconciliation before the write: commit may succeed without a reply.

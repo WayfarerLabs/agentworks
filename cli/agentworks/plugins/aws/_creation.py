@@ -78,8 +78,13 @@ class EC2Creation:
     """
 
     def __init__(
-        self, owner: OperationOwner, vm_name: str, session: Any, region: str,
-        *, role_auth: _OwnedRoleSession | None = None,
+        self,
+        owner: OperationOwner,
+        vm_name: str,
+        session: Any,
+        region: str,
+        *,
+        role_auth: _OwnedRoleSession | None = None,
     ) -> None:
         self.owner, self.vm_name, self.session, self.region = owner, vm_name, session, region
         self.role_auth = role_auth
@@ -119,8 +124,13 @@ class EC2Creation:
         return not self.cleanup_incomplete
 
     def call(
-        self, service: str, method: str, deadline: Deadline,
-        *, record: Callable[[dict[str, Any]], None] | None = None, **kwargs: Any,
+        self,
+        service: str,
+        method: str,
+        deadline: Deadline,
+        *,
+        record: Callable[[dict[str, Any]], None] | None = None,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """Retain receipts before late-result checks and original-client closure."""
         from botocore.config import Config
@@ -136,17 +146,17 @@ class EC2Creation:
                 self.role_auth.begin(deadline)
             remaining = self.remaining(deadline)
             self.client = self.session.client(
-                service, region_name=self.region,
+                service,
+                region_name=self.region,
                 config=Config(
-                    connect_timeout=remaining, read_timeout=remaining,
+                    connect_timeout=remaining,
+                    read_timeout=remaining,
                     retries={"total_max_attempts": 1, "mode": "standard"},
                 ),
             )
             if self.role_auth is not None:
                 operation = "".join(part.title() for part in method.split("_"))
-                self.client.meta.events.register(
-                    f"before-send.{service}.{operation}", self.role_auth.guard_ec2_send
-                )
+                self.client.meta.events.register(f"before-send.{service}.{operation}", self.role_auth.guard_ec2_send)
             if method in {"create_security_group", "run_instances"}:
                 operation = "".join(part.title() for part in method.split("_"))
 
@@ -196,8 +206,11 @@ class EC2Creation:
             return None
         revision = row.payload_revision
         if (
-            row.ownership != self.owner.ownership or row.obligation_kind != KIND or row.payload_version != 1
-            or not 0 <= revision < len(self.history) or row.payload != encode(self.history[revision])
+            row.ownership != self.owner.ownership
+            or row.obligation_kind != KIND
+            or row.payload_version != 1
+            or not 0 <= revision < len(self.history)
+            or row.payload != encode(self.history[revision])
         ):
             raise StateError("EC2 creation resource custody conflicts")
         can_resolve = not self.cleanup_incomplete and (
@@ -217,14 +230,25 @@ class EC2Creation:
         return obligation
 
     def launch(
-        self, deadline: Deadline, *, account: str, backend: str, nonce: str,
-        subnet: str, vpc: str, image: str, root_device: str, arguments: dict[str, Any],
+        self,
+        deadline: Deadline,
+        *,
+        account: str,
+        backend: str,
+        nonce: str,
+        subnet: str,
+        vpc: str,
+        image: str,
+        root_device: str,
+        arguments: dict[str, Any],
     ) -> None:
         if self._registration_entered:
             raise StateError("EC2 creation was already attempted")
         public_arguments = {**arguments, "UserData": hashlib.sha256(arguments["UserData"]).hexdigest()}
         digest = hashlib.sha256(json.dumps(public_arguments, sort_keys=True).encode("ascii")).hexdigest()
-        self.history.append(ResourceIntent(account, self.region, backend, nonce, subnet, vpc, image, root_device, digest))
+        self.history.append(
+            ResourceIntent(account, self.region, backend, nonce, subnet, vpc, image, root_device, digest)
+        )
         self._registration_entered = True
         obligation = self.owner.register_lifecycle_obligation(
             KIND, payload_version=1, payload=encode(self.intent), obligation_id=self.obligation_id
@@ -236,15 +260,22 @@ class EC2Creation:
         self._group_entered = True
 
         def group_receipt(result: dict[str, Any]) -> None:
-            self.record(replace(
-                self.intent,
-                group_id=identifier(result.get("GroupId"), "sg"),
-                group_receipt=result["ResponseMetadata"]["RequestId"],
-            ))
+            self.record(
+                replace(
+                    self.intent,
+                    group_id=identifier(result.get("GroupId"), "sg"),
+                    group_receipt=result["ResponseMetadata"]["RequestId"],
+                )
+            )
 
         self.call(
-            "ec2", "create_security_group", deadline, record=group_receipt,
-            GroupName=f"agentworks-{nonce}", GroupDescription=f"Agentworks VM {backend}", VpcId=vpc,
+            "ec2",
+            "create_security_group",
+            deadline,
+            record=group_receipt,
+            GroupName=f"agentworks-{nonce}",
+            GroupDescription=f"Agentworks VM {backend}",
+            VpcId=vpc,
             TagSpecifications=[{"ResourceType": "security-group", "Tags": self.tags()}],
         )
         if self.group(deadline).get("IpPermissions") != []:
@@ -268,20 +299,35 @@ class EC2Creation:
                 ebs = mappings[0].get("Ebs")
                 if type(ebs) is dict and ebs.get("VolumeId") is not None:
                     volumes = (identifier(ebs["VolumeId"], "vol"),)
-            if type(interfaces) is list and len(interfaces) == 1 and type(interfaces[0]) is dict:
-                if interfaces[0].get("NetworkInterfaceId") is not None:
-                    nics = (identifier(interfaces[0]["NetworkInterfaceId"], "eni"),)
-            self.record(replace(
-                self.intent,
-                instance_id=identifier(instance.get("InstanceId"), "i"),
-                launch_receipt=result["ResponseMetadata"]["RequestId"],
-                volumes=volumes, interfaces=nics,
-            ))
+            if (
+                type(interfaces) is list
+                and len(interfaces) == 1
+                and type(interfaces[0]) is dict
+                and interfaces[0].get("NetworkInterfaceId") is not None
+            ):
+                nics = (identifier(interfaces[0]["NetworkInterfaceId"], "eni"),)
+            self.record(
+                replace(
+                    self.intent,
+                    instance_id=identifier(instance.get("InstanceId"), "i"),
+                    launch_receipt=result["ResponseMetadata"]["RequestId"],
+                    volumes=volumes,
+                    interfaces=nics,
+                )
+            )
 
-        arguments = {**arguments, "NetworkInterfaces": [{
-            "DeviceIndex": 0, "AssociatePublicIpAddress": True, "DeleteOnTermination": True,
-            "Groups": [self.intent.group_id], "SubnetId": subnet,
-        }]}
+        arguments = {
+            **arguments,
+            "NetworkInterfaces": [
+                {
+                    "DeviceIndex": 0,
+                    "AssociatePublicIpAddress": True,
+                    "DeleteOnTermination": True,
+                    "Groups": [self.intent.group_id],
+                    "SubnetId": subnet,
+                }
+            ],
+        }
         self.call("ec2", "run_instances", deadline, record=launch_receipt, **arguments)
 
     def tags(self) -> list[dict[str, str]]:
@@ -297,8 +343,10 @@ class EC2Creation:
             raise ValidationError("EC2 creation group observation is incomplete")
         group = groups[0]
         if (
-            group.get("GroupId") != self.intent.group_id or group.get("OwnerId") != self.intent.account
-            or group.get("VpcId") != self.intent.vpc or type(group.get("Tags")) is not list
+            group.get("GroupId") != self.intent.group_id
+            or group.get("OwnerId") != self.intent.account
+            or group.get("VpcId") != self.intent.vpc
+            or type(group.get("Tags")) is not list
             or any(group["Tags"].count(tag) != 1 for tag in self.tags())
         ):
             raise StateError("EC2 creation group association changed")
@@ -311,7 +359,9 @@ class EC2Creation:
         result = self.call("ec2", "describe_instances", deadline, InstanceIds=[intent.instance_id])
         reservations = result.get("Reservations")
         if (
-            type(reservations) is not list or len(reservations) != 1 or type(reservations[0]) is not dict
+            type(reservations) is not list
+            or len(reservations) != 1
+            or type(reservations[0]) is not dict
             or reservations[0].get("OwnerId") != intent.account
         ):
             raise StateError("EC2 creation instance account is unproved")
@@ -320,9 +370,12 @@ class EC2Creation:
             raise StateError("EC2 creation instance observation is incomplete")
         instance = instances[0]
         if (
-            instance.get("InstanceId") != intent.instance_id or instance.get("ClientToken") != intent.nonce
-            or instance.get("ImageId") != intent.image or instance.get("SubnetId") != intent.subnet
-            or instance.get("VpcId") != intent.vpc or type(instance.get("Tags")) is not list
+            instance.get("InstanceId") != intent.instance_id
+            or instance.get("ClientToken") != intent.nonce
+            or instance.get("ImageId") != intent.image
+            or instance.get("SubnetId") != intent.subnet
+            or instance.get("VpcId") != intent.vpc
+            or type(instance.get("Tags")) is not list
             or any(instance["Tags"].count(tag) != 1 for tag in self.tags())
         ):
             raise StateError("EC2 creation exact instance association changed")

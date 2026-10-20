@@ -21,13 +21,14 @@ from agentworks.execution._runtime_prerequisite import RuntimeSelection, Runtime
 from agentworks.execution.binding import NativeExecutionBinding, _EarlyGuestFactsRoute, _IndependentJobAvailability
 from agentworks.execution.carriers.ssh import SSHCarrier
 from agentworks.plugins.aws._creation import EC2Creation, identifier
-from agentworks.plugins.aws._creation_bootstrap import SSHReadiness, early_user_data, observe_early_guest
+from agentworks.plugins.aws._creation_bootstrap import early_user_data
 from agentworks.plugins.aws._creation_rollback import observe_attachments, rollback
 from agentworks.plugins.aws._native_route import EC2NativeRoute
 from agentworks.plugins.aws._owned_auth import _OwnedRoleSession
 from agentworks.plugins.aws.auth import _build_ambient_session
 from agentworks.plugins.aws.config import AwsAmbientAuth, _instance_catalog, _select_instance_type
 from agentworks.vms._creation_access import VMCreationResult
+from agentworks.vms._creation_ssh import CLOUD_INIT_CHECK, SSHReadiness, observe_early_guest
 from agentworks.vms._creation_trust import CreationSSHTrust
 from agentworks.vms._ssh_native_binding import vm_ssh_connection
 from agentworks.vms._ssh_native_exposure import OwnedSSHExposure
@@ -54,8 +55,12 @@ class EC2OwnedCreationAccess:
     """
 
     def __init__(
-        self, request: ProvisionRequest, platform: EC2Platform, ctx: RunContext,
-        owner: OperationOwner, custody: LocalDeliveryCustody,
+        self,
+        request: ProvisionRequest,
+        platform: EC2Platform,
+        ctx: RunContext,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
     ) -> None:
         from agentworks.plugins.aws.platform import _DEBIAN_SSM_RELEASES
 
@@ -108,7 +113,9 @@ class EC2OwnedCreationAccess:
             return MappingProxyType({})
         intent = creation.intent
         values = {
-            "region": intent.region, "account_id": intent.account, "backend_name": intent.backend,
+            "region": intent.region,
+            "account_id": intent.account,
+            "backend_name": intent.backend,
             "security_group_id": str(intent.group_id),
         }
         if intent.instance_id is not None:
@@ -172,7 +179,9 @@ class EC2OwnedCreationAccess:
         result = creation.call("ec2", "describe_instance_types", deadline, InstanceTypes=[selected.type])
         entries = result.get("InstanceTypes")
         if (
-            type(entries) is not list or len(entries) != 1 or type(entries[0]) is not dict
+            type(entries) is not list
+            or len(entries) != 1
+            or type(entries[0]) is not dict
             or entries[0].get("InstanceType") != selected.type
             or type(entries[0].get("ProcessorInfo")) is not dict
             or selected.arch not in entries[0]["ProcessorInfo"].get("SupportedArchitectures", [])
@@ -194,10 +203,16 @@ class EC2OwnedCreationAccess:
         root = observed.get("RootDeviceName")
         mappings = observed.get("BlockDeviceMappings")
         if (
-            observed.get("ImageId") != image or observed.get("Architecture") != selected.arch
-            or observed.get("RootDeviceType") != "ebs" or type(root) is not str or not root.startswith("/dev/")
-            or type(mappings) is not list or len(mappings) != 1 or type(mappings[0]) is not dict
-            or mappings[0].get("DeviceName") != root or type(mappings[0].get("Ebs")) is not dict
+            observed.get("ImageId") != image
+            or observed.get("Architecture") != selected.arch
+            or observed.get("RootDeviceType") != "ebs"
+            or type(root) is not str
+            or not root.startswith("/dev/")
+            or type(mappings) is not list
+            or len(mappings) != 1
+            or type(mappings[0]) is not dict
+            or mappings[0].get("DeviceName") != root
+            or type(mappings[0].get("Ebs")) is not dict
         ):
             raise StateError("EC2 creation requires one observed Debian EBS root device")
         floor = mappings[0]["Ebs"].get("VolumeSize")
@@ -206,24 +221,35 @@ class EC2OwnedCreationAccess:
         if self._disk < floor:
             raise ValidationError("EC2 requested root disk is smaller than the Debian image volume")
         configured = self._platform.config.subnet_id
-        query = {"SubnetIds": [configured]} if configured else {"Filters": [{"Name": "default-for-az", "Values": ["true"]}]}
+        query = (
+            {"SubnetIds": [configured]} if configured else {"Filters": [{"Name": "default-for-az", "Values": ["true"]}]}
+        )
         result = creation.call("ec2", "describe_subnets", deadline, **query)
         subnets = result.get("Subnets")
         if (
-            type(subnets) is not list or not subnets or result.get("NextToken")
+            type(subnets) is not list
+            or not subnets
+            or result.get("NextToken")
             or any(type(subnet) is not dict for subnet in subnets)
         ):
             raise StateError("EC2 launch subnet observation is incomplete")
         if configured and (len(subnets) != 1 or subnets[0].get("SubnetId") != configured):
             raise StateError("EC2 launch subnet does not match the configured selection")
-        chosen = min(subnets, key=lambda subnet: (str(subnet.get("AvailabilityZone", "")), str(subnet.get("SubnetId", ""))))
+        chosen = min(
+            subnets, key=lambda subnet: (str(subnet.get("AvailabilityZone", "")), str(subnet.get("SubnetId", "")))
+        )
         subnet, vpc = identifier(chosen.get("SubnetId"), "subnet"), identifier(chosen.get("VpcId"), "vpc")
         if chosen.get("OwnerId") != account:
             raise StateError("EC2 launch subnet belongs to another account")
-        result = creation.call("ec2", "describe_instances", deadline, Filters=[
-            {"Name": "tag:agentworks:vm", "Values": [self._backend]},
-            {"Name": "instance-state-name", "Values": ["pending", "running", "stopping", "stopped"]},
-        ])
+        result = creation.call(
+            "ec2",
+            "describe_instances",
+            deadline,
+            Filters=[
+                {"Name": "tag:agentworks:vm", "Values": [self._backend]},
+                {"Name": "instance-state-name", "Values": ["pending", "running", "stopping", "stopped"]},
+            ],
+        )
         reservations = result.get("Reservations")
         if type(reservations) is not list or result.get("NextToken") or reservations:
             raise StateError("EC2 backend name is in use or its absence is unproved")
@@ -241,17 +267,41 @@ class EC2OwnedCreationAccess:
             account, subnet, vpc, image, root = self._prepare_launch(creation, deadline)
             self._ordinary_admission()
             creation.launch(
-                deadline, account=account, backend=self._backend, nonce=self._nonce,
-                subnet=subnet, vpc=vpc, image=image, root_device=root, arguments={
-                    "ImageId": image, "InstanceType": self._selected.type, "MinCount": 1, "MaxCount": 1,
-                    "ClientToken": self._nonce, "UserData": self._user_data,
-                    "BlockDeviceMappings": [{"DeviceName": root, "Ebs": {
-                        "VolumeSize": self._disk, "VolumeType": "gp3", "DeleteOnTermination": True,
-                    }}],
-                    "TagSpecifications": [{"ResourceType": resource, "Tags": [
-                        {"Key": "agentworks:vm", "Value": self._backend},
-                        {"Key": "agentworks:creation", "Value": self._nonce},
-                    ]} for resource in ("instance", "volume")],
+                deadline,
+                account=account,
+                backend=self._backend,
+                nonce=self._nonce,
+                subnet=subnet,
+                vpc=vpc,
+                image=image,
+                root_device=root,
+                arguments={
+                    "ImageId": image,
+                    "InstanceType": self._selected.type,
+                    "MinCount": 1,
+                    "MaxCount": 1,
+                    "ClientToken": self._nonce,
+                    "UserData": self._user_data,
+                    "BlockDeviceMappings": [
+                        {
+                            "DeviceName": root,
+                            "Ebs": {
+                                "VolumeSize": self._disk,
+                                "VolumeType": "gp3",
+                                "DeleteOnTermination": True,
+                            },
+                        }
+                    ],
+                    "TagSpecifications": [
+                        {
+                            "ResourceType": resource,
+                            "Tags": [
+                                {"Key": "agentworks:vm", "Value": self._backend},
+                                {"Key": "agentworks:creation", "Value": self._nonce},
+                            ],
+                        }
+                        for resource in ("instance", "volume")
+                    ],
                 },
             )
             while True:
@@ -267,8 +317,16 @@ class EC2OwnedCreationAccess:
             connection = vm_ssh_connection(self._name, self._admin, endpoint, self._settings)
             self._locator, self._endpoint = locator, endpoint
             self._route = EC2NativeRoute(
-                self._owner, self._name, creation.session, account, creation.region,
-                str(creation.intent.group_id), self._backend, instance, prefixes, role_auth=self._role_auth,
+                self._owner,
+                self._name,
+                creation.session,
+                account,
+                creation.region,
+                str(creation.intent.group_id),
+                self._backend,
+                instance,
+                prefixes,
+                role_auth=self._role_auth,
             )
             self._ordinary_admission()
             self._route_transition(self._route.open, deadline)
@@ -278,12 +336,17 @@ class EC2OwnedCreationAccess:
             self._validate_route(deadline)
             self._ordinary_admission()
             self._trust = CreationSSHTrust(
-                self._owner, vm_name=self._name, admin_username=self._admin, instance_marker=self._marker,
-                endpoint=endpoint, settings=self._settings, deadline=deadline,
+                self._owner,
+                vm_name=self._name,
+                admin_username=self._admin,
+                instance_marker=self._marker,
+                endpoint=endpoint,
+                settings=self._settings,
+                deadline=deadline,
             )
             self._trust.prepare()
             self._validate_route(deadline)
-            observe_early_guest(connection, self._marker, deadline, self._custody)
+            observe_early_guest(connection, self._marker, deadline, self._custody, bootstrap_check=CLOUD_INIT_CHECK)
             self._validate_route(deadline)
             carrier = SSHCarrier(connection)
             root_entry = IdentityPlan(
@@ -291,7 +354,9 @@ class EC2OwnedCreationAccess:
                 IdentityMode.DIRECT if self._admin == "root" else IdentityMode.SUDO_ROOT,
             )
             self.binding = NativeExecutionBinding(
-                carrier, self._admin, RuntimeSelection(RuntimeTargetOS.LINUX),
+                carrier,
+                self._admin,
+                RuntimeSelection(RuntimeTargetOS.LINUX),
                 _early_guest_facts_route=_EarlyGuestFactsRoute(carrier, root_entry, self._admin),
                 _new_managed_delivery=lambda: SSHCarrier(connection),
                 _independent_availability=self.independent_availability,
@@ -329,8 +394,10 @@ class EC2OwnedCreationAccess:
         locator, instance = self.creation.instance(deadline)
         state = instance.get("State")
         if (
-            locator != self._locator or instance.get("PublicIpAddress") != self._endpoint
-            or type(state) is not dict or state.get("Name") != "running"
+            locator != self._locator
+            or instance.get("PublicIpAddress") != self._endpoint
+            or type(state) is not dict
+            or state.get("Name") != "running"
         ):
             raise StateError("EC2 creation native route association changed")
         self._route_transition(self._route.check, deadline)
@@ -399,9 +466,10 @@ class EC2OwnedCreationAccess:
                 self._role_auth.close_client()
                 if self._role_auth.cleanup_incomplete:
                     return False
-            if self._route is not None:
-                if not self._route.close(deadline) or not self._route_transition(self._route.settle, deadline):
-                    return False
+            if self._route is not None and (
+                not self._route.close(deadline) or not self._route_transition(self._route.settle, deadline)
+            ):
+                return False
             if self._trust is not None and not self._trust.close(deadline):
                 return False
             creation = self.creation
