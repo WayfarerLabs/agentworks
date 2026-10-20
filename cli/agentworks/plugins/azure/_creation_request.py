@@ -127,10 +127,12 @@ class AzureCreationRequests:
         return bool(self._handles)
 
     def close(self, deadline: Deadline) -> bool:
+        """Retire actual local originals even after provider admission expires."""
+        if type(deadline) is not Deadline or deadline.expires_at is None:
+            raise ValidationError("Azure creation cleanup requires a finite deadline")
         control: BaseException | None = None
         for handle in self._handles:
             try:
-                remaining(deadline)
                 handle.close()
             except Exception:
                 pass
@@ -220,6 +222,7 @@ class AzureCreationRequests:
         from agentworks.plugins.azure._route_client import network_route_client
 
         self.close(deadline)
+        remaining(deadline)
         if self.cleanup_incomplete:
             raise StateError("Azure creation retains an unretired original")
         self.owner.list_pending_lifecycle_obligations()
@@ -295,7 +298,11 @@ class AzureCreationRequests:
             if ack is None or ack.monitor is None:
                 raise StateError("Azure creation request completion remains uncertain")
             response = self.call(credential, "GET", ack.monitor, deadline)
-            state = _sdk(lambda response=response: monitor_state(response, ack, lambda: remaining(deadline)))
+
+            def observe(response: Any = response) -> str:
+                return monitor_state(response, ack, lambda: remaining(deadline))
+
+            state = _sdk(observe)
             if deleting:
                 item.delete_state = state
             else:
@@ -387,9 +394,11 @@ class AzureCreationRequests:
                 self.reconcile(deadline)
                 url = resource_url(item.resource_id)
                 response = self.call(credential, "DELETE", url, deadline)
-                item.delete_ack = _sdk(
-                    lambda response=response, url=url: acknowledgment(response, "DELETE", url, self.subscription)
-                )
+
+                def receipt(response: Any = response, url: str = url) -> RuleAcknowledgment:
+                    return acknowledgment(response, "DELETE", url, self.subscription)
+
+                item.delete_ack = _sdk(receipt)
                 if item.delete_ack.monitor is None:
                     item.delete_state = "Succeeded"
                 self.reconcile(deadline)

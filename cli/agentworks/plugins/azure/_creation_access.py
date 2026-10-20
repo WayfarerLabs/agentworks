@@ -22,6 +22,7 @@ from agentworks.plugins.azure._identity import canonical_vm_id
 from agentworks.plugins.azure._native_route import AzureNativeRoute
 from agentworks.plugins.azure._owned_auth import _OwnedAzureCredential
 from agentworks.vms._creation_access import VMCreationResult
+from agentworks.vms._creation_ssh import CLOUD_INIT_CHECK
 from agentworks.vms._creation_trust import CreationSSHTrust
 from agentworks.vms._ssh_native_binding import require_ssh_settings, ssh_execution_binding, vm_ssh_connection
 from agentworks.vms._ssh_native_exposure import OwnedSSHExposure
@@ -35,9 +36,6 @@ if TYPE_CHECKING:
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.plugins.azure.platform import AzureVMPlatform
     from agentworks.vms._creation_ssh import SSHReadiness
-
-_CLOUD_INIT_CHECK = """/usr/bin/cloud-init status --wait >/dev/null
-[ \"$(/usr/bin/cloud-init status)\" = 'status: done' ]"""
 
 
 class AzureOwnedCreationAccess:
@@ -304,7 +302,7 @@ class AzureOwnedCreationAccess:
                 self._marker,
                 deadline,
                 self._custody,
-                bootstrap_check=_CLOUD_INIT_CHECK,
+                bootstrap_check=CLOUD_INIT_CHECK,
             )
             self._check_route(deadline)
             self._binding = ssh_execution_binding(
@@ -373,11 +371,12 @@ class AzureOwnedCreationAccess:
             resource_settled = self._requests.accepted or not any(item.sent for item in self._requests.resources)
             if self._rollback and not self._requests.accepted and not resource_settled:
                 self._owner.list_pending_lifecycle_obligations()
-                budget = self._budget(deadline)
                 with self._requests.custody(deadline):
-                    resource_settled = self._requests.rollback(self._credential(budget), budget)
-            self._requests.reconcile(deadline, resolve=resource_settled)
-            if resource_settled:
+                    resource_settled = self._requests.rollback(self._credential(deadline), deadline)
+            if not self._requests.close(deadline):
+                return False
+            reconciled = self._requests.reconcile(deadline, resolve=resource_settled)
+            if resource_settled and reconciled:
                 self._settled = self._auth.close()
                 remaining(deadline)
             return self._settled

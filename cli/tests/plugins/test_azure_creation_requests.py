@@ -5,11 +5,17 @@ from __future__ import annotations
 import copy
 import json
 import socket
+from collections.abc import Callable, Iterator
 from contextlib import closing
-from types import SimpleNamespace
+from dataclasses import dataclass
+from pathlib import Path
+from types import TracebackType
+from typing import Any
+from urllib.parse import unquote, urlsplit
 
 import pytest
 from azure.core.pipeline.transport import HttpTransport
+from azure.core.rest import HttpRequest, HttpResponse
 
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
@@ -38,35 +44,42 @@ class Control(BaseException):
     pass
 
 
-class Transport(HttpTransport):
-    def __init__(self):
-        self.values = {}
-        self.calls = []
-        self.responses = []
-        self.fail_put = None
+class Transport(HttpTransport[HttpRequest, HttpResponse]):
+    def __init__(self) -> None:
+        self.values: dict[str, dict[str, Any]] = {}
+        self.calls: list[HttpRequest] = []
+        self.responses: list[RuleResponse] = []
+        self.fail_put: BaseException | None = None
         self.put_status = 201
         self.monitor = False
         self.keep_disk = False
-        self.close_error = None
-        self.put_close_error = None
+        self.close_error: BaseException | None = None
+        self.put_close_error: BaseException | None = None
         self.pending_identity = False
+        self.on_response: Callable[[RuleResponse], None] | None = None
 
-    def open(self):
+    def open(self) -> None:
         pass
 
-    def close(self):
+    def close(self) -> None:
         if self.close_error is not None:
             raise self.close_error
 
-    def __enter__(self):
+    def __enter__(self) -> Transport:
         return self
 
-    def __exit__(self, *args):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
         self.close()
 
-    def send(self, request, **kwargs):
+    def send(self, request: HttpRequest, **kwargs: Any) -> HttpResponse:
         self.calls.append(request)
-        headers = {}
+        headers: dict[str, str] = {}
+        value: dict[str, Any] | None
         if request.url == MONITOR:
             assert request.method == "GET"
             status, value = 200, {"status": "Succeeded"}
@@ -75,12 +88,24 @@ class Transport(HttpTransport):
             status = 404 if value is None else 200
         elif request.method == "PUT":
             value = json.loads(request.body)
-            value["id"] = VM if "/virtualMachines/" in request.url else IP
+            assert value is not None
+            value["id"] = unquote(urlsplit(request.url).path)
             value["properties"]["provisioningState"] = "Succeeded"
-            value["properties"]["vmId" if value["id"] == VM else "resourceGuid"] = UUID
-            if value["id"] == VM:
-                value["properties"]["storageProfile"] = {"osDisk": {"managedDisk": {"id": DISK}}}
-                self.values[resource_url(DISK)] = {"id": DISK}
+            is_vm = "/virtualMachines/" in request.url
+            value["properties"]["vmId" if is_vm else "resourceGuid"] = UUID
+            if is_vm:
+                profile = value["properties"].setdefault("storageProfile", {"osDisk": {}})
+                disk_name = profile["osDisk"].get("name")
+                disk_id = (
+                    value["id"].split("/Microsoft.Compute/", 1)[0] + "/Microsoft.Compute/disks/" + disk_name
+                    if disk_name is not None
+                    else DISK
+                )
+                profile["osDisk"]["managedDisk"] = {"id": disk_id}
+                value["properties"]["instanceView"] = {"statuses": [{"code": "PowerState/running"}]}
+                self.values[resource_url(disk_id)] = {"id": disk_id}
+            if "/publicIPAddresses/" in request.url:
+                value["properties"]["ipAddress"] = "192.0.2.10"
             self.values[request.url] = copy.deepcopy(value)
             if self.fail_put is not None:
                 self.close_error = self.put_close_error
@@ -95,17 +120,29 @@ class Transport(HttpTransport):
                 value["properties"]["provisioningState"] = "Updating"
         else:
             assert request.method == "DELETE"
-            self.values.pop(request.url, None)
+            removed = self.values.pop(request.url, None)
             if "/virtualMachines/" in request.url and not self.keep_disk:
-                self.values.pop(resource_url(DISK), None)
+                assert removed is not None
+                disk_id = removed["properties"]["storageProfile"]["osDisk"]["managedDisk"]["id"]
+                self.values.pop(resource_url(disk_id), None)
             status, value = 204, None
         response = RuleResponse(request, status, headers, copy.deepcopy(value))
         self.responses.append(response)
+        if self.on_response is not None:
+            self.on_response(response)
         return response
 
 
+@dataclass
+class RequestHarness:
+    requests: AzureCreationRequests
+    owner: OperationOwner
+    transport: Transport
+    credential: Credential
+
+
 @pytest.fixture
-def owned(tmp_path, monkeypatch):
+def owned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[RequestHarness]:
     for target, method in (
         (socket.socket, "connect"),
         (socket.socket, "connect_ex"),
@@ -128,10 +165,10 @@ def owned(tmp_path, monkeypatch):
             CreationResource(VM, {"tags": TAGS, "properties": {}}),
         )
         requests = AzureCreationRequests(owner, SUB, plan, DISK)
-        yield SimpleNamespace(requests=requests, owner=owner, transport=transport, credential=credential)
+        yield RequestHarness(requests, owner, transport, credential)
 
 
-def create(owned, index):
+def create(owned: RequestHarness, index: int) -> dict[str, Any]:
     deadline = Deadline.after(10)
     with owned.requests.custody(deadline):
         return owned.requests.create(index, owned.credential, deadline)
@@ -234,6 +271,7 @@ def test_retained_disk_prevents_false_rollback_success(owned, monkeypatch):
     deadline = Deadline(105.0)
     with owned.requests.custody(deadline), pytest.raises(CreationDeadlineExpired):
         owned.requests.rollback(owned.credential, deadline)
+    assert not owned.requests.cleanup_incomplete
     assert owned.owner.list_pending_lifecycle_obligations()
     assert resource_url(DISK) in owned.transport.values
 
