@@ -78,9 +78,14 @@ class CreationResources:
 
     def _encode(self) -> bytes:
         data = json.dumps(
-            {"version": VERSION, "accepted": self.accepted, "resources": {
-                key: asdict(value) for key, value in self.resources.items()
-            }}, ensure_ascii=True, sort_keys=True, separators=(",", ":"),
+            {
+                "version": VERSION,
+                "accepted": self.accepted,
+                "resources": {key: asdict(value) for key, value in self.resources.items()},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
         ).encode("ascii")
         if len(data) > MAX_LIFECYCLE_PAYLOAD_BYTES:
             raise ValidationError("GCE creation resource intent exceeds the lifecycle bound")
@@ -92,7 +97,10 @@ class CreationResources:
         remaining(deadline)
         self._registration_entered = True
         self._obligation = self.owner.register_lifecycle_obligation(
-            KIND, payload_version=VERSION, payload=self._durable, obligation_id=self._id,
+            KIND,
+            payload_version=VERSION,
+            payload=self._durable,
+            obligation_id=self._id,
         )
         remaining(deadline)
         self._obligation.mark_possible_effect()
@@ -145,9 +153,12 @@ class CreationResources:
 
     def _retain(self, resource: Resource, value: dict[str, Any], deadline: Deadline, *, deleting: bool) -> None:
         operation, target = receipt(
-            value, scope=resource.scope, path=resource.path,
+            value,
+            scope=resource.scope,
+            path=resource.path,
             request_id=resource.delete_request if deleting else resource.create_request,
-            deleting=deleting, resource_id=resource.resource_id,
+            deleting=deleting,
+            resource_id=resource.resource_id,
             operation=resource.delete_operation if deleting else resource.create_operation,
         )
         if deleting:
@@ -204,8 +215,10 @@ class CreationResources:
         assert value is not None
         instance = self.resources["instance"]
         users = value.get("users")
-        if type(users) is not list or len(users) != 1 or users[0] not in tuple(
-            f"{host}/compute/v1/{instance.path}" for host in HOSTS
+        if (
+            type(users) is not list
+            or len(users) != 1
+            or users[0] not in tuple(f"{host}/compute/v1/{instance.path}" for host in HOSTS)
         ):
             raise StateError("GCE created disk is not attached to the receipt-owned VM")
         disk.resource_id = exact_resource(value, path, "disk", disk.resource_id)

@@ -23,7 +23,8 @@ FIELDS = (
 
 def _strings(value: object) -> tuple[str, ...]:
     if (
-        type(value) is not list or len(value) > 256
+        type(value) is not list
+        or len(value) > 256
         or any(type(item) is not str or not item or len(item) > 1024 for item in value)
         or len(set(value)) != len(value)
     ):
@@ -64,17 +65,30 @@ def firewall_shape(value: dict[str, Any], project: str) -> tuple[Any, ...]:
     direction = value.get("direction", "INGRESS")
     disabled, priority = value.get("disabled", False), value.get("priority", 1000)
     if (
-        direction not in ("INGRESS", "EGRESS") or type(disabled) is not bool
-        or type(priority) is not int or not 0 <= priority <= 65535
+        direction not in ("INGRESS", "EGRESS")
+        or type(disabled) is not bool
+        or type(priority) is not int
+        or not 0 <= priority <= 65535
     ):
         raise ValidationError("GCE creation firewall behavior is invalid")
     result = (
-        canonical_path(value.get("network"), project_id=project, kind="network"), direction, disabled, priority,
-        *(_strings(value.get(key, [])) for key in (
-            "targetTags", "targetServiceAccounts", "sourceRanges", "sourceTags",
-            "sourceServiceAccounts", "destinationRanges"
-        )),
-        _protocols(value.get("allowed", [])), _protocols(value.get("denied", [])),
+        canonical_path(value.get("network"), project_id=project, kind="network"),
+        direction,
+        disabled,
+        priority,
+        *(
+            _strings(value.get(key, []))
+            for key in (
+                "targetTags",
+                "targetServiceAccounts",
+                "sourceRanges",
+                "sourceTags",
+                "sourceServiceAccounts",
+                "destinationRanges",
+            )
+        ),
+        _protocols(value.get("allowed", [])),
+        _protocols(value.get("denied", [])),
     )
     if bool(result[10]) == bool(result[11]) or (result[4] and result[5]):
         raise ValidationError("GCE creation firewall behavior is contradictory")
@@ -88,8 +102,14 @@ def validate_firewall(value: dict[str, Any], body: dict[str, Any], project: str,
 
 
 def check_policy(
-    api: CreationAPI, project: str, network: str, tag: str, prefixes: tuple[str, ...], deadline: Deadline,
-    *, owned: dict[str, tuple[str, dict[str, Any]]],
+    api: CreationAPI,
+    project: str,
+    network: str,
+    tag: str,
+    prefixes: tuple[str, ...],
+    deadline: Deadline,
+    *,
+    owned: dict[str, tuple[str, dict[str, Any]]],
 ) -> None:
     """Prove complete bounded classic inventory and refuse applicable conflicts."""
     value = api.get(network, deadline)
@@ -136,14 +156,18 @@ def check_policy(
             if behavior[3] == 0 and allowed:
                 raise StateError("GCE creation conflicts with an applicable priority-zero allow")
             denies_ssh = any(
-                protocol == "all" or (protocol in ("tcp", "6") and (
-                    not ports or any(int(port.split("-")[0]) <= 22 <= int(port.split("-")[-1]) for port in ports)
-                )) for protocol, ports in denied
+                protocol == "all"
+                or (
+                    protocol in ("tcp", "6")
+                    and (not ports or any(int(port.split("-")[0]) <= 22 <= int(port.split("-")[-1]) for port in ports))
+                )
+                for protocol, ports in denied
             )
             try:
                 overlaps = any(
                     IPv4Network(source).overlaps(IPv4Network(prefix))
-                    for source in (behavior[6] or ("0.0.0.0/0",)) for prefix in prefixes
+                    for source in (behavior[6] or ("0.0.0.0/0",))
+                    for prefix in prefixes
                 )
             except ValueError:
                 raise ValidationError("GCE creation firewall source range is invalid") from None

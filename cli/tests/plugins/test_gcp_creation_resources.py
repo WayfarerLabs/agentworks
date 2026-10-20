@@ -66,8 +66,10 @@ class ScriptedAPI:
             parsed = urlsplit(path)
             request_id = parse_qs(parsed.query)["requestId"][0]
             key = next(
-                key for key, resource in self.controller.resources.items()
-                if resource.path == parsed.path or (method == "POST" and resource.path == parsed.path + "/" + body["name"])
+                key
+                for key, resource in self.controller.resources.items()
+                if resource.path == parsed.path
+                or (method == "POST" and resource.path == parsed.path + "/" + body["name"])
             )
             resource = self.controller.resources[key]
             saved = json.loads(row.payload)["resources"][key]
@@ -75,17 +77,26 @@ class ScriptedAPI:
             target = str(101 + list(self.controller.resources).index(key))
             if method == "POST":
                 self.live[resource.path] = {
-                    **copy.deepcopy(body), "id": target, "kind": f"compute#{resource.kind}",
+                    **copy.deepcopy(body),
+                    "id": target,
+                    "kind": f"compute#{resource.kind}",
                     "selfLink": ROOT + resource.path,
                 }
                 if key == "instance":
                     disk = self.controller.resources["disk"]
-                    self.live[resource.path]["disks"] = [{
-                        "boot": True, "autoDelete": True, "type": "PERSISTENT", "source": ROOT + disk.path,
-                    }]
+                    self.live[resource.path]["disks"] = [
+                        {
+                            "boot": True,
+                            "autoDelete": True,
+                            "type": "PERSISTENT",
+                            "source": ROOT + disk.path,
+                        }
+                    ]
                     self.live[disk.path] = {
-                        "name": disk.path.rsplit("/", 1)[-1], "id": "104",
-                        "kind": "compute#disk", "selfLink": ROOT + disk.path,
+                        "name": disk.path.rsplit("/", 1)[-1],
+                        "id": "104",
+                        "kind": "compute#disk",
+                        "selfLink": ROOT + disk.path,
                         "users": [ROOT + resource.path],
                     }
             else:
@@ -98,8 +109,11 @@ class ScriptedAPI:
                     self.live[self.controller.resources["disk"].path]["users"] = []
             operation = f"{'Delete' if method == 'DELETE' else 'Insert'}_{key}"
             result = {
-                "kind": "compute#operation", "name": operation, "clientOperationId": request_id,
-                "targetId": target, "targetLink": ROOT + resource.path,
+                "kind": "compute#operation",
+                "name": operation,
+                "clientOperationId": request_id,
+                "targetId": target,
+                "targetLink": ROOT + resource.path,
                 "operationType": "delete" if method == "DELETE" else "insert",
                 "status": "RUNNING" if self.insert_pending and method == "POST" else "DONE",
                 "selfLink": ROOT + resource.scope + "/operations/" + operation,
@@ -118,14 +132,29 @@ def owned(tmp_path, monkeypatch):
         api = ScriptedAPI(owner)
         names = derive_names("sample")
         resources = {
-            "deny": Resource(f"{GLOBAL}/firewalls/{names.deny_rule}", "firewall", firewall_body(names, NETWORK, ("192.0.2.1/32",), allow=False)),
-            "allow": Resource(f"{GLOBAL}/firewalls/{names.allow_rule}", "firewall", firewall_body(names, NETWORK, ("192.0.2.1/32",), allow=True)),
+            "deny": Resource(
+                f"{GLOBAL}/firewalls/{names.deny_rule}",
+                "firewall",
+                firewall_body(names, NETWORK, ("192.0.2.1/32",), allow=False),
+            ),
+            "allow": Resource(
+                f"{GLOBAL}/firewalls/{names.allow_rule}",
+                "firewall",
+                firewall_body(names, NETWORK, ("192.0.2.1/32",), allow=True),
+            ),
             "instance": Resource(f"{ZONAL}/instances/sample", "instance", {"name": "sample"}),
             "disk": Resource(f"{ZONAL}/disks/sample", "disk", {}),
         }
         controller = CreationResources(owner, api, resources)
         api.controller = controller
-        yield SimpleNamespace(owner=owner, database=database, api=api, controller=controller, resources=resources, deadline=Deadline.after(30))
+        yield SimpleNamespace(
+            owner=owner,
+            database=database,
+            api=api,
+            controller=controller,
+            resources=resources,
+            deadline=Deadline.after(30),
+        )
 
 
 def insert_all(p):
@@ -241,7 +270,12 @@ def test_committed_receipt_publication_interruption_reconciles_exact_revision(ow
     assert caught.value is primary and p.resources["instance"].resource_id == "103"
     p.controller.reconcile(p.deadline)
     assert p.controller._publication is None
-    assert json.loads(p.owner.inspect_lifecycle_obligation(p.controller._id).payload)["resources"]["instance"]["resource_id"] == "103"
+    assert (
+        json.loads(p.owner.inspect_lifecycle_obligation(p.controller._id).payload)["resources"]["instance"][
+            "resource_id"
+        ]
+        == "103"
+    )
     assert len([method for method, _path in p.api.calls if method == "POST"]) == 1
 
 
@@ -283,9 +317,14 @@ def test_accepted_resource_controller_refuses_vm_or_disk_rollback(owned):
 def test_extra_disk_attachment_prevents_vm_auto_delete(owned):
     p = owned
     insert_all(p)
-    p.api.live[p.resources["instance"].path]["disks"].append({
-        "boot": False, "autoDelete": True, "type": "PERSISTENT", "source": ROOT + ZONAL + "/disks/other",
-    })
+    p.api.live[p.resources["instance"].path]["disks"].append(
+        {
+            "boot": False,
+            "autoDelete": True,
+            "type": "PERSISTENT",
+            "source": ROOT + ZONAL + "/disks/other",
+        }
+    )
     with pytest.raises(StateError):
         p.controller.delete("instance", p.deadline)
     assert not any(method == "DELETE" for method, _path in p.api.calls)

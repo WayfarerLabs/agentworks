@@ -32,9 +32,14 @@ class CreationSelection:
 
 
 def select(
-    api: CreationAPI, config: GcpGCEConfig, request: ProvisionRequest, names: GceNames,
-    prefixes: tuple[str, ...], deadline: Deadline,
-    *, disk_name: str,
+    api: CreationAPI,
+    config: GcpGCEConfig,
+    request: ProvisionRequest,
+    names: GceNames,
+    prefixes: tuple[str, ...],
+    deadline: Deadline,
+    *,
+    disk_name: str,
 ) -> CreationSelection:
     project, zone = component(config.project_id), component(config.zone)
     scope = f"projects/{project}/zones/{zone}"
@@ -69,12 +74,16 @@ def select(
     assert shape is not None
     exact_resource(shape, machine, "machineType")
     if (
-        type(shape.get("guestCpus")) is not int or shape["guestCpus"] != selected.cpus
-        or type(shape.get("memoryMb")) is not int or shape["memoryMb"] != selected.memory_gib * 1024
-        or ("architecture" in shape and (
-            type(shape["architecture"]) is not str or shape["architecture"].lower() != selected.arch
-        ))
-        or shape.get("maximumPersistentDisks") == 0 or shape.get("accelerators", []) != []
+        type(shape.get("guestCpus")) is not int
+        or shape["guestCpus"] != selected.cpus
+        or type(shape.get("memoryMb")) is not int
+        or shape["memoryMb"] != selected.memory_gib * 1024
+        or (
+            "architecture" in shape
+            and (type(shape["architecture"]) is not str or shape["architecture"].lower() != selected.arch)
+        )
+        or shape.get("maximumPersistentDisks") == 0
+        or shape.get("accelerators", []) != []
     ):
         raise ConfigError("GCE selected machine does not match the declared CPU, memory, architecture or disk contract")
     family = IMAGE_FAMILIES[request.debian_release][selected.arch]

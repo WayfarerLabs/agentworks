@@ -22,8 +22,14 @@ from tests.plugins.gcp.test_owned_read_sdk import FreshCredential
 @pytest.fixture
 def sdk(monkeypatch):
     p = SimpleNamespace(
-        sessions=[], responses=[], sends=[], credential_calls=[], body=b'{"id":"123"}',
-        status=200, encoding=None, close_failures=0,
+        sessions=[],
+        responses=[],
+        sends=[],
+        credential_calls=[],
+        body=b'{"id":"123"}',
+        status=200,
+        encoding=None,
+        close_failures=0,
     )
     session_factory = requests.Session
     close_response = requests.Response.close
@@ -67,7 +73,9 @@ def sdk(monkeypatch):
     monkeypatch.setattr(requests, "Session", session)
     monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", send)
     monkeypatch.setattr(google.auth, "default", default)
-    p.api = CreationAPI("sample", GcpGCEConfig(name="gcp-gce", project_id="project", zone="us-central1-a"), RunContext(), "offline")
+    p.api = CreationAPI(
+        "sample", GcpGCEConfig(name="gcp-gce", project_id="project", zone="us-central1-a"), RunContext(), "offline"
+    )
     return p
 
 
@@ -75,7 +83,9 @@ def test_constructor_is_passive_and_consumer_retains_originals(sdk):
     p = sdk
     assert not p.sessions and not p.credential_calls
     deadline = Deadline.after(5)
-    with p.api.exchange("POST", "projects/project/global/firewalls?requestId=uuid", deadline, body={"name": "rule"}) as value:
+    with p.api.exchange(
+        "POST", "projects/project/global/firewalls?requestId=uuid", deadline, body={"name": "rule"}
+    ) as value:
         assert value == {"id": "123"}
         assert p.api._response is p.responses[0] and p.api._session is p.sessions[1]
         assert p.api.auth._request.session is p.sessions[0]
@@ -99,10 +109,15 @@ def test_failed_original_response_close_blocks_new_requests_then_retires(sdk):
     assert not p.api.cleanup_incomplete
 
 
-@pytest.mark.parametrize("status,encoding,body", [
-    (302, None, b'{}'), (200, "gzip", b'{}'), (200, None, b'{"id":1,"id":2}'),
-    (200, None, json.dumps({"data": "x" * 65_536}).encode()),
-])
+@pytest.mark.parametrize(
+    "status,encoding,body",
+    [
+        (302, None, b"{}"),
+        (200, "gzip", b"{}"),
+        (200, None, b'{"id":1,"id":2}'),
+        (200, None, json.dumps({"data": "x" * 65_536}).encode()),
+    ],
+)
 def test_external_status_encoding_and_ingestion_fail_closed(sdk, status, encoding, body):
     p = sdk
     p.status, p.encoding, p.body = status, encoding, body

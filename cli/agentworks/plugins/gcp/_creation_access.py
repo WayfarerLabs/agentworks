@@ -59,8 +59,13 @@ class GCEOwnedCreationAccess:
     """
 
     def __init__(
-        self, request: ProvisionRequest, platform: GCEPlatform, ctx: RunContext,
-        *, owner: OperationOwner, custody: LocalDeliveryCustody,
+        self,
+        request: ProvisionRequest,
+        platform: GCEPlatform,
+        ctx: RunContext,
+        *,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
     ) -> None:
         if (
             type(owner) is not OperationOwner
@@ -155,21 +160,38 @@ class GCEOwnedCreationAccess:
         assert value is not None
         selected = self._selection
         endpoint, disk_path = instance_endpoint(
-            value, project=selected.project, zone=selected.zone, name=self._names.backend_name,
-            resource_id=resource.resource_id, network=selected.network,
-            subnet=selected.subnet, tag=self._names.network_tag, disk_path=selected.disk_path,
+            value,
+            project=selected.project,
+            zone=selected.zone,
+            name=self._names.backend_name,
+            resource_id=resource.resource_id,
+            network=selected.network,
+            subnet=selected.subnet,
+            tag=self._names.network_tag,
+            disk_path=selected.disk_path,
         )
         if self._resources.resources["disk"].resource_id is None:
             self._resources.capture_disk(disk_path, deadline)
         self._publish_metadata()
         power = value.get("status")
         if type(power) is not str or power not in {
-            "PROVISIONING", "STAGING", "RUNNING", "STOPPING", "TERMINATED", "SUSPENDING", "SUSPENDED", "REPAIRING"
+            "PROVISIONING",
+            "STAGING",
+            "RUNNING",
+            "STOPPING",
+            "TERMINATED",
+            "SUSPENDING",
+            "SUSPENDED",
+            "REPAIRING",
         }:
             raise ValidationError("GCE created VM power observation is invalid")
-        return (VMStatus.RUNNING if power == "RUNNING" else VMStatus.STOPPED if power in {
-            "TERMINATED", "SUSPENDED"
-        } else VMStatus.UNKNOWN), endpoint
+        return (
+            VMStatus.RUNNING
+            if power == "RUNNING"
+            else VMStatus.STOPPED
+            if power in {"TERMINATED", "SUSPENDED"}
+            else VMStatus.UNKNOWN
+        ), endpoint
 
     def _publish_metadata(self) -> None:
         if self._resources is None or self._selection is None:
@@ -180,15 +202,20 @@ class GCEOwnedCreationAccess:
         self._metadata.update(project_id=selected.project, zone=selected.zone, network_url=selected.network)
         for key in ("allow", "deny"):
             if resources[key].resource_id is not None:
-                self._metadata.update({
-                    f"{key}_rule": resources[key].body["name"], f"{key}_rule_id": resources[key].resource_id or "",
-                })
+                self._metadata.update(
+                    {
+                        f"{key}_rule": resources[key].body["name"],
+                        f"{key}_rule_id": resources[key].resource_id or "",
+                    }
+                )
         if resources["allow"].resource_id is not None:
             self._metadata["allow_source_ranges"] = ",".join(self._prefixes)
         if resources["instance"].resource_id is not None:
             self._metadata.update(
-                instance_name=names.backend_name, instance_id=resources["instance"].resource_id or "",
-                network_tag=names.network_tag, access_config_name=ACCESS_CONFIG,
+                instance_name=names.backend_name,
+                instance_id=resources["instance"].resource_id or "",
+                network_tag=names.network_tag,
+                access_config_name=ACCESS_CONFIG,
             )
         if resources["disk"].resource_id is not None:
             self._metadata.update(boot_disk=resources["disk"].path, boot_disk_id=resources["disk"].resource_id or "")
@@ -209,7 +236,12 @@ class GCEOwnedCreationAccess:
                     raise StateError("GCE creation requires an unsealed ordinary owner")
             self._prefixes = self._exposure.resolve(config_allow_cidrs(self._ctx.config), deadline)
             selected = select(
-                self._api, self._platform.config, self._request, self._names, self._prefixes, deadline,
+                self._api,
+                self._platform.config,
+                self._request,
+                self._names,
+                self._prefixes,
+                deadline,
                 disk_name=self._disk_name,
             )
             self._selection = selected
@@ -217,16 +249,40 @@ class GCEOwnedCreationAccess:
             zone_scope = f"projects/{selected.project}/zones/{selected.zone}"
             names = self._names
             resources = {
-                "deny": Resource(f"{global_scope}/firewalls/{names.deny_rule}", "firewall", firewall_body(
-                    names, selected.network, self._prefixes, allow=False,
-                )),
-                "allow": Resource(f"{global_scope}/firewalls/{names.allow_rule}", "firewall", firewall_body(
-                    names, selected.network, self._prefixes, allow=True,
-                )),
-                "instance": Resource(f"{zone_scope}/instances/{names.backend_name}", "instance", instance_body(
-                    self._request, names, machine=selected.machine, image=selected.image, disk_type=selected.disk_type,
-                    network=selected.network, subnet=selected.subnet, disk_name=self._disk_name,
-                )),
+                "deny": Resource(
+                    f"{global_scope}/firewalls/{names.deny_rule}",
+                    "firewall",
+                    firewall_body(
+                        names,
+                        selected.network,
+                        self._prefixes,
+                        allow=False,
+                    ),
+                ),
+                "allow": Resource(
+                    f"{global_scope}/firewalls/{names.allow_rule}",
+                    "firewall",
+                    firewall_body(
+                        names,
+                        selected.network,
+                        self._prefixes,
+                        allow=True,
+                    ),
+                ),
+                "instance": Resource(
+                    f"{zone_scope}/instances/{names.backend_name}",
+                    "instance",
+                    instance_body(
+                        self._request,
+                        names,
+                        machine=selected.machine,
+                        image=selected.image,
+                        disk_type=selected.disk_type,
+                        network=selected.network,
+                        subnet=selected.subnet,
+                        disk_name=self._disk_name,
+                    ),
+                ),
                 "disk": Resource(selected.disk_path, "disk", {}),
             }
             self._resources = CreationResources(self._owner, self._api, resources)
@@ -248,8 +304,13 @@ class GCEOwnedCreationAccess:
             self._readiness = SSHReadiness()
             self._readiness.wait(endpoint, deadline)
             self._trust = CreationSSHTrust(
-                self._owner, vm_name=self._request.vm_name, admin_username=self._request.admin_username,
-                instance_marker=self._marker, endpoint=endpoint, settings=self._settings, deadline=deadline,
+                self._owner,
+                vm_name=self._request.vm_name,
+                admin_username=self._request.admin_username,
+                instance_marker=self._marker,
+                endpoint=endpoint,
+                settings=self._settings,
+                deadline=deadline,
             )
             self._trust.prepare()
             self._owner.list_pending_lifecycle_obligations()
@@ -258,10 +319,13 @@ class GCEOwnedCreationAccess:
                 self._request.vm_name, self._request.admin_username, endpoint, self._settings
             )
             observe_early_guest(
-                connection, self._marker, deadline, self._custody,
+                connection,
+                self._marker,
+                deadline,
+                self._custody,
                 bootstrap_check=(
                     "attempt=0; until test -f " + STARTUP_MARKER + "; do "
-                    "attempt=$((attempt + 1)); test \"$attempt\" -le 240 || exit 1; sleep 1; done"
+                    'attempt=$((attempt + 1)); test "$attempt" -le 240 || exit 1; sleep 1; done'
                 ),
             )
             self._check_route(deadline)
@@ -271,7 +335,9 @@ class GCEOwnedCreationAccess:
                 IdentityMode.DIRECT if self._request.admin_username == "root" else IdentityMode.SUDO_ROOT,
             )
             self._binding = NativeExecutionBinding(
-                carrier, self._request.admin_username, RuntimeSelection(RuntimeTargetOS.LINUX),
+                carrier,
+                self._request.admin_username,
+                RuntimeSelection(RuntimeTargetOS.LINUX),
                 _early_guest_facts_route=_EarlyGuestFactsRoute(carrier, root, self._request.admin_username),
                 _new_managed_delivery=lambda: SSHCarrier(connection),
                 _independent_availability=self.independent_availability,
@@ -305,8 +371,13 @@ class GCEOwnedCreationAccess:
                 if key in ("deny", "allow") and resource.resource_id is not None
             }
             check_policy(
-                self._api, self._selection.project, self._selection.network,
-                self._names.network_tag, self._prefixes, budget, owned=owned,
+                self._api,
+                self._selection.project,
+                self._selection.network,
+                self._names.network_tag,
+                self._prefixes,
+                budget,
+                owned=owned,
             )
 
     def complete_bootstrap(self, deadline: Deadline) -> None:

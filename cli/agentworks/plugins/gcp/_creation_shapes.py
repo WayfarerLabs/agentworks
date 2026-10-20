@@ -69,10 +69,7 @@ def receipt(
             and value["selfLink"] not in tuple(f"{host}/compute/v1/{scope}/operations/{name}" for host in HOSTS)
         )
         or ("/zones/" not in scope and "zone" in value)
-        or (
-            "zone" in value
-            and value["zone"] not in tuple(f"{host}/compute/v1/{scope}" for host in HOSTS)
-        )
+        or ("zone" in value and value["zone"] not in tuple(f"{host}/compute/v1/{scope}" for host in HOSTS))
     ):
         raise ValidationError("GCE creation operation is not associated with this request")
     return name, target
@@ -102,7 +99,7 @@ apt-get update -q
 apt-get install -y -q python3 sudo util-linux openssh-server
 /usr/bin/python3 -I -S -B -c 'import sys; assert sys.version_info >= (3,11)'
 id -u {shlex.quote(user)} >/dev/null 2>&1 || useradd -m -s /bin/bash {shlex.quote(user)}
-printf '%s\\n' {shlex.quote(user + ' ALL=(ALL) NOPASSWD: ALL')} > /etc/sudoers.d/90-agentworks-creation
+printf '%s\\n' {shlex.quote(user + " ALL=(ALL) NOPASSWD: ALL")} > /etc/sudoers.d/90-agentworks-creation
 chmod 0440 /etc/sudoers.d/90-agentworks-creation
 visudo -cf /etc/sudoers.d/90-agentworks-creation
 install -d -m 0755 /var/lib/agentworks
@@ -151,7 +148,8 @@ def instance_body(
     disk_name: str,
 ) -> dict[str, Any]:
     if (
-        type(request.ssh_public_key) is not str or not request.ssh_public_key.strip()
+        type(request.ssh_public_key) is not str
+        or not request.ssh_public_key.strip()
         or any(character in request.ssh_public_key for character in ("\r", "\n", "\0"))
         or len(request.ssh_public_key.encode("utf-8")) > 16_384
     ):
@@ -166,40 +164,55 @@ def instance_body(
     return {
         "name": names.backend_name,
         "machineType": machine,
-        "disks": [{
-            "boot": True,
-            "autoDelete": True,
-            "type": "PERSISTENT",
-            "initializeParams": {
-                "diskName": disk_name,
-                "sourceImage": image,
-                "diskType": disk_type,
-                "diskSizeGb": str(request.disk_gib),
-            },
-        }],
+        "disks": [
+            {
+                "boot": True,
+                "autoDelete": True,
+                "type": "PERSISTENT",
+                "initializeParams": {
+                    "diskName": disk_name,
+                    "sourceImage": image,
+                    "diskType": disk_type,
+                    "diskSizeGb": str(request.disk_gib),
+                },
+            }
+        ],
         "networkInterfaces": [interface],
         "tags": {"items": [names.network_tag]},
-        "metadata": {"items": [
-            {"key": "ssh-keys", "value": f"{request.admin_username}:{request.ssh_public_key}"},
-            {"key": "block-project-ssh-keys", "value": "TRUE"},
-            {"key": "enable-oslogin", "value": "FALSE"},
-            {"key": "startup-script", "value": startup_script(request)},
-        ]},
+        "metadata": {
+            "items": [
+                {"key": "ssh-keys", "value": f"{request.admin_username}:{request.ssh_public_key}"},
+                {"key": "block-project-ssh-keys", "value": "TRUE"},
+                {"key": "enable-oslogin", "value": "FALSE"},
+                {"key": "startup-script", "value": startup_script(request)},
+            ]
+        },
         "serviceAccounts": [],
     }
 
 
 def instance_endpoint(
-    value: dict[str, Any], *, project: str, zone: str, name: str, resource_id: str,
-    network: str, subnet: str | None, tag: str, disk_path: str,
+    value: dict[str, Any],
+    *,
+    project: str,
+    zone: str,
+    name: str,
+    resource_id: str,
+    network: str,
+    subnet: str | None,
+    tag: str,
+    disk_path: str,
 ) -> tuple[str | None, str]:
     """Read the receipt-associated VM's one primary NAT and persistent boot disk."""
     exact_resource(value, f"projects/{project}/zones/{zone}/instances/{name}", "instance", resource_id)
     interfaces = value.get("networkInterfaces")
     tags = value.get("tags", {}).get("items") if type(value.get("tags")) is dict else None
     if (
-        type(interfaces) is not list or len(interfaces) != 1 or type(interfaces[0]) is not dict
-        or tags != [tag] or value.get("serviceAccounts", []) != []
+        type(interfaces) is not list
+        or len(interfaces) != 1
+        or type(interfaces[0]) is not dict
+        or tags != [tag]
+        or value.get("serviceAccounts", []) != []
     ):
         raise StateError("GCE created VM network, disks or service identity changed")
     interface = interfaces[0]
@@ -211,8 +224,11 @@ def instance_endpoint(
     configs = interface.get("accessConfigs")
     boot_disk_path(value, disk_path)
     if (
-        type(configs) is not list or len(configs) != 1 or type(configs[0]) is not dict
-        or configs[0].get("name") != ACCESS_CONFIG or configs[0].get("type") != "ONE_TO_ONE_NAT"
+        type(configs) is not list
+        or len(configs) != 1
+        or type(configs[0]) is not dict
+        or configs[0].get("name") != ACCESS_CONFIG
+        or configs[0].get("type") != "ONE_TO_ONE_NAT"
     ):
         raise StateError("GCE created VM primary NAT or boot disk changed")
     endpoint = configs[0].get("natIP")
@@ -232,7 +248,9 @@ def boot_disk_path(value: dict[str, Any], expected: str) -> str:
         raise StateError("GCE created VM boot attachment changed")
     disk = disks[0]
     if (
-        disk.get("boot") is not True or disk.get("autoDelete") is not True or disk.get("type") != "PERSISTENT"
+        disk.get("boot") is not True
+        or disk.get("autoDelete") is not True
+        or disk.get("type") != "PERSISTENT"
         or disk.get("source") not in tuple(f"{host}/compute/v1/{expected}" for host in HOSTS)
     ):
         raise StateError("GCE created VM boot disk changed")

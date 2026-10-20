@@ -56,12 +56,21 @@ class ProviderAPI(ScriptedAPI):
             return {"kind": "compute#zone", "name": "us-central1-a", "id": "13", "selfLink": ROOT + path}
         if "/machineTypes/" in path:
             return {
-                "kind": "compute#machineType", "name": "e2-standard-2", "id": "14", "selfLink": ROOT + path,
-                "guestCpus": 2, "memoryMb": 8192, "architecture": "X86_64", "maximumPersistentDisks": 16,
+                "kind": "compute#machineType",
+                "name": "e2-standard-2",
+                "id": "14",
+                "selfLink": ROOT + path,
+                "guestCpus": 2,
+                "memoryMb": 8192,
+                "architecture": "X86_64",
+                "maximumPersistentDisks": 16,
             }
         if "/images/family/" in path:
             return {
-                "kind": "compute#image", "name": "debian-13-sample", "id": "15", "architecture": "X86_64",
+                "kind": "compute#image",
+                "name": "debian-13-sample",
+                "id": "15",
+                "architecture": "X86_64",
                 "selfLink": ROOT + "projects/debian-cloud/global/images/debian-13-sample",
             }
         if "/diskTypes/" in path:
@@ -89,22 +98,43 @@ def owned(tmp_path, monkeypatch):
     settings = SSHSettings(tmp_path / "trust", tmp_path / "identity")
     config = Config(
         OperatorConfig(tmp_path / "public", tmp_path / "private", ssh=settings),
-        PathsConfig(), DefaultsConfig(), tmp_path / "absent.toml", SessionConfig(),
+        PathsConfig(),
+        DefaultsConfig(),
+        tmp_path / "absent.toml",
+        SessionConfig(),
     )
     platform = GCEPlatform("offline", {"project_id": "project", "zone": "us-central1-a"})
     provision = ProvisionRequest(
-        vm_name="sample", debian_release=DebianRelease.TRIXIE, hostname="sample", system_slug=None,
-        instance_marker=MARKER, admin_username="operator", ssh_public_key=TEST_SSH_PUBLIC_KEY,
-        ssh_private_key=None, tailscale_auth_key="join-secret-sentinel", progress=Progress(),
-        cpus=2, memory_gib=8, disk_gib=20, swap_gib=0,
+        vm_name="sample",
+        debian_release=DebianRelease.TRIXIE,
+        hostname="sample",
+        system_slug=None,
+        instance_marker=MARKER,
+        admin_username="operator",
+        ssh_public_key=TEST_SSH_PUBLIC_KEY,
+        ssh_private_key=None,
+        tailscale_auth_key="join-secret-sentinel",
+        progress=Progress(),
+        cpus=2,
+        memory_gib=8,
+        disk_gib=20,
+        swap_gib=0,
     )
     with closing(Database(tmp_path / "state.db")) as database:
         owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "sample"), "proof")
         api = ProviderAPI(owner)
         p = SimpleNamespace(
-            database=database, owner=owner, api=api, events=[], request=provision, platform=platform,
-            ctx=RunContext(config=config), custody=LocalDeliveryCustody(), settings=settings,
-            deadline=Deadline.after(30), fail_probe=None,
+            database=database,
+            owner=owner,
+            api=api,
+            events=[],
+            request=provision,
+            platform=platform,
+            ctx=RunContext(config=config),
+            custody=LocalDeliveryCustody(),
+            settings=settings,
+            deadline=Deadline.after(30),
+            fail_probe=None,
         )
         monkeypatch.setattr(creation, "CreationAPI", lambda *args: api)
         monkeypatch.setattr(creation.OwnedSSHExposure, "resolve", lambda *args: ("192.0.2.1/32",))
@@ -148,7 +178,12 @@ def owned(tmp_path, monkeypatch):
         def retired(*args, **kwargs):
             pytest.fail("retired provider orchestration entered")
 
-        for method in ("create", "build_native_execution_access", "resolve_native_execution_binding", "native_transport"):
+        for method in (
+            "create",
+            "build_native_execution_access",
+            "resolve_native_execution_binding",
+            "native_transport",
+        ):
             monkeypatch.setattr(GCEPlatform, method, retired)
         monkeypatch.setattr(creation, "CreationResources", resources)
         monkeypatch.setattr(creation, "SSHReadiness", Readiness)
@@ -281,7 +316,10 @@ def test_exact_random_boot_disk_collision_refuses_before_mutation(owned):
     p = owned
     selected = ZONAL + "/disks/" + p.access._disk_name
     p.api.live[selected] = {
-        "kind": "compute#disk", "name": p.access._disk_name, "id": "999", "selfLink": ROOT + selected,
+        "kind": "compute#disk",
+        "name": p.access._disk_name,
+        "id": "999",
+        "selfLink": ROOT + selected,
     }
     with pytest.raises(AlreadyExistsError):
         p.access.provision(p.deadline)
