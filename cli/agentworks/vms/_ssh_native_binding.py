@@ -32,14 +32,8 @@ def require_ssh_settings(vm: VMRow, ctx: RunContext, config: Config | None) -> S
     return settings
 
 
-def ssh_execution_binding(
-    vm: VMRow,
-    endpoint: object,
-    settings: SSHSettings,
-    *,
-    independent_availability: _IndependentJobAvailability | None = None,
-) -> NativeExecutionBinding:
-    """Bind one selected literal IPv4 without admitting local files."""
+def vm_ssh_connection(vm_name: str, admin_username: str, endpoint: object, settings: SSHSettings) -> SSHConnection:
+    """Construct passive connection policy for a core-selected literal VM endpoint."""
     try:
         if not isinstance(endpoint, str):
             raise ValueError
@@ -48,12 +42,12 @@ def ssh_execution_binding(
         raise StateError(
             "VM execution requires a literal IPv4 endpoint",
             entity_kind="vm",
-            entity_name=vm.name,
+            entity_name=vm_name,
         ) from None
-    connection = SSHConnection(
+    return SSHConnection(
         host=endpoint,
         port=22,
-        user=vm.admin_username,
+        user=admin_username,
         identity_file=settings.identity_file,
         trust=ManagedSSHTrust(settings.trust_store),
         host_key_alias=None,
@@ -62,6 +56,17 @@ def ssh_execution_binding(
         keepalive_interval=settings.keepalive_interval,
         keepalive_count_max=settings.keepalive_count_max,
     )
+
+
+def ssh_execution_binding(
+    vm: VMRow,
+    endpoint: object,
+    settings: SSHSettings,
+    *,
+    independent_availability: _IndependentJobAvailability | None = None,
+) -> NativeExecutionBinding:
+    """Bind one selected literal IPv4 without admitting local files."""
+    connection = vm_ssh_connection(vm.name, vm.admin_username, endpoint, settings)
     carrier = SSHCarrier(connection)
     root_entry = IdentityPlan(
         IdentityExpectation(0, 0, (0,)),

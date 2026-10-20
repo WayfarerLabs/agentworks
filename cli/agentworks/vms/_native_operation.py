@@ -199,7 +199,7 @@ class _Workflow:
             raise StateError("VM operation retains unsettled local delivery")
         if not self._components_settled():
             raise StateError("VM operation retains unsettled work")
-        access_settled = self.access is None or self.access.settle(budget)
+        access_settled = self._settle_access(budget)
         obligations = self.owner.list_pending_lifecycle_obligations()
         if access_settled and self.local_delivery.settled and self._components_settled() and not obligations:
             self.owner.seal_lifecycle_obligations()
@@ -210,6 +210,10 @@ class _Workflow:
             self.owner.close()
             return
         raise StateError("VM operation retains unsettled work")
+
+    def _settle_access(self, deadline: Deadline) -> bool:
+        """Settle the retained platform after route and local delivery cleanup."""
+        return self.access is None or self.access.settle(deadline)
 
 
 def _prepare_target(
@@ -306,8 +310,7 @@ def _prepare(
 
     def check_canonical(deadline: Deadline) -> None:
         """Revalidate the retained provider and pinned canonical selection without activation."""
-        if workflow.body_admission_closed:
-            raise StateError("VM operation no longer admits body work")
+        # Cleanup retains this selection check after public body admission closes.
         provider_locator_remaining(deadline, vm_name=vm_name)
         claim = db.operations.inspect(workflow.owner.ownership.scope)
         if claim is None or claim.ownership != workflow.owner.ownership:
