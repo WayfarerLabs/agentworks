@@ -3,8 +3,6 @@ via the Proxmox REST API."""
 
 from __future__ import annotations
 
-import hashlib
-import json
 import sys
 import time
 import urllib.parse
@@ -16,7 +14,6 @@ from pydantic import Field, model_validator
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import (
-    ProviderLocator,
     ProviderLocatorObservation,
     ProvisionRequest,
     ProvisionResult,
@@ -32,6 +29,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, ConnectivityError, ProvisioningError, StateError
+from agentworks.plugins.proxmox._provider_locator import proxmox_provider_locator
 from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.plugins.proxmox.teardown import (
     rollback_create_on_interrupt,
@@ -53,6 +51,7 @@ if TYPE_CHECKING:
     from agentworks.execution.carriers.proxmox import ProxmoxConnection
     from agentworks.operations import OperationOwner
     from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
+    from agentworks.vms._creation_access import OwnedVMCreationAccess
     from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 
@@ -614,16 +613,22 @@ class ProxmoxPlatform(VMPlatform):
                 entity_name=vm.name,
             )
 
-        # A versioned JSON array frames fields independently without exposing
-        # provider facts or restricting the configured namespace's length.
-        framed = json.dumps(
-            ("agentworks.proxmox.provider-locator.v1", connection.api_url, connection.vmid, parsed_generation),
-            ensure_ascii=True,
-            separators=(",", ":"),
-        ).encode("ascii")
-        locator = ProviderLocator("proxmox:v1:" + hashlib.sha256(framed).hexdigest())
+        locator = proxmox_provider_locator(connection.api_url, connection.vmid, parsed_generation)
         provider_locator_remaining(deadline, vm_name=vm.name)
         return locator
+
+    def build_creation_access(
+        self,
+        request: ProvisionRequest,
+        ctx: RunContext,
+        *,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
+    ) -> OwnedVMCreationAccess:
+        """Retain passive new-only creation under the caller's exact owner."""
+        from agentworks.plugins.proxmox._creation_access import ProxmoxOwnedCreationAccess
+
+        return ProxmoxOwnedCreationAccess(request, self, ctx, owner, custody)
 
     def build_native_execution_access(
         self,

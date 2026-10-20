@@ -218,6 +218,11 @@ class ProxmoxClone:
         return self._obligation_id
 
     @property
+    def wire_effect_possible(self) -> bool:
+        """Conservative wire-boundary fact, not presence or rollback authority."""
+        return self._post_entered
+
+    @property
     def association(self) -> CloneAssociation | None:
         intent = self.intent
         uuid = intent.destination_smbios_uuid

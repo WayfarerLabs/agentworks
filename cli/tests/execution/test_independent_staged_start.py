@@ -261,6 +261,36 @@ def test_closed_helper_with_unknown_launch_releases_borrow_and_cleans_exact_stag
     assert carrier.events.count("activate") == 1
 
 
+@pytest.mark.parametrize("native", [False, True])
+def test_closing_bookkeeping_retains_closed_unknown_start_until_finish(staged, native):
+    _, repository, operation, access, carrier, workflow, _ = staged
+    carrier.receipt = False
+    if native:
+        operation._native_binding = replace(operation._native_binding, _new_helper_delivery=carrier.new_delivery)
+    with pytest.raises(StateError):
+        bulk_start(access)
+    (active,) = operation.active_inline_calls
+    record = repository.inspect(active.start.receipt.identity)
+    obligations = workflow.owner.list_pending_lifecycle_obligations()
+    events = list(carrier.events)
+    with pytest.raises(StateError):
+        operation.retry_inline_bookkeeping()
+    operation.retry_inline_bookkeeping(finishing=True)
+    assert active.borrow.closed and not active.operation.requires_owner_retention
+    assert workflow.owner._active_borrow is None and workflow.owner._outstanding_attempt is None
+    with pytest.raises(StateError):
+        operation.finish()
+    assert operation.active_inline_calls == (active,) and not operation._finished
+    assert not active.start.stage.cleaned and operation._prepared_stages
+    assert repository.inspect(active.start.receipt.identity) == record
+    assert workflow.owner.list_pending_lifecycle_obligations() == obligations
+    assert carrier.events == events and not workflow.owner._released
+    with pytest.raises(StateError):
+        workflow.close(cleanup_deadline=Deadline.after(5))
+    assert active.start.stage.cleaned and operation._prepared_stages == []
+    assert operation.active_inline_calls == (active,) and not workflow.owner._released
+
+
 @pytest.mark.parametrize("committed", [False, True])
 def test_reservation_control_after_staging_closes_unused_activation_and_preserves_control(
     staged, monkeypatch, committed

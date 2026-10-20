@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.operations import OperationOwner
     from agentworks.transports import ExecTransport
+    from agentworks.vms._creation_access import OwnedVMCreationAccess
     from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 
@@ -470,6 +471,26 @@ class VMPlatform(Capability):
         a late result. Such timeouts are not magical preemption of a provider
         call.
         """
+
+    def build_creation_access(
+        self,
+        request: ProvisionRequest,
+        ctx: RunContext,
+        *,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
+    ) -> OwnedVMCreationAccess:
+        """Construct new-only creation custody before any provider effect.
+
+        The pure request data is shared with creation callers. Implementations
+        do not invoke legacy creation or return its execution transport. This
+        additive hook does not change existing manager consumers.
+        """
+        raise StateError(
+            f"VM platform '{self.name}' has not implemented owned creation access",
+            entity_kind="vm",
+            entity_name=request.vm_name,
+        )
 
     def build_native_execution_access(
         self,

@@ -26,6 +26,8 @@ from agentworks.operations import LifecycleObligation, OperationAttempt, Operati
 from tests.execution.files._target_support import target_for_owner
 from tests.execution.test_execution_access import LocalCarrier
 from tests.execution.test_execution_operation import RecordingCarrier, _patch_candidate_execution
+from tests.execution.test_proxmox_inline_closure import _run as run_proxmox
+from tests.execution.test_proxmox_inline_closure import scenario as scenario
 
 
 @pytest.fixture
@@ -282,6 +284,36 @@ def test_handoff_reply_loss_does_not_mutate_successor_borrow(owned, monkeypatch:
     operation.finish()
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="actual Linux inline helper")
+def test_closed_native_helper_bookkeeping_preserves_successor_attempt(
+    scenario, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, owner, operation, _, _, _, qga, deliveries = scenario
+    qga.running = False
+    original = OperationBorrow.handoff_retained_effect
+
+    def lost_reply(borrow):
+        original(borrow)
+        raise KeyboardInterrupt("completed native handoff reply lost")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(OperationBorrow, "handoff_retained_effect", lost_reply)
+        with pytest.raises(KeyboardInterrupt):
+            run_proxmox(scenario)
+    (active,) = operation.active_inline_calls
+    assert active.borrow.closed and active.operation.delivery_started
+    assert deliveries[0].closure_proven and active.candidate is None
+    successor = owner.borrow()
+    attempt = successor.begin_attempt()
+    operation.retry_inline_bookkeeping(finishing=True)
+    assert operation.active_inline_calls == ()
+    assert owner._active_borrow is successor and owner._outstanding_attempt is attempt
+    assert successor.has_outstanding_attempt and not successor.closed
+    attempt.settle()
+    successor.close()
+    operation.finish()
+
+
 @pytest.mark.parametrize("control", [False, True])
 def test_unknown_helper_blocks_new_calls_and_finish(owned, monkeypatch: pytest.MonkeyPatch, control: bool) -> None:
     _, owner, operation = owned
@@ -531,8 +563,11 @@ def test_second_mark_retry_refusal_preserves_exact_custody(
         operation.finish()
 
 
-def test_predispatch_retry_refuses_successor_borrow(owned, monkeypatch: pytest.MonkeyPatch) -> None:
-    _, owner, operation = owned
+@pytest.mark.parametrize("attempt_started", [False, True])
+def test_predispatch_retry_retires_closed_call_without_changing_successor(
+    owned, monkeypatch: pytest.MonkeyPatch, attempt_started: bool
+) -> None:
+    database, owner, operation = owned
     _patch_candidate_execution(monkeypatch)
     original = OperationBorrow.handoff_retained_effect
 
@@ -551,14 +586,30 @@ def test_predispatch_retry_refuses_successor_borrow(owned, monkeypatch: pytest.M
     with pytest.raises(ValidationError):
         _run(operation, carrier)
     (active,) = operation.active_inline_calls
+    assert active.borrow.closed and not active.operation.delivery_started
     successor = owner.borrow()
-    with pytest.raises(StateError):
-        operation.retry_inline_bookkeeping()
-    assert operation.active_inline_calls == (active,)
-    assert not successor._closed
+    attempt = successor.begin_attempt() if attempt_started else None
+    obligations = owner.list_pending_lifecycle_obligations()
+    assert obligations
+    claim = database.operations.inspect(owner.ownership.scope)
+    assert claim is not None
+    operation.retry_inline_bookkeeping()
+    assert operation.active_inline_calls == () and active.borrow.closed
+    assert owner._active_borrow is successor and not successor.closed
+    assert owner._outstanding_attempt is attempt
+    assert owner.list_pending_lifecycle_obligations() == obligations
+    assert database.operations.inspect(owner.ownership.scope) == claim
+    assert operation.unfinished_inline_executions == ()
+    assert active.outcome is not None and not active.outcome.requires_owner_retention
     assert carrier.calls == 0
-    attempt = successor.begin_attempt()
+    with pytest.raises(StateError):
+        operation.finish()
+    assert owner._active_borrow is successor and not successor.closed
+    assert owner._outstanding_attempt is attempt
+    assert owner.list_pending_lifecycle_obligations() == obligations
+    assert database.operations.inspect(owner.ownership.scope) == claim
+    if attempt is None:
+        attempt = successor.begin_attempt()
     attempt.settle()
     successor.close()
-    operation.retry_inline_bookkeeping()
     operation.finish()
