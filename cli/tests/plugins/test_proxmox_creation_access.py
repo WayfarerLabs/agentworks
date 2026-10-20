@@ -30,7 +30,7 @@ from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers._proxmox_http import _Endpoint
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, _ProxmoxWire, _WireFailure
 from agentworks.operations import OperationOwner
-from agentworks.plugins.proxmox._creation_access import RESOURCE_KIND, ProxmoxOwnedCreationAccess, _ResourceIntent
+from agentworks.plugins.proxmox._creation_access import RESOURCE_KIND, ProxmoxOwnedCreationAccess
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY
 
@@ -729,63 +729,3 @@ def test_provision_fences_actual_owner_before_secret_delivery_or_candidate_read(
     finally:
         if borrowed is not None:
             borrowed.close()
-
-
-class _InterruptedAcceptance(list[_ResourceIntent]):
-    def __init__(self, values: list[_ResourceIntent], primary: BaseException, *, committed: bool) -> None:
-        super().__init__(values)
-        self.primary = primary
-        self.committed = committed
-
-    def append(self, intent: _ResourceIntent) -> None:
-        if not intent.accepted:
-            super().append(intent)
-            return
-        if self.committed:
-            super().append(intent)
-        raise self.primary
-
-
-@pytest.mark.parametrize("committed", [False, True])
-def test_acceptance_append_interruption_has_one_retained_source_of_authority(
-    owned: Harness, monkeypatch: pytest.MonkeyPatch, committed: bool
-) -> None:
-    owned.access.provision(Deadline.after(5))
-    primary = KeyboardInterrupt("acceptance append interrupted")
-    cause = RuntimeError("original append cause")
-    primary.__cause__ = cause
-    owned.access._resource_history = _InterruptedAcceptance(
-        owned.access._resource_history, primary, committed=committed
-    )
-    before = owned.calls.copy()
-    with pytest.raises(KeyboardInterrupt) as caught:
-        owned.access.complete_bootstrap(Deadline.after(1))
-    assert caught.value is primary and caught.value.__cause__ is cause
-    assert owned.access._resource_history[-1].accepted is committed
-    row = owned.row()
-    assert row is not None and row.state is LifecycleObligationState.POSSIBLE_EFFECT
-    assert json.loads(row.payload)["accepted"] is False
-    repository = owned.owner._repository
-    original = repository.resolve_lifecycle_obligation
-
-    def resolve(ownership: OperationOwnership, obligation_id: str) -> LifecycleObligation:
-        if obligation_id == owned.access._resource_id:
-            durable = repository.inspect_lifecycle_obligation(ownership, obligation_id)
-            assert durable is not None and json.loads(durable.payload)["accepted"] is True
-        return original(ownership, obligation_id)
-
-    monkeypatch.setattr(repository, "resolve_lifecycle_obligation", resolve)
-    if committed:
-        with pytest.raises(StateError):
-            owned.access.request_rollback()
-        owned.access.complete_bootstrap(Deadline.after(1))
-        owned.access.complete_bootstrap(Deadline.after(1))
-    else:
-        owned.access.request_rollback()
-    owned.owner.stop_admission()
-    assert owned.access.settle(Deadline.after(1)) is committed
-    assert owned.calls == before
-    row = owned.row()
-    assert row is not None
-    assert row.state is (LifecycleObligationState.RESOLVED if committed else LifecycleObligationState.POSSIBLE_EFFECT)
-    assert json.loads(row.payload)["accepted"] is committed

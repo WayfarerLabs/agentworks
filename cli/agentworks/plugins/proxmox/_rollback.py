@@ -41,7 +41,7 @@ class RollbackPhase(StrEnum):
     STOPPED = "stopped"
     INVENTORIED = "inventoried"
     REMOVE_REQUESTED = "remove-requested"
-    DISKS_ABSENT = "disks-absent"
+    REMOVAL_SETTLED = "removal-settled"
     DESTROY_REQUESTED = "destroy-requested"
     COMPLETE = "complete"
 
@@ -293,9 +293,8 @@ class ProxmoxCreationRollback:
                     ),
                 )
                 self._wait(upid, "qmconfig", deadline)
-            self._verify_empty(association, deadline)
-            self._record(phase=RollbackPhase.DISKS_ABSENT)
-        if self.state.phase in (RollbackPhase.DISKS_ABSENT, RollbackPhase.DESTROY_REQUESTED):
+            self._record(phase=RollbackPhase.REMOVAL_SETTLED)
+        if self.state.phase in (RollbackPhase.REMOVAL_SETTLED, RollbackPhase.DESTROY_REQUESTED):
             if self.state.destroy_upid is None and RollbackPhase.DESTROY_REQUESTED not in self._entered:
                 # PVE has no generation-conditional destroy. This fresh proof is
                 # deliberately not described as an atomic provider precondition.
@@ -318,9 +317,11 @@ class ProxmoxCreationRollback:
     def _verify_empty(self, association: CloneAssociation, deadline: Deadline) -> None:
         self._shape(deadline)
         self._permissions(deadline)
-        if disks(self._config(association, deadline), self._storage) or self._power(deadline) != "stopped":
+        config = self._config(association, deadline)
+        if disks(config, self._storage) or self._power(deadline) != "stopped":
             raise StateError("Proxmox rollback config still references images or VM is not stopped")
         if self._volumes(deadline):
             raise StateError("Proxmox rollback logical image absence is unproved")
         self._permissions(deadline)
-        self._config(association, deadline)
+        if self._config(association, deadline)["digest"] != config["digest"]:
+            raise StateError("Proxmox rollback config changed during logical image verification")

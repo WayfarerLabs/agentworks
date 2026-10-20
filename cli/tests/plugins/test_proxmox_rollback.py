@@ -14,6 +14,7 @@ from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers._proxmox_http import _Endpoint
 from agentworks.execution.carriers.proxmox import _ProxmoxWire, _WireFailure
 from agentworks.plugins.proxmox._configuration import ProxmoxConfiguration
+from agentworks.plugins.proxmox._creation_access import _ResourceIntent
 from agentworks.plugins.proxmox._rollback import RollbackPhase
 from tests.plugins.test_proxmox_creation_access import TOKEN, Harness
 from tests.plugins.test_proxmox_creation_access import database as database
@@ -186,6 +187,7 @@ def rollback_owned(owned: Harness, monkeypatch: pytest.MonkeyPatch) -> RollbackH
     return value
 
 
+@pytest.mark.windows
 def test_normal_rollback_resolves_exact_resource_under_closing_original_owner(rollback_owned: RollbackHarness) -> None:
     h = rollback_owned.creation
     owner, controllers = h.owner, (h.access.clone, h.access.configuration, h.access.activation, h.access.bootstrap)
@@ -205,6 +207,7 @@ def test_normal_rollback_resolves_exact_resource_under_closing_original_owner(ro
     assert h.database.operations.inspect(owner.ownership.scope) is None
 
 
+@pytest.mark.windows
 @pytest.mark.parametrize("endpoint", _MUTATIONS)
 def test_lost_mutation_reply_keeps_original_control_and_never_replays(
     rollback_owned: RollbackHarness,
@@ -225,6 +228,7 @@ def test_lost_mutation_reply_keeps_original_control_and_never_replays(
     assert (row := value.creation.row()) is not None and row.state is LifecycleObligationState.POSSIBLE_EFFECT
 
 
+@pytest.mark.windows
 @pytest.mark.parametrize("committed", [False, True])
 @pytest.mark.parametrize(
     "phase,receipt",
@@ -489,3 +493,101 @@ def test_destroy_task_success_requires_independent_exact_free_vmid(rollback_owne
     assert (row := h.creation.row()) is not None and row.state is LifecycleObligationState.POSSIBLE_EFFECT
     h.free_error = False
     assert h.settle() and h.mutations() == list(_MUTATIONS)
+
+
+class _InterruptedAcceptance(list[_ResourceIntent]):
+    def __init__(self, values: list[_ResourceIntent], primary: BaseException, *, committed: bool) -> None:
+        super().__init__(values)
+        self.primary = primary
+        self.committed = committed
+
+    def append(self, intent: _ResourceIntent) -> None:
+        if not intent.accepted:
+            super().append(intent)
+            return
+        if self.committed:
+            super().append(intent)
+        raise self.primary
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("committed", [False, True])
+def test_acceptance_append_interruption_has_one_retained_source_of_authority(
+    rollback_owned: RollbackHarness,
+    monkeypatch: pytest.MonkeyPatch,
+    committed: bool,
+) -> None:
+    value, h = rollback_owned, rollback_owned.creation
+    primary = KeyboardInterrupt("acceptance append interrupted")
+    cause = RuntimeError("original append cause")
+    primary.__cause__ = cause
+    h.access._resource_history = _InterruptedAcceptance(h.access._resource_history, primary, committed=committed)
+    before = h.calls.copy()
+    with pytest.raises(KeyboardInterrupt) as caught:
+        h.access.complete_bootstrap(Deadline.after(1))
+    assert caught.value is primary and caught.value.__cause__ is cause
+    assert h.access._resource_history[-1].accepted is committed
+    row = h.row()
+    assert row is not None and row.state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert json.loads(row.payload)["accepted"] is False
+    repository = h.owner._repository
+    original = repository.resolve_lifecycle_obligation
+
+    def resolve(ownership: OperationOwnership, obligation_id: str) -> LifecycleObligation:
+        if obligation_id == h.access._resource_id:
+            durable = repository.inspect_lifecycle_obligation(ownership, obligation_id)
+            assert durable is not None
+            payload = json.loads(durable.payload)
+            assert payload["accepted"] is committed
+            assert payload["accepted"] is True or payload["rollback"]["phase"] == RollbackPhase.COMPLETE
+        return original(ownership, obligation_id)
+
+    monkeypatch.setattr(repository, "resolve_lifecycle_obligation", resolve)
+    if committed:
+        with pytest.raises(StateError):
+            h.access.request_rollback()
+        h.access.complete_bootstrap(Deadline.after(1))
+        h.access.complete_bootstrap(Deadline.after(1))
+    else:
+        h.access.request_rollback()
+    h.owner.stop_admission()
+    assert value.settle()
+    if committed:
+        assert h.calls == before and value.alive and value.images and not value.mutations()
+    else:
+        assert value.mutations() == list(_MUTATIONS) and not value.alive and not value.images
+    row = h.row()
+    assert row is not None and row.state is LifecycleObligationState.RESOLVED
+    assert json.loads(row.payload)["accepted"] is committed
+    assert h.access._resource_history[-1].accepted is committed
+    assert caught.value is primary and caught.value.__cause__ is cause
+
+
+def test_final_config_change_during_empty_proof_retains_debt_without_destroy(
+    rollback_owned: RollbackHarness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    value, h = rollback_owned, rollback_owned.creation
+    original = _ProxmoxWire.request_current_config
+    reads = 0
+
+    def config(wire: _ProxmoxWire, *, custody: LocalDeliveryCustody, timeout: float) -> dict[str, object]:
+        nonlocal reads
+        assert h.access.rollback is not None
+        if h.access.rollback.state.phase is RollbackPhase.REMOVAL_SETTLED:
+            reads += 1
+            if reads == 2:
+                h.current.update(scsi1="local-lvm:vm-123-disk-1,size=1G", digest="e" * 40)
+                value.images.append({"volid": "local-lvm:vm-123-disk-1", "vmid": 123, "format": "raw"})
+        return original(wire, custody=custody, timeout=timeout)
+
+    monkeypatch.setattr(_ProxmoxWire, "request_current_config", config)
+    value.close_for_rollback()
+    with pytest.raises(StateError):
+        value.settle()
+    assert reads == 2 and value.mutations() == [_Endpoint.VM_STOP, _Endpoint.VM_REMOVE_DISKS]
+    assert value.alive and value.images and "scsi1" in h.current
+    assert (row := h.row()) is not None and row.state is LifecycleObligationState.POSSIBLE_EFFECT
+    with pytest.raises(StateError):
+        value.settle()
+    assert value.mutations() == [_Endpoint.VM_STOP, _Endpoint.VM_REMOVE_DISKS]
