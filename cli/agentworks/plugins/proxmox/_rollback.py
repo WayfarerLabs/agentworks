@@ -125,10 +125,10 @@ class ProxmoxCreationRollback:
             raise TimeoutError("Proxmox rollback deadline expired")
         return remaining
 
-    def _record(self, **changes: object) -> None:
+    def _record(self, state: RollbackState) -> None:
         # Retain the exact requested state before publication, including a lost
         # committed response. The callback reconciles that same resource history.
-        self.state = replace(self.state, **changes)
+        self.state = state
         self._publish(self.state)
 
     def _check(self, deadline: Deadline) -> None:
@@ -187,24 +187,32 @@ class ProxmoxCreationRollback:
     def _submit(
         self,
         phase: RollbackPhase,
-        task_type: str,
-        receipt_field: str,
         deadline: Deadline,
         request: Callable[[], str],
     ) -> str:
         if self.state.phase is not phase:
-            self._record(phase=phase)
+            self._record(replace(self.state, phase=phase))
         self._check(deadline)
-        upid = getattr(self.state, receipt_field)
+        if phase is RollbackPhase.STOP_REQUESTED:
+            task_type, upid = "qmstop", self.state.stop_upid
+        elif phase is RollbackPhase.REMOVE_REQUESTED:
+            task_type, upid = "qmconfig", self.state.remove_upid
+        else:
+            assert phase is RollbackPhase.DESTROY_REQUESTED
+            task_type, upid = "qmdestroy", self.state.destroy_upid
         if upid is not None:
-            assert isinstance(upid, str)
             return upid
         if phase in self._entered:
             raise StateError("Proxmox rollback acknowledgment is unknown; mutation cannot be replayed")
         self._entered.add(phase)
         upid = request()
         _task_fields(upid, self._wire._connection, task_type)
-        self._record(**{receipt_field: upid})
+        if phase is RollbackPhase.STOP_REQUESTED:
+            self._record(replace(self.state, stop_upid=upid))
+        elif phase is RollbackPhase.REMOVE_REQUESTED:
+            self._record(replace(self.state, remove_upid=upid))
+        else:
+            self._record(replace(self.state, destroy_upid=upid))
         self._check(deadline)
         return upid
 
@@ -238,8 +246,11 @@ class ProxmoxCreationRollback:
         if self.state.phase is RollbackPhase.INITIAL:
             config = self._config(association, deadline)
             self._record(
-                phase=RollbackPhase.ASSOCIATED,
-                generation=associated_config(config, association, self._marker, expected_generation),
+                replace(
+                    self.state,
+                    phase=RollbackPhase.ASSOCIATED,
+                    generation=associated_config(config, association, self._marker, expected_generation),
+                )
             )
         if self.state.phase in (RollbackPhase.ASSOCIATED, RollbackPhase.STOP_REQUESTED):
             # A known stop receipt is always observed, even if power already fell.
@@ -248,15 +259,13 @@ class ProxmoxCreationRollback:
                     self._config(association, deadline)
                 upid = self._submit(
                     RollbackPhase.STOP_REQUESTED,
-                    "qmstop",
-                    "stop_upid",
                     deadline,
                     lambda: self._wire.request_vm_stop(timeout=self._remaining(deadline), custody=self._custody),
                 )
                 self._wait(upid, "qmstop", deadline)
             if self._power(deadline) != "stopped":
                 raise StateError("Proxmox rollback stop is not observed")
-            self._record(phase=RollbackPhase.STOPPED)
+            self._record(replace(self.state, phase=RollbackPhase.STOPPED))
         if self.state.phase is RollbackPhase.STOPPED:
             self._shape(deadline)
             self._permissions(deadline)
@@ -268,7 +277,7 @@ class ProxmoxCreationRollback:
                 raise StateError("Proxmox rollback cannot positively inventory every exact owned image")
             digest = config["digest"]
             assert isinstance(digest, str)
-            self._record(phase=RollbackPhase.INVENTORIED, disks=inventory, digest=digest)
+            self._record(replace(self.state, phase=RollbackPhase.INVENTORIED, disks=inventory, digest=digest))
         if self.state.phase in (RollbackPhase.INVENTORIED, RollbackPhase.REMOVE_REQUESTED):
             if self.state.disks:
                 if self.state.remove_upid is None and RollbackPhase.REMOVE_REQUESTED not in self._entered:
@@ -279,11 +288,9 @@ class ProxmoxCreationRollback:
                         raise StateError("Proxmox rollback disk inventory changed")
                     digest = config["digest"]
                     assert isinstance(digest, str)
-                    self._record(digest=digest)
+                    self._record(replace(self.state, digest=digest))
                 upid = self._submit(
                     RollbackPhase.REMOVE_REQUESTED,
-                    "qmconfig",
-                    "remove_upid",
                     deadline,
                     lambda: self._wire.request_vm_remove_disks(
                         tuple(disk.key for disk in self.state.disks),
@@ -293,7 +300,7 @@ class ProxmoxCreationRollback:
                     ),
                 )
                 self._wait(upid, "qmconfig", deadline)
-            self._record(phase=RollbackPhase.REMOVAL_SETTLED)
+            self._record(replace(self.state, phase=RollbackPhase.REMOVAL_SETTLED))
         if self.state.phase in (RollbackPhase.REMOVAL_SETTLED, RollbackPhase.DESTROY_REQUESTED):
             if self.state.destroy_upid is None and RollbackPhase.DESTROY_REQUESTED not in self._entered:
                 # PVE has no generation-conditional destroy. This fresh proof is
@@ -301,8 +308,6 @@ class ProxmoxCreationRollback:
                 self._verify_empty(association, deadline)
             upid = self._submit(
                 RollbackPhase.DESTROY_REQUESTED,
-                "qmdestroy",
-                "destroy_upid",
                 deadline,
                 lambda: self._wire.request_vm_destroy(timeout=self._remaining(deadline), custody=self._custody),
             )
@@ -310,7 +315,7 @@ class ProxmoxCreationRollback:
             self._check(deadline)
             self._wire.request_vmid_free(timeout=self._remaining(deadline), custody=self._custody)
             self._check(deadline)
-            self._record(phase=RollbackPhase.COMPLETE)
+            self._record(replace(self.state, phase=RollbackPhase.COMPLETE))
         self._check(deadline)
         return self.state.phase is RollbackPhase.COMPLETE
 
