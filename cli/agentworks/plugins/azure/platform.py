@@ -78,6 +78,7 @@ if TYPE_CHECKING:
     from agentworks.execution.carrier import Deadline
     from agentworks.operations import OperationOwner
     from agentworks.transports import Transport
+    from agentworks.vms._creation_access import OwnedVMCreationAccess
     from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 
@@ -810,6 +811,19 @@ class AzureVMPlatform(VMPlatform):
             return vm.name
         _rg, name, _cfg = _parse_resource_id(resource_id)
         return name
+
+    def build_creation_access(
+        self,
+        request: ProvisionRequest,
+        ctx: RunContext,
+        *,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
+    ) -> OwnedVMCreationAccess:
+        """Build passive independent creation under the caller's exact VM owner."""
+        from agentworks.plugins.azure._creation_access import AzureOwnedCreationAccess
+
+        return AzureOwnedCreationAccess(request, self, ctx, owner=owner, custody=custody)
 
     def build_native_execution_access(
         self,
