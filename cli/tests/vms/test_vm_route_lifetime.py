@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -22,27 +23,47 @@ from agentworks.execution.carriers.wsl2 import WSL2Carrier
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
 from agentworks.execution.result import ExitCode
+from agentworks.execution.target import ExecutionRoute
 from agentworks.operations import OperationBorrow, OperationOwner
 from agentworks.vms import _native_operation as native
 from agentworks.vms._native_operation import VMOperation, _RoutePreparation, _Workflow
-from agentworks.vms.target_preparation import VMTargetPreparationControlFact, VMTargetPreparationStatus
+from agentworks.vms.target_preparation import (
+    VMTargetPreparation,
+    VMTargetPreparationControlFact,
+    VMTargetPreparationStatus,
+    prepare_managed_vm_target_from_platform,
+)
 from tests.execution.files._file_stage_support import LocalCarrier
 from tests.execution.files._file_upload_support import BytesSource
 from tests.execution.files._target_support import target_for_owner
 from tests.execution.files.test_upload_bookkeeping import bundles as bundles
 from tests.execution.files.test_upload_bookkeeping import held as held
 from tests.execution.files.test_upload_bookkeeping import upload
-from tests.execution.test_prepared_stage_closing import TARGET, NativeDelivery, ScriptedCarrier, stage
+from tests.execution.test_prepared_helper_stage import TARGET, stage
+from tests.execution.test_prepared_stage_closing import NativeDelivery, ScriptedCarrier
 from tests.execution.test_prepared_stage_closing import owned as owned
 from tests.execution.test_proxmox_inline_closure import _run as run_proxmox
 from tests.execution.test_proxmox_inline_closure import scenario as scenario
 from tests.vms.test_native_operation import _install_route, _root, _RouteCarrier, _scope
 from tests.vms.test_native_operation import database as database
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from agentworks.db import AgentRow, Database
+    from agentworks.execution._managed_runs import ManagedTargetIdentity
+    from tests.execution.test_proxmox_inline_closure import Scenario
+    from tests.execution.test_wsl2_platform_hold import FakeNative, FakeObserver
+
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="synthetic Linux route composition")
 
 
-def _record(owner, files=None, *, target=None):
+def _record(
+    owner: OperationOwner,
+    files: FileOperation | None = None,
+    *,
+    target: ManagedTargetIdentity | None = None,
+) -> _RoutePreparation:
     target = target or target_for_owner(owner)
     operation = ExecutionOperation(owner, target)
     return _RoutePreparation(
@@ -50,20 +71,21 @@ def _record(owner, files=None, *, target=None):
     )
 
 
-def _prepared(database, tmp_path, monkeypatch):
+def _prepared(
+    database: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[_Workflow, WSL2Platform, _RouteCarrier, FakeNative, FakeObserver]:
     platform = WSL2Platform("wsl2", {})
     carrier, host, observer = _install_route(database, platform, monkeypatch)
     owner = OperationOwner.acquire(database.operations, _scope(), "route-composition")
     workflow = _Workflow(owner, Deadline.after(30))
-    native._prepare(
-        workflow, database, "box", platform, RunContext(), _root(tmp_path), None, native.ExecutionRoute.NATIVE
-    )
+    native._prepare(workflow, database, "box", platform, RunContext(), _root(tmp_path), None, ExecutionRoute.NATIVE)
     return workflow, platform, carrier, host, observer
 
 
-def _completed_inline_routes(scenario):
+def _completed_inline_routes(scenario: Scenario) -> tuple[_Workflow, LocalCarrier]:
     _, owner, later_operation, _, plan, runtime, qga, _ = scenario
     earlier = _record(owner, target=later_operation._target)
+    assert earlier.views is not None
     carrier = LocalCarrier()
     outcome = earlier.views.execution_operation.run_inline(
         carrier,
@@ -81,7 +103,16 @@ def _completed_inline_routes(scenario):
     return _Workflow(owner, qga.deadline, routes=[earlier, later]), carrier
 
 
-def _next_route(workflow, database, platform, first, tmp_path, monkeypatch, *, agent=None):
+def _next_route(
+    workflow: _Workflow,
+    database: Database,
+    platform: WSL2Platform,
+    first: _RouteCarrier,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    agent: AgentRow | None = None,
+) -> VMOperation:
     """Use a fresh helper transcript with the retained platform's exact binding.
 
     The simulated second route is explicitly selected at the common assembly
@@ -98,7 +129,7 @@ def _next_route(workflow, database, platform, first, tmp_path, monkeypatch, *, a
         ),
     )
 
-    def check(deadline):
+    def check(deadline: Deadline) -> None:
         assert deadline is workflow.deadline and not deadline.expired
         claim = database.operations.inspect(_scope())
         assert claim is not None and claim.ownership == workflow.owner.ownership
@@ -106,20 +137,26 @@ def _next_route(workflow, database, platform, first, tmp_path, monkeypatch, *, a
     def forbidden(*args, **kwargs):
         pytest.fail("route assembly reacquired platform availability or ownership")
 
+    access = workflow.access
+    assert access is not None
+    binding = access.binding
+    assert binding is not None
+    vm = database.get_vm("box")
+    assert vm is not None
     monkeypatch.setattr(platform, "build_native_execution_access", forbidden)
-    monkeypatch.setattr(workflow.access, "ensure_available", forbidden)
+    monkeypatch.setattr(access, "ensure_available", forbidden)
     monkeypatch.setattr(OperationOwner, "acquire", forbidden)
     return native._prepare_route(
         workflow,
         database,
-        database.get_vm("box"),
+        vm,
         platform,
-        workflow.access,
+        access,
         ProviderLocator("wsl2:registration"),
-        workflow.access.binding,
+        binding,
         trusted_root=_root(tmp_path),
         agent=agent,
-        route=native.ExecutionRoute.CANONICAL,
+        route=ExecutionRoute.CANONICAL,
         route_check=check,
     )
 
@@ -127,6 +164,7 @@ def _next_route(workflow, database, platform, first, tmp_path, monkeypatch, *, a
 def test_later_route_completed_file_borrow_retires_before_earlier_execution_lifetime(held, monkeypatch):
     database, owner, files, root, _ = held
     earlier = _record(owner)
+    assert earlier.views is not None
     earlier.views.execution_operation._dispatch_obligation = owner.register_lifecycle_obligation(
         "carrier-dispatch", payload_version=1, payload=b""
     )
@@ -155,7 +193,9 @@ def test_later_route_completed_file_borrow_retires_before_earlier_execution_life
 def test_completed_later_inline_handoff_retires_before_earlier_lifetime(scenario, monkeypatch, committed):
     database, owner, operation, _, _, _, qga, deliveries = scenario
     workflow, earlier_carrier = _completed_inline_routes(scenario)
-    earlier = workflow.routes[0].views.execution_operation
+    earlier_views = workflow.routes[0].views
+    assert earlier_views is not None
+    earlier = earlier_views.execution_operation
     qga.running = False
     control = KeyboardInterrupt("later route handoff reply lost")
     cause = ValueError("original handoff cause")
@@ -263,6 +303,7 @@ def test_later_inline_borrow_retires_after_closed_earlier_inline_bookkeeping(sce
         views=VMOperation(owner, None, None, FileOperation(owner, operation._target), operation, None)
     )
     later = _record(owner, target=operation._target)
+    assert later.views is not None
     later_operation = later.views.execution_operation
     workflow = _Workflow(owner, qga.deadline, routes=[earlier, later])
     qga.running = False
@@ -395,12 +436,13 @@ def test_closing_later_unarmed_registration_retires_without_admission(scenario, 
 def test_second_route_interruption_retains_both_records_and_exact_cause(database, tmp_path, monkeypatch, phase):
     workflow, platform, carrier, host, _ = _prepared(database, tmp_path, monkeypatch)
     first = workflow.routes[0]
+    assert first.views is not None
     access = workflow.access
     ownership = workflow.owner.ownership
     agent = database.insert_agent("worker", "box", "worker") if phase == "namespace" else None
     control = KeyboardInterrupt(phase)
-    original = native.prepare_managed_vm_target_from_platform
-    partial = None
+    original = prepare_managed_vm_target_from_platform
+    partial: VMTargetPreparation | None = None
 
     def target(*args, **kwargs):
         nonlocal partial
@@ -452,6 +494,7 @@ def test_local_native_revocation_preserves_owner_and_outer_close_revokes_both_ro
     workflow, platform, carrier, host, observer = _prepared(database, tmp_path, monkeypatch)
     first = workflow.routes[0]
     native_views = first.views
+    assert native_views is not None
     access = workflow.access
     first.body_admission_closed = True
     with pytest.raises(StateError):
@@ -485,6 +528,7 @@ def test_local_native_revocation_preserves_owner_and_outer_close_revokes_both_ro
 def test_unfinished_native_file_call_prevents_new_route_preparation_without_retirement(database, tmp_path, monkeypatch):
     workflow, platform, carrier, _, _ = _prepared(database, tmp_path, monkeypatch)
     first = workflow.routes[0]
+    assert first.views is not None
     call = first.views.file_operation.begin_local_download()
     retire = workflow.owner.retire_unused_borrow
     retirements = []
@@ -511,6 +555,7 @@ def test_later_retained_closing_helper_blocks_earlier_fresh_scratch_cleanup(owne
     carriers = [ScriptedCarrier(owner), ScriptedCarrier(owner)]
     cleanups = []
     for record, carrier in zip((earlier, later), carriers, strict=True):
+        assert record.views is not None
         prepared = stage((database, owner, carrier))
         assert prepared.begin()
         cleanup = PreparedStageCleanup(prepared)
