@@ -359,13 +359,27 @@ def test_successful_transfer_resolves_resource_but_never_releases_owner(owned: H
     assert owned.database.operations.inspect(owned.owner.ownership.scope) is None
 
 
-def test_aborted_unaccepted_resource_is_retained_without_dummy_rollback(owned: Harness) -> None:
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("description", "another-instance"),
+        ("smbios1", f"uuid={SOURCE_UUID}"),
+        ("vmgenid", SOURCE_UUID),
+    ],
+)
+def test_rollback_refuses_changed_clone_association_and_retains_resource(
+    owned: Harness,
+    field: str,
+    value: str,
+) -> None:
     owned.access.provision(Deadline.after(5))
     owned.access.request_rollback()
     before = owned.calls.copy()
+    owned.current[field] = value
     owned.owner.stop_admission()
-    assert not owned.access.settle(Deadline.after(1))
-    assert owned.calls == before
+    with pytest.raises(StateError):
+        owned.access.settle(Deadline.after(1))
+    assert all(method == "GET" for _, method, _ in owned.calls[len(before) :])
     with pytest.raises(StateError):
         owned.access.complete_bootstrap(Deadline.after(1))
     with pytest.raises(StateError):

@@ -44,7 +44,9 @@ from agentworks.execution.carriers._proxmox_http import (
     _valid_configuration_body,
     _valid_control_timeout,
     _valid_digest,
+    _valid_remove_disks_body,
     _valid_resize_body,
+    _valid_storage,
     _valid_task_id,
 )
 from agentworks.execution.carriers._subprocess import run_process
@@ -272,6 +274,47 @@ class _ProxmoxWire:
         data = self._exchange(_Endpoint.VMID_FREE, "GET", None, custody=custody, body=None, timeout=timeout)
         if type(data) is not int or data != self._connection.vmid:
             raise _WireFailure("Proxmox did not establish that the selected VM identifier is free")
+
+    def request_vm_remove_disks(
+        self, keys: tuple[str, ...], *, digest: str, custody: LocalDeliveryCustody, timeout: float
+    ) -> str:
+        """Force-delete only exact config drive keys through one asynchronous config task."""
+        body = {"delete": ",".join(keys), "force": 1, "digest": digest}
+        if not _valid_control_timeout(timeout) or not _valid_remove_disks_body(body):
+            raise ValidationError("Proxmox disk removal requires exact keys, digest and finite timeout")
+        data = self._exchange(
+            _Endpoint.VM_REMOVE_DISKS,
+            "POST",
+            None,
+            custody=custody,
+            body=json.dumps(body, ensure_ascii=True).encode("ascii"),
+            timeout=timeout,
+        )
+        if not _valid_task_id(data):
+            raise _WireFailure("Proxmox returned an invalid disk-removal acknowledgment")
+        assert isinstance(data, str)
+        return data
+
+    def request_rollback_observation(
+        self, endpoint: _Endpoint, *, storage: str | None = None, custody: LocalDeliveryCustody, timeout: float
+    ) -> object:
+        """Read the fixed rollback inventory and current-token permission endpoints."""
+        allowed = (
+            _Endpoint.SNAPSHOTS,
+            _Endpoint.PENDING,
+            _Endpoint.VM_PERMISSIONS,
+            _Endpoint.STORAGE_PERMISSIONS,
+            _Endpoint.STORAGE_IMAGES,
+        )
+        storage_endpoint = endpoint in (_Endpoint.STORAGE_PERMISSIONS, _Endpoint.STORAGE_IMAGES)
+        if (
+            endpoint not in allowed
+            or not _valid_control_timeout(timeout)
+            or (storage_endpoint and not _valid_storage(storage))
+            or (not storage_endpoint and storage is not None)
+        ):
+            raise ValidationError("Proxmox rollback observation requires a fixed route and finite timeout")
+        return self._exchange(endpoint, "GET", storage, custody=custody, body=None, timeout=timeout)
 
     def request_vm_configure(
         self,

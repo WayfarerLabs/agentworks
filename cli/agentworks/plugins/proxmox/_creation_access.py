@@ -1,4 +1,4 @@
-"""Retained new-only Proxmox creation, without resource rollback implementation."""
+"""Retained new-only Proxmox creation and exact unaccepted-resource rollback."""
 
 from __future__ import annotations
 
@@ -36,6 +36,7 @@ from agentworks.plugins.proxmox._creation_bootstrap import ProxmoxCreationBootst
 from agentworks.plugins.proxmox._native_access import _guest_info_responded
 from agentworks.plugins.proxmox._native_binding import proxmox_native_binding
 from agentworks.plugins.proxmox._provider_locator import proxmox_provider_locator
+from agentworks.plugins.proxmox._rollback import ProxmoxCreationRollback, RollbackPhase, RollbackState
 from agentworks.secrets.line_safety import LineOrientedSecretUse, require_line_safe_secret
 from agentworks.vms._creation_access import VMCreationResult
 from agentworks.vms.identity import validate_vm_instance_marker
@@ -66,6 +67,7 @@ class _ResourceIntent:
     vmgenid: str
     smbios_uuid: str | None = None
     accepted: bool = False
+    rollback: RollbackState = RollbackState()
 
 
 def _encode(intent: _ResourceIntent) -> bytes:
@@ -92,7 +94,8 @@ class ProxmoxOwnedCreationAccess:
 
     Only public inputs are copied. Secret delivery begins in provision, never
     construction. Settlement observes retained calls, never replays mutation.
-    Requested rollback of a possible created resource remains unresolved here.
+    Rollback retains uncertain requests and proves logical image disposition
+    before destroying the empty, associated VM.
     """
 
     def __init__(
@@ -155,6 +158,7 @@ class ProxmoxOwnedCreationAccess:
         self.configuration: ProxmoxConfiguration | None = None
         self.activation: ProxmoxActivation | None = None
         self.bootstrap: ProxmoxCreationBootstrap | None = None
+        self.rollback: ProxmoxCreationRollback | None = None
         self._resource_id = uuid4().hex
         self._resource_history: list[_ResourceIntent] = []
 
@@ -223,6 +227,13 @@ class ProxmoxOwnedCreationAccess:
                 _ResourceIntent(
                     source.api_url, source.node, source.vmid, candidate, source.token_id, self._marker, self._generation
                 )
+            )
+            self.rollback = ProxmoxCreationRollback(
+                replace(source, vmid=candidate),
+                instance_marker=self._marker,
+                storage=self._storage,
+                custody=self._custody,
+                publish=self._publish_rollback,
             )
             resource = self._owner.register_lifecycle_obligation(
                 RESOURCE_KIND,
@@ -356,6 +367,14 @@ class ProxmoxOwnedCreationAccess:
         if association is not None and self._resource_history[-1].smbios_uuid is None:
             self._resource_history.append(replace(self._resource_history[-1], smbios_uuid=association.smbios_uuid))
 
+    def _publish_rollback(self, state: RollbackState) -> None:
+        current = self._resource_history[-1]
+        if current.accepted:
+            raise StateError("Proxmox bootstrap rollback window has closed")
+        if current.rollback != state:
+            self._resource_history.append(replace(current, rollback=state))
+        self._reconcile_resource()
+
     def _reconcile_resource(self) -> None:
         row = self._owner.inspect_lifecycle_obligation(self._resource_id)
         if row is None:
@@ -371,7 +390,10 @@ class ProxmoxOwnedCreationAccess:
         ):
             raise StateError("Proxmox created-resource custody conflicts")
         unused = self.clone is None or not self.clone.wire_effect_possible
-        can_resolve = self._custody.settled and (unused or self._resource_history[-1].accepted)
+        intent = self._resource_history[-1]
+        can_resolve = self._custody.settled and (
+            unused or intent.accepted or intent.rollback.phase is RollbackPhase.COMPLETE
+        )
         if row.state is LifecycleObligationState.RESOLVED:
             if not can_resolve or revision != len(self._resource_history) - 1:
                 raise StateError("Proxmox created-resource custody was prematurely resolved")
@@ -409,13 +431,20 @@ class ProxmoxOwnedCreationAccess:
             row = self._owner.inspect_lifecycle_obligation(self.activation.obligation_id)
             if row is not None or self.activation.obligation is not None:
                 self.activation.reconcile(deadline)
-                if self.activation.payload.upid is not None:
+                row = self._owner.inspect_lifecycle_obligation(self.activation.obligation_id)
+                if (
+                    row is not None
+                    and row.state is not LifecycleObligationState.RESOLVED
+                    and self.activation.payload.upid is not None
+                ):
                     self._wait_activation(deadline)
             ids.append(self.activation.obligation_id)
         if self.bootstrap is not None:
             if self.bootstrap.intent is not None:
                 self.bootstrap.reconcile(deadline)
-                self.bootstrap.observe(deadline)
+                row = self._owner.inspect_lifecycle_obligation(self.bootstrap.obligation_id)
+                if row is not None and row.state is not LifecycleObligationState.RESOLVED:
+                    self.bootstrap.observe(deadline)
             ids.append(self.bootstrap.obligation_id)
         _remaining(deadline)
         return self._custody.settled and all(
@@ -445,13 +474,19 @@ class ProxmoxOwnedCreationAccess:
             self._rollback_requested = True
 
     def settle(self, deadline: Deadline) -> bool:
-        """Retire actual requests, retaining any untransferred created resource."""
+        """Settle original calls and requested rollback under the original owner."""
         self._acquire(deadline)
         try:
             settled = self._settle_controllers(deadline)
             if self._resource_history:
                 self._refresh_resource()
                 self._reconcile_resource()
+                association = None if self.clone is None else self.clone.association
+                if settled and self._rollback_requested and association is not None:
+                    assert self.rollback is not None
+                    generation = None if self.configuration is None else self.configuration.acknowledged_generation
+                    self.rollback.settle(association, deadline, expected_generation=generation)
+                    self._reconcile_resource()
             row = self._owner.inspect_lifecycle_obligation(self._resource_id)
             return settled and (row is None or row.state is LifecycleObligationState.RESOLVED)
         finally:

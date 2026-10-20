@@ -45,6 +45,34 @@ class _Endpoint(StrEnum):
     VM_CLONE = "vm-clone"
     VM_CONFIGURE = "vm-configure"
     VM_RESIZE = "vm-resize"
+    VM_REMOVE_DISKS = "vm-remove-disks"
+    SNAPSHOTS = "snapshots"
+    PENDING = "pending"
+    VM_PERMISSIONS = "vm-permissions"
+    STORAGE_PERMISSIONS = "storage-permissions"
+    STORAGE_IMAGES = "storage-images"
+
+
+def _valid_storage(value: object) -> bool:
+    return type(value) is str and len(value) <= 128 and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", value) is not None
+
+
+def _valid_remove_disks_body(value: object) -> bool:
+    """Accept only bounded exact drive keys and the provider's force-delete schema."""
+    if type(value) is not dict or set(value) != {"delete", "force", "digest"}:
+        return False
+    keys = value["delete"]
+    if type(keys) is not str or len(keys) > 2048:
+        return False
+    parts = keys.split(",")
+    return (
+        0 < len(parts) <= 128
+        and len(set(parts)) == len(parts)
+        and all(re.fullmatch(r"(?:(?:scsi|virtio|sata|ide|unused)[0-9]+|efidisk0|tpmstate0)", key) for key in parts)
+        and type(value["force"]) is int
+        and value["force"] == 1
+        and _valid_digest(value["digest"])
+    )
 
 
 def _valid_clone_body(value: object) -> bool:
@@ -176,6 +204,15 @@ def _request(payload: dict[str, Any]) -> bytes:
     node = urllib.parse.quote(connection["node"], safe="")
     origin = connection["api_url"].rstrip("/")
     node_base = f"{origin}/api2/json/nodes/{node}"
+    if endpoint in (
+        _Endpoint.VM_REMOVE_DISKS,
+        _Endpoint.SNAPSHOTS,
+        _Endpoint.PENDING,
+        _Endpoint.VM_PERMISSIONS,
+        _Endpoint.STORAGE_PERMISSIONS,
+        _Endpoint.STORAGE_IMAGES,
+    ) and (type(connection["vmid"]) is not int or connection["vmid"] <= 0):
+        raise ValueError("Rollback requires an exact positive integer VM identifier")
     base = f"{node_base}/qemu/{connection['vmid']}"
     method, suffix, body = payload["method"], payload["suffix"], payload["body"]
     if endpoint is _Endpoint.GUEST_AGENT:
@@ -190,15 +227,34 @@ def _request(payload: dict[str, Any]) -> bytes:
         ):
             raise ValueError("Guest execution requires a fixed method, route and body")
         url = f"{base}/agent/{suffix}"
-    elif endpoint in (_Endpoint.POWER, _Endpoint.CURRENT_CONFIG, _Endpoint.GUEST_INFO):
+    elif endpoint in (
+        _Endpoint.POWER,
+        _Endpoint.CURRENT_CONFIG,
+        _Endpoint.GUEST_INFO,
+        _Endpoint.SNAPSHOTS,
+        _Endpoint.PENDING,
+    ):
         if suffix is not None or method != "GET" or body is not None:
             raise ValueError("Provider observation requires a fixed body-free GET")
         route = {
             _Endpoint.POWER: "status/current",
             _Endpoint.CURRENT_CONFIG: "config?current=1",
             _Endpoint.GUEST_INFO: "agent/info",
+            _Endpoint.SNAPSHOTS: "snapshot",
+            _Endpoint.PENDING: "pending",
         }[endpoint]
         url = f"{base}/{route}"
+    elif endpoint is _Endpoint.VM_PERMISSIONS:
+        if suffix is not None or method != "GET" or body is not None:
+            raise ValueError("Effective VM permissions require a fixed GET")
+        url = f"{origin}/api2/json/access/permissions?path=%2Fvms%2F{connection['vmid']}"
+    elif endpoint in (_Endpoint.STORAGE_PERMISSIONS, _Endpoint.STORAGE_IMAGES):
+        if not _valid_storage(suffix) or method != "GET" or body is not None:
+            raise ValueError("Storage observation requires an exact storage and fixed GET")
+        if endpoint is _Endpoint.STORAGE_PERMISSIONS:
+            url = f"{origin}/api2/json/access/permissions?path=%2Fstorage%2F{suffix}"
+        else:
+            url = f"{node_base}/storage/{suffix}/content?content=images&vmid={connection['vmid']}"
     elif endpoint in (_Endpoint.NEXT_ID, _Endpoint.VMID_FREE):
         if suffix is not None or method != "GET" or body is not None:
             raise ValueError("Candidate VM identifier requires a fixed body-free GET")
@@ -222,6 +278,15 @@ def _request(payload: dict[str, Any]) -> bytes:
         if suffix is not None or method != "DELETE" or body is not None:
             raise ValueError("VM destroy requires a fixed body-free DELETE")
         url = base
+    elif endpoint is _Endpoint.VM_REMOVE_DISKS:
+        if (
+            suffix is not None
+            or method != "POST"
+            or type(body) is not str
+            or not _valid_remove_disks_body(json.loads(body))
+        ):
+            raise ValueError("Disk removal requires an exact digest-guarded POST")
+        url = f"{base}/config"
     elif endpoint in (_Endpoint.VM_CONFIGURE, _Endpoint.VM_RESIZE):
         if suffix is not None or method != "PUT" or type(body) is not str:
             raise ValueError("Configuration requires a fixed PUT and exact public body")
@@ -244,6 +309,12 @@ def _request(payload: dict[str, Any]) -> bytes:
         _Endpoint.VM_CLONE,
         _Endpoint.VM_CONFIGURE,
         _Endpoint.VM_RESIZE,
+        _Endpoint.VM_REMOVE_DISKS,
+        _Endpoint.SNAPSHOTS,
+        _Endpoint.PENDING,
+        _Endpoint.VM_PERMISSIONS,
+        _Endpoint.STORAGE_PERMISSIONS,
+        _Endpoint.STORAGE_IMAGES,
     ) and not _valid_control_timeout(payload["timeout"]):
         raise ValueError("VM control requires a positive finite timeout")
     request = urllib.request.Request(

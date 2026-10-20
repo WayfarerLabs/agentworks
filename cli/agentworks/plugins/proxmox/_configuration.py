@@ -228,6 +228,13 @@ class ProxmoxConfiguration:
         self._resize_attempted = False
         self._resize_entered = False
 
+    @property
+    def acknowledged_generation(self) -> str | None:
+        """Return the applied generation only after the exact config acknowledgment."""
+        if not self._configuration_history or not self._configuration_history[-1].acknowledged:
+            return None
+        return self._configuration_history[-1].request.vmgenid
+
     def _acquire(self, deadline: Deadline) -> None:
         if not self._lock.acquire(timeout=min(_remaining(deadline), TIMEOUT_MAX)):
             raise TimeoutError("Proxmox configuration transition deadline expired")

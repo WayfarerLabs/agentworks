@@ -17,6 +17,7 @@ import pytest
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import Deadline
+from agentworks.execution.carriers._proxmox_http import _Endpoint as _Route
 from agentworks.execution.carriers._proxmox_http import _request
 from agentworks.execution.carriers.proxmox import ProxmoxConnection, _ProxmoxWire, _WireFailure
 from tests.execution.test_proxmox import connection, interrupted_worker, stub_process, worker_payload
@@ -25,11 +26,17 @@ from tests.execution.test_proxmox_trust import _Endpoint
 from tests.execution.test_proxmox_trust import endpoint as endpoint
 
 UPID = "UPID:node1:00000001:100000001:00000001:qmdestroy:123:user@pve!token:"
-ROUTES = ["stop", "destroy", "free"]
+READ_ROUTES = ["snapshots", "pending", "vm-permissions", "storage-permissions", "storage-images"]
+ROUTES = ["stop", "destroy", "free", "remove", *READ_ROUTES]
 WORKER_ROUTES = [
     ("vm-stop", "POST", None),
     ("vm-destroy", "DELETE", None),
     ("vmid-free", "GET", None),
+    ("snapshots", "GET", None),
+    ("pending", "GET", None),
+    ("vm-permissions", "GET", None),
+    ("storage-permissions", "GET", "local-lvm"),
+    ("storage-images", "GET", "local-lvm"),
 ]
 
 
@@ -77,13 +84,24 @@ def _call(wire: _ProxmoxWire, route: str, custody: LocalDeliveryCustody, *, time
         return wire.request_vm_stop(custody=custody, timeout=timeout)
     if route == "destroy":
         return wire.request_vm_destroy(custody=custody, timeout=timeout)
+    if route == "remove":
+        return wire.request_vm_remove_disks(("scsi0", "ide2"), digest="a" * 40, custody=custody, timeout=timeout)
+    if route in READ_ROUTES:
+        return wire.request_rollback_observation(
+            _Route(route),
+            storage="local-lvm" if route.startswith("storage-") else None,
+            custody=custody,
+            timeout=timeout,
+        )
     assert route == "free"
     return wire.request_vmid_free(custody=custody, timeout=timeout)
 
 
 def _reply(route: str) -> bytes:
-    if route in ("stop", "destroy"):
+    if route in ("stop", "destroy", "remove"):
         return json.dumps({"data": UPID}).encode()
+    if route in READ_ROUTES:
+        return b'{"data":[]}' if route in ("snapshots", "pending", "storage-images") else b'{"data":{}}'
     assert route == "free"
     return b'{"data":123}'
 
@@ -100,12 +118,36 @@ def test_owned_tls_fixed_rollback_routes(
     for route in ROUTES:
         value.response = _reply(route)
         result = _call(value.wire, route, value.custody)
-        assert result == (UPID if route in ("stop", "destroy") else None)
+        expected: object = UPID if route in ("stop", "destroy", "remove") else None
+        if route in READ_ROUTES:
+            expected = [] if route in ("snapshots", "pending", "storage-images") else {}
+        assert result == expected
         assert value.custody.settled
     assert value.requests == [
         ("POST", "/api2/json/nodes/node1/qemu/123/status/stop", b"", "PVEAPIToken=user@pve!token=secret-canary"),
         ("DELETE", "/api2/json/nodes/node1/qemu/123", b"", "PVEAPIToken=user@pve!token=secret-canary"),
         ("GET", "/api2/json/cluster/nextid?vmid=123", b"", "PVEAPIToken=user@pve!token=secret-canary"),
+        (
+            "POST",
+            "/api2/json/nodes/node1/qemu/123/config",
+            json.dumps({"delete": "scsi0,ide2", "force": 1, "digest": "a" * 40}).encode(),
+            "PVEAPIToken=user@pve!token=secret-canary",
+        ),
+        ("GET", "/api2/json/nodes/node1/qemu/123/snapshot", b"", "PVEAPIToken=user@pve!token=secret-canary"),
+        ("GET", "/api2/json/nodes/node1/qemu/123/pending", b"", "PVEAPIToken=user@pve!token=secret-canary"),
+        ("GET", "/api2/json/access/permissions?path=%2Fvms%2F123", b"", "PVEAPIToken=user@pve!token=secret-canary"),
+        (
+            "GET",
+            "/api2/json/access/permissions?path=%2Fstorage%2Flocal-lvm",
+            b"",
+            "PVEAPIToken=user@pve!token=secret-canary",
+        ),
+        (
+            "GET",
+            "/api2/json/nodes/node1/storage/local-lvm/content?content=images&vmid=123",
+            b"",
+            "PVEAPIToken=user@pve!token=secret-canary",
+        ),
     ]
 
 
@@ -133,7 +175,7 @@ def test_unsettled_custody_refuses_before_worker(monkeypatch: pytest.MonkeyPatch
         assert custody.close(Deadline.after(3))
 
 
-@pytest.mark.parametrize("route", ["stop", "destroy"])
+@pytest.mark.parametrize("route", ["stop", "destroy", "remove"])
 @pytest.mark.parametrize("receipt", [None, "", {}, [], True, 123, "a" * 256, "\u00e9" * 128, "\ud800"])
 def test_invalid_receipt_fails_after_one_request(monkeypatch: pytest.MonkeyPatch, route: str, receipt: object) -> None:
     process = stub_process(monkeypatch, json.dumps({"data": receipt}).encode())
@@ -142,7 +184,7 @@ def test_invalid_receipt_fails_after_one_request(monkeypatch: pytest.MonkeyPatch
     assert process.exchange.call_count == 1
 
 
-@pytest.mark.parametrize("route", ["stop", "destroy"])
+@pytest.mark.parametrize("route", ["stop", "destroy", "remove"])
 @pytest.mark.parametrize("receipt", [UPID, "raw opaque receipt", "a" * 255, "\u00e9" * 127 + "a"])
 def test_receipt_is_returned_without_task_or_cleanup_claims(
     monkeypatch: pytest.MonkeyPatch, route: str, receipt: str
@@ -312,3 +354,83 @@ def test_tls_verifies_peer_before_rollback_http(
     with pytest.raises(_WireFailure):
         _call(_ProxmoxWire(value), route, rollback_endpoint.custody)
     assert rollback_endpoint.requests == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"delete": "scsi0", "force": 1, "digest": "a" * 40, "background_delay": 0},
+        {"delete": "scsi0", "force": 0, "digest": "a" * 40},
+        {"delete": "scsi0", "force": True, "digest": "a" * 40},
+        {"delete": "scsi0", "force": 1, "digest": "stale"},
+        {"delete": "description", "force": 1, "digest": "a" * 40},
+        {"delete": "scsi0,scsi0", "force": 1, "digest": "a" * 40},
+        {"delete": "", "force": 1, "digest": "a" * 40},
+    ],
+)
+def test_worker_disk_removal_refuses_nonexact_schema_before_http(
+    monkeypatch: pytest.MonkeyPatch,
+    body: dict[str, object],
+) -> None:
+    build = MagicMock()
+    monkeypatch.setattr(urllib.request, "build_opener", build)
+    with pytest.raises(ValueError):
+        _request(
+            {
+                **worker_payload(),
+                "endpoint": "vm-remove-disks",
+                "method": "POST",
+                "suffix": None,
+                "body": json.dumps(body),
+            }
+        )
+    build.assert_not_called()
+
+
+@pytest.mark.parametrize("keys", [(), ("scsi0", "scsi0"), ("description",), ("scsi0/../ide2",)])
+def test_invalid_remove_keys_refuse_before_worker(monkeypatch: pytest.MonkeyPatch, keys: tuple[str, ...]) -> None:
+    spawn = MagicMock()
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    with pytest.raises(ValidationError):
+        _ProxmoxWire(connection()).request_vm_remove_disks(
+            keys,
+            digest="a" * 40,
+            custody=LocalDeliveryCustody(),
+            timeout=1,
+        )
+    spawn.assert_not_called()
+
+
+@pytest.mark.parametrize("endpoint", ["vm-remove-disks", *READ_ROUTES])
+@pytest.mark.parametrize("vmid", [True, "123&vmid=456", "123/../456", 0, -1])
+def test_worker_rollback_routes_refuse_identifier_injection_before_http(
+    monkeypatch: pytest.MonkeyPatch,
+    endpoint: str,
+    vmid: object,
+) -> None:
+    build = MagicMock()
+    monkeypatch.setattr(urllib.request, "build_opener", build)
+    payload = {**worker_payload(), "endpoint": endpoint}
+    payload["connection"]["vmid"] = vmid
+    with pytest.raises(ValueError):
+        _request(payload)
+    build.assert_not_called()
+
+
+@pytest.mark.parametrize("endpoint", [_Route.STORAGE_IMAGES, _Route.STORAGE_PERMISSIONS])
+@pytest.mark.parametrize("storage", ["../local", "local?userid=root@pam", "local/storage", "", "a" * 129])
+def test_storage_route_refuses_path_or_query_injection(
+    monkeypatch: pytest.MonkeyPatch,
+    endpoint: _Route,
+    storage: str,
+) -> None:
+    spawn = MagicMock()
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    with pytest.raises(ValidationError):
+        _ProxmoxWire(connection()).request_rollback_observation(
+            endpoint,
+            storage=storage,
+            custody=LocalDeliveryCustody(),
+            timeout=1,
+        )
+    spawn.assert_not_called()
