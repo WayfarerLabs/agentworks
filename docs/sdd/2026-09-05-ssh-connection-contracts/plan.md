@@ -226,15 +226,16 @@ proves that restoring old TOML does not discard current managed policy, revocati
 partial-update custody. Production writer coexistence and rollback through both usable RunContext
 paths still require transport composition and native acceptance.
 
-Composition `63a076cc` integrates transport `4bfb1747` and its retained configuration/resize leaf.
-Three source reviews find no material defect; two optional owner data simplifications are recorded.
-Root passes 918 related cases and all fifteen static/website entries. The last full local run at
-`6f1569e0` remains red with 22,279 passes and 22 host-fixture failures. The
-[composition record](phase2-transport-results.md#configuration-and-resize-dependency-composition)
-retains the partial-creation scope and new five-case identity-refusal diagnostic. These checks do
-not establish usable creation, native/Windows terminal, shared sanitation or both additive
-RunContext workflows. Full Phase 2 and R1-R5 acceptance stay open; no completion checkbox or lock
-changes.
+Composition `f63b28b1` integrates transport `cf3035e5`, its public prerequisite bootstrap and the
+shared exact-publication guard. Three source reviews find no material defect; an optional duplicate
+fingerprint remains a transport-owner suggestion. Root passes 2,617 related cases with 12 skips and
+all fifteen static/website entries. The last complete local run at `6f1569e0` remains red with
+22,279 passes and 22 host-fixture failures. The
+[composition record](phase2-transport-results.md#prerequisite-bootstrap-and-publication-dependency-composition)
+retains exact pins, the corrected measurement-runner evidence and the leaf's limits. Published
+`b110221b` CI is green at its own earlier composition. These results do not establish usable
+creation, native/Windows terminal, shared sanitation or both additive RunContext workflows. Full
+Phase 2 and R1-R5 acceptance stay open; no completion checkbox or lock changes.
 
 The deferred native fixture increment at `37c7840c` uses actual `SSHCarrier.execute`, requires guest
 status 37 and retains failed or uncertain evidence. Three independent source lanes find no material

@@ -6,6 +6,71 @@ does not replace the SSH plan, shared transport contracts or full implementation
 Earlier records retain their original observations. New entries supersede only the gates they
 actually measure.
 
+## Prerequisite bootstrap and publication dependency composition
+
+Evaluated join `f63b28b1b93eefd5aab35a2d62fa43d5261b0bf0` incorporates transport
+`cf3035e5a5739bbee77d320359f502a8520e3e59` over published SSH `b110221b`. Its CLI tree is
+`08fd1352d5ade3ae1072a96bd116bde912a6b3ba`. The six-file owner contribution adds the fixed public
+prerequisite bootstrap, its fixtures, the shared publication postcondition and affected owner, clone
+and configuration regressions. Non-SSH production and the whole transport SDD equal the owner. SSH
+production, fixtures and the complete SSH SDD are unchanged at this evaluated join.
+
+The prerequisite leaf checks the original fenced owner, exact running VM association and generation
+before one native guest-agent request. Its fixed root script requires successful cloud-init,
+establishes minimal public runtime/account/sudo/scratch prerequisites and installs the existing
+fixed marker. It retains the original owner, custody, execution budget and acknowledged PID. Status
+eligibility clears before a potentially consumable read; a lost terminal reply cannot authorize
+another read or execution. A fresh observation budget applies only to the same positively retained
+PID. Successful fixed-script evidence and settled local custody can resolve only this obligation. No
+prepared identity, SSH trust authority, secret join, owner release or complete creation follows.
+
+The shared lifecycle publisher now requires the actual returned persisted payload version and bytes
+to equal the requested values. A mismatched committed row remains retained before refusal; exact
+repeats keep their existing repository behavior. This is the existing publication boundary's
+postcondition, without a new interface, schema, retry or recovery rule. Related provider, WSL and
+file/prepared-stage recovery callers remain covered by the source review and focused selection.
+
+All three independent source reviews find no material defect; root fully reads their complete signed
+reports. Complexity identifies one optional transport-owner deletion: omit the separate script
+fingerprint because the retained exact-request fingerprint already covers the script and arguments.
+Root acknowledges and will relay the complete suggestion while retaining exact owner bytes. The
+prior clone/configuration optional suggestions keep their original disposition.
+
+Root's corrected 45-path selection passes 2,617 cases with 12 skips and 43 cases not selected in
+147.31 seconds; wrapper exit zero takes 147.899 seconds. The same-process receipt checks lexical
+interpreter/prefix/cwd, writing PID and all 642 loaded first-party origins. Full Ruff, formatting of
+1,608 files and typing of 1,570 sources pass. All fifteen static/website entries pass, including
+canonical file quality, Rulesync, locked-SDD, exact CI Typer isolation, 160 Python tests in 35.136
+seconds, 103 Node tests, four builds and two deterministic comparisons. This is focused unit
+evidence; Windows/native-console skips remain explicit, and the fixed privileged bootstrap was not
+executed successfully against a guest.
+
+The first scratch runner lacked a main guard, so multiprocessing re-entered the full selection and
+shared its temporary root and receipt. The invalid run is interrupted; root reads all six original
+failure sections. Its partial 2,108 passes and six failures supply no product acceptance result. The
+entire interrupted fixture/output remains retained. Independent source review clears the guarded
+entry; root preserves the exact selection and runs the corrected measurement above with a 300 MiB
+disk growth limit and a 1 GiB reserve; neither resource guard fires. No product source, skip,
+deadline, identity/account/group override or retry policy changes to obtain the pass. An attempted
+retirement of older successful fixtures stops before deletion on incomplete process inspection;
+three obsolete owned review environments instead restore space, preserving source, reports and every
+test fixture.
+
+Published SSH [run 39343843415](https://github.com/WayfarerLabs/agentworks/actions/runs/39343843415)
+tests `b110221b` through actual merge `c58e39852b5520ec48b65e52626b4941b9ae39d0` into `4bfb1747`.
+Linux Python 3.12/3.13/3.14 each pass 22,187 cases with 310 skips and 51 warnings; Windows Server
+2025/Python 3.13.16 passes 2,198 with 80 skips and 25 warnings. Website, all four static jobs and
+aggregate CI pass. Root reads all originating Python and Website gate portions; the
+[complete report](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6280294263)
+retains exact outputs and raw hashes. This is evidence at that earlier composition, not hosted
+validation for the new join or a waiver of the last full local run's 22 retained host failures and
+22,279 passes. The earlier five-case diagnostic keeps its original limited scope.
+
+Complete new-only creation/configuration/rollback, settled enrollment/trust-writer publication,
+writer coexistence/rollback, supported-platform terminal/fault/presentation, factories, both usable
+additive RunContext paths and full R1-R5 acceptance remain required. No public feedback round,
+ready/checkpoint signal, completed plan block or lock follows from this private progress.
+
 ## Configuration and resize dependency composition
 
 Evaluated join `63a076cce154f0494f0cf56dc654c6cf42e20bd7` incorporates transport
