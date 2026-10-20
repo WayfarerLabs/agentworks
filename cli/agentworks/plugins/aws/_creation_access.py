@@ -429,6 +429,8 @@ class EC2OwnedCreationAccess:
             _, instance = self.creation.instance(deadline)
             state = instance.get("State")
             name = state.get("Name") if type(state) is dict else None
+            if type(name) is not str:
+                return VMStatus.UNKNOWN
             return {"running": VMStatus.RUNNING, "stopped": VMStatus.STOPPED}.get(name, VMStatus.UNKNOWN)
         finally:
             self._lock.release()

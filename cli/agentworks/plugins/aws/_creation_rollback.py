@@ -90,12 +90,29 @@ def _absent(creation: EC2Creation, method: str, deadline: Deadline, code: str, *
         creation.call("ec2", method, deadline, **kwargs)
     except Exception as error:
         # The SDK error may be wrapped, but its exact provider code is retained.
-        cause = error.__cause__ if error.__cause__ is not None else error
+        cause = error.__cause__ if isinstance(error.__cause__, Exception) else error
         if error_code(cause) == code and not creation.cleanup_incomplete:
             creation.remaining(deadline)
             return True
         raise
     return False
+
+
+def _wait_for_group(creation: EC2Creation, deadline: Deadline) -> None:
+    """Observe the acknowledged group's identity before admitting its deletion.
+
+    A newly created group can be temporarily invisible. NotFound before our
+    delete cannot prove that the acknowledged create has been removed.
+    """
+    while True:
+        try:
+            creation.group(deadline)
+            return
+        except Exception as error:
+            cause = error.__cause__ if isinstance(error.__cause__, Exception) else error
+            if error_code(cause) != "InvalidGroup.NotFound" or creation.cleanup_incomplete:
+                raise
+        time.sleep(min(0.1, creation.remaining(deadline)))
 
 
 def rollback(creation: EC2Creation, deadline: Deadline) -> bool:
@@ -109,8 +126,6 @@ def rollback(creation: EC2Creation, deadline: Deadline) -> bool:
     if intent.group_id is None or (intent.launch_attempted and intent.instance_id is None):
         return False
     if intent.instance_id is not None:
-        if not creation.intent.volumes or not creation.intent.interfaces:
-            return False
         while True:
             _, instance = creation.instance(deadline)
             state = instance.get("State")
@@ -125,8 +140,8 @@ def rollback(creation: EC2Creation, deadline: Deadline) -> bool:
                 raise StateError("EC2 rollback power is unproved")
             if state["Name"] != "terminated":
                 if not creation.intent.terminate_attempted and state["Name"] != "shutting-down":
-                    observe_attachments(creation, instance, deadline)
-                    creation.group(deadline)
+                    observe_attachments(creation, instance, deadline, record_initial=True)
+                    _wait_for_group(creation, deadline)
                     creation.record(replace(creation.intent, terminate_attempted=True))
 
                     def receipt(result: dict[str, Any]) -> None:
@@ -146,6 +161,8 @@ def rollback(creation: EC2Creation, deadline: Deadline) -> bool:
                         "ec2", "terminate_instances", deadline, record=receipt, InstanceIds=[intent.instance_id]
                     )
             else:
+                if not creation.intent.volumes or not creation.intent.interfaces:
+                    return False
                 volumes_absent = all(
                     _absent(
                         creation,
@@ -170,10 +187,7 @@ def rollback(creation: EC2Creation, deadline: Deadline) -> bool:
                     break
             time.sleep(min(0.1, creation.remaining(deadline)))
     if not creation.intent.group_delete_attempted:
-        if _absent(creation, "describe_security_groups", deadline, "InvalidGroup.NotFound", GroupIds=[intent.group_id]):
-            creation.record(replace(creation.intent, removed=True))
-            return True
-        creation.group(deadline)
+        _wait_for_group(creation, deadline)
         creation.record(replace(creation.intent, group_delete_attempted=True))
 
         def deleted(result: dict[str, Any]) -> None:

@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import gzip
 import json
+from collections.abc import Callable
 from types import SimpleNamespace
+from typing import Any
 
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from agentworks.db import LifecycleObligationState
+from agentworks.operations import OperationOwner
 from agentworks.plugins.aws._creation import KIND
 
 ACCOUNT = "123456789012"
@@ -23,45 +27,46 @@ IMAGE = "ami-0123456789abcdef0"
 JOIN_KEY = "tskey-secret-never-in-provider-payload"
 
 
-def receipt(**values):
+def receipt(**values: Any) -> dict[str, Any]:
     return {**values, "ResponseMetadata": {"HTTPStatusCode": 200, "RetryAttempts": 0, "RequestId": "request-one"}}
 
 
-def absent(code):
+def absent(code: str) -> ClientError:
     return ClientError({"Error": {"Code": code, "Message": "scripted absence"}}, "Describe")
 
 
 class Session:
-    def __init__(self, owner):
+    def __init__(self, owner: OperationOwner) -> None:
         self.owner = owner
-        self.calls = []
-        self.clients = []
-        self.closes = []
-        self.close_failure = None
-        self.fault = None
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.clients: list[SimpleNamespace] = []
+        self.closes: list[SimpleNamespace] = []
+        self.close_failure: BaseException | None = None
+        self.fault: str | None = None
         self.account = ACCOUNT
         self.state = "running"
         self.termination_states = ["shutting-down", "terminated"]
         self.volume_linger = 0
         self.nic_linger = 0
         self.group_linger = 0
-        self.image_floor = 8
+        self.group_visibility_delay = 0
+        self.image_floor: object = 8
         self.volume = VOLUME
         self.interface = NIC
-        self.volume_tags = None
+        self.volume_tags: list[dict[str, str]] | None = None
         self.deleted = False
-        self.nonce = None
-        self.rules = []
-        self.after = lambda method: None
+        self.nonce: str | None = None
+        self.rules: list[dict[str, Any]] = []
+        self.after: Callable[[str], None] = lambda method: None
 
-    def client(self, service, *, region_name, config):
+    def client(self, service: str, *, region_name: str, config: Config) -> SimpleNamespace:
         assert region_name == REGION
         assert config.retries == {"total_max_attempts": 1, "mode": "standard"}
         assert config.connect_timeout > 0 and config.read_timeout == config.connect_timeout
-        events = {}
+        events: dict[str, Callable[..., None]] = {}
         client = SimpleNamespace(meta=SimpleNamespace(events=SimpleNamespace(register=events.__setitem__)))
 
-        def close():
+        def close() -> None:
             self.closes.append(client)
             if self.close_failure is not None:
                 raise self.close_failure
@@ -86,7 +91,7 @@ class Session:
             "delete_security_group",
         ):
 
-            def send(*, _method=method, **kwargs):
+            def send(*, _method: str = method, **kwargs: Any) -> dict[str, Any]:
                 operation = "".join(part.title() for part in _method.split("_"))
                 callback = events.get(f"before-send.{service}.{operation}")
                 if callback is not None:
@@ -103,7 +108,7 @@ class Session:
         self.clients.append(client)
         return client
 
-    def instance(self):
+    def instance(self) -> dict[str, Any]:
         return {
             "InstanceId": INSTANCE,
             "ClientToken": self.nonce,
@@ -136,10 +141,11 @@ class Session:
             ],
         }
 
-    def tags(self):
+    def tags(self) -> list[dict[str, str]]:
+        assert self.nonce is not None
         return [{"Key": "agentworks:vm", "Value": "system-vm-one"}, {"Key": "agentworks:creation", "Value": self.nonce}]
 
-    def reply(self, method, args):
+    def reply(self, method: str, args: dict[str, Any]) -> dict[str, Any]:
         if method == "get_caller_identity":
             return receipt(Account=self.account)
         if method == "describe_instance_types":
@@ -197,6 +203,9 @@ class Session:
                 Reservations=[] if "Filters" in args else [{"OwnerId": self.account, "Instances": [self.instance()]}]
             )
         if method == "describe_security_groups":
+            if self.group_visibility_delay:
+                self.group_visibility_delay -= 1
+                raise absent("InvalidGroup.NotFound")
             if self.deleted:
                 if self.group_linger:
                     self.group_linger -= 1

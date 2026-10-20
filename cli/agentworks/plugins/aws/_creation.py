@@ -169,7 +169,10 @@ class EC2Creation:
                 self.client.meta.events.register(f"before-send.ec2.{operation}", guard_creation_send)
             self.remaining(deadline)
             self.owner.list_pending_lifecycle_obligations()
-            result = getattr(self.client, method)(**kwargs)
+            raw: object = getattr(self.client, method)(**kwargs)
+            if type(raw) is not dict or any(type(key) is not str for key in raw):
+                raise ValidationError("EC2 creation returned an invalid response object")
+            result: dict[str, Any] = raw
             EC2NativeRoute._receipt(result)
             if not _request_id(result["ResponseMetadata"]["RequestId"]):
                 raise ValidationError("EC2 creation returned an invalid request identity")

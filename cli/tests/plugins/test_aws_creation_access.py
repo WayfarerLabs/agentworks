@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import gzip
 import json
+from collections.abc import Iterator
 from contextlib import closing
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -19,12 +21,15 @@ from agentworks.errors import LimitExceededError, StateError, ValidationError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._helper_launcher import IdentityMode
 from agentworks.execution.carrier import Deadline
-from agentworks.execution.carriers.ssh import SSHSettings
+from agentworks.execution.carriers.ssh import SSHConnection, SSHSettings
 from agentworks.operations import OperationOwner
 from agentworks.plugins.aws import _creation_access
 from agentworks.plugins.aws._creation import KIND
+from agentworks.plugins.aws._creation_access import EC2OwnedCreationAccess
 from agentworks.plugins.aws._owned_auth import _OwnedRoleSession
 from agentworks.plugins.aws.platform import EC2Platform
+from agentworks.vms._creation_ssh import CLOUD_INIT_CHECK, SSHReadiness
+from agentworks.vms._ssh_native_exposure import OwnedSSHExposure
 from tests.plugins.test_aws_creation_support import (
     ACCOUNT,
     INSTANCE,
@@ -38,7 +43,7 @@ from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY
 
 
 @pytest.fixture
-def owned(tmp_path, monkeypatch):
+def owned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
     with closing(Database(tmp_path / "creation.db")) as database:
         owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "proof")
         session = Session(owner)
@@ -61,14 +66,14 @@ def owned(tmp_path, monkeypatch):
             disk_gib=20,
             swap_gib=0,
         )
-        events = []
+        events: list[str] = []
 
         class Trust:
-            def __init__(self, selected_owner, **kwargs):
+            def __init__(self, selected_owner: OperationOwner, **kwargs: object) -> None:
                 assert selected_owner is owner and kwargs["endpoint"] == "192.0.2.7"
                 events.append("trust-retained")
 
-            def prepare(self):
+            def prepare(self) -> None:
                 assert session.nonce is not None and session.rules
                 resource = next(
                     row for row in owner.list_pending_lifecycle_obligations() if row.obligation_kind == KIND
@@ -77,18 +82,33 @@ def owned(tmp_path, monkeypatch):
                 assert recorded["volumes"] == [VOLUME] and recorded["interfaces"] == [NIC]
                 events.append("trust-prepared")
 
-            def close(self, deadline):
+            def close(self, deadline: Deadline) -> bool:
                 assert not session.rules
                 events.append("trust-closed")
                 return True
 
         monkeypatch.setattr(_creation_access, "_build_ambient_session", lambda region: session)
         monkeypatch.setattr(_creation_access, "CreationSSHTrust", Trust)
-        monkeypatch.setattr(_creation_access.SSHReadiness, "wait", lambda *args: events.append("listening"))
-        monkeypatch.setattr(_creation_access.OwnedSSHExposure, "resolve", lambda *args: ("192.0.2.1/32",))
-        monkeypatch.setattr(_creation_access, "observe_early_guest", lambda *args: events.append("prerequisites"))
+        monkeypatch.setattr(SSHReadiness, "wait", lambda *args: events.append("listening"))
+        monkeypatch.setattr(OwnedSSHExposure, "resolve", lambda *args: ("192.0.2.1/32",))
+
+        def prerequisites(
+            connection: SSHConnection,
+            marker: str,
+            deadline: Deadline,
+            selected_custody: LocalDeliveryCustody,
+            *,
+            bootstrap_check: str,
+        ) -> None:
+            assert connection.host == "192.0.2.7" and marker == request.instance_marker
+            assert deadline.expires_at is not None and selected_custody is custody
+            assert bootstrap_check == CLOUD_INIT_CHECK
+            events.append("prerequisites")
+
+        monkeypatch.setattr(_creation_access, "observe_early_guest", prerequisites)
         custody = LocalDeliveryCustody()
         access = platform.build_creation_access(request, RunContext(config=config), owner=owner, custody=custody)
+        assert isinstance(access, EC2OwnedCreationAccess)
         yield SimpleNamespace(
             database=database,
             owner=owner,
@@ -315,13 +335,16 @@ def test_configured_role_is_retained_and_never_falls_back_to_ambient(owned, monk
     )
     ctx = RunContext(config=owned.config, secrets=SimpleNamespace(get=lambda name: "access-key-secret"))
     access = platform.build_creation_access(owned.request, ctx, owner=owned.owner, custody=owned.custody)
+    assert isinstance(access, EC2OwnedCreationAccess)
     access.provision(Deadline.after(5))
-    assert calls == [access._role_auth] and access.creation.role_auth is access._role_auth
+    creation, role_auth = access.creation, access._role_auth
+    assert creation is not None and role_auth is not None
+    assert calls == [role_auth] and creation.role_auth is role_auth
     access.complete_bootstrap(Deadline.after(5))
     owned.owner.stop_admission()
     assert access.settle(Deadline.after(5))
-    assert access._role_auth._deadline is None and not access._role_auth.cleanup_incomplete
-    resource = owned.owner.inspect_lifecycle_obligation(access.creation.obligation_id)
+    assert role_auth._deadline is None and not role_auth.cleanup_incomplete
+    resource = owned.owner.inspect_lifecycle_obligation(creation.obligation_id)
     assert resource is not None and b"access-key-secret" not in resource.payload
 
 
@@ -471,3 +494,114 @@ def test_cleanup_deadline_retains_original_request_then_fresh_budget_observes(ow
     methods = [method for method, _ in owned.session.calls]
     assert methods.count("run_instances") == methods.count("terminate_instances") == 1
     assert methods.count("delete_security_group") == 1
+
+
+def test_acknowledged_group_waits_for_visibility_before_its_one_delete(owned, monkeypatch):
+    from agentworks.plugins.aws import _creation_rollback
+
+    def interrupt_before_launch(method: str) -> None:
+        if method == "describe_security_groups":
+            raise KeyboardInterrupt("provisioning interrupted after SG acknowledgment")
+
+    owned.session.after = interrupt_before_launch
+    with pytest.raises(KeyboardInterrupt):
+        owned.access.provision(Deadline.after(5))
+    creation = owned.access.creation
+    assert creation is not None and creation.intent.group_receipt is not None
+    assert not creation.intent.launch_attempted
+    owned.session.after = lambda method: None
+    owned.session.group_visibility_delay = 3
+    clock = [100.0]
+    monkeypatch.setattr("agentworks.execution.carrier.time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(
+        _creation_rollback, "time", SimpleNamespace(sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    )
+    owned.access.request_rollback()
+    owned.owner.stop_admission()
+    assert owned.access.settle(Deadline.after(5))
+    assert owned.session.group_visibility_delay == 0 and creation.intent.removed
+    methods = [method for method, _ in owned.session.calls]
+    assert methods.count("create_security_group") == methods.count("delete_security_group") == 1
+    assert "run_instances" not in methods
+
+
+def test_acknowledged_group_notfound_expires_with_debt_until_observed_then_deleted(owned, monkeypatch):
+    from agentworks.plugins.aws import _creation_rollback
+
+    def interrupt_before_launch(method: str) -> None:
+        if method == "describe_security_groups":
+            raise KeyboardInterrupt("provisioning interrupted after SG acknowledgment")
+
+    owned.session.after = interrupt_before_launch
+    with pytest.raises(KeyboardInterrupt):
+        owned.access.provision(Deadline.after(5))
+    creation = owned.access.creation
+    assert creation is not None and creation.intent.group_receipt is not None
+    owned.session.after = lambda method: None
+    owned.session.group_visibility_delay = 100
+    clock = [100.0]
+    monkeypatch.setattr("agentworks.execution.carrier.time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(
+        _creation_rollback, "time", SimpleNamespace(sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    )
+    owned.access.request_rollback()
+    owned.owner.stop_admission()
+    with pytest.raises(LimitExceededError):
+        owned.access.settle(Deadline.after(0.25))
+    assert not creation.intent.removed and not creation.intent.group_delete_attempted
+    assert owned.owner.list_pending_lifecycle_obligations()
+    assert "delete_security_group" not in [method for method, _ in owned.session.calls]
+    owned.session.group_visibility_delay = 0
+    assert owned.access.settle(Deadline.after(5))
+    methods = [method for method, _ in owned.session.calls]
+    assert methods.count("create_security_group") == methods.count("delete_security_group") == 1
+
+
+@pytest.mark.parametrize("committed", [False, True])
+@pytest.mark.parametrize("foreign_volume", [False, True])
+def test_interrupted_acknowledged_launch_can_observe_initial_attachments_during_cleanup(
+    owned, monkeypatch, committed, foreign_volume
+):
+    reply = owned.session.reply
+
+    def without_attachments(method, arguments):
+        result = reply(method, arguments)
+        if method == "run_instances":
+            result["Instances"][0].pop("BlockDeviceMappings")
+            result["Instances"][0].pop("NetworkInterfaces")
+        return result
+
+    monkeypatch.setattr(owned.session, "reply", without_attachments)
+    repository = owned.database.operations
+    publish = repository.publish_lifecycle_obligation_payload
+    interrupted = False
+
+    def interrupt_publication(*args, **kwargs):
+        nonlocal interrupted
+        if not interrupted and json.loads(kwargs["payload"]).get("launch_receipt"):
+            interrupted = True
+            if committed:
+                publish(*args, **kwargs)
+            raise KeyboardInterrupt("launch receipt publication interrupted")
+        return publish(*args, **kwargs)
+
+    monkeypatch.setattr(repository, "publish_lifecycle_obligation_payload", interrupt_publication)
+    with pytest.raises(KeyboardInterrupt):
+        owned.access.provision(Deadline.after(5))
+    creation = owned.access.creation
+    assert creation is not None and creation.intent.instance_id == INSTANCE
+    assert not creation.intent.volumes and not creation.intent.interfaces and not owned.events
+    owned.access.request_rollback()
+    owned.owner.stop_admission()
+    if foreign_volume:
+        owned.session.volume_tags = [{"Key": "agentworks:creation", "Value": "foreign-creation"}]
+        with pytest.raises(StateError):
+            owned.access.settle(Deadline.after(5))
+        assert not creation.intent.volumes and not creation.intent.interfaces
+        assert "terminate_instances" not in [method for method, _ in owned.session.calls]
+        owned.session.volume_tags = None
+    assert owned.access.settle(Deadline.after(5))
+    assert creation.intent.volumes == (VOLUME,) and creation.intent.interfaces == (NIC,)
+    methods = [method for method, _ in owned.session.calls]
+    assert methods.count("create_security_group") == methods.count("run_instances") == 1
+    assert methods.count("terminate_instances") == methods.count("delete_security_group") == 1
