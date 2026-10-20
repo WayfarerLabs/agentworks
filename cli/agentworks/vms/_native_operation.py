@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform.base import ProviderLocator
     from agentworks.db import AgentRow, VMRow
     from agentworks.execution.binding import NativeExecutionBinding
-    from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
+    from agentworks.vms._native_execution_access import OwnedVMPlatformAccess
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,7 +115,7 @@ class _Workflow:
     owner: OperationOwner
     deadline: Deadline
     local_delivery: LocalDeliveryCustody = field(default_factory=LocalDeliveryCustody, repr=False)
-    access: OwnedNativePlatformAccess | None = None
+    access: OwnedVMPlatformAccess | None = None
     routes: list[_RoutePreparation] = field(default_factory=list)
     finalizing: bool = False
     body_admission_closed: bool = False
@@ -355,7 +355,7 @@ def _prepare_route(
     db: Database,
     vm: VMRow,
     platform: VMPlatform,
-    access: OwnedNativePlatformAccess,
+    access: OwnedVMPlatformAccess,
     locator: ProviderLocator,
     binding: NativeExecutionBinding,
     *,

@@ -1,4 +1,4 @@
-"""Private platform-owned access retained by the native composition root."""
+"""Private platform custody retained across selected execution routes."""
 
 from __future__ import annotations
 
@@ -14,17 +14,14 @@ if TYPE_CHECKING:
     from agentworks.execution.carrier import Deadline
 
 
-class OwnedNativePlatformAccess(Protocol):
-    """Retain partial platform progress without finalizing the operation owner."""
+class OwnedVMPlatformAccess(Protocol):
+    """Share retained availability and cleanup without acquiring or closing an owner."""
 
     @property
     def binding(self) -> NativeExecutionBinding | None: ...
 
     @property
     def independent_availability(self) -> _IndependentJobAvailability | None: ...
-
-    @property
-    def native_configuration_check(self) -> Callable[[], None] | None: ...
 
     @property
     def guest_check(self) -> Callable[[VMGuestIdentity], None] | None: ...
@@ -34,10 +31,17 @@ class OwnedNativePlatformAccess(Protocol):
 
     def observe_power(self, deadline: Deadline) -> VMStatus: ...
 
-    def ensure_available(self, power: VMStatus, deadline: Deadline) -> ProviderLocator: ...
-
-    def prepare_native_route(self, deadline: Deadline) -> NativeExecutionBinding: ...
-
     def observe_locator(self, deadline: Deadline) -> ProviderLocatorObservation: ...
 
     def settle(self, deadline: Deadline) -> bool: ...
+
+
+class OwnedNativePlatformAccess(OwnedVMPlatformAccess, Protocol):
+    """Prepare an existing VM without finalizing its operation owner."""
+
+    @property
+    def native_configuration_check(self) -> Callable[[], None] | None: ...
+
+    def ensure_available(self, power: VMStatus, deadline: Deadline) -> ProviderLocator: ...
+
+    def prepare_native_route(self, deadline: Deadline) -> NativeExecutionBinding: ...
