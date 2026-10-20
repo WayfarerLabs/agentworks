@@ -1353,13 +1353,19 @@ class ExecutionOperation:
                 operation.settle(candidate.dispatch, candidate.carrier_completion)
             operation.coordination_uncertain = False
         elif not operation.pending_remote_effects and operation.outstanding_attempt is None:
-            # A lost begin reply precedes entry into the actual carrier.
+            # A completed handoff does not depend on another route's borrower.
+            # A lost begin reply still requires its original actual attempt.
             with self._owner._guard:  # noqa: SLF001
                 self._owner._reconcile_transition_locked()  # noqa: SLF001
+                attempt = self._owner._outstanding_attempt  # noqa: SLF001
+                if active.borrow._closed and (  # noqa: SLF001
+                    attempt is None or isinstance(attempt, OperationAttempt) and attempt._borrow is not active.borrow  # noqa: SLF001
+                ):
+                    operation.coordination_uncertain = False
+                    return
                 borrower = self._owner._active_borrow  # noqa: SLF001
                 if borrower is not active.borrow and (borrower is not None or not active.borrow._closed):  # noqa: SLF001
                     raise StateError("Inline call no longer owns its admission borrow")
-                attempt = self._owner._outstanding_attempt  # noqa: SLF001
                 if attempt is not None and (
                     not isinstance(attempt, OperationAttempt) or attempt._borrow is not active.borrow  # noqa: SLF001
                 ):

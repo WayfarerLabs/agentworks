@@ -195,6 +195,167 @@ def test_completed_later_inline_handoff_retires_before_earlier_lifetime(scenario
     assert caught.value is control and control.__cause__ is cause
 
 
+def test_later_file_borrow_retires_before_closed_earlier_inline_bookkeeping(scenario, tmp_path, monkeypatch):
+    database, owner, operation, _, plan, _, qga, deliveries = scenario
+    earlier = _RoutePreparation(
+        views=VMOperation(owner, None, None, FileOperation(owner, operation._target), operation, None)
+    )
+    files = FileOperation(owner, operation._target)
+    later = _record(owner, files, target=operation._target)
+    workflow = _Workflow(owner, qga.deadline, routes=[earlier, later])
+    qga.running = False
+    handoff_control = KeyboardInterrupt("earlier handoff reply lost")
+    handoff_cause = ValueError("original handoff cause")
+    handoff_control.__cause__ = handoff_cause
+    original = OperationBorrow.handoff_retained_effect
+
+    def handoff_then_interrupt(borrow):
+        original(borrow)
+        raise handoff_control
+
+    with monkeypatch.context() as patch:
+        patch.setattr(OperationBorrow, "handoff_retained_effect", handoff_then_interrupt)
+        with pytest.raises(KeyboardInterrupt) as earlier_caught:
+            run_proxmox(scenario)
+    assert earlier_caught.value is handoff_control and handoff_control.__cause__ is handoff_cause
+    (execution_call,) = operation.active_inline_calls
+    assert execution_call.bookkeeping_retained and execution_call.borrow.closed
+    assert execution_call.prepared is None and execution_call.candidate is None
+    assert execution_call.operation.outstanding_attempt is None and deliveries[0].closure_proven
+    approved = tmp_path / "approved"
+    approved.mkdir()
+    held_upload = (database, owner, files, approved, plan)
+    carrier = LocalCarrier()
+    payload = b"actual second route file"
+    source = BytesSource(payload)
+    file_control = KeyboardInterrupt("later file borrow close interrupted")
+    file_cause = ValueError("original file close cause")
+    file_control.__cause__ = file_cause
+
+    def interrupt_close(borrow):
+        raise file_control
+
+    with monkeypatch.context() as patch:
+        patch.setattr(OperationBorrow, "close", interrupt_close)
+        with pytest.raises(KeyboardInterrupt) as later_caught:
+            upload(held_upload, carrier, source)
+    assert later_caught.value is file_control and file_control.__cause__ is file_cause
+    (file_call,) = files.active_uploads
+    assert file_call.capture_ready and file_call.outcome is not None
+    assert not file_call.outcome.requires_owner_retention and not file_call.borrow.closed
+    assert owner._active_borrow is file_call.borrow and file_call.borrow is not execution_call.borrow
+    assert operation.active_inline_calls == (execution_call,) and execution_call.borrow.closed
+    assert approved.joinpath("target").read_bytes() == payload
+    calls = list(qga.calls), carrier.calls, source.calls
+    assert calls[0] and calls[1] and database.operations.inspect(owner.ownership.scope) is not None
+    workflow.close(cleanup_deadline=Deadline.after(2))
+    assert not operation.active_inline_calls and not files.active_uploads
+    assert file_call.borrow.closed and approved.joinpath("target").read_bytes() == payload
+    assert (qga.calls, carrier.calls, source.calls) == calls
+    assert database.operations.inspect(owner.ownership.scope) is None
+    assert earlier_caught.value is handoff_control and handoff_control.__cause__ is handoff_cause
+    assert later_caught.value is file_control and file_control.__cause__ is file_cause
+
+
+def test_later_inline_borrow_retires_after_closed_earlier_inline_bookkeeping(scenario, monkeypatch):
+    database, owner, operation, _, plan, runtime, qga, deliveries = scenario
+    earlier = _RoutePreparation(
+        views=VMOperation(owner, None, None, FileOperation(owner, operation._target), operation, None)
+    )
+    later = _record(owner, target=operation._target)
+    later_operation = later.views.execution_operation
+    workflow = _Workflow(owner, qga.deadline, routes=[earlier, later])
+    qga.running = False
+    earlier_control = KeyboardInterrupt("earlier completed handoff reply lost")
+    earlier_cause = ValueError("original earlier cause")
+    earlier_control.__cause__ = earlier_cause
+    original = OperationBorrow.handoff_retained_effect
+
+    def handoff_then_interrupt(borrow):
+        original(borrow)
+        raise earlier_control
+
+    with monkeypatch.context() as patch:
+        patch.setattr(OperationBorrow, "handoff_retained_effect", handoff_then_interrupt)
+        with pytest.raises(KeyboardInterrupt) as earlier_caught:
+            run_proxmox(scenario)
+    assert earlier_caught.value is earlier_control and earlier_control.__cause__ is earlier_cause
+    (earlier_call,) = operation.active_inline_calls
+    assert earlier_call.bookkeeping_retained and earlier_call.borrow.closed
+    assert earlier_call.prepared is None and earlier_call.candidate is None
+    assert earlier_call.operation.outstanding_attempt is None and deliveries[0].closure_proven
+    carrier = LocalCarrier()
+    later_control = KeyboardInterrupt("later completed handoff interrupted")
+    later_cause = ValueError("original later cause")
+    later_control.__cause__ = later_cause
+
+    def interrupt_handoff(borrow):
+        raise later_control
+
+    with monkeypatch.context() as patch:
+        patch.setattr(OperationBorrow, "handoff_retained_effect", interrupt_handoff)
+        with pytest.raises(KeyboardInterrupt) as later_caught:
+            later_operation.run_inline(
+                carrier,
+                Command(("/bin/true",)),
+                plan=plan,
+                runtime_selection=runtime,
+                deadline=qga.deadline,
+            )
+    assert later_caught.value is later_control and later_control.__cause__ is later_cause
+    (later_call,) = later_operation.active_inline_calls
+    assert later_call.bookkeeping_retained and not later_call.borrow.closed
+    assert later_call.operation.outstanding_attempt is None and later_call.candidate is not None
+    assert later_call.outcome is not None and reduce_owned_inline_result(later_call.outcome).status == ExitCode(0)
+    assert owner._active_borrow is later_call.borrow and later_call.borrow is not earlier_call.borrow
+    assert operation.active_inline_calls == (earlier_call,) and earlier_call.borrow.closed
+    calls = list(qga.calls), carrier.calls
+    assert calls[0] and calls[1] and database.operations.inspect(owner.ownership.scope) is not None
+    workflow.close(cleanup_deadline=Deadline.after(2))
+    assert not operation.active_inline_calls and not later_operation.active_inline_calls
+    assert later_call.borrow.closed and (qga.calls, carrier.calls) == calls
+    assert database.operations.inspect(owner.ownership.scope) is None
+    assert earlier_caught.value is earlier_control and earlier_control.__cause__ is earlier_cause
+    assert later_caught.value is later_control and later_control.__cause__ is later_cause
+
+
+def test_closed_inline_borrow_with_own_lost_begin_attempt_remains_retained(scenario, monkeypatch):
+    database, owner, operation, _, _, _, qga, _ = scenario
+    route = _RoutePreparation(
+        views=VMOperation(owner, None, None, FileOperation(owner, operation._target), operation, None)
+    )
+    workflow = _Workflow(owner, qga.deadline, routes=[route])
+    control = KeyboardInterrupt("actual begin reply lost")
+    cause = ValueError("original begin cause")
+    control.__cause__ = cause
+    original = OperationBorrow.begin_attempt
+    attempts = []
+
+    def begin_then_interrupt(borrow):
+        attempts.append(original(borrow))
+        raise control
+
+    with monkeypatch.context() as patch:
+        patch.setattr(OperationBorrow, "begin_attempt", begin_then_interrupt)
+        with pytest.raises(KeyboardInterrupt) as caught:
+            run_proxmox(scenario)
+    assert caught.value is control and isinstance(control.__cause__, InlineExecutionControlFact)
+    assert control.__cause__.__cause__ is cause
+    (active,) = operation.active_inline_calls
+    (attempt,) = attempts
+    assert active.bookkeeping_retained and active.operation.outstanding_attempt is None
+    assert not active.operation.pending_remote_effects and active.operation.coordination_uncertain
+    assert owner._outstanding_attempt is attempt and attempt._borrow is active.borrow
+    active.borrow.handoff_unresolved()
+    assert active.borrow.closed and active.borrow.has_outstanding_attempt
+    with pytest.raises(StateError):
+        workflow.close(cleanup_deadline=Deadline.after(2))
+    assert operation.active_inline_calls == (active,) and active.operation.coordination_uncertain
+    assert owner._outstanding_attempt is attempt and not qga.calls
+    assert database.operations.inspect(owner.ownership.scope) is not None
+    assert caught.value is control and control.__cause__.__cause__ is cause
+
+
 def test_closing_later_unarmed_registration_retires_without_admission(scenario, monkeypatch):
     database, owner, operation, _, _, _, qga, _ = scenario
     workflow, earlier_carrier = _completed_inline_routes(scenario)
