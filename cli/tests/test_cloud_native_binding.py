@@ -492,10 +492,11 @@ elif "{provider}" == "gcp":
     mod._VMIdentity.from_row = lambda vm: NS(network_url="n", subnet_url=None, access_config_name="a")
     mod.verify_instance_network = lambda *a, **kw: None
     mod.live_external_ipv4 = lambda *a, **kw: "{IP}"
-vm = NS(name="vm", admin_username="admin", platform_metadata={{"resource_id":"id"}})
+vm = NS(name="vm", admin_username="admin", instance_marker="c" * 32, platform_metadata={{"resource_id":"id"}})
 config = NS(operator=NS(ssh=SSHSettings(Path("/absent/trust"), Path("/absent/key"))))
 b = p.resolve_native_execution_binding(vm, RunContext(), config=config, deadline=Deadline.after(10))
 assert b.carrier._connection.host == "{IP}"
+assert b.carrier._connection.host_key_alias == "agw-vm-" + vm.instance_marker
 assert b._new_managed_delivery()._connection is b.carrier._connection
 '''
     result = subprocess.run([sys.executable, "-c", source], capture_output=True, text=True, check=False)
