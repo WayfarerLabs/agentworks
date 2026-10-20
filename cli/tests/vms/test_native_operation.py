@@ -1050,8 +1050,8 @@ def test_missing_root_plan_refuses_before_views_and_preserves_hold_custody(
     if uncertain_hold:
         fact = raised.value.__cause__
         assert isinstance(fact, VMOperationControlFact)
-        assert fact._workflow.views is None
-        assert fact._workflow.identity is not None and fact._workflow.identity.elevated_plan is None
+        assert fact._workflow.routes[0].views is None
+        assert fact._workflow.routes[0].identity is not None and fact._workflow.routes[0].identity.elevated_plan is None
         with pytest.raises(StateError):
             fact._workflow.owner.borrow()
         observer.presence = GuestAnchorPresence.ABSENT_CONFIRMED
@@ -1124,7 +1124,7 @@ def test_full_guest_mismatch_prevents_file_and_command_application_effects(
     assert not observer.events and database.operations.inspect(_scope()) is not None
     fact = teardown.value.__cause__
     assert isinstance(fact, VMOperationControlFact)
-    assert fact._workflow.views is views
+    assert fact._workflow.routes[0].views is views
     with pytest.raises(StateError):
         views.owner.borrow()
 
@@ -1194,12 +1194,14 @@ def test_interruption_after_selected_preparation_keeps_actual_child_custody(
     assert isinstance(fact, VMOperationControlFact)
     access = fact._workflow.access
     assert isinstance(access, WSL2OwnedNativePlatformAccess) and access.selected is not None
-    assert fact._workflow.preparation is not None and fact._workflow.preparation.pending_remote_effects
+    assert (
+        fact._workflow.routes[0].preparation is not None and fact._workflow.routes[0].preparation.pending_remote_effects
+    )
     assert database.operations.inspect(_scope()) is not None
     with pytest.raises(StateError):
         fact.retry_cleanup(Deadline.after(10))
     assert prepared is not None
-    fact._workflow.preparation = prepared
+    fact._workflow.routes[0].preparation = prepared
     fact.retry_cleanup(Deadline.after(10))
     assert database.operations.inspect(_scope()) is None
 

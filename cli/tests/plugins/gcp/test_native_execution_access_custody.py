@@ -85,7 +85,7 @@ def test_late_guest_fact_is_retained_without_repeating_preparation(full):
     p.guest_hook = lambda: setattr(p.sdk, "now", p.deadline.expires_at)
     with pytest.raises(LimitExceededError):
         prepare_native(p, VMStatus.RUNNING, p.deadline)
-    assert p.workflow.preparation is p.prep
+    assert p.workflow.routes[0].preparation is p.prep
     assert p.access.settle(Deadline.after(2))
     assert p.calls.count("guest-stub") == 1
 

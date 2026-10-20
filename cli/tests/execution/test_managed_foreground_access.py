@@ -75,7 +75,7 @@ def test_foreground_managed_zero_is_one_launch_and_wait(view, monkeypatch, check
     assert main.start.calls == 1 and main.observe.calls == 3
     assert result.stdout.retention is result.stderr.retention is Retention.DISCARDED
     assert keeper.stop.calls == keeper.observe.calls == 0
-    assert not workflow.views.execution_operation.managed_runs[0].keeper._stop.is_set()
+    assert not workflow.routes[0].views.execution_operation.managed_runs[0].keeper._stop.is_set()
     assert database.operations.inspect(workflow.owner.ownership.scope) is not None
     workflow.close(cleanup_deadline=Deadline.after(5))
 
@@ -222,7 +222,7 @@ def test_acknowledgement_consumes_budget_without_losing_job(view, monkeypatch, p
     )
     assert result.stdout.retention is result.stderr.retention is retention
     assert main.start.calls == 1 and main.observe.calls == 0 and keeper.stop.calls == 0
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     assert run.acknowledged and not run.keeper._stop.is_set()
     assert database.operations.inspect(workflow.owner.ownership.scope) is not None
     workflow.close(cleanup_deadline=Deadline.after(5))
@@ -232,7 +232,7 @@ def test_acknowledgement_consumes_budget_without_losing_job(view, monkeypatch, p
 def test_pre_first_wait_expiry_never_adopts_foreign_reference(view, reference):
     _, workflow, _, main, _ = view
     with pytest.raises(ValidationError):
-        workflow.views.execution_operation.wait_job(reference, main, Deadline.after(0))
+        workflow.routes[0].views.execution_operation.wait_job(reference, main, Deadline.after(0))
     assert main.start.calls == main.observe.calls == 0
     workflow.close(cleanup_deadline=Deadline.after(5))
 
@@ -258,7 +258,7 @@ def test_foreground_flags_refuse_before_managed_effects(view, options):
     values = {"profile": Protection.MANAGED, **options}
     with pytest.raises((ValidationError, StateError)):
         access.run(Command(["/bin/true"]), **values)
-    assert not workflow.views.execution_operation.managed_runs
+    assert not workflow.routes[0].views.execution_operation.managed_runs
     assert main.start.calls == main.observe.calls == keeper.clock.calls == 0
     workflow.close(cleanup_deadline=Deadline.after(5))
 
@@ -276,7 +276,7 @@ def test_foreground_controls_preserve_identity_reference_and_cause(view, monkeyp
     with pytest.raises(KeyboardInterrupt) as caught:
         access.run(Command(["/bin/true"]), profile=Protection.MANAGED)
     assert caught.value is control and isinstance(control.__cause__, ManagedExecutionControlFact)
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     assert control.__cause__.reference.run_id == run.receipt.identity.run_id
     assert control.__cause__.__cause__ is not None
     with pytest.raises(StateError):
@@ -367,7 +367,7 @@ def test_observation_timeout_keeps_keeper_and_owner_live(view, monkeypatch, chec
         result = access.run(Command(["/bin/true"]), profile=Protection.MANAGED)
     assert result.job is not None and result.failure is ExecutionFailure.DEADLINE
     assert main.start.calls == main.observe.calls == 1 and keeper.stop.calls == 0
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     assert not run.keeper._stop.is_set() and not run.cleanup_complete
     assert run.keeper._worker is not None and run.keeper._worker.is_alive()
     assert run.keeper.obligation is not None
@@ -402,7 +402,7 @@ def test_foreground_overlap_retains_reservation_but_never_launches(view, monkeyp
     monkeypatch.setattr(main.start, "validate", validate)
     with pytest.raises(StateError) as caught:
         access.run(Command(["/bin/true"]), profile=Protection.MANAGED)
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     assert run.reserved is not None and run.keeper.obligation is not None
     assert isinstance(caught.value.__cause__, ManagedExecutionControlFact)
     assert caught.value.__cause__.reference.run_id == run.receipt.identity.run_id
@@ -420,7 +420,7 @@ def test_entry_overlap_retains_conservative_admission_uncertainty(view):
     borrow = workflow.owner.borrow()
     with pytest.raises(StateError):
         access.run(Command(["/bin/true"]), profile=Protection.MANAGED)
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     assert run.reserved is not None and run.keeper.admission_uncertain and run.keeper.obligation is None
     assert main.start.calls == main.observe.calls == keeper.clock.calls == 0
     borrow.close()
@@ -459,7 +459,7 @@ def test_pre_first_wait_expiry_cannot_promote_unknown_original_start(view):
         access.run(Command(["/bin/true"]), profile=Protection.MANAGED)
     assert isinstance(caught.value.__cause__, ManagedExecutionControlFact)
     with pytest.raises(ValidationError):
-        workflow.views.execution_operation.wait_job(caught.value.__cause__.reference, main, Deadline.after(0))
+        workflow.routes[0].views.execution_operation.wait_job(caught.value.__cause__.reference, main, Deadline.after(0))
     assert main.start.calls == 1 and main.observe.calls == 0
     with pytest.raises(StateError):
         workflow.close(cleanup_deadline=Deadline.after(5))
@@ -496,7 +496,7 @@ def test_foreground_preserves_body_identity_and_sensitive_bytes(view, monkeypatc
     assert body.source == source.encode() and body.stdin == payload
     assert body.environment == (("PRIVATE", "private-value"),) and body.cwd == "/approved"
     assert body.output_mode == ("sensitivity-suppressed" if sensitive else "discard")
-    (run,) = workflow.views.execution_operation.managed_runs
+    (run,) = workflow.routes[0].views.execution_operation.managed_runs
     assert run.receipt.spec.workload == (access._elevated_plan.expected if sudo else ordinary.expected)
     workflow.close(cleanup_deadline=Deadline.after(5))
 
@@ -515,7 +515,7 @@ def test_unbounded_selected_managed_budget_refuses_before_launch(view, monkeypat
     monkeypatch.setattr(access, "_deadline", lambda: Deadline.after(None))
     with pytest.raises(ValidationError):
         access.run(Command(["/bin/true"]), profile=Protection.MANAGED)
-    assert main.start.calls == main.observe.calls == 0 and not workflow.views.execution_operation.managed_runs
+    assert main.start.calls == main.observe.calls == 0 and not workflow.routes[0].views.execution_operation.managed_runs
     workflow.close(cleanup_deadline=Deadline.after(5))
 
 

@@ -25,7 +25,7 @@ pytestmark = pytest.mark.windows
 @pytest.mark.parametrize("point", ["carrier", "active", "dispatch-id", "tracking"])
 def test_setup_allocation_failure_releases_unused_borrow(view, lookup, monkeypatch, entry, point):
     database, workflow, access, main, keeper = view
-    operation = workflow.views.execution_operation
+    operation = workflow.routes[0].views.execution_operation
     drains = []
     if entry in {"observe", "stop"}:
         reference = access.start(

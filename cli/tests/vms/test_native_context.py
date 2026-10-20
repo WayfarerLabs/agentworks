@@ -427,7 +427,7 @@ def test_uncertain_cleanup_retains_original_control_cause_and_owner(
     fact = control.__cause__
     assert isinstance(fact, VMOperationControlFact) and fact.__cause__ is cause
     operation = prepared[0]
-    assert fact._workflow.views is operation and fact._workflow.owner is operation.owner
+    assert fact._workflow.routes[0].views is operation and fact._workflow.owner is operation.owner
     claim = database.operations.inspect(_scope())
     assert claim is not None and claim.ownership == operation.owner.ownership
     with pytest.raises(StateError):
@@ -560,7 +560,7 @@ def test_command_then_completed_file_bookkeeping_retries_exact_call_without_repl
     else:
         fact = control.__cause__
         assert isinstance(fact, VMOperationControlFact) and fact.__cause__ is cause
-        assert fact._workflow.views is operation
+        assert fact._workflow.routes[0].views is operation
         claim = database.operations.inspect(_scope())
         assert claim is not None and claim.ownership == operation.owner.ownership
         fact.retry_cleanup(Deadline.after(10))

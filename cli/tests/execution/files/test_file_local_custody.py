@@ -27,7 +27,7 @@ from agentworks.execution.files import (
 )
 from agentworks.execution.target import ExecutionIdentity, ExecutionRoute, ExecutionTarget
 from agentworks.operations import OperationOwner
-from agentworks.vms._native_operation import VMOperation, _Workflow
+from agentworks.vms._native_operation import VMOperation, _RoutePreparation, _Workflow
 from tests.execution.files._file_access_support import bound_access as bound_access
 from tests.execution.files._file_access_support import plan as plan
 from tests.execution.files._file_read_support import LocalCarrier
@@ -67,7 +67,7 @@ def workflow(access: FileAccess, owner: OperationOwner) -> _Workflow:
             ExecutionRoute.NATIVE,
         ),
     )
-    return _Workflow(owner, Deadline.after(30), views=views)
+    return _Workflow(owner, Deadline.after(30), routes=[_RoutePreparation(views=views)])
 
 
 def test_owned_source_open_and_close_share_the_ordinary_serial_borrow(bound_access, tmp_path, monkeypatch):

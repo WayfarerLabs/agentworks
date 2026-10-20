@@ -41,7 +41,7 @@ from agentworks.vms.target_preparation import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from agentworks.capabilities.vm_platform.base import ProviderLocator
     from agentworks.db import AgentRow, VMRow
@@ -77,21 +77,17 @@ class VMOperationControlFact(Exception):
 
 
 @dataclass
-class _Workflow:
-    owner: OperationOwner
-    deadline: Deadline
-    local_delivery: LocalDeliveryCustody = field(default_factory=LocalDeliveryCustody, repr=False)
-    access: OwnedNativePlatformAccess | None = None
+class _RoutePreparation:
+    """Retained preparation and admission for one route under the outer owner."""
+
     preparation: VMTargetPreparation | None = None
     identity: TargetIdentityPreparation | None = None
     agent_identity: TargetIdentityPreparation | None = None
     namespace: NamespacePreparation | None = None
     views: VMOperation | None = None
-    finalizing: bool = False
     body_admission_closed: bool = False
-    _cleanup_lock: Lock = field(default_factory=Lock, init=False, repr=False)
 
-    def _components_settled(self) -> bool:
+    def components_settled(self) -> bool:
         if self.namespace is not None and not self.namespace.settled:
             return False
         preparation = self.preparation
@@ -113,9 +109,26 @@ class _Workflow:
         execution = views.execution_operation
         return not (files.has_pending_custody or execution.has_pending_custody)
 
+
+@dataclass
+class _Workflow:
+    owner: OperationOwner
+    deadline: Deadline
+    local_delivery: LocalDeliveryCustody = field(default_factory=LocalDeliveryCustody, repr=False)
+    access: OwnedNativePlatformAccess | None = None
+    routes: list[_RoutePreparation] = field(default_factory=list)
+    finalizing: bool = False
+    body_admission_closed: bool = False
+    _cleanup_lock: Lock = field(default_factory=Lock, init=False, repr=False)
+
+    def _components_settled(self) -> bool:
+        return all(route.components_settled() for route in self.routes)
+
     def close(self, *, cleanup_deadline: Deadline | None = None) -> None:
         """Stop body admission, then release only on aggregate exact settlement."""
         self.body_admission_closed = True
+        for route in self.routes:
+            route.body_admission_closed = True
         self.owner.stop_admission()
         if not self._cleanup_lock.acquire(blocking=False):
             raise StateError("VM operation cleanup is already active")
@@ -131,14 +144,15 @@ class _Workflow:
             return
         self.owner.retire_unused_borrow()
         budget = self.deadline if cleanup_deadline is None else cleanup_deadline
-        if self.views is not None:
-            # A previous close may retain an actual scratch helper independently
-            # from artifact debt. Retire it before admitting keeper cleanup.
-            if self.views.execution_operation.closing_scratch_helper_pending:
-                self.views.execution_operation.finish_scratch_cleanup(budget)
-            drained = True
-            interrupted: BaseException | None = None
-            for run in self.views.execution_operation.managed_runs:
+        views = tuple(route.views for route in self.routes if route.views is not None)
+        # No route may dispatch fresh cleanup while another route retains an
+        # actual closing scratch helper under the shared serial borrow.
+        for view in views:
+            view.execution_operation.settle_closing_scratch_helpers(budget)
+        drained = True
+        interrupted: BaseException | None = None
+        for view in views:
+            for run in view.execution_operation.managed_runs:
                 try:
                     if not run.keeper.drain(budget).drained or run.keeper.closing_exchange_pending:
                         drained = False
@@ -146,44 +160,46 @@ class _Workflow:
                     drained = False
                     if interrupted is None:
                         interrupted = control
-            if interrupted is not None:
-                raise interrupted
-            if not drained:
-                raise StateError("VM managed keeper drain remains unsettled")
-            # Bookkeeping cannot settle a finished helper while its actual
-            # host delivery is still open. This drain proves no guest closure.
-            if not self.owner.close_local_delivery(budget):
-                raise StateError("VM operation retains unsettled helper delivery")
-            if self.views.execution_operation.active_inline_calls:
-                self.views.execution_operation.observe_inline_cleanup(budget)
-            # Completed file calls can still hold the serial borrow. Retire
-            # their bookkeeping before resolving the execution lifetime row.
-            self.views.file_operation.settle_local_file_bookkeeping(budget)
-            self.views.file_operation.settle_download_bookkeeping()
-            self.views.file_operation.settle_completed_bookkeeping()
+        if interrupted is not None:
+            raise interrupted
+        if not drained:
+            raise StateError("VM managed keeper drain remains unsettled")
+        if not self.owner.close_local_delivery(budget):
+            raise StateError("VM operation retains unsettled helper delivery")
+        for view in views:
+            if view.execution_operation.active_inline_calls:
+                view.execution_operation.observe_inline_cleanup(budget)
+        # Retire every route's completed file and namespace borrow before any
+        # execution lifetime resolution, which also needs the shared borrow.
+        for view in views:
+            view.file_operation.settle_local_file_bookkeeping(budget)
+            view.file_operation.settle_download_bookkeeping()
+            view.file_operation.settle_completed_bookkeeping()
+        for route in self.routes:
+            if route.namespace is not None:
+                route.namespace.settle_local(budget)
+        for view in views:
             try:
-                self.views.execution_operation.finish()
+                view.execution_operation.finish()
             except BaseException as control:
                 # Closed helpers can release scratch while unknown launch
                 # facts retain the independent START obligation and claim.
                 try:
-                    self.views.execution_operation.finish_scratch_cleanup(budget)
+                    view.execution_operation.finish_scratch_cleanup(budget)
                 except BaseException:
                     raise control from control.__cause__
                 raise
-            self.views.execution_operation.finish_scratch_cleanup(budget)
+            view.execution_operation.finish_scratch_cleanup(budget)
+        for view in views:
+            for run in view.execution_operation.managed_runs:
+                run.finish_cleanup(budget)
         if not self.local_delivery.close(budget) or not self.owner.close_local_delivery(budget):
             raise StateError("VM operation retains unsettled local delivery")
-        if self.namespace is not None:
-            self.namespace.settle_local(budget)
-        if self.views is not None:
-            for run in self.views.execution_operation.managed_runs:
-                run.finish_cleanup(budget)
         if not self._components_settled():
             raise StateError("VM operation retains unsettled work")
         access_settled = self.access is None or self.access.settle(budget)
         obligations = self.owner.list_pending_lifecycle_obligations()
-        if access_settled and self.local_delivery.settled and not obligations:
+        if access_settled and self.local_delivery.settled and self._components_settled() and not obligations:
             self.owner.seal_lifecycle_obligations()
             self.owner.record_effects_resolved()
             # A release may commit before its reply is interrupted. Retry the
@@ -196,6 +212,7 @@ class _Workflow:
 
 def _prepare_target(
     workflow: _Workflow,
+    route: _RoutePreparation,
     vm: VMRow,
     platform: VMPlatform,
     locator: ProviderLocator,
@@ -204,7 +221,7 @@ def _prepare_target(
     """Retain common guest preparation before any platform guest check."""
     assert workflow.access is not None
     try:
-        workflow.preparation = prepare_managed_vm_target_from_platform(
+        route.preparation = prepare_managed_vm_target_from_platform(
             vm,
             platform,
             locator,
@@ -215,10 +232,10 @@ def _prepare_target(
         )
     except BaseException as control:
         if isinstance(control.__cause__, VMTargetPreparationControlFact):
-            workflow.preparation = control.__cause__.preparation
+            route.preparation = control.__cause__.preparation
         raise
     provider_locator_remaining(workflow.deadline, vm_name=vm.name)
-    return workflow.preparation
+    return route.preparation
 
 
 def _require_vm_row(db: Database, vm_name: str, platform: VMPlatform, ctx: RunContext) -> VMRow:
@@ -244,7 +261,7 @@ def _prepare(
     route: ExecutionRoute,
 ) -> VMOperation:
     vm = _require_vm_row(db, vm_name, platform, ctx)
-    instance_marker = validate_vm_instance_marker(vm.instance_marker)
+    validate_vm_instance_marker(vm.instance_marker)
     try:
         encode_account_request(AccountRequest("0" * 32, vm.admin_username))
     except AccountRequestError as error:
@@ -316,13 +333,57 @@ def _prepare(
         binding = replace(canonical_binding, _independent_availability=selected_availability)
         route_check = check_canonical
 
+    return _prepare_route(
+        workflow,
+        db,
+        vm,
+        platform,
+        access,
+        locator,
+        binding,
+        trusted_root=trusted_root,
+        agent=agent,
+        route=route,
+        route_check=route_check,
+    )
+
+
+def _prepare_route(
+    workflow: _Workflow,
+    db: Database,
+    vm: VMRow,
+    platform: VMPlatform,
+    access: OwnedNativePlatformAccess,
+    locator: ProviderLocator,
+    binding: NativeExecutionBinding,
+    *,
+    trusted_root: PurePosixPath,
+    agent: AgentRow | None,
+    route: ExecutionRoute,
+    route_check: Callable[[Deadline], None] | None,
+) -> VMOperation:
+    """Assemble one route using retained availability and explicit route evidence.
+
+    The outer workflow retains platform access before calling this assembly.
+    Each route remains addressable even if target or account preparation raises.
+    """
+    if workflow.body_admission_closed:
+        raise StateError("VM operation no longer admits route preparation")
+    assert workflow.access is access
+    retained = _RoutePreparation()
+    workflow.routes.append(retained)
+    vm_name = vm.name
+    instance_marker = validate_vm_instance_marker(vm.instance_marker)
+
     def check_route() -> None:
+        if workflow.body_admission_closed or retained.body_admission_closed:
+            raise StateError("VM operation no longer admits body work")
         if route_check is not None:
             route_check(workflow.deadline)
         provider_locator_remaining(workflow.deadline, vm_name=vm_name)
 
     check_route()
-    preparation = _prepare_target(workflow, vm, platform, locator, binding)
+    preparation = _prepare_target(workflow, retained, vm, platform, locator, binding)
     result = preparation.guest_result if preparation is not None else None
     observation = result.observation if result is not None else None
     guest = observation.identity if observation is not None else None
@@ -353,9 +414,9 @@ def _prepare(
         )
     except BaseException as control:
         if isinstance(control.__cause__, TargetIdentityControlFact):
-            workflow.identity = control.__cause__.preparation
+            retained.identity = control.__cause__.preparation
         raise
-    workflow.identity = identity
+    retained.identity = identity
     if (
         workflow.deadline.expired
         or identity.status is not TargetIdentityStatus.PREPARED
@@ -380,9 +441,9 @@ def _prepare(
             )
         except BaseException as control:
             if isinstance(control.__cause__, TargetIdentityControlFact):
-                workflow.agent_identity = control.__cause__.preparation
+                retained.agent_identity = control.__cause__.preparation
             raise
-        workflow.agent_identity = agent_identity
+        retained.agent_identity = agent_identity
         if (
             workflow.deadline.expired
             or agent_identity.status is not TargetIdentityStatus.PREPARED
@@ -390,7 +451,7 @@ def _prepare(
         ):
             raise StateError("VM agent account preparation is unavailable", entity_kind="agent", entity_name=agent.name)
         check_route()
-        workflow.namespace = NamespacePreparation(
+        retained.namespace = NamespacePreparation(
             workflow.owner,
             binding.carrier,
             target,
@@ -399,7 +460,7 @@ def _prepare(
             binding.runtime_selection,
             workflow.deadline,
         )
-        workflow.namespace.prepare()
+        retained.namespace.prepare()
         check_route()
     file_operation = FileOperation(workflow.owner, target, bootstrap=bootstrap)
     execution_operation = ExecutionOperation(
@@ -413,7 +474,7 @@ def _prepare(
     )
 
     def selected_deadline() -> Deadline:
-        if workflow.body_admission_closed:
+        if workflow.body_admission_closed or retained.body_admission_closed:
             raise StateError("VM operation no longer admits body work")
         return workflow.deadline
 
@@ -483,7 +544,7 @@ def _prepare(
     views = VMOperation(
         workflow.owner, files, execution, file_operation, execution_operation, execution_target, agent_target
     )
-    workflow.views = views
+    retained.views = views
     return views
 
 

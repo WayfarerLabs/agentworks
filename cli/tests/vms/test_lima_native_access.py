@@ -40,7 +40,7 @@ from agentworks.execution.carriers._subprocess import ProcessResult
 from agentworks.execution.carriers.lima import LimaCarrier
 from agentworks.operations import OperationOwner
 from agentworks.vms._lima_native_access import LimaOwnedNativePlatformAccess
-from agentworks.vms._native_operation import _prepare_target, _Workflow
+from agentworks.vms._native_operation import _prepare_target, _RoutePreparation, _Workflow
 from agentworks.vms.target_preparation import VMTargetPreparationFailure, VMTargetPreparationStatus
 from tests.execution.carriers.test_lima import process_result
 from tests.vms.test_target_preparation import _MARKER, TranscriptCarrier, _success_payload
@@ -161,7 +161,9 @@ def prepare_native(access: LimaOwnedNativePlatformAccess, power: VMStatus, deadl
     access.native_configuration_check()
     locator = access.ensure_available(power, deadline)
     binding = access.prepare_native_route(deadline)
-    _prepare_target(workflow, access.vm, access.platform, locator, binding)
+    retained = _RoutePreparation()
+    workflow.routes.append(retained)
+    _prepare_target(workflow, retained, access.vm, access.platform, locator, binding)
     return workflow
 
 
@@ -186,7 +188,10 @@ def test_projection_binding_and_same_deadline_home_through_start_and_guest(local
     assert selected is not None
     monkeypatch.setenv("LIMA_HOME", "/must-not-follow-new-environment")
     workflow = prepare_native(access, power, deadline)
-    assert workflow.preparation is not None and workflow.preparation.status is VMTargetPreparationStatus.PREPARED
+    assert (
+        workflow.routes[0].preparation is not None
+        and workflow.routes[0].preparation.status is VMTargetPreparationStatus.PREPARED
+    )
     binding = access.binding
     assert binding.delivery_account == fake.user != access.vm.admin_username
     assert binding._early_guest_facts_route.account == fake.user
@@ -526,10 +531,10 @@ def test_guest_marker_is_still_checked(local, monkeypatch, marker_ok: bool) -> N
     power = access.observe_power(Deadline.after(10))
     workflow = prepare_native(access, power, Deadline.after(10))
     assert guest.calls == 1
-    assert workflow.preparation is not None
-    assert (workflow.preparation.status is VMTargetPreparationStatus.PREPARED) is marker_ok
+    assert workflow.routes[0].preparation is not None
+    assert (workflow.routes[0].preparation.status is VMTargetPreparationStatus.PREPARED) is marker_ok
     if not marker_ok:
-        assert workflow.preparation.failure is VMTargetPreparationFailure.IDENTITY
+        assert workflow.routes[0].preparation.failure is VMTargetPreparationFailure.IDENTITY
 
 
 def test_actual_packed_guest_probe_under_explicit_mocked_admission(local, monkeypatch) -> None:
@@ -561,7 +566,10 @@ def test_actual_packed_guest_probe_under_explicit_mocked_admission(local, monkey
     monkeypatch.setattr(LimaCarrier, "execute", execute)
     power = access.observe_power(Deadline.after(10))
     workflow = prepare_native(access, power, Deadline.after(10))
-    assert workflow.preparation is not None and workflow.preparation.status is VMTargetPreparationStatus.PREPARED
+    assert (
+        workflow.routes[0].preparation is not None
+        and workflow.routes[0].preparation.status is VMTargetPreparationStatus.PREPARED
+    )
     assert len(calls) == 1 and calls[0].returncode == 0, calls[0].stderr
     assert access.settle(Deadline.after(5))
 

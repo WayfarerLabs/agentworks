@@ -242,7 +242,7 @@ def test_stale_or_closing_owner_refuses_resource_lookup_and_stop(observer, closi
 @pytest.mark.parametrize("outstanding", (False, True))
 def test_active_file_borrow_refuses_stop_before_dispatch(observer, outstanding):
     _, _, operation, access, main, workflow = observer
-    files = workflow.views.file_operation
+    files = workflow.routes[0].views.file_operation
     borrow = files._owner.borrow()
     attempt = borrow.begin_attempt() if outstanding else None
     try:

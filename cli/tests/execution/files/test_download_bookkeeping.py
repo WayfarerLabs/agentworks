@@ -43,7 +43,7 @@ def pending(owner: OperationOwner) -> tuple[PersistedLifecycleObligation, FileCa
 def test_registration_failure_preserves_original_custody_unless_absence_is_proved(bound_access, monkeypatch, fault):
     from agentworks.execution._execution_operation import ExecutionOperation
     from agentworks.execution.carrier import Deadline
-    from agentworks.vms._native_operation import VMOperation, _Workflow
+    from agentworks.vms._native_operation import VMOperation, _RoutePreparation, _Workflow
     from tests.execution.files._target_support import target_for_owner
 
     access, root, owner, db = bound_access
@@ -133,7 +133,8 @@ def test_registration_failure_preserves_original_custody_unless_absence_is_prove
     with pytest.raises(StateError):
         access._operation.settle_download_bookkeeping()
     workflow = _Workflow(owner, Deadline.after(20))
-    workflow.views = VMOperation(
+    workflow.routes.append(_RoutePreparation())
+    workflow.routes[0].views = VMOperation(
         owner, None, None, access._operation, ExecutionOperation(owner, target_for_owner(owner)), None
     )
     with pytest.raises(StateError):
@@ -262,7 +263,7 @@ def test_failed_calls_and_incomplete_capture_keep_truthful_custody(bound_access,
 def test_aggregate_settles_captured_closure_after_stop_before_component_check(bound_access, monkeypatch):
     from agentworks.execution._execution_operation import ExecutionOperation
     from agentworks.execution.carrier import Deadline
-    from agentworks.vms._native_operation import VMOperation, _Workflow
+    from agentworks.vms._native_operation import VMOperation, _RoutePreparation, _Workflow
     from tests.execution.files._target_support import target_for_owner
 
     access, root, owner, db = bound_access
@@ -278,7 +279,8 @@ def test_aggregate_settles_captured_closure_after_stop_before_component_check(bo
     with pytest.raises(KeyboardInterrupt):
         access.download(PurePosixPath(root / "source"), root.parent / "destination")
     workflow = _Workflow(owner, Deadline.after(20))
-    workflow.views = VMOperation(
+    workflow.routes.append(_RoutePreparation())
+    workflow.routes[0].views = VMOperation(
         owner,
         None,
         None,

@@ -315,7 +315,7 @@ def test_actual_route_response_close_failure_retains_owner_then_fresh_cleanup_fi
     original = next(response for response in p.route.responses if response.request.method == "PUT")
     assert original.close_calls == 2 and not original.closed
     assert p.access.cleanup_incomplete and p.credential.closed == 0
-    assert not p.guest_calls and p.workflow.preparation is None and p.access.route_check is None
+    assert not p.guest_calls and not p.workflow.routes and p.access.route_check is None
     assert p.database.operations.inspect(p.owner.ownership.scope) is not None
     assert len(p.owner.list_pending_lifecycle_obligations()) == 1
     before = (len(p.compute.calls), len(p.network.calls), len(p.constructions))

@@ -4,7 +4,7 @@ from typing import Any
 
 from agentworks.db import VMStatus
 from agentworks.execution.carrier import Deadline
-from agentworks.vms._native_operation import _prepare_target, _Workflow
+from agentworks.vms._native_operation import _prepare_target, _RoutePreparation, _Workflow
 
 
 def prepare_native(fixture: Any, power: VMStatus, deadline: Deadline) -> None:
@@ -15,4 +15,6 @@ def prepare_native(fixture: Any, power: VMStatus, deadline: Deadline) -> None:
         access.native_configuration_check()
     locator = access.ensure_available(power, deadline)
     binding = access.prepare_native_route(deadline)
-    _prepare_target(fixture.workflow, access._vm, access._platform, locator, binding)
+    retained = _RoutePreparation()
+    fixture.workflow.routes.append(retained)
+    _prepare_target(fixture.workflow, retained, access._vm, access._platform, locator, binding)

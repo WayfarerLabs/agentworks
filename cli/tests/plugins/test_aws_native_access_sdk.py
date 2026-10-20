@@ -370,7 +370,7 @@ def test_sdk_prepares_and_removes_only_owned_rule(native_aws, power):
     p.state = power.value
     assert p.access.observe_power(p.deadline) is power
     prepare_native(p, power, p.deadline)
-    assert len(p.preparations) == 1 and p.workflow.preparation is not None
+    assert len(p.preparations) == 1 and p.workflow.routes[0].preparation is not None
     assert p.access.binding._independent_availability is _IndependentJobAvailability.NO_IDLE_STOP
     p.access.route_check(p.deadline)
     assert p.access.settle(p.deadline)

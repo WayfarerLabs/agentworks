@@ -41,7 +41,7 @@ def test_disposal_fresh_identity_publication_survives_interruption(view, monkeyp
     reference = access.start(
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
-    run = workflow.views.execution_operation.managed_runs[0]
+    run = workflow.routes[0].views.execution_operation.managed_runs[0]
     old_id = run.disposal_obligation_id
     assign = ManagedOperationRun.__setattr__
     published: list[str] = []
@@ -96,7 +96,7 @@ def test_disposal_settled_row_recovers_without_deleted_launch_observation(view, 
     reference = access.start(
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
-    run = workflow.views.execution_operation.managed_runs[0]
+    run = workflow.routes[0].views.execution_operation.managed_runs[0]
     old_id = run.disposal_obligation_id
     main.dispose.response = _disposed if boundary == "disposed-helper-return" else _not_ready
     with monkeypatch.context() as patch:
@@ -149,7 +149,7 @@ def test_disposal_retry_refuses_mismatched_resolved_row(view, monkeypatch, field
     reference = access.start(
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
-    run = workflow.views.execution_operation.managed_runs[0]
+    run = workflow.routes[0].views.execution_operation.managed_runs[0]
     original_dispose = dispose_bound_managed_run
 
     def lose_helper_reply(*args, **kwargs):
@@ -183,7 +183,7 @@ def test_stop_refuses_other_owner_borrow_before_keeper_drain(view, attempt_start
     reference = access.start(
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
-    run = workflow.views.execution_operation.managed_runs[0]
+    run = workflow.routes[0].views.execution_operation.managed_runs[0]
     borrow = workflow.owner.borrow()
     attempt = borrow.begin_attempt() if attempt_started else None
     with pytest.raises(StateError):
@@ -201,7 +201,7 @@ def test_file_call_attempt_excludes_explicit_stop(view):
     reference = access.start(
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
-    run = workflow.views.execution_operation.managed_runs[0]
+    run = workflow.routes[0].views.execution_operation.managed_runs[0]
     operation = FileOperation(workflow.owner, run.receipt.spec.target)
     refused = []
 
@@ -229,7 +229,7 @@ def test_confirmed_disposal_publication_survives_interruption(view, monkeypatch)
     reference = access.start(
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
-    run = workflow.views.execution_operation.managed_runs[0]
+    run = workflow.routes[0].views.execution_operation.managed_runs[0]
     assign = ManagedOperationRun.__setattr__
     interrupted: list[bool] = []
 
@@ -275,7 +275,7 @@ def test_stop_interrupted_bookkeeping_uses_retained_lifetime_custody(view, monke
     reference = access.start(
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
-    run = workflow.views.execution_operation.managed_runs[0]
+    run = workflow.routes[0].views.execution_operation.managed_runs[0]
     original = getattr(OperationBorrow, transition)
     interrupted: list[bool] = []
 
@@ -292,7 +292,7 @@ def test_stop_interrupted_bookkeeping_uses_retained_lifetime_custody(view, monke
             access.stop(reference)
     assert main.stop.calls == (1 if transition == "handoff_retained_effect" else 0)
     assert run.keeper._stop.is_set() is (transition == "handoff_retained_effect")
-    workflow.views.execution_operation.retry_inline_bookkeeping()
+    workflow.routes[0].views.execution_operation.retry_inline_bookkeeping()
     access.observe(reference)
     rows = database.operations.list_pending_lifecycle_obligations(workflow.owner.ownership)
     assert len([row for row in rows if row.obligation_kind == "carrier-dispatch"]) == 1
@@ -304,7 +304,7 @@ def test_explicit_stop_does_not_clear_unknown_closing_helper(view):
     reference = access.start(
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
-    run = workflow.views.execution_operation.managed_runs[0]
+    run = workflow.routes[0].views.execution_operation.managed_runs[0]
     assert run.keeper.drain(Deadline.after(2)).drained
     keeper.stop.code = None
     with pytest.raises(StateError):
@@ -324,7 +324,7 @@ def test_stop_takeover_refuses_old_generation_delivery(view, monkeypatch, takeov
     reference = access.start(
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
-    run = workflow.views.execution_operation.managed_runs[0]
+    run = workflow.routes[0].views.execution_operation.managed_runs[0]
     recovered = [False]
 
     def recover() -> None:

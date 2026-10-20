@@ -252,7 +252,7 @@ def test_closed_helper_with_unknown_launch_releases_borrow_and_cleans_exact_stag
     with pytest.raises(StateError):
         start(access)
     with pytest.raises(StateError):
-        workflow.views.files.stat(PurePosixPath("/tmp/other"))
+        workflow.routes[0].views.files.stat(PurePosixPath("/tmp/other"))
     with pytest.raises(StateError):
         workflow.close(cleanup_deadline=Deadline.after(5))
     assert operation._prepared_stages == [] and active.start.stage.cleaned
