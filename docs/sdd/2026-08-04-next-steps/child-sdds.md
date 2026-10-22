@@ -866,6 +866,11 @@ Merged work the ledger owes a line, recorded from the merges themselves.
     effort has presumed the answer. The saga lead routed the question to both lanes and to the
     operator on 2026-09-18, and the ruling followed on 2026-09-19. Both efforts handling it without
     presuming an answer is why the ruling cost nothing to apply: no artifact had to be unwound.
+  - **Both efforts stopped 2026-10-20 and are superseded by transport-take2** (PR #851). The
+    implementation PRs never merged: #833 (transport-improv's implementation) and #832
+    (ssh-connection-contracts' carrier) were closed 2026-10-22. The proof packages above remain on
+    `main`, unwired, for the successor to adopt or delete. The ledger entries for the successor, and
+    the re-examined dependency of waves 5 and 7, follow once its artifacts are on `main`.
 
 ### Efforts that ran without ledger entries (reconstructed 2026-09-06)
 

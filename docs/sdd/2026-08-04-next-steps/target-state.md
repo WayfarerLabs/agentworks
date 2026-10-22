@@ -478,7 +478,16 @@ the execution layer has to provide anyway.
 rather than design: the snapshot existed to let transport consume requirements without editing
 another effort's artifacts, and it became the surviving record by accident. Its own header
 anticipates this disposition and says to "carry accepted requirements into their designated home
-before retiring either record." That transfer is now live work for the transport effort.
+before retiring either record." Under the 2026-10-20 reset below, that transfer belongs to the
+follow-up containment effort, and the transport-improv directory must not be wiped until it is done.
+
+**Superseded by the transport reset (operator, 2026-10-20).** The operator stopped both rebuild
+efforts and replaced them with one successor, transport-take2 (PR #851), whose FRD records the
+rulings verbatim. Containment no longer rides the transport effort: session containment, resource
+limits, and the installed VM program `agw-atc` move to a separate follow-up effort. The "Containment
+is an execution option" ruling and its rationale stand as the record of the 2026-09-19 position.
+Reconciling this section, and the other saga records that the reset makes stale, follows once the
+successor's artifacts are on `main`.
 
 ### Observability (destinations 5 and 6)
 
