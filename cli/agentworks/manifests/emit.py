@@ -389,17 +389,28 @@ def _document_model(kind: str) -> type[BaseModel]:
     fact this model does own is the top-level key set, which
     ``tests/manifests/test_emit.py`` pins against the envelope's own.
     """
+    # Built from runtime values (the owning constant, the kind, the kind's
+    # spec model), so mypy cannot see a type here, exactly as
+    # ``capabilities.config.tagged_host_model`` cannot.
+    api_version: Any = Literal[API_VERSION]
+    kind_tag: Any = Literal[kind]
+    # Required but nullable, matching the envelope exactly: the key must be
+    # present, and `spec:` with nothing after it reads as an empty mapping
+    # rather than an error. Dropping the null arm would make the schema
+    # stricter than the loader, which is the one direction this module may
+    # not go.
+    spec: Any = spec_model(kind) | None
     return create_model(
         f"{class_name(kind)}Document",
         __base__=AgwModel,
         __module__=__name__,
         __doc__=f"One {kind} resource manifest document.",
         apiVersion=(
-            Literal[API_VERSION],
+            api_version,
             Field(description="The manifest schema version. Always `agentworks/v1`."),
         ),
         kind=(
-            Literal[kind],
+            kind_tag,
             Field(description=KIND_REGISTRY[kind].description),
         ),
         metadata=(
@@ -407,12 +418,7 @@ def _document_model(kind: str) -> type[BaseModel]:
             Field(description="The fields every declared resource carries, whatever its kind."),
         ),
         spec=(
-            # Required but nullable, matching the envelope exactly: the key
-            # must be present, and `spec:` with nothing after it reads as an
-            # empty mapping rather than an error. Dropping the null arm
-            # would make the schema stricter than the loader, which is the
-            # one direction this module may not go.
-            spec_model(kind) | None,
+            spec,
             Field(description=f"The {kind} kind's own fields."),
         ),
     )
