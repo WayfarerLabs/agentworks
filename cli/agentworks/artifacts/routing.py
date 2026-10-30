@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
@@ -14,8 +15,6 @@ from agentworks.harness_setup.state import read_native_setup
 from agentworks.secrets.orchestration import SecretTarget
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from agentworks.artifacts.application import OwnedArtifactFile
     from agentworks.artifacts.model import ArtifactFacet, ArtifactGroup, ArtifactOwner
     from agentworks.db import Database, VMRow, WorkspaceRow
@@ -37,6 +36,7 @@ class ArtifactOwnerView:
     reason: str = ""
     record: SetupRecord | None = None
     prepared: ArtifactInputs | None = None
+    ancestor_blocked: bool = False
 
 
 @dataclass(frozen=True)
@@ -86,6 +86,18 @@ def inspect_owner_artifacts(
             return ArtifactOwnerView(
                 inputs, captured, capture_status, "unavailable", "The owner's integration state is unavailable."
             )
+    block = inputs.activations.get(integration_name) if integration_name is not None else None
+    if inputs.component == "session" and integration_name is not None and block is None:
+        if record is not None and record.artifact_files:
+            return ArtifactOwnerView(
+                inputs,
+                captured,
+                capture_status,
+                "retirement",
+                "The removed activation still owns artifact files.",
+                record,
+            )
+        return ArtifactOwnerView(inputs, captured, capture_status, "inactive", record=record)
     if capture_status != "current":
         return ArtifactOwnerView(inputs, captured, capture_status, capture_status, reason, record)
     if inherited is None:
@@ -96,12 +108,12 @@ def inspect_owner_artifacts(
             "unavailable",
             "An ancestor's artifact routing result is unavailable.",
             record,
+            ancestor_blocked=True,
         )
     local = captured.inputs if captured is not None else None
     prepared = ArtifactInputs(local=local, deferred=inherited)
     if integration_name is None:
         return ArtifactOwnerView(inputs, captured, capture_status, "current", prepared=prepared)
-    block = inputs.activations.get(integration_name)
     if block is None:
         if record is not None and record.artifact_files:
             return ArtifactOwnerView(
@@ -129,12 +141,17 @@ def inspect_owner_artifacts(
             prepared,
         )
     if not record.complete or record.pending_cleanup:
+        reason = (
+            "The activated facet still has artifact cleanup pending."
+            if record.pending_cleanup
+            else "The activated facet's previous setup did not finish."
+        )
         return ArtifactOwnerView(
             inputs,
             captured,
             capture_status,
             "incomplete",
-            "The activated facet has unfinished artifact application or cleanup.",
+            reason,
             record,
             prepared,
         )
@@ -150,13 +167,26 @@ def inspect_owner_artifacts(
             record,
             prepared,
         )
-    if declaration != record.declaration or tuple(item.identity for item in prepared.items()) != record.artifact_inputs:
+    current_ids = tuple(item.identity for item in prepared.items())
+    if declaration != record.declaration or current_ids != record.artifact_inputs:
+        differences = _declaration_changes(record.declaration, declaration) if declaration != record.declaration else []
+        if current_ids != record.artifact_inputs:
+            changed = tuple(
+                f"{item.content.type.value} {item.content.name}"
+                for item in prepared.items()
+                if item.identity not in record.artifact_inputs
+            )
+            differences.append(
+                f"prepared artifacts changed: {_brief(changed)}"
+                if changed
+                else "prepared artifact order or removals changed"
+            )
         return ArtifactOwnerView(
             inputs,
             captured,
             capture_status,
             "stale",
-            "The activated facet's config, environment or prepared artifacts have changed.",
+            "; ".join(differences) + ".",
             record,
             prepared,
         )
@@ -171,6 +201,40 @@ def inspect_owner_artifacts(
             prepared,
         )
     return ArtifactOwnerView(inputs, captured, capture_status, "current", record=record, prepared=prepared)
+
+
+def _brief(names: tuple[str, ...]) -> str:
+    """Keep drift diagnostics bounded without exposing values or artifact bodies."""
+    return ", ".join(names if len(names) <= 3 else (*names[:2], "..."))
+
+
+def _changed_keys(before: object, after: object) -> tuple[str, ...]:
+    if not isinstance(before, Mapping) or not isinstance(after, Mapping):
+        return ()
+    missing = object()
+    keys = before.keys() | after.keys()
+    return tuple(sorted(key for key in keys if before.get(key, missing) != after.get(key, missing)))
+
+
+def _declaration_changes(before: Mapping[str, object], after: Mapping[str, object]) -> list[str]:
+    """Name only changed declaration keys; persisted values never enter diagnostics."""
+    changes: list[str] = []
+    if before.get("config") != after.get("config"):
+        keys = _changed_keys(before.get("config"), after.get("config"))
+        changes.append(f"integration config changed: {_brief(keys)}" if keys else "integration config changed")
+    old_env, new_env = before.get("env"), after.get("env")
+    if old_env != new_env:
+        if isinstance(old_env, Mapping) and isinstance(new_env, Mapping):
+            for scope in sorted(old_env.keys() | new_env.keys()):
+                if old_env.get(scope) == new_env.get(scope):
+                    continue
+                keys = _changed_keys(old_env.get(scope), new_env.get(scope))
+                changes.append(
+                    f"{scope} environment changed: {_brief(keys)}" if keys else f"{scope} environment changed"
+                )
+        else:
+            changes.append("declared environment changed")
+    return changes or ["setup declaration changed"]
 
 
 def inactive_destination(facet: ArtifactFacet) -> ArtifactFacet:

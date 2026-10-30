@@ -229,7 +229,7 @@ def test_session_inspection_uses_runtime_diamond_order(db: Database, unhandled: 
     from agentworks.artifacts.inspection import inspect_artifacts
     from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.harness_setup.model import NativeSetupState, SetupRecord
-    from agentworks.harness_setup.state import write_native_setup
+    from agentworks.harness_setup.state import read_native_setup, write_native_setup
     from agentworks.schema import CapabilityConfig
     from agentworks.secrets.orchestration import SecretTarget
     from tests.artifacts.test_routing import graph
@@ -270,6 +270,28 @@ def test_session_inspection_uses_runtime_diamond_order(db: Database, unhandled: 
     assert tuple(item.reason for item in integration.recorded_deferred) == tuple(
         item.reason for item in record.deferred
     )
+    agent_record = read_native_setup(db, "agent", "agent").records[0]
+    write_native_setup(
+        db,
+        "agent",
+        "agent",
+        NativeSetupState(records=(agent_record.model_copy(update={"complete": False}),)),
+        operation="fixture",
+    )
+    blocked = inspect_artifacts(db, fixture.registry, session_name="review")
+    assert blocked.owners[1].integrations[0].status == "incomplete"
+    assert blocked.owners[-1].integrations[0].status == "unavailable"
+
+    from agentworks.artifacts.routing import inspect_owner_artifacts
+    from agentworks.db import AppliedStateKey, VersionedPayload
+
+    db.instance_state.replace_applied_slices(
+        "session", "review", "fixture", {AppliedStateKey.HARNESS_NATIVE_SETUP: VersionedPayload(2, {"broken": True})}
+    )
+    own_failure = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited=None)
+    assert own_failure.status == "unavailable" and not own_failure.ancestor_blocked
+    result = inspect_artifacts(db, fixture.registry, session_name="review")
+    assert result.owners[-1].integrations[0].reason == own_failure.reason
 
 
 def test_worked_manifests_build_without_acquiring_their_sources(tmp_path, monkeypatch) -> None:
