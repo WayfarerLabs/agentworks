@@ -735,9 +735,12 @@ Merged work the ledger owes a line, recorded from the merges themselves.
   an independent installed-OpenSSH carrier. The new stack may not import, wrap, subclass, or call
   legacy execution code. Cutover and physical deletion of the old stack are transport-owned
   deliverables.
+  - **Superseded 2026-10-20 by transport-take2**; see the transport reset entry below. Both
+    directories are locked as superseded.
   - **Unlike the other adjacent standalone efforts, these bear prerequisites.** Waves 5 and 7 build
     on the execution contract they define, so neither wave should be chartered against today's
-    transport. Recorded in `phasing.md` against both waves.
+    transport. Recorded in `phasing.md` against both waves. Reopened 2026-10-23: the dependency now
+    turns on wave 5's input-interception investigation, per `target-state.md`.
   - **Saga-lead condition at adoption:** inventory the old stack's incident-derived behaviors before
     deletion and re-prove each against the new stack. Those lessons live only in tests and comments
     (forced TTY versus closed stdin, Windows stdin newline rewriting, the Git-for-Windows POSIX
@@ -869,8 +872,26 @@ Merged work the ledger owes a line, recorded from the merges themselves.
   - **Both efforts stopped 2026-10-20 and are superseded by transport-take2** (PR #851). The
     implementation PRs never merged: #833 (transport-improv's implementation) and #832
     (ssh-connection-contracts' carrier) were closed 2026-10-22. The proof packages above remain on
-    `main`, unwired, for the successor to adopt or delete. The ledger entries for the successor, and
-    the re-examined dependency of waves 5 and 7, follow once its artifacts are on `main`.
+    `main`, unwired, for the successor to adopt or delete. The successor's entry follows.
+- **Transport reset: transport-take2 adopted** (PR #851, merged 2026-10-30). An adjacent standalone
+  child replacing both rebuild efforts, by operator ruling recorded in `target-state.md`. It landed
+  its requirements baseline, the operator's 2026-10-20 and 2026-10-23 rulings verbatim, and
+  lockfiles marking transport-improv and ssh-connection-contracts as superseded. Two things outlive
+  the stopped efforts: the proof packages under `cli/agentworks/execution/`, which the successor
+  adopts or deletes, and the transport-improv directory, which must not be wiped until the follow-up
+  containment effort has taken what it accepts from the preserved session-cgroups snapshot.
+  - **Its lead listed the saga records the reset made stale**
+    (`message-2026-10-20-transport-reset.md` in this directory). The 2026-10-20 and 2026-10-23
+    rulings in `target-state.md`, the supersession notes above, and the wave 5 and 7 headers in
+    `phasing.md` reconcile them.
+  - **The saga-lead condition carries forward** as the successor's R10, which starts from the
+    inventory in the transport-improv migration strategy.
+  - **Its prerequisite role for waves 5 and 7 is open**, decided by wave 5's input-interception
+    investigation (operator, 2026-10-23).
+  - **The saga lead delivered a salvage list** (`message-2026-10-23-transport-salvage.md` in the
+    successor's directory): measured platform facts and contract lessons from the predecessors'
+    integration reports, each linked to its source and marked measured, reasoned, or unresolved, so
+    the reset does not have to rediscover them.
 
 ### Efforts that ran without ledger entries (reconstructed 2026-09-06)
 
@@ -921,10 +942,18 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
   secret delivery, SSH command errors, and command logging, and because no current wave owns that
   span: `phasing.md`'s wave 4 is the setup pipeline and one vertical integration, and it places
   session runtime and tmux on the observability track rather than its own. The fix touches the
-  shared SSH transport contract, so it was filed rather than fixed in passing under Scope discipline
-- Wave 5: session observability phase 1 (depends on the new execution contract; see `phasing.md`)
+  shared SSH transport contract, so it was filed rather than fixed in passing under Scope
+  discipline. **It overlaps transport-take2** (2026-10-23): that FRD's R3 and R4 require environment
+  values to arrive byte-exact and keep sensitive input and environment out of command arguments,
+  logs, and exceptions, which removes this leak path for any consumer that migrates. Whether this
+  child folds into that migration or still runs first is an operator decision.
+- Wave 5: session observability phase 1 (its input-interception investigation decides whether it
+  waits for transport-take2; see `phasing.md`)
 - Wave 6: agentic artifacts and distillation
-- Wave 7: structured control (depends on the new execution contract; see `phasing.md`)
+- Wave 7: structured control (follows wave 5's finding on transport-take2; see `phasing.md`)
+- Follow-up containment effort (operator ruling 2026-10-20): session containment, resource limits,
+  and the installed VM program `agw-atc`, taking the session-cgroups snapshot and the 2026-09-18 and
+  2026-09-19 containment rulings as input. An adjacent standalone child when seeded.
 - Wave 8: external plugin API
 - CLI grammar child: spawned, completed, and locked; see its ledger section above.
 - Security-architecture doc child: seeds after wave 3 merges; carries the per-platform

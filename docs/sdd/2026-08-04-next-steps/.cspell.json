@@ -30,6 +30,7 @@
     "unkeyed",
     "unmemoized",
     "unspawned",
-    "unwired"
+    "unwired",
+    "worktrees"
   ]
 }
