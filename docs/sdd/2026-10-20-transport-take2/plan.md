@@ -5,200 +5,292 @@
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
 - Source baseline: `eee56117c`
-- Delivery: one design PR (HLA and plan), then one PR per slice below, each based on `main`
+- Delivery: one design PR (HLA and plan), then one PR per slice, each based on `main`
 
 ## Delivery rules
 
-- Each slice is one PR that is complete on its own terms: it ships a new piece together with every
-  consumer the slice names, the collateral that piece outdates, and live evidence for the cells the
-  slice lists. No slice lands surface ahead of its consumers (R10).
-- Each slice starts by writing or updating its LLD in this directory and getting it through the
-  private review loop before code. LLDs are linked from the slice's first checkbox.
-- Every slice runs the private quality loop (`agentworks-reviewer`, `muntz`, and a generic
-  correctness pass for code) before it goes ready, and live validation through the
-  `integration-testing` skill before merge. Missing live coverage goes to the operator for
-  disposition and never counts as passing (R11).
-- Add each slice's migrated modules to the independence guard (HLA D14) in the same PR.
-- The operator owns merge.
+- **Each slice is one complete PR.** It ships its new pieces together with every consumer the slice
+  names, the collateral those pieces outdate, and live evidence for the cells the slice lists. No
+  vocabulary item or module lands before the slice that migrates its first consumer (R10).
+- **LLDs come first.** Each slice that needs an LLD starts by writing it in this directory and
+  taking it through the private review loop before code. The slice's first checkbox links it.
+- **Reviews and validation.** Every slice runs the private quality loop before it goes ready:
+  `agentworks-reviewer`, `muntz`, and a generic correctness pass for code. It is live-validated
+  through the `integration-testing` skill before merge. Missing live coverage goes to the operator
+  for disposition and never counts as passing (R11).
+- **Independence.** Each slice adds its migrated files to the static legacy-import check (HLA D14).
+- **Collateral.** Permanent docs and ADR amendments ride in the slice that makes them true.
+- **Merge.** The operator owns merge.
 
-## Phase 0: Design
+## Design
 
 - [x] Scout the consumer inventory, platform surfaces, SSH mechanics and predecessor proof code at
       `eee56117c`.
 - [x] Write the HLA and this plan.
-- [ ] Run the private project review and complexity pass on the design and resolve material
+- [x] Run the private project review and complexity pass on the design, and resolve material
       findings.
-- [ ] Publish the design PR, address published feedback, and get operator answers to the HLA's open
-      questions.
+- [ ] Publish the design PR and address published feedback.
+- [ ] Record the operator's answers to the HLA's open questions.
 
-Definition of done: the HLA and plan are on `main`, and the HLA's open questions have recorded
-answers.
+Definition of done: the HLA and plan are on `main`, and each HLA open question has a recorded
+answer.
 
-## Phase 1: Trust (HLA D9)
+## Slice 1: Trust (HLA D9)
 
-- [ ] Write `trust-lld.md`: store layout and alias derivation, enrollment, import matching for plain
-      and hashed records and markers, re-establishment hook, removal, managed alias options, and the
-      legacy argv changes.
-- [ ] Implement `execution/trust.py` with the store, enrollment reset, import and removal.
-- [ ] Add `agw vm import-host-keys [--known-hosts PATH] [VM...]`, using the name the operator
-      confirmed.
-- [ ] Point every legacy core SSH and scp path at the store with `StrictHostKeyChecking=yes`:
-      `ssh.py`, `transports/ssh.py`, `vms/backup.py`, `workspaces/manager/copy.py` and the port
-      forward in `vms/manager/tailscale.py`.
-- [ ] Make `vm create`'s first core connection enroll into a freshly reset store file.
-- [ ] Make `vm delete` remove the store file after the platform delete succeeds.
-- [ ] Add `HostKeyAlias`, `UserKnownHostsFile` and `StrictHostKeyChecking yes` to managed `awvm--`
-      and `awagent--` entries.
-- [ ] Give cloud provisioning SSH a throwaway known-hosts file per create, so nothing in core or
-      cloud plugins writes the operator's `known_hosts`.
-- [ ] Tests: import over plain, hashed and marked records; a missing record is `TrustMissing` and
-      never first use; enrollment only from create; alias entries render the store options; the
-      source known-hosts file is byte-identical after import.
-- [ ] Collateral: command reference, completions, operator guide for the one-time import, doctor
-      check for VMs without a store record, release notes.
-- [ ] Live evidence: create, operator `ssh awvm--<vm>`, import of an existing VM and a tailnet
-      address change after rekey. Cover Remote Lima from macOS and Linux, AWS from Windows, and
-      WSL2. Include an encrypted key served by the agent.
+- [ ] Write `trust-lld.md`. It covers:
+  - trust modes and which factories select each;
+  - store layout and alias derivation;
+  - the enrollment reset;
+  - import pattern matching for plain and hashed records and markers;
+  - the re-establishment hook;
+  - removal;
+  - managed entry options.
+- [ ] Implement `execution/trust.py` and the trust errors in `execution/errors.py`.
+- [ ] Add `agw vm import-host-keys (--all | VM...) [--known-hosts PATH]`, using the name the
+      operator confirmed.
+- [ ] Bind the legacy VM-target factories to the store in VM mode: `transport()`,
+      `agent_transport()`, `transport_for_user()`, the backup scp, the workspace-copy ssh and the
+      port forward. Host targets stay unchanged.
+- [ ] Make create reset the store file and run Phase A's first connection in Enroll mode. Make
+      delete remove the store file after the platform delete succeeds.
+- [ ] Move cloud provisioning SSH to Provider mode.
+- [ ] Have `ssh_config.py` write the store options for VMs that have a store record.
+- [ ] Tests:
+  - import over plain, hashed, patterned and marked records;
+  - the source file is byte-identical after import;
+  - a missing record raises `TrustMissing` and never falls back to first use;
+  - Enroll mode is reachable only from create;
+  - managed entries carry store options only once a record exists.
+- [ ] Re-prove incident row I9 (host keys preserved across stop and start).
+- [ ] Collateral: update the command reference and completions, add an operator guide section on the
+      one-time import, add release notes, and update `cli/agentworks/execution/README.md`.
+- [ ] Live evidence, on every platform: create, the operator's own `ssh` to a managed entry, import
+      of an existing VM, and an address change after rekey. Cells:
+  - Remote Lima from macOS and Linux;
+  - local Lima from macOS;
+  - WSL2;
+  - Proxmox, AWS, Azure and GCP from at least one workstation each, Windows among them.
 
-Definition of done: no Agentworks code path accepts a host key except create's enrollment, every
-core SSH connection verifies against the store, and the operator's `known_hosts` is never written.
+  Include an encrypted key served by the agent.
 
-## Phase 2: Execution core and the operator exec surface (HLA D1 to D5, D8, D12 to D14)
+Definition of done: every core connection to a VM verifies against the store, the only acceptance of
+a new key is create's enrollment, and nothing in Agentworks writes the operator's `known_hosts` for
+a VM connection.
 
-- [ ] Write `execution-lld.md`: client resolution per workstation, the policy file, the envelope
-      format and bound, the bootstrap steps and trailer, request and result types, error mapping,
-      logging, and the adoption and deletion list for the proof modules.
-- [ ] Implement `client.py`, `policy.py`, `process.py`, `envelope.py`, `bootstrap.py`,
-      `requests.py`, `results.py`, `errors.py`, `logging.py`, `access.py`, `terminal_attach.py` and
-      `forwarding.py`.
-- [ ] Delete `execution/carrier.py`, `execution/preparation.py`, `execution/carriers/` and their
-      tests, after adopting what the LLD lists.
-- [ ] Add the in-process fake `VMAccess` for manager tests.
+## Slice 2: Execution core and the operator exec surface (HLA D1 to D5, D8, D12 to D14)
+
+- [ ] Write `execution-lld.md`. It covers:
+  - client resolution per workstation;
+  - the VM and host policies;
+  - the envelope format and bound;
+  - the launcher's steps, marker and trailer;
+  - request and result types;
+  - error mapping;
+  - the operation log;
+  - the adoption and deletion list for the proof modules.
+- [ ] Implement `client.py`, `ssh_process.py`, `envelope.py`, `guest_launcher.py`, `requests.py`
+      (the items this slice's consumers use), `results.py`, the remaining `errors.py`, `oplog.py`,
+      `access.py`, `attach.py` and `forwarding.py`.
+- [ ] Delete `execution/carrier.py`, `execution/preparation.py`, `execution/bootstrap.py`,
+      `execution/carriers/` and their tests, after adopting what the LLD lists.
+- [ ] Add the conftest blocker under `cli/tests/execution/`, the static legacy-import check, and the
+      recording fake `VMAccess`.
 - [ ] Migrate `vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection`, release
       probing (`vms/manager/release.py`) and `vm port-forward`.
-- [ ] Conformance vectors run against a local bootstrap and on live targets:
-  - literal argv, including empty, whitespace and shell characters;
-  - script versus stdin;
+- [ ] Move the old `LOG_DIR` readers to `oplog`'s constant.
+- [ ] Replace doctor's `ssh` and `scp` presence check with the resolver's verdict.
+- [ ] Conformance vectors, run against a local launcher on Linux and on live targets:
+  - literal argv, including empty arguments, whitespace and shell characters;
+  - script versus stdin, with script source absent from guest argv;
   - every interpreter and startup choice;
-  - environment byte-exactness, including `%`, quotes, `${...}`, CR, LF and any other byte but NUL;
+  - environment byte-exactness, including `%`, quotes, `${...}`, CR, LF and every other byte but
+    NUL;
   - working directory;
-  - elevation, and agent elevation refused;
+  - elevation;
+  - agent elevation refused before dispatch;
   - exit statuses 0, 1 and 255;
-  - delivery failure versus unknown;
+  - not delivered versus unknown;
+  - the missing-envelope marker;
   - the trailer under a background child;
   - the deadline;
-  - the size bound refusal;
-  - a sensitive stdin absent from logs and exceptions;
+  - the size-bound refusal;
+  - sensitive stdin absent from logs and exceptions;
   - binary stdin and stdout on Windows.
-- [ ] Re-prove incident rows I1 (closed stdin, no forced TTY) and I2 (Windows byte-exact stdin)
-      against the new stack.
-- [ ] Amend ADR 0014.
-- [ ] Collateral: `agw doctor` reports the client path, build and version; command reference and
-      guide updates for any changed behavior.
-- [ ] Live evidence: all three workstations against Remote Lima, Linux and macOS against local Lima,
-      Windows against WSL2, and one cloud. Record the Windows 10 inbox client version, if a Windows
-      10 host is available.
+- [ ] Re-prove incident rows I1 to I7.
+- [ ] Amend ADRs 0013 and 0014.
+- [ ] Collateral: update the command reference and guides for any changed behavior, and
+      `cli/agentworks/execution/README.md`.
+- [ ] Live evidence:
+  - all three workstations against Remote Lima;
+  - Linux and macOS against local Lima;
+  - Windows against WSL2;
+  - one cloud.
 
-Definition of done: the migrated commands use only `agentworks.execution`, and their modules pass
-the independence guard.
+  Include a Debian 12 and a Debian 13 guest.
 
-## Phase 3: VM contract and platform surface (HLA D10, D11)
+Definition of done: the migrated commands reach VMs only through `agentworks.execution`, their files
+pass the static check, and the package's tests pass with the legacy modules blocked.
 
-- [ ] Write `platform-lld.md`: `ProvisionResult` changes, `run_recovery` and `RecoveryResult`, the
-      sshd-dependence declaration, per-platform recovery channels and private access, the recovery
-      scripts, `vm recover`, and the contract probes and diagnoses.
-- [ ] Add the AcceptEnv fragment to the shared provisioning bootstrap script.
-- [ ] Make `tailnet_address` required. Delete `ProvisionResult.native_transport`,
-      `VMPlatform.native_transport` and the `transports.native_transport` factory.
-- [ ] Implement `run_recovery` for each platform with its private channel. Rehome the Lima, Remote
-      Lima, WSL2 and Proxmox native code as plugin-private modules (`plugins/proxmox/guest_agent.py`
-      replaces `plugins/proxmox/transport.py`). Port `tailscale_join.py` and `wsl2_bootstrap.py` off
-      `ExecTransport`.
-- [ ] Implement `recovery_ssh.py` for the cloud platforms, verifying against the VM's store entry.
-- [ ] Move rejoin, rekey and delete-time logout onto `run_recovery`, keeping the activation gate's
-      automatic rejoin.
-- [ ] Add `vms/contract.py` with the base and initialized probes. Run the base probe as create's
-      first connection and first at reinit, and the initialized probe at the end of Phase B.
-- [ ] Move Debian attestation onto the base probe and amend ADR 0025.
+## Slice 3: First contact and the VM contract (HLA D10, D11 first half)
+
+- [ ] Write `contract-lld.md`. It covers:
+  - the check table and diagnoses;
+  - the provisioning bootstrap additions;
+  - `tailnet_address`;
+  - Phase A on `VMAccess`;
+  - `reachability`.
+- [ ] Add the AcceptEnv fragment and the envelope `env_keep` line to the shared provisioning
+      bootstrap script and to WSL2's own sudoers write.
+- [ ] Make `ProvisionResult.tailnet_address` required on every platform, and delete
+      `ProvisionResult.native_transport` and Phase A's native `tailscale ip -4` fallback.
+- [ ] Move Phase A onto `VMAccess`: the first connection in Enroll mode, then the base checks
+      (including Debian attestation), then `reachability.wait` after `post_tailscale_ready`. Hand
+      Phase B a legacy target as today.
+- [ ] Implement `reachability.py` and the `observation` request option it polls with.
+- [ ] Prove an elevated request on a fresh, never-initialized Debian 12 and 13 VM.
+- [ ] Add `vms/contract.py`. Run the base checks first at reinit and the initialized checks at the
+      end of Phase B.
+- [ ] Amend ADR 0025.
+- [ ] Tests:
+  - a VM failing a base check is not reported ready;
+  - each diagnosis names reinit or recreation;
+  - a platform that cannot report the address fails create.
+- [ ] Collateral: platform author documentation for `tailnet_address`, and the command reference for
+      create and reinit diagnoses.
+- [ ] Live evidence: create and reinit on every platform from at least one workstation each.
+
+Definition of done: core's work on a new VM starts over SSH at the reported address, and core's
+first operation there is the base contract check.
+
+## Slice 4: Recovery and the platform surface (HLA D11 second half)
+
+- [ ] Write `platform-lld.md`. It covers:
+  - `run_recovery`, `RecoveryResult` and its trailer wrapper;
+  - `recovery_needs_guest_sshd`;
+  - `native_shell`;
+  - each platform's recovery channel and private access;
+  - `public_ssh.py`;
+  - the recovery scripts;
+  - `vm recover`;
+  - each cloud's provider-side host-key fingerprint source.
+- [ ] Implement `run_recovery` and `native_shell` on every platform.
+- [ ] Rehome native code as plugin-private modules:
+  - Remote Lima's host connection, under the host policy, and its host-side detached create;
+  - `plugins/proxmox/guest_agent.py`, replacing `plugins/proxmox/transport.py`;
+  - the Lima and WSL2 wrappers.
+- [ ] Port `tailscale_join.py` and `wsl2_bootstrap.py` off `ExecTransport`.
+- [ ] Implement `capabilities/vm_platform/public_ssh.py` for the clouds.
+- [ ] Move rejoin, rekey and delete-time logout onto `run_recovery`, as the operator's answer to the
+      automatic-rejoin question directs.
 - [ ] Add `agw vm recover <vm>` with access repair, rejoin, host-key re-establishment and SSH
-      verification. Keep `vm shell --platform` on platforms that offer a native shell, with a typed
-      refusal elsewhere (R2).
-- [ ] Tests: each platform declares the sshd dependence; recovery returns status, delivery failure
-      or unknown; logout reports the script's status or unknown and never checks SSH afterwards; a
-      VM without the fragment gets `VMNotReady` naming recovery.
-- [ ] Collateral: platform author documentation for the new surface, command reference, completions,
-      operator guide for recovery.
-- [ ] Live evidence: create, reinit, rekey, delete and recovery on every platform, from at least one
-      workstation each. Include recovery of a VM with a broken sshd on WSL2 or Proxmox, and with a
-      lost store record.
+      verification. Repoint `VMNotReady` and `TrustMissing` guidance at it.
+- [ ] Delete `VMPlatform.native_transport`, the `transports.native_transport` factory and
+      `native_shell_unavailable_hint`.
+- [ ] Tests:
+  - each platform declares sshd dependence;
+  - recovery reports status, delivery failure or unknown, and never trusts a channel exit code;
+  - logout reports the script's status or unknown, and never checks SSH afterwards;
+  - a platform without a native shell refuses with `FeatureUnavailable` before credentials are
+    resolved.
+- [ ] Collateral: platform author documentation, the command reference, completions, and an operator
+      guide section on recovery.
+- [ ] Live evidence:
+  - rejoin, rekey, delete and `vm recover` on every platform from at least one workstation each;
+  - recovery of a broken sshd on WSL2 and on Proxmox;
+  - recovery of a lost store record on one cloud and on Remote Lima.
 
-Definition of done: no core code reaches a native channel except through `run_recovery` or the
-optional native shell, and every platform's private access imports no legacy module.
+Definition of done: core reaches a native channel only through `run_recovery` or `native_shell`, and
+no platform's private access imports a legacy module.
 
-## Phase 4: Files and capability delivery (HLA D6, D12)
+## Slice 5: Files and capability delivery (HLA D6, D12)
 
-- [ ] Write `files-lld.md`: each operation's script, stdin and stdout use, the `flock` protocol,
-      tree staging and swap, mode and ownership, and cleanup rules.
+- [ ] Write `files-lld.md`. It covers:
+  - each operation's script and its use of stdin and stdout;
+  - the `flock` protocol;
+  - the symlink policy;
+  - mode and ownership;
+  - cleanup.
 - [ ] Implement `files.py` and `RunContext.admin_access()` and `agent_access()`.
-- [ ] Migrate artifact publication, session artifacts, native probing, the harness-native settings
-      merge and CLI transcript reads, codex and claude artifact reads, harness integrations'
-      readiness and start stages, and the git-credential providers.
-- [ ] Tests: publish applies mode and owner before rename; `publish_if` detects a concurrent writer;
-      JSON null survives a merge; a malformed destination is refused; cleanup touches only what the
-      operation created.
+- [ ] Migrate:
+  - artifact publication and session artifacts;
+  - native probing;
+  - the harness-native settings merge and CLI transcript reads;
+  - the codex and claude artifact reads;
+  - harness integrations' readiness and start stages;
+  - the git-credential providers.
+- [ ] Tests:
+  - `write` applies mode and owner before the rename;
+  - `write_if` and `remove_if` detect a concurrent writer;
+  - JSON null survives an update;
+  - a malformed destination is refused;
+  - a symlinked destination is refused;
+  - cleanup touches only what the operation created.
+- [ ] Amend ADR 0019.
+- [ ] Collateral: update `capabilities/README.md` and plugin author documentation for the new
+      accessors.
 - [ ] Live evidence: harness setup and a session start with artifacts, on Remote Lima from macOS and
       on one cloud from Windows.
 
 Definition of done: `native_files.py` has no remaining callers.
 
-## Phase 5: Initialization
+## Slice 6: Initialization
 
-- [ ] Migrate the VM initializer (`vms/initializer/`), `vms/hardening.py`, `vms/tailscale_dns.py`,
-      `sources.py`, `command_checks.py`, `git_config.py`, `git_credentials/`, the agent initializer
-      and grants, and the harness setup runners. The `SetupRunner` environment rules become request
-      environment on the admin or agent access.
-- [ ] Replace hand-written `printf | sudo tee` and `write_file` plus `chmod` sequences with
-      `files.write`.
+- [ ] Migrate:
+  - `vms/initializer/`, `vms/hardening.py` and `vms/tailscale_dns.py`;
+  - `sources.py` (with `upload_tree`), `command_checks.py` and `git_config.py`;
+  - `git_credentials/`;
+  - the agent initializer and grants;
+  - the harness setup runners. The `SetupRunner` environment rules become request environment.
+- [ ] Replace hand-written `printf | sudo tee`, `tee -a` and `write_file` plus `chmod` sequences
+      with `files.write` and `files.update`.
+- [ ] Collateral: guides or reference pages whose described init behavior changes.
 - [ ] Live evidence: create and reinit on every platform from at least one workstation each.
 
 Definition of done: create and reinit run entirely on the new transport.
 
-## Phase 6: Workspaces and sessions
+## Slice 7: Workspaces, sessions and backup (HLA D7)
 
-- [ ] Migrate workspace backends, copy (replacing its hand-built ssh tar stream with
-      `download_tree`), rehome and repair, and `sessions/`, including tmux, consoles, status probes
-      and pid repair. Session environment travels in the request rather than in tmux `-e` arguments
-      where tmux inherits it.
-- [ ] Live evidence: session and console create, attach, detach and restore on Remote Lima from all
-      three workstations and on WSL2.
+- [ ] Implement `detached.py`, and the `FromFile` and `ToFile` input and sink.
+- [ ] Migrate:
+  - workspace backends, rehome and repair;
+  - workspace copy, using `run` over an opaque tar stream;
+  - `sessions/`, including tmux, consoles, status probes and pid repair, with session environment in
+    the request rather than in `tmux -e` arguments where tmux inherits it;
+  - backup's launch, observation, interrupt and download, using `detached` and `ToFile` with
+    progress.
+- [ ] Tests:
+  - a fresh launch never matches an earlier one;
+  - observation resumes across a dropped connection;
+  - interrupt stops the work;
+  - the detached base is never world-writable.
+- [ ] Re-prove incident row I8.
+- [ ] Amend ADR 0017.
+- [ ] Collateral: guides for sessions, consoles and backup where behavior changes.
+- [ ] Live evidence:
+  - session and console create, attach, detach and restore on Remote Lima from all three
+    workstations and on WSL2;
+  - backup with a forced disconnect and with an interrupt, on WSL2 (idle shutdown) and Remote Lima.
 
-Definition of done: no workspace or session module imports a legacy module.
+Definition of done: no workspace, session or backup module imports a legacy module, and
+`remote_exec.py` has no remaining callers.
 
-## Phase 7: Backup and detached work (HLA D7)
+## Slice 8: Removal
 
-- [ ] Implement `detached.py`.
-- [ ] Migrate backup's launch, observation, interrupt and download, replacing its hand-built scp
-      with `download` to a file sink with progress.
-- [ ] Tests: a fresh launch never matches an earlier one; observation resumes across a dropped
-      connection; interrupt stops the work.
-- [ ] Live evidence: backup with a forced disconnect and with an interrupt, on WSL2 (idle shutdown)
-      and Remote Lima.
-
-Definition of done: `remote_exec.py` has no remaining callers.
-
-## Phase 8: Removal
-
-- [ ] Re-prove every incident inventory row against the new stack and record the evidence here.
-- [ ] Delete `agentworks.transports`, `agentworks.ssh`, `agentworks.remote_exec`,
-      `agentworks.harness_setup.runner`, `agentworks.native_files` and
-      `agentworks.plugins.proxmox.transport`, with their tests.
+- [ ] Confirm that every incident inventory row has recorded evidence.
+- [ ] Delete the six legacy modules with their tests:
+  - `agentworks.transports`
+  - `agentworks.ssh`
+  - `agentworks.remote_exec`
+  - `agentworks.harness_setup.runner`
+  - `agentworks.native_files`
+  - `agentworks.plugins.proxmox.transport`
 - [ ] Delete `RunContext.admin_target()` and `agent_target()`, and the `SSHError` special case in
       `cli/_entry.py`.
 - [ ] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
       `agentworks.execution` and platforms' private access.
-- [ ] Complete the 18-cell evidence matrix, sending any gap to the operator.
-- [ ] Promote the transport's lasting concepts to permanent docs (an architecture page for
-      `agentworks.execution`, platform author guidance), then write `locked.md`.
+- [ ] Complete the evidence matrix, sending any gap to the operator.
+- [ ] Confirm that the permanent docs (the `agentworks.execution` README, platform author guidance
+      and the operator guides) describe the end state, then write `locked.md`.
 
-Definition of done: R10's end state holds, every matrix gap has an operator disposition, and the SDD
-is locked.
+Definition of done: R10's end state holds, every matrix cell has evidence or an operator
+disposition, and the SDD is locked.
