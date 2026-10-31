@@ -49,11 +49,11 @@ answer.
 - [ ] Add `agw vm import-host-keys (--all | VM...) [--known-hosts PATH]`, using the name the
       operator confirmed.
 - [ ] Bind the legacy VM-target factories to the store in VM mode: `transport()`,
-      `agent_transport()`, `transport_for_user()`, the backup scp, the workspace-copy ssh and the
-      port forward. Host targets stay unchanged.
+      `agent_transport()`, `transport_for_user()`, the backup scp, the workspace-copy ssh, the port
+      forward and the clouds' public-address native transports. Host targets stay unchanged.
 - [ ] Make create reset the store file and run Phase A's first connection in Enroll mode. Make
       delete remove the store file after the platform delete succeeds.
-- [ ] Move cloud provisioning SSH to Provider mode.
+- [ ] Move cloud provisioning SSH to Unverified mode.
 - [ ] Have `ssh_config.py` write the store options for VMs that have a store record.
 - [ ] Tests:
   - import over plain, hashed, patterned and marked records;
@@ -97,6 +97,9 @@ a VM connection.
       recording fake `VMAccess`.
 - [ ] Migrate `vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection`, release
       probing (`vms/manager/release.py`) and `vm port-forward`.
+- [ ] Limit the admin and agent template `shell` fields to the POSIX family at the config boundary,
+      as the operator's answer on account shells directs, with sample-config comments and release
+      notes.
 - [ ] Move the old `LOG_DIR` readers to `oplog`'s constant.
 - [ ] Replace doctor's `ssh` and `scp` presence check with the resolver's verdict.
 - [ ] Conformance vectors, run against a local launcher on Linux and on live targets:
@@ -140,7 +143,8 @@ pass the static check, and the package's tests pass with the legacy modules bloc
   - Phase A on `VMAccess`;
   - `reachability`.
 - [ ] Add the AcceptEnv fragment and the envelope `env_keep` line to the shared provisioning
-      bootstrap script and to WSL2's own sudoers write.
+      bootstrap script and to WSL2's own sudoers write, validating each sudoers file with
+      `visudo -cf` before it is installed.
 - [ ] Make `ProvisionResult.tailnet_address` required on every platform, and delete
       `ProvisionResult.native_transport` and Phase A's native `tailscale ip -4` fallback.
 - [ ] Move Phase A onto `VMAccess`: the first connection in Enroll mode, then the base checks
@@ -166,6 +170,7 @@ first operation there is the base contract check.
 
 - [ ] Write `platform-lld.md`. It covers:
   - `run_recovery`, `RecoveryResult` and its trailer wrapper;
+  - `read_host_keys` and its cloud overrides;
   - `recovery_needs_guest_sshd`;
   - `native_shell`;
   - each platform's recovery channel and private access;
@@ -173,7 +178,7 @@ first operation there is the base contract check.
   - the recovery scripts;
   - `vm recover`;
   - each cloud's provider-side host-key fingerprint source.
-- [ ] Implement `run_recovery` and `native_shell` on every platform.
+- [ ] Implement `run_recovery`, `read_host_keys` and `native_shell` on every platform.
 - [ ] Rehome native code as plugin-private modules:
   - Remote Lima's host connection, under the host policy, and its host-side detached create;
   - `plugins/proxmox/guest_agent.py`, replacing `plugins/proxmox/transport.py`;
@@ -182,8 +187,9 @@ first operation there is the base contract check.
 - [ ] Implement `capabilities/vm_platform/public_ssh.py` for the clouds.
 - [ ] Move rejoin, rekey and delete-time logout onto `run_recovery`, as the operator's answer to the
       automatic-rejoin question directs.
-- [ ] Add `agw vm recover <vm>` with access repair, rejoin, host-key re-establishment and SSH
-      verification. Repoint `VMNotReady` and `TrustMissing` guidance at it.
+- [ ] Add `agw vm recover <vm>`: host-key re-establishment first when the record is missing, then
+      access repair, rejoin and SSH verification. Repoint `VMNotReady` and `TrustMissing` guidance
+      at it.
 - [ ] Delete `VMPlatform.native_transport`, the `transports.native_transport` factory and
       `native_shell_unavailable_hint`.
 - [ ] Tests:
@@ -263,7 +269,7 @@ Definition of done: create and reinit run entirely on the new transport.
   - observation resumes across a dropped connection;
   - interrupt stops the work;
   - the detached base is never world-writable.
-- [ ] Re-prove incident row I8.
+- [ ] Re-prove incident rows I6a and I8.
 - [ ] Amend ADR 0017.
 - [ ] Collateral: guides for sessions, consoles and backup where behavior changes.
 - [ ] Live evidence:
@@ -286,6 +292,8 @@ Definition of done: no workspace, session or backup module imports a legacy modu
   - `agentworks.plugins.proxmox.transport`
 - [ ] Delete `RunContext.admin_target()` and `agent_target()`, and the `SSHError` special case in
       `cli/_entry.py`.
+- [ ] Make the managed SSH entries' store options unconditional, with release notes for operators
+      who never imported.
 - [ ] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
       `agentworks.execution` and platforms' private access.
 - [ ] Complete the evidence matrix, sending any gap to the operator.
