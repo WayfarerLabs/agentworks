@@ -1,7 +1,7 @@
 # Transport Take 2: Functional Requirements
 
-- Status: Requirements baseline accepted by the operator on 2026-10-20 and amended on 2026-10-23;
-  HLA and plan follow. No design or implementation is claimed.
+- Status: Requirements baseline accepted by the operator on 2026-10-20 and amended on 2026-10-23.
+  Design in [hla.md](./hla.md); work tracked in [plan.md](./plan.md).
 - Started: 2026-10-20
 - Effort: `transport-take2`
 - Supersedes: [transport-improv](../2026-09-12-transport-improv/locked.md) and
