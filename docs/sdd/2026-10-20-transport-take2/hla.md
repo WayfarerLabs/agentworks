@@ -138,7 +138,9 @@ The envelope holds a version tag, a random completion nonce, the elevation choic
 and startup flags, the literal argv or script source, the environment and the working directory.
 Each field is base64-encoded, and the fields are joined with `.`, which is outside the base64
 alphabet and needs no quoting. The resulting token is cut into parts of at most 30,000 bytes, one
-per `AGENTWORKS_EXEC_<n>` variable, and the launcher joins them in order.
+per `AGENTWORKS_EXEC_<n>` variable, and the launcher joins them in order. Part 0 records the part
+count and total length, so a missing or stale part is a typed refusal rather than an undecodable
+envelope.
 
 - **Why `SendEnv`.** It works in every mode, including a TTY attach, where stdin is the terminal and
   cannot carry a header, and it leaves stdin wholly to the caller, the separation R3 asks for.
@@ -152,7 +154,7 @@ per `AGENTWORKS_EXEC_<n>` variable, and the launcher joins them in order.
   encoded), which a single part would barely hold, hence the parts. Bulk data travels on stdin,
   never in the envelope. The complexity review measured a 131,044-byte value arriving intact by
   `SendEnv` from a 9.2p1 client; slice 2 proves the multi-part form, including on Windows.
-- **Acceptance.** The VM must accept the variable. Today only Phase B writes the
+- **Acceptance.** The VM must accept the variables. Today only Phase B writes the
   `50-agentworks-accept-env.conf` fragment (`AcceptEnv *`, `vms/initializer/shell_env.py:397-460`).
   This design adds the same fragment to the shared provisioning bootstrap script, so a brand new VM
   accepts the envelope at core's first connection (D10).
@@ -189,10 +191,10 @@ provisioning onward. It needs no Python.
 2. **Elevates when asked.** If the request is elevated and the launcher is not root, it re-executes
    itself under `sudo -n`. The provisioning bootstrap adds
    `Defaults:<admin> env_keep += "AGENTWORKS_EXEC_*"` beside its `NOPASSWD:ALL` line, so the
-   variable survives sudo on a VM that Phase B has not reached yet. Phase B's existing
+   variables survive sudo on a VM that Phase B has not reached yet. Phase B's existing
    `env_keep += "AGENTWORKS_*"` covers older VMs. Slice 3, the first to elevate before Phase B,
    proves this on a fresh VM.
-3. **Clears the variable**, then applies the environment and the working directory.
+3. **Clears the variables**, then applies the environment and the working directory.
 4. **Runs the payload as a child.** A literal argv runs with no shell. A script runs under the
    chosen interpreter, which reads the source from a file descriptor and never from its arguments
    (R4). Login or interactive startup applies only when requested. `sh` and `bash` are fixed paths.
