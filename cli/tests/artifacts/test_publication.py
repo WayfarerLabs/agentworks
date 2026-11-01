@@ -102,13 +102,22 @@ def test_modified_obsolete_file_retains_ownership(target):
     assert path.read_bytes() == b"operator edit"
 
 
-def test_matching_file_content_allows_mode_convergence(target):
+def test_modified_executable_intent_is_preserved_and_diagnosed(target):
     path = target.home / "managed"
     owned = publish_artifacts(target, (artifact(path),), (), lambda files: None, roots=(str(target.home),)).files
     path.chmod(0o700)
     result = publish_artifacts(target, (artifact(path),), owned, lambda files: None, roots=(str(target.home),))
-    assert result.files == owned and not result.skipped
-    assert path.stat().st_mode & 0o777 == 0o600
+    assert result.files == owned and result.skipped[0].path == str(path)
+    assert path.stat().st_mode & 0o777 == 0o700
+
+
+def test_matching_unclaimed_content_converges_permissions_without_changing_executable_intent(target):
+    path = target.home / "matching"
+    path.write_bytes(b"content")
+    path.chmod(0o644)
+    result = publish_artifacts(target, (artifact(path),), (), lambda files: None, roots=(str(target.home),))
+    assert len(result.files) == 1 and not result.skipped
+    assert path.read_bytes() == b"content" and path.stat().st_mode & 0o777 == 0o600
 
 
 def test_checkpoint_failure_stops_further_publication(target):

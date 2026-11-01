@@ -35,9 +35,10 @@ Transport work remains with its owner; this implementation uses today's transpor
 
 PR [794](https://github.com/WayfarerLabs/agentworks/pull/794) merged on 2026-09-14 at
 `908258a932c7715ff92dc75a7a64163a99920872`. The implementation includes workstation/Git acquisition,
-per-type maps with scope-owned namespaces, the native support matrix and a launch error for
-artifacts still unhandled at the session. The effort lead owns architecture, sequencing and this
-plan. Remaining live acceptance and closeout are listed below; merge did not complete them.
+per-type maps with scope-owned namespaces and the native support matrix. Its original final-session
+launch-error policy is superseded by the later optional-delivery and facet-independence rulings. The
+effort lead owns architecture, sequencing and this plan. Remaining live acceptance and closeout are
+listed below; merge did not complete them.
 
 The operator approved an authoring amendment on 2026-09-14: optional description-only rule
 frontmatter, strict rule/persona metadata validation, inspection descriptions and artifacts-guide

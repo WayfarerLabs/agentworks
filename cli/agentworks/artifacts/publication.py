@@ -137,7 +137,7 @@ def publish_artifacts(
             prior = current.get(path)
             if (
                 data is not None
-                and data[0] != hashlib.sha256(item.data).hexdigest()
+                and (data[0] != hashlib.sha256(item.data).hexdigest() or bool(data[1] & 0o111) != item.executable)
                 and (prior is None or data != (prior.sha256, _mode(prior.executable, group, root)))
             ):
                 reason = f"existing content at '{path}' differs from the declaration and recorded ownership"

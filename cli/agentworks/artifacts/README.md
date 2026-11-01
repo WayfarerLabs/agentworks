@@ -89,10 +89,11 @@ To inspect artifact delivery, use
 `agw artifact show --session <session-name> --integration <integration-name>`. Read the VM, actual
 user, workspace, then session rows in that order. An incomplete ancestor has unfinished application
 or cleanup. A stale ancestor reports changed integration config keys, declared environment variable
-names by scope, or prepared artifact names, without their values. The session row names the ancestor
-whose artifact delivery needs attention. These ancestor reports do not block launch. An inactive
-session integration has no setup obligation for that facet. Inspection reports recorded application,
-not a fresh check of native files or model context.
+names by scope, or prepared artifact names, without their values. Each owner's status is
+independent; the session row describes its own recorded application. Ancestor problems are reported
+at managed start without blocking launch. An inactive session integration has no setup obligation
+for that facet. Inspection reports recorded application, not a fresh check of native files or model
+context.
 
 ## Composition and names
 
