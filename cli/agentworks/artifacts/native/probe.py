@@ -23,6 +23,15 @@ if TYPE_CHECKING:
     from agentworks.artifacts.application import OwnedArtifactFile
     from agentworks.transports import Transport
 
+
+class NativeArtifactConflictError(StateError):
+    """Native names that setup can defer without suppressing independent artifacts."""
+
+    def __init__(self, message: str, identities: tuple[str, ...], *, hint: str) -> None:
+        super().__init__(message, hint=hint)
+        self.identities = identities
+
+
 # Executed in the same login-shell environment as the native workload. Only selected
 # bounded artifact frontmatter and discovery facts return for local identity checks.
 # Settings bodies and artifact instruction bodies are not returned.
@@ -447,11 +456,15 @@ def probe_native(
             ]
             details.append(f"Native {problem.identity!r} at {problem.path!r}; managed artifacts: {', '.join(managed)}")
     if problems:
-        raise StateError(
-            f"{tool} artifact delivery: "
-            + "; ".join([*(_PROBLEM_MESSAGES[problem].format(tool=tool) for problem in problems), *details]),
-            hint=f"Native configuration directory: {root!r}",
+        message = f"{tool} artifact delivery: " + "; ".join(
+            [*(_PROBLEM_MESSAGES[problem].format(tool=tool) for problem in problems), *details]
         )
+        hint = f"Native configuration directory: {root!r}"
+        if all(problem in ("native-artifact-collision", "native-artifact-identity-mismatch") for problem in problems):
+            raise NativeArtifactConflictError(
+                message, tuple(dict.fromkeys(problem.identity for problem in inventory_problems)), hint=hint
+            )
+        raise StateError(message, hint=hint)
     return root
 
 
@@ -471,6 +484,7 @@ def _inventory_problems(
             raise ValueError
         selected = set(identities)
         total = 0
+        problems: list[_InventoryProblem] = []
         for row in inventory:
             if (
                 not isinstance(row, dict)
@@ -496,10 +510,10 @@ def _inventory_problems(
             expected = entries.get(row["path"])
             if expected is not None:
                 if native_identity != expected:
-                    return [_InventoryProblem("native-artifact-identity-mismatch", expected, row["path"])]
+                    problems.append(_InventoryProblem("native-artifact-identity-mismatch", expected, row["path"]))
                 continue
             if native_identity in selected:
-                return [_InventoryProblem("native-artifact-collision", native_identity, row["path"])]
-        return []
+                problems.append(_InventoryProblem("native-artifact-collision", native_identity, row["path"]))
+        return problems
     except (ValueError, TypeError, SourceRefError, RecursionError):
         return [_InventoryProblem("unreadable-native-inventory")]

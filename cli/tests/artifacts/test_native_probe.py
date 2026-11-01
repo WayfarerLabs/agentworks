@@ -382,6 +382,22 @@ def test_inventory_collision_retains_native_identity_and_competing_path():
     assert (problems[0].identity, problems[0].path) == ("agent:review", path)
 
 
+def test_inventory_returns_all_conflicting_native_names():
+    paths = ("/workspace/.claude/agents/first.md", "/workspace/.claude/agents/second.md")
+    names = ("review", "helper")
+    problems = _inventory_problems(
+        [
+            {"kind": "agent", "path": path, "frontmatter": f"name: {name}"}
+            for path, name in zip(paths, names, strict=True)
+        ],
+        tuple(f"agent:{name}" for name in names),
+        {},
+    )
+    assert [(problem.identity, problem.path) for problem in problems] == list(
+        zip((f"agent:{name}" for name in names), paths, strict=True)
+    )
+
+
 def test_codex_inventory_bounds_combined_toml_bytes(tmp_path):
     root = tmp_path / "home/.codex/agents"
     root.mkdir(parents=True)
