@@ -13,11 +13,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ConfigError, ConnectivityError, ExternalError, StateError
-from agentworks.ssh_identity import identity_is_passphrase_protected
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from agentworks.execution.results import NotDeliveredReason, Result
 
 
@@ -157,23 +154,10 @@ class ExecutionIncomplete(ConnectivityError):
     have run. ``attaching`` is for the parking connection of a terminal attach,
     where an unknown outcome still means no shell started: the message says so
     instead of that the command may have run.
-
-    ``identity_file`` is the operator's SSH identity. ssh runs in batch mode and
-    cannot ask for a passphrase, so when a connection failed and that file is a
-    passphrase-protected key, the hint also says to load it into the SSH agent.
-    The file is read only here, on the failure path.
     """
 
-    PASSPHRASE_HINT = (
-        "The SSH identity {key} is passphrase-protected, and Agentworks runs ssh in batch mode, "
-        "so it cannot prompt for the passphrase. Load the key into your SSH agent with 'ssh-add {key}'."
-    )
-
-    def __init__(
-        self, vm_name: str, result: Result, *, attaching: bool = False, identity_file: Path | None = None
-    ) -> None:
+    def __init__(self, vm_name: str, result: Result, *, attaching: bool = False) -> None:
         from agentworks.execution.results import NotDelivered, UnknownReason
-        from agentworks.path_rendering import format_host_path
 
         self.vm_name = vm_name
         self.result = result
@@ -195,12 +179,6 @@ class ExecutionIncomplete(ConnectivityError):
             reason = getattr(completion, "reason", None)
             summary = f"the outcome of the command on VM '{vm_name}' is unknown ({getattr(reason, 'value', reason)})"
             hint = "The command may have run; check its effects before running it again."
-        if (
-            identity_file is not None
-            and getattr(completion, "reason", None) is UnknownReason.CONNECTION
-            and identity_is_passphrase_protected(identity_file)
-        ):
-            hint += " " + self.PASSPHRASE_HINT.format(key=f"'{format_host_path(identity_file)}'")
         super().__init__(
             _with_tail(summary, result.client_log_tail),
             entity_kind="vm",

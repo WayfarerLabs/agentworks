@@ -115,8 +115,9 @@ path and needs none of what follows. Everything else keeps its current path for 
   system configuration do not apply to them. An `IdentityAgent` set only in `~/.ssh/config`
   (1Password, Secretive) is ignored; the agent named by `SSH_AUTH_SOCK` serves the key. Every
   connection runs in batch mode, so ssh never prompts for a key's passphrase: an encrypted key has
-  to be loaded in that agent first. When a connection fails and the configured key is an encrypted
-  OpenSSH key, the error's hint says to run `ssh-add`.
+  to be loaded in that agent first. When a connection fails and the configured key is
+  passphrase-protected, the error's hint mentions `ssh-add`; `vm port-forward` shows ssh's own log
+  instead.
 - **Exit statuses.** A command that cannot start exits 127 when it is not found, 126 when it is
   found but cannot run (no execute bit, or a script with no `#!` line, since there is no shell
   fallback), and 125 when the workspace directory is missing, each with one line from `agw`. A

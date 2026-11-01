@@ -19,13 +19,14 @@ from agentworks.errors import StateError, ValidationError
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, forwarding, pump, ssh_process
 from agentworks.execution.agw_launch import refusal_status
-from agentworks.execution.errors import CommandFailed, describe_refusal
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, describe_refusal
 from agentworks.execution.requests import LoginShell
-from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result
+from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.execution.trust import TrustBinding, TrustMode
+from agentworks.ssh_identity import passphrase_hint
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
     from pathlib import Path
     from typing import BinaryIO
 
@@ -78,12 +79,13 @@ class VMAccess:
         With ``check`` a result that is not ``Completed(0)`` raises its typed error.
         """
         stdout, stderr = pump.Capture(), pump.Capture()
-        result = self._execute(request, stdin=None, on_stdout=stdout, on_stderr=stderr)
-        result = Result(result.completion, bytes(stdout.data), bytes(stderr.data), result.client_log_tail)
-        if check and result.require_completed(self.vm_name, identity_file=self._identity_file) != 0:
-            assert isinstance(result.completion, Completed)
-            raise CommandFailed(self.vm_name, result.completion.status, result)
-        return result
+        with self._passphrase_hint_on_connection_failure():
+            result = self._execute(request, stdin=None, on_stdout=stdout, on_stderr=stderr)
+            result = Result(result.completion, bytes(stdout.data), bytes(stderr.data), result.client_log_tail)
+            if check and result.require_completed(self.vm_name) != 0:
+                assert isinstance(result.completion, Completed)
+                raise CommandFailed(self.vm_name, result.completion.status, result)
+            return result
 
     def stream(self, request: Request, *, stdin: BinaryIO | None, stdout: BinaryIO, stderr: BinaryIO) -> int:
         """Run ``request`` with live output and return the guest's status.
@@ -106,15 +108,16 @@ class VMAccess:
 
             return write
 
-        result = self._execute(request, stdin=stdin, on_stdout=deliver(stdout), on_stderr=deliver(stderr))
-        completion = result.completion
-        if isinstance(completion, NotDelivered) and completion.reason is NotDeliveredReason.REFUSED:
-            code = completion.code or ""
-            with contextlib.suppress(OSError):
-                stderr.write(f"agw: {describe_refusal(code)}\n".encode())
-                stderr.flush()
-            return refusal_status(code)
-        return result.require_completed(self.vm_name, identity_file=self._identity_file)
+        with self._passphrase_hint_on_connection_failure():
+            result = self._execute(request, stdin=stdin, on_stdout=deliver(stdout), on_stderr=deliver(stderr))
+            completion = result.completion
+            if isinstance(completion, NotDelivered) and completion.reason is NotDeliveredReason.REFUSED:
+                code = completion.code or ""
+                with contextlib.suppress(OSError):
+                    stderr.write(f"agw: {describe_refusal(code)}\n".encode())
+                    stderr.flush()
+                return refusal_status(code)
+            return result.require_completed(self.vm_name)
 
     def attach(self, request: LoginShell) -> int:
         """Attach the operator's terminal to a login shell and return its exit status."""
@@ -139,15 +142,10 @@ class VMAccess:
                 ssh_process.ArgvMode.TERMINAL,
                 ssh_process.stage0_command(attach_module.socket_path(token)),
             )
-            return attach_module.attach(
-                vm_name=self.vm_name,
-                wire=wire,
-                nonce=nonce,
-                parking_argv=parking,
-                terminal_argv=terminal,
-                log=log,
-                identity_file=self._identity_file,
-            )
+            with self._passphrase_hint_on_connection_failure():
+                return attach_module.attach(
+                    vm_name=self.vm_name, wire=wire, nonce=nonce, parking_argv=parking, terminal_argv=terminal, log=log
+                )
 
     def forward(self, forwards: Sequence[Forward], *, verbose: bool = False) -> int:
         """Forward local ports until the client exits, and return its status."""
@@ -167,6 +165,23 @@ class VMAccess:
             return forwarding.run_forward(argv, vm_name=self.vm_name, log=log)
 
     # -- Internals -------------------------------------------------------------
+
+    @contextlib.contextmanager
+    def _passphrase_hint_on_connection_failure(self) -> Iterator[None]:
+        """Add the SSH agent hint to a connection failure when the operator's key is passphrase-protected.
+
+        ssh runs in batch mode, so an encrypted key that is not loaded in the
+        agent fails as a plain connection failure. The key file is read only
+        here, after such a failure.
+        """
+        try:
+            yield
+        except ExecutionIncomplete as error:
+            if error.result.completion == Unknown(UnknownReason.CONNECTION):
+                hint = passphrase_hint(self._identity_file)
+                if hint is not None:
+                    error.hint = f"{error.hint} {hint}" if error.hint else hint
+            raise
 
     def _policy(self) -> ssh_process.VMPolicy:
         return ssh_process.VMPolicy(self._identity_file, TrustBinding(TrustMode.VM, self.vm_name))

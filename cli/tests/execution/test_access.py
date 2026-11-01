@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -23,7 +23,6 @@ from agentworks.execution.errors import (
     TrustMissing,
     VMNotReady,
 )
-from agentworks.execution.pump import StopReason
 from agentworks.execution.requests import Command, LoginShell, Script, Shell
 from agentworks.execution.results import (
     Completed,
@@ -35,6 +34,9 @@ from agentworks.execution.results import (
 )
 from tests.conftest import seed_vm_trust
 from tests.ssh_fixtures import write_test_ssh_keypair
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 SECRET = "sekrit-env-value-91"
 
@@ -249,21 +251,55 @@ def _key(tmp_path: Path, *, cipher: bytes) -> Path:
     return key
 
 
-def _hint(completion: object, identity_file: Path | None, *, attaching: bool = False) -> str | None:
-    return ExecutionIncomplete("box", result(completion), attaching=attaching, identity_file=identity_file).hint
+def _unhinted(completion: object) -> str | None:
+    return ExecutionIncomplete("box", result(completion)).hint
 
 
-@pytest.mark.parametrize("attaching", [False, True])
-def test_a_connection_failure_with_an_encrypted_key_adds_to_the_hint(tmp_path: Path, attaching: bool) -> None:
-    connection = Unknown(UnknownReason.CONNECTION)
-    encrypted = _hint(connection, _key(tmp_path, cipher=b"aes256-ctr"), attaching=attaching)
-    plain = _hint(connection, _key(tmp_path, cipher=b"none"), attaching=attaching)
+def _operations(access: VMAccess) -> dict[str, Any]:
+    return {
+        "run": lambda: access.run(Command(("true",)), check=True),
+        "stream": lambda: access.stream(Command(("true",)), stdin=None, stdout=None, stderr=None),  # type: ignore[arg-type]
+        "attach": lambda: access.attach(LoginShell()),
+    }
 
+
+@pytest.fixture
+def connection_fails(supported_client: SSHClient, monkeypatch: pytest.MonkeyPatch) -> Callable[[object], None]:
+    """Make every operation fail as the given completion, the way the real layers do."""
+    seed_vm_trust("box")
+
+    def fail_with(completion: object) -> None:
+        monkeypatch.setattr(VMAccess, "_execute", lambda self, *a, **k: result(completion))
+        error = ExecutionIncomplete("box", result(completion), attaching=True)
+
+        def attach_fails(**kwargs: object) -> int:
+            raise error
+
+        monkeypatch.setattr(attach_module, "attach", attach_fails)
+
+    return fail_with
+
+
+@pytest.mark.parametrize("operation", ["run", "stream", "attach"])
+def test_a_connection_failure_with_an_encrypted_key_adds_to_the_hint(
+    connection_fails: Callable[[object], None], operation: str, tmp_path: Path
+) -> None:
+    connection_fails(Unknown(UnknownReason.CONNECTION))
+    hints = {}
+    for cipher in (b"none", b"aes256-ctr"):
+        access = vm_access(vm(), config(_key(tmp_path, cipher=cipher)), Admin())
+        with pytest.raises(ExecutionIncomplete) as caught:
+            _operations(access)[operation]()
+        hints[cipher] = caught.value.hint
+
+    plain, encrypted = hints[b"none"], hints[b"aes256-ctr"]
+    assert plain is not None
+    assert encrypted is not None
     assert encrypted != plain
-    assert plain == _hint(connection, None, attaching=attaching)
-    assert plain == _hint(connection, tmp_path / "absent", attaching=attaching)
+    assert encrypted.startswith(plain)
 
 
+@pytest.mark.parametrize("operation", ["run", "stream"])
 @pytest.mark.parametrize(
     "completion",
     [
@@ -272,18 +308,23 @@ def test_a_connection_failure_with_an_encrypted_key_adds_to_the_hint(tmp_path: P
         NotDelivered(NotDeliveredReason.LAUNCHER_FAILED),
     ],
 )
-def test_only_a_connection_failure_reads_the_key(tmp_path: Path, completion: object) -> None:
-    assert _hint(completion, _key(tmp_path, cipher=b"aes256-ctr")) == _hint(completion, None)
+def test_only_a_connection_failure_gets_the_hint(
+    connection_fails: Callable[[object], None], operation: str, completion: object, tmp_path: Path
+) -> None:
+    connection_fails(completion)
+    access = vm_access(vm(), config(_key(tmp_path, cipher=b"aes256-ctr")), Admin())
+
+    with pytest.raises(ExecutionIncomplete) as caught:
+        _operations(access)[operation]()
+
+    assert caught.value.hint == _unhinted(completion)
 
 
-def test_the_key_is_read_only_on_a_failure(
+def test_the_key_is_read_only_after_a_failure(
     supported_client: SSHClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    seed_vm_trust("box")
     reads: list[Path] = []
-    monkeypatch.setattr(
-        "agentworks.execution.errors.identity_is_passphrase_protected", lambda path: reads.append(path) or True
-    )
+    monkeypatch.setattr("agentworks.execution.access.passphrase_hint", lambda path: reads.append(path))
     monkeypatch.setattr(VMAccess, "_execute", lambda self, *a, **k: result(Completed(0)))
     access = vm_access(vm(), config(tmp_path / "key"), Admin())
 
@@ -291,32 +332,3 @@ def test_the_key_is_read_only_on_a_failure(
     access.stream(Command(("true",)), stdin=None, stdout=None, stderr=None)  # type: ignore[arg-type]
 
     assert reads == []
-
-
-def test_run_and_stream_pass_the_configured_identity_to_the_connection_failure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    key = _key(tmp_path, cipher=b"aes256-ctr")
-    monkeypatch.setattr(VMAccess, "_execute", lambda self, *a, **k: result(Unknown(UnknownReason.CONNECTION)))
-    access = vm_access(vm(), config(key), Admin())
-    expected = _hint(Unknown(UnknownReason.CONNECTION), key)
-
-    with pytest.raises(ExecutionIncomplete) as from_run:
-        access.run(Command(("true",)), check=True)
-    with pytest.raises(ExecutionIncomplete) as from_stream:
-        access.stream(Command(("true",)), stdin=None, stdout=None, stderr=None)  # type: ignore[arg-type]
-
-    assert from_run.value.hint == from_stream.value.hint == expected
-
-
-def test_a_parking_connection_failure_passes_the_identity_to_the_error(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    key = _key(tmp_path, cipher=b"aes256-ctr")
-    session = SimpleNamespace(end=lambda: None)
-    monkeypatch.setattr(ssh_process, "outcome", lambda *a: result(Unknown(UnknownReason.CONNECTION)))
-
-    with pytest.raises(ExecutionIncomplete) as caught:
-        attach_module._raise_parking_failure("box", session, StopReason.EXITED, tmp_path / "log", key)  # type: ignore[arg-type]
-
-    assert caught.value.hint == _hint(Unknown(UnknownReason.CONNECTION), key, attaching=True)

@@ -17,6 +17,8 @@ import struct
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from agentworks.path_rendering import format_host_path
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -178,6 +180,19 @@ def _read_bounded_file(path: Path) -> bytes:
         if descriptor is not None:
             with contextlib.suppress(OSError):
                 os.close(descriptor)
+
+
+def passphrase_hint(identity_file: Path) -> str | None:
+    """The line telling the operator to load ``identity_file`` into the SSH agent, or ``None``.
+
+    Only a passphrase-protected OpenSSH key gets one: ssh runs in batch mode and
+    cannot ask for the passphrase. It reads conditionally because a connection
+    failure has other causes too, such as a stopped VM or a dropped network.
+    """
+    if not identity_is_passphrase_protected(identity_file):
+        return None
+    key = format_host_path(identity_file)
+    return f"If {key} is not loaded in your SSH agent, load it with: ssh-add {key}"
 
 
 def _decode_openssh_envelope(contents: bytes) -> bytes:

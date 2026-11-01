@@ -36,7 +36,8 @@
 
 [operator]
 ssh_public_key = "~/.ssh/id_ed25519.pub"    # required: used to authorize access to VMs
-ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connections to VMs; an encrypted key must be loaded in the SSH agent
+# An encrypted private key must be loaded in your SSH agent (ssh-add): Agentworks runs ssh in batch mode.
+ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connections to VMs
 #ssh_config = "~/.ssh/config"               # SSH config file for VM host entries
 #ssh_config_dir = true                      # manage VM entries in ~/.ssh/config.d/
 #ssh_host_prefix = "awvm--"                 # prefix for VM SSH host aliases (e.g. awvm--myvm)

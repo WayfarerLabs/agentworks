@@ -2,9 +2,7 @@
 
 ``agw-launch`` rebuilds the environment of every command it runs, so values set
 through pam_env never reach those commands. Agentworks does not support them;
-this module only tells the operator when a VM has some. The probe text and its
-parsing live here, apart from reinit's flow, so that moving the check into the
-VM contract is a lift.
+this module only tells the operator when a VM has some.
 
 ``/etc/default/locale`` is left out on purpose: Debian's sshd PAM stack reads
 it, every VM has it set, and ``agw-launch`` sets the locale itself.
@@ -43,12 +41,20 @@ def parse_pam_env_probe(stdout: str) -> tuple[str, ...]:
 
 
 def warn_pam_env_settings(target: ExecTransport, vm_name: str) -> None:
-    """Warn when the VM holds pam_env settings. Never raises: a failed probe only warns."""
-    try:
-        files = parse_pam_env_probe(target.run(PAM_ENV_PROBE, check=False).stdout)
-    except Exception as error:
-        output.warn(f"Could not check VM '{vm_name}' for pam_env settings: {error}")
+    """Warn when the VM holds pam_env settings, or that they could not be checked.
+
+    The probe always ends in ``true``, so a non-zero status means it did not run
+    to its end (an admin login shell that cannot parse it, say). That only
+    warns. A connection failure raises: reinit runs this on the connection it
+    just used for the release probe.
+    """
+    result = target.run(PAM_ENV_PROBE, check=False)
+    if result.returncode != 0:
+        output.warn(
+            f"Could not check VM '{vm_name}' for pam_env settings: the check exited with status {result.returncode}."
+        )
         return
+    files = parse_pam_env_probe(result.stdout)
     if files:
         output.warn(
             f"VM '{vm_name}' has pam_env settings in {', '.join(files)}. "

@@ -51,7 +51,6 @@ def attach(
     parking_argv: Sequence[str],
     terminal_argv: Sequence[str],
     log: Path,
-    identity_file: Path,
 ) -> int:
     """Park the request, run the terminal half under the guard, and return its exit status.
 
@@ -61,15 +60,14 @@ def attach(
     connection fails first on a missing python3, a trust mismatch, a refusal or
     a refused connection, so the typed error is raised before the terminal is
     touched. So is a parking connection that never reports ``parked`` (a
-    startup file that reads stdin would hold it forever). ``identity_file`` is
-    only for the connection failure's key hint (:class:`ExecutionIncomplete`).
+    startup file that reads stdin would hold it forever).
     """
     with PipeSession(
         parking_argv, request=wire, nonce=nonce, hold_stdin_open=True, on_stdout=_ignore, on_stderr=_ignore
     ) as session:
         stop = session.pump(lambda: session.stdout.parked, budget=Deadline.after(PARKING_WAIT_SECONDS))
         if not session.stdout.parked:
-            _raise_parking_failure(vm_name, session, stop, log, identity_file)
+            _raise_parking_failure(vm_name, session, stop, log)
         with guarded_terminal() as guard:
             code = ssh_process.run_terminal(terminal_argv)
             guard.clean_exit = code == 0
@@ -88,9 +86,7 @@ def _ignore(_payload: bytes) -> None:
     return None
 
 
-def _raise_parking_failure(
-    vm_name: str, session: PipeSession, stop: StopReason, log: Path, identity_file: Path
-) -> None:
+def _raise_parking_failure(vm_name: str, session: PipeSession, stop: StopReason, log: Path) -> None:
     session.end()
     result = ssh_process.outcome(session, stop, log)
     # A parking connection that completed without ever parking broke the protocol.
@@ -98,6 +94,6 @@ def _raise_parking_failure(
         result = Result(Unknown(UnknownReason.TRUNCATED), client_log_tail=result.client_log_tail)
     # Whatever the connection's fate, no shell started.
     if isinstance(result.completion, Unknown) and result.completion.reason is not UnknownReason.HOST_KEY:
-        raise ExecutionIncomplete(vm_name, result, attaching=True, identity_file=identity_file)
+        raise ExecutionIncomplete(vm_name, result, attaching=True)
     result.require_completed(vm_name)
     raise ExecutionIncomplete(vm_name, result)  # pragma: no cover - require_completed raises for all else

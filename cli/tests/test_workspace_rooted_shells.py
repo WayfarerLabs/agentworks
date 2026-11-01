@@ -337,7 +337,7 @@ def test_exec_agent_workspace_prefixes_cd(
     db.insert_agent_grant("a1", "ws1", "explicit")
 
     recorder = _patch_agent_common(monkeypatch)
-    config = SimpleNamespace()
+    config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key=Path("/nonexistent/key")))
 
     rc = agent_manager.exec_agent(  # type: ignore[arg-type]
         db, config, name="a1", command=["echo", "hi"], workspace_name="ws1", interaction=TtyInteractionPolicy.REFUSE
