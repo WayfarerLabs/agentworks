@@ -43,7 +43,7 @@ them:
 | `agentworks/execution/client.py`                 | `resolve_ssh`, `SSHClient`: resolution, banner and version check                                                  |
 | `agentworks/execution/ssh_process.py`            | `VMPolicy`, `build_argv`, the stage 0 string, `Deadline`, and the pump that spawns a client                       |
 | `agentworks/execution/envelope.py`               | Frames, the JSON envelope, markers, the stream filters, the classifier and `launcher_source()`                    |
-| `agentworks/execution/agw_launch.py`             | The guest program. Stage 0 execs it; production never imports it                                                  |
+| `agentworks/execution/agw_launch.py`             | The guest program. Stage 0 execs it; the client imports only its two shared definitions                           |
 | `agentworks/execution/requests.py`, `results.py` | The slice 2 vocabulary, with `Shell` and `AccountShell` (below)                                                   |
 | `agentworks/execution/access.py`                 | `VMAccess`, `Admin`, `Agent`, `vm_access`                                                                         |
 | `agentworks/execution/attach.py`                 | The two-connection attach under `guarded_terminal`                                                                |
@@ -138,11 +138,11 @@ Unknown(reason)        CONNECTION | HOST_KEY | TRUNCATED | DEADLINE | OUTPUT_LIM
   `NotDelivered` or `Unknown`, because their consumers can only report it. Neither takes the other's
   inputs: no operation combines input with a terminal, so incident row I4's refusal is structural.
 - **Refusals.** `stream` maps `NotDelivered(REFUSED)` as tty mode does: `exec ENOENT` is status 127,
-  `exec EACCES` and `exec ENOEXEC` are 126, anything else (`cwd`, `handover`, other errno) is 125,
-  with one line naming the refusal on the stderr it was given. So `vm exec VM nosuchcmd` still
-  exits 127. `run` raises `RequestRefused(StateError)` for the same outcome, and `attach` raises it
-  when the parking connection refuses, before the terminal is touched. One `refusal_status(code)` in
-  `agw_launch.py` is the table for the guest and the client alike.
+  any other `exec` errno is 126, and `cwd` and `handover` are 125, with one line naming the refusal
+  on the stderr it was given. So `vm exec VM nosuchcmd` still exits 127. `run` raises
+  `RequestRefused(StateError)` for the same outcome, and `attach` raises it when the parking
+  connection refuses, before the terminal is touched. One `refusal_status(code)` in `agw_launch.py`
+  is the table for the guest and the client alike.
 - **Validation** lives in the one function that turns a request into bytes (`envelope.encode`).
   Boundary: environment, arguments, working directory and script text come from operator-authored
   config and from secret backends. It refuses NUL anywhere, an environment name outside
@@ -179,16 +179,17 @@ as `-o` (the proof's list at `connection.py:109-153`, cut to what `-F none` leav
 | Identity | `IdentityFile="<ssh_private_key>"` and `IdentitiesOnly=yes` (I13). `CertificateFile="<ssh_private_key>/disabled-certificate"`, the 8.5 workaround (`:117-121`). No `IdentityAgent`: the default agent serves an encrypted key |
 | Auth     | `BatchMode=yes`, `PreferredAuthentications=publickey`, `SecurityKeyProvider=none`                                                                                                                                             |
 | Trust    | `trust.ssh_options(TrustBinding(VM, vm.name))`, read at spawn, so a missing record is `TrustMissing` and nothing spawns                                                                                                       |
-| Liveness | `ConnectionAttempts=1`, `ConnectTimeout=30`, `ServerAliveInterval=15`, `ServerAliveCountMax=4` (I7; the constants are `ssh.py:288` and `:296-297`)                                                                            |
+| Liveness | `ConnectTimeout=30`, `ServerAliveInterval=15`, `ServerAliveCountMax=4` (I7; the constants are `ssh.py:288` and `:296-297`)                                                                                                    |
 
 - **What `-F none` already settles.** Password and keyboard-interactive authentication, multiplexing
   (I12), proxies, agent and X11 forwarding, host-key DNS, canonicalization, `KnownHostsCommand`,
-  `PermitLocalCommand` and `ClearAllForwardings` are all at their defaults with no configuration
-  read, and no environment variable changes them. The proof pinned each anyway; these pins are not
-  carried over. The escape character is inactive under `-T`, and the terminal half keeps ssh's
-  default `~`, as `transports/ssh.py:380` does today. The CI `ssh -G` test and the live 8.5 and
-  Windows cells guard those defaults.
-- **Dropped from the proof:** the pins above, its own `StrictHostKeyChecking`,
+  `PermitLocalCommand`, `ClearAllForwardings`, `PKCS11Provider`, `HostbasedAuthentication`, `Tunnel`
+  and `ConnectionAttempts` are all at their defaults with no configuration read, and no environment
+  variable changes them. The proof pinned each anyway; these pins are not carried over. The escape
+  character is inactive under `-T`, and the terminal half keeps ssh's default `~`, as
+  `transports/ssh.py:380` does today. The CI `ssh -G` test and the live 8.5 and Windows cells guard
+  those defaults.
+- **Dropped from the proof:** the pins above, `EscapeChar=none`, its own `StrictHostKeyChecking`,
   `GlobalKnownHostsFile=none`, `UpdateHostKeys`, `CheckHostIP`, `UserKnownHostsFile` and
   `HostKeyAlias` (now `trust.py`'s one copy), `IdentityAgent`, `RevokedHostKeys` (no consumer) and
   the `known_hosts_file` plumbing.
@@ -219,14 +220,16 @@ as `-o` (the proof's list at `connection.py:109-153`, cut to what `-F none` leav
   stdin is not a terminal, which breaks `echo ls | agw vm shell`. tty mode accepts a non-pty.
 - **Forwarded addresses.** `-L <bind>:<local>:localhost:<remote>` as `tailscale.py` builds it today.
 - **The client log.** `-E` appends ssh's own diagnostics, never the remote's output, to a file from
-  `tempfile.mkstemp()` in the system temporary directory (0600), removed in a `finally`. The value
-  goes to ssh verbatim, so it needs no quoting. stderr then carries only what the guest wrote, the
-  filters read nothing from OpenSSH, and the client's diagnostics can be shown without the risk that
-  pre-marker stderr quotes request bytes. The terminal half keeps ssh's diagnostics on the
-  operator's terminal, as today. A live cell confirms that `Host key verification failed` and the
-  authentication and connection errors land in the file on 8.5, 9.x and Win32-OpenSSH. **HLA
-  amendment proposed:** D4 and D13 say the client does not read OpenSSH's diagnostics; it now reads
-  this log, to type `Host key verification failed` and to show its last 20 lines in errors.
+  `tempfile.mkstemp()` in the system temporary directory (0600), whose descriptor is closed before
+  the spawn (a Windows unlink fails while a handle is open), and removed in a `finally`. The value
+  goes to ssh verbatim, so it needs no quoting. stderr then carries what the guest wrote, apart from
+  a login banner sshd may send before the marker, which the filter drops; the filters read nothing
+  from OpenSSH, and the client's diagnostics can be shown without the risk that pre-marker stderr
+  quotes request bytes. The terminal half keeps ssh's diagnostics on the operator's terminal, as
+  today. A live cell confirms that `Host key verification failed` and the authentication and
+  connection errors land in the file on 8.5, 9.x and Win32-OpenSSH. **HLA amendment proposed:** D4
+  and D13 say the client does not read OpenSSH's diagnostics; it now reads this log, to type
+  `Host key verification failed` and to show its last 20 lines in errors.
 
 **Spawning.** `subprocess.Popen(argv, stdin=PIPE, stdout=PIPE, stderr=PIPE, bufsize=0)` with the
 proof's Windows environment strip (`_io.py:104-114`). The pump is the proof's single-threaded loop
@@ -242,9 +245,10 @@ local shell.
   it at end of file. A thread is needed because Windows cannot poll a console or pipe handle, and
   one mechanism serves every platform. It reads the raw stream because a daemon thread blocked in
   `BufferedReader.read1` aborts the interpreter at exit (`_enter_buffered_busy`, status 134,
-  measured on Python 3.11). A caller with no stdin passes `None` and the pipe closes right after the
-  request. The thread outlives the call blocked in a read; `stream` is the last thing a command
-  does. A write that fails after the start marker is the consumer ending early, not a failure.
+  reproduced on Python 3.11; the CLI's floor is 3.12, where the subprocess test covers it). A caller
+  with no stdin passes `None` and the pipe closes right after the request. The thread outlives the
+  call blocked in a read; `stream` is the last thing a command does. A write that fails after the
+  start marker is the consumer ending early, not a failure.
 - **Binary stdio.** Callers pass `sys.stdout.buffer` and `sys.stderr.buffer` (the text layer's
   `newline="\n"` at `cli/_entry.py:38` does not apply), after flushing the text layer (I2).
 
@@ -318,23 +322,27 @@ The guest program, run by stage 0 under `python3 -I -S` from `launcher_source()`
 which reads `agw_launch.py` from the installed package. The file has no import-time effect: it
 defines `main(f, g)` and ends with
 `if __name__ == "__main__": main(globals()["f"], globals()["g"])`, so the package guard can import
-it and linters see no undefined names. Its standard-library imports sit in one `try`; an
-`ImportError` exits with `STDLIB_MISSING_STATUS`, 69, before any marker. That is the
-`python3-minimal` case: Debian's `libpython3.11-minimal` ships `os`, `sys` and `socket`, which stage
-0 needs, but not `json`, which is in `libpython3.11-stdlib`. The client's classifier imports that
-constant and `refusal_status` from this module, so each is defined once. Steps, mapped to HLA D4:
+it and linters see no undefined names. Stage 0's top-level names (`os`, `sys`, `S`, `a`, `s`, `f`,
+`r`, `g`) are the same globals agw-launch's `exec` runs in, so the file defines none of them at
+module level. Its only module-level definitions are `STDLIB_MISSING_STATUS`, `refusal_status` and
+`main`; every other import sits in one `try` inside `main()`, because the client imports this module
+on Windows, where `pwd` does not exist. An `ImportError` there exits with `STDLIB_MISSING_STATUS`,
+69, before any marker. That is the `python3-minimal` case: Debian's `libpython3.11-minimal` ships
+`os`, `sys` and `socket`, which stage 0 needs, but not `json`, which is in `libpython3.11-stdlib`.
+The client's classifier imports that constant and `refusal_status` from this module, so each is
+defined once. Steps, mapped to HLA D4:
 
-1. **Read.** The envelope, with its own exact-read loop. Every failure before the start marker is an
-   uncaught exception (exit 1) or the status above; neither is 127 or 255. The one ordering rule:
-   argv and environment are encoded to bytes before the start marker, so a string that cannot be
-   encoded fails before it.
+1. **Read.** The envelope, with its own exact-read loop, and the passwd entry. Every failure before
+   the start marker is an uncaught exception (exit 1) or the status above; neither is 127 or 255.
+   The one ordering rule: argv and environment are encoded to bytes before the start marker, so a
+   string that cannot be encoded fails before it.
 2. **Check the streams** (`run` and `park` modes). Descriptors 1 and 2 must each be a FIFO or a
    socket, and distinct (`st_dev` and `st_ino`). A startup file that ran `exec >/dev/null` or
    `exec 2>&1` fails this and exits 1.
 3. **Start marker** to descriptor 1, then 2.
 4. **Reset.** Environment rebuilt in this order: `HOME`, `USER`, `LOGNAME`, `SHELL` from the passwd
-   entry of `os.getuid()` (a missing entry is an exception before the marker, since sshd cannot
-   authenticate a uid without one; an empty shell is `/bin/sh`), then
+   entry of `os.getuid()` (looked up in step 1, before the marker: a missing entry is an exception,
+   since sshd cannot authenticate a uid without one; an empty shell is `/bin/sh`), then
    `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/games:/usr/games`,
    `LANG=C.UTF-8`, `SHLVL=1`, `TERM` and `SSH_TTY` (the terminal name) in `tty` mode when stdin is a
    terminal, `XDG_RUNTIME_DIR=/run/user/<uid>` when that directory exists and the uid owns it, and
@@ -365,10 +373,13 @@ constant and `refusal_status` from this module, so each is defined once. Steps, 
 
 **`tty` mode** (the terminal half of an attach) runs `LoginShell` only, since a script's memfd could
 not survive the descriptor close. It runs steps 1, 4 and 5 with no check, no markers and no child:
-it closes descriptors from 3 up and `os.execv`s `[shell, "-l"]`, adding `-i` only when stdin is a
+it resets every disposition that is `SIG_IGN` to `SIG_DFL`, including Python's own `SIGPIPE` and
+`SIGXFSZ` ignores (nothing else restores them before an exec, unlike `Popen`), clears the signal
+mask, closes descriptors from 3 up and `os.execv`s `[shell, "-l"]`, adding `-i` only when stdin is a
 terminal, so the shell is the session leader on the pty. A refusal prints one line to stderr and
-exits with `refusal_status(code)`: 127 for `exec ENOENT`, 126 for `exec EACCES` and `exec ENOEXEC`,
-125 otherwise, as `env(1)` does.
+exits with `refusal_status(code)`: 127 for `exec ENOENT`, 126 for any other `exec` errno, and 125
+for `cwd` and `handover`. The shell convention is 127 not found and 126 found but not runnable;
+`env(1)` also uses 125 for its own failure.
 
 ## Completion, on the client
 
@@ -455,16 +466,19 @@ above and waits for the client, polling `Popen.wait(timeout=0.2)` so Ctrl-C is d
 - **Diagnostics.** Without `verbose`, `-E` sends them to the client log and stderr is `DEVNULL`,
   because an unread stderr pipe stalls the client after about a thousand refused channels. With
   `verbose` there is no `-E` and the client inherits the operator's stderr.
-- **Failure.** `ExitOnForwardFailure=yes` and `ConnectTimeout` make a setup failure the client's own
-  exit, so there is no readiness probe, handle or context manager. A non-zero exit raises plain
-  `ConnectivityError` with the log's last 20 lines, or `TrustMismatch` when the log holds
-  `Host key verification failed`. A zero exit returns 0. The client always ends on the way out:
-  terminate, one second, kill, and the log is removed. **HLA amendment proposed:** D8 describes a
-  context manager that returns once the local port accepts a connection.
+- **Exit contract.** `forward` returns the client's exit status and never raises for a non-zero one.
+  `ExitOnForwardFailure=yes` and `ConnectTimeout` make a setup failure the same non-zero exit, so
+  there is no readiness probe, handle or context manager. On a non-zero exit it reports the log's
+  last 20 lines through `agentworks.output`, and a `Host key verification failed` there raises
+  `TrustMismatch` instead. Under `verbose` there is no log, so no tail and no `TrustMismatch`
+  typing. The client always ends on the way out: terminate, one second, kill, and the log is
+  removed. **HLA amendment proposed:** D8 describes a context manager that returns once the local
+  port accepts a connection.
 - **Signals.** The library installs none. `port_forward_vm` installs a `SIGTERM` handler that raises
   `KeyboardInterrupt` for the duration of the forward and restores the previous handler (today's
-  handlers are never restored, `tailscale.py:180-181`). An operator stop returns 0; any other end
-  returns the client's status. The legacy returned the terminated client's status (`-15` on POSIX).
+  handlers are never restored, `tailscale.py:180-181`). `port_forward_vm` owns the 0 on an operator
+  stop and returns the client's status for any other end. The legacy returned the terminated
+  client's status (`-15` on POSIX).
 
 ## Errors
 
@@ -522,8 +536,9 @@ the package attribute so one patch reaches every manager.
   - The guest sees a fixed `PATH`, `LANG=C.UTF-8`, `SHLVL=1` and no `SSH_CLIENT` or
     `SSH_CONNECTION`.
   - A literal `vm exec` command no longer inherits the account shell's startup. A command that
-    cannot start, such as `vm exec VM nosuchcmd`, exits 127 (126 when not executable) with one line
-    from agw instead of the shell's message. A missing workspace directory exits 125 with one line.
+    cannot start, such as `vm exec VM nosuchcmd`, exits 127 with one line from agw instead of the
+    shell's message, and `vm exec VM ./script-without-shebang` exits 126, since there is no shell
+    `ENOEXEC` fallback. A missing workspace directory exits 125 with one line.
   - An argument or `NAME=VALUE` environment string over 131,071 bytes is refused up front.
   - `IdentityAgent` set only in `~/.ssh/config` (1Password, Secretive) is ignored by the six
     commands, since no configuration is read; the agent named by `SSH_AUTH_SOCK` serves the key.
@@ -576,8 +591,8 @@ the package attribute so one patch reaches every manager.
     with no record spawns nothing;
   - the resolver against temporary executables, including an empty and a relative `PATH` element and
     the Windows candidate order;
-  - stage 0 is one line of at most 200 characters with no `'`, `"`, `!` or backslash, and the
-    launcher parses at 3.11 and imports only the standard library, inside its guard;
+  - stage 0 is one line of under 200 characters (`< 200`) with no `'`, `"`, `!` or backslash, and
+    the launcher parses at 3.11 and imports only the standard library, inside its guard;
   - passivity: `vm_access` on a VM with no address and a missing key file raises nothing and spawns
     nothing;
   - error messages and `repr` hold no stream or environment value;
@@ -601,29 +616,29 @@ a rootless local `sshd` (`ListenAddress 127.0.0.1`, a temporary host key and `Au
 is the live lane, `-m integration` with `AGW_CONFORMANCE_VM`, run by the tester from each
 workstation. `zsh` and `dash` are required on CI (a missing shell fails there, skips locally).
 
-| Vector                                                                                                                                                 | Lanes  |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ |
-| Literal argv: empty, whitespace, shell characters, dash-led items and `--` (I5)                                                                        | L S V  |
-| Script versus stdin; script text absent from the interpreter's `/proc/<pid>/cmdline`                                                                   | L S V  |
-| Interpreter and startup: `sh`, `bash`, `user_default`, each with and without login                                                                     | L V    |
-| Environment: every byte `0x01` to `0xFF`, `%`, quotes, `${HOME}`, CR, LF                                                                               | L S V  |
-| Size limits: an argument and an environment value at 131,071 bytes run, one more is refused; a total over `ARG_MAX` is `exec E2BIG`                    | L V    |
-| Working directory, and a missing one as `refused cwd` (status 125 under `stream`)                                                                      | L V    |
-| A missing command is `exec ENOENT` and status 127; one that is not executable 126                                                                      | L S V  |
-| Exit 0, 1 and 255; death by signal as 128 plus the signal                                                                                              | L S V  |
-| Stage 0 under `sh`, `dash`, `bash`, `zsh` with startup files that print and export                                                                     | L      |
-| Output before the start marker dropped, with and without a trailing newline                                                                            | L      |
-| `NotDelivered` versus `Unknown`: no python3 (127), a missing standard library module (69), a startup `exit 0`, a startup `exit 255`, a killed launcher | L      |
-| A startup file that reads stdin, and one that redirects a standard stream, as not delivered; no stream text in the error                               | L      |
-| Signal dispositions and descriptors reset; a startup `TERM` or `XDG_RUNTIME_DIR` leaves the payload's values                                           | L      |
-| Exact stdin positioning through `stream(stdin=...)`: the payload reads the caller's first byte                                                         | L S V  |
-| A bash child of the payload reads no account startup file; stdin a pipe, and in L a socket (I11)                                                       | L S V  |
-| Background child holding both streams: prompt completion, status correct                                                                               | L S V  |
-| Payload stdout with no trailing newline; a `refused` trailer                                                                                           | L S    |
-| Deadline: `Unknown(DEADLINE)` at the deadline, client reaped                                                                                           | L S    |
-| Handover: success, the 30 s timeout, an existing directory name, a missing `cwd`, second connection never arrives, nothing left behind                 | L S V  |
-| Host key mismatch is `TrustMismatch`, read from the client log                                                                                         | S      |
-| Binary stdin and stdout, from Windows (`windows` mark) and live                                                                                        | pump V |
+| Vector                                                                                                                                                                                          | Lanes  |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| Literal argv: empty, whitespace, shell characters, dash-led items and `--` (I5)                                                                                                                 | L S V  |
+| Script versus stdin; script text absent from the interpreter's `/proc/<pid>/cmdline`                                                                                                            | L S V  |
+| Interpreter and startup: `sh`, `bash`, `user_default`, each with and without login                                                                                                              | L V    |
+| Environment: every byte `0x01` to `0xFF`, `%`, quotes, `${HOME}`, CR, LF                                                                                                                        | L S V  |
+| Size limits: an argument and an environment value at 131,071 bytes run, one more is refused; a total over `ARG_MAX` is `exec E2BIG`                                                             | L V    |
+| Working directory, and a missing one as `refused cwd` (status 125 under `stream`)                                                                                                               | L V    |
+| A missing command is `exec ENOENT` and status 127; any other `exec` failure, such as a file with no execute bit or no shebang, 126                                                              | L S V  |
+| Exit 0, 1 and 255; death by signal as 128 plus the signal                                                                                                                                       | L S V  |
+| Stage 0 under `sh`, `dash`, `bash`, `zsh` with startup files that print and export                                                                                                              | L      |
+| Output before the start marker dropped, with and without a trailing newline                                                                                                                     | L      |
+| `NotDelivered` versus `Unknown`: no python3 (127), a missing standard library module (69), a startup `exit 0`, a startup `exit 255`, a killed launcher                                          | L      |
+| A startup file that reads stdin, and one that redirects a standard stream, as not delivered; no stream text in the error                                                                        | L      |
+| Signal dispositions and descriptors reset; a startup `TERM` or `XDG_RUNTIME_DIR` leaves the payload's values; in the shell of a handover, `SigIgn` and `SigBlk` in `/proc/self/status` are zero | L      |
+| Exact stdin positioning through `stream(stdin=...)`: the payload reads the caller's first byte                                                                                                  | L S V  |
+| A bash child of the payload reads no account startup file; stdin a pipe, and in L a socket (I11)                                                                                                | L S V  |
+| Background child holding both streams: prompt completion, status correct                                                                                                                        | L S V  |
+| Payload stdout with no trailing newline; a `refused` trailer                                                                                                                                    | L S    |
+| Deadline: `Unknown(DEADLINE)` at the deadline, client reaped                                                                                                                                    | L S    |
+| Handover: success, the 30 s timeout, an existing directory name, a missing `cwd`, second connection never arrives, nothing left behind                                                          | L S V  |
+| Host key mismatch is `TrustMismatch`, read from the client log                                                                                                                                  | S      |
+| Binary stdin and stdout, from Windows (`windows` mark) and live                                                                                                                                 | pump V |
 
 The stdout-after-trailer ordering is a unit test of the filters, not a vector, since pipes do not
 reorder.
@@ -686,13 +701,21 @@ client on one workstation (else the operator's disposition). For each, the V vec
 ### HLA amendments proposed
 
 - D1: doctor keeps its `ssh` and `scp` PATH rows and adds the resolver's verdict.
-- D2: the terminal half uses `-t`, not `-tt`; liveness options apply to every connection.
-- D3: a per-string kernel limit of 131,071 bytes on argv elements and `K=V` strings.
+- D2 (`hla.md:111`): the terminal half uses `-t`, not `-tt`; liveness options apply to every
+  connection; connection sharing, forwarding and proxy commands are off by the `-F none` defaults
+  rather than by explicit pins.
+- D3 (`hla.md:149`): a per-string kernel limit of 131,071 bytes on argv elements and `K=V` strings;
+  agw-launch has its own exact-read loop rather than reusing stage 0's `r`.
 - D4 and D13: the client reads ssh's diagnostics from a `-E` log, to type `HOST_KEY` and to show its
-  tail in errors.
+  tail in errors; `STDLIB_MISSING` is a not-delivered reason that maps to `VMNotReady`.
+- D4 (`hla.md:192`): `bootstrap.py`'s locale handling is not kept; the launcher sets `LANG=C.UTF-8`.
+- D4 step 6 (`hla.md:245`): a missing passwd entry is an exception before the marker, not `refused`;
+  `refused` has no `passwd` or `interpreter` code.
 - D5: a new `LoginShell` request.
-- D8: a timed-out park writes `end` and `refused handover`; the forward is a blocking call with no
-  readiness probe, handle or context manager.
+- D8 (`hla.md:397`): the terminal half uses `-t`; the client picks the handover token and the guest
+  writes a bare `parked`; a timed-out park writes `end` and `refused handover`; the forward is a
+  blocking call that returns the client's status, with no readiness probe, handle or context
+  manager.
 - D9: the VM policy keeps the null device for `GlobalKnownHostsFile`, not `none`.
 - D13: a new `RequestRefused`, and `stream`'s mapping of a refusal to status 126, 127 or 125;
   `TrustMismatch`'s PR A hint names the manual path; `oplog.py` and the `LOG_DIR` move land in slice
@@ -703,6 +726,13 @@ client on one workstation (else the operator's disposition). For each, the V vec
 
 ### Plan amendments proposed
 
+- The LLD box (`plan.md:98`, `:104`) names the host policy and the operation log; the host policy is
+  deferred to slice 4 and the operation log to slice 3.
+- The implement box (`plan.md:106`) names `launcher.py` and `oplog.py`: they become `agw_launch.py`
+  (with stage 0 in `ssh_process.py`), and `oplog.py` is slice 3's.
+- The re-prove box (`plan.md:148`) gains I12 to I14, I19 and I21.
+- The stdout-after-trailer vector (`plan.md:143`) becomes a unit test of the filters, since pipes do
+  not reorder.
 - The slice 2 doctor box keeps the `ssh` and `scp` presence check beside the resolver's verdict.
 - The slice 2 box "Move the old `LOG_DIR` readers to `oplog`'s constant" and `oplog.py` move to
   slice 3, with the writer.
