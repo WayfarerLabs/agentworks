@@ -295,6 +295,12 @@ applied), the operator accepted all three and wrote:]
 
 > Keep python3 at init
 
+[On R4's "Sensitive input, environment and script content never appear in command arguments, logs,
+exceptions or retained artifacts", asked whether "sensitive" qualifies all three or whether all
+script source stays out of logs, the operator chose:]
+
+> Sensitive qualifies all three (Recommended)
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.
