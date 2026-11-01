@@ -112,7 +112,7 @@ a VM connection.
       recording fake `VMAccess`.
 - [ ] Migrate `vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection` and
       `vm port-forward`. Release probing stays legacy until slice 3, because reinit runs it before
-      initialization and must still reach a VM without python3 (`vms/manager/lifecycle.py:946`).
+      initialization and must still reach a VM without python3 (`vms/manager/lifecycle.py:962`).
       Keep `vm exec`'s single-argument form as a shell command line, sent as a `Script` under the
       identity's default shell, and several arguments as a literal argv, as today
       (`vms/manager/exec.py:271`).
@@ -139,8 +139,8 @@ a VM connection.
     delivered;
   - signal dispositions and descriptors reset for the payload, and a startup file that overrides
     `TERM` or `XDG_RUNTIME_DIR` leaves the payload's values unchanged;
-    - the end marker and trailer under a background child that holds both streams, and with stdout's
-      last bytes arriving after the trailer;
+  - the end marker and trailer under a background child that holds both streams, and with stdout's
+    last bytes arriving after the trailer;
   - payload stdout that does not end in a newline, and a `refused` trailer;
   - the deadline;
   - sensitive stdin absent from logs and exceptions;
@@ -174,7 +174,7 @@ pass the static check, and the package's tests pass with the legacy modules bloc
   - Phase A on `VMAccess`;
   - `reachability`.
 - [ ] Add python3 to `PROVISIONING_PACKAGES`, which every platform's bootstrap already installs
-      (`lima.py:385`, `wsl2_bootstrap.py:65`, and the AWS, Azure, GCP and Proxmox platforms).
+      (`lima.py:391`, `wsl2_bootstrap.py:65`, and the AWS, Azure, GCP and Proxmox platforms).
 - [ ] Make `ProvisionResult.tailnet_address` required on every platform, with each platform retrying
       the address read after a successful join so the key is never sent twice (HLA D11), and delete
       `ProvisionResult.native_transport` and Phase A's native `tailscale ip -4` fallback.
@@ -191,7 +191,9 @@ pass the static check, and the package's tests pass with the legacy modules bloc
 - [ ] Tests:
   - a VM failing a base check is not reported ready;
   - each diagnosis names reinit or recreation;
-  - a platform that cannot report the address fails create.
+  - a platform that cannot report the address logs the node out over its provisioning channel and
+    fails create, without a second join;
+  - a VM with pam_env settings gets a warning naming the file and still passes the contract.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
 - [ ] Collateral: platform author documentation for `tailnet_address`, and the command reference for
@@ -204,7 +206,7 @@ first operation there is the base contract check.
 ## Slice 4: Recovery and the platform surface (HLA D11 second half; PR B)
 
 - [ ] Write `platform-lld.md`. It covers:
-  - `run_recovery`, `RecoveryResult` and its trailer wrapper;
+  - `run_as_root`, and core's `run_recovery`, `RecoveryResult` and its marker wrapper;
   - `read_host_keys` and its cloud overrides;
   - `recovery_needs_guest_sshd`;
   - `native_shell`;
@@ -212,8 +214,11 @@ first operation there is the base contract check.
   - `public_ssh.py`;
   - the recovery scripts;
   - `vm recover`;
-  - each cloud's provider-side host-key fingerprint source.
-- [ ] Implement `run_recovery`, `read_host_keys` and `native_shell` on every platform.
+  - each cloud's provider-side host-key fingerprint source;
+  - whether the QEMU guest agent waits for the output pipes to close, so that a background child of
+    a recovery script would stall Proxmox recovery, and what the platform does about it.
+- [ ] Implement core's `run_recovery` in `vms/recovery.py`, and `run_as_root`, `read_host_keys` and
+      `native_shell` on every platform.
 - [ ] Rehome native code as plugin-private modules:
   - Remote Lima's host connection, under the host policy, and its host-side detached create;
   - `plugins/proxmox/guest_agent.py`, replacing `plugins/proxmox/transport.py`;
@@ -258,7 +263,7 @@ first operation there is the base contract check.
   - recovery of a broken sshd on WSL2 and on Proxmox;
   - recovery of a lost store record on one cloud and on Remote Lima.
 
-Definition of done: core reaches a native channel only through `run_recovery` or `native_shell`, and
+Definition of done: core reaches a native channel only through `run_as_root` or `native_shell`, and
 no platform's private access imports a legacy module.
 
 ## Slice 5: Files and capability delivery (HLA D6, D12; PR C)

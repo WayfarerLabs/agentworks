@@ -40,7 +40,7 @@ contract.
                             |
             installed OpenSSH  ==tailnet==>  sshd  ->  stage 0  ->  agw-launch (python3)
 
- platform plugins: private native access + run_recovery(script, stdin) + optional native shell
+ platform plugins: private native access + run_as_root(program, stdin) + optional native shell
  shared SSH machinery for platforms: execution.ssh_process (host policy or VM policy)
 ```
 
@@ -268,8 +268,11 @@ if one proves necessary, is the same installed program (`2026-08-04-next-steps/t
 - **Unknown.** Everything else is unknown, whatever the client's own exit status: a start marker
   without both the end marker and the trailer, or 255 with no start marker. The client does not read
   OpenSSH's diagnostics to tell a refused connection from a dropped one. It reads one OpenSSH token
-  only to type an error: `Host key verification failed` on a 255 becomes `TrustMismatch`, naming
-  `agw vm recover`, since a host key that no longer matches the store needs the operator.
+  only to type an error: `Host key verification failed` on a 255 becomes `TrustMismatch`. Its hint
+  names the manual path: verify the new key through the platform console or provider, remove the
+  store file and import a verified file, or recreate the VM. `agw vm recover` cannot fix it, since
+  recovery re-establishes only a missing record and verifies against an existing one; a flow that
+  replaces a changed key is not part of this design.
 - **TTY mode.** An attach never elevates to root; an elevated attach request is refused before
   dispatch, and no current attach consumer elevates. The root `sudo -n` prefix and the handover
   argument are never combined. An attach returns its exit code; a 255 is reported as "connection
@@ -325,15 +328,15 @@ file program `native_files.py` already dispatches the same way on `main` (`_FILE
 it a separate payload, rather than part of agw-launch, keeps file code off the requests that do not
 use it. There is no scp.
 
-| Operation                                   | Mechanism                                                                                                                                                                                                                                                                                                                                                                                     | Current consumers (slice)                                                                                 |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `read(path) -> (bytes, digest)`             | Open without following symlinks and copy to stdout; the workstation computes the digest from the bytes it received                                                                                                                                                                                                                                                                            | artifacts, native CLI transcripts, settings (5)                                                           |
-| `write(path, data, mode, owner, group)`     | A temporary file in the destination directory, filled from stdin with owner and mode set and `fsync`ed without the lock, then renamed into place under it. With `preserve_metadata=True` the existing file's owner, group, mode and extended attributes (ACLs) are copied onto the temporary file under the lock, before the rename, as `native_files.py` does today (`:120-126`, `:153-172`) | initializer fragments, profiles, tmuxinator, sources (5, 6)                                               |
-| `write_if(path, data, expected, ...)`       | As `write`, comparing the current digest (or absence) with `expected` under the lock before the rename, with the same `preserve_metadata` option                                                                                                                                                                                                                                              | artifact publication (with `preserve_metadata=True`, `artifacts/publication.py:205`), settings merges (5) |
-| `update(path, transform, ...)`              | `read`, apply `transform` on the workstation, `write_if`; retry on conflict                                                                                                                                                                                                                                                                                                                   | harness JSON and TOML settings, marked profile blocks (5, 6)                                              |
-| `remove(path)`, `remove_if(path, expected)` | Under the lock                                                                                                                                                                                                                                                                                                                                                                                | artifact cleanup (5), workspaces (7)                                                                      |
-| `ensure_directory`, `prune_empty_parents`   | Operations of the same program                                                                                                                                                                                                                                                                                                                                                                | artifacts (5), workspaces (7)                                                                             |
-| `upload_tree(local_dir, dest)`              | A `tarfile` stream from the workstation, extracted beside `dest` and swapped in for it, as its one caller needs (`fetch_dir` replaces `dest` today, `sources.py:282-287`)                                                                                                                                                                                                                     | sources' `fetch_dir` (6)                                                                                  |
+| Operation                                   | Mechanism                                                                                                                                                                                                                                                                                                                                          | Current consumers (slice)                                                                                 |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `read(path) -> (bytes, digest)`             | Open without following symlinks and copy to stdout; the workstation computes the digest from the bytes it received                                                                                                                                                                                                                                 | artifacts, native CLI transcripts, settings (5)                                                           |
+| `write(path, data, mode, owner, group)`     | A temporary file in the destination directory, filled from stdin with owner and mode set and `fsync`ed without the lock, then renamed into place under it. None of its consumers keeps an existing file's metadata                                                                                                                                 | initializer fragments, profiles, tmuxinator, sources (5, 6)                                               |
+| `write_if(path, data, expected, ...)`       | As `write`, comparing the current digest (or absence) with `expected` under the lock before the rename. With `preserve_metadata=True` the existing file's owner, group, mode and extended attributes (ACLs) are copied onto the temporary file under the lock, before the rename, as `native_files.py` does today (`:116`, `:125-126`, `:155-172`) | artifact publication (with `preserve_metadata=True`, `artifacts/publication.py:205`), settings merges (5) |
+| `update(path, transform, ...)`              | `read`, apply `transform` on the workstation, `write_if`; retry on conflict                                                                                                                                                                                                                                                                        | harness JSON and TOML settings, marked profile blocks (5, 6)                                              |
+| `remove(path)`, `remove_if(path, expected)` | Under the lock                                                                                                                                                                                                                                                                                                                                     | artifact cleanup (5), workspaces (7)                                                                      |
+| `ensure_directory`, `prune_empty_parents`   | Operations of the same program                                                                                                                                                                                                                                                                                                                     | artifacts (5), workspaces (7)                                                                             |
+| `upload_tree(local_dir, dest)`              | A `tarfile` stream from the workstation, extracted beside `dest` and swapped in for it, as its one caller needs (`fetch_dir` replaces `dest` today, `sources.py:282-287`)                                                                                                                                                                          | sources' `fetch_dir` (6)                                                                                  |
 
 - **One lock for every writer.** Every mutating file operation, tree uploads and removals included,
   takes `flock` on one VM-wide lock file, `/run/lock/agentworks-files.lock`. `/run/lock` is a
@@ -470,9 +473,9 @@ Host connections such as Remote Lima's keep their own configuration and are not 
 - **Re-establishment.** This is part of `agw vm recover` (D11). It calls the platform's
   `read_host_keys`, shows the fingerprints, and writes them to the store only after the operator
   confirms.
-  - **Default implementation.** `run_recovery` with a fixed script that prints the public host keys.
-    Its channel does not use the VM's store: WSL2's `wsl.exe`, Proxmox's guest agent, and Lima's
-    `limactl shell` over Lima's own host-local access.
+  - **Default implementation.** `run_recovery` (D11) with a fixed script that prints the public host
+    keys. Its channel does not use the VM's store: WSL2's `wsl.exe`, Proxmox's guest agent, and
+    Lima's `limactl shell` over Lima's own host-local access.
   - **Clouds.** They override it and read the keys in Unverified mode. Where a provider publishes
     fingerprints (for example EC2 console output or GCE guest attributes), the platform may return
     them for the operator to compare; R7 requires only the operator's confirmation. The platform LLD
@@ -505,7 +508,11 @@ Host connections such as Remote Lima's keep their own configuration and are not 
   - supported login shells (`sh`, `dash`, `bash` or `zsh`) for the admin and every agent;
   - Tailscale up at the recorded address;
   - python3 and agw-launch running, which the check's own request proves, plus coreutils, util-linux
-    and `tar`.
+    and `tar`;
+  - no pam_env settings: `/etc/environment`, `/etc/security/pam_env.conf` and the admin's and each
+    agent's `~/.pam_environment` hold nothing but comments and blank lines. agw-launch does not
+    apply pam_env (the operator's 2026-11-01 ruling), so a VM that uses it gets a warning naming the
+    file, and the contract still passes.
 
   Because this is core's first operation, the release check is the first thing core does on the
   common path.
@@ -521,31 +528,32 @@ Host connections such as Remote Lima's keep their own configuration and are not 
 - **Older VMs without python3.** python3 joined init only on 2026-09-14 (`2841cb9fa`), so a VM
   initialized before then lacks it unless its image shipped it; the WSL2 Debian root filesystem is
   the likely case. Such a VM gets `VMNotReady`. In PR A its hint names `agw vm reinit`, whose
-  release probe and Phase A stay on the legacy stack until slice 3, so reinit still runs there
-  without python3; from PR B it names `agw vm recover`, whose access repair installs python3 (D11).
-  Release notes say so.
+  release probe and initialization stay on the legacy stack until slice 3 (reinit has no Phase A),
+  so reinit still runs there without python3; from PR B it names `agw vm recover`, whose access
+  repair installs python3 (D11). Release notes say so.
 
 ### D11. The platform surface (R1, R2, R7)
 
 Changes to `capabilities/vm_platform/base.py`:
 
-| Today                                         | After                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ProvisionResult.native_transport` (required) | Removed in slice 3, when Phase A and Debian attestation move onto SSH                                                                                                                                                                                                                                                                                                                                                                                            |
-| `ProvisionResult.tailscale_ip: str \| None`   | `tailnet_address: str`, required. After a successful join the platform retries reading the address within its own provisioning step, so a transient failure costs neither the VM nor a second use of the key. If it still cannot read it, create fails without a second join, and the failed VM is kept for `agw vm delete`, whose logout removes the node. Today's join-once rule (`tailscale_join.py:65-71`, `vms/initializer/driver.py:386-398`) carries over |
-| `native_transport(vm, ctx, config)`           | Removed in slice 4, when rejoin, rekey, logout and the native shell move                                                                                                                                                                                                                                                                                                                                                                                         |
-| (none)                                        | `run_recovery(vm, ctx, script, stdin, deadline) -> RecoveryResult`: root, once, no Tailscale dependency, VM trust only                                                                                                                                                                                                                                                                                                                                           |
-| (none)                                        | `read_host_keys(vm, ctx) -> HostKeyReading`, the key-reading half of the same R7 capability, not a second one: the VM's public host keys, plus any provider-side fingerprints. The default runs a fixed script through `run_recovery`; a cloud overrides it with its private access under Unverified trust                                                                                                                                                       |
-| (none)                                        | `ClassVar recovery_needs_guest_sshd: bool`                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `native_shell_unavailable_hint`               | `native_shell(vm, ctx) -> int`. A platform offers a shell by overriding it. Core detects the override on the class before the operation boundary, so it refuses with `FeatureUnavailable` before credentials are resolved (R2). A platform may set guidance text for the refusal                                                                                                                                                                                 |
-| `transient_route`, `probe_failure_hint`       | Private to each platform's own native code (recovery and native shell)                                                                                                                                                                                                                                                                                                                                                                                           |
+| Today                                         | After                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ProvisionResult.native_transport` (required) | Removed in slice 3, when Phase A and Debian attestation move onto SSH                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `ProvisionResult.tailscale_ip: str \| None`   | `tailnet_address: str`, required. After a successful join the platform retries reading the address within its own provisioning step, so a transient failure costs neither the VM nor a second use of the key. If it still cannot read it, the platform logs the node out over that same provisioning channel, which is still open and still pinned, and create fails without a second join; the failed VM is kept for `agw vm delete`, with no node left to remove. Today's join-once rule (`tailscale_join.py:65-71`, `vms/initializer/driver.py:386-398`) carries over |
+| `native_transport(vm, ctx, config)`           | Removed in slice 4, when rejoin, rekey, logout and the native shell move                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| (none)                                        | `run_as_root(vm, ctx, program, stdin, deadline) -> RawRun`: runs core's program as root through the platform's channel, once, with no Tailscale dependency and VM trust only, and returns the channel's status and both streams unread                                                                                                                                                                                                                                                                                                                                   |
+| (none)                                        | `read_host_keys(vm, ctx) -> HostKeyReading`, the key-reading half of the same R7 capability, not a second one: the VM's public host keys, plus any provider-side fingerprints. The default runs a fixed script through `run_recovery`; a cloud overrides it with its private access under Unverified trust                                                                                                                                                                                                                                                               |
+| (none)                                        | `ClassVar recovery_needs_guest_sshd: bool`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `native_shell_unavailable_hint`               | `native_shell(vm, ctx) -> int`. A platform offers a shell by overriding it. Core detects the override on the class before the operation boundary, so it refuses with `FeatureUnavailable` before credentials are resolved (R2). A platform may set guidance text for the refusal                                                                                                                                                                                                                                                                                         |
+| `transient_route`, `probe_failure_hint`       | Private to each platform's own native code (recovery and native shell)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
-**RecoveryResult.** `run_recovery` wraps the core script in a small `sh` wrapper that writes the
-same end marker and trailer as D4, and reads its result to both, as D4's client does, so a recovery
-result is the script's status, delivery failure, or unknown. It never relies on `limactl` or
-`wsl.exe` exit codes; the salvage message measured WSL passing raw wait statuses through, which
-makes a signal and an exit indistinguishable. Sensitive stdin follows D5. The capability takes no
-environment, directory or files.
+**RecoveryResult.** Core's `run_recovery` in `vms/recovery.py` wraps the script in a small `sh`
+wrapper that writes D4's closing markers, passes it to the platform's `run_as_root`, and reads the
+raw streams with D4's own reader, so a recovery result is the script's status, delivery failure, or
+unknown. A platform author runs `sh` as root and returns what came back; only core knows the
+markers. It never relies on `limactl` or `wsl.exe` exit codes; the salvage message measured WSL
+passing raw wait statuses through, which makes a signal and an exit indistinguishable. Sensitive
+stdin follows D5. The capability takes no environment, directory or files.
 
 **Per platform:**
 
@@ -671,7 +679,7 @@ The slices:
    Phase B stays on the legacy stack until slice 6.
 
 4. **Recovery and the platform surface.**
-   - `run_recovery` on every platform, with `public_ssh.py`.
+   - `run_as_root` on every platform, with `public_ssh.py`, and core's `run_recovery`.
    - Each platform's native code rehomed as private modules: Remote Lima's host connection and
      host-side detached create, the Proxmox QGA client, and the WSL2 and Lima wrappers.
    - Rejoin, rekey and logout move onto recovery, starting a VM stops rejoining on its own, and
@@ -715,6 +723,10 @@ Each of its rows is either a decision this design already makes (the probe's log
 D5, metadata and ACL preservation in D6, python3 from provisioning in D10) or behavior of a module
 this effort only repoints onto `VMAccess` (settings merges, publication and sections, session
 identity, restart confirmation), whose existing tests stay green in the slice that moves its caller.
+The source table's row asking that destination and home paths come from composition and bounded file
+observations rather than discovery commands is dropped on purpose: those probes
+(`harness_setup/dispatch.py:47`, `:52`, `artifacts/session.py:76`) stay ordinary requests, and the
+`HOME` they read is trustworthy because agw-launch rebuilds it (D5).
 
 ## Evidence matrix (R11)
 
@@ -795,14 +807,8 @@ requirement-level rulings (R3, R7, R11 and python3 at provisioning) are quoted i
 
 ## Awaiting the operator
 
-1. **Provisioning's auth key.** R1 leaves the first Tailscale join to each platform's provisioning,
-   and R4's secrecy rule covers only the transport and recovery input. The lead proposes a
-   one-sentence R1 amendment: provisioning's first join sends the auth key once and keeps it out of
-   retained provisioning artifacts, command lines, logs and exceptions. Incident row I10 and slice
-   4's test carry it either way.
-2. **python3 at init.** From slice 3, init's python3 install converges nothing, since init cannot
-   reach a VM without python3 and `agw vm recover` covers older ones. It stays, as the operator
-   asked, unless the operator drops it.
+Nothing. The operator ruled on 2026-11-01 (FRD rulings): R1 now carries the auth-key rule, and init
+keeps installing python3.
 
 ## Alternatives considered
 
