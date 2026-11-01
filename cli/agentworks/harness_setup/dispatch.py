@@ -192,9 +192,23 @@ def run_setup(
                 state = replace_setup_record(state, current)
                 persist(state)
 
+            incomplete = False
+
+            def report_incomplete(reason: str, *, integration_name: str = name) -> None:
+                nonlocal incomplete
+                if not isinstance(reason, str) or not reason.strip():
+                    raise StateError("integration returned an invalid incomplete-setup reason")
+                incomplete = True
+                output.warn(f"Native setup for {inputs.component}/{inputs.name} via {integration_name}: {reason}")
+
             scoped_secrets = {ref.name: invocation.secrets[ref.name] for ref in integration.config_secret_refs()}
             call = replace(
-                invocation, prior=previous, checkpoint=checkpoint, secrets=scoped_secrets, artifacts=artifacts
+                invocation,
+                prior=previous,
+                checkpoint=checkpoint,
+                report_incomplete=report_incomplete,
+                secrets=scoped_secrets,
+                artifacts=artifacts,
             )
             if isinstance(call, VMSetupInvocation):
                 application = integration.vm_init(call)
@@ -235,10 +249,12 @@ def run_setup(
             else:
                 settled_paths = {file.path for file in application.files} | {item.path for item in publication.skipped}
                 pending_files = any(item.path not in settled_paths for item in owned)
-                current = current.model_copy(update={"complete": not pending_files, "pending_cleanup": pending_files})
+                current = current.model_copy(
+                    update={"complete": not pending_files and not incomplete, "pending_cleanup": pending_files}
+                )
                 state = replace_setup_record(state, current)
             persist(state)
-            if block is not None and current.complete:
+            if block is not None and not pending_files:
                 report_applied(
                     artifacts,
                     integration=name,

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -185,15 +186,16 @@ def test_actual_native_lifecycle_and_checkpointed_idempotency(
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
-def test_unowned_existing_native_setup_refused(transport: LocalFixtureTransport, tool: NativeTool) -> None:
+def test_identical_unowned_native_setup_is_adopted(transport: LocalFixtureTransport, tool: NativeTool) -> None:
     market = market_fixture(transport, tool)
     config = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"])
     claims: list[tuple[NativeClaim, ...]] = []
     setup_user(tool, config, invocation(transport, claims))
     settings = transport.home / (".codex/config.toml" if tool == "codex" else ".claude/settings.json")
     before = settings.read_bytes()
-    with pytest.raises(ConfigError):
-        setup_user(tool, config, invocation(transport, []))
+    adopted: list[tuple[NativeClaim, ...]] = []
+    setup_user(tool, config, invocation(transport, adopted))
+    assert adopted[-1] == claims[-1]
     assert settings.read_bytes() == before
 
 
@@ -393,7 +395,7 @@ def test_checkpoint_failure_stops_before_next_native_mutation(
         assert cli.plugins(cli.markets()) == ()
 
 
-def test_claude_project_dependency_blocks_all_retirement_writes(transport: LocalFixtureTransport) -> None:
+def test_claude_project_dependency_retains_only_its_marketplace(transport: LocalFixtureTransport) -> None:
     market = market_fixture(transport, "claude")
     claims: list[tuple[NativeClaim, ...]] = []
     setup_user(
@@ -411,13 +413,20 @@ def test_claude_project_dependency_blocks_all_retirement_writes(transport: Local
     assert result.ok
     user_settings = transport.home / ".claude/settings.json"
     project_settings = project / ".claude/settings.json"
-    before_user, before_project = user_settings.read_bytes(), project_settings.read_bytes()
-    checkpoint_count = len(claims)
-    with pytest.raises(StateError):
-        setup_user("claude", None, invocation(transport, claims, prior=record(claims[-1], "claude")))
-    assert user_settings.read_bytes() == before_user
+    before_project = project_settings.read_bytes()
+    incomplete: list[str] = []
+    setup_user(
+        "claude",
+        None,
+        replace(invocation(transport, claims, prior=record(claims[-1], "claude")), report_incomplete=incomplete.append),
+    )
+    assert incomplete
     assert project_settings.read_bytes() == before_project
-    assert len(claims) == checkpoint_count
+    assert [(claim.role, claim.identifier) for claim in claims[-1]] == [("marketplace", "fixture-market")]
+    document = parse_settings(user_settings.read_bytes(), format="json")
+    enabled = document.get("enabledPlugins", {})
+    assert isinstance(enabled, dict)
+    assert "one@fixture-market" not in enabled
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
@@ -599,9 +608,11 @@ def test_codex_missing_marketplace_keeps_unobservable_plugin_cleanup_pending(tra
         cli.remove_market("fixture-market")
     before = (transport.home / ".codex/config.toml").read_bytes()
     count = len(claims)
-    with pytest.raises(StateError):
-        setup_user("codex", None, invocation(transport, claims, prior=prior))
-    assert len(claims) == count
+    incomplete: list[str] = []
+    setup_user("codex", None, replace(invocation(transport, claims, prior=prior), report_incomplete=incomplete.append))
+    assert incomplete
+    assert len(claims) == count + 1
+    assert [claim.role for claim in claims[-1]] == ["plugin"]
     assert (transport.home / ".codex/config.toml").read_bytes() == before
 
 

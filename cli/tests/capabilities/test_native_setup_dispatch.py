@@ -451,3 +451,32 @@ def test_malformed_obsolete_section_only_blocks_removal_of_entire_activation(db,
     record = run_setup(db, Mock(), inputs, invocation, operation="fixture").records[0]
     assert record.artifact_files == (old,) and record.skipped == (skipped,)
     assert record.complete == activated and record.pending_cleanup != activated
+
+
+def test_partial_native_setup_preserves_incomplete_evidence_and_continues_publication(setup_case, monkeypatch):
+    from agentworks.artifacts.application import ArtifactPublication
+    from agentworks.capabilities.harness_integration import harness_integration_for
+
+    db, inputs, invocation, events, _ = setup_case
+    first = harness_integration_for("first")
+    original = first.user_init
+    partial = True
+
+    def initialize(self, call):
+        application = original(self, call)
+        if self.name == "first" and partial:
+            call.report_incomplete("fixture native conflict")
+        return application
+
+    monkeypatch.setattr(first, "user_init", initialize)
+    publish = Mock(return_value=ArtifactPublication())
+    monkeypatch.setattr("agentworks.harness_setup.dispatch.publish_artifacts", publish)
+    run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
+    assert events == [("first", False), ("second", False)]
+    assert publish.call_count == 2
+    records = read_native_setup(db, "agent", "agent").records
+    assert not records[0].complete and records[1].complete
+    assert records[0].claims[0].identifier == "first"
+    partial = False
+    run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
+    assert all(item.complete for item in read_native_setup(db, "agent", "agent").records)

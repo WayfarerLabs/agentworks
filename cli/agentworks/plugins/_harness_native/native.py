@@ -1,7 +1,8 @@
 """Reconcile native setup owned by one user or workspace integration activation.
 
 Native command success is followed by identity observation before a checkpoint.
-Matching registrations without a prior claim remain unowned and are refused.
+Identical registrations can be adopted; differing unowned entries are retained
+and reported without preventing independent entries from converging.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from agentworks.capabilities.harness_integration.settings import (
 from agentworks.errors import ConfigError, StateError
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.native_files import NativeFiles, native_path
-from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeMarket, NativeTool
+from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeMarket, NativePlugin, NativeTool
 
 if TYPE_CHECKING:
     from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
@@ -103,6 +104,7 @@ class _MappingPlan:
         group: str = "",
         overlays: tuple[tuple[tuple[str, str], SettingsValue], ...] = (),
         removed: tuple[tuple[str, str], ...] = (),
+        protected: tuple[tuple[str, str], ...] = (),
     ) -> None:
         if self.skipped:
             return
@@ -111,13 +113,24 @@ class _MappingPlan:
         document = parse_settings(result.content, format=self.prepared.format)
         for key, name in removed:
             _table(document, key).pop(name, None)
-        native = {} if current is None or not overlays else parse_settings(current, format=self.prepared.format)
+        native = (
+            {}
+            if current is None or not (overlays or protected)
+            else parse_settings(current, format=self.prepared.format)
+        )
         for (key, name), value in overlays:
             if key not in document:
                 document[key] = {}
             table = _table(document, key)
             baseline = _table(native, key).get(name)
             table[name] = _overlay_fields(_overlay_fields(baseline, table.get(name, baseline)), value)
+        for key, name in protected:
+            if name in _table(native, key):
+                if key not in document:
+                    document[key] = {}
+                _table(document, key)[name] = _table(native, key)[name]
+            else:
+                _table(document, key).pop(name, None)
         content = serialize_settings(document, format=self.prepared.format)
         if content != current:
             files.publish(destination, content, expected=_hash(current), group=group)
@@ -147,13 +160,12 @@ def setup_workspace(
             invocation.checkpoint(())
 
 
-def _require_owned(claim: NativeClaim | None, source: str | None, *, operation: str) -> None:
-    if claim is None:
-        raise ConfigError(
-            f"native {operation} already exists without an Agentworks claim; remove it with the native CLI first"
-        )
-    if source is None or claim.source != source:
-        raise StateError(f"native {operation} differs from its ownership claim; resolve the drift with the native CLI")
+def _owned(claim: NativeClaim | None, source: str | None) -> bool:
+    return claim is not None and source is not None and claim.source == source
+
+
+def _plugin_market(plugin: NativePlugin) -> str | None:
+    return None if plugin.source is None else str(parse_settings(plugin.source.encode(), format="json")["marketplace"])
 
 
 def _check_contributions(
@@ -283,83 +295,151 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
             if claim.identifier not in (set(selectors) if claim.role == "plugin" else desired_names)
         )
         _check_contributions(tool, plan, tuple(desired), tuple(selectors), obsolete)
-        # Validate all existing ownership and all removal dependencies before the
-        # first actual native registration, plugin command, or settings write.
-        for market in desired:
-            if market.name in by_market:
-                _require_owned(
-                    prior.get(("marketplace", market.name)), by_market[market.name].source, operation="marketplace"
-                )
-                if market.source != by_market[market.name].source:
-                    raise ConfigError("desired marketplace source differs from the existing native source")
-        planned_markets = {**by_market, **{market.name: market for market in desired}}
-        for selector in selectors:
-            parent_market = planned_markets.get(selector.rsplit("@", 1)[1])
-            if parent_market is None or parent_market.source is None:
-                raise ConfigError(
-                    "requested plugin has no observable marketplace source; register an explicit source first"
-                )
-            if selector in by_plugin:
-                _require_owned(prior.get(("plugin", selector)), by_plugin[selector].source, operation="plugin")
-        removing = {claim.identifier for claim in obsolete if claim.role == "plugin"}
-        for claim in obsolete:
-            if claim.role == "marketplace":
-                if claim.identifier in by_market:
-                    _require_owned(claim, by_market[claim.identifier].source, operation="marketplace")
-                if any(
-                    plugin.identifier.endswith("@" + claim.identifier)
-                    and (plugin.scope != "user" or plugin.identifier not in removing)
-                    for plugin in installed
-                ):
-                    raise StateError(
-                        "marketplace cleanup would affect an unowned or project plugin; remove that dependency first"
-                    )
-            elif claim.identifier in by_plugin:
-                _require_owned(claim, by_plugin[claim.identifier].source, operation="plugin")
-            else:
-                key, name = _native_key(tool, "plugin", claim.identifier)
-                if name in _table(initial_document, key):
-                    raise StateError(
-                        "plugin ownership cannot be observed after marketplace drift; repair it with the native CLI"
-                    )
+        protected: set[tuple[str, str]] = set()
+        blocked_markets: set[str] = set()
+        blocked_plugins: set[str] = set()
+        removed: list[NativeClaim] = []
 
-        def checkpoint(claim: NativeClaim | None, role: str, identifier: str) -> None:
+        def checkpoint(claim: NativeClaim | None, role: str, identifier: str, *, force: bool = False) -> None:
             nonlocal claims
-            updated = [old for old in claims if (old.role, old.identifier) != (role, identifier)]
+            old = next((item for item in claims if (item.role, item.identifier) == (role, identifier)), None)
+            if old == claim and not force:
+                return
+            updated = [item for item in claims if (item.role, item.identifier) != (role, identifier)]
             if claim is not None:
                 updated.append(claim)
             invocation.checkpoint(tuple(updated))
             claims = updated
 
-        if sources or requested:
-            files.directory(root, create=True)
-        for claim in sorted(obsolete, key=lambda item: item.role == "marketplace"):
-            if claim.role == "plugin" and claim.identifier in by_plugin:
+        def skip(role: str, identifier: str, reason: str) -> None:
+            protected.add(_native_key(tool, role, identifier))
+            invocation.report_incomplete(
+                f"Retained {role} '{identifier}': {reason}; resolve it and retry owning setup."
+            )
+            if role == "marketplace":
+                blocked_markets.add(identifier)
+                protected.update(
+                    _native_key(tool, "plugin", item.identifier)
+                    for item in installed
+                    if item.identifier.endswith("@" + identifier)
+                )
+            else:
+                blocked_plugins.add(identifier)
+
+        def remove_plugin(claim: NativeClaim) -> bool:
+            existing = by_plugin.get(claim.identifier)
+            if existing is not None:
+                if not _owned(claim, existing.source):
+                    skip("plugin", claim.identifier, "the observed installation differs from its recorded ownership")
+                    return False
                 cli.uninstall(claim.identifier)
                 observed = cli.plugins(cli.markets())
-                if any(plugin.identifier == claim.identifier and plugin.scope == "user" for plugin in observed):
+                if any(item.identifier == claim.identifier and item.scope == "user" for item in observed):
                     raise StateError("native plugin removal could not be confirmed")
-            elif claim.role == "marketplace" and claim.identifier in by_market:
+                by_plugin.pop(claim.identifier, None)
+            else:
+                key, name = _native_key(tool, "plugin", claim.identifier)
+                if name in _table(initial_document, key):
+                    skip("plugin", claim.identifier, "its installation identity cannot be observed")
+                    return False
+            checkpoint(None, "plugin", claim.identifier)
+            removed.append(claim)
+            return True
+
+        if sources or requested:
+            files.directory(root, create=True)
+        # Retirement is entry-local: preserve unsafe associations and their claims,
+        # while unrelated removals and desired entries continue.
+        for claim in obsolete:
+            if claim.role == "plugin":
+                remove_plugin(claim)
+        for claim in obsolete:
+            if claim.role != "marketplace":
+                continue
+            existing = by_market.get(claim.identifier)
+            if existing is not None:
+                if not _owned(claim, existing.source):
+                    skip("marketplace", claim.identifier, "the observed source differs from its recorded ownership")
+                    continue
+                if any(item.identifier.endswith("@" + claim.identifier) for item in cli.plugins(cli.markets())):
+                    skip("marketplace", claim.identifier, "other user or project plugins still depend on it")
+                    continue
                 cli.remove_market(claim.identifier)
-                if any(market.name == claim.identifier for market in cli.markets()):
+                if any(item.name == claim.identifier for item in cli.markets()):
                     raise StateError("native marketplace removal could not be confirmed")
-            checkpoint(None, claim.role, claim.identifier)
+                by_market.pop(claim.identifier, None)
+            checkpoint(None, "marketplace", claim.identifier)
+            removed.append(claim)
+
         for market in desired:
-            if market.name not in by_market:
+            existing_market = by_market.get(market.name)
+            if existing_market is not None and existing_market.source != market.source:
+                if not _owned(prior.get(("marketplace", market.name)), existing_market.source):
+                    skip("marketplace", market.name, "the existing unowned source differs from the declaration")
+                    continue
+                dependents = tuple(
+                    item for item in cli.plugins(cli.markets()) if item.identifier.endswith("@" + market.name)
+                )
+                if any(
+                    item.scope != "user" or not _owned(prior.get(("plugin", item.identifier)), item.source)
+                    for item in dependents
+                ):
+                    skip("marketplace", market.name, "replacement would affect an unowned or project plugin")
+                    continue
+                for plugin in dependents:
+                    if not remove_plugin(prior[("plugin", plugin.identifier)]):
+                        break
+                else:
+                    cli.remove_market(market.name)
+                    if any(item.name == market.name for item in cli.markets()):
+                        raise StateError("native marketplace removal could not be confirmed")
+                    checkpoint(None, "marketplace", market.name)
+                    by_market.pop(market.name, None)
+                    existing_market = None
+                if market.name in by_market:
+                    skip("marketplace", market.name, "a dependent plugin could not be retired")
+                    continue
+            if existing_market is None:
                 cli.add_market(source_for[market.name])
                 observed_market = next((item for item in cli.markets() if item.name == market.name), None)
                 if observed_market is None or observed_market.source != market.source:
                     raise StateError("native marketplace registration identity could not be confirmed")
-                checkpoint(
-                    NativeClaim(role="marketplace", identifier=market.name, destination=root, source=market.source),
-                    "marketplace",
-                    market.name,
-                )
+                by_market[market.name] = observed_market
+            elif market.source is None:
+                skip("marketplace", market.name, "its source cannot be observed")
+                continue
+            claim = NativeClaim(role="marketplace", identifier=market.name, destination=root, source=market.source)
+            if existing_market is not None and prior.get(("marketplace", market.name)) != claim:
+                output.info(f"Adopting matching native marketplace '{market.name}' via {tool}.")
+            checkpoint(claim, "marketplace", market.name, force=existing_market is None)
+
+        # Marketplace replacement may have removed an installation that existed in
+        # the initial inventory. Observe the current native state before installing.
+        markets = cli.markets()
+        by_market = {item.name: item for item in markets}
+        by_plugin = {item.identifier: item for item in cli.plugins(markets) if item.scope == "user"}
         for selector in selectors:
-            existing = by_plugin.get(selector)
-            if existing is None or not existing.enabled:
+            parent = selector.rsplit("@", 1)[1]
+            if parent in blocked_markets:
+                skip("plugin", selector, "its requested marketplace could not converge")
+                continue
+            parent_market = by_market.get(parent)
+            if parent_market is None or parent_market.source is None:
+                skip("plugin", selector, "its marketplace source cannot be observed")
+                continue
+            existing_plugin = by_plugin.get(selector)
+            previous_plugin_claim = prior.get(("plugin", selector))
+            if (
+                existing_plugin is not None
+                and not _owned(previous_plugin_claim, existing_plugin.source)
+                and (_plugin_market(existing_plugin) != parent_market.source or not existing_plugin.enabled)
+            ):
+                skip("plugin", selector, "the unowned installation differs from the declaration")
+                continue
+            changed = existing_plugin is None or not existing_plugin.enabled
+            if existing_plugin is None or not existing_plugin.enabled:
                 cli.install(selector)
-                observed_plugin = next(
+                existing_plugin = next(
                     (
                         item
                         for item in cli.plugins(cli.markets())
@@ -367,24 +447,27 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                     ),
                     None,
                 )
-                if observed_plugin is None or not observed_plugin.enabled or observed_plugin.source is None:
+                if existing_plugin is None or not existing_plugin.enabled or existing_plugin.source is None:
                     raise StateError("native user plugin installation could not be confirmed")
-                checkpoint(
-                    NativeClaim(role="plugin", identifier=selector, destination=root, source=observed_plugin.source),
-                    "plugin",
-                    selector,
-                )
+            elif existing_plugin.source is None:
+                skip("plugin", selector, "its installation source cannot be observed")
+                continue
+            adopted = NativeClaim(role="plugin", identifier=selector, destination=root, source=existing_plugin.source)
+            if prior.get(("plugin", selector)) != adopted and selector in by_plugin:
+                output.info(f"Adopting matching native plugin '{selector}' via {tool}.")
+            checkpoint(adopted, "plugin", selector, force=changed)
         if plan is not None:
             current = files.read(destination)
             current_document = {} if current is None else parse_settings(current, format=_format(tool))
             overlays: tuple[tuple[tuple[str, str], SettingsValue], ...] = tuple(
-                (_native_key(tool, "marketplace", market.name), _market_fields(market)) for market in desired
+                (_native_key(tool, "marketplace", market.name), _market_fields(market))
+                for market in desired
+                if market.name not in blocked_markets
             ) + tuple(
                 (_native_key(tool, "plugin", selector), True if tool == "claude" else {"enabled": True})
                 for selector in selectors
+                if selector not in blocked_plugins
             )
-            # Confirm the native command's own keys before overlaying them. Other
-            # mapped fields under these tables remain source-controlled values.
             for (key, name), _value in overlays:
                 if name not in _table(current_document, key):
                     raise StateError("native plugin settings association could not be confirmed")
@@ -393,5 +476,6 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 destination,
                 current=current,
                 overlays=overlays,
-                removed=tuple(_native_key(tool, old.role, old.identifier) for old in obsolete),
+                removed=tuple(_native_key(tool, old.role, old.identifier) for old in removed),
+                protected=tuple(sorted(protected)),
             )
