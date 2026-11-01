@@ -19,6 +19,7 @@ from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs,
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import AgentworksError, ConnectivityError, StateError
+from agentworks.execution.trust import TrustBinding, TrustMode
 from agentworks.plugins.gcp.auth import GcpClientCache
 from agentworks.plugins.gcp.bootstrap import (
     GCE_READINESS_COMMAND,
@@ -409,6 +410,7 @@ class GCEPlatform(VMPlatform):
             request.progress.output(f"GCE instance '{names.backend_name}' is running")
             transport = SSHTransport(
                 host=external_ip,
+                trust=request.provisioning_trust,
                 user=request.admin_username,
                 identity_file=request.ssh_private_key,
             )
@@ -590,6 +592,7 @@ class GCEPlatform(VMPlatform):
             identity_file = getattr(getattr(config, "operator", None), "ssh_private_key", None)
         return SSHTransport(
             host=live_external_ipv4(current, access_config_name=identity.access_config_name),
+            trust=TrustBinding(TrustMode.VM, vm.name),
             user=vm.admin_username,
             identity_file=identity_file,
         )

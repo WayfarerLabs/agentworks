@@ -15,6 +15,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.execution.trust import HOST_TRUST
 from agentworks.transports._shared import env_assignment_prefix
 from agentworks.transports.base import Transport
 from agentworks.transports.ssh import SSHTransport, keepalive_args, note_ssh_interactive_exit
@@ -58,6 +59,7 @@ class RemoteLimaTransport(Transport):
         # login-shell wrap would be wrong.
         self._host_login = SSHTransport(
             host=vm_host_ssh,
+            trust=HOST_TRUST,
             user=None,
             login_shell=True,
             default_timeout=default_timeout,
@@ -65,6 +67,7 @@ class RemoteLimaTransport(Transport):
         )
         self._host_raw = SSHTransport(
             host=vm_host_ssh,
+            trust=HOST_TRUST,
             user=None,
             login_shell=False,
             default_timeout=default_timeout,

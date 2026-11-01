@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
+from agentworks.execution import trust
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
@@ -246,6 +247,10 @@ class LiveVMNode:
                 entity_name=self._row.name,
                 hint=f"start it with: agw vm start {self._row.name}",
             )
+        # Before the start boots the VM: with no host-key record the reconnect
+        # check could only fail, and its failure would send the repair path to
+        # spend a Tailscale auth key.
+        trust.require_record(self._row.name)
         observed = self._observed.value if self._observed else "stopped"
         output.info(f"VM '{self._row.name}' is {observed}. Starting...")
         platform = self._site.platform

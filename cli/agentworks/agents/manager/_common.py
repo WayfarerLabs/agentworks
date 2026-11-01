@@ -258,10 +258,15 @@ def _assert_agent_ssh_works(target: Transport, agent: AgentRow) -> None:
       operator sees "VM unreachable" rather than "agent needs reinit."
     """
     from agentworks.errors import ConnectivityError
+    from agentworks.execution.errors import TrustMissing
     from agentworks.ssh import SSH_TRANSPORT_ERROR, SSHError
 
     try:
         probe = target.run("true", check=False)
+    except TrustMissing:
+        # Keep its hint, which names the import, rather than "check that the
+        # VM is reachable".
+        raise
     except SSHError as e:
         raise ConnectivityError(
             f"direct SSH probe to agent '{agent.name}' failed: {e}",

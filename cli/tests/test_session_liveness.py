@@ -13,6 +13,7 @@ import pytest
 
 from agentworks.db import SessionMode, SessionRow, SessionStatus
 from agentworks.errors import ConnectivityError, NotFoundError, StateError
+from agentworks.execution.trust import HOST_TRUST
 from agentworks.sessions.manager import (
     _needs_repair,
     _repair_session_pid,
@@ -263,7 +264,7 @@ def test_batch_fleet_uses_constant_argv_and_unbounded_stdin_data(
 
     monkeypatch.setattr("agentworks.transports.ssh.subprocess.run", run_process)
 
-    status_map = batch_check_status(sessions, target=SSHTransport("vm-host"))
+    status_map = batch_check_status(sessions, target=SSHTransport("vm-host", trust=HOST_TRUST))
 
     assert len(calls) == 1
     argv, kwargs = calls[0]

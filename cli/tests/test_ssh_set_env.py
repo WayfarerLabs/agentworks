@@ -18,12 +18,13 @@ from unittest.mock import patch
 
 import pytest
 
+from agentworks.execution.trust import HOST_TRUST
 from agentworks.ssh import _set_env_args
 from agentworks.transports.ssh import SSHTransport
 
 
 def _target() -> SSHTransport:
-    return SSHTransport(host="vm.tailnet", user="agentworks")
+    return SSHTransport(trust=HOST_TRUST, host="vm.tailnet", user="agentworks")
 
 
 def _set_env_value(args: list[str]) -> str | None:

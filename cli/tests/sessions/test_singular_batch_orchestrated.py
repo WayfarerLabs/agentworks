@@ -40,7 +40,7 @@ from agentworks.sessions import manager as session_manager
 from agentworks.sessions.manager._queries import session_listing_data
 from agentworks.vms import manager as vm_manager
 from agentworks.vms.applied_state import VMSSHIdentityPolicyError
-from tests.conftest import stub_vm_ssh_identity
+from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
@@ -58,6 +58,7 @@ def _seed_vm(db: Database, name: str, host: str | None, *, site: str = "proxmox"
     db.insert_vm(name, site=site, hostname=name)
     if host is not None:
         db.update_vm_tailscale(name, host)
+    seed_vm_trust(name)
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
         (f"ws-{name}", name, f"/srv/ws-{name}", f"ws-ws-{name}"),

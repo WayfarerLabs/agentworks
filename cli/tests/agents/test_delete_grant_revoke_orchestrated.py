@@ -35,7 +35,7 @@ from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from agentworks.vms import manager as vm_manager
-from tests.conftest import stub_vm_ssh_identity
+from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
@@ -51,6 +51,7 @@ def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
 def _seed(db: Database) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    seed_vm_trust("box")
     db.insert_agent("a1", "box", "agt-a1", template="default")
 
 

@@ -39,6 +39,7 @@ from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscal
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import AuthorizationError, ConfigError, NotFoundError, StateError, TokenRejectedError
+from agentworks.execution.trust import TrustBinding, TrustMode
 from agentworks.plugins.aws.auth import _build_access_key_session, _build_ambient_session
 from agentworks.plugins.aws.config import (
     AwsAmbientAuth,
@@ -571,6 +572,7 @@ class EC2Platform(VMPlatform):
 
             prov_transport = SSHTransport(
                 host=public_ip,
+                trust=request.provisioning_trust,
                 user=request.admin_username,
                 identity_file=request.ssh_private_key,
             )
@@ -717,6 +719,7 @@ class EC2Platform(VMPlatform):
 
         return SSHTransport(
             host=public_ip,
+            trust=TrustBinding(TrustMode.VM, vm.name),
             user=vm.admin_username,
             identity_file=identity_file,
         )

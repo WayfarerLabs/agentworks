@@ -16,6 +16,8 @@ import shlex
 import subprocess
 from typing import TYPE_CHECKING
 
+from agentworks.execution import trust as host_trust
+from agentworks.execution.errors import TrustMissing
 from agentworks.ssh import (
     SSH_DEFAULT_RETRIES,
     SSH_INTERACTIVE_ALIVE_COUNT_MAX,
@@ -36,7 +38,18 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from agentworks.execution.trust import HostTrust, TrustBinding
     from agentworks.ssh import SSHLogger
+
+
+class SSHTrustMissing(SSHError, TrustMissing):
+    """A VM-mode connection was refused because the VM has no host-key record.
+
+    The legacy-side form of :class:`TrustMissing`. It is also an ``SSHError``
+    so a handler that reports a failure and carries on keeps treating it as an
+    unreachable VM, while the loops that retry and fall back to repair re-raise
+    ``TrustMissing`` ahead of their ``except SSHError``.
+    """
 
 
 def _decoded_output(value: str | bytes) -> str:
@@ -98,11 +111,12 @@ def note_ssh_interactive_exit(code: int, endpoint: str) -> None:
 
 def _scp_base_args(
     *,
+    host_key_options: tuple[str, ...],
     port: int | None,
     identity_file: Path | None,
     proxy_jump: str | None,
 ) -> list[str]:
-    args = ["scp", "-q", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+    args = ["scp", "-q", *host_key_options, "-o", "BatchMode=yes"]
     if port is not None:
         args.extend(["-P", str(port)])
     if identity_file is not None:
@@ -131,12 +145,18 @@ class SSHTransport(Transport):
     merged streams, and fake ``isatty`` would corrupt captured output)
     into a programmatic call; only an explicit ``run(tty=True)`` asks for
     a pty, with ``-tt``.
+
+    ``trust`` is required: a :class:`TrustBinding` for a VM, or ``HOST_TRUST``
+    for a host. The host-key options are resolved when a command is spawned, not
+    when the transport is built, so a VM-mode transport can exist before its VM
+    has a record and refuses at first use.
     """
 
     def __init__(
         self,
         host: str,
         *,
+        trust: TrustBinding | HostTrust,
         user: str | None = None,
         port: int | None = None,
         identity_file: Path | None = None,
@@ -147,6 +167,7 @@ class SSHTransport(Transport):
         retries: int = SSH_DEFAULT_RETRIES,
     ) -> None:
         self.host = host
+        self.trust = trust
         self.user = user
         self.port = port
         self.identity_file = identity_file
@@ -157,6 +178,18 @@ class SSHTransport(Transport):
         self.retries = retries
 
     # -- Internal helpers ------------------------------------------------
+
+    def host_key_options(self) -> tuple[str, ...]:
+        """The ``-o`` arguments for this transport's trust, read at call time.
+
+        Public for the callers that build their own ``ssh`` or ``scp`` argv
+        from this transport (backup's progress-reporting scp, workspace copy).
+        Raises :class:`SSHTrustMissing` for a VM with no host-key record.
+        """
+        try:
+            return host_trust.ssh_options(self.trust)
+        except TrustMissing as e:
+            raise SSHTrustMissing(e.vm_name) from e
 
     def _ssh_base_args(
         self,
@@ -183,7 +216,7 @@ class SSHTransport(Transport):
         ``input_data`` payload leave ``close_stdin`` false so stdin stays open
         for the write.
         """
-        args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+        args = ["ssh", *self.host_key_options(), "-o", "BatchMode=yes"]
         if tty:
             args.insert(1, "-tt")
         else:
@@ -262,6 +295,7 @@ class SSHTransport(Transport):
                     identity_file=self.identity_file,
                     proxy_jump=self.proxy_jump,
                     login_shell=self.login_shell,
+                    host_key_options=self.host_key_options(),
                 ),
                 command,
                 check=check,
@@ -354,7 +388,7 @@ class SSHTransport(Transport):
         """Interactive SSH with ``-t`` (allocates a TTY) and no
         ``BatchMode``. Empty ``command`` opens a login shell.
         """
-        args = ["ssh", "-t", "-o", "StrictHostKeyChecking=accept-new", *keepalive_args()]
+        args = ["ssh", "-t", *self.host_key_options(), *keepalive_args()]
         if self.port is not None:
             args.extend(["-p", str(self.port)])
         if self.identity_file is not None:
@@ -381,6 +415,7 @@ class SSHTransport(Transport):
     ) -> None:
         """Copy a local file to ``remote_path`` via scp."""
         args = _scp_base_args(
+            host_key_options=self.host_key_options(),
             port=self.port,
             identity_file=self.identity_file,
             proxy_jump=self.proxy_jump,
@@ -408,6 +443,7 @@ class SSHTransport(Transport):
     ) -> None:
         """Copy ``remote_path`` from the VM to ``local_path`` via scp."""
         args = _scp_base_args(
+            host_key_options=self.host_key_options(),
             port=self.port,
             identity_file=self.identity_file,
             proxy_jump=self.proxy_jump,
@@ -438,15 +474,7 @@ class SSHTransport(Transport):
         ``vm exec`` and ``agent exec`` so the operator sees output
         stream in real time. Returns the remote exit code.
         """
-        args = [
-            "ssh",
-            "-T",
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            "-o",
-            "BatchMode=yes",
-            *keepalive_args(),
-        ]
+        args = ["ssh", "-T", *self.host_key_options(), "-o", "BatchMode=yes", *keepalive_args()]
         if self.port is not None:
             args.extend(["-p", str(self.port)])
         if self.identity_file is not None:

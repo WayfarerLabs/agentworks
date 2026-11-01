@@ -21,6 +21,7 @@ from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import SSHTransport
 from tests._aws_fakes import install_fakes as install_aws_fakes
 from tests._azure_platform_support import _install_fakes as install_azure_fakes
+from tests.conftest import provisioning_trust_for_tests
 
 _SENTINEL = "tskey-boundary-'swordfish"
 _AZURE_CONFIG = {
@@ -46,6 +47,7 @@ def _request() -> ProvisionRequest:
         admin_username="agentworks",
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=None,
+        provisioning_trust=provisioning_trust_for_tests("vm1"),
         tailscale_auth_key=_SENTINEL,
         progress=MagicMock(),
         cpus=4,

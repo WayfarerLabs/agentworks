@@ -23,11 +23,12 @@ import pytest
 
 from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
 from agentworks.db import VMStatus
+from agentworks.execution.trust import HOST_TRUST
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.ssh import SSHResult
 from agentworks.vms import manager as vm_manager
-from tests.conftest import stub_vm_ssh_identity
+from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
 from tests.native_exec_support import ExecCall, ExecutionOnlyTransport
 
 if TYPE_CHECKING:
@@ -43,6 +44,7 @@ def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
 def _seed_vm(db: Database, *, operator_stopped: bool = False) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    seed_vm_trust("box")
     if operator_stopped:
         db.set_operator_stopped("box", True)
 
@@ -246,6 +248,32 @@ def test_rekey_running_check_runs_after_the_resolve_boundary(
     assert order == ["preflight", "resolve", "status"]
 
 
+def test_rekey_without_a_host_key_record_raises_before_resolving_or_touching_the_vm(
+    db: Database,
+    make_config,  # noqa: ANN001
+    _ts_key: None,
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rekeying would spend the new key and record the new address before its
+    reconnect check raised."""
+    from agentworks.execution import trust
+    from agentworks.execution.errors import TrustMissing
+
+    config = make_config()
+    _seed_vm(db)
+    trust.remove("box")
+    events = _fake_status(monkeypatch, VMStatus.RUNNING)
+
+    with pytest.raises(TrustMissing):
+        vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert resolve_counter == []
+    assert events == []
+    row = db.get_vm("box")
+    assert row is not None and row.tailscale_host == "100.64.0.9"
+
+
 def test_rekey_missing_key_fails_at_the_one_resolve_before_status(
     db: Database,
     make_config,  # noqa: ANN001
@@ -312,7 +340,7 @@ def _fake_rekey_transports(
     )
     monkeypatch.setattr(
         "agentworks.transports.transport",
-        lambda vm, config, **kwargs: SSHTransport(host="100.64.0.9"),
+        lambda vm, config, **kwargs: SSHTransport(trust=HOST_TRUST, host="100.64.0.9"),
     )
     monkeypatch.setattr("agentworks.transports.wait_for_reconnect", lambda target: True)
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda config, db: None)
@@ -604,7 +632,7 @@ def backup_env(
     from agentworks.transports import SSHTransport
 
     monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
-    target = SSHTransport(host="100.64.0.9")
+    target = SSHTransport(trust=HOST_TRUST, host="100.64.0.9")
     target.run = lambda *a, **k: SimpleNamespace(stdout="", ok=True)  # type: ignore[method-assign, assignment]
     monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: target)
     return make_config(f'[paths]\nbackups = "{tmp_path.as_posix()}/backups"\n')

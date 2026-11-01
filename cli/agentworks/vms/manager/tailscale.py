@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import ConnectivityError, StateError, ValidationError
+from agentworks.execution.trust import TrustBinding, TrustMode, ssh_options
 
 from ._helpers import _guard_failed_vm, _require_vm
 from .boundary import gated_vm_boundary
@@ -151,7 +152,7 @@ def port_forward_vm(
                 )
 
     # Build SSH command with -L flags for each forward
-    ssh_cmd = ["ssh", "-N", "-o", "StrictHostKeyChecking=accept-new"]
+    ssh_cmd = ["ssh", "-N", *ssh_options(TrustBinding(TrustMode.VM, vm.name))]
     if config.operator.ssh_private_key:
         ssh_cmd.extend(["-i", str(config.operator.ssh_private_key)])
     for local_port, remote_port in forwards:

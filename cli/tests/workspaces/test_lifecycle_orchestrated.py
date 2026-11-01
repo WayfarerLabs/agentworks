@@ -37,12 +37,13 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
+from agentworks.execution.trust import HOST_TRUST
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.transports import SSHTransport
 from agentworks.vms import manager as vm_manager
 from agentworks.workspaces import manager as workspace_manager
-from tests.conftest import ManifestDoc, stub_vm_ssh_identity
+from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -79,6 +80,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
 def _seed(db: Database, *, ws: str = "ws1") -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    seed_vm_trust("box")
     # rehome and copy guard on init status pre-gate; the seeded row
     # must be COMPLETE for them (repair and delete never guarded).
     db.update_vm_init_status("box", InitStatus.COMPLETE)
@@ -718,6 +720,7 @@ def test_repair_parent_traversal_quotes_a_spaced_path(
     spaced_path = "/srv/my ws;danger"
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    seed_vm_trust("box")
     db.update_vm_init_status("box", InitStatus.COMPLETE)
     db.insert_workspace(
         "ws1",
@@ -1019,6 +1022,7 @@ def test_delete_group_removal_uses_the_recorded_linux_group(
     config = make_config()
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    seed_vm_trust("box")
     db.update_vm_init_status("box", InitStatus.COMPLETE)
     db.insert_workspace(
         "legacy",
@@ -1085,6 +1089,7 @@ def _seed_vm_only(db: Database) -> None:
     pre-seed one."""
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    seed_vm_trust("box")
     db.update_vm_init_status("box", InitStatus.COMPLETE)
 
 
@@ -1532,7 +1537,7 @@ def _wire_copy_fakes(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> _Fak
     # host / user / identity_file attributes the pack step reads).
     class _FakeSSHTarget(_FakeAdminTarget, SSHTransport):  # type: ignore[misc]  # the fake's recording run deliberately shadows the real signature
         def __init__(self) -> None:
-            SSHTransport.__init__(self, "100.64.0.9", user="admin")
+            SSHTransport.__init__(self, "100.64.0.9", trust=HOST_TRUST, user="admin")
             _FakeAdminTarget.__init__(self, events=events)
 
     fake = _FakeSSHTarget()
@@ -1902,7 +1907,7 @@ class _RehomeThenRepairTarget(_FakeAdminTarget, SSHTransport):  # type: ignore[m
     the ACL step is a true no-op; every other probe reports already-converged."""
 
     def __init__(self) -> None:
-        SSHTransport.__init__(self, "100.64.0.9", user="admin")
+        SSHTransport.__init__(self, "100.64.0.9", trust=HOST_TRUST, user="admin")
         _FakeAdminTarget.__init__(self)
         self._copied = False
         self._acl_canonical = False
@@ -1971,7 +1976,7 @@ class _CopyThenRepairTarget(_FakeAdminTarget, SSHTransport):  # type: ignore[mis
     freshly copied workspace finds nothing to fix."""
 
     def __init__(self) -> None:
-        SSHTransport.__init__(self, "100.64.0.9", user="admin")
+        SSHTransport.__init__(self, "100.64.0.9", trust=HOST_TRUST, user="admin")
         _FakeAdminTarget.__init__(self)
         self._acl_canonical = False
         # Same workspace-mode state the repair steps drive (see
