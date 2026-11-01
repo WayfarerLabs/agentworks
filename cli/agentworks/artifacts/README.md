@@ -79,7 +79,9 @@ The VM has no activated shell facet, so core makes its captured hint available t
 Agent setup handles it as a file for that actual user. A shell session under that agent does not
 receive the handled hint again. If the user facet were inactive, the hint would instead reach
 session and be published in its private artifact directory. Inactive workspace facets likewise pass
-their applicable inputs to session.
+their applicable inputs to session. Recorded session deferrals resolve against the original owner's
+capture, even if an upstream facet later changes its routing. If that content is no longer readable,
+Agentworks reports the unresolved route and its owning repair action without inventing content.
 
 Use `agw artifact show --agent <agent-name> --integration shell` to inspect the captured input and
 recorded handling. The templates themselves do not create instances. See `agw vm create --help`,
@@ -337,7 +339,9 @@ Native harness session delivery is disabled by default; shell publishes its priv
 Inputs left unhandled, including deferrals from ancestors, produce warnings with their original
 owner, type, name and reason. They do not prevent launch and are not reported as successfully
 delivered. Invalid input, unsafe publication and conflicts introduced by new session delivery remain
-errors. Differing unowned file content during setup is preserved and recorded as a skip.
+errors. A differing whole file in the prospective session directory is preserved and refuses the new
+run before teardown of an existing runtime. Differing unowned file content during setup is preserved
+and recorded as a skip.
 
 This delivery includes declared bundles and harness handling. Core hint emission, features, hooks,
 and MCP artifacts are later work.
@@ -436,8 +440,9 @@ Handling an input for one user does not consume the VM result for another user.
 utility. Native formats and policy live in integration adapters. Existing files whose bytes match
 the declaration can be adopted, with recorded ownership and a report. Differing unowned or manually
 changed files are preserved with recorded skips and evidence for retry; independent artifacts still
-apply. A conflicting member skips its whole skill package. Generated instruction sections instead
-follow their explicit replaceable-section contract.
+apply. A conflicting member skips its whole skill package, including when a modified obsolete member
+must be retained while the package is still requested. Generated instruction sections instead follow
+their explicit replaceable-section contract.
 
 `session.py` prepares the launch context, stages a new private run before old-runtime teardown, then
 retires obsolete owned files after teardown. No artifact bookkeeping changes VM deletion.

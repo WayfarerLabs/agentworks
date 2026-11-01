@@ -91,6 +91,8 @@ registration or user plugin whose observable identity and source match the reque
 recorded and reported, including after an interrupted setup. Differing unowned entries or ambiguous
 native drift are preserved and reported individually. Independent entries and later integrations
 continue, and the affected integration's setup record remains incomplete until retry succeeds.
+Descendant session launches still proceed and can repeat the incomplete-setup warning until the
+owning setup resolves the retained conflict.
 Resolve a conflicting association with the native CLI before retrying its owning setup. Unrelated
 built-in or remote entries whose source cannot be established are preserved; Agentworks cannot claim
 or remove those entries without observable source identity.

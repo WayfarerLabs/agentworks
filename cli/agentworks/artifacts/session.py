@@ -159,6 +159,13 @@ def stage_session_artifacts(
         current = current.model_copy(update={"skipped": published.skipped})
         state = replace_setup_record(state, current)
         write_native_setup(db, "session", name, state, operation="session-prepare")
+        whole_files = {file.path for file in application.files if not file.generated_section}
+        conflict = next((item for item in published.skipped if item.path in whole_files), None)
+        if conflict is not None:
+            raise StateError(
+                f"Session artifact publication could not apply '{conflict.path}': {conflict.reason}",
+                hint="Existing content was retained; inspect the destination before retrying.",
+            )
     report_applied(
         context.inputs,
         integration=integration,

@@ -1078,3 +1078,33 @@ local checks. The handoff requests every retained acceptance scenario below, wit
 attention to interrupted native registration, independent facets during upstream drift, actual users
 and workspaces, own-session failure before teardown, native options and cleanup. Both SDDs remain
 unlocked until that evidence is audited and the remaining requirements are complete.
+
+## Facet independence feedback, round 1 of 3
+
+PR [862](https://github.com/WayfarerLabs/agentworks/pull/862) opened ready at `72923b6`; all CI
+jobs passed. After the one-hour reporting window, the first authorized public correction round began
+on 2026-11-01 at 07:38 UTC, with the PR returned to draft before source changes. The fixed batch
+contains Copilot's six threads and the initial saga and Muntz reports. No independent live acceptance
+report is claimed from those code reviews.
+
+The accepted corrections cover whole-file session collisions before teardown, modified obsolete
+members of requested skills, pre-render setup name collisions, recorded routes independent of current
+upstream routing, shared strict/advisory native discovery and adoption-report events. Optional
+simplifications stay within those paths. The native inventory reread and safe retirement guards stay:
+marketplace registration can change the source observable for an installed plugin, so manual inventory
+updates do not replace the fresh observation.
+
+Codex's listing follows current marketplace registration without proving an unclaimed installation's
+original source. The operator has been asked to choose conservative preservation with a reported
+recovery limit or persisted installation-intent tracking. That finding remains unresolved; independent
+corrections proceed without inventing ownership or an intent-state protocol. The `awaiting-direction`
+label identifies this decision. The remaining round allowance stays dormant after this round until the
+operator resolves it.
+
+- [ ] Complete the independent accepted corrections and their focused regression checks.
+- [ ] Resolve the Codex provenance decision through authenticated operator direction and complete
+      the resulting correction within its agreed boundary.
+- [ ] Run the three private review lanes and required gates on the corrected exact head; publish
+      the complete handoff with the appropriate draft/ready signal.
+- [ ] Audit independent live acceptance against every retained requirement and finish promotion
+      and both locks. Unit tests and CI alone do not close the live obligations above.

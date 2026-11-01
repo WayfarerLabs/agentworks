@@ -69,6 +69,21 @@ def test_retry_adopts_native_mutation_after_its_checkpoint_failed(transport, too
     assert claims[-1] == ()
 
 
+@pytest.mark.parametrize("tool,role", [("codex", "marketplace"), ("claude", "marketplace"), ("claude", "plugin")])
+def test_native_adoption_reports_the_adopted_entry(transport, tool, role, monkeypatch):
+    market = market_fixture(transport, tool)
+    config = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"] if role == "plugin" else [])
+    claims: list[tuple[NativeClaim, ...]] = []
+    setup_user(tool, config, invocation(transport, claims))
+    prior = record(tuple(item for item in claims[-1] if item.role != role), tool)
+    reports: list[str] = []
+    monkeypatch.setattr("agentworks.plugins._harness_native.native.output.info", reports.append)
+    setup_user(tool, config, invocation(transport, claims, prior=prior))
+    identifier = "one@fixture-market" if role == "plugin" else "fixture-market"
+    assert len(reports) == 1 and identifier in reports[0]
+    assert any(item.role == role and item.identifier == identifier for item in claims[-1])
+
+
 @pytest.mark.parametrize("tool", ["codex", "claude"])
 @pytest.mark.parametrize("strategy", ["replace", "merge-overwrite", "merge-preserve", "skip-existing"])
 def test_skipped_plugin_is_preserved_by_mapping_while_an_independent_plugin_converges(transport, tool, strategy):
@@ -183,3 +198,74 @@ def test_owned_marketplace_source_change_reinstalls_its_requested_plugin(transpo
     assert all(item.source is not None and str(alternate) in item.source for item in claims[-1])
     setup_user(tool, None, invocation(transport, claims, prior=record(claims[-1], tool)))
     assert claims[-1] == ()
+
+
+@pytest.mark.parametrize("tool", ["codex", "claude"])
+@pytest.mark.parametrize("strategy", ["replace", "merge-overwrite"])
+def test_skipped_market_preserves_its_native_associations_during_mapping(transport, tool, strategy):
+    market = market_fixture(transport, tool)
+    setup_user(
+        tool,
+        NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
+        invocation(transport, []),
+    )
+    settings = transport.home / (".codex/config.toml" if tool == "codex" else ".claude/settings.json")
+    format = "toml" if tool == "codex" else "json"
+    before = parse_settings(settings.read_bytes(), format=format)
+    source = transport.root / "source"
+    field = "model_reasoning_effort" if tool == "codex" else "alwaysThinkingEnabled"
+    value = "low" if tool == "codex" else False
+    source.write_bytes(serialize_settings({field: value}, format=format))
+    incomplete: list[str] = []
+    claims: list[tuple[NativeClaim, ...]] = []
+    setup_user(
+        tool,
+        NativeUserConfig(
+            marketplaces=[str(copied_market(market, tool))],
+            settings=SettingsMapping(source=str(source), strategy=strategy),
+        ),
+        replace(invocation(transport, claims), report_incomplete=incomplete.append),
+    )
+    after = parse_settings(settings.read_bytes(), format=format)
+    assert incomplete and not any(claims)
+    assert after[field] == value
+    for key in ("marketplaces", "plugins") if tool == "codex" else ("extraKnownMarketplaces", "enabledPlugins"):
+        assert after[key] == before[key]
+
+
+@pytest.mark.parametrize("tool", ["codex", "claude"])
+def test_market_replacement_retains_ownership_when_dependent_cannot_retire(transport, tool, monkeypatch):
+    market = market_fixture(transport, tool)
+    claims: list[tuple[NativeClaim, ...]] = []
+    setup_user(
+        tool,
+        NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
+        invocation(transport, claims),
+    )
+    previous = claims[-1]
+    plugins = NativeCLI.plugins
+    observed = 0
+
+    def changing_inventory(cli, markets):
+        nonlocal observed
+        result = plugins(cli, markets)
+        if not cli.isolated:
+            observed += 1
+            if observed == 1:
+                return tuple(replace(plugin, source=None) for plugin in result)
+        return result
+
+    monkeypatch.setattr(NativeCLI, "plugins", changing_inventory)
+    incomplete: list[str] = []
+    setup_user(
+        tool,
+        NativeUserConfig(marketplaces=[str(copied_market(market, tool))], plugins=["one@fixture-market"]),
+        replace(invocation(transport, claims, prior=record(previous, tool)), report_incomplete=incomplete.append),
+    )
+    assert incomplete and claims[-1] == previous
+    root = transport.home / (".codex" if tool == "codex" else ".claude")
+    with NativeFiles(transport) as files:
+        cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(root))
+        current = cli.markets()
+        assert current[0].source == next(item.source for item in previous if item.role == "marketplace")
+        assert {item.identifier for item in cli.plugins(current)} == {"one@fixture-market"}

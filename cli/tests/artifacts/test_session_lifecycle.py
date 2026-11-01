@@ -141,6 +141,36 @@ def test_forged_artifact_directory_preserves_running_session(lifecycle, monkeypa
     assert "kill" not in lifecycle.events and "tmux_create" not in lifecycle.events
 
 
+def test_differing_prospective_session_file_preserves_running_session(lifecycle, monkeypatch):
+    from agentworks.artifacts import session as artifact_session
+
+    lifecycle.restart()
+    previous = lifecycle.db.get_session("s1")
+    old_files = lifecycle.files()
+    publish = artifact_session.publish_artifacts
+    conflicts = []
+
+    def interfere(runner, desired, *args, **kwargs):
+        path = Path(desired[0].path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"unowned prospective content")
+        conflicts.append(path)
+        return publish(runner, desired, *args, **kwargs)
+
+    monkeypatch.setattr(artifact_session, "publish_artifacts", interfere)
+    lifecycle.events.clear()
+    with pytest.raises(StateError):
+        lifecycle.restart()
+    current = lifecycle.db.get_session("s1")
+    assert previous is not None and current is not None and current.run_id == previous.run_id
+    assert all(file.exists() for file in old_files)
+    assert len(conflicts) == 1 and conflicts[0].read_bytes() == b"unowned prospective content"
+    assert "kill" not in lifecycle.events and "tmux_create" not in lifecycle.events
+    record = read_native_setup(lifecycle.db, "session", "s1").records[0]
+    assert not record.complete and record.skipped
+    assert str(conflicts[0]) not in {file.path for file in record.artifact_files}
+
+
 def test_restart_stages_new_files_before_kill_and_cleans_old_after(lifecycle, monkeypatch):
     lifecycle.restart()
     previous = lifecycle.db.get_session("s1")

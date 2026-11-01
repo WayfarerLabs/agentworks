@@ -64,15 +64,18 @@ def test_conflicting_artifact_does_not_block_an_independent_artifact(target):
     assert tuple(file.path for file in result.skipped) == (str(second),)
 
 
-def test_matching_unclaimed_file_is_adopted_and_retired(target):
+def test_matching_unclaimed_file_is_adopted_and_retired(target, monkeypatch):
     path = target.home / "matching"
     path.write_bytes(b"content")
     path.chmod(0o600)
     before = path.stat().st_mtime_ns
     checkpoints: list[tuple[OwnedArtifactFile, ...]] = []
+    reports: list[str] = []
+    monkeypatch.setattr("agentworks.artifacts.publication.output.info", reports.append)
     result = publish_artifacts(target, (artifact(path),), (), checkpoints.append, roots=(str(target.home),))
     assert len(result.files) == 1 and checkpoints == [result.files]
     assert path.stat().st_mtime_ns == before and not result.skipped
+    assert len(reports) == 1 and str(path) in reports[0]
     assert not publish_artifacts(target, (), result.files, checkpoints.append, roots=(str(target.home),)).files
     assert not path.exists()
 
@@ -87,6 +90,38 @@ def test_conflicting_skill_member_preserves_the_whole_package(target):
     assert not result.files
     assert {entry.path for entry in result.skipped} == {entry.path for entry in desired}
     assert not (root / "SKILL.md").exists() and member.read_bytes() == b"operator script"
+
+
+@pytest.mark.parametrize("rootless", [False, True])
+def test_modified_obsolete_member_preserves_requested_skill_as_a_unit(target, rootless):
+    root = target.home / "skills/review"
+
+    def member(name, data=b"old"):
+        return replace(
+            artifact(root / name, data),
+            package_root=None if rootless else str(root),
+            native_identity="skill:review",
+        )
+
+    previous = publish_artifacts(
+        target, (member("SKILL.md"), member("old.sh")), (), lambda files: None, roots=(str(target.home),)
+    ).files
+    (root / "old.sh").write_bytes(b"operator script")
+    independent = replace(artifact(target.home / "independent", b"independent"), origins=("b" * 64,))
+    desired = (member("SKILL.md", b"new instructions"), member("new.sh", b"new script"), independent)
+    result = publish_artifacts(target, desired, previous, lambda files: None, roots=(str(target.home),))
+    assert (root / "SKILL.md").read_bytes() == b"old"
+    assert (root / "old.sh").read_bytes() == b"operator script"
+    assert not (root / "new.sh").exists()
+    assert Path(independent.path).read_bytes() == independent.data
+    assert {entry.path for entry in result.skipped} == {str(root / name) for name in ("SKILL.md", "old.sh", "new.sh")}
+    assert {file.path for file in result.files} == {file.path for file in previous} | {independent.path}
+    # Resolving the local modification makes retry converge the complete package.
+    (root / "old.sh").write_bytes(b"old")
+    retried = publish_artifacts(target, desired, result.files, lambda files: None, roots=(str(target.home),))
+    assert not retried.skipped and not (root / "old.sh").exists()
+    assert (root / "SKILL.md").read_bytes() == b"new instructions"
+    assert (root / "new.sh").read_bytes() == b"new script"
 
 
 def test_modified_obsolete_file_retains_ownership(target):
