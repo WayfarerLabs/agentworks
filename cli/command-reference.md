@@ -567,10 +567,12 @@ WAL mode, and takes an exclusive SQLite writer lock. The database-use lock remai
 installation so another Agentworks process cannot recreate WAL state in the replacement gap. Restore
 refuses after a bounded wait when other database users prevent that safe replacement boundary.
 
-Restore does not create an implicit backup of the live destination and does not migrate the restored
-schema. Run `agw database backup` first if you want an additional recovery point before replacement.
-Restore a schema-compatible backup before running an older Agentworks release against state created
-by a newer release.
+Restore does not touch the VM host-key store in `~/.config/agentworks/known_hosts/`, which is
+outside the database; copy that directory along with the backup when restoring on another
+workstation (see [Host keys](#host-keys)). Restore does not create an implicit backup of the live
+destination and does not migrate the restored schema. Run `agw database backup` first if you want an
+additional recovery point before replacement. Restore a schema-compatible backup before running an
+older Agentworks release against state created by a newer release.
 
 ### Secrets
 
@@ -757,8 +759,8 @@ Agentworks verifies every connection to a VM against a per-VM host-key store, ne
 by VM name, so a VM keeps its trust across tailnet address changes. `vm create` records the key on
 its first connection and nowhere else; `vm delete` removes the file. A command that reaches a VM
 over SSH refuses a VM with no recorded key, with a hint naming the import, rather than trusting it
-on first use. `vm delete` still works without a record, but on a cloud VM it cannot then log the
-node out of Tailscale.
+on first use; describe and listing commands warn per VM and carry on. `vm delete` still works
+without a record, but on a cloud VM it cannot then log the node out of Tailscale.
 
 `agw vm import-host-keys (--all | <name>...) [--known-hosts <path>]` copies keys you already trust
 into the store. It asks OpenSSH's own `ssh-keygen -F` which keys `~/.ssh/known_hosts` (or the file

@@ -456,10 +456,10 @@ def session_description(
             require_vm_ssh_boundary(db, config, vm)
         except UserAbort:
             raise
-        except TrustMissing:
+        except TrustMissing as exc:
             # Describe degrades to an unknown runtime status, as it does for the
-            # other SSH preconditions; the warning below says so.
-            pass
+            # other SSH preconditions, but says why for this VM.
+            output.warn(f"{exc}. {exc.hint}")
         except (ConfigError, ConnectivityError, VMSSHIdentityPolicyError):
             pass
         else:

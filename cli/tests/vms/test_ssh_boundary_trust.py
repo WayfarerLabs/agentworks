@@ -52,3 +52,15 @@ def test_a_vm_with_a_record_goes_on_to_the_identity_check(db: Database, monkeypa
     require_vm_ssh_boundary(db, _CONFIG, vm)  # type: ignore[arg-type]
 
     assert checked == ["web"]
+
+
+def test_live_resource_query_warns_which_vm_has_no_record_and_degrades(db: Database, captured_output: object) -> None:
+    from agentworks.vms.manager._helpers import _query_live_resources
+
+    vm = _vm(db)
+
+    assert _query_live_resources(db, vm, _CONFIG) is None  # type: ignore[arg-type]
+
+    warnings = captured_output.warnings  # type: ignore[attr-defined]
+    assert len(warnings) == 1
+    assert "'web'" in warnings[0]
