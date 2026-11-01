@@ -53,7 +53,7 @@ them:
 | `agentworks/vms/manager/port_forward.py`         | `port_forward_vm`, moved out of `tailscale.py` so the file can pass the static import check                       |
 | `agentworks/vms/manager/platform_shell.py`       | The legacy-touching part of `vm shell --platform`, moved out of `exec.py`; legacy until slice 4                   |
 | `tests/execution/conftest.py`                    | The legacy-module blocker                                                                                         |
-| `tests/execution/conformance/`                   | The vectors and their carriers                                                                                    |
+| `tests/execution/conformance/`                   | The vectors and their lanes                                                                                       |
 | `tests/vm_access_support.py`                     | `RecordingVMAccess`                                                                                               |
 
 `trust.py` makes `_literal_path` (`trust.py:122`) public as `literal_path(path, what)`, so the VM
@@ -121,8 +121,9 @@ The slice 2 subset of D5. Strings are `str`. `Shell` is a `StrEnum` of `sh`, `ba
 
 `LoginShell` is the identity's default shell as an interactive login shell. A `Script` with an empty
 source would run `shell -l -i FILE` on an empty file and exit, and a name that says "shell session"
-is more truthful than that. It is valid only for `attach`; `run` and `stream` refuse it, and
-`attach` refuses a request with a `deadline`.
+is more truthful than that. It is valid only for `attach`, and the types say so: `run` and `stream`
+take `RunRequest` (`Command | Script`), `attach` takes `LoginShell`, and only `Command` and `Script`
+carry a `deadline` (`BoundedRequestOptions`), so neither misuse needs a runtime refusal.
 
 `Result` holds `completion` and `stdout` and `stderr` as bytes (both `repr=False`).
 `Result.require_completed(vm_name) -> int` returns the status of a `Completed` and otherwise raises
@@ -631,12 +632,12 @@ the package attribute so one patch reaches every manager.
 
 ### Conformance vectors
 
-One list of vectors, three carriers. **L** runs `$SHELL -c <remote command>` locally through the
-same pump and envelope, with the account's startup files set per vector and `SSH_CLIENT` exported as
-sshd does; its interpreter path is a parameter. It covers the shells and runs on every Linux CI
-host, once with `/usr/bin/python3` and once with a 3.11 interpreter from `uv python install 3.11`,
-since `ast.parse` cannot catch 3.12-only standard library calls. **S** runs the real client against
-a rootless local `sshd` (`ListenAddress 127.0.0.1`, a temporary host key and `AuthorizedKeysFile`,
+One list of vectors, three lanes. **L** runs `$SHELL -c <remote command>` locally through the same
+pump and envelope, with the account's startup files set per vector and `SSH_CLIENT` exported as sshd
+does; its interpreter path is a parameter. It covers the shells and runs on every Linux CI host,
+once with `/usr/bin/python3` and once with a 3.11 interpreter from `uv python install 3.11`, since
+`ast.parse` cannot catch 3.12-only standard library calls. **S** runs the real client against a
+rootless local `sshd` (`ListenAddress 127.0.0.1`, a temporary host key and `AuthorizedKeysFile`,
 `UsePAM no`, `StrictModes no`) and `trust.write_records` for the test host key; it skips locally
 when `sshd` is missing or cannot start, fails on CI in either case, and the CI job installs
 `openssh-server` if the runner image lacks it. **V** is the live lane, `-m integration` with
