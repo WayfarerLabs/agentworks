@@ -729,6 +729,19 @@ directory on this VM. The workspace's template env joins the env chain (between 
 into the workspace; the exec variant runs the command from the workspace directory. A workspace that
 lives on a different VM is rejected with a `ValidationError` before any SSH work.
 
+`vm shell`, `vm exec`, `vm verify-connection`, `vm port-forward`, `agent shell` and `agent exec`
+connect with the OpenSSH client on the workstation, version 8.5 or newer. Agentworks uses the first
+`ssh` on `PATH`; on Windows it uses only the native Win32-OpenSSH under `System32\OpenSSH` or
+`Program Files\OpenSSH`, never the `ssh` bundled with Git for Windows. `agw doctor` shows which
+client was resolved, and an unsupported one is refused before anything else runs. These commands run
+`ssh -F none` in batch mode, so `~/.ssh/config` does not apply and an encrypted private key must be
+loaded in the SSH agent. The VM needs `python3`; a VM without it is reported as unable to run
+Agentworks requests, and `agw vm reinit <name>` installs it. A command that is not found exits 127,
+one that cannot run exits 126, and a missing workspace directory exits 125.
+
+`vm port-forward` runs until interrupted and exits 0 when stopped with Ctrl-C or `SIGTERM`. It exits
+non-zero when a forward cannot be set up, such as a busy local port.
+
 In both exec commands the `--` separator is only required when the remote command's first token
 starts with `-` (it stops Agentworks from reading the token as its own option); without it, a
 dash-led first token is rejected with a hint naming the recoveries. Bare commands need no `--`.
@@ -840,9 +853,9 @@ changes the final instance layer under the rules in [Instance specs](#instance-s
 
 `agent shell` and `agent exec` both SSH directly as the agent's Linux user. `agent shell` opens an
 interactive login shell (sources the agent's profile). `agent exec` runs a single command
-non-interactively but still wraps it in the agent's login shell so the agent's `PATH` (mise shims,
-`~/.local/bin`, etc.) is in scope. Useful for scripted invocations like
-`agw agent exec myagent -- claude -p "..."`.
+non-interactively but still runs it in the agent's login shell so the agent's `PATH` (mise shims,
+`~/.local/bin`, etc.) is in scope. A template `shell` is one of `sh`, `dash`, `bash` or `zsh`.
+Useful for scripted invocations like `agw agent exec myagent -- claude -p "..."`.
 
 Both accept `--workspace <ws>` to root the session in a workspace the agent has access to. The
 workspace's template env joins the env chain (between vm and agent), and `AGENTWORKS_WORKSPACE` /

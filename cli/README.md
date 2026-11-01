@@ -597,7 +597,9 @@ Passphrase-protected OpenSSH private keys remain supported: Agentworks reads the
 embedded in the private-key envelope without decrypting it or consulting a sibling public-key file.
 Recognized encrypted legacy key formats that do not expose a public identity are reported as
 unverifiable, not mismatched. SSH-agent identity selection is not part of this comparison contract;
-the configured private-key path remains the identity source.
+the configured private-key path remains the identity source. Connections for `vm exec`, `vm shell`,
+`agent exec`, `agent shell`, `vm verify-connection` and `vm port-forward` run in SSH batch mode and
+never prompt for a passphrase, so an encrypted key must be loaded in the SSH agent first.
 
 Required system packages, including `python3` for guest-side native setup and artifact helpers, are
 installed on every platform during create and reinit regardless of template configuration. Failure
