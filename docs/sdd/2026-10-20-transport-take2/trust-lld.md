@@ -1,6 +1,6 @@
 # Transport Take 2: Trust Low-Level Design (Slice 1)
 
-- Status: Draft for review. Nothing here is implemented.
+- Status: Implemented in slice 1 (PR A); live evidence pending.
 - Date: 2026-11-01
 - Architecture: [hla.md](./hla.md) D9 (the VM-bound host-key store); requirements: R8
 - Plan: [plan.md](./plan.md), slice 1, delivered in PR A with slice 2
@@ -43,8 +43,7 @@ where its VM policy's `-F none` makes them load-bearing. The option sets below t
 `none` values: before 8.5 a `none` is read as a file name relative to the working directory, so a
 file planted there could add a trusted key, which R8 forbids. They name the null device instead,
 which every version accepts, and that holds for scp, whose own `ssh` reads the same options.
-`ssh-keygen`, which import needs, is located in the directory of the `ssh` on `PATH`, falling back
-to `PATH` itself.
+`ssh-keygen`, which import needs, is the one on `PATH`.
 
 ## Store paths and alias
 
@@ -52,16 +51,19 @@ to `PATH` itself.
   mode 0700. `trust.begin_enrollment` and the record writer create it, because OpenSSH does not
   create a custom `UserKnownHostsFile`'s parent directory: under `accept-new` a failed write only
   warns.
-- **File name.** `vm-<name>`. VM names match `NAME_RE` (`naming.py:22`), which admits Windows
-  reserved device names such as `con` and `nul`, and Windows reserves those with any extension too,
-  so a prefix is the safe fix. HLA D9 is amended to match.
+- **File name.** `vm-<name>`. The store checks each name against its own path- and option-safe
+  pattern rather than `NAME_RE` (`naming.py:22`), because persisted names are never re-validated and
+  a stricter check would strand an old VM. Names admit Windows reserved device names such as `con`
+  and `nul`, and Windows reserves those with any extension too, so a prefix is the safe fix. HLA D9
+  is amended to match.
 - **Alias.** `HostKeyAlias=agentworks-vm-<name>`. It satisfies the alias rule the proof enforces
   (`execution/carriers/ssh/connection.py:64`). It is deliberately not derived from the configurable
   `ssh_host_prefix`, so changing that prefix never orphans trust.
-- **Record format.** Plain `known_hosts` lines, `<alias> <keytype> <base64>`, one per key, file
-  mode 0600. Writes go through a temporary file in the directory and a rename, reusing
-  `ssh_config.py`'s `_atomic_write` (`ssh_config.py:271`) moved to a shared helper rather than
-  adding a third copy.
+- **Record format.** Plain `known_hosts` lines, `<alias> <keytype> <base64>`, one per key. A record
+  the import writes is mode 0600; the file `ssh` creates at enrollment takes the umask, which the
+  0700 directory makes harmless. Writes go through a temporary file in the directory and a rename,
+  reusing `ssh_config.py`'s `_atomic_write` (`ssh_config.py:271`) moved to a shared helper rather
+  than adding a third copy.
 - **Path quoting.** Option values follow the proof's `_literal_path` rules
   (`execution/carriers/ssh/connection.py:19`): an absolute path, forward slashes on Windows, and a
   refusal of `%`, `$`, `"`, backslash and control characters. The path is always double-quoted. A
@@ -85,32 +87,32 @@ policy ignores configuration.
 
 - **`VM`** reads the store when options are built, which is at spawn, not when the transport is
   constructed. With no record it raises and spawns nothing; it never falls back to first use. The
-  legacy builder raises `SSHTrustMissing`, a legacy-side subclass of both `SSHError` and
-  `TrustMissing` defined in `transports/ssh.py`. A handler that reports a failure and carries on
-  keeps treating it as an unreachable VM. The two loops that retry, and whose callers fall back to
-  repair, re-raise it ahead of their `except SSHError`: `wait_for_reconnect`
-  (`transports/__init__.py:297-308`), whose `False` sends `vm start` and the activation gate into a
-  Tailscale rejoin through `_tailscale_rejoin_required` (`vms/manager/tailscale.py:257-274`) and
-  would spend the auth key, and `native_transport`'s probe loop (`:223-237`), which would otherwise
-  retry six times and print the platform's network hint. The agent probe's rewrap into
-  `ConnectivityError` (`agents/manager/_common.py:263-271`) re-raises it too, so its hint keeps
-  naming the import. `trust.py` imports nothing legacy.
-- **Preflight.** The commands that boot a VM or spend a Tailscale key before their first connection
-  check the store first and raise `TrustMissing` before resolving a secret or touching the VM:
-  `vm start` (`vms/manager/power.py:50-58`, ahead of `_live_vm_boundary`), the activation gate's
-  start (`LiveVMNode.auto_start`, `vms/nodes.py:232`), and `vm rekey` (`vms/manager/power.py:344`),
-  which would otherwise spend the new key and record the new address before its reconnect check
-  raised. The check also covers a VM with no recorded tailnet address, which
-  `_tailscale_rejoin_required` sends to a rejoin without probing (`tailscale.py:268-269`).
+  legacy builder raises `TrustMissing` itself, which is not an `SSHError`. A missing record is a
+  state the operator must fix, not an unreachable VM, so no best-effort `except SSHError` handler
+  swallows it: otherwise `agent delete` and `workspace delete` would delete their rows and orphan
+  the VM-side account and workspace, and `wait_for_reconnect`'s `False` would send `vm start` into a
+  Tailscale rejoin that spends the auth key. A loop that reports per VM across several VMs reports
+  it for that VM instead of aborting, and `vm delete`'s best-effort teardown carries on as it does
+  for any failure. `trust.py` imports nothing legacy.
+- **Preflight.** `require_vm_ssh_boundary` (`vms/manager/boundary.py:64`), the SSH precondition the
+  session, agent and workspace commands already run before the gate and any secret, checks the
+  record, so those commands refuse before any prompt or best-effort step. Backup checks it before it
+  starts. The commands that boot a VM or spend a Tailscale key before their first connection check
+  the store first too, before resolving a secret or touching the VM: `vm start`
+  (`vms/manager/power.py:50-58`, ahead of `_live_vm_boundary`), the activation gate's start
+  (`LiveVMNode.auto_start`, `vms/nodes.py:232`), and `vm rekey` (`vms/manager/power.py:344`), which
+  would otherwise spend the new key and record the new address before its reconnect check raised.
+  The check also covers a VM with no recorded tailnet address, which `_tailscale_rejoin_required`
+  sends to a rejoin without probing (`tailscale.py:268-269`).
 - **`ENROLL`** is bound only by create (below), and only to Phase A's verify connection.
 - **`UNVERIFIED`** uses a file the create owns, because the platform builds the transport inside
   `create` and core keeps using it afterwards, for `probe_debian_release` and Phase A's fallback
   (below).
-  - `trust.provisioning_file(vm)` creates it with `mkstemp` (0600, an unpredictable name) inside the
-    private store directory, never a shared temporary directory, so no other local user can seed it
-    with a key.
-  - Create registers its deletion on its existing cleanup stack, so it goes on success and on every
-    failure path.
+  - `trust.provisioning_binding(vm_name)`, a context manager yielding the `UNVERIFIED` binding,
+    creates it with `mkstemp` (0600, an unpredictable name) inside the private store directory,
+    never a shared temporary directory, so no other local user can seed it with a key.
+  - Create enters it on its existing cleanup stack, so the file goes on success and on every failure
+    path.
   - `ProvisionRequest` carries the binding, path included, so each cloud plugin builds its
     create-time transport from it.
   - A key is accepted once and then pinned for the rest of the create, which matches what
@@ -156,8 +158,9 @@ WireGuard already authenticates, rather than over the public internet.
 
 - **Create.**
   1. After `db.insert_vm` commits and the pending VM is marked realized
-     (`vms/manager/lifecycle.py:421-438`), `trust.begin_enrollment(vm)` removes any stale record and
-     creates the directory, so a reused name never inherits a key. A failure there unwinds the row.
+     (`vms/manager/lifecycle.py:421-438`), `trust.begin_enrollment(vm_name)` removes any stale
+     record and creates the directory, so a reused name never inherits a key. A failure there
+     unwinds the row.
   2. Phase A's verify connection runs `ENROLL`, so its first success writes the key to the store and
      nowhere else.
   3. After the verify loop (`driver.py:413-423`), Phase A checks that the store now holds a key. If
@@ -168,11 +171,13 @@ WireGuard already authenticates, rather than over the public internet.
      provisioning file is removed by create's cleanup stack whatever happens (above).
 - **A create that fails before enrolling** is kept as failed (`lifecycle.py:595-606`). In PR A its
   remedy is delete and recreate. From PR B, `agw vm recover` re-establishes trust.
-- **Delete.** `trust.remove(vm)` runs beside the per-VM log cleanup
-  (`vms/manager/power.py:318-324`). That is after `platform.delete` when the binding succeeds, and
-  also on the path that skips backend cleanup after a binding failure (`power.py:245-256`). The rule
-  is that the store file goes whenever the VM's row goes (`power.py:336`). Logout and session
-  teardown (279-301) still have the store.
+- **Delete.** `trust.remove(vm_name)` runs after the row is deleted (`power.py:336`), and even when
+  the following `sync_ssh_config` fails, so the store file goes whenever the row goes and a failure
+  in between never leaves a live row without its record. It runs on the path that skips backend
+  cleanup after a binding failure (`power.py:245-256`), and not when `platform.delete` raises, which
+  keeps the row. Logout and session teardown (279-301) still have the store. A cloud VM with no
+  record cannot log out of Tailscale, because its native transport is `VM`-bound; delete warns and
+  carries on, and the upgrade guide says to import first or remove the node in the admin console.
 - **Rekey and address changes** need nothing: the alias, not the address, keys the record.
 - **Stop and start** need nothing: the key persists on the guest (incident row I9).
 
@@ -194,7 +199,8 @@ WireGuard already authenticates, rather than over the public internet.
    - The output's comment lines are dropped.
    - A record line that begins with `@` carries a `@cert-authority` or `@revoked` marker. Any such
      line for the VM means nothing is imported for it.
-4. **Write.** The matched records are rewritten under the alias and written atomically.
+4. **Write.** The matched records are rewritten under the alias and written atomically. The writer
+   validates each key type and blob, so a malformed source line is never reported as imported.
    - A VM with no record gets them all.
    - A VM with a non-empty record is never written. If the matched keys are a subset of the stored
      ones, it reports `already current`; otherwise `conflicts with the stored key`.
@@ -221,22 +227,27 @@ existing ones:
     HostKeyAlias agentworks-vm-<name>
     UserKnownHostsFile "<store file>"
     StrictHostKeyChecking yes
+        GlobalKnownHostsFile /dev/null
+    CheckHostIP no
     UpdateHostKeys no
     HashKnownHosts no
 ```
 
-`UpdateHostKeys no` and `HashKnownHosts no` stop the operator's own `ssh` from writing to the store
-or hashing it. Entries for a VM without a record stay unchanged until slice 8 makes the block
-unconditional, as D9 decided: the operator's own `ssh` keeps working until they import. Every change
-to a record is followed by `sync_ssh_config`: import, enrollment's existing post-create sync
-(`vms/initializer/driver.py:235-237`, right after Phase A, reached even when Phase B fails), delete
-(`power.py:340`), and, in slice 4, recovery.
+(`NUL` replaces `/dev/null` on Windows.) An unreadable record or an unsafe store path for one VM
+warns and omits that VM's block; it never aborts the rebuild for the others.
+
+The pins match `ssh_options`: the operator's own `ssh` consults only the store for the alias, never
+writes to it, and never hashes it. Entries for a VM without a record stay unchanged until slice 8
+makes the block unconditional, as D9 decided: the operator's own `ssh` keeps working until they
+import. Every change to a record is followed by `sync_ssh_config`: import, enrollment's existing
+post-create sync (`vms/initializer/driver.py:235-237`, right after Phase A, reached even when Phase
+B fails), delete (`power.py:340`), and, in slice 4, recovery.
 
 ## Errors
 
 - **`TrustMissing(StateError)`**, with `entity_kind="vm"`. Its hint names
   `agw vm import-host-keys <vm>`, and `--known-hosts` with a verified file for a VM that has no
-  entry. Slice 4 adds `agw vm recover`. The legacy code raises it as `SSHTrustMissing` (above).
+  entry. Slice 4 adds `agw vm recover`. The legacy code raises it directly (above).
 - **`TrustMismatch`** lands with the slice 2 core.
 
 ## Tests
@@ -254,8 +265,15 @@ Each test guards behavior, per the development principles and the no-prose-polic
     `native_transport` raise it on the first attempt;
   - the provisioning file is private, survives into core's post-create use (the release probe and
     Phase A's fallback), and is removed on success and on failure;
-  - Windows path forms (`@pytest.mark.windows`);
-  - `SSHTransport` cannot be built without a `trust` value.
+    - Windows path forms, and import against the platform's own `ssh-keygen`
+      (`@pytest.mark.windows`);
+  - `require_vm_ssh_boundary`, `vm start`, the activation gate, `vm rekey` and backup refuse a VM
+    with no record before resolving a secret or touching it, and `agent delete` and
+    `workspace delete` refuse before touching the database;
+  - a multi-VM listing reports a missing record for that VM and carries on.
+
+  `SSHTransport`'s required `trust` is a type-checker guarantee, so no test restates it.
+
 - **Enrollment:**
   - the store holds the key after Phase A's verify connection;
   - an empty store after a successful connection fails create;
@@ -273,7 +291,11 @@ Each test guards behavior, per the development principles and the no-prose-polic
 
 - **Lifecycle:** create begins enrollment after the row is realized; delete removes the record
   whenever it removes the row.
-- **Managed entries:** the trust block appears exactly when a record exists.
+- **Managed entries:** the trust block appears exactly when a record exists, the installed client
+  resolves it against the store, and one bad record never aborts the rebuild.
+- **ENROLL only from create** holds by construction: Phase A is reached only through `bootstrap_vm`
+  from create (`vms/initializer/driver.py:161`, `vms/manager/lifecycle.py:643`), and the factories
+  bind `VM`. The enrollment tests cover both; nothing pins the call graph.
 
 ## Collateral
 
@@ -286,7 +308,13 @@ Each test guards behavior, per the development principles and the no-prose-polic
   - the one-time import;
   - what fails until it runs, and that the operator's own `ssh` keeps working meanwhile;
   - the verified-file path for a VM with no entry;
-  - `agw vm import-host-keys --all` as the checklist of VMs still without a record.
+    - `agw vm import-host-keys --all` as the checklist of VMs still without a record;
+  - that a cloud VM deleted without a record stays on the tailnet until its node is removed;
+  - that a database restored onto another workstation needs the import again there.
+
+  The guide and the command reference hold the long form; the `TrustMissing` hint and the other docs
+  point to them.
+
 - **`cli/agentworks/execution/README.md`:** what the package now provides in production.
 - **`vms/initializer/ssh_keys.py:136-140`:** the stale docstring about clearing `known_hosts` by
   hand.
