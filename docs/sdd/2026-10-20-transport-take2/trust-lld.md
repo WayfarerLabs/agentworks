@@ -86,9 +86,13 @@ policy ignores configuration.
 - **`VM`** reads the store when options are built, which is at spawn, not when the transport is
   constructed. With no record it raises and spawns nothing; it never falls back to first use. The
   legacy builder raises `SSHTrustMissing`, a legacy-side subclass of both `SSHError` and
-  `TrustMissing` defined in `transports/ssh.py`. Every existing `except SSHError` therefore keeps
-  behaving as it does for an unreachable VM, no handler needs changing, and `trust.py` imports
-  nothing legacy.
+  `TrustMissing` defined in `transports/ssh.py`. A handler that reports a failure and carries on
+  keeps treating it as an unreachable VM. The two loops that retry, and whose callers fall back to
+  repair, re-raise it ahead of their `except SSHError`: `wait_for_reconnect`
+  (`transports/__init__.py:297-308`), whose `False` sends `vm start` and the activation gate into a
+  Tailscale rejoin through `_tailscale_rejoin_required` (`vms/manager/tailscale.py:257-274`) and
+  would spend the auth key, and `native_transport`'s probe loop (`:223-237`), which would otherwise
+  retry six times and print the platform's network hint. `trust.py` imports nothing legacy.
 - **`ENROLL`** is bound only by create (below), and only to Phase A's verify connection.
 - **`UNVERIFIED`** uses a file the create owns, because the platform builds the transport inside
   `create` and core keeps using it afterwards, for `probe_debian_release` and Phase A's fallback
@@ -236,6 +240,8 @@ Each test guards behavior, per the development principles and the no-prose-polic
   - quoting holds for a store path containing a space.
 - **Options and binding:**
   - `VM` with no record raises `TrustMissing` and spawns nothing;
+  - `vm start` on a VM with no record raises `TrustMissing` without reaching `_ensure_tailscale` or
+    resolving a secret, and `native_transport` raises it on the first attempt;
   - the provisioning file is private, survives into core's post-create use (the release probe and
     Phase A's fallback), and is removed on success and on failure;
   - Windows path forms (`@pytest.mark.windows`);
