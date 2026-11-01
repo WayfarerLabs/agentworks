@@ -90,10 +90,13 @@ if the native harness normally chooses one by precedence. Same-scope composition
 that cross-scope suppression. Outer setup uses the owners it knows; the session checks the joined
 actual user/workspace context without retroactively running ancestor setup. Multiple members
 belonging to one skill are one identity. Distinct origins claiming the same native skill or agent
-identity are an error, including across user/workspace branches. Session persona definitions are
-retained as individually owned files with their native identity; Claude and Grok still receive the
-combined definitions in one JSON argument. Previously handled ancestor payloads are not
-retransmitted.
+identity cannot be delivered by silently choosing one. Setup defers affected native entries with
+unchanged origins and reports partial completion; unrelated entries continue. Previously owned
+placements omitted from the new plan follow ordinary safe retirement, while modified/unowned content
+is retained. A new session carrier introducing a collision remains an error; conflicts solely
+between existing ancestor placements are reports. Session persona definitions are retained as
+individually owned files with their native identity; Claude and Grok still receive the combined
+definitions in one JSON argument. Previously handled ancestor payloads are not retransmitted.
 
 Hints aggregate into one rule-like file per native destination where file discovery is supported,
 using an `agentworks-hints` name. Session-only mechanisms may instead aggregate into additive native

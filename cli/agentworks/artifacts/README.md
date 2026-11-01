@@ -299,12 +299,15 @@ names are shown in full; larger groups show the first two and `...`. Deferral ou
 the affected artifacts, destination and reason. A later setup or restart reconsiders those inputs;
 delivery still depends on the receiving integration and any required workaround.
 
-The native adapters refuse ambiguous skill or persona identities across scopes, including already
-handled ancestors. Before managed launch, a bounded inventory also checks existing native entries in
-the known machine, user and direct workspace discovery roots. It reads native metadata names,
-including Codex configuration registrations, rather than assuming filenames are names. Conflicts
-identify the native name and competing paths. This check still runs when all applicable inputs were
-handled upstream.
+The native adapters check skill and persona identities across scopes. Before new delivery, a bounded
+inventory checks existing entries in known machine, user and direct workspace discovery roots. It
+reads native metadata names, including Codex configuration registrations, rather than assuming
+filenames are names. Conflicts identify the native name and competing paths. During setup,
+conflicting artifacts are deferred individually to the next supported facet while independent
+artifacts continue. Ordinary safe retirement removes prior owned placements no longer in that plan;
+modified or unowned files remain protected. A newly requested session carrier that would shadow
+another contribution is an error. Problems solely in existing ancestor placement warn and do not
+block session launch.
 
 Inventory covers selected skill/persona types, with at most 512 directory entries, YAML headers up
 to 32 KiB each and 1 MiB combined, and an Agentworks rendered-TOML budget for Codex personas of 32
@@ -333,7 +336,8 @@ managed run uses a new directory; reusable session names do not reuse another se
 Native harness session delivery is disabled by default; shell publishes its private files directly.
 Inputs left unhandled, including deferrals from ancestors, produce warnings with their original
 owner, type, name and reason. They do not prevent launch and are not reported as successfully
-delivered. Invalid input, unsafe publication and ownership conflicts remain errors.
+delivered. Invalid input, unsafe publication and conflicts introduced by new session delivery remain
+errors. Differing unowned file content during setup is preserved and recorded as a skip.
 
 This delivery includes declared bundles and harness handling. Core hint emission, features, hooks,
 and MCP artifacts are later work.

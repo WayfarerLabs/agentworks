@@ -360,11 +360,13 @@ workspace skill must not hide a same-named user skill that the integration promi
 Integrations must account for the native identities and discovery locations of local, deferred and
 already applied ancestor contributions, including existing native entries that can shadow managed
 artifacts. Use faithful aggregation, non-conflicting placement or a supported native namespace;
-otherwise refuse the combination with the competing origins and native identity. A successful file
-write or same-scope replacement rule does not authorize cross-scope native shadowing. Perform checks
-using the actual owners available at that lifecycle stage; the session validates new delivery
-against the joined user and workspace context without making outer scopes inspect descendants.
-Conflicts solely between already-placed ancestor artifacts are reported without blocking launch.
+otherwise diagnose the affected contribution with its competing origins and native identity without
+claiming delivery. During setup, defer conflicting native entries individually while independent
+entries continue; new session delivery must not introduce native shadowing. A successful file write
+or same-scope replacement rule does not authorize cross-scope native shadowing. Perform checks using
+the actual owners available at that lifecycle stage; the session validates new delivery against the
+joined user and workspace context without making outer scopes inspect descendants. Conflicts solely
+between already-placed ancestor artifacts are reported without blocking launch.
 
 **R6. Give hints an appropriate representation.** Integrations may aggregate small hints into a
 native rule or include them in launch context when supported. Prefer one clearly named
