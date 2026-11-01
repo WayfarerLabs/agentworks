@@ -1123,6 +1123,42 @@ def test_reinit_applies_a_legacy_flat_vm_payload(
     assert vm_template.cpus == 11
 
 
+@pytest.mark.parametrize("probe", ["settings", "fails"])
+def test_reinit_warns_about_pam_env_settings_and_still_initializes(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,
+    probe: str,
+) -> None:
+    """A VM with pam_env settings (or a probe that cannot run) costs a warning, never the reinit."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    config = make_config()
+    _seed_provisioned_vm(db)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+
+    @contextlib.contextmanager
+    def _hold(self: LimaPlatform, vm: object, *, config: object | None = None):
+        yield
+
+    monkeypatch.setattr(LimaPlatform, "vm_active", _hold)
+    initialized: list[bool] = []
+    monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: initialized.append(True))
+
+    def _run(command: str, **kwargs: object) -> SimpleNamespace:
+        if probe == "fails":
+            raise RuntimeError("connection lost")
+        return SimpleNamespace(stdout="/etc/environment\n", returncode=0)
+
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kw: SimpleNamespace(run=_run))
+
+    vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert initialized == [True]
+    assert len(captured_output.warnings) == 1
+
+
 @pytest.mark.parametrize("admin_template", ["", "work"])
 def test_reinit_errors_cleanly_for_an_unresolved_stored_admin_template(
     make_config,
