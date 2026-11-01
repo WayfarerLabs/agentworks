@@ -149,6 +149,10 @@ same user boundary. A session can still use an external native home when its art
 or in the private run directory. Existing ancestor-only discovery problems are warnings; new session
 delivery must still validate its own carriers, destinations and native identities.
 
+The shared session probe checks new carriers strictly, then checks existing ancestor files through
+the advisory path. A mixed-delivery start therefore retains ancestor warnings without adding old
+paths to the strict request. Integrations keep their native discovery roots and carrier details.
+
 Codex and Grok guidance is carried directly in native argv; no unused guidance file is published.
 Claude's additive prompt file and Codex's selected role configuration files are consumed by their
 native CLI carriers.
@@ -161,7 +165,10 @@ Codex TOML and configuration-registered role names use the standard library. Pub
 skill entrypoints before supporting members, so an interrupted large-package write remains
 inspectable and retryable. Retirement reverses that order: `SKILL.md` stays present and owned while
 any owned supporting member or required parent cleanup remains. Modified or unowned files remain
-untouched.
+untouched. A modified obsolete member of a still-requested skill skips the whole package before
+publication, so new instructions cannot be combined with that retained member. A differing whole
+file in a prospective session directory refuses staging before the old runtime is torn down;
+setup's per-entry skip policy does not authorize launching with that content.
 
 Retirement prunes empty parents of each removed owned skill member only within the exact package
 root supplied by the integration and retained on that file's existing record. Core validates that
