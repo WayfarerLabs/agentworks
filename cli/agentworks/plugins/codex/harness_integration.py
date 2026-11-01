@@ -116,6 +116,7 @@ from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     ancestor_diagnostics,
+    defer_setup_conflicts,
     native_home,
     validate_discovery_paths,
     validate_native_command,
@@ -466,8 +467,13 @@ class CodexIntegration(HarnessIntegration):
     def vm_init(self, invocation: VMSetupInvocation) -> ArtifactApplication:
         plan = ArtifactApplication() if self.retiring else vm_artifacts(invocation.artifacts)
         if plan.files:
-            probe_native(
-                invocation.runner, tool="codex", environment=invocation.environment, files=plan.files, vm_only=True
+            plan = defer_setup_conflicts(
+                plan,
+                invocation,
+                "user",
+                lambda files: probe_native(
+                    invocation.runner, tool="codex", environment=invocation.environment, files=files, vm_only=True
+                ),
             )
         return plan
 
@@ -510,12 +516,17 @@ class CodexIntegration(HarnessIntegration):
         )
         setup_user("codex", config, setup_invocation)
         if plan.files:
-            probe_native(
-                invocation.runner,
-                tool="codex",
-                environment=invocation.environment,
-                home=invocation.home,
-                files=plan.files,
+            plan = defer_setup_conflicts(
+                plan,
+                invocation,
+                "session",
+                lambda files: probe_native(
+                    invocation.runner,
+                    tool="codex",
+                    environment=invocation.environment,
+                    home=invocation.home,
+                    files=files,
+                ),
             )
         return plan
 
@@ -541,13 +552,18 @@ class CodexIntegration(HarnessIntegration):
         )
         setup_workspace("codex", config, invocation)
         if plan.files:
-            probe_native(
-                invocation.runner,
-                tool="codex",
-                environment=invocation.environment,
-                workspace=invocation.root,
-                files=plan.files,
-                workspace_only=True,
+            plan = defer_setup_conflicts(
+                plan,
+                invocation,
+                "session",
+                lambda files: probe_native(
+                    invocation.runner,
+                    tool="codex",
+                    environment=invocation.environment,
+                    workspace=invocation.root,
+                    files=files,
+                    workspace_only=True,
+                ),
             )
         return plan
 

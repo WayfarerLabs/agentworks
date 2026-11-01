@@ -30,6 +30,7 @@ from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     ancestor_diagnostics,
     defer,
+    defer_setup_conflicts,
     native_home,
     validate_discovery_paths,
     validate_native_command,
@@ -191,12 +192,17 @@ class GrokBuildIntegration(HarnessIntegration):
         validate_user_placement(plan, invocation.home)
 
         if plan.files:
-            probe_native(
-                invocation.runner,
-                tool="grok",
-                environment=invocation.environment,
-                home=invocation.home,
-                files=plan.files,
+            plan = defer_setup_conflicts(
+                plan,
+                invocation,
+                "session",
+                lambda files: probe_native(
+                    invocation.runner,
+                    tool="grok",
+                    environment=invocation.environment,
+                    home=invocation.home,
+                    files=files,
+                ),
             )
         return plan
 
@@ -207,13 +213,18 @@ class GrokBuildIntegration(HarnessIntegration):
             else outer_artifacts(invocation.artifacts, f"{invocation.root}/.grok")
         )
         if plan.files:
-            probe_native(
-                invocation.runner,
-                tool="grok",
-                environment=invocation.environment,
-                workspace=invocation.root,
-                files=plan.files,
-                workspace_only=True,
+            plan = defer_setup_conflicts(
+                plan,
+                invocation,
+                "session",
+                lambda files: probe_native(
+                    invocation.runner,
+                    tool="grok",
+                    environment=invocation.environment,
+                    workspace=invocation.root,
+                    files=files,
+                    workspace_only=True,
+                ),
             )
         return plan
 

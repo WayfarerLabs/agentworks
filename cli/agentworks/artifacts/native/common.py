@@ -4,19 +4,20 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, ArtifactFile
 from agentworks.artifacts.model import ArtifactInputs, ArtifactType
-from agentworks.errors import AgentworksError, ConfigError
+from agentworks.errors import AgentworksError, ConfigError, StateError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
     from agentworks.artifacts.application import OwnedArtifactFile, SessionArtifactContext
     from agentworks.artifacts.model import ArtifactFacet, ArtifactInput
+    from agentworks.capabilities.harness_integration.setup import SetupInvocation
 
 
 # Agentworks budget for a rendered persona TOML file, including its instruction body.
@@ -103,6 +104,52 @@ def skill_files(root: str, item: ArtifactInput, *, namespace: str = "") -> tuple
         )
         for member in item.content.members
     )
+
+
+def defer_setup_conflicts(
+    application: ArtifactApplication,
+    invocation: SetupInvocation,
+    destination: ArtifactFacet,
+    probe: Callable[[tuple[ArtifactFile, ...]], object],
+) -> ArtifactApplication:
+    """Defer conflicting native entries while validating independent setup outputs.
+
+    Probe identity conflicts concern particular artifacts. Other native, policy,
+    transport and malformed-input failures still fail this facet. Removing a
+    placement from the plan allows ordinary safe retirement of its owned files.
+    """
+    from agentworks.artifacts.native.probe import NativeArtifactConflictError
+
+    while application.files:
+        try:
+            probe(application.files)
+            return application
+        except NativeArtifactConflictError as error:
+            rejected = {
+                origin
+                for file in application.files
+                if file.native_identity in error.identities
+                for origin in file.origins
+            }
+            if not rejected:
+                raise StateError("native artifact conflict does not identify a proposed setup entry") from error
+            invocation.report_incomplete(str(error))
+            existing = {item.input_id for item in application.deferred}
+            deferred = tuple(
+                ArtifactDeferral(
+                    input_id=item.identity,
+                    destination=destination,
+                    reason="Native identity conflicts with existing content; repair that entry and rerun owning setup",
+                )
+                for item in invocation.artifacts.items()
+                if item.origin_identity in rejected and item.identity not in existing
+            )
+            application = replace(
+                application,
+                files=tuple(file for file in application.files if not rejected.intersection(file.origins)),
+                deferred=(*application.deferred, *deferred),
+            )
+    return application
 
 
 def validate_names(inputs: ArtifactInputs) -> None:

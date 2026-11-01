@@ -40,6 +40,7 @@ from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     ancestor_diagnostics,
+    defer_setup_conflicts,
     native_home,
     validate_discovery_paths,
     validate_native_command,
@@ -216,8 +217,13 @@ class ClaudeCodeIntegration(HarnessIntegration):
             )
         )
         if plan.files:
-            probe_native(
-                invocation.runner, tool="claude", environment=invocation.environment, files=plan.files, vm_only=True
+            plan = defer_setup_conflicts(
+                plan,
+                invocation,
+                "user",
+                lambda files: probe_native(
+                    invocation.runner, tool="claude", environment=invocation.environment, files=files, vm_only=True
+                ),
             )
         return plan
 
@@ -251,12 +257,17 @@ class ClaudeCodeIntegration(HarnessIntegration):
         )
         setup_user("claude", config, setup_invocation)
         if plan.files:
-            probe_native(
-                invocation.runner,
-                tool="claude",
-                environment=invocation.environment,
-                home=invocation.home,
-                files=plan.files,
+            plan = defer_setup_conflicts(
+                plan,
+                invocation,
+                "session",
+                lambda files: probe_native(
+                    invocation.runner,
+                    tool="claude",
+                    environment=invocation.environment,
+                    home=invocation.home,
+                    files=files,
+                ),
             )
         return plan
 
@@ -270,13 +281,18 @@ class ClaudeCodeIntegration(HarnessIntegration):
         )
         setup_workspace("claude", config, invocation)
         if plan.files:
-            probe_native(
-                invocation.runner,
-                tool="claude",
-                environment=invocation.environment,
-                workspace=invocation.root,
-                files=plan.files,
-                workspace_only=True,
+            plan = defer_setup_conflicts(
+                plan,
+                invocation,
+                "session",
+                lambda files: probe_native(
+                    invocation.runner,
+                    tool="claude",
+                    environment=invocation.environment,
+                    workspace=invocation.root,
+                    files=files,
+                    workspace_only=True,
+                ),
             )
         return plan
 

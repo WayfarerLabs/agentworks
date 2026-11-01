@@ -8,6 +8,7 @@ import shlex
 import tomllib
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import get_args
 
@@ -898,3 +899,118 @@ def test_failed_native_probe_is_advisory_only_without_new_carriers(
     else:
         result = integration.start(RunContext(admin_target=_FakeTarget()), intent=HarnessLaunchIntent.RESUME_OR_NEW)
         assert result.command == "fixture-launch" and warnings
+
+
+@pytest.mark.parametrize(
+    "implementation,facet",
+    [
+        (ClaudeCodeIntegration, "vm"),
+        (ClaudeCodeIntegration, "user"),
+        (ClaudeCodeIntegration, "workspace"),
+        (CodexIntegration, "vm"),
+        (CodexIntegration, "user"),
+        (CodexIntegration, "workspace"),
+        (GrokBuildIntegration, "user"),
+        (GrokBuildIntegration, "workspace"),
+    ],
+)
+def test_setup_native_name_conflict_defers_only_affected_artifact(implementation, facet, db, monkeypatch):
+    from importlib import import_module
+
+    from agentworks.artifacts.native.probe import NativeArtifactConflictError
+    from agentworks.capabilities.harness_integration.setup import (
+        SetupInvocation,
+        UserSetupInvocation,
+        VMSetupInvocation,
+        WorkspaceSetupInvocation,
+    )
+    from tests.conftest import _FakeTarget
+
+    module = import_module(implementation.__module__)
+    module_root = "/home/alice/.native"
+    calls = []
+
+    def check(*args, files=(), **kwargs):
+        calls.append(tuple(files))
+        if any(file.native_identity == "skill:review" for file in files):
+            raise NativeArtifactConflictError("fixture competing skill", ("skill:review",), hint="fixture repair")
+        return module_root
+
+    monkeypatch.setattr(module, "probe_native", check)
+    if implementation is CodexIntegration:
+        monkeypatch.setattr(module, "guidance_path", lambda runner, root: root + "/AGENTS.md")
+    bad = artifact(ArtifactType.SKILL)
+    good = artifact(ArtifactType.RULE)
+    incomplete: list[str] = []
+    common = {
+        "vm": db.insert_vm("vm", "site", "host"),
+        "runner": _FakeTarget(),
+        "prior": None,
+        "checkpoint": lambda claims: None,
+        "report_incomplete": incomplete.append,
+        "artifacts": received(bad, good),
+    }
+    invocation: SetupInvocation
+    if facet == "vm":
+        invocation = VMSetupInvocation(**common)
+    elif facet == "user":
+        invocation = UserSetupInvocation(**common, username="alice", home="/home/alice")
+    else:
+        invocation = WorkspaceSetupInvocation(**common, workspace_name="ws", root="/workspace", linux_group="ws")
+    integration = implementation.for_setup(owner_kind="vm", owner_name="vm", facet=facet, config={})
+    result = getattr(integration, {"vm": "vm_init", "user": "user_init", "workspace": "workspace_init"}[facet])(
+        invocation
+    )
+    assert incomplete and calls
+    assert not any(bad.origin_identity in file.origins for file in result.files)
+    route = next(item for item in result.deferred if item.input_id == bad.identity)
+    assert route.destination == ("user" if facet == "vm" else "session")
+    assert any(good.origin_identity in file.origins for file in result.files) or any(
+        item.input_id == good.identity for item in result.deferred
+    )
+    assert not any(file.native_identity == "skill:review" for file in calls[-1]) or not result.files
+
+
+@pytest.mark.parametrize("modified", [False, True])
+def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, modified):
+    from agentworks.artifacts.native.common import defer_setup_conflicts
+    from agentworks.artifacts.native.probe import NativeArtifactConflictError
+    from agentworks.artifacts.publication import publish_artifacts
+    from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
+    from tests.native_setup_fixtures import LocalFixtureTransport
+
+    target = LocalFixtureTransport(tmp_path)
+    bad, good = artifact(ArtifactType.SKILL), artifact(ArtifactType.RULE)
+    inputs = received(bad, good)
+    plan = claude.outer_artifacts(inputs, str(target.home / ".claude"))
+    current = publish_artifacts(target, plan.files, (), lambda files: None, roots=(str(target.home),)).files
+    entrypoint = target.home / ".claude/skills/review/SKILL.md"
+    if modified:
+        entrypoint.write_text("operator changed entrypoint")
+    competing = target.home / ".claude/skills/competing/SKILL.md"
+    competing.parent.mkdir(parents=True)
+    competing.write_text("operator content")
+    incomplete: list[str] = []
+    invocation = UserSetupInvocation(
+        vm=db.insert_vm("vm", "site", "host"),
+        runner=target,
+        prior=None,
+        checkpoint=lambda claims: None,
+        report_incomplete=incomplete.append,
+        artifacts=inputs,
+        username="alice",
+        home=str(target.home),
+    )
+
+    def check(files):
+        if any(file.native_identity == "skill:review" for file in files):
+            raise NativeArtifactConflictError("fixture competing skill", ("skill:review",), hint="fixture repair")
+
+    filtered = defer_setup_conflicts(plan, invocation, "session", check)
+    result = publish_artifacts(target, filtered.files, current, lambda files: None, roots=(str(target.home),))
+    assert incomplete and filtered.deferred[0].input_id == bad.identity
+    assert competing.read_text() == "operator content"
+    assert entrypoint.exists() is modified
+    assert any(file.path == str(entrypoint) for file in result.files) is modified
+    assert all(Path(file.path).exists() for file in result.files)
+    assert any(good.origin_identity in file.origins for file in result.files)
