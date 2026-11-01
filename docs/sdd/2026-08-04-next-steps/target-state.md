@@ -413,6 +413,7 @@ and deliberately not folded in: wave 8 is the external plugin API (registration 
 discovery, namespacing, versioning), while this effort is OS-level containment of what an agent can
 do on the VM. Trust is a shared theme, not a shared deliverable, and folding them would make wave 8
 mean two things. Nothing downstream waits on this effort, and it depends on no wave before it.
+(Superseded 2026-09-19, and that ruling in turn on 2026-10-20; see below.)
 
 **Transport and SSH rebuilt in parallel, then cut over and deleted (operator, 2026-09-14).** The
 execution layer is replaced rather than cleaned up in place, by two coordinated adjacent standalone
@@ -422,7 +423,9 @@ execution contract through permission-scoped views, and ssh-connection-contracts
 carrier. The new stack must not import, wrap, subclass, or call legacy execution code, directly or
 indirectly; that constraint is what keeps the rebuild from inheriting the assumptions it exists to
 replace. Cutover across resources and physical deletion of the old stack are transport-owned
-deliverables, not cleanup deferred past the interesting work.
+deliverables, not cleanup deferred past the interesting work. (Superseded 2026-10-20 by the
+transport reset below, which keeps the cutover and deletion deliverables and narrows the no-legacy
+constraint to the execution layer.)
 
 The rationale is that this layer's defect is a missing contract rather than accumulated mess.
 Behavior was discovered rather than specified, repeatedly: the Windows-only forced-TTY workaround
@@ -434,14 +437,16 @@ being discovered.
 **These are adjacent standalone children, but unlike the others they bear prerequisites.** Nothing
 waits on session-cgroups; waves 5 and 7 wait on this. Wave 5's session-level PTY observation and
 input interception, and wave 7's structured control, both build on the execution contract this work
-defines. Neither wave should be chartered against today's transport.
+defines. Neither wave should be chartered against today's transport. (Reopened 2026-10-23; see the
+ruling on waves 5 and 7 below.)
 
 **Saga-lead condition recorded at adoption (2026-09-14):** the old stack's tests carry
 incident-derived knowledge that exists nowhere else, including the forced-TTY versus closed-stdin
 finding, Windows stdin `TextIOWrapper` newline rewriting, and the Git-for-Windows POSIX toolchain
 dependency. Permission to copy useful tests does not protect that. Inventory those behaviors before
 deletion and re-prove each against the new stack, rather than discovering after the fact that a
-lesson was deleted with the code that encoded it.
+lesson was deleted with the code that encoded it. (Carried forward as transport-take2's R10, which
+starts from the inventory in the transport-improv migration strategy.)
 
 **Simplification becomes a standing loop (operator, 2026-09-14).** One-shot sweeps of a moving
 codebase race themselves: a survey starts going stale the moment it is written, which is why the
@@ -481,13 +486,58 @@ anticipates this disposition and says to "carry accepted requirements into their
 before retiring either record." Under the 2026-10-20 reset below, that transfer belongs to the
 follow-up containment effort, and the transport-improv directory must not be wiped until it is done.
 
-**Superseded by the transport reset (operator, 2026-10-20).** The operator stopped both rebuild
-efforts and replaced them with one successor, transport-take2 (PR #851), whose FRD records the
-rulings verbatim. Containment no longer rides the transport effort: session containment, resource
-limits, and the installed VM program `agw-atc` move to a separate follow-up effort. The "Containment
-is an execution option" ruling and its rationale stand as the record of the 2026-09-19 position.
-Reconciling this section, and the other saga records that the reset makes stale, follows once the
-successor's artifacts are on `main`.
+**Transport reset to one successor, transport-take2 (operator, 2026-10-20).** The operator stopped
+both rebuild efforts and replaced them with one,
+[transport-take2](../2026-10-20-transport-take2/frd.md), whose FRD records the rulings verbatim.
+Both predecessors are locked as superseded. The successor's shape:
+
+- Installed OpenSSH to the VM's tailnet address is the only full transport, and it carries no
+  platform-specific behavior.
+- Every VM satisfies one machine-checked contract after create or reinit; platform differences are
+  fixed in provisioning, not carried as branches in core.
+- Each platform supplies one native capability, recovery of canonical SSH access; its other native
+  needs stay private to it.
+- The execution layer is still built in parallel and still may not import, wrap, subclass, or call
+  the current execution modules, but platform and provisioning code are not rebuilt.
+- The new surface reaches consumers as new `RunContext` accessors and lands together with its first
+  migrated consumers, not after every workflow is validated. Cutover and deletion of the old stack
+  remain this effort's deliverables.
+
+The rationale, in the operator's words: "part of the original flaw was wanting to have a full-blown
+native Transport." Treating every platform's native channel as a full execution target forced every
+operation to fit the tightest channel limits. Together with a validate-everything-first gate, that
+produced a large unmerged stack with no shippable increment.
+
+transport-take2 is an adjacent standalone child, the standing its predecessors had. Whether it also
+bears prerequisites depends on the waves 5 and 7 ruling below.
+
+**Containment moves to a follow-up effort (operator, 2026-10-20).** Session containment, resource
+limits, and an installed VM program, `agw-atc`, form a separate follow-up effort, not yet seeded. It
+takes the session-cgroups snapshot preserved in the transport-improv directory as input, together
+with two earlier rulings: the 2026-09-19 containment ruling above, and the 2026-09-18 ruling that
+the execution boundary is an escalating set of protection profiles, recorded in the
+[transport-improv FRD](../2026-09-12-transport-improv/frd.md#operator-rulings-2026-09-18). Resource
+limits are in scope because disks filling with agents' worktrees and caches has been a recurring
+operational problem. When seeded it is an adjacent standalone child, as session-cgroups was.
+
+**Waves 5 and 7 wait on transport-take2 only if observability needs a VM-side wrapper (operator,
+2026-10-23).** The operator left the dependency open:
+
+> Yeah, I just don't know. I think there's good chance we'll need wrapper program to properly
+> implement transcripts and observability. If that's the case, I wouldn't want to develop that on
+> the old transport. But if not, we can probably start on the old transport and then migrate once
+> the new one is available. Decide later.
+
+Wave 5 already contains the question that decides it, its input-interception investigation. That
+investigation needs no new transport, so it may run first, on today's transport. It also tests the
+successor lead's read (`message-2026-10-20-transport-reset.md`): that the waves need nothing beyond
+transport-take2's R4, because interception belongs to core's session runtime, which owns tmux and
+the PTY on the VM. If the investigation concludes that transcripts and observability need a wrapper
+program on the VM, wave 5's implementation waits for transport-take2 and wave 7 follows it. If not,
+both waves build on today's transport and migrate with every other consumer. A wrapper program would
+be an installed VM program, the same kind of thing as `agw-atc`. If both prove necessary they should
+be one program, with one install path and one place in the VM contract, so a wrapper finding is a
+reason to coordinate with the containment effort rather than to build a second guest program.
 
 ### Observability (destinations 5 and 6)
 
