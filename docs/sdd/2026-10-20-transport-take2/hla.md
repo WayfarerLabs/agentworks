@@ -163,10 +163,10 @@ The client writes three things on stdin, in order:
 **Stage 0.** The remote command is one constant line, `/usr/bin/python3 -I -S -c '<stage 0>'`, with
 `sudo -n` in front for an elevated request and a handover path after it for the terminal half of an
 attach (D8). Stage 0 is one line of under 200 characters: it reads the length-prefixed agw-launch
-source from stdin, or from the handover socket, and runs it. On any failure to read or start it,
-stage 0 exits with a fixed status and prints nothing, so a startup file that ate the stream gives a
-clean "not delivered" rather than a traceback. It contains no single quote, so the account shell
-passes it through unchanged. `-I` ignores Python's environment variables and the user site
+source from stdin, or from the handover socket, and runs it. If it cannot read or start it, Python
+exits non-zero with its own traceback before any start marker, so the request is not delivered and
+the error carries that traceback as its diagnostic. It contains no single quote, so the account
+shell passes it through unchanged. `-I` ignores Python's environment variables and the user site
 directory, and `-S` skips site packages, so no Python startup applies. The short line stays far
 below Windows' 32,767-character command-line limit and keeps sudo's log entry to one line. Elevation
 is the whole operation running under `sudo -n`, so no variable has to survive sudo.
@@ -193,14 +193,13 @@ syntax that needs no particular python3 release. It is rewritten in Python from 
 **Relationship to agw-atc.** The follow-up containment effort introduces `agw-atc`, an installed,
 long-running VM program for sessions, limits and process-to-session lookup. The two stay distinct by
 lifecycle: agw-launch arrives with every request and always matches the client that sent it, and
-agw-atc is installed and versioned with the VM. The operator asked on 2026-11-01 for the two to be
-aligned ("It feels like we should align these one way or another"), and the lead's answer is to keep
-two names and fix this design's side: agw-launch stays the only way a request starts, and it
-outlives its own request only as the brief parked half of a handover. Work agw-atc will own is a
-request whose payload runs `agw-atc`, so running a request never depends on agw-atc being installed.
-The containment effort's own SDD owns everything else about agw-atc. The saga's waves 5 and 7 ruling
-adds the other constraint on it: a future VM-side observability wrapper, if one proves necessary, is
-the same installed program (`2026-08-04-next-steps/target-state.md`).
+agw-atc is installed and versioned with the VM. The operator asked on 2026-11-01 whether the two
+should be aligned; this design keeps two names and fixes its own side: agw-launch stays the only way
+a request starts, and it outlives its own request only as the brief parked half of a handover. Work
+agw-atc will own is a request whose payload runs `agw-atc`, so running a request never depends on
+agw-atc being installed. The containment effort's own SDD owns everything else about agw-atc. The
+saga's waves 5 and 7 ruling adds the other constraint on it: a future VM-side observability wrapper,
+if one proves necessary, is the same installed program (`2026-08-04-next-steps/target-state.md`).
 
 **What agw-launch does:**
 
@@ -208,10 +207,10 @@ the same installed program (`2026-08-04-next-steps/target-state.md`).
    delivered.
 2. **Checks its standard streams.** sshd gives the command pipes or sockets, stdout and stderr
    distinct (the terminal in TTY mode). If a startup file redirected one, for example with
-   `exec >/dev/null` or `exec 2>&1`, agw-launch exits with a fixed status before the start marker,
-   so the payload never runs and the request is reported as not delivered. A startup file that swaps
-   both streams for other pipes that discard their input still defeats the check; that contrived
-   case is a stated residual with the resource limits below.
+   `exec >/dev/null` or `exec 2>&1`, agw-launch exits non-zero before the start marker, so the
+   payload never runs and the request is reported as not delivered. A startup file that swaps both
+   streams for other pipes that discard their input still defeats the check; that contrived case is
+   one of R3's known gaps (step 4).
 3. **Writes the start marker**, `<nonce> start`, to stdout and to stderr.
 4. **Resets what the payload inherits:**
    - the environment, rebuilt from `HOME`, `USER`, `LOGNAME` and `SHELL` from the identity's passwd
@@ -221,26 +220,28 @@ the same installed program (`2026-08-04-next-steps/target-state.md`).
      cannot touch: `TERM` from the envelope (the operator's terminal type, with a default the LLD
      sets for a Windows workstation that has none) and `SSH_TTY` from the terminal's name in TTY
      mode, and `XDG_RUNTIME_DIR` as `/run/user/<uid>` when that directory exists and belongs to the
-     identity; then the request's environment. Nothing is copied from the inherited environment, so
-     `SSH_CLIENT` and `SSH_CONNECTION`, which no Agentworks code reads, are no longer passed, and
-     release notes say so;
+     identity; then the request's environment. Nothing is copied from the inherited environment,
+     since only these sources are out of startup files' reach, so `SSH_CLIENT` and `SSH_CONNECTION`
+     are no longer passed, and release notes say so;
    - the working directory (the home directory by default) and a fixed umask;
    - signal dispositions back to their defaults, and no inherited descriptor above 2.
 
-   Three things cannot be reset: resource limits and scheduling priority a startup file lowered,
-   since an unprivileged process cannot tell them from PAM's or raise them again, and a background
-   process a startup file leaves holding the session's streams, which can write into the payload's
-   output after the start marker. Keeping that process out would mean framing every byte of payload
-   output. R3 states them as known gaps (operator, 2026-11-01).
+   R3 (operator, 2026-11-01) states three known gaps. Resource limits and scheduling priority a
+   startup file lowered cannot be reset, since an unprivileged process cannot tell them from PAM's
+   or raise them again. A background process a startup file leaves holding the session's streams can
+   write into the payload's output after the start marker; keeping it out would mean framing every
+   byte of payload output. And step 2 cannot see a startup file swap both streams for pipes that
+   discard their input.
 
 5. **Runs the payload as a child.** A literal argv runs with no shell. A script runs under the
    chosen interpreter, which reads the source from a file descriptor and never from its arguments
    (R4). Login or interactive startup applies only when requested. `sh` and `bash` are fixed paths.
    The default shell is the destination identity's passwd entry. A missing interpreter fails rather
    than being substituted.
-6. **Reports completion.** Except in TTY mode, after the payload exits it writes one framed trailer
-   to stderr: `<nonce> exit <status>`, or `<nonce> refused <reason>` when it could not start the
-   payload (a missing interpreter or passwd entry). In TTY mode it execs the payload instead.
+6. **Reports completion.** Except in TTY mode, after the payload exits it writes an end marker,
+   `<nonce> end`, to stdout and then one framed trailer to stderr: `<nonce> exit <status>`, or
+   `<nonce> refused <reason>` when it could not start the payload (a missing interpreter or passwd
+   entry). In TTY mode it execs the payload instead.
 
 **Completion rules:**
 
@@ -248,23 +249,26 @@ the same installed program (`2026-08-04-next-steps/target-state.md`).
   discards everything before the start marker on each stream, so shell-startup output never reaches
   the command's caller. On the terminal half of an attach the client is not in the stream, so such
   output can appear on the operator's terminal; it still never reaches the command.
-- **The trailer is the only completion evidence.** The client strips it, so a guest exit of 255 is
-  reported as completed with status 255. Once the trailer has arrived, the client keeps reading for
-  a short, fixed linger and then ends the client process; the trailer already carries the payload's
-  status, and the ssh client's own exit waits for the channel to close. Bytes that arrive in that
-  window, from background children of the payload, are kept as stderr. It never waits for end of
-  file, because a background child that holds stderr would otherwise stall the request for its whole
-  lifetime (measured in the integration report on #856).
+- **The end marker and trailer are the only completion evidence.** The client reads stdout to its
+  end marker and stderr to its trailer, strips both, and then ends the ssh process. The status is
+  the trailer's, never the ssh client's, so a guest exit of 255 is reported as completed with
+  status 255. Bytes after either marker come from background children of the payload and are
+  dropped. The client never waits for end of file, because a background child that holds stderr
+  would otherwise stall the request for its whole lifetime (measured in the integration report on
+  #856), and never for a timer, because stdout and stderr travel separately and the trailer can
+  arrive before the last of stdout. The LLD fixes the framing, so payload output need not end in a
+  newline.
 - **Not delivered.** A remote exit status other than 255 with no start marker means the payload
   never started: a clean exit delivers all prior output first, and step 2 refuses streams the marker
   could not reach. Status 127 without `sudo` there means the account shell found no python3, which
   is typed `VMNotReady`. Under `sudo` a missing python3 exits 1 instead; the unelevated base check
   (D10) finds it first.
 - **Unknown.** Everything else without a trailer is unknown, whatever the client's own exit status:
-  a start marker with no trailer, or 255 with no start marker. The client does not read OpenSSH's
-  diagnostics to tell a refused connection from a dropped one. It reads one OpenSSH token only to
-  type an error: `Host key verification failed` on a 255 becomes `TrustMismatch`, naming
-  `agw vm recover`, since a host key that no longer matches the store needs the operator.
+  a start marker without both the end marker and the trailer, or 255 with no start marker. The
+  client does not read OpenSSH's diagnostics to tell a refused connection from a dropped one. It
+  reads one OpenSSH token only to type an error: `Host key verification failed` on a 255 becomes
+  `TrustMismatch`, naming `agw vm recover`, since a host key that no longer matches the store needs
+  the operator.
 - **TTY mode.** An attach never elevates to root; an elevated attach request is refused before
   dispatch, and no current attach consumer elevates. The root `sudo -n` prefix and the handover
   argument are never combined. An attach returns its exit code; a 255 is reported as "connection
@@ -317,15 +321,15 @@ file program `native_files.py` already dispatches the same way on `main` (`_FILE
 it a separate payload, rather than part of agw-launch, keeps file code off the requests that do not
 use it. There is no scp.
 
-| Operation                                   | Mechanism                                                                                                                                                                                                                                                                                                              | Current consumers (slice)                                                                        |
-| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `read(path) -> (bytes, digest)`             | Open without following symlinks and copy to stdout; the workstation computes the digest from the bytes it received                                                                                                                                                                                                     | artifacts, native CLI transcripts, settings (5)                                                  |
-| `write(path, data, mode, owner, group)`     | Under the lock: a temporary file in the destination directory filled from stdin, owner and mode set on it, `fsync`, then rename. With `preserve=True` the temporary file takes the existing file's owner, group, mode and extended attributes (ACLs) instead, as `native_files.py` does today (`:120-126`, `:153-172`) | initializer fragments, profiles, tmuxinator, sources (5, 6)                                      |
-| `write_if(path, data, expected, ...)`       | As `write`, after comparing the current digest (or absence) with `expected` under the lock, with the same `preserve` option                                                                                                                                                                                            | artifact publication (with `preserve=True`, `artifacts/publication.py:205`), settings merges (5) |
-| `update(path, transform, ...)`              | `read`, apply `transform` on the workstation, `write_if`; retry on conflict                                                                                                                                                                                                                                            | harness JSON and TOML settings, marked profile blocks (5, 6)                                     |
-| `remove(path)`, `remove_if(path, expected)` | Under the lock                                                                                                                                                                                                                                                                                                         | artifact cleanup (5), workspaces (7)                                                             |
-| `ensure_directory`, `prune_empty_parents`   | Operations of the same program                                                                                                                                                                                                                                                                                         | artifacts (5), workspaces (7)                                                                    |
-| `upload_tree(local_dir, dest, replace=)`    | A `tarfile` stream from the workstation into `tar -x -C dest`; `replace` clears `dest` first, as `copy_dir_to` does today                                                                                                                                                                                              | sources' `fetch_dir` (6)                                                                         |
+| Operation                                   | Mechanism                                                                                                                                                                                                                                                                                                                                                                                     | Current consumers (slice)                                                                                 |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `read(path) -> (bytes, digest)`             | Open without following symlinks and copy to stdout; the workstation computes the digest from the bytes it received                                                                                                                                                                                                                                                                            | artifacts, native CLI transcripts, settings (5)                                                           |
+| `write(path, data, mode, owner, group)`     | A temporary file in the destination directory, filled from stdin with owner and mode set and `fsync`ed without the lock, then renamed into place under it. With `preserve_metadata=True` the existing file's owner, group, mode and extended attributes (ACLs) are copied onto the temporary file under the lock, before the rename, as `native_files.py` does today (`:120-126`, `:153-172`) | initializer fragments, profiles, tmuxinator, sources (5, 6)                                               |
+| `write_if(path, data, expected, ...)`       | As `write`, comparing the current digest (or absence) with `expected` under the lock before the rename, with the same `preserve_metadata` option                                                                                                                                                                                                                                              | artifact publication (with `preserve_metadata=True`, `artifacts/publication.py:205`), settings merges (5) |
+| `update(path, transform, ...)`              | `read`, apply `transform` on the workstation, `write_if`; retry on conflict                                                                                                                                                                                                                                                                                                                   | harness JSON and TOML settings, marked profile blocks (5, 6)                                              |
+| `remove(path)`, `remove_if(path, expected)` | Under the lock                                                                                                                                                                                                                                                                                                                                                                                | artifact cleanup (5), workspaces (7)                                                                      |
+| `ensure_directory`, `prune_empty_parents`   | Operations of the same program                                                                                                                                                                                                                                                                                                                                                                | artifacts (5), workspaces (7)                                                                             |
+| `upload_tree(local_dir, dest)`              | A `tarfile` stream from the workstation, extracted beside `dest` and swapped in for it, as its one caller needs (`fetch_dir` replaces `dest` today, `sources.py:282-287`)                                                                                                                                                                                                                     | sources' `fetch_dir` (6)                                                                                  |
 
 - **One lock for every writer.** Every mutating file operation, tree uploads and removals included,
   takes `flock` on one VM-wide lock file, `/run/lock/agentworks-files.lock`. `/run/lock` is a
@@ -338,11 +342,12 @@ use it. There is no scp.
   conditional write beneath it can never hold different locks, and replacing a directory never
   replaces a lock, so `write_if` is atomic with respect to every Agentworks writer, which is R5's
   cooperating-writer guarantee. A tree upload extracts into a temporary directory beside its
-  destination without the lock and takes it only to move the result into place (with `replace`, the
-  old tree aside and the new one in), so every hold is short, and a lock wait has a deadline.
-  Workspace copy's opaque tar stream is a `run`, not a file operation, and takes no lock. An agent
-  that creates the file unreadable, or holds the lock to stall other writers, is a hostile writer,
-  which stays with the permissions effort along with hostile path races.
+  destination without the lock and takes it only to move the result into place (the old tree aside
+  and the new one in), and a `write` likewise stages its temporary file first, so every hold is
+  short, and a lock wait has a deadline. Workspace copy's opaque tar stream is a `run`, not a file
+  operation, and takes no lock. An agent that creates the file unreadable, or holds the lock to
+  stall other writers, is a hostile writer, which stays with the permissions effort along with
+  hostile path races.
 - **Symlinks.** A destination that is a symlink is refused, as `native_files.py` refuses today,
   rather than followed as the hand-written `tee` paths do.
 - **The merge stays on the workstation.** `update` runs
@@ -698,18 +703,11 @@ linked issues and fix history) and adds rows before anything is deleted.
 
 ### Release behaviors to preserve (R10)
 
-The transport-improv migration strategy also lists release behaviors the cutover must keep. They are
-carried here, each with the slice that moves the code carrying it.
-
-| Source                                                                | Behavior to keep                                                                                                                                                                                 | Slice |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----- |
-| `capabilities/harness_integration/settings.py`                        | Replace, merge-overwrite, merge-preserve and skip-existing; JSON null kept as a value; whole-array replacement; TOML values                                                                      | 5     |
-| `artifacts/publication.py`, `artifacts/sections.py`                   | Unowned and modified files left alone, generated-section surroundings, malformed-marker refusal, metadata and ACLs (D6 `preserve`), per-effect checkpoints, cleanup evidence after interruptions | 5     |
-| `harness_setup/dispatch.py`, `artifacts/session.py`                   | Destination and home identity supplied through composition and bounded observations, not discovery commands                                                                                      | 5, 6  |
-| `artifacts/native/probe.py`                                           | The login and interactive environment (D5 `PythonProgram`), collision checks and redaction                                                                                                       | 5     |
-| `sessions/manager/_create_roll.py`, `db/models.py`                    | Durable session UUID and per-launch run ID, private artifact ownership, unknown-runtime cleanup evidence                                                                                         | 7     |
-| `sessions/manager/_lifecycle.py`                                      | Running-restart confirmation and selected-session identity checks                                                                                                                                | 7     |
-| `vms/initializer/driver.py`, `capabilities/vm_platform/cloud_init.py` | python3's availability, now guaranteed from provisioning (D10)                                                                                                                                   | 3     |
+The transport-improv migration strategy's release-behavior table needs no inventory of its own here.
+Each of its rows is either a decision this design already makes (the probe's login environment in
+D5, metadata and ACL preservation in D6, python3 from provisioning in D10) or behavior of a module
+this effort only repoints onto `VMAccess` (settings merges, publication and sections, session
+identity, restart confirmation), whose existing tests stay green in the slice that moves its caller.
 
 ## Evidence matrix (R11)
 

@@ -11,9 +11,9 @@
 
 - **Three PRs.** PR A carries slices 1 and 2, PR B slices 3 and 4, and PR C slices 5 to 8, as the
   operator chose on 2026-10-31. Each PR is complete: it ships its new pieces together with every
-  consumer its slices name, the collateral those pieces outdate, and live evidence for the cells its
-  slices list. No vocabulary item or module lands before the slice that migrates its first consumer
-  (R10).
+  consumer its slices name, whose existing tests stay green, the collateral those pieces outdate,
+  and live evidence for the cells its slices list. No vocabulary item or module lands before the
+  slice that migrates its first consumer (R10).
 - **Slices are review units.** Each slice inside a PR gets its own private review round as it
   completes, and the assembled PR gets a closing review before it goes ready.
 - **LLDs come first.** Each slice that needs an LLD starts by writing it in this directory and
@@ -139,7 +139,8 @@ a VM connection.
     delivered;
   - signal dispositions and descriptors reset for the payload, and a startup file that overrides
     `TERM` or `XDG_RUNTIME_DIR` leaves the payload's values unchanged;
-  - the trailer under a background child;
+  - the end marker and trailer under a background child that holds both streams, and with stdout's
+    last bytes arriving after the trailer;
   - the deadline;
   - sensitive stdin absent from logs and exceptions;
   - binary stdin and stdout on Windows.
@@ -243,11 +244,14 @@ first operation there is the base contract check.
   - recovery reports status, delivery failure or unknown, and never trusts a channel exit code;
   - logout reports the script's status or unknown, and never checks SSH afterwards;
   - a platform without a native shell refuses with `FeatureUnavailable` before credentials are
-    resolved.
+    resolved;
+  - `vm start` on a VM whose Tailscale does not reconnect fails with the `agw vm recover` hint and
+    resolves no secret.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
-- [ ] Collateral: platform author documentation, the command reference, completions, and an operator
-      guide section on recovery.
+- [ ] Collateral: platform author documentation, the command reference, completions, an operator
+      guide section on recovery, and the Proxmox guide's start-time rejoin note
+      (`docs/guides/proxmox.md:203-205`).
 - [ ] Live evidence:
   - rejoin, rekey, delete and `vm recover` on every platform from at least one workstation each;
   - recovery of a broken sshd on WSL2 and on Proxmox;
@@ -281,7 +285,7 @@ no platform's private access imports a legacy module.
   - a malformed destination is refused;
   - a symlinked destination is refused;
   - cleanup touches only what the operation created;
-  - `preserve=True` keeps the existing file's owner, group, mode and ACLs.
+  - `preserve_metadata=True` keeps the existing file's owner, group, mode and ACLs.
 - [ ] Amend ADR 0019.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
