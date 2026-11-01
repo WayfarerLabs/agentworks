@@ -138,12 +138,13 @@ other runtime configuration applies to the primary thread.
 Preflight resolves the native root in the actual login environment. Declared environment is passed
 through the transport's environment channel, not embedded into logged command text. A changed actual
 `HOME` is an error because session publication belongs to the Linux user selected by core. A changed
-native home that no longer discovers an applied ancestor's files requires correction or owning-facet
-reinitialization. User artifact publication honors native-home overrides beneath that user's `HOME`.
-A plan that would publish outside `HOME` is explicitly unsupported and fails before settings or
-plugin mutations. Persisted ownership and retirement therefore share the same user boundary. A
-session can still use an external native home when its artifacts remain inline or in the private run
-directory and it has no incompatible ancestor placement.
+native home that no longer discovers an applied ancestor's files is reported with its owning repair
+operation and does not block session launch. User artifact publication honors native-home overrides
+beneath that user's `HOME`. A plan that would publish outside `HOME` is explicitly unsupported and
+fails before settings or plugin mutations. Persisted ownership and retirement therefore share the
+same user boundary. A session can still use an external native home when its artifacts remain inline
+or in the private run directory. Existing ancestor-only discovery problems are warnings; new session
+delivery must still validate its own carriers, destinations and native identities.
 
 Codex and Grok guidance is carried directly in native argv; no unused guidance file is published.
 Claude's additive prompt file and Codex's selected role configuration files are consumed by their
@@ -203,8 +204,9 @@ not require enabling it. Claude rule exclusions are checked against requested ru
 exclusion patterns that this adapter cannot interpret are diagnosed explicitly. Codex skill
 selectors and Grok disabled skill names are checked against supplied artifacts. Grok workspace paths
 are checked against Git ignore rules; user files outside that workspace are not fed to the
-workspace's ignore check. A relevant restriction in any inspected configuration layer causes a
-conservative refusal. The adapter does not reconstruct native trust or merge precedence, so a later
+workspace's ignore check. A relevant restriction on newly requested delivery in an inspected
+configuration layer causes a conservative refusal. An ancestor-only restriction is a report and does
+not prevent launch. The adapter does not reconstruct native trust or merge precedence, so a later
 layer that reenables an artifact does not clear that refusal. Diagnostics identify a configured
 restriction without claiming it is the native effective policy.
 
@@ -226,12 +228,13 @@ accepts `session-prompt`, `session-skill-plugin`, and `session-agent-definitions
 skills have no workaround. These names opt into the existing carriers in the table above. Hooks,
 automatic fallbacks and release-by-release compatibility tables are not part of this correction.
 
-Raw carrier conflicts are checked for enabled session delivery and already applied ancestor
-discovery. Disabled session inputs do not introduce restrictions on native launch arguments. Outer
-native placement and its safety/ownership checks remain in place. Core emits final unhandled
-warnings after full output validation and stores the deferrals so inspection does not claim success.
-Known domain failures retain their error type and focused remediation through the agent lifecycle;
-version/configuration refusals are not recast as unexplained SSH failures.
+Raw carrier conflicts are checked for enabled new session delivery. Ancestor-only discovery problems
+are reported rather than enforced as session prerequisites. Disabled session inputs do not introduce
+restrictions on native launch arguments. Outer native placement and its safety/ownership checks
+remain in place. Core emits final unhandled warnings after full output validation and stores the
+deferrals so inspection does not claim success. Known domain failures retain their error type and
+focused remediation through the agent lifecycle; version/configuration refusals are not recast as
+unexplained SSH failures.
 
 Native argv and the fully quoted returned command each have a conservative 32 KiB UTF-8 limit,
 leaving room for launcher wrapping below the operating system's per-argument limit. Oversized text

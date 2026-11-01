@@ -80,9 +80,9 @@ def publish_artifacts(
 ) -> ArtifactPublication:
     """Preflight all destinations, then checkpoint each confirmed file change.
 
-    Modified obsolete whole files remain owned for later cleanup. Whole-file
-    adoption requires prior ownership; generated sections use their delimiters
-    as the boundary and preserve all surrounding content.
+    Modified obsolete whole files remain owned for later cleanup. Matching files
+    can be adopted; differing unowned files skip their artifact without blocking
+    independent entries. Generated sections preserve all surrounding content.
     """
     if not desired and not previous:
         return ArtifactPublication()
@@ -129,13 +129,29 @@ def publish_artifacts(
                 output.warn(f"Skipping artifact destination '{path}': {reason}.")
                 continue
             sections[path] = (existing, replacement)
-        for path in planned:
+        conflicts: dict[str, str] = {}
+        for path, item in planned.items():
             if path in sections or path in skipped_paths:
                 continue
             data = observed[path]
             prior = current.get(path)
-            if data is not None and (prior is None or data != (prior.sha256, _mode(prior.executable, group, root))):
-                raise StateError("artifact destination is unowned or has been modified; existing content was retained")
+            if (
+                data is not None
+                and data[0] != hashlib.sha256(item.data).hexdigest()
+                and (prior is None or data != (prior.sha256, _mode(prior.executable, group, root)))
+            ):
+                reason = f"existing content at '{path}' differs from the declaration and recorded ownership"
+                for origin in (*item.origins, *(prior.origins if prior is not None else ())):
+                    conflicts.setdefault(origin, reason)
+                output.warn(f"Skipping artifact destination '{path}': {reason}; existing content was retained.")
+        # A skill's supporting files and entrypoint are one artifact. Never
+        # publish part of a package when another member must be preserved.
+        for path in observed:
+            entry = planned.get(path) or current[path]
+            reason = next((conflicts[origin] for origin in entry.origins if origin in conflicts), None)
+            if reason is not None and path not in skipped_paths:
+                skipped.append(ArtifactSkip(path=path, origins=entry.origins, reason=reason))
+                skipped_paths.add(path)
         retirement = sorted(
             current.items(),
             key=lambda item: (
@@ -177,6 +193,7 @@ def publish_artifacts(
                 item[0].count("/") if _skill_entrypoint_directory(item[1]) is not None else 0,
             ),
         )
+        adopted: list[str] = []
         for path, item in publication:
             if path in skipped_paths:
                 continue
@@ -215,6 +232,15 @@ def publish_artifacts(
             if prior != record:
                 current[path] = record
                 checkpoint(tuple(current.values()))
+                if (
+                    path not in sections
+                    and observed_file is not None
+                    and (prior is None or observed_file != (prior.sha256, _mode(prior.executable, group, root)))
+                ):
+                    adopted.append(path)
+        if adopted:
+            shown = adopted if len(adopted) <= 3 else [*adopted[:2], "..."]
+            output.info(f"Adopting {len(adopted)} matching artifact files ({', '.join(shown)}).")
     return ArtifactPublication(tuple(current.values()), tuple(skipped))
 
 

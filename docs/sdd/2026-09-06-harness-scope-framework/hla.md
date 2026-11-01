@@ -595,9 +595,13 @@ Serialize observation, native mutation, and applied-state persistence for the sa
 across command executions. A competing mutation refuses with retry guidance. The LLD chooses a lock
 that spans that lifetime and specifies cascade ordering; a SQLite write transaction held across
 network calls is not the design. Remote writes and SQLite are not a distributed transaction: a crash
-can leave unrecorded native residue. Treat it as unowned until the integration can prove its claim;
-do not adopt it just because bytes match. Unknown versions retain their evidence, malformed known
-records yield safe errors, and partial replacement preserves unrelated keys and integrations.
+can leave unrecorded native residue. Retry adopts an entry whose observed native identity and source
+match the declaration, records its confirmed claim, and reports adoption. Differing unowned entries
+are preserved and reported individually while independent setup continues. Setup invocations can
+report incomplete entry application without aborting their other work; core retains an incomplete
+setup record until a later retry converges. Actual transport, native-operation and persistence
+failures remain errors. Unknown versions retain their evidence, malformed known records yield safe
+errors, and partial replacement preserves unrelated keys and integrations.
 
 For a new workspace, buffer applied facts until creation commits and unwind partial native setup
 through the existing failed-create path. Existing database backup/restore and VM backup exports must

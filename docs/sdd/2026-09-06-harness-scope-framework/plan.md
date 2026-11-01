@@ -1,5 +1,36 @@
 # Harness Scope Framework: Implementation Plan
 
+## Facet independence and closeout, 2026-11-01
+
+The operator authorized the saga's facet-independence amendment and completion of both this SDD and
+its companion on 2026-11-01. This amendment supersedes earlier ancestor-freshness launch gates and
+refusal to adopt matching unclaimed native entries. Completed checkboxes below remain the historical
+record. The explicit integration-owned required/recommended prerequisite API and unsupported
+activated-facet errors remain in scope and unchanged.
+
+One implementation PR on `fix/harness-facet-independence`, based on `c8d4dfb`, carries both
+`sdd:harness-scope-framework` and `sdd:agent-artifacts`, plus `saga:next-steps`. The operator
+authorized up to three published feedback/fix rounds per PR. After independent private reviews and
+gates, the ready handoff requests the separate integration-test session's full process and
+explicitly lists the retained live acceptance obligations. Neither SDD locks ahead of that
+acceptance. The final closeout records the R1-R16/R1-R10 audits and adds both lockfiles together.
+Transport work remains with its owner; this implementation uses today's transport APIs.
+
+- [ ] Amend owned requirements and architecture to independent facets, matching-content adoption,
+      per-entry conflict reports and nonblocking stale-ancestor artifact delivery.
+- [ ] Implement native adoption/convergence and interrupted-run retry with truthful partial setup
+      evidence, preserving differing unowned entries and independent setup work.
+- [ ] Implement runtime routing over available captures and known deferrals without an ancestor
+      freshness gate, recapture, implicit setup or duplicate delivery; preserve own-facet errors.
+- [ ] Align artifact publication, permanent guides and diagnostics with the amended contract.
+- [ ] Complete private project, complexity and correctness reviews and the required gates.
+- [ ] Publish the complete ready handoff with the full live-test emphasis; critically assess and
+      incorporate or rebut feedback within the three-round allowance.
+- [ ] Audit the independent live evidence against every retained acceptance requirement, reconcile
+      completed follow-up handoffs with their merge evidence, and close actual remaining gaps.
+- [ ] Promote remaining load-bearing guidance, audit all requirements and create `locked.md` only
+      once both efforts' retained obligations are complete.
+
 - Status: Implementation authorized by the operator after design review on 2026-09-07
 - Governing requirements: [FRD](frd.md)
 - Approved architecture: [HLA](hla.md)
@@ -156,8 +187,8 @@ and budget before creating live resources. Native CLI research can use isolated 
 fixtures, without touching the operator's installed plugins or authentication.
 
 - [ ] Prove VM, admin, agent, workspace and session env and facet mapping, explicit enablement,
-      multiple independent configurations, inherited lists and deliberate empty selections (R1-R6,
-      R8).
+      multiple independent configurations, inherited activation maps and explicit null opt-outs
+      (R1-R6, R8).
 - [ ] Observe two users and two workspaces for native plugin/settings applicability and all four
       mapping policies; verify session-only compatibility (R3, R13-R15).
 - [ ] Observe required/recommended/absent prerequisites for the actual user, including stale and
@@ -423,7 +454,7 @@ selector keeps its existing tagged shape and setup activation maps support expli
       including persisted instance specs and removal of inherited config references.
 - [x] Verify inheritance, defaults, selection replacement, source attribution, saved-state recovery,
       readiness, and lifecycle behavior; run required gates and independent private review lanes.
-- [ ] Publish the complete PR ready for review and monitor its feedback under the delivery process.
+- [x] Publish the complete PR ready for review and monitor its feedback under the delivery process.
 
 The clarified implementation passed 9,657 non-integration tests with seven skips, Ruff lint/format,
 and strict mypy across 849 files. File lint, locked-SDD and Rulesync checks passed, alongside 160
@@ -465,3 +496,12 @@ The operator agreed to a separate follow-up for a consistent omitted-versus-null
 inheritance: omission inherits; explicit null clears the inherited value, with defaults or required
 value validation applied afterward. Unknown opt-out key validation belongs in that follow-up's
 clearing contract; this correction preserves the current treatment of unavailable integrations.
+
+## Follow-up handoff audit, 2026-11-01
+
+The activation-map handoff box is complete: PR
+[816](https://github.com/WayfarerLabs/agentworks/pull/816) merged on 2026-09-15 as
+`a22d5cb6b73b03d116335dc3a732685d0e6289ae`. Its final feedback closeout records clean saga, Muntz
+and integration-test reports at `67bb0dc1`, with no remaining correction. The agreed broader
+null-inheritance follow-up is separate. This audit closes only the stale publish box; it does not
+substitute that report for the live matrix still listed above.

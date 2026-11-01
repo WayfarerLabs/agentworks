@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -48,14 +49,44 @@ def test_owned_file_update_mode_and_idempotent_removal(target):
     assert publish_artifacts(target, (), updated, checkpoints.append, roots=(str(target.home),)).files == ()
 
 
-def test_entire_plan_collision_checked_before_first_write(target):
+def test_conflicting_artifact_does_not_block_an_independent_artifact(target):
     first, second = target.home / "first", target.home / "second"
-    second.write_bytes(b"content")
-    with pytest.raises(StateError):
-        publish_artifacts(
-            target, (artifact(first), artifact(second)), (), lambda files: None, roots=(str(target.home),)
-        )
-    assert not first.exists() and second.read_bytes() == b"content"
+    second.write_bytes(b"operator content")
+    result = publish_artifacts(
+        target,
+        (artifact(first), replace(artifact(second), origins=("b" * 64,))),
+        (),
+        lambda files: None,
+        roots=(str(target.home),),
+    )
+    assert first.read_bytes() == b"content" and second.read_bytes() == b"operator content"
+    assert tuple(file.path for file in result.files) == (str(first),)
+    assert tuple(file.path for file in result.skipped) == (str(second),)
+
+
+def test_matching_unclaimed_file_is_adopted_and_retired(target):
+    path = target.home / "matching"
+    path.write_bytes(b"content")
+    path.chmod(0o600)
+    before = path.stat().st_mtime_ns
+    checkpoints: list[tuple[OwnedArtifactFile, ...]] = []
+    result = publish_artifacts(target, (artifact(path),), (), checkpoints.append, roots=(str(target.home),))
+    assert len(result.files) == 1 and checkpoints == [result.files]
+    assert path.stat().st_mtime_ns == before and not result.skipped
+    assert not publish_artifacts(target, (), result.files, checkpoints.append, roots=(str(target.home),)).files
+    assert not path.exists()
+
+
+def test_conflicting_skill_member_preserves_the_whole_package(target):
+    root = target.home / "skills/review"
+    root.mkdir(parents=True)
+    member = root / "run.sh"
+    member.write_bytes(b"operator script")
+    desired = tuple(replace(artifact(root / name), package_root=str(root)) for name in ("SKILL.md", "run.sh"))
+    result = publish_artifacts(target, desired, (), lambda files: None, roots=(str(target.home),))
+    assert not result.files
+    assert {entry.path for entry in result.skipped} == {entry.path for entry in desired}
+    assert not (root / "SKILL.md").exists() and member.read_bytes() == b"operator script"
 
 
 def test_modified_obsolete_file_retains_ownership(target):
@@ -64,18 +95,20 @@ def test_modified_obsolete_file_retains_ownership(target):
     path.write_bytes(b"operator edit")
     assert publish_artifacts(target, (), owned, lambda files: None, roots=(str(target.home),)).files == owned
     assert path.read_bytes() == b"operator edit"
-    with pytest.raises(StateError):
-        publish_artifacts(target, (artifact(path, b"update"),), owned, lambda files: None, roots=(str(target.home),))
+    result = publish_artifacts(
+        target, (artifact(path, b"update"),), owned, lambda files: None, roots=(str(target.home),)
+    )
+    assert result.files == owned and result.skipped[0].path == str(path)
+    assert path.read_bytes() == b"operator edit"
 
 
-def test_modified_file_mode_is_preserved_and_diagnosed(target):
+def test_matching_file_content_allows_mode_convergence(target):
     path = target.home / "managed"
     owned = publish_artifacts(target, (artifact(path),), (), lambda files: None, roots=(str(target.home),)).files
     path.chmod(0o700)
-    with pytest.raises(StateError):
-        publish_artifacts(target, (artifact(path),), owned, lambda files: None, roots=(str(target.home),))
-    assert publish_artifacts(target, (), owned, lambda files: None, roots=(str(target.home),)).files == owned
-    assert path.exists() and path.stat().st_mode & 0o777 == 0o700
+    result = publish_artifacts(target, (artifact(path),), owned, lambda files: None, roots=(str(target.home),))
+    assert result.files == owned and not result.skipped
+    assert path.stat().st_mode & 0o777 == 0o600
 
 
 def test_checkpoint_failure_stops_further_publication(target):
@@ -89,6 +122,10 @@ def test_checkpoint_failure_stops_further_publication(target):
         publish_artifacts(target, (artifact(first), artifact(second)), (), unavailable, roots=(str(target.home),))
     assert first.exists() and not second.exists()
     assert not list((target.root / "tmp").iterdir())
+    retried = publish_artifacts(
+        target, (artifact(first), artifact(second)), (), lambda files: None, roots=(str(target.home),)
+    )
+    assert len(retried.files) == 2 and not retried.skipped
 
 
 def test_scope_escape_and_links_are_refused(target):

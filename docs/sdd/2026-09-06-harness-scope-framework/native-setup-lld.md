@@ -153,10 +153,15 @@ rename after validating the final document. Clean temporary files on handled fai
 Plugin commands and mapped settings share one planned native change set. Compute the mapping's
 effective document first, compare its plugin/marketplace declarations with explicit lists, reject
 inconsistency and reconcile matching declarations once. Query native installed state before claiming
-ownership. Installation or registration that existed without an Agentworks applied-state record
-remains unowned; the migration strategy explains explicit remediation. Query again after every
-command before recording its actual result. A command's success alone does not establish scope or
-identity.
+ownership. Adopt an unclaimed registration only when its native source equals the declaration. For
+an installed user plugin, compare its observed marketplace identity with the selected parent, then
+retain the full observed identity, including its version, in the claim. Record and report adoption;
+retries can therefore heal mutation-before-checkpoint interruption without provisional claims.
+Differing unowned entries are skipped individually and reported through the invocation's incomplete
+callback. Core leaves `complete=False` while allowing independent native entries, artifact
+publication and later integrations to proceed. A settings mapping must preserve skipped native
+associations, including under replace policies. Query again after every command before recording its
+actual result. A command's success alone does not establish scope or identity.
 
 Isolated local fixtures pin concrete native query payload fields, removal behavior and
 command/settings ordering; see [native research](prior-art-research.md). Commands resolve the

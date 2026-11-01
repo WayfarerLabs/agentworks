@@ -1,5 +1,36 @@
 # Agent artifacts: implementation plan
 
+## Facet independence and closeout, 2026-11-01
+
+The operator authorized the saga's facet-independence amendment and completion of both this SDD and
+its companion on 2026-11-01. This amendment supersedes earlier ancestor-freshness launch gates and
+refusal to adopt matching unclaimed native entries. Completed checkboxes below remain the historical
+record. The explicit integration-owned required/recommended prerequisite API and unsupported
+activated-facet errors remain in scope and unchanged.
+
+One implementation PR on `fix/harness-facet-independence`, based on `c8d4dfb`, carries both
+`sdd:harness-scope-framework` and `sdd:agent-artifacts`, plus `saga:next-steps`. The operator
+authorized up to three published feedback/fix rounds per PR. After independent private reviews and
+gates, the ready handoff requests the separate integration-test session's full process and
+explicitly lists the retained live acceptance obligations. Neither SDD locks ahead of that
+acceptance. The final closeout records the R1-R16/R1-R10 audits and adds both lockfiles together.
+Transport work remains with its owner; this implementation uses today's transport APIs.
+
+- [ ] Amend owned requirements and architecture to independent facets, matching-content adoption,
+      per-entry conflict reports and nonblocking stale-ancestor artifact delivery.
+- [ ] Implement native adoption/convergence and interrupted-run retry with truthful partial setup
+      evidence, preserving differing unowned entries and independent setup work.
+- [ ] Implement runtime routing over available captures and known deferrals without an ancestor
+      freshness gate, recapture, implicit setup or duplicate delivery; preserve own-facet errors.
+- [ ] Align artifact publication, permanent guides and diagnostics with the amended contract.
+- [ ] Complete private project, complexity and correctness reviews and the required gates.
+- [ ] Publish the complete ready handoff with the full live-test emphasis; critically assess and
+      incorporate or rebut feedback within the three-round allowance.
+- [ ] Audit the independent live evidence against every retained acceptance requirement, reconcile
+      completed follow-up handoffs with their merge evidence, and close actual remaining gaps.
+- [ ] Promote remaining load-bearing guidance, audit all requirements and create `locked.md` only
+      once both efforts' retained obligations are complete.
+
 ## Current stage and ownership
 
 PR [794](https://github.com/WayfarerLabs/agentworks/pull/794) merged on 2026-09-14 at
@@ -810,7 +841,7 @@ unconditional.
 - [x] Complete private project, complexity and correctness reviews.
 - [x] Finish regression checks: 9,604 tests passed with seven skips; lint, types, Rulesync and
       website checks passed.
-- [ ] Publish the ready follow-up PR for issue 812 and assess its feedback.
+- [x] Publish the ready follow-up PR for issue 812 and assess its feedback.
 
 This correction ships on `fix/vm-python-prerequisite`, under the artifact SDD. The initial issue's
 WSL observations are external evidence, not a live WSL rerun by this lead. Full SDD acceptance and
@@ -876,7 +907,7 @@ Current names match, but adding an unimplemented config name must fail validatio
 - [x] Drive shell delivery separately for every schema-declared workaround and artifact type.
 - [x] Verify the new checks fail on a one-sided config-name addition; complete private reviews and
       required gates.
-- [ ] Publish round 1 of 1 as ready and assess its feedback.
+- [x] Publish round 1 of 1 as ready and assess its feedback.
 
 The existing selective-delivery tests remain because they check each method's artifact types.
 Runtime behavior and operator configuration do not change in this round. The accepted check needs no
@@ -970,7 +1001,7 @@ PR 795.
 - [x] Verify refusals before I/O and preserve normal unprivileged operation.
 - [x] Update the integration and artifact guides and architecture.
 - [x] Complete private project, correctness and complexity reviews and validation.
-- [ ] Publish and describe the exact corrected head, then return PR 825 to ready.
+- [x] Publish and describe the exact corrected head, then return PR 825 to ready.
 
 The first handoff's independent live Lima test verified Codex user guidance, surrounding-content and
 metadata preservation, malformed-section refusal without changing bytes, and recorded skips. It did
@@ -992,3 +1023,20 @@ clean. Website Python (160), Node (103) and both deterministic double builds pas
 rendered the updated artifact guide in an isolated HOME, which was removed afterwards. Filesystem
 tests use real local helper execution with simulated elevation; no live VM publication is claimed
 for this correction.
+
+## Follow-up handoff audit, 2026-11-01
+
+The three stale publish boxes are complete. PR
+[813](https://github.com/WayfarerLabs/agentworks/pull/813) shipped issue 812's Python prerequisite
+correction; its final reading records clean WSL evidence and independent cleanup. PR
+[822](https://github.com/WayfarerLabs/agentworks/pull/822) merged on 2026-09-15 as
+`b00b39bec241630a249f3f279a824d5c78e2dae3`; its final round disposition records clean Muntz and
+integration re-validation with green CI. PR
+[825](https://github.com/WayfarerLabs/agentworks/pull/825) merged on 2026-09-16 as
+`91902c016169e8e81474902bfab712a6a8892dbf`; the boundary correction's independent tester found no
+findings, with VM publication explicitly left as a live-coverage gap.
+
+These observations close only handoff bookkeeping. Remaining native option, managed lifecycle,
+shared-workspace and VM placement acceptance must be established by the new ready handoff's
+integration-test run before either SDD locks. Empty non-package session directories were reported as
+an optional observation without retained content, not an open accepted failure.

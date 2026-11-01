@@ -77,7 +77,9 @@ before shallower ones. Unowned files do not keep an obsolete entrypoint active.
 A VM deferral chooses exactly one of user, workspace or session. User/workspace deferrals can only
 target session. Core sends an inactive VM's inputs to user, then passes an inactive user or
 workspace's applicable inputs to session. It does not rerun ancestor setup during session start.
-Missing or stale active artifact results require the owning setup operation.
+Missing, stale or incomplete ancestor artifact results are reported with their owner and repair
+operation. They do not block a receiving facet. Runtime routing reuses available captures and known
+explicit deferrals, never recaptures an ancestor, and reports unknown handling without guessing.
 
 Before `start`, core calls `prepare_artifacts` with the immutable `SessionArtifactContext` available
 on the session binding. This includes completed environment, actual home, prospective session/run
@@ -360,10 +362,15 @@ Return `SetupGap` entries with `required` or `recommended` severity and an integ
 reason. Core refuses required gaps before session runtime replacement and warns for recommended
 gaps. The base and all shipped integrations currently return no gaps, preserving session-only use;
 there is no operator-authored universal `required_facets` field. This hook is separate from the
-capability's executable-readiness probe.
+capability's executable-readiness probe. A required gap represents a specific dependency of the
+consuming integration; it is not a blanket artifact-freshness requirement on every ancestor.
 
 Setup invocations carry prior claims and a callback for the complete remaining claim set after each
-confirmed ownership change. Core persists completion and cleanup evidence in the owning
+confirmed ownership change. Report an entry skipped because of differing unowned content through
+`report_incomplete(reason)` and continue independent work. Core reports the owning resource and
+integration, and retains incomplete evidence without failing the whole initialization. Matching
+native entries can be adopted only after observing their full identity and source; adoption is
+checkpointed and reported. Core persists completion and cleanup evidence in the owning
 instance-state slice; it does not infer native ownership from filenames. Removed activations are
 invoked with absent config for retirement, and failed retirement retains evidence for retry. See
 [native harness setup](../../../../docs/guides/native-harness-setup.md) for the shipped cleanup

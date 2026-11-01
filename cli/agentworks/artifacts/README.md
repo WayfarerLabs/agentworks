@@ -85,13 +85,14 @@ Use `agw artifact show --agent <agent-name> --integration shell` to inspect the 
 recorded handling. The templates themselves do not create instances. See `agw vm create --help`,
 `agw agent create --help` and `agw session create --help` for your normal instance workflow.
 
-For a session refusal, use
+To inspect artifact delivery, use
 `agw artifact show --session <session-name> --integration <integration-name>`. Read the VM, actual
 user, workspace, then session rows in that order. An incomplete ancestor has unfinished application
 or cleanup. A stale ancestor reports changed integration config keys, declared environment variable
 names by scope, or prepared artifact names, without their values. The session row names the ancestor
-blocking its artifact route. An inactive integration has no setup obligation for that facet.
-Inspection reports recorded application, not a fresh check of native files or model context.
+whose artifact delivery needs attention. These ancestor reports do not block launch. An inactive
+session integration has no setup obligation for that facet. Inspection reports recorded application,
+not a fresh check of native files or model context.
 
 ## Composition and names
 
@@ -209,13 +210,16 @@ unsupported metadata before refreshing. Source changes alone do not update an ex
 VM/admin and agent changes take effect through the owning reinitialization operation. Workspaces
 have no reinit operation; recreate the workspace when its artifact setup must change. Session
 creation and managed launch prepare session-owned inputs. A stale ancestor requires its own setup
-operation; starting a descendant does not repair it implicitly.
+operation; starting a descendant reports it and continues with existing placement and known captured
+deferrals. It does not repair or recapture the ancestor implicitly. Unknown handling is reported
+without claiming delivery.
 
 Applying files at an owning facet changes its native locations during that setup. A running workload
 may pick up those files if its harness supports reloading them; Agentworks does not promise live
 reload. Deferral instead records inputs for a later facet and does not update existing descendants.
 User-routed changes take effect when the actual user's setup runs. Session-routed changes take
-effect on a subsequent managed start or restart, after any stale ancestors have been refreshed.
+effect on a subsequent managed start or restart using the available captures and known routes.
+Missing, stale or interrupted ancestor setup warns with its owner and supported repair operation.
 Running sessions retain their existing delivery until then.
 
 Workspace-routed changes have a stricter limit: workspace setup runs only during creation. There is
@@ -424,10 +428,11 @@ Handling an input for one user does not consume the VM result for another user.
 
 `application.py` defines integration results, file/section ownership and recorded skips.
 `publication.py` validates plugin output and uses the shared guarded `NativeFiles` transport
-utility. Native formats and policy live in integration adapters. Existing unowned files are never
-adopted merely because their bytes match. Changed whole files are retained and diagnosed, with
-evidence for retry. Generated instruction sections instead follow their explicit replaceable-section
-contract.
+utility. Native formats and policy live in integration adapters. Existing files whose bytes match
+the declaration can be adopted, with recorded ownership and a report. Differing unowned or manually
+changed files are preserved with recorded skips and evidence for retry; independent artifacts still
+apply. A conflicting member skips its whole skill package. Generated instruction sections instead
+follow their explicit replaceable-section contract.
 
 `session.py` prepares the launch context, stages a new private run before old-runtime teardown, then
 retires obsolete owned files after teardown. No artifact bookkeeping changes VM deletion.

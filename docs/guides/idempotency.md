@@ -176,7 +176,9 @@ integration while preserving the others; a later layer can reactivate it with fr
 Cleanup is deliberately bounded. Settings mappings retain their native document when removed and
 have no separate ownership claims; they do not restore overwritten values. Native plugins and
 marketplaces are removed only when their recorded identity still proves ownership, without affecting
-unowned or project dependencies. A matching pre-existing installation is not adopted. See
+unowned or project dependencies. Matching pre-existing entries are adopted after native identity and
+source verification, with a recorded claim and adoption report. Differing unowned entries are
+preserved and reported individually while other setup continues. See
 [native harness setup](native-harness-setup.md) for collision and retirement behavior, and
 [migrating Claude setup](migrating-claude-setup.md) for old declarations and stored overlays.
 

@@ -87,11 +87,13 @@ conflict. Plugin commands run first; the final mapping preserves their controlle
 
 Completed native mutations are observed and recorded individually. Repeat setup leaves matching
 owned installations in place and enables a requested owned plugin if it is disabled. A native
-registration or plugin without an Agentworks ownership record is not adopted, even when it matches
-the request. Remove the conflicting association with the native CLI before retrying. Source identity
-drift also requires native remediation before setup can continue. Unrelated built-in or remote
-entries whose source cannot be established are preserved; Agentworks cannot claim or remove those
-entries without observable source identity.
+registration or user plugin whose observable identity and source match the request is adopted,
+recorded and reported, including after an interrupted setup. Differing unowned entries or ambiguous
+native drift are preserved and reported individually. Independent entries and later integrations
+continue, and the affected integration's setup record remains incomplete until retry succeeds.
+Resolve a conflicting association with the native CLI before retrying its owning setup. Unrelated
+built-in or remote entries whose source cannot be established are preserved; Agentworks cannot claim
+or remove those entries without observable source identity.
 
 Removing desired associations removes owned plugins before owned marketplaces. The integration
 refuses marketplace cleanup when it would affect an unowned or project plugin. Claude's native
@@ -102,9 +104,9 @@ garbage collection owns orphaned cache cleanup. Agentworks does not delete guess
 An independently removed marketplace can hide a surviving plugin from native inventory. When the
 remaining evidence cannot prove the plugin's ownership, cleanup stays pending with its prior
 applied-state record. Repair or remove the association using the native CLI, then retry. A failure
-after a native mutation but before its checkpoint may likewise require native remediation; an
-unrecorded write is never silently adopted. Settings retention is intentional and is separate from
-pending plugin cleanup.
+after a native mutation but before its checkpoint heals on retry when the resulting native entry
+matches the declaration; adoption is recorded and reported. Settings retention is intentional and is
+separate from pending plugin cleanup.
 
 ## Native compatibility evidence
 

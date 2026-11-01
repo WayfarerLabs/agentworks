@@ -234,7 +234,10 @@ private session directory under the actual user's home.
 Applying files at a facet updates its native locations during that setup. Whether a running workload
 reloads them depends on the harness. Deferring inputs updates only the reusable result; existing
 descendants and running sessions keep their prior delivery until the receiving user's setup or
-managed session start/restart runs. Stale ancestors must be refreshed in their own lifecycle order.
+managed session start/restart runs. Missing, stale or incomplete ancestor state is reported with its
+owner and supported repair operation; it does not block descendant setup or session launch. Runtime
+routing uses available captures and explicit known deferrals without guessing unknown handling or
+refreshing ancestors.
 
 Workspace setup runs only at creation. There is no workspace reinit, and workspace repair does not
 refresh artifacts. An existing workspace cannot adopt changed workspace-routed inputs in place;
@@ -252,7 +255,9 @@ An integration can require or recommend prior setup through its session `check_s
 provides evidence for the session's actual VM, user, and workspace, and enforces the severity the
 integration returns: a required gap refuses launch before runtime replacement; a recommended gap
 warns and permits launch. Integrations supply the reason, and core adds the owning remediation.
-These are integration policies, not a generic operator-authored list of required facets.
+These are integration policies, not a generic operator-authored list of required facets. A required
+gap means that the consuming session needs a specific prerequisite to function; it does not mean
+that all upstream artifact state must match its latest declarations.
 
 The shipped integrations currently declare no ancestor requirement, so session-only use is valid
 when the tool is otherwise installed and ready and any supplied artifacts can be delivered there.

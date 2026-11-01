@@ -192,6 +192,8 @@ require or recommend successful setup of a particular facet for its bound resour
 session integration can require its user facet for the session's actual user; setup for another user
 cannot satisfy that prerequisite. A facet with no prerequisite remains optional. These are the
 consuming integration's readiness requirements, not global required/optional flags on facet schemas.
+They remain an explicit exception to facet independence: artifact freshness alone is not a global
+launch prerequisite. None of the shipped integrations currently declares a prerequisite.
 
 **R11. The Claude-specific template fields migrate into the Claude integration's config.**
 `claude_marketplaces` and `claude_plugins` leave the VM admin config and agent templates and become
@@ -274,9 +276,10 @@ through the saga lead.
   anchored-projections principle: projections govern surfaces where enforcement is real, and trusted
   in-process integration code is governed by trust, review, and disclosure.
 - **Native setup ownership is conventional and review-enforced:** claim the smallest practical
-  ownership unit; never silently adopt or overwrite repository, operator, or generator-owned
-  content. R15 authorizes only the explicitly selected settings destination and policy; record
-  applied state so reinit converges; secrets never enter persisted state.
+  ownership unit; adopt content identical to the declaration with a recorded and reported ownership
+  claim. Preserve and report differing unowned content, scoped to the affected entry while other
+  setup continues. R15 authorizes only the explicitly selected settings destination and policy;
+  record applied state so reinit converges; secrets never enter persisted state.
 - **Artifacts are entirely deferred.** No placeholder artifact APIs, formats, storage, or
   installation mechanisms land with facets. Rulesync reuse is a question for the future artifact
   effort.
@@ -586,3 +589,14 @@ idempotent removal or explicit retention when desired native setup changes or an
 removed. The ordinary shell session retains its behavior without setup activation. Unsupported setup
 activations fail explicitly. Deferred artifact requirements and the withdrawn early session identity
 slice do not gate this effort.
+
+## Operator ruling: independent facets and convergence, 2026-11-01
+
+The operator authorized the saga's 2026-10-31 ruling for this effort. Applying a facet converges its
+owned native setup to the declaration. Matching unclaimed entries are adopted, with the adoption
+recorded and reported, so an interruption between native mutation and checkpoint heals on retry.
+Differing unowned content is retained and reported per entry; that entry's refusal does not fail the
+whole owning initialization or suppress independent setup. Record partial completion truthfully.
+Actual failures of the running facet, including malformed declarations, failed native operations,
+transport errors and persistence failures, retain their error behavior. The R10 explicit
+required/recommended prerequisite API and R3 unsupported-activation errors remain.
