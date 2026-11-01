@@ -143,11 +143,11 @@ def test_forged_artifact_directory_preserves_running_session(lifecycle, monkeypa
 
 def test_differing_prospective_session_file_preserves_running_session(lifecycle, monkeypatch):
     from agentworks.artifacts import session as artifact_session
+    from agentworks.artifacts.publication import publish_artifacts
 
     lifecycle.restart()
     previous = lifecycle.db.get_session("s1")
     old_files = lifecycle.files()
-    publish = artifact_session.publish_artifacts
     conflicts = []
 
     def interfere(runner, desired, *args, **kwargs):
@@ -155,7 +155,7 @@ def test_differing_prospective_session_file_preserves_running_session(lifecycle,
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"unowned prospective content")
         conflicts.append(path)
-        return publish(runner, desired, *args, **kwargs)
+        return publish_artifacts(runner, desired, *args, **kwargs)
 
     monkeypatch.setattr(artifact_session, "publish_artifacts", interfere)
     lifecycle.events.clear()

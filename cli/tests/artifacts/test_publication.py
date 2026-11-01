@@ -96,7 +96,7 @@ def test_conflicting_skill_member_preserves_the_whole_package(target):
 def test_modified_obsolete_member_preserves_requested_skill_as_a_unit(target, rootless, monkeypatch):
     root = target.home / "skills/review"
 
-    def member(name, data=b"old"):
+    def member(name: str, data: bytes = b"old") -> ArtifactFile:
         return replace(
             artifact(root / name, data),
             package_root=None if rootless else str(root),
