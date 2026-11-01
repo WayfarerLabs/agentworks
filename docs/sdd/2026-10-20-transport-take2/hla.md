@@ -164,10 +164,11 @@ The client writes three things on stdin, in order:
 `sudo -n` in front for an elevated request and a handover path after it for the terminal half of an
 attach (D8). Stage 0 is one line of under 200 characters: it reads the length-prefixed agw-launch
 source from stdin, or from the handover socket, and runs it. If it cannot read or start it, Python
-exits non-zero with its own traceback before any start marker, so the request is not delivered and
-the error carries that traceback as its diagnostic. It contains no single quote, so the account
-shell passes it through unchanged. `-I` ignores Python's environment variables and the user site
-directory, and `-S` skips site packages, so no Python startup applies. The short line stays far
+exits non-zero before any start marker, so the request is not delivered. The client discards
+everything before the marker, so a traceback quoting misaligned request bytes, as a startup file
+that reads stdin produces, never reaches the error or a log. It contains no single quote, so the
+account shell passes it through unchanged. `-I` ignores Python's environment variables and the user
+site directory, and `-S` skips site packages, so no Python startup applies. The short line stays far
 below Windows' 32,767-character command-line limit and keeps sudo's log entry to one line. Elevation
 is the whole operation running under `sudo -n`, so no variable has to survive sudo.
 
