@@ -57,21 +57,21 @@ Two things this graph deliberately does not serialize:
   features, integrations), attachments at every ownership point, applied state, one vertical
   integration proving create/reinit semantics, workspace create-time materialization, upstream
   prerequisite reporting without implicit remediation, and the Claude template-field migration.
-- **Wave 5: observability phase 1 (may start alongside waves 2 through 4; depends on the new
-  execution contract, see the transport and SSH rebuild ruling in `target-state.md`).** Event
-  vocabulary and session/run identity, session-level PTY observation and the input-interception
-  investigation, one vertical fusion integration (Claude Code first; generalize the Codex notify
-  channel as the push mechanism), a simple persisted transcript with replay, honest coverage
-  declaration. The run-id schema change is small and self-contained and may land early if
-  convenient. Two consumers land shortly after the stream exists: the distiller (wave 6) and VM
-  auto-suspend (the suspend mechanics are vm-platform work designable independently; only the idle
-  signal waits here).
+- **Wave 5: observability phase 1 (may start alongside waves 2 through 4; its input-interception
+  investigation runs first and decides whether the rest waits for transport-take2, see the waves 5
+  and 7 ruling in `target-state.md`).** Event vocabulary and session/run identity, session-level PTY
+  observation and the input-interception investigation, one vertical fusion integration (Claude Code
+  first; generalize the Codex notify channel as the push mechanism), a simple persisted transcript
+  with replay, honest coverage declaration. The run-id schema change is small and self-contained and
+  may land early if convenient. Two consumers land shortly after the stream exists: the distiller
+  (wave 6) and VM auto-suspend (the suspend mechanics are vm-platform work designable independently;
+  only the idle signal waits here).
 - **Wave 6: artifacts and the learning loop's write-back path.** First-class agentic contributions
   through the integration materialization seam; revive distillation from the harvest against the
   real event stream. This closes the memory-learning loop.
-- **Wave 7: structured control (depends on the new execution contract; see the transport and SSH
-  rebuild ruling in `target-state.md`).** Observability phase 2 (validated intents, ACP projection,
-  stale-decision rejection).
+- **Wave 7: structured control (waits for transport-take2 only if wave 5's investigation finds that
+  observability needs a VM-side wrapper; see the waves 5 and 7 ruling in `target-state.md`).**
+  Observability phase 2 (validated intents, ACP projection, stale-decision rejection).
 - **Closeout wave (gates the saga lock; operator ruling, 2026-08-06):** after the waves complete and
   before the saga locks, one comprehensive review of everything the saga changed, in strict priority
   order: (1) security above all, reviewing the accumulated whole as one attack surface (the
