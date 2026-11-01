@@ -44,3 +44,11 @@ current-spec provenance.
 `agw vm verify-connection NAME` performs an active SSH check without starting the VM. Creating,
 starting, stopping, backing up, or rekeying a VM belongs to the corresponding `agw vm` command; use
 `agw vm --help` for the current surface.
+
+## Host keys
+
+Agentworks verifies each VM's SSH host key against a per-VM store, not your `~/.ssh/known_hosts`.
+`agw vm create` records the key on its first connection, and a VM with no record is refused rather
+than trusted on first use. A VM that predates the store needs the one-time
+`agw vm import-host-keys --all`; see `agw vm import-host-keys --help` and the VM section of the
+command reference.

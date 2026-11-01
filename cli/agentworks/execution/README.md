@@ -1,8 +1,35 @@
 # Independent execution mechanics
 
-This package currently implements a bounded, internal Linux execution proof. Production factories
-and RunContext still use the existing stack. These modules are not a permission-scoped public API;
-they must not be handed directly to capability consumers.
+This package currently implements a bounded, internal Linux execution proof, plus the VM host-key
+store that production already uses. Production factories and RunContext still use the existing stack
+for execution. These modules are not a permission-scoped public API; they must not be handed
+directly to capability consumers.
+
+## Host-key trust (in production)
+
+`trust.py` owns the per-VM host-key store (`~/.config/agentworks/known_hosts/vm-<name>`, records
+under the alias `agentworks-vm-<name>`) and the OpenSSH options each trust mode selects. The legacy
+stack calls it; it imports nothing legacy.
+
+- `TrustBinding(mode, vm_name, provisioning_file=None)` names how a connection to a VM establishes
+  trust. `VM` verifies against the store with `StrictHostKeyChecking=yes` and raises `TrustMissing`
+  (`errors.py`) when the VM has no record, never falling back to first use. `ENROLL` is create's
+  first connection only and writes the VM's freshly reset record under `accept-new`. `UNVERIFIED` is
+  cloud provisioning before the VM is in the store: it accepts a key once into a private file the
+  create owns (`provisioning_binding`) and deletes that file when the create ends.
+- `HOST_TRUST` marks a connection to a host, such as Remote Lima's, rather than a VM. It keeps the
+  operator's own SSH configuration and `known_hosts`.
+- `ssh_options(trust)` returns the `-o` arguments. They pin the global known-hosts file to the null
+  device and turn host-key updates, hashing and IP checks off, so no configuration file can change
+  them. VM options are read when a command is spawned, not when the transport is built.
+- `entry_options(vm_name)` gives the managed SSH config lines that make the operator's own `ssh`
+  verify against the store once the VM has a record.
+- `begin_enrollment`, `write_records`, `stored_keys` and `remove` are the record's lifecycle. Writes
+  are atomic and private.
+
+Every `SSHTransport` and `SSHTarget` is constructed with an explicit trust choice, so a connection
+that skips the decision fails to type-check. `agw vm import-host-keys` fills the store from an
+existing `known_hosts` using `ssh-keygen -F`.
 
 `carrier.py` defines the buffered adapter boundary. Preparation supplies literal bootstrap argv;
 CarrierIO holds the only finite input source. A report distinguishes submitted/unknown dispatch,

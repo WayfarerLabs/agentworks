@@ -629,23 +629,24 @@ just a vm-site.
 > true long-lived VMs (e.g. Lima, Azure, Proxmox, etc.) if you need a VM that survives independent
 > of your workstation.
 
-| Command                                             | Description                                                   |
-| --------------------------------------------------- | ------------------------------------------------------------- |
-| `agw vm create <name>`                              | Create a new VM (provision + initialize)                      |
-| `agw vm list`                                       | List configured VMs                                           |
-| `agw vm describe <name>`                            | Show VM details, workspaces, and event log                    |
-| `agw vm verify-connection <name>`                   | Test the canonical admin connection without starting the VM   |
-| `agw vm shell <name> [--workspace <ws>]`            | Admin shell on a VM (optionally rooted in a workspace)        |
-| `agw vm exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command as admin (optionally from a workspace) |
-| `agw vm start <name>`                               | Start a stopped VM and clear its manual-stop intent           |
-| `agw vm stop <name>`                                | Stop a VM and keep it stopped (no auto-start)                 |
-| `agw vm reinit <name>`                              | Re-run initialization on a provisioned VM                     |
-| `agw vm confirm-release <name>`                     | Observe and explicitly record the live Debian release         |
-| `agw vm delete <name>`                              | Delete a VM (with confirmation)                               |
-| `agw vm backup <name>`                              | Back up a VM: metadata, agents, workspaces, and files         |
-| `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)     |
-| `agw vm port-forward <name> <ports...>`             | Forward local port(s) to a VM (like kubectl port-forward)     |
-| `agw vm logs <name>`                                | Show SSH logs for a VM                                        |
+| Command                                             | Description                                                    |
+| --------------------------------------------------- | -------------------------------------------------------------- |
+| `agw vm create <name>`                              | Create a new VM (provision + initialize)                       |
+| `agw vm list`                                       | List configured VMs                                            |
+| `agw vm describe <name>`                            | Show VM details, workspaces, and event log                     |
+| `agw vm verify-connection <name>`                   | Test the canonical admin connection without starting the VM    |
+| `agw vm shell <name> [--workspace <ws>]`            | Admin shell on a VM (optionally rooted in a workspace)         |
+| `agw vm exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command as admin (optionally from a workspace)  |
+| `agw vm start <name>`                               | Start a stopped VM and clear its manual-stop intent            |
+| `agw vm stop <name>`                                | Stop a VM and keep it stopped (no auto-start)                  |
+| `agw vm reinit <name>`                              | Re-run initialization on a provisioned VM                      |
+| `agw vm confirm-release <name>`                     | Observe and explicitly record the live Debian release          |
+| `agw vm delete <name>`                              | Delete a VM (with confirmation)                                |
+| `agw vm backup <name>`                              | Back up a VM: metadata, agents, workspaces, and files          |
+| `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)      |
+| `agw vm port-forward <name> <ports...>`             | Forward local port(s) to a VM (like kubectl port-forward)      |
+| `agw vm logs <name>`                                | Show SSH logs for a VM                                         |
+| `agw vm import-host-keys (--all \| <name>...)`      | Import VM host keys from `known_hosts` into the host-key store |
 
 **Power-state semantics:** a VM that stopped on its own (idle timeout, host reboot) is started
 automatically, on demand, by any command that needs it live. A VM stopped with `agw vm stop` is
@@ -749,6 +750,30 @@ detection fails entirely, those entries are used alone. Proxmox QGA supplies nat
 execution, but it does not provide the interactive terminal required by this flag. Use the Proxmox
 web UI's serial console (`VM > Console` in the Proxmox VE web UI) as the equivalent escape hatch.
 
+#### Host keys
+
+Agentworks verifies every connection to a VM against a per-VM host-key store, never against your
+`~/.ssh/known_hosts`. The store is one file per VM under `~/.config/agentworks/known_hosts/`, keyed
+by VM name, so a VM keeps its trust across tailnet address changes. `vm create` records the key on
+its first connection and nowhere else; `vm delete` removes the file. A VM with no recorded key is
+refused with a hint rather than trusted on first use.
+
+`agw vm import-host-keys (--all | <name>...) [--known-hosts <path>]` copies keys you already trust
+into the store. It asks OpenSSH's own `ssh-keygen -F` which keys `~/.ssh/known_hosts` (or the file
+named by `--known-hosts`) holds for each VM's tailnet address, so the answer is exactly what `ssh`
+would have trusted: wildcards, negation, comma lists, hashed entries and bracketed ports all behave
+as OpenSSH defines them. The source file is only read. A VM that already has a record is never
+changed; the report says `already current` or `conflicts with the stored key`. A matching
+`@cert-authority` or `@revoked` line blocks the import for that VM (`trust marker present`).
+
+Each VM gets one report line: `imported (N keys)`, `already current`, `no matching entry`,
+`trust marker present`, `conflicts with the stored key`, or `no tailnet address`. The command exits
+non-zero while any selected VM ends without a record, with `--all` as well.
+
+For a VM with no matching entry, verify its host key fingerprints against its console or provider,
+gather the keys with `ssh-keyscan` into a file, and pass that file with `--known-hosts`. The scanned
+file is trusted as given, so check the fingerprints first.
+
 ### Workspaces
 
 Manage workspaces on VMs.
@@ -847,6 +872,12 @@ prefixes are configurable via `operator.ssh_host_prefix` (default `awvm--`) and
 Entries are rebuilt declaratively from the database on every agent / VM lifecycle operation, so a
 fresh `agw agent create` or `agw vm delete` keeps the file in sync without manual intervention. Run
 `agw config sync-ssh-config` to force a rebuild.
+
+Entries for a VM that has a host-key record also carry `HostKeyAlias`, `UserKnownHostsFile` (the
+VM's store file) and `StrictHostKeyChecking yes`, plus `UpdateHostKeys no` and `HashKnownHosts no`
+so your own `ssh` neither writes to the store nor hashes it. Entries for a VM without a record are
+unchanged, so your own `ssh` keeps working until you run `agw vm import-host-keys`. See
+[Host keys](#host-keys).
 
 ### Sessions
 
