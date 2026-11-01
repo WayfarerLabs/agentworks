@@ -583,11 +583,9 @@ where the platform offers a usable recovery transport, restore the configured pu
 reinitialize. Some platform transports also depend on the configured key; use provider-native
 recovery or recreate the VM when that path cannot connect.
 
-Agentworks verifies each VM's SSH host key against its own per-VM store under
-`~/.config/agentworks/known_hosts/`, written by `agw vm create` on its first connection and removed
-by `agw vm delete`. A VM with no recorded key is refused, never trusted on first use. A VM created
-before the store existed needs the one-time `agw vm import-host-keys --all`, which copies the keys
-`ssh-keygen -F` finds in `~/.ssh/known_hosts`; see [Host keys](command-reference.md#host-keys) and
+Agentworks verifies each VM's SSH host key against its own per-VM store, never trusting a first
+connection. A VM created before the store existed needs a one-time `agw vm import-host-keys --all`;
+see [Host keys](command-reference.md#host-keys) and
 [Upgrading to 0.20](../docs/guides/upgrading-to-0.20.md).
 
 Debian distribution upgrades remain operator-led. After following Debian's release notes and

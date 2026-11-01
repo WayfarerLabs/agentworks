@@ -47,8 +47,6 @@ starting, stopping, backing up, or rekeying a VM belongs to the corresponding `a
 
 ## Host keys
 
-Agentworks verifies each VM's SSH host key against a per-VM store, not your `~/.ssh/known_hosts`.
-`agw vm create` records the key on its first connection, and a VM with no record is refused rather
-than trusted on first use. A VM that predates the store needs the one-time
-`agw vm import-host-keys --all`; see `agw vm import-host-keys --help` and the VM section of the
-command reference.
+Agentworks verifies each VM's SSH host key against a per-VM store and never trusts a first
+connection. `agw vm import-host-keys --help` explains how to fill the store for a VM that predates
+it.

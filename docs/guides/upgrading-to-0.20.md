@@ -51,11 +51,22 @@ A VM whose creation failed before its first connection has no record either. Del
 
 ## What fails until the import runs
 
-Commands that connect to a VM fail with a missing-record error that names this import. That includes
-`vm shell`, `vm exec`, `vm reinit`, `vm backup`, `vm port-forward`, the workspace, agent and session
-commands, and the activation of a stopped VM by `vm start` or by any command that would start it.
-`vm start` and `vm rekey` refuse before they boot the VM or spend a Tailscale auth key. `vm delete`,
-`vm list` and `vm describe` do not need a record.
+Every command that reaches a VM over SSH refuses a VM with no record, before it starts the VM,
+resolves a secret or changes anything, and prints a hint that names the import. That covers
+`vm shell`, `vm exec`, `vm reinit`, `vm backup`, `vm port-forward`, `vm start`, `vm rekey`, and the
+workspace, agent, session and console commands, including the start of a stopped VM that any of them
+would trigger. `vm start` and `vm rekey` check first so they never boot the VM or spend a Tailscale
+auth key. Status listings that span several VMs report the VM without a record and carry on with the
+others.
+
+`vm delete` still works without a record, because deleting is what you do with a broken VM. It
+cannot reach a cloud VM (AWS, Azure, GCP) to log its node out of Tailscale, though, so that step is
+skipped with a warning. Import first to get the logout, or remove the node in the Tailscale admin
+console afterwards.
+
+`agw database restore` onto a new workstation carries no host-key records, because the store lives
+beside the database rather than in it. Run the import there, with `--known-hosts` pointing at a
+`known_hosts` file from a workstation that has connected to the VMs.
 
 Your own `ssh awvm--NAME` keeps working meanwhile: Agentworks adds the store options to a VM's
 managed SSH entry only once the VM has a record. After the import, those entries verify against the

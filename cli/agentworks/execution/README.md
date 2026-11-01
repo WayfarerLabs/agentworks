@@ -28,8 +28,9 @@ stack calls it; it imports nothing legacy.
   are atomic and private.
 
 Every `SSHTransport` and `SSHTarget` is constructed with an explicit trust choice, so a connection
-that skips the decision fails to type-check. `agw vm import-host-keys` fills the store from an
-existing `known_hosts` using `ssh-keygen -F`.
+that skips the decision fails to type-check. `TrustMissing` is a state error, not an `SSHError`, so
+best-effort and retrying SSH handlers cannot absorb it. Operator guidance is in the command
+reference and the 0.20 upgrade guide.
 
 `carrier.py` defines the buffered adapter boundary. Preparation supplies literal bootstrap argv;
 CarrierIO holds the only finite input source. A report distinguishes submitted/unknown dispatch,
