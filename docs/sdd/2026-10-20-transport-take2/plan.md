@@ -48,7 +48,7 @@ answer.
 
 ## Slice 1: Trust (HLA D9; PR A)
 
-- [ ] Write `trust-lld.md`. It covers:
+- [x] Write [`trust-lld.md`](./trust-lld.md). It covers:
   - trust modes and which factories select each;
   - store layout and alias derivation;
   - the enrollment reset;
