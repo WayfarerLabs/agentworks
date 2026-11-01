@@ -139,8 +139,9 @@ a VM connection.
     delivered;
   - signal dispositions and descriptors reset for the payload, and a startup file that overrides
     `TERM` or `XDG_RUNTIME_DIR` leaves the payload's values unchanged;
-  - the end marker and trailer under a background child that holds both streams, and with stdout's
-    last bytes arriving after the trailer;
+    - the end marker and trailer under a background child that holds both streams, and with stdout's
+      last bytes arriving after the trailer;
+  - payload stdout that does not end in a newline, and a `refused` trailer;
   - the deadline;
   - sensitive stdin absent from logs and exceptions;
   - binary stdin and stdout on Windows.

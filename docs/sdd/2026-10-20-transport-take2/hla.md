@@ -166,11 +166,11 @@ attach (D8). Stage 0 is one line of under 200 characters: it reads the length-pr
 source from stdin, or from the handover socket, and runs it. If it cannot read or start it, Python
 exits non-zero before any start marker, so the request is not delivered. The client discards
 everything before the marker, so a traceback quoting misaligned request bytes, as a startup file
-that reads stdin produces, never reaches the error or a log. It contains no single quote, so the
-account shell passes it through unchanged. `-I` ignores Python's environment variables and the user
-site directory, and `-S` skips site packages, so no Python startup applies. The short line stays far
-below Windows' 32,767-character command-line limit and keeps sudo's log entry to one line. Elevation
-is the whole operation running under `sudo -n`, so no variable has to survive sudo.
+that reads stdin produces, never reaches the error or a log. Stage 0's line contains no single
+quote, so the account shell passes it through unchanged. `-I` ignores Python's environment variables
+and the user site directory, and `-S` skips site packages, so no Python startup applies. The short
+line stays far below Windows' 32,767-character command-line limit and keeps sudo's log entry to one
+line. Elevation is the whole operation running under `sudo -n`, so no variable has to survive sudo.
 
 **Account shell precondition.** sshd hands that command to the destination account's login shell as
 `$SHELL -c`, so the account shell parses one constant line before stage 0 runs. Managed accounts
@@ -239,10 +239,11 @@ if one proves necessary, is the same installed program (`2026-08-04-next-steps/t
    (R4). Login or interactive startup applies only when requested. `sh` and `bash` are fixed paths.
    The default shell is the destination identity's passwd entry. A missing interpreter fails rather
    than being substituted.
-6. **Reports completion.** Except in TTY mode, after the payload exits it writes an end marker,
-   `<nonce> end`, to stdout and then one framed trailer to stderr: `<nonce> exit <status>`, or
-   `<nonce> refused <reason>` when it could not start the payload (a missing interpreter or passwd
-   entry). In TTY mode it execs the payload instead.
+6. **Reports completion.** Except in TTY mode, once the payload exits, or once it finds it cannot
+   start it, agw-launch writes an end marker, `<nonce> end`, to stdout and then one framed trailer
+   to stderr: `<nonce> exit <status>`, or `<nonce> refused <reason>` when the payload could not
+   start (a missing interpreter or passwd entry). Every trailer follows an end marker. In TTY mode
+   it execs the payload instead.
 
 **Completion rules:**
 
@@ -264,12 +265,11 @@ if one proves necessary, is the same installed program (`2026-08-04-next-steps/t
   could not reach. Status 127 without `sudo` there means the account shell found no python3, which
   is typed `VMNotReady`. Under `sudo` a missing python3 exits 1 instead; the unelevated base check
   (D10) finds it first.
-- **Unknown.** Everything else without a trailer is unknown, whatever the client's own exit status:
-  a start marker without both the end marker and the trailer, or 255 with no start marker. The
-  client does not read OpenSSH's diagnostics to tell a refused connection from a dropped one. It
-  reads one OpenSSH token only to type an error: `Host key verification failed` on a 255 becomes
-  `TrustMismatch`, naming `agw vm recover`, since a host key that no longer matches the store needs
-  the operator.
+- **Unknown.** Everything else is unknown, whatever the client's own exit status: a start marker
+  without both the end marker and the trailer, or 255 with no start marker. The client does not read
+  OpenSSH's diagnostics to tell a refused connection from a dropped one. It reads one OpenSSH token
+  only to type an error: `Host key verification failed` on a 255 becomes `TrustMismatch`, naming
+  `agw vm recover`, since a host key that no longer matches the store needs the operator.
 - **TTY mode.** An attach never elevates to root; an elevated attach request is refused before
   dispatch, and no current attach consumer elevates. The root `sudo -n` prefix and the handover
   argument are never combined. An attach returns its exit code; a 255 is reported as "connection
@@ -387,9 +387,10 @@ platform-private (D11).
 ### D8. Streaming, attach, forwarding and reachability (R2, R4)
 
 - **`stream(request)`** writes the agw-launch source and the envelope, then copies the operator's
-  stdin into the pipe in binary mode until end of file. Stdout passes through after the start
-  marker, and stderr goes through the trailer filter, which holds back only bytes that could begin a
-  trailer, so live stderr is never delayed by a timer. Consumers: `vm exec`, `agent exec`.
+  stdin into the pipe in binary mode until end of file. After the start marker each stream passes
+  through a filter that holds back only bytes that could begin its closing marker (the end marker on
+  stdout, the trailer on stderr) and stops there, so live output is never delayed by a timer and
+  nothing after the markers reaches the operator. Consumers: `vm exec`, `agent exec`.
 - **`attach(request, clear_screen_on_exit=)`** uses two connections, so ssh keeps the operator's
   real terminal (its window size and modes come from its own stdin) while the request still travels
   on a private stdin. A first `-T` request carries the envelope marked for handover: agw-launch
@@ -537,10 +538,11 @@ Changes to `capabilities/vm_platform/base.py`:
 | `transient_route`, `probe_failure_hint`       | Private to each platform's own native code (recovery and native shell)                                                                                                                                                                                                                                                                                                                                                                                           |
 
 **RecoveryResult.** `run_recovery` wraps the core script in a small `sh` wrapper that writes the
-same nonce trailer as D4, so a recovery result is the script's status, delivery failure, or unknown.
-It never relies on `limactl` or `wsl.exe` exit codes; the salvage message measured WSL passing raw
-wait statuses through, which makes a signal and an exit indistinguishable. Sensitive stdin follows
-D5. The capability takes no environment, directory or files.
+same end marker and trailer as D4, and reads its result to both, as D4's client does, so a recovery
+result is the script's status, delivery failure, or unknown. It never relies on `limactl` or
+`wsl.exe` exit codes; the salvage message measured WSL passing raw wait statuses through, which
+makes a signal and an exit indistinguishable. Sensitive stdin follows D5. The capability takes no
+environment, directory or files.
 
 **Per platform:**
 
@@ -757,7 +759,7 @@ exactly true.
 | The terminal handover: timeout, and cleanup when the second connection fails                                                  | Conformance vectors and live attach from all three, slice 2 |
 | `sudo -n` passing stdin through under Debian's sudoers defaults                                                               | Elevated request on a fresh Debian 12 and 13 VM, slice 3    |
 | python3 at provisioning on every platform's image                                                                             | Create on every platform, slice 3                           |
-| The trailer with a background child holding stderr                                                                            | Conformance vector, slice 2                                 |
+| The end marker and trailer with a background child holding both streams, and stdout's tail arriving after the trailer         | Conformance vector, slice 2                                 |
 | The shared lock file under `/run/lock` with `protected_regular`, a creator in another group, and `flock`, on Debian 12 and 13 | Conformance vector, slice 5                                 |
 | Encrypted keys served by the agent                                                                                            | Live cell, slice 1                                          |
 | Cloud host-key re-establishment                                                                                               | Lost-record recovery on one cloud, slice 4                  |
