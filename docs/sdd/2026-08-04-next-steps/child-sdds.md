@@ -691,15 +691,16 @@ Merged work the ledger owes a line, recorded from the merges themselves.
   - **That fourth fix supersedes this saga's own ruling** at
     `scope-participation-contract.md:72-74`, which chose base no-op defaults over an
     absence-means-unsupported rule on the premise that "review and testing catch a mistyped
-    override." Eight of twelve integration-by-facet cells shipped accepted and inert, so the premise
-    did not hold. The effort relayed the operator's direction in
+    override." Eight of twelve integration-by-facet cells were accepted and inert at that head, so
+    the premise did not hold. The effort relayed the operator's direction in
     `message-2026-09-11-harness-unsupported-facets.md` and correctly did not edit this saga's
     artifacts. Reconciling the contract is the saga lead's, pending the operator's direction.
     **Reconciled 2026-10-31:** the operator confirmed the error rule, and the contract is corrected
     in place under `target-state.md`'s facet independence ruling.
   - **Open after merge:** live VM acceptance of the harness integrations, which no lane has
-    performed, and the effort's final SDD lock. At 2026-10-31 the plan's 8 open items are all live
-    proof and the lock, including interruption and native drift, the territory of issue #840.
+    performed, and the effort's final SDD lock. At 2026-10-31 the plan has 8 open items: seven of
+    live proof and closeout (including interruption and native drift, the territory of issue #840)
+    and one stale publish box for PR #816, which merged 2026-09-15.
 - **Agent artifacts merged** (PR #794, merged 2026-09-14 as `908258a9`; SDD **not yet locked**). The
   wave 4 successor, seeded and delivered by the same lead, carrying the artifact half that
   facets-first deferred: `artifact-bundle` resources and `artifacts` blocks, workstation and Git
@@ -716,15 +717,18 @@ Merged work the ledger owes a line, recorded from the merges themselves.
     directly to session; `message-2026-09-13-agent-artifacts-user-default.md` supersedes it with
     user. The newer states the supersession; the older does not yet say it was superseded.
     **Reconciled 2026-10-31:** `main` routes an inactive VM facet's inputs to user
-    (`artifacts/routing.py:240-241`), as the newer message says, and the facet independence ruling
+    (`artifacts/routing.py:240-242`), as the newer message says, and the facet independence ruling
     in `target-state.md` records it.
   - **Open after merge:** live acceptance and the effort's SDD lock. The saga-side reconciliation of
     the superseded no-op-defaults rule is done (2026-10-31).
   - **The 2026-10-31 facet independence ruling reverses two of its gates:** session start refusing
     on any non-current upstream artifact placement (the impact issue #841 records), and native setup
     refusing unclaimed identical entries before applying (issue #840). The fix changes shipped
-    behavior in this effort and wave 4, so it is filed as its own corrective effort rather than
-    folded into later facet work; chartering it is the operator's call.
+    behavior in this effort and wave 4, ahead of later facet work. The operator plans to hand it to
+    both efforts' lead within their existing SDDs (2026-11-01: "I have an existing session
+    (agw-ns-harness-facets) that I plan on handing the work to"), and the saga lead delivered a
+    message into each SDD. The required/recommended readiness gate is kept for now (operator,
+    2026-11-01), so it is not among the gates reversed.
 - **Session cgroups adopted** (PR #770, adopted 2026-09-14 by operator ruling recorded in
   `target-state.md`). An adjacent standalone child: saga-lead-seeded and reviewed, not a numbered
   wave, and not gating the saga lock. It contains what an agent can do on its VM through cgroups and

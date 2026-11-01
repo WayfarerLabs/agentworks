@@ -72,9 +72,10 @@ call these at the end of their pipelines for the integrations the owning templat
 delivered through the run targets; agent artifacts arrive as inputs. An integration implements the
 facets it supports, and the base methods reject an activation at a facet it does not implement, so
 the operator sees the error. **Correction, 2026-10-31:** this originally gave the base class no-op
-defaults, on the premise that review and testing catch a mistyped override. Wave 4 shipped eight of
-twelve integration-by-facet cells accepted and inert, so the premise failed; the operator confirmed
-the error rule, and pass-through for a facet that is not activated is core's routing, recorded in
+defaults, on the premise that review and testing catch a mistyped override. Integration testing of
+wave 4's first ready head found eight of twelve integration-by-facet cells accepted and inert, so
+the premise failed; the shipped base methods reject instead, and the operator confirmed the error
+rule, and pass-through for a facet that is not activated is core's routing, recorded in
 `target-state.md`'s facet independence ruling. Whether a lightweight supported-scopes report exists
 for doctor and guide output is the effort lead's call. A per-scope invocation is constructed for its
 owning resource; it never reuses a session instance's target identity, readiness cache, or state
@@ -120,19 +121,18 @@ everything, artifacts included. It does not. Artifact payloads already handled u
 integration and resource path do not reach the session-facet invocation; each invocation receives
 local artifacts plus only the applicable inherited artifacts still deferred for it. An integration
 returns the artifacts it defers, with a reason for each, and an entry still deferred at the session
-facet is not something the session silently hoists. **Correction, 2026-09-08:** this originally said
-such an entry is a typed core error before launch. The operator has reopened that policy; whether an
-unresolved session entry blocks launch or receives another explicit treatment is for the artifacts
-successor SDD to settle. Silent loss is not among the options. **Settled, 2026-10-31:** such an
-entry is reported, never a launch block (`target-state.md`, facet independence ruling). The
-integration owns representation. Env is naturally process-scoped. Content that cannot be represented
-at its own scope is hoisted into the session, and the integration decides placement using its
-harness knowledge (for example, session-scoped artifacts under a harness-specific workspace path
-keyed by `session_uuid`), including deduplication and double-provisioning avoidance. Hoisting is
-isolation, not security: other sessions being able to see user-scope artifacts is expected; the
-integration's job is that hoisted material only takes effect for its own workload. Session-scope env
-and artifacts come from the session template's own declarations; there is deliberately no
-session-feature initially (one gets added only if real pressure emerges).
+facet is not something the session silently hoists: it is reported, never a launch block, and never
+silently lost. **Correction, 2026-10-31:** this originally said such an entry is a typed core error
+before launch; the operator reopened that on 2026-09-07 and settled it in `target-state.md`'s facet
+independence ruling. The integration owns representation. Env is naturally process-scoped. Content
+that cannot be represented at its own scope is hoisted into the session, and the integration decides
+placement using its harness knowledge (for example, session-scoped artifacts under a
+harness-specific workspace path keyed by `session_uuid`), including deduplication and
+double-provisioning avoidance. Hoisting is isolation, not security: other sessions being able to see
+user-scope artifacts is expected; the integration's job is that hoisted material only takes effect
+for its own workload. Session-scope env and artifacts come from the session template's own
+declarations; there is deliberately no session-feature initially (one gets added only if real
+pressure emerges).
 
 ### Artifact conduct
 
@@ -140,6 +140,9 @@ Behavioral conventions integrations follow (review-enforced, same trust basis): 
 practical ownership unit; never silently adopt or overwrite repository, operator, or generator-owned
 content; record applied state (destinations, strategies, hashes) so reinit can converge and drift is
 reported rather than fought; secrets never enter persisted state or resolved configuration.
+**Narrowed, 2026-10-31:** under the facet independence ruling, content identical to the declaration
+is adopted, and the adoption is recorded and reported, so it is not silent. Content Agentworks does
+not own that differs from the declaration is never overwritten.
 
 ### State
 
@@ -157,7 +160,10 @@ A session integration checks its own upstream prerequisites during readiness (it
 using persisted applied state and inexpensive probes, and reports gaps with remediation pointing at
 the owning operation (`agw agent reinit ...`), through core's standard error framing. Gaps carry
 severity: a required prerequisite fails the operation, a recommended one warns and permits degraded
-operation. It never repairs upstream state from a session operation.
+operation. It never repairs upstream state from a session operation. **2026-11-01:** a required gap
+is the one standing exception to the facet independence ruling's "no facet blocks another". The
+operator kept the gate pending discussion with the harness scope framework's lead; no shipped
+integration reports a gap today.
 
 ## Session and run identity
 
