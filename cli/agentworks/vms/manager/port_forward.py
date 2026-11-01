@@ -12,10 +12,9 @@ from ._helpers import _guard_failed_vm, _require_vm
 from .boundary import gated_vm_boundary
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.execution.access import VMAccess
     from agentworks.execution.requests import Forward
     from agentworks.secrets.policy import TtyInteractionPolicy
 
@@ -79,10 +78,10 @@ def port_forward_vm(
     # Run in foreground until interrupted
     registry = load_request_registry(config, live_database=db)
     with gated_vm_boundary(db, config, registry, vm, interaction=interaction):
-        return _hold_forward(access.forward, forwards, verbose=verbose)
+        return _hold_forward(access, forwards, verbose=verbose)
 
 
-def _hold_forward(forward: Callable[..., int], forwards: list[Forward], *, verbose: bool) -> int:
+def _hold_forward(access: VMAccess, forwards: list[Forward], *, verbose: bool) -> int:
     """Run the blocking forward, treating Ctrl-C and SIGTERM as the operator's stop.
 
     SIGTERM is turned into the same ``KeyboardInterrupt`` as Ctrl-C for the
@@ -94,7 +93,7 @@ def _hold_forward(forward: Callable[..., int], forwards: list[Forward], *, verbo
 
     previous = signal.signal(signal.SIGTERM, stop)
     try:
-        return forward(forwards, verbose=verbose)
+        return access.forward(forwards, verbose=verbose)
     except KeyboardInterrupt:
         return 0
     finally:

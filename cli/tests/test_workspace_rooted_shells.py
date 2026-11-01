@@ -125,7 +125,6 @@ def _patch_agent_common(monkeypatch: pytest.MonkeyPatch) -> AccessRecorder:
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
     stub_vm_gates(monkeypatch)
-    monkeypatch.setattr(agent_manager, "_assert_agent_access_works", lambda *a, **k: None)
     return _install_recorder(monkeypatch)
 
 

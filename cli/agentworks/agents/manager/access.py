@@ -24,11 +24,11 @@ from ._common import (
     agent_scope,
 )
 
-# ``_assert_agent_access_works``, ``_resolve_agent_direct_env_scopes``, and
-# ``_agent_direct_secret_target`` are referenced through the package object
-# (``_mgr.NAME``) at call time rather than imported by value, because tests
-# monkeypatch them on ``agentworks.agents.manager``; a by-value import here
-# would freeze a copy the patch could not reach.
+# ``_resolve_agent_direct_env_scopes`` and ``_agent_direct_secret_target`` are
+# referenced through the package object (``_mgr.NAME``) at call time rather
+# than imported by value, because tests monkeypatch them on
+# ``agentworks.agents.manager``; a by-value import here would freeze a copy
+# the patch could not reach.
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -163,7 +163,7 @@ def shell_agent(
         # authorized_keys was never populated) get an actionable error
         # rather than dropping into a remote shell that immediately exits
         # on Permission denied.
-        _mgr._assert_agent_access_works(access, execution.vm_access(vm, config, Admin()), agent)
+        _assert_agent_access_works(access, execution.vm_access(vm, config, Admin()), agent)
 
         # An interactive login shell as the agent, in the workspace when one
         # is named. No sudo / su involved.
@@ -262,7 +262,7 @@ def exec_agent(
 
         # Probe direct agent SSH first so pre-rollout agents (whose
         # authorized_keys was never populated) get an actionable error.
-        _mgr._assert_agent_access_works(access, execution.vm_access(vm, config, Admin()), agent)
+        _assert_agent_access_works(access, execution.vm_access(vm, config, Admin()), agent)
 
         # A login shell runs the command so the agent's PATH (mise shims,
         # ~/.local/bin, etc.) is set up. This matches the env an operator

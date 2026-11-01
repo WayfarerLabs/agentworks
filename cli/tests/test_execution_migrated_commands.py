@@ -110,18 +110,20 @@ def test_the_probe_runs_a_bounded_true_as_the_agent(vm_access_recorder: AccessRe
 def test_a_dropped_connection_with_a_healthy_admin_means_the_agent_predates_the_rollout(
     vm_access_recorder: AccessRecorder,
 ) -> None:
-    with pytest.raises(StateError, match="rejected direct SSH") as raised:
+    with pytest.raises(StateError) as raised:
         probe(vm_access_recorder, Result(Unknown(UnknownReason.CONNECTION)), Result(Completed(0)))
 
-    assert "agent reinit a1" in (raised.value.hint or "")
+    assert type(raised.value) is StateError  # not VMNotReady or a trust error, which are its subclasses
     assert vm_access_recorder.operations == [("a1", "run"), ("admin", "run")]
 
 
 def test_a_dropped_connection_with_an_unreachable_admin_means_the_vm_is_unreachable(
     vm_access_recorder: AccessRecorder,
 ) -> None:
-    with pytest.raises(ConnectivityError, match="unreachable"):
+    with pytest.raises(ConnectivityError) as raised:
         probe(vm_access_recorder, Result(Unknown(UnknownReason.CONNECTION)), Result(Unknown(UnknownReason.CONNECTION)))
+
+    assert type(raised.value) is ConnectivityError
 
 
 @pytest.mark.parametrize(

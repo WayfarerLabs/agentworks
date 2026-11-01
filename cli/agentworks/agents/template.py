@@ -99,7 +99,7 @@ class AgentTemplate(DeclaredResource):
     ] = Field(default_factory=list)
     """Parent templates this one composes, nearest last."""
 
-    shell: AccountShell | None = None
+    shell: AccountShell | None = Field(default=None, examples=["bash"])
     """The agent user's login shell: `sh`, `dash`, `bash` or `zsh`. A path such as
     `/usr/bin/zsh` is read as its basename."""
 

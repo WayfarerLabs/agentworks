@@ -281,6 +281,49 @@ def test_exec_stopped_vm_gate_burst_then_boundary_burst(
     assert request.env.get("AGENT_TOKEN") == "agent-env-val"
 
 
+# -- identity: the agent's own account, not the admin's ------------------------
+
+
+def test_agent_exec_probes_and_runs_as_the_agent(
+    db: Database,
+    make_config,  # noqa: ANN001
+    vm_access_recorder: AccessRecorder,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    rc = agent_manager.exec_agent(
+        db, config, name="a1", command=["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    assert rc == 0
+    assert vm_access_recorder.operations == [
+        ("a1", "run"),
+        ("a1", "stream"),
+    ]  # the admin was never asked to do anything
+    assert ("box", AGENT) in vm_access_recorder.built
+
+
+def test_agent_shell_probes_and_attaches_as_the_agent(
+    db: Database,
+    make_config,  # noqa: ANN001
+    vm_access_recorder: AccessRecorder,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    assert agent_manager.shell_agent(db, config, name="a1", interaction=TtyInteractionPolicy.REFUSE) == 0
+
+    assert vm_access_recorder.operations == [("a1", "run"), ("a1", "attach")]
+    assert ("box", AGENT) in vm_access_recorder.built
+
+
 # -- validation stays pre-gate ------------------------------------------------
 
 
