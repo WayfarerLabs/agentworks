@@ -469,3 +469,60 @@ def test_stale_inactive_capture_explains_available_passthrough_without_refresh(d
         runtime = fixture.route().inputs
         known = {item.identity for item in runtime.items()}
         assert set(expected) <= known
+
+
+@pytest.mark.parametrize("source_available", [False, True])
+def test_session_inspection_reuses_recorded_route_independently_of_current_vm_route(
+    db: Database, monkeypatch, source_available
+):
+    from agentworks.artifacts.inspection import inspect_artifacts
+    from agentworks.artifacts.state import capture_owner, read_captures, write_capture
+    from agentworks.harness_setup.inputs import SetupInputs
+    from agentworks.harness_setup.model import NativeSetupState, SetupRecord
+    from agentworks.harness_setup.state import read_native_setup, write_native_setup
+    from agentworks.package_sources import PackageCapture
+    from agentworks.schema import CapabilityConfig
+    from agentworks.secrets.orchestration import SecretTarget
+    from tests.artifacts.test_routing import graph
+
+    fixture = graph(db, active=("vm", "agent", "workspace"), counts={"agent": 0, "workspace": 0})
+    source = fixture.captures["vm"].inputs
+    fixture.save("vm", routes={"vm-0": "user"})
+    agent = fixture.save("agent", inherited=source, routes={"vm-0": "session"})
+    fixture.save("vm", routes={"vm-0": "workspace"})
+    fixture.save("workspace", inherited=source)
+    if not source_available:
+        fixture.registry.lookup("artifact-bundle", "vm-bundle").hints.clear()
+        empty = capture_owner(fixture.registry, "vm", "vm", "vm", fixture.owners["vm"].artifacts)
+        write_capture(db, "vm", "vm", "vm", empty, operation="fixture")
+    db.insert_session("review", "workspace", "default", SessionMode.AGENT, agent_name="agent", socket_path="/socket")
+    block = CapabilityConfig()
+    owner = SetupInputs(
+        "session", "review", "session", {"shell": block}, SecretTarget(vm={}, agent={}, workspace={}, session={})
+    )
+    record = SetupRecord(
+        component="session",
+        integration="shell",
+        destination_id="d" * 64,
+        declaration=owner.declaration("shell", block),
+        complete=True,
+        artifact_inputs=tuple(item.identity for item in source.items()),
+    )
+    write_native_setup(db, "session", "review", NativeSetupState(records=(record,)), operation="fixture")
+    captures = read_captures(db, "vm", "vm")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("inspection acquired sources or changed instance state")
+
+    monkeypatch.setattr(PackageCapture, "capture", forbidden)
+    monkeypatch.setattr(type(db.instance_state), "replace_applied_slices", forbidden)
+    runtime = fixture.route().inputs
+    assert tuple(runtime.items()) == (tuple(source.items()) if source_available else ())
+    inspected = inspect_artifacts(db, fixture.registry, session_name="review")
+    assert inspected.owners[1].integrations[0].status == "stale"
+    assert inspected.owners[-1].integrations[0].status == ("current" if source_available else "stale")
+    assert tuple(item.input_id for item in inspected.owners[1].integrations[0].recorded_deferred) == tuple(
+        item.input_id for item in agent.deferred
+    )
+    assert read_native_setup(db, "session", "review").records == (record,)
+    assert read_captures(db, "vm", "vm") == captures

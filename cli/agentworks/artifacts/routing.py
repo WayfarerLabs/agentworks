@@ -118,7 +118,7 @@ def inspect_owner_artifacts(
         return ArtifactOwnerView(inputs, captured, capture_status, "inactive", record=record, prepared=prepared)
     # Plugin/settings-only evidence keeps its existing required/recommended
     # readiness behavior. There is no artifact result to reuse in this case.
-    if not prepared and (record is None or not record.artifact_files):
+    if not prepared and (record is None or not (record.artifact_files or record.artifact_inputs)):
         return ArtifactOwnerView(inputs, captured, capture_status, "current", record=record, prepared=prepared)
     if record is None or record.artifact_inputs is None:
         return ArtifactOwnerView(
@@ -355,23 +355,44 @@ def session_inherited_inputs(
     report: bool = False,
 ) -> dict[ArtifactOwner, ArtifactGroup]:
     """Union available deferrals once in original owner and declaration order."""
-    routes = tuple(available_deferred_inputs(view, "session", integration_name) for view in (vm, user, workspace))
-    selected = [item.identity for route in routes for group in route.values() for item in group.items()]
+    ancestors = (vm, user, workspace)
+    routes = []
+    for view in ancestors:
+        if integration_name in view.owner.activations:
+            # A recorded result belongs to this facet's original invocation.
+            # Its upstream routes may have changed since then.
+            identities = (
+                ()
+                if view.record is None
+                else tuple(item.input_id for item in view.record.deferred if item.destination == "session")
+            )
+        else:
+            identities = tuple(
+                item.identity
+                for group in available_deferred_inputs(view, "session", integration_name).values()
+                for item in group.items()
+            )
+        routes.append(identities)
+    selected = [identity for route in routes for identity in route]
     if report and len(set(selected)) != len(selected):
         output.warn(f"Repeated artifact routes via {integration_name} were combined once; refresh the owning facets.")
     selected_ids = set(selected)
     result = {}
-    for view in (vm, user, workspace):
+    for view in ancestors:
         if view.captured is not None:
             group = view.captured.inputs.select(selected_ids)
             if group:
                 result[group.owner] = group
     resolved = {item.identity for group in result.values() for item in group.items()}
-    if report and selected_ids - resolved:
-        output.warn(
-            f"Some artifact routes via {integration_name} have no readable source in this owner graph; "
-            "refresh the owning facets. Unknown content was omitted."
-        )
+    if report:
+        for view, route in zip(ancestors, routes, strict=True):
+            unresolved = tuple(identity[:12] for identity in route if identity not in resolved)
+            if unresolved:
+                output.warn(
+                    f"Artifact routes via {integration_name} at {view.owner.component}/{view.owner.name} "
+                    f"have no readable source in this owner graph: {_brief(unresolved)}. "
+                    f"{_remediation(view)} Unknown content was omitted."
+                )
     return result
 
 

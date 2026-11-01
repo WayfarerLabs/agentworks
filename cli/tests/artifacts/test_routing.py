@@ -653,3 +653,82 @@ def test_overlapping_stale_diamond_routes_deliver_same_input_once(db, monkeypatc
     result = session_inherited_inputs(vm, user, workspace, integration_name="shell", report=True)
     assert [item.origin.entry for group in result.values() for item in group.items()] == ["vm-0", "workspace-0"]
     assert len(warnings) == 1
+
+
+@pytest.mark.parametrize("receiver", ["agent", "workspace"])
+def test_recorded_session_deferral_survives_changed_vm_route(db, monkeypatch, receiver):
+    from agentworks import output
+    from agentworks.artifacts.routing import session_ancestor_views
+
+    fixture = graph(db, active=("vm", "agent", "workspace"), counts={"agent": 0, "workspace": 0})
+    other = "workspace" if receiver == "agent" else "agent"
+    source = fixture.captures["vm"].inputs
+    fixture.save("vm", routes={"vm-0": fixture.owners[receiver].facet})
+    recorded = fixture.save(receiver, inherited=source, routes={"vm-0": "session"})
+    fixture.save("vm", routes={"vm-0": fixture.owners[other].facet})
+    fixture.save(other, inherited=source)
+    warnings: list[str] = []
+    monkeypatch.setattr(output, "warn", warnings.append)
+    before = db.instance_state.get_applied_slices(fixture.owners[receiver].kind, fixture.owners[receiver].name)
+
+    result = fixture.route()
+    assert tuple(result.inputs.items()) == tuple(source.items())
+    views = session_ancestor_views(db, fixture.registry, fixture.vm, fixture.workspace, "agent", "shell")
+    view = next(view for view in views if view.owner.component == receiver)
+    assert view.status == "stale" and not view.prepared
+    assert view.record == recorded and warnings
+    assert db.instance_state.get_applied_slices(view.owner.kind, view.owner.name) == before
+    assert read_captures(db, "vm", "vm")["vm"] == fixture.captures["vm"]
+
+
+@pytest.mark.parametrize("receiver", ["vm", "agent", "workspace"])
+def test_empty_replacement_capture_keeps_deferral_history_stale_and_reports_unresolved_route(db, monkeypatch, receiver):
+    from agentworks import output
+    from agentworks.artifacts.routing import session_ancestor_views, session_inherited_inputs
+
+    fixture = graph(db, active=("vm", "agent", "workspace"), counts={"agent": 0, "workspace": 0})
+    source = fixture.captures["vm"].inputs
+    fixture.save("vm", routes={"vm-0": "session" if receiver == "vm" else fixture.owners[receiver].facet})
+    for component in ("agent", "workspace"):
+        fixture.save(
+            component,
+            inherited=source if receiver == component else None,
+            routes={"vm-0": "session"} if receiver == component else None,
+        )
+    fixture.registry.lookup("artifact-bundle", "vm-bundle").hints.clear()
+    empty = capture_owner(fixture.registry, "vm", "vm", "vm", fixture.owners["vm"].artifacts)
+    assert not empty.inputs
+    write_capture(db, "vm", "vm", "vm", empty, operation="fixture")
+    views = session_ancestor_views(db, fixture.registry, fixture.vm, fixture.workspace, "agent", "shell")
+    assert views[0].capture_status == "current" and views[0].status == "stale"
+    assert next(view for view in views if view.owner.component == receiver).status == "stale"
+    warnings: list[str] = []
+    repairs: list[SetupInputs] = []
+    monkeypatch.setattr(output, "warn", warnings.append)
+    monkeypatch.setattr(
+        "agentworks.artifacts.routing._remediation", lambda view: repairs.append(view.owner) or "fixture repair"
+    )
+
+    result = session_inherited_inputs(*views, integration_name="shell", report=True)
+    assert not result and len(warnings) == 1
+    assert repairs == [fixture.owners[receiver]]
+    assert read_captures(db, "vm", "vm")["vm"] == empty
+
+
+def test_runtime_deduplicates_recorded_and_new_vm_session_routes(db, monkeypatch):
+    from agentworks import output
+    from agentworks.artifacts.routing import session_ancestor_views, session_inherited_inputs
+
+    fixture = graph(db, active=("vm", "agent", "workspace"), counts={"agent": 0, "workspace": 0})
+    source = fixture.captures["vm"].inputs
+    fixture.save("vm", routes={"vm-0": "user"})
+    fixture.save("agent", inherited=source, routes={"vm-0": "session"})
+    fixture.save("workspace")
+    fixture.save("vm", routes={"vm-0": "session"})
+    views = session_ancestor_views(db, fixture.registry, fixture.vm, fixture.workspace, "agent", "shell")
+    assert views[1].status == "stale" and not views[1].prepared
+    warnings: list[str] = []
+    monkeypatch.setattr(output, "warn", warnings.append)
+
+    result = session_inherited_inputs(*views, integration_name="shell", report=True)
+    assert result == {source.owner: source} and len(warnings) == 1
