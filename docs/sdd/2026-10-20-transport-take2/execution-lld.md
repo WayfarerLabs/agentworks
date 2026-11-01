@@ -11,14 +11,14 @@
 This LLD settles the details the HLA leaves open for the execution core and the operator exec
 surface:
 
-- client resolution, the VM and host policies, and how the client spawns `ssh`;
+- client resolution, the VM policy, and how the client spawns `ssh`;
 - the stdin framing, stage 0, the envelope and the start and completion markers;
 - agw-launch's steps and the terminal handover;
-- request and result types, error mapping and the operation log;
+- request and result types and error mapping;
 - the migrated commands, the guards and the proof modules' adoption and deletion.
 
-Where the HLA is wrong or silent, the narrowest choice is made here and marked **HLA amendment
-proposed**. The lead folds those into the HLA.
+Where the HLA or plan is wrong or silent, the narrowest choice is made here and marked **HLA
+amendment proposed** or **Plan amendment proposed**; the last section lists them all.
 
 **Left to the first consumer.** HLA D5 lands each vocabulary item with its first consumer, and no
 slice 2 consumer uses these, so they are specified only where a later slice's contract depends on
@@ -28,38 +28,36 @@ them:
   (slice 3). Slice 3 must settle one interaction: a sudoers `use_pty` default would turn descriptors
   1 and 2 into a pty, which agw-launch's stream check (below) refuses;
 - `observation` and retry, with `reachability` (slice 3);
-- `PythonProgram`, `Script.interactive` and `FeatureUnavailable` (slice 4 and later). Measured here
-  for that slice: `dash -i FILE` prints a prompt to stderr per line it reads from the file, so an
+- the operation log, `oplog.py` with `LOG_DIR` and `OperationLog` (slice 3, with create's Phase A,
+  its first writer). Slice 2 leaves `ssh.LOG_DIR` and its readers alone;
+- `PythonProgram`, `Script.interactive` and `FeatureUnavailable` (slice 4 and later). Measured for
+  that slice: `dash -i FILE` prints a prompt to stderr per line it reads from the file, so an
   interactive script needs the HLA's startup shell that execs the interpreter, not `-i FILE`;
-- the `Discard` and `ToFile` sinks and the `FromFile` input (slice 7);
-- `attach`'s `clear_screen_on_exit` (slice 7), the Enroll trust mode (slice 3) and the host policy
-  (slice 4).
+- stdin and output sinks beyond the operator's stdin for `stream` (slice 5 and later), the Enroll
+  trust mode (slice 3), the host policy (slice 4) and `attach`'s `clear_screen_on_exit` (slice 7).
 
 ## Module layout
 
-| Module                                           | Contents                                                                                                         |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `agentworks/execution/client.py`                 | `resolve_ssh`, `SSHClient`: resolution, banner and version check                                                 |
-| `agentworks/execution/ssh_process.py`            | `VMPolicy`, `build_argv`, `Deadline`, and the pump that spawns a client and carries its three streams            |
-| `agentworks/execution/envelope.py`               | Frames, the JSON envelope, nonce, marker bytes, the stream filters and the completion classifier                 |
-| `agentworks/execution/launcher.py`               | The client's half of agw-launch: stage 0, `launcher_source()`                                                    |
-| `agentworks/execution/agw_launch.py`             | The guest program. It is exec'd by stage 0, never imported in production                                         |
-| `agentworks/execution/requests.py`, `results.py` | The slice 2 vocabulary (below)                                                                                   |
-| `agentworks/execution/access.py`                 | `VMAccess`, `Admin`, `Agent`, `vm_access`                                                                        |
-| `agentworks/execution/attach.py`                 | The two-connection attach under `guarded_terminal`                                                               |
-| `agentworks/execution/forwarding.py`             | The forward context manager                                                                                      |
-| `agentworks/execution/oplog.py`                  | `LOG_DIR`; `OperationLog` arrives in slice 3                                                                     |
-| `agentworks/execution/errors.py`                 | Adds `ExecutionIncomplete`, `CommandFailed`, `VMNotReady`, `TrustMismatch`, `ClientUnsupported`, `ForwardFailed` |
-| `agentworks/vms/manager/port_forward.py`         | `port_forward_vm`, moved out of `tailscale.py` so the file can pass the static import check                      |
-| `agentworks/vms/manager/platform_shell.py`       | `vm shell --platform`, moved out of `exec.py`; legacy until slice 4                                              |
-| `tests/execution/conftest.py`                    | The legacy-module blocker                                                                                        |
-| `tests/execution/conformance/`                   | The vectors and their carriers                                                                                   |
-| `tests/vm_access_support.py`                     | `RecordingVMAccess`                                                                                              |
+| Module                                           | Contents                                                                                                          |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `agentworks/execution/client.py`                 | `resolve_ssh`, `SSHClient`: resolution, banner and version check                                                  |
+| `agentworks/execution/ssh_process.py`            | `VMPolicy`, `build_argv`, the stage 0 string, `Deadline`, and the pump that spawns a client                       |
+| `agentworks/execution/envelope.py`               | Frames, the JSON envelope, markers, the stream filters, the classifier and `launcher_source()`                    |
+| `agentworks/execution/agw_launch.py`             | The guest program. Stage 0 execs it; production never imports it                                                  |
+| `agentworks/execution/requests.py`, `results.py` | The slice 2 vocabulary, with `Shell` and `AccountShell` (below)                                                   |
+| `agentworks/execution/access.py`                 | `VMAccess`, `Admin`, `Agent`, `vm_access`                                                                         |
+| `agentworks/execution/attach.py`                 | The two-connection attach under `guarded_terminal`                                                                |
+| `agentworks/execution/forwarding.py`             | The blocking forward                                                                                              |
+| `agentworks/execution/errors.py`                 | Adds `ExecutionIncomplete`, `CommandFailed`, `VMNotReady`, `TrustMismatch`, `ClientUnsupported`, `RequestRefused` |
+| `agentworks/vms/manager/port_forward.py`         | `port_forward_vm`, moved out of `tailscale.py` so the file can pass the static import check                       |
+| `agentworks/vms/manager/platform_shell.py`       | The legacy-touching part of `vm shell --platform`, moved out of `exec.py`; legacy until slice 4                   |
+| `tests/execution/conftest.py`                    | The legacy-module blocker                                                                                         |
+| `tests/execution/conformance/`                   | The vectors and their carriers                                                                                    |
+| `tests/vm_access_support.py`                     | `RecordingVMAccess`                                                                                               |
 
-`launcher.py` and `agw_launch.py` split the HLA's one `launcher.py` row, because one half runs on
-the workstation and the other is text sent to the guest. `trust.py` makes `_literal_path`
-(`trust.py:122`) public as `literal_path(path, what)`, so the VM policy quotes the identity file by
-the same rules as the store path and its refusal names what it was refusing.
+`trust.py` makes `_literal_path` (`trust.py:122`) public as `literal_path(path, what)`, so the VM
+policy quotes the identity file by the same rules as the store path and its refusal names what it
+was refusing.
 
 ## The proof modules
 
@@ -69,7 +67,7 @@ the same rules as the store path and its refusal names what it was refusing.
 | `preparation.py`                                                | Deleted. The base64 line envelope and its 256 KiB cap are superseded by `envelope.py`; the `Command` and `Script` shapes carry over to `requests.py`. Its reserved-environment list existed for the Bash bootstrap and does not carry over                                                                                                                                              |
 | `bootstrap.py`                                                  | Deleted, replaced by `agw_launch.py`. Its locale save, force and restore (`:31-33`, `:135`) was for Bash's own parsing and has no counterpart in a Python launcher                                                                                                                                                                                                                      |
 | `carriers/ssh/client.py`                                        | Adopted into `client.py`: the banner regex (`:27`) and the 8.5 floor (`:61`). The probe on every execute becomes once per process; `SSHCarrier` is deleted                                                                                                                                                                                                                              |
-| `carriers/ssh/connection.py`                                    | Adopted into `ssh_process.py`: the option list (`:109-153`, reconciled below) and the host and user checks (`:51-58`). Its trust options are `trust.ssh_options`, so only one copy survives                                                                                                                                                                                             |
+| `carriers/ssh/connection.py`                                    | Adopted into `ssh_process.py`: the option list (`:109-153`, cut down below) and the host and user checks (`:51-58`). Its trust options are `trust.ssh_options`, so only one copy survives                                                                                                                                                                                               |
 | `carriers/ssh/_io.py`                                           | Adopted into `ssh_process.py`: the single-threaded non-blocking pump, kill and reap, the Windows environment strip (`:104-114`) and cleanup on `BaseException` (`:191`)                                                                                                                                                                                                                 |
 | `carriers/proxmox.py`, `carriers/_proxmox_http.py`              | Deleted (R10). Slice 4 writes the QGA client fresh                                                                                                                                                                                                                                                                                                                                      |
 | `tests/execution/` proof tests, `conformance.py`, their READMEs | Deleted with their modules, except the process-level cases of `carriers/ssh/test_client.py` (duplex pressure `:146`, EOF on empty input `:164`, capture limits `:174`, short and failed writes `:219` and `:234`, deadline reap `:272`, interruption `:430`, local signals `:449`, descendant handles `:459` and `:507`, the Windows environment `:543`), which are adapted to the pump |
@@ -84,68 +82,73 @@ parsed `(major, minor)`. Every spawn takes the `SSHClient`, so no caller can lau
 
 - **POSIX.** The first `ssh` along `PATH`, skipping empty and relative elements. Only that candidate
   is judged.
-- **Windows.** `PATH` is never searched. The candidates are `%SystemRoot%\System32\OpenSSH\ssh.exe`
-  and `%ProgramFiles%\OpenSSH\ssh.exe`, in that order, each skipped when its variable is unset.
-  Every candidate is judged and the first acceptable one wins, so a Windows 10 workstation with the
-  inbox 8.1 client and the MSI install resolves to the MSI build.
+- **Windows.** `PATH` is never searched. The candidates, in order, are
+  `%SystemRoot%\Sysnative\OpenSSH\ssh.exe`, `%SystemRoot%\System32\OpenSSH\ssh.exe`,
+  `%ProgramW6432%\OpenSSH\ssh.exe` and `%ProgramFiles%\OpenSSH\ssh.exe`. Each is skipped when its
+  variable is unset or its file is missing. `Sysnative` and `ProgramW6432` exist only for a 32-bit
+  Python on 64-bit Windows, where `System32` and `ProgramFiles` are redirected away from the real
+  client. Every candidate is judged and the first acceptable one wins, so a Windows 10 workstation
+  with the inbox 8.1 client and the MSI install resolves to the MSI build.
 - **Judging.** `ssh -V` runs once per candidate (`stdin=DEVNULL`, 10 s). The banner on stderr must
   match the proof's regex, with the `for_Windows_` form required on Windows and refused elsewhere,
   and the version must be at least 8.5.
 - **Refusal.** `ClientUnsupported` lists each path tried with its reason (missing, wrong build, too
   old) and how to install a supported client, naming the Win32-OpenSSH MSI and the inbox 8.1 client
-  on Windows 10.
-- **Before credentials.** `require_vm_access_boundary(db, config, vm)` in `vms/manager/boundary.py`
-  calls `resolve_ssh()` and then `require_vm_ssh_boundary` (`boundary.py:65`). The six migrated
-  commands call it first, before `gated_vm_boundary`, so an unsupported client refuses before any
-  prompt. It does not go inside `require_vm_ssh_boundary`, because the session, workspace and backup
-  commands still use the legacy `ssh`; slice 7 folds it in when the last legacy user of the gate
-  moves.
-- **Doctor.** `_check_required_tools` (`doctor.py:526`) reports `ssh` from `resolve_ssh()`: the path
-  and version when acceptable, the refusal otherwise. **HLA amendment proposed:** it keeps its `scp`
-  check, because backup and workspace copy still use `scp` until slice 7, and the check goes with
-  the last user (HLA D1 and the plan's slice 2 box say it goes now).
+  on Windows 10. A `Popen` failure on the resolved path raises it too.
+- **Before credentials.** Each migrated command calls `resolve_ssh()` first, before any database
+  read or guard, so an unsupported client refuses before anything else. The existing boundaries
+  (`require_vm_ssh_boundary`, `gated_vm_boundary`) stay as they are.
+- **Doctor.** `_check_required_tools` (`doctor.py:526`) keeps its PATH presence rows for `ssh`,
+  `scp` and `tailscale`, because the legacy paths still use bare `ssh` and `scp`, and adds a row
+  with the resolver's verdict: path and version, or the refusal. Slice 7 or 8 removes the `ssh` and
+  `scp` rows with the last legacy user. **HLA amendment proposed:** D1 and the plan's slice 2 box
+  replace the presence check now.
 
 ## Requests and results
 
-The slice 2 subset of D5. Strings are `str`; `Shell` is a `StrEnum` of `sh`, `bash` and
-`user_default`.
+The slice 2 subset of D5. Strings are `str`. `Shell` is a `StrEnum` of `sh`, `bash` and
+`user_default`. `AccountShell` is `Literal["sh", "dash", "bash", "zsh"]`, the template field type.
 
-| Type         | Fields                                                                                 | First consumer                                                 |
-| ------------ | -------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `Command`    | `argv: tuple[str, ...]`                                                                | `vm exec` with several arguments, `verify-connection`          |
-| `Script`     | `source: str`, `shell: Shell`, `login: bool = False`                                   | `vm exec` with one argument, `agent exec` (login)              |
-| `LoginShell` | none                                                                                   | `vm shell`, `agent shell`                                      |
-| Common       | `env: Mapping[str, str] = {}`, `cwd: str \| None`, `deadline: float \| None` (seconds) | all                                                            |
-| Input        | `NoInput`, `Bytes(data: bytes, sensitive: bool = False)`                               | conformance vectors (R4); production callers arrive in slice 5 |
-| Output       | `Capture(limit: int = 1 MiB)`                                                          | `run`                                                          |
+| Type         | Fields                                                                                 | First consumer                                        |
+| ------------ | -------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `Command`    | `argv: tuple[str, ...]`                                                                | `vm exec` with several arguments, `verify-connection` |
+| `Script`     | `source: str`, `shell: Shell`, `login: bool = False`                                   | `vm exec` with one argument, `agent exec` (login)     |
+| `LoginShell` | none                                                                                   | `vm shell`, `agent shell`                             |
+| Common       | `env: Mapping[str, str] = {}`, `cwd: str \| None`, `deadline: float \| None` (seconds) | all                                                   |
 
 **HLA amendment proposed:** D5 gains `LoginShell`, the identity's default shell as an interactive
-login shell (`[shell, "-l", "-i"]`). A `Script` with an empty source would run `shell -l -i FILE` on
-an empty file and exit, and a name that says "shell session" is more truthful than that. It is valid
-only for `attach`; `run` and `stream` refuse it, and `attach` refuses a request with a `deadline`.
+login shell. A `Script` with an empty source would run `shell -l -i FILE` on an empty file and exit,
+and a name that says "shell session" is more truthful than that. It is valid only for `attach`;
+`run` and `stream` refuse it, and `attach` refuses a request with a `deadline`.
 
-`Result` holds `completion`, `stdout: bytes` and `stderr: bytes` (both `repr=False`), plus `text()`
-for decoded `stdout` (UTF-8, `errors="replace"`, no newline conversion).
+`Result` holds `completion` and `stdout` and `stderr` as bytes (both `repr=False`).
 `Result.require_completed(vm_name) -> int` returns the status of a `Completed` and otherwise raises
 by the error table below; `run(check=True)` is that plus `CommandFailed` for a non-zero status.
 
 ```text
 Completed(status)
-NotDelivered(reason)   CLIENT_START | PYTHON_MISSING | LAUNCHER_FAILED | REFUSED(detail)
+NotDelivered(reason)   PYTHON_MISSING | STDLIB_MISSING | LAUNCHER_FAILED | REFUSED(code)
 Unknown(reason)        CONNECTION | HOST_KEY | TRUNCATED | DEADLINE | OUTPUT_LIMIT
 ```
 
-- **Sensitive stdin.** Both streams are read and dropped, `Result` holds empty bytes, and the
-  operation log keeps no stream (D5, D13). No call combines input with a terminal: `run` and
-  `stream` use `-T` and `attach` takes no input, so incident row I4's refusal is structural.
+- **`access.run(request, *, check=False) -> Result`.** The client closes ssh's stdin right after the
+  request. Each stream is read up to one pump constant, 1 MiB; more is `Unknown(OUTPUT_LIMIT)`.
 - **`access.stream(request, *, stdin, stdout, stderr) -> int`** and
   **`access.attach(request) -> int`** return the guest's status. They raise rather than return
-  `NotDelivered` or `Unknown`, because their consumers can only report it.
+  `NotDelivered` or `Unknown`, because their consumers can only report it. Neither takes the other's
+  inputs: no operation combines input with a terminal, so incident row I4's refusal is structural.
+- **Refusals.** `stream` maps `NotDelivered(REFUSED)` as tty mode does: `exec ENOENT` is status 127,
+  `exec EACCES` and `exec ENOEXEC` are 126, anything else (`cwd`, `handover`, other errno) is 125,
+  with one line naming the refusal on the stderr it was given. So `vm exec VM nosuchcmd` still
+  exits 127. `run` raises `RequestRefused(StateError)` for the same outcome, and `attach` raises it
+  when the parking connection refuses, before the terminal is touched. One `refusal_status(code)` in
+  `agw_launch.py` is the table for the guest and the client alike.
 - **Validation** lives in the one function that turns a request into bytes (`envelope.encode`).
   Boundary: environment, arguments, working directory and script text come from operator-authored
   config and from secret backends. It refuses NUL anywhere, an environment name outside
-  `[A-Za-z_][A-Za-z0-9_]*`, a relative `cwd`, an empty argv or empty `argv[0]`, and a lone surrogate
-  outside `U+DC80` to `U+DCFF` (below).
+  `[A-Za-z_][A-Za-z0-9_]*`, a relative `cwd`, an empty argv or empty `argv[0]`, a lone surrogate
+  outside `U+DC80` to `U+DCFF`, and any argv element or `K=V` environment string over 131,071 bytes
+  once encoded (below).
 
 ## The access object
 
@@ -153,14 +156,8 @@ Unknown(reason)        CONNECTION | HOST_KEY | TRUNCATED | DEADLINE | OUTPUT_LIM
 `Agent(name, linux_user)`. Construction copies the VM name, its tailnet address, the SSH user
 (`admin_username` or the agent's `linux_user`) and the identity file path, and nothing else (R9): no
 key is read, no trust file is opened and nothing is spawned. Its trust is always
-`TrustBinding(TrustMode.VM, vm.name)`; Enroll arrives with slice 3.
-
-| Operation                                                         | Returns                   |
-| ----------------------------------------------------------------- | ------------------------- |
-| `run(request, *, input=NoInput(), output=Capture(), check=False)` | `Result`                  |
-| `stream(request, *, stdin, stdout, stderr)`                       | the guest's status        |
-| `attach(request)`                                                 | the guest's status        |
-| `forward(forwards, *, verbose=False)`                             | a context manager (below) |
+`TrustBinding(TrustMode.VM, vm.name)`; Enroll arrives with slice 3. The operations are `run`,
+`stream`, `attach` and `forward`.
 
 Each operation runs in this order, so everything before the spawn raises with nothing dispatched:
 `resolve_ssh()` (`ClientUnsupported`), encode the request (`ValidationError`), build the options
@@ -175,61 +172,61 @@ port (22 except in tests, which run a local `sshd`). Both are validated at their
 database, with the proof's host and user patterns (`connection.py:51-58`).
 
 **VM policy options.** `-F none` first, so no operator or system configuration applies, then these
-as `-o` (the proof's list at `connection.py:109-153`, reconciled with D2 and `trust.ssh_options`):
+as `-o` (the proof's list at `connection.py:109-153`, cut to what `-F none` leaves to say):
 
-| Group     | Options                                                                                                                                                                                                                    |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Identity  | `IdentityFile="<ssh_private_key>"`, `IdentitiesOnly=yes` (I13). `CertificateFile="<ssh_private_key>/disabled-certificate"`, the 8.5 workaround (`:117-121`). No `IdentityAgent`: the default agent serves an encrypted key |
-| Auth      | `BatchMode=yes`, `PreferredAuthentications=publickey`, `PasswordAuthentication=no`, `KbdInteractiveAuthentication=no`, `SecurityKeyProvider=none`, `PKCS11Provider=none`, `HostbasedAuthentication=no`                     |
-| Trust     | `trust.ssh_options(TrustBinding(VM, vm.name))`, read at spawn (so a missing record is `TrustMissing` and nothing spawns), plus `KnownHostsCommand=none` and `VerifyHostKeyDNS=no`                                          |
-| Isolation | `CanonicalizeHostname=no`, `ForwardAgent=no`, `ForwardX11=no`, `Tunnel=no`, `ProxyCommand=none`, `ProxyJump=none`, `ControlMaster=no`, `ControlPath=none`, `ControlPersist=no` (I12), `PermitLocalCommand=no`              |
-| Liveness  | `ConnectionAttempts=1`, `ConnectTimeout=30`, `ServerAliveInterval=15`, `ServerAliveCountMax=4` (I7; the constants are `ssh.py:288` and `:296-297`)                                                                         |
-| By mode   | `ClearAllForwardings=yes` except for a forward; `EscapeChar=none` except for the terminal half of an attach                                                                                                                |
+| Group    | Options                                                                                                                                                                                                                       |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identity | `IdentityFile="<ssh_private_key>"` and `IdentitiesOnly=yes` (I13). `CertificateFile="<ssh_private_key>/disabled-certificate"`, the 8.5 workaround (`:117-121`). No `IdentityAgent`: the default agent serves an encrypted key |
+| Auth     | `BatchMode=yes`, `PreferredAuthentications=publickey`, `SecurityKeyProvider=none`                                                                                                                                             |
+| Trust    | `trust.ssh_options(TrustBinding(VM, vm.name))`, read at spawn, so a missing record is `TrustMissing` and nothing spawns                                                                                                       |
+| Liveness | `ConnectionAttempts=1`, `ConnectTimeout=30`, `ServerAliveInterval=15`, `ServerAliveCountMax=4` (I7; the constants are `ssh.py:288` and `:296-297`)                                                                            |
 
-- **Dropped from the proof:** its own `StrictHostKeyChecking`, `GlobalKnownHostsFile=none`,
-  `UpdateHostKeys`, `CheckHostIP`, `UserKnownHostsFile` and `HostKeyAlias` (now `trust.py`'s one
-  copy), `IdentityAgent`, `RevokedHostKeys` (no consumer) and the `known_hosts_file` plumbing.
+- **What `-F none` already settles.** Password and keyboard-interactive authentication, multiplexing
+  (I12), proxies, agent and X11 forwarding, host-key DNS, canonicalization, `KnownHostsCommand`,
+  `PermitLocalCommand` and `ClearAllForwardings` are all at their defaults with no configuration
+  read, and no environment variable changes them. The proof pinned each anyway; these pins are not
+  carried over. The escape character is inactive under `-T`, and the terminal half keeps ssh's
+  default `~`, as `transports/ssh.py:380` does today. The CI `ssh -G` test and the live 8.5 and
+  Windows cells guard those defaults.
+- **Dropped from the proof:** the pins above, its own `StrictHostKeyChecking`,
+  `GlobalKnownHostsFile=none`, `UpdateHostKeys`, `CheckHostIP`, `UserKnownHostsFile` and
+  `HostKeyAlias` (now `trust.py`'s one copy), `IdentityAgent`, `RevokedHostKeys` (no consumer) and
+  the `known_hosts_file` plumbing.
 - **HLA amendment proposed:** D9 says slice 2's VM policy uses `none` values for
   `GlobalKnownHostsFile`. It keeps the null device `trust.ssh_options` already pins, which every
   version accepts, so the legacy paths and the VM policy share one function.
 - **HLA amendment proposed:** the liveness options apply to every connection, not only streaming,
   attach and forward (D2). A dead peer then ends a `run` that has no deadline within a minute,
   instead of hanging, and one option list has no per-mode branches.
-- **`EscapeChar`.** The proof turns the escape off. The terminal half leaves ssh's default `~`, as
-  `transports/ssh.py:380` does today, so an operator can still kill a hung session with `~.`.
 - **Environment.** Nothing is sent through ssh. Under `-F none` no `SendEnv` applies, and the
   request's environment is in the envelope (D3).
 
 **Argv shapes.** `<stage0>` is `/usr/bin/python3 -I -S -c '<program>'` (below).
 
-| Mode                              | Argv                                                                                      |
-| --------------------------------- | ----------------------------------------------------------------------------------------- |
-| `run`, `stream`, the parking half | `ssh -F none -T -E <client log> <options> -l <user> -- <host> <stage0>`                   |
-| Terminal half of an attach        | `ssh -F none -t <options> -l <user> -- <host> <stage0> <socket path>`                     |
-| Forward                           | `ssh -F none -N -n <options> -o ExitOnForwardFailure=yes [-v] -L ... -l <user> -- <host>` |
+| Mode                              | Argv                                                                                                         |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `run`, `stream`, the parking half | `ssh -F none -T -E <client log> <options> -l <user> -- <host> <stage0>`                                      |
+| Terminal half of an attach        | `ssh -F none -t <options> -l <user> -- <host> <stage0> <socket path>`                                        |
+| Forward                           | `ssh -F none -N -n [-E <client log> or -v] <options> -o ExitOnForwardFailure=yes -L ... -l <user> -- <host>` |
 
 - **No `-n` on request-bearing connections.** `-n` would replace the request's stdin with the null
   device. ADR 0020's measured alternative, a stdin pipe the client closes, was proven equivalent
   there (PR #736, 80 of 80), so "closed stdin" is the client closing its pipe after the request and
   the caller's input. A forward carries no request and uses `-n`.
-- **`-T` and `-t`.** `-T` on every pipe mode (I14); `-T` also beats an operator's `RequestTTY force`
-  because no configuration is read. **HLA amendment proposed:** the terminal half uses `-t`, not the
-  HLA's `-tt`, as `transports/ssh.py:380` does. `-tt` would force a pty when the operator's stdin is
-  not a terminal, which breaks `echo ls | agw vm shell`. In TTY mode agw-launch accepts a non-pty.
+- **`-T` and `-t`.** `-T` on every pipe mode (I14); it also beats an operator's `RequestTTY force`,
+  and no configuration is read anyway. **HLA amendment proposed:** the terminal half uses `-t`, not
+  the HLA's `-tt`, as `transports/ssh.py:380` does. `-tt` would force a pty when the operator's
+  stdin is not a terminal, which breaks `echo ls | agw vm shell`. tty mode accepts a non-pty.
 - **Forwarded addresses.** `-L <bind>:<local>:localhost:<remote>` as `tailscale.py` builds it today.
-- **The client's own log.** `-E` sends ssh's own diagnostics, never the remote's output, to a
-  private file: `tempfile.mkstemp` (0600) in `CONFIG_DIR / "run"` (0700), removed when the operation
-  ends, quoted by `literal_path`. stderr then carries only what the guest wrote, so the filters need
-  no OpenSSH token, and the client's diagnostics can be shown without the risk that pre-marker
-  stderr quotes request bytes. The terminal half and the forward keep ssh's diagnostics on the
+- **The client log.** `-E` appends ssh's own diagnostics, never the remote's output, to a file from
+  `tempfile.mkstemp()` in the system temporary directory (0600), removed in a `finally`. The value
+  goes to ssh verbatim, so it needs no quoting. stderr then carries only what the guest wrote, the
+  filters read nothing from OpenSSH, and the client's diagnostics can be shown without the risk that
+  pre-marker stderr quotes request bytes. The terminal half keeps ssh's diagnostics on the
   operator's terminal, as today. A live cell confirms that `Host key verification failed` and the
-  authentication and connection errors land in the `-E` file on 8.5, 9.x and Win32-OpenSSH.
-
-**The host policy** lands in slice 4 with its first callers, and nothing in `build_argv` precludes
-it. It omits `-F none` and the isolation pins, honors the operator's configuration, takes
-`StrictHostKeyChecking=accept-new` from `trust.ssh_options(HOST_TRUST)` or the platform's own trust
-options, adds `BatchMode=yes` and the liveness options, and uses the same pump. Its destination may
-be an alias with no user.
+  authentication and connection errors land in the file on 8.5, 9.x and Win32-OpenSSH. **HLA
+  amendment proposed:** D4 and D13 say the client does not read OpenSSH's diagnostics; it now reads
+  this log, to type `Host key verification failed` and to show its last 20 lines in errors.
 
 **Spawning.** `subprocess.Popen(argv, stdin=PIPE, stdout=PIPE, stderr=PIPE, bufsize=0)` with the
 proof's Windows environment strip (`_io.py:104-114`). The pump is the proof's single-threaded loop
@@ -239,17 +236,17 @@ a 10 ms sleep when nothing moved, the deadline, then kill and a 0.5 s reap, and 
 local shell.
 
 - **Who uses it.** `run`, `stream` and the parking connection of an attach reuse the one pump. The
-  terminal half (inherited stdio, `subprocess` wait) and the forward (stdin null, stderr captured)
-  have no pipes to pump and do not.
-- **Operator stdin for `stream`.** A daemon thread reads `stdin.read1(65536)` into a queue and the
-  pump drains one chunk per pass into ssh's stdin, closing it at end of file. A thread is needed
-  because Windows cannot poll a console or pipe handle, and one mechanism serves every platform. A
-  caller with no stdin passes `None` and the pipe closes right after the request. The thread
-  outlives the call blocked in a read; `stream` is the last thing a command does. A write that fails
-  after the start marker is the consumer ending early, not a failure.
-- **Binary stdio.** Callers pass `sys.stdout.buffer`, `sys.stderr.buffer` and `sys.stdin.buffer`
-  (the text layer's `newline="\n"` at `cli/_entry.py:38` does not apply), after flushing the text
-  layer (I2).
+  terminal half (inherited stdio, `subprocess` wait) and the forward (no pipes) do not.
+- **Operator stdin for `stream`.** The caller passes `sys.stdin.buffer.raw`. A daemon thread reads
+  `stdin.read(65536)` into a queue and the pump drains one chunk per pass into ssh's stdin, closing
+  it at end of file. A thread is needed because Windows cannot poll a console or pipe handle, and
+  one mechanism serves every platform. It reads the raw stream because a daemon thread blocked in
+  `BufferedReader.read1` aborts the interpreter at exit (`_enter_buffered_busy`, status 134,
+  measured on Python 3.11). A caller with no stdin passes `None` and the pipe closes right after the
+  request. The thread outlives the call blocked in a read; `stream` is the last thing a command
+  does. A write that fails after the start marker is the consumer ending early, not a failure.
+- **Binary stdio.** Callers pass `sys.stdout.buffer` and `sys.stderr.buffer` (the text layer's
+  `newline="\n"` at `cli/_entry.py:38` does not apply), after flushing the text layer (I2).
 
 ## The wire
 
@@ -257,76 +254,86 @@ The client writes three things to ssh's stdin, in order: the launcher source fra
 frame, then the caller's input, untouched, until end of file. A frame is **ten ASCII decimal digits,
 zero padded, then that many bytes**.
 
-**Stage 0.** The program below, as one `exec("...")` string with `\n` escapes, 209 characters:
+**Stage 0**, the `-c` program, 199 characters:
 
-```python
-import os,sys;a=sys.argv[1:];f=0
-if a:from socket import*;s=socket(1);s.connect(a[0]);f=s.fileno()
-def r(n,d=bytes()):
- while n:c=os.read(f,n)or 1/0;d+=c;n-=len(c)
- return d
-exec(g:=r(int(r(10))))
+```text
+import os,sys,socket as S;a=sys.argv[1:];s=a and S.socket(1);a and s.connect(a[0]);f=a and s.fileno()or 0;r=lambda n:n and(lambda c:c+r(n-len(c)))(os.read(f,n)or 1/0)or bytes();exec(g:=r(int(r(10))))
 ```
 
-- **HLA amendment proposed:** D4 says under 200 characters. With the handover branch this is 209,
-  and I could not bring it under 200 without dropping the socket branch, so the bound becomes 256.
-  The reason for the bound, one line without a single quote that survives a shell and a sudo log, is
-  unchanged.
-- **Quoting.** The program has no single quote, which would end the account shell's quoting, and no
-  `!`, which `csh` expands even inside single quotes. It has no newline. Its only `"` are the pair
-  around the `exec` literal and its only backslashes are the `\n` escapes, so Windows argument
-  quoting escapes one pair. Measured under `sh`, `dash`, `bash` and `zsh` with Python 3.11; the
-  Windows round trip is a live cell.
-- **`r(n)`** reads exactly `n` bytes with `os.read` and so leaves stdin at the next byte (no
-  buffered reader may touch it). End of file raises, so any short or empty input is a traceback and
-  exit 1 before a marker. agw-launch reuses `r` for the envelope. `f` is stdin, or the socket on the
-  handover form. `g` keeps the launcher source for a parking launcher to serve.
-- **Python.** Measured with 3.11 (Debian 12); the program uses nothing newer, and Debian 13's 3.13
-  is a live cell. The launcher is plain syntax too: `ast.parse(..., feature_version=(3, 11))` in a
-  test, and the conformance vectors run on whatever `/usr/bin/python3` is present.
+- **What it does.** `f` is stdin, or the connected socket on the handover form (`a` is the socket
+  path). `r(n)` reads exactly `n` bytes with `os.read`, so stdin is left at the next byte and no
+  buffered reader touches it. `g` is the launcher source, which `exec` then runs and a parking
+  launcher serves again. End of file raises, so any short or empty input is a traceback and exit 1
+  before a marker.
+- **Quoting.** The program has no `'`, which would end the account shell's quoting, no `!`, which
+  `csh` expands even inside single quotes, no `"`, no backslash and no newline, so Windows argument
+  quoting has nothing to escape. Measured under `sh`, `dash`, `bash` and `zsh` with Python 3.11, in
+  pipe and socket mode; the Windows round trip is a live cell.
+- **Recursion.** `r` recurses once per partial read. That is fine for the launcher (tens of
+  kilobytes, a few reads); agw-launch reads the envelope with its own loop, and receives `f` and `g`
+  as `main(f, g)`.
+- **Python.** Measured with 3.11 (Debian 12); Debian 13's 3.13 is a live cell. The launcher uses
+  plain syntax and only the standard library: `ast.parse(..., feature_version=(3, 11))` in a test,
+  and the L lane also runs under a 3.11 interpreter in CI (below).
 
 **Envelope.** One JSON object, `json.dumps(obj, ensure_ascii=True, separators=(",", ":"))`, so the
 wire is pure ASCII whatever the workstation's locale. No version field (HLA D3).
 
-| Field    | Type                         | Meaning                                                                             |
-| -------- | ---------------------------- | ----------------------------------------------------------------------------------- |
-| `nonce`  | 32 lowercase hex             | `secrets.token_hex(16)` per request, never in the payload's argv or environment     |
-| `mode`   | `run`, `tty` or `park`       | Pipe mode with markers; terminal exec; park for a handover                          |
-| `kind`   | `argv`, `script` or `shell`  | `Command`, `Script`, `LoginShell`                                                   |
-| `argv`   | list of str                  | `argv` kind, non-empty                                                              |
-| `shell`  | `sh`, `bash`, `user_default` | `script` kind                                                                       |
-| `source` | str                          | `script` kind                                                                       |
-| `login`  | bool                         | `script` kind                                                                       |
-| `cwd`    | str or null                  | Absolute; null means the home directory                                             |
-| `env`    | object of str to str         | The request's environment                                                           |
-| `term`   | str or null                  | `tty` and `park` modes: the operator's `TERM`, `xterm-256color` when unset or empty |
+| Field      | Type                         | Meaning                                                                             |
+| ---------- | ---------------------------- | ----------------------------------------------------------------------------------- |
+| `nonce`    | 32 lowercase hex             | `secrets.token_hex(16)` per request, never in the payload's argv or environment     |
+| `mode`     | `run`, `tty` or `park`       | Pipe mode with markers; terminal exec; park for a handover                          |
+| `kind`     | `argv`, `script` or `shell`  | `Command`, `Script`, `LoginShell`                                                   |
+| `argv`     | list of str                  | `argv` kind, non-empty                                                              |
+| `shell`    | `sh`, `bash`, `user_default` | `script` kind                                                                       |
+| `source`   | str                          | `script` kind                                                                       |
+| `login`    | bool                         | `script` kind                                                                       |
+| `cwd`      | str or null                  | Absolute; null means the home directory                                             |
+| `env`      | object of str to str         | The request's environment                                                           |
+| `term`     | str or null                  | `tty` and `park` modes: the operator's `TERM`, `xterm-256color` when unset or empty |
+| `handover` | 16 lowercase hex             | `park` mode: the client's `secrets.token_hex(8)`, naming the socket directory       |
+
+The client validates; agw-launch does not re-validate the schema. A malformed envelope is an
+uncaught exception before the start marker, and one build ships both halves.
 
 - **Bytes in JSON.** Values are `str`. Text that is not valid UTF-8 travels as the code points
   `os.fsdecode` produces (`U+DC80` to `U+DCFF`), which JSON carries as `\udcXX`. The guest encodes
   every string with `utf-8` and `surrogateescape`, so the guest sees the original bytes: `%`,
-  quotes, `${...}`, CR, LF and every byte but NUL exactly. A string that cannot encode that way is
-  refused by the client; the launcher refuses it too, before its start marker.
+  quotes, `${...}`, CR, LF and every byte but NUL exactly.
+- **Kernel limits.** Linux caps each argv element and each `K=V` environment string at
+  `MAX_ARG_STRLEN`, 131,072 bytes counting the NUL (measured: 131,071 runs, 131,072 fails).
+  `envelope.encode` refuses a larger element or string with a `ValidationError` naming which. A
+  total over `ARG_MAX` stays `refused exec E2BIG`. Script source is unaffected, since it goes to a
+  memfd. **HLA amendment proposed:** D3 says nothing bounds a request but memory; the per-string
+  limit is the kernel's.
 - **Markers.** Every marker is `0x1E`, the nonce, a space, a word, a newline: `start`, `end`,
-  `exit N`, `refused CODE`, `parked DIR`. Payload output is the bytes between the start marker and
-  the closing one, so it needs no trailing newline. The lead byte is one no text emits, so the
-  filters' hold-back (below) almost never delays a real byte; a lead hex digit would hold back one
-  in sixteen output endings.
+  `exit N`, `refused CODE`, `parked`. Payload output is the bytes between the start marker and the
+  closing one, so it needs no trailing newline. The lead byte is one no text emits, so the filters'
+  hold-back (below) almost never delays a real byte; a lead hex digit would hold back one in sixteen
+  output endings.
 
 ## agw-launch
 
-The guest program, run by stage 0 under `python3 -I -S` from `launcher_source()`, which reads
-`agw_launch.py` from the installed package. The file has no import-time effect (its `main()` runs
-only when `__name__` is `"__main__"`, as it is under stage 0's `-c`), so the package guard can
-import it. Steps, mapped to HLA D4:
+The guest program, run by stage 0 under `python3 -I -S` from `launcher_source()` (in `envelope.py`),
+which reads `agw_launch.py` from the installed package. The file has no import-time effect: it
+defines `main(f, g)` and ends with
+`if __name__ == "__main__": main(globals()["f"], globals()["g"])`, so the package guard can import
+it and linters see no undefined names. Its standard-library imports sit in one `try`; an
+`ImportError` (a `python3-minimal` without them) exits with `STDLIB_MISSING_STATUS`, 69, before any
+marker. The client's classifier imports that constant and `refusal_status` from this module, so each
+is defined once. Steps, mapped to HLA D4:
 
-0. **Read.** The envelope by `r`. Malformed JSON or schema exits 70 before any marker. Every failure
-   before the start marker exits 70 or, for an uncaught exception, 1; neither is 127 or 255.
-1. **Check the streams** (`run` and `park` modes). Descriptors 1 and 2 must each be a FIFO or a
+1. **Read.** The envelope, with its own exact-read loop. Every failure before the start marker is an
+   uncaught exception (exit 1) or the status above; neither is 127 or 255. The one ordering rule:
+   argv and environment are encoded to bytes before the start marker, so a string that cannot be
+   encoded fails before it.
+2. **Check the streams** (`run` and `park` modes). Descriptors 1 and 2 must each be a FIFO or a
    socket, and distinct (`st_dev` and `st_ino`). A startup file that ran `exec >/dev/null` or
-   `exec 2>&1` fails this and exits 70.
-2. **Start marker** to descriptor 1, then 2.
-3. **Reset.** Environment rebuilt in this order: `HOME`, `USER`, `LOGNAME`, `SHELL` from the passwd
-   entry of `os.getuid()` (a missing entry is `refused passwd`; an empty shell is `/bin/sh`), then
+   `exec 2>&1` fails this and exits 1.
+3. **Start marker** to descriptor 1, then 2.
+4. **Reset.** Environment rebuilt in this order: `HOME`, `USER`, `LOGNAME`, `SHELL` from the passwd
+   entry of `os.getuid()` (a missing entry is an exception before the marker, since sshd cannot
+   authenticate a uid without one; an empty shell is `/bin/sh`), then
    `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/games:/usr/games`,
    `LANG=C.UTF-8`, `SHLVL=1`, `TERM` and `SSH_TTY` (the terminal name) in `tty` mode when stdin is a
    terminal, `XDG_RUNTIME_DIR=/run/user/<uid>` when that directory exists and the uid owns it, and
@@ -334,32 +341,33 @@ import it. Steps, mapped to HLA D4:
    environment. The working directory is set with `os.chdir` in agw-launch itself, to `cwd` or home
    (`refused cwd` on failure, which `Popen` could not tell from a missing `argv[0]`), the umask is
    `022`, every signal an earlier process ignored goes back to its default, the signal mask is
-   cleared, and the payload gets no descriptor above 2.
+   cleared, and the payload gets no descriptor above 2 other than a script's.
    - **Choices the HLA leaves open.** `PATH` is one fixed value for every identity, a superset of
      Debian's login paths so `ip` resolves for an admin and later for root. The locale is
      `LANG=C.UTF-8` and no `LC_*`: sessions used to inherit the workstation's `LANG` through
      `SendEnv`, which `-F none` stops sending, and a fixed value makes output reproducible.
-4. **Run the payload as a child** (`subprocess.Popen` with bytes arguments and environment,
+5. **Run the payload as a child** (`subprocess.Popen` with bytes arguments and environment,
    `restore_signals=True`, `close_fds=True`, `umask=0o022`), not a shell:
    - `argv`: the arguments themselves; `argv[0]` is searched in the rebuilt `PATH`. A failure to
-     execute is `refused exec <ERRNO>`.
-   - `script`: the source goes to an anonymous file from `os.memfd_create`, passed in `pass_fds` as
-     the one inherited descriptor and named `/dev/fd/N`, so script text is in no argv and the
-     interpreter's stdin stays the caller's. The interpreter is `/bin/sh`, `/bin/bash` or the passwd
-     shell (`refused interpreter` when it is not executable), run as `[interp] [-l] /dev/fd/N`. The
-     interpreter's own children inherit the descriptor; it holds only the script they came from.
-   - `shell`: `tty` mode only, below. The payload's stdin is agw-launch's, positioned at the
-     caller's first byte. There is no copy loop.
-5. **Complete.** After `wait`, write `<M>end` to descriptor 1 then `<M>exit N` to descriptor 2, with
+     execute is `refused exec <ERRNO>`, which covers a missing or non-executable interpreter too.
+   - `script`: the source goes to an anonymous file from `os.memfd_create`, flagged
+     `MFD_NOEXEC_SEAL` (`0x8`, kernel 6.3 and later) with a retry without it on `EINVAL`, passed in
+     `pass_fds` and named `/dev/fd/N`, so script text is in no argv and the interpreter's stdin
+     stays the caller's. The interpreter is `/bin/sh`, `/bin/bash` or the passwd shell, run as
+     `[interp] [-l] /dev/fd/N`. The interpreter's own children inherit that descriptor, the only one
+     they inherit; it holds the script they came from. The payload's stdin is agw-launch's,
+     positioned at the caller's first byte. There is no copy loop.
+6. **Complete.** After `wait`, write `<M>end` to descriptor 1 then `<M>exit N` to descriptor 2, with
    `N` the exit status, or 128 plus the signal for a payload killed by one. A refusal writes `end`
-   then `refused CODE` instead. Codes are `passwd`, `interpreter`, `cwd`, `exec <ERRNO>` and, for a
-   parked launcher, `handover`.
+   then `refused CODE` instead. Codes are `cwd`, `exec <ERRNO>` and, for a parked launcher,
+   `handover`.
 
-**`tty` mode** (the terminal half of an attach) runs steps 0, 3 and 4 with no check, no markers and
-no child: it closes descriptors from 3 up and `os.execvpe`s the payload, so the shell is the session
-leader on the pty. It takes any request kind; slice 2 sends only `LoginShell`. For `LoginShell` the
-program is `[shell, "-l", "-i"]`. A refusal prints one line to stderr and exits 126 (cannot
-execute), 127 (not found) or 125 (other), as `env(1)` does.
+**`tty` mode** (the terminal half of an attach) runs `LoginShell` only, since a script's memfd could
+not survive the descriptor close. It runs steps 1, 4 and 5 with no check, no markers and no child:
+it closes descriptors from 3 up and `os.execv`s `[shell, "-l"]`, adding `-i` only when stdin is a
+terminal, so the shell is the session leader on the pty. A refusal prints one line to stderr and
+exits with `refusal_status(code)`: 127 for `exec ENOENT`, 126 for `exec EACCES` and `exec ENOEXEC`,
+125 otherwise, as `env(1)` does.
 
 ## Completion, on the client
 
@@ -368,7 +376,9 @@ execute), 127 (not found) or 125 (other), as `env(1)` does.
 - **Seeking.** Search for the start marker, dropping everything before it and keeping only a tail of
   marker length across chunks. Nothing in the dropped bytes is read.
 - **Passing.** Forward payload bytes at once, holding back only the longest suffix that is a proper
-  prefix of the closing prefix (`0x1E`, nonce, space). No timer is involved.
+  prefix of the closing prefix (`0x1E`, nonce, space). No timer is involved. A control line on
+  stdout, `<M>parked`, is removed from the stream and reported to the attach; nothing else on a
+  stream is a control line before the closing one.
 - **Done.** After the closing line, drop everything. stdout closes with `end`, stderr with `exit N`
   or `refused CODE`.
 
@@ -379,71 +389,77 @@ The classifier combines both filters with ssh's own exit status:
 | `end` on stdout and `exit N` on stderr                            | `Completed(N)`; ssh's own status is ignored                                                                     |
 | `end` on stdout and `refused CODE` on stderr                      | `NotDelivered(REFUSED, CODE)`                                                                                   |
 | No start marker, ssh exit 127                                     | `NotDelivered(PYTHON_MISSING)`                                                                                  |
+| No start marker, ssh exit `STDLIB_MISSING_STATUS`                 | `NotDelivered(STDLIB_MISSING)`                                                                                  |
 | No start marker, ssh exit 0 to 254 otherwise                      | `NotDelivered(LAUNCHER_FAILED)`                                                                                 |
 | No start marker, ssh exit 255, a signal, or a status above 255    | `Unknown(CONNECTION)`, or `Unknown(HOST_KEY)` when the client log holds `Host key verification failed` on a 255 |
 | A start marker, but no `end` or no trailer at exit or end of file | `Unknown(TRUNCATED)`                                                                                            |
-| Deadline reached, or a stream over its capture limit              | `Unknown(DEADLINE)`, `Unknown(OUTPUT_LIMIT)`                                                                    |
-| `Popen` raised                                                    | `NotDelivered(CLIENT_START)`                                                                                    |
+| Deadline reached, or a stream over the pump constant              | `Unknown(DEADLINE)`, `Unknown(OUTPUT_LIMIT)`                                                                    |
 
 - **Ending the client.** Once both streams are done the client closes ssh's stdin, waits up to one
   second for a natural exit and kills it. It never waits for end of file or on a timer, so a
   background child holding the channel cannot stall it. If one stream is done and the other is not,
   it keeps pumping until the other completes or both reach end of file.
-- **No pre-marker text is kept.** `NotDelivered` and `Unknown` carry reasons, never stream text:
-  with no start marker, the stderr may be a traceback quoting request bytes a startup file left
-  unread. They do carry the last 20 lines of the client log, which holds only ssh's own diagnostics
+- **No stream text in errors.** `NotDelivered` and `Unknown` carry reasons, never stream text: with
+  no start marker, the stderr may be a traceback quoting request bytes a startup file left unread.
+  They do carry the last 20 lines of the client log, which holds only ssh's own diagnostics
   (`Permission denied (publickey)`, `Connection timed out`), so the operator sees why a connection
-  failed. This is the one OpenSSH output the client reads, and it reads one token from it to type an
-  error (HLA D4).
+  failed.
 
 ## Terminal handover
 
 `attach(request)` does, in order:
 
-1. Build the `tty` envelope for the request, with `term`, and send it to a first connection as
-   `mode: "park"` (argv shape `run`, stage 0 with no argument).
-2. agw-launch, in `park` mode, creates `tempfile.mkdtemp(prefix="agw-handover-", dir="/tmp")` (mode
-   0700; `TMPDIR` is ignored under `-I`), binds a Unix stream socket `s` in it under umask 077, and
-   listens. It writes the start markers and `<M>parked <dir>` to stdout.
-3. The client reads that line from the parking connection, checks `<dir>` against
-   `^/tmp/agw-handover-[A-Za-z0-9_]{8}$` (it goes into a remote command line), then, inside
-   `with guarded_terminal() as guard:`, runs the terminal half. Its stage 0 gets `<dir>/s` as
+1. Generate `token = secrets.token_hex(8)`, build the `tty` envelope for the request with `term`,
+   and send it to a first connection as `mode: "park"` with `handover: token` (argv shape `run`,
+   stage 0 with no argument). The socket path, `/tmp/agw-handover-<token>/s`, is computed locally.
+2. agw-launch, in `park` mode, first pre-checks what the terminal half would otherwise fail on: the
+   working directory (`cwd`, or home) must be enterable and the shell executable. A failure is
+   `refused cwd` or `refused exec <ERRNO>`, so it comes back typed before the terminal is touched.
+   It then installs `SIGHUP` and `SIGTERM` handlers that raise `SystemExit`, so the `finally` below
+   runs, and calls `os.mkdir("/tmp/agw-handover-<token>", 0o700)`. An existing name is
+   `refused handover`, so a pre-planted path is never reused. The path is fixed under `/tmp`, so
+   `TMPDIR` plays no part. It binds a Unix stream socket `s` in the directory under umask 077,
+   listens, and writes `<M>parked` to stdout.
+3. The client reads that line from the parking connection, then, inside
+   `with guarded_terminal() as guard:`, runs the terminal half. Its stage 0 gets the socket path as
    `sys.argv[1]`, connects, reads the launcher frame and the envelope frame from the socket, and
-   runs agw-launch in `tty` mode.
+   runs agw-launch in `tty` mode. No guest text reaches a command line.
 4. The parked launcher waits with `select` on the listener and on its own stdin, for at most 30
-   seconds. On a connection it sends the launcher frame and the envelope re-serialized with
+   seconds. On a connection it sends the launcher frame (`g`) and the envelope re-serialized with
    `mode: "tty"`, closes the connection, then writes `end` and `exit 0`. On stdin end of file (the
    client closing its pipe) or the timeout it writes `end` and `refused handover`. In every case a
    `finally` removes the socket and the directory, so a failed second connection leaves nothing.
+   **HLA amendment proposed:** D8 says the parked half exits after 30 seconds with no trailer; it
+   writes this one so the client can tell a timeout from a drop.
 5. After the second connection returns, still inside the guard, `guard.clean_exit = code == 0`.
    After the guard, a code of 255 prints the notice "connection ended or the command exited 255;
    terminal restored" with the existing detail line (I6), reimplemented in `attach.py` because the
    legacy helper is `transports/ssh.py:77`. The client then closes the parking connection's stdin,
    pumps it for up to two seconds and ends it.
 
-The parking connection fails first on a missing `python3`, a trust mismatch or a refused connection,
-so `attach` raises `VMNotReady`, `TrustMismatch` or `ExecutionIncomplete` before the terminal is
-touched. While the terminal half runs, the parking connection's pipes go unread; it writes a few
-lines, far below a pipe buffer. A failure of only the second connection returns its code; with the
-socket gone the operator sees Python's traceback on the terminal and code 1, which is accepted for
-that rare race. `socket` has no `SO_PEERCRED` check: the directory is 0700, and the account's own
-processes can already read its processes (HLA D8).
+The parking connection fails first on a missing `python3`, a trust mismatch, a refusal or a refused
+connection, so `attach` raises `VMNotReady`, `TrustMismatch`, `RequestRefused` or
+`ExecutionIncomplete` before the terminal is touched. While the terminal half runs, the parking
+connection's pipes go unread; it writes a few lines, far below a pipe buffer. A failure of only the
+second connection returns its code; with the socket gone the operator sees Python's traceback on the
+terminal and code 1, which is accepted for that rare race. There is no `SO_PEERCRED` check: the
+directory is 0700, and the account's own processes can already read its processes (HLA D8).
 
 ## Forward
 
-`access.forward(forwards, verbose=False)` is a context manager over
-`Forward(local_port, remote_port, bind_address="localhost")`. It spawns the forward argv above with
-stderr captured (inherited under `verbose`) and then waits for readiness:
+`access.forward(forwards, *, verbose=False) -> int` blocks, over
+`Forward(local_port, remote_port, bind_address="localhost")` values. It spawns the forward argv
+above and waits for the client, polling `Popen.wait(timeout=0.2)` so Ctrl-C is delivered.
 
-- **Ready** is a TCP connect to `bind_address` (loopback for an unspecified address) on each local
-  port succeeding, polled every 50 ms for up to 60 s. Each probe opens one forwarded channel that
-  closes at once, a side effect the HLA accepts by choosing this signal.
-- **Not ready** is the client exiting first (`ExitOnForwardFailure=yes`, a refused connection) or
-  the 60 s elapsing. `ForwardFailed(ConnectivityError)` carries the client's stderr, which holds no
-  request data, since a forward runs no request, and `Host key verification failed` there raises
-  `TrustMismatch` instead. **HLA amendment proposed:** D13 gains `ForwardFailed`.
-- **The handle** has `wait() -> int` (polling `Popen.wait(timeout=0.2)` so Ctrl-C is delivered) and
-  exit ends the client: terminate, one second, kill.
+- **Diagnostics.** Without `verbose`, `-E` sends them to the client log and stderr is `DEVNULL`,
+  because an unread stderr pipe stalls the client after about a thousand refused channels. With
+  `verbose` there is no `-E` and the client inherits the operator's stderr.
+- **Failure.** `ExitOnForwardFailure=yes` and `ConnectTimeout` make a setup failure the client's own
+  exit, so there is no readiness probe, handle or context manager. A non-zero exit raises plain
+  `ConnectivityError` with the log's last 20 lines, or `TrustMismatch` when the log holds
+  `Host key verification failed`. A zero exit returns 0. The client always ends on the way out:
+  terminate, one second, kill, and the log is removed. **HLA amendment proposed:** D8 describes a
+  context manager that returns once the local port accepts a connection.
 - **Signals.** The library installs none. `port_forward_vm` installs a `SIGTERM` handler that raises
   `KeyboardInterrupt` for the duration of the forward and restores the previous handler (today's
   handlers are never restored, `tailscale.py:180-181`). An operator stop returns 0; any other end
@@ -451,86 +467,79 @@ stderr captured (inherited under `verbose`) and then waits for readiness:
 
 ## Errors
 
-| Error                 | Kind                | Raised for                                                                                                | PR A hint                                                                   |
-| --------------------- | ------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `ClientUnsupported`   | `ConfigError`       | No acceptable OpenSSH, before dispatch                                                                    | The install guidance in the message                                         |
-| `VMNotReady`          | `StateError`        | `NotDelivered(PYTHON_MISSING)` (an unelevated 127)                                                        | `agw vm reinit <vm>`, whose Phase A still runs without python3              |
-| `TrustMismatch`       | `StateError`        | `Unknown(HOST_KEY)`, and the forward's token                                                              | Verify the new key, remove the store file, `import-host-keys --known-hosts` |
-| `ExecutionIncomplete` | `ConnectivityError` | Any other `NotDelivered` or `Unknown`; carries the `Result`, names which, and shows the client log's tail | A `NotDelivered` command did not start; an `Unknown` one may have run       |
-| `CommandFailed`       | `ExternalError`     | `check=True` with a non-zero status; message has the status, never stream text                            | none                                                                        |
-| `ForwardFailed`       | `ConnectivityError` | A forward that never became ready                                                                         | none                                                                        |
+| Error                 | Kind                | Raised for                                                                                              | PR A hint                                                                   |
+| --------------------- | ------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `ClientUnsupported`   | `ConfigError`       | No acceptable OpenSSH, or the resolved client fails to start                                            | The install guidance in the message                                         |
+| `VMNotReady`          | `StateError`        | `NotDelivered(PYTHON_MISSING)` (an unelevated 127) and `NotDelivered(STDLIB_MISSING)`                   | `agw vm reinit <vm>`, whose Phase A still runs without python3              |
+| `TrustMismatch`       | `StateError`        | `Unknown(HOST_KEY)`, and the forward's token                                                            | Verify the new key, remove the store file, `import-host-keys --known-hosts` |
+| `RequestRefused`      | `StateError`        | `NotDelivered(REFUSED)` under `run` and `attach`; names the code                                        | Fix the working directory or the command                                    |
+| `ExecutionIncomplete` | `ConnectivityError` | Any other `NotDelivered` or `Unknown`; carries the `Result`, names which, and shows the client log tail | A `NotDelivered` command did not start; an `Unknown` one may have run       |
+| `CommandFailed`       | `ExternalError`     | `check=True` with a non-zero status; message has the status, never stream text                          | none                                                                        |
 
-**HLA amendment proposed:** `TrustMismatch`'s hint cannot name `agw vm recover` in PR A, which lands
-in slice 4 (PR B). Until then it names the manual path, since import never rewrites an existing
-record (`trust-lld.md`). The hint is one constant slice 4 changes. `TrustMissing` already exists
-(`errors.py`). `PermissionDenied` and `FeatureUnavailable` land with their first consumers. No error
-message, `repr` or hint holds a stream, an environment value, script text or stdin.
-
-## The operation log
-
-`oplog.LOG_DIR = CONFIG_DIR / "logs"` is the one constant, the same directory as today (`ssh.py:89`,
-`cli/_errors.py:57`). `SSHLogger` and every reader read it through the module (`oplog.LOG_DIR` at
-call time) so one test patch reaches them all.
-
-- **Readers moved:** `doctor_state.py:124`, `vms/manager/_helpers.py:205`, `lifecycle.py:99`,
-  `power.py:323` and `cli/commands/vm.py:441`. `ssh.py` drops its constant and `SSHLogger`
-  (`ssh.py:99`) reads `oplog.LOG_DIR`. The session fixture at `tests/conftest.py:83` patches
-  `oplog.LOG_DIR`, and so do the eight test files that patched `agentworks.ssh.LOG_DIR`.
-- **The writer waits for its first consumer.** None of the six migrated commands writes a log today,
-  and a log from them would displace the create log that the readers above show newest-first. HLA
-  D5's rule lands nothing before its consumer, so `OperationLog` arrives in slice 3 with create's
-  Phase A. Its contract is fixed now so slice 3 inherits it: `<vm>-<UTC timestamp>-<stem>.log` in
-  `LOG_DIR`, so the existing globs keep matching; per operation the caller's label, the request
-  shape (kind, flags, environment variable names, `cwd`, input size, `sensitive`, deadline, the ssh
-  argv without request data), the outcome with elapsed time, the client log, and the streams after
-  `SSHLogger`'s redaction (raw and `shlex.quote`d forms, longest first), with a sensitive stdin
-  keeping both streams out. It never records argv values, environment values, script text or stdin.
-  **Plan amendment:** the slice 2 box names `oplog.py`; slice 2 lands its constant and slice 3 its
-  writer.
+**HLA amendment proposed:** D13 gains `RequestRefused` and the refusal mapping above, and its errors
+may show the client log's tail. **HLA amendment proposed:** `TrustMismatch`'s hint cannot name
+`agw vm recover` in PR A, which lands in slice 4 (PR B). Until then it names the manual path, since
+import never rewrites an existing record (`trust-lld.md`). The hint is one constant slice 4 changes.
+`TrustMissing` already exists (`errors.py`). `PermissionDenied` and `FeatureUnavailable` land with
+their first consumers. No error message, `repr` or hint holds a stream, an environment value or
+script text.
 
 ## The migrated commands
 
-All six keep their guards, workspace and secret resolution and the gate. Each gains
-`require_vm_access_boundary` before the gate and builds
-`access = execution.vm_access(vm, config, Admin() or Agent(agent))`, called through the package
-attribute so one patch reaches every manager.
+All six keep their guards, workspace and secret resolution and the gate. Each calls `resolve_ssh()`
+first and builds `access = execution.vm_access(vm, config, Admin() or Agent(agent))`, called through
+the package attribute so one patch reaches every manager.
 
-| Command                                       | Request and call                                                                                                                                                                        |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vm exec` (`exec.py:182`)                     | One argument: `Script(arg, Shell.USER_DEFAULT)`. Several: `Command(tuple(args))`. `cwd=ws.workspace_path`, `env=compose_env(...)`. `access.stream(...)` with the process's binary stdio |
-| `agent exec` (`access.py:134`)                | `Script(source, Shell.USER_DEFAULT, login=True)`, with `source` the one argument or `shlex.join(args)`, as `$SHELL -lc` does today                                                      |
-| `vm shell` (`exec.py:35`)                     | `LoginShell(cwd, env)` and `access.attach`                                                                                                                                              |
-| `agent shell` (`access.py:34`)                | The same with the agent's access, after the agent probe                                                                                                                                 |
-| `vm verify-connection` (`verification.py:28`) | `run(Command(("true",), deadline=10), check=True)`. The message keeps "via ssh" (the kind is now the constant `ssh`)                                                                    |
-| `vm port-forward` (`tailscale.py:73`)         | Port parsing and guards as today, then `access.forward(...)` and the signal handling above                                                                                              |
+| Command                                       | Request and call                                                                                                                                                                                                    |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vm exec` (`exec.py:182`)                     | One argument: `Script(arg, Shell.USER_DEFAULT)`. Several: `Command(tuple(args))`. `cwd=ws.workspace_path`, `env=compose_env(...)`. `access.stream(...)` with `sys.stdin.buffer.raw` and the process's binary output |
+| `agent exec` (`access.py:134`)                | `Script(source, Shell.USER_DEFAULT, login=True)`, with `source` the one argument or `shlex.join(args)`, as `$SHELL -lc` does today                                                                                  |
+| `vm shell` (`exec.py:35`)                     | `LoginShell(cwd, env)` and `access.attach`                                                                                                                                                                          |
+| `agent shell` (`access.py:34`)                | The same with the agent's access, after the agent probe                                                                                                                                                             |
+| `vm verify-connection` (`verification.py:28`) | `run(Command(("true",), deadline=10), check=True)`. The message keeps "via ssh" (the kind is now the constant `ssh`)                                                                                                |
+| `vm port-forward` (`tailscale.py:73`)         | Port parsing and guards as today, then `access.forward(...)` and the signal handling above                                                                                                                          |
 
-- **Splits for the static check.** `exec.py` keeps `exec_vm` and the default `shell_vm`; the
-  `--platform` branch (`exec.py:72`, `:162-165`) moves to `platform_shell.py`, still on the legacy
-  `native_transport` and `gated_vm_platform_recovery_boundary` until slice 4, and `shell_vm`
-  dispatches to it. `vm shell --platform` uses `native_transport`, and `native_shell` is slice 4's.
-  `port_forward_vm` moves from `tailscale.py`, which keeps `_ensure_tailscale`'s legacy imports.
+- **Splits for the static check.** `exec.py` keeps its shared preamble (guards, workspace, gate
+  choice, environment) and both `exec_vm` and `shell_vm`. Only the legacy-touching part of the
+  `--platform` branch (`exec.py:162-166`: `native_transport` creation, the `Transport` check and the
+  interactive call, with the import at `:72`) moves to `platform_shell.py`, still legacy until slice
+  4, so `exec.py` imports nothing retired. `vm shell --platform` uses `native_transport`, and
+  `native_shell` is slice 4's. `port_forward_vm` moves from `tailscale.py`, which keeps
+  `_ensure_tailscale`'s legacy imports.
 - **Agent probe.** `_assert_agent_ssh_works` (`agents/manager/_common.py:237`) takes a legacy
   `Transport`, and the sessions and agent-create paths still call it. A new
-  `_assert_agent_access_works` beside it serves `agent exec` and `agent shell`: `Completed(any)`
-  passes; `NotDelivered(PYTHON_MISSING)` is `VMNotReady`; `Unknown(HOST_KEY)` is `TrustMismatch`;
-  any other `NotDelivered` or `Unknown` runs the same `true` as the admin. If that completes, the
-  agent predates the rollout (the existing `StateError` and hint); otherwise the VM is unreachable
-  (the existing `ConnectivityError`). This keeps incident row I19 without reading ssh diagnostics,
-  so **I19 is also re-proved in slice 2** (inventory amendment proposed).
+  `_assert_agent_access_works` in `agents/manager/access.py`, a file under the static check, serves
+  `agent exec` and `agent shell` with `true` as the agent. A `Completed` of any status passes. Only
+  `Unknown(CONNECTION)` falls back to running `true` as the admin: if that completes, the agent
+  predates the rollout (the existing `StateError` and hint); otherwise the VM is unreachable (the
+  existing `ConnectivityError`). Every other outcome raises as it is: `VMNotReady`, `TrustMismatch`,
+  `RequestRefused` or `ExecutionIncomplete`. This keeps incident row I19, so **I19 is also re-proved
+  in slice 2** (inventory amendment proposed).
 - **Behavior changes** for release notes and the 0.20 guide:
   - OpenSSH 8.5 or newer is required for these six commands, and Windows needs the native build.
   - A VM without `python3` is `VMNotReady`, not a shell error.
   - The guest sees a fixed `PATH`, `LANG=C.UTF-8`, `SHLVL=1` and no `SSH_CLIENT` or
     `SSH_CONNECTION`.
-  - A literal `vm exec` command no longer inherits the account shell's startup, and a missing
-    workspace directory is a not-delivered error, not a shell message.
-  - `vm shell` without a command stops showing the message of the day and last-login line, because
-    sshd prints them only when it runs the login shell itself.
+  - A literal `vm exec` command no longer inherits the account shell's startup. A command that
+    cannot start, such as `vm exec VM nosuchcmd`, exits 127 (126 when not executable) with one line
+    from agw instead of the shell's message. A missing workspace directory exits 125 with one line.
+  - An argument or `NAME=VALUE` environment string over 131,071 bytes is refused up front.
+  - `IdentityAgent` set only in `~/.ssh/config` (1Password, Secretive) is ignored by the six
+    commands, since no configuration is read; the agent named by `SSH_AUTH_SOCK` serves the key.
+  - `vm shell` and `agent shell` without `--workspace` lose the message of the day and last-login
+    line, because sshd prints them only when it runs the login shell itself. Operator disposition
+    pending.
+  - An encrypted key the default agent does not hold can no longer prompt for its passphrase on
+    `vm shell` and `agent shell`, since every connection runs with `BatchMode=yes`. Operator
+    disposition pending.
+  - `/etc/environment` and other `pam_env` variables no longer reach the payload, which gets only
+    the rebuilt environment. Operator disposition pending.
   - `vm port-forward` exits 0 on an operator stop.
 - **Template `shell` fields** (`vms/admin.py:99`, `agents/template.py:101`): the type becomes
-  `Literal["sh", "dash", "bash", "zsh"]` (`ACCOUNT_SHELLS`, defined in `launcher.py` beside the line
-  that needs them), with the allowed values in the field docstrings, which the generated samples
-  render (`manifests/samples.py:57`). A path such as `/usr/bin/zsh` is refused, so the dead
+  `AccountShell` with a before-validator that reduces a path to its basename, so `/usr/bin/zsh`
+  still loads and is stored as `zsh`. Anything whose basename is not `sh`, `dash`, `bash` or `zsh`
+  is a config error that names the field and the allowed values. The allowed values are in the field
+  docstrings, which the generated samples render (`manifests/samples.py:57`). The dead
   `"/" in shell` branch of `agents/initializer.py:65` goes. `ResolvedAgentTemplate.shell`
   (`agents/templates.py:33`) takes the same type. Existing accounts are not re-checked until slice
   3's base check.
@@ -541,8 +550,8 @@ attribute so one patch reaches every manager.
   modules and their submodules from `sys.modules`, deletes the attribute on each parent package (so
   `from agentworks import ssh` also fails), and puts a `MetaPathFinder` that raises `ImportError`
   first on `sys.meta_path`. It uses `monkeypatch` so every test restores them. The session fixture
-  that imported `agentworks.ssh` is gone (`oplog.LOG_DIR`), and `test_independence.py` still proves
-  import time in a fresh interpreter.
+  at `tests/conftest.py:83` imports `agentworks.ssh` once before any test, which the per-test
+  eviction tolerates. `test_independence.py` still proves import time in a fresh interpreter.
 - **Static check** (`tests/test_execution_import_boundary.py`), modeled on
   `tests/test_registry_warning_boundary.py:19-50`. It parses each file in `MIGRATED_FILES` and fails
   on any `Import` or `ImportFrom` of a legacy module, anywhere in the file (top level, in a
@@ -551,60 +560,69 @@ attribute so one patch reaches every manager.
   `vms/manager/verification.py`, `vms/manager/port_forward.py` and `agents/manager/access.py`. The
   `execution/` modules are covered by the package guard. Later slices append.
 - **`RecordingVMAccess`** (`tests/vm_access_support.py`) subclasses `VMAccess`, overrides the four
-  operations to record `(operation, request, input)` and return a canned `Result` or raise, and
-  needs no ssh. A fixture patches `agentworks.execution.vm_access` to return it. Manager tests run
-  on every CI host with it.
+  operations to record `(operation, request)` and return a canned `Result` or raise, and needs no
+  ssh. A fixture patches `agentworks.execution.vm_access` to return it. Manager tests run on every
+  CI host with it.
 - **Unit tests**, none restating implementation or prose:
-  - envelope round trip over all bytes `0x01` to `0xFF` as values, and each refusal;
+  - envelope round trip over all bytes `0x01` to `0xFF` as values, and each refusal, including an
+    element and a string at 131,071 bytes (accepted) and 131,072 (`ValidationError`);
   - the filters under every split of a stream and every interleaving of the two, including a payload
-    ending in the closing prefix's first bytes;
-  - the classifier table, row by row;
+    ending in the closing prefix's first bytes and a `parked` line;
+  - the classifier table, row by row, and the refusal-to-status table;
   - `ssh -G` against the installed client, with the policy argv: `-T` beats `RequestTTY force`,
-    identity and trust options take effect, no multiplexing, keepalives on, and quoting holds for an
-    identity path with a space; `VM` trust with no record spawns nothing;
-  - the resolver against temporary executables, including an empty and a relative `PATH` element;
-  - stage 0 is one line with no `'` and no `!` and under 256 characters, and the launcher parses at
-    3.11 and imports only the standard library;
+    identity and trust options take effect, no multiplexing, keepalives on, the defaults `-F none`
+    leaves are still the defaults, and quoting holds for an identity path with a space; `VM` trust
+    with no record spawns nothing;
+  - the resolver against temporary executables, including an empty and a relative `PATH` element and
+    the Windows candidate order;
+  - stage 0 is one line of at most 200 characters with no `'`, `"`, `!` or backslash, and the
+    launcher parses at 3.11 and imports only the standard library, inside its guard;
   - passivity: `vm_access` on a VM with no address and a missing key file raises nothing and spawns
     nothing;
-  - error messages and `repr` hold no stream, environment value or stdin;
+  - error messages and `repr` hold no stream or environment value;
   - the pump (the adapted proof cases), `@pytest.mark.windows` for binary stdio and end of file;
-  - doctor's `ssh` row; invalid template shells refuse at config load; the six commands refuse an
-    unsupported client before the first prompt.
+  - a subprocess test of `stream`: stdin held open by the parent, the guest exits, its status comes
+    back, and the process exits without an interpreter abort;
+  - doctor's rows; invalid template shells refuse at config load and a path loads as its basename;
+    the six commands refuse an unsupported client before reading the database; the agent probe's
+    four outcomes.
 
 ### Conformance vectors
 
 One list of vectors, three carriers. **L** runs `$SHELL -c <remote command>` locally through the
 same pump and envelope, with the account's startup files set per vector and `SSH_CLIENT` exported as
-sshd does; it covers the shells and runs on every Linux CI host. **S** runs the real client against
+sshd does; its interpreter path is a parameter. It covers the shells and runs on every Linux CI
+host, once with `/usr/bin/python3` and once with a 3.11 interpreter from `uv python install 3.11`,
+since `ast.parse` cannot catch 3.12-only standard library calls. **S** runs the real client against
 a rootless local `sshd` (`ListenAddress 127.0.0.1`, a temporary host key and `AuthorizedKeysFile`,
 `UsePAM no`, `StrictModes no`) and `trust.write_records` for the test host key; it skips when no
 `sshd` binary exists, and the CI job installs `openssh-server` if the runner image lacks it. **V**
 is the live lane, `-m integration` with `AGW_CONFORMANCE_VM`, run by the tester from each
 workstation. `zsh` and `dash` are required on CI (a missing shell fails there, skips locally).
 
-| Vector                                                                                                                         | Lanes  |
-| ------------------------------------------------------------------------------------------------------------------------------ | ------ |
-| Literal argv: empty, whitespace, shell characters, dash-led items and `--` (I5)                                                | L S V  |
-| Script versus stdin; script text absent from the interpreter's `/proc/<pid>/cmdline`                                           | L S V  |
-| Interpreter and startup: `sh`, `bash`, `user_default`, each with and without login                                             | L V    |
-| Environment: every byte `0x01` to `0xFF`, `%`, quotes, `${HOME}`, CR, LF, a 1 MiB value                                        | L S V  |
-| Working directory, and a missing one as `refused cwd`                                                                          | L V    |
-| Exit 0, 1 and 255; death by signal as 128 plus the signal                                                                      | L S V  |
-| Stage 0 under `sh`, `dash`, `bash`, `zsh` with startup files that print and export                                             | L      |
-| Output before the start marker dropped, with and without a trailing newline                                                    | L      |
-| `NotDelivered` versus `Unknown`: no python3 (127 as `VMNotReady`), a startup `exit 0`, a startup `exit 255`, a killed launcher | L      |
-| A startup file that reads stdin, and one that redirects a standard stream, as not delivered; no stream text in the error       | L      |
-| Signal dispositions and descriptors reset; a startup `TERM` or `XDG_RUNTIME_DIR` leaves the payload's values                   | L      |
-| Exact stdin positioning: the payload reads the caller's first byte                                                             | L S V  |
-| A bash child of the payload reads no account startup file; stdin a pipe, and in L a socket (I11)                               | L S V  |
-| Background child holding both streams: prompt completion, status correct                                                       | L S V  |
-| Payload stdout with no trailing newline; a `refused` trailer                                                                   | L S    |
-| Deadline: `Unknown(DEADLINE)` at the deadline, client reaped                                                                   | L S    |
-| Handover: success, the 30 s timeout, second connection never arrives, nothing left behind                                      | L S V  |
-| Host key mismatch is `TrustMismatch`                                                                                           | S      |
-| Sensitive stdin absent from exceptions and the client log                                                                      | L      |
-| Binary stdin and stdout, from Windows (`windows` mark) and live                                                                | pump V |
+| Vector                                                                                                                                                 | Lanes  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ |
+| Literal argv: empty, whitespace, shell characters, dash-led items and `--` (I5)                                                                        | L S V  |
+| Script versus stdin; script text absent from the interpreter's `/proc/<pid>/cmdline`                                                                   | L S V  |
+| Interpreter and startup: `sh`, `bash`, `user_default`, each with and without login                                                                     | L V    |
+| Environment: every byte `0x01` to `0xFF`, `%`, quotes, `${HOME}`, CR, LF                                                                               | L S V  |
+| Size limits: an argument and an environment value at 131,071 bytes run, one more is refused; a total over `ARG_MAX` is `exec E2BIG`                    | L V    |
+| Working directory, and a missing one as `refused cwd` (status 125 under `stream`)                                                                      | L V    |
+| A missing command is `exec ENOENT` and status 127; one that is not executable 126                                                                      | L S V  |
+| Exit 0, 1 and 255; death by signal as 128 plus the signal                                                                                              | L S V  |
+| Stage 0 under `sh`, `dash`, `bash`, `zsh` with startup files that print and export                                                                     | L      |
+| Output before the start marker dropped, with and without a trailing newline                                                                            | L      |
+| `NotDelivered` versus `Unknown`: no python3 (127), a missing standard library module (69), a startup `exit 0`, a startup `exit 255`, a killed launcher | L      |
+| A startup file that reads stdin, and one that redirects a standard stream, as not delivered; no stream text in the error                               | L      |
+| Signal dispositions and descriptors reset; a startup `TERM` or `XDG_RUNTIME_DIR` leaves the payload's values                                           | L      |
+| Exact stdin positioning through `stream(stdin=...)`: the payload reads the caller's first byte                                                         | L S V  |
+| A bash child of the payload reads no account startup file; stdin a pipe, and in L a socket (I11)                                                       | L S V  |
+| Background child holding both streams: prompt completion, status correct                                                                               | L S V  |
+| Payload stdout with no trailing newline; a `refused` trailer                                                                                           | L S    |
+| Deadline: `Unknown(DEADLINE)` at the deadline, client reaped                                                                                           | L S    |
+| Handover: success, the 30 s timeout, an existing directory name, a missing `cwd`, second connection never arrives, nothing left behind                 | L S V  |
+| Host key mismatch is `TrustMismatch`, read from the client log                                                                                         | S      |
+| Binary stdin and stdout, from Windows (`windows` mark) and live                                                                                        | pump V |
 
 The stdout-after-trailer ordering is a unit test of the filters, not a vector, since pipes do not
 reorder.
@@ -637,14 +655,14 @@ reorder.
 | Row | How                                                                                                                                                  |
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | I1  | No `-n`; the client closes its own stdin pipe. Pump test for end of file; live Windows loop of 25 runs each of `true`, `sleep .001` and `echo -n ""` |
-| I2  | Binary pipes and `.buffer`; the all-bytes vectors; the Windows-marked pump test; live from Windows                                                   |
+| I2  | Binary pipes and raw or `.buffer` streams; the all-bytes vectors; the Windows-marked pump test; live from Windows                                    |
 | I3  | The V lane drives real guests from each workstation; the resolver refuses MSYS builds, so no Git for Windows tool is in the path                     |
-| I4  | No API combines input with a terminal; value-free errors tested                                                                                      |
+| I4  | No operation combines input with a terminal; value-free errors tested                                                                                |
 | I5  | Literal argv and the `--` before the destination; the dash-led vector                                                                                |
 | I6  | `attach` tests with a fake terminal check the notice comes after the guard; live                                                                     |
 | I7  | `ssh -G` shows the keepalive and connect options; one live cell drops the network under a `stream`                                                   |
 | I11 | The vector, with a pipe and a socket on stdin                                                                                                        |
-| I12 | `ssh -G` shows no multiplexing under a hostile configuration                                                                                         |
+| I12 | `ssh -G` shows no multiplexing with the policy argv, and the live 8.5 and Windows cells repeat it                                                    |
 | I13 | `ssh -G` shows the explicit identity file; live with a key named other than the default on Windows                                                   |
 | I14 | `ssh -G` of the pipe-mode argv shows no pty even with `RequestTTY force` supplied                                                                    |
 | I19 | The agent probe (above)                                                                                                                              |
@@ -657,7 +675,35 @@ Windows against WSL2, and one cloud, with a Debian 12 and a Debian 13 guest and 
 client on one workstation (else the operator's disposition). For each, the V vectors and these:
 
 - `-F none` and the stdin protocol on 8.5 and on Win32-OpenSSH, including the stage 0 quoting round
-  trip through `ssh.exe`;
+  trip through `ssh.exe`, and the client log capturing ssh's diagnostics;
 - `vm exec` from Windows with binary stdin and early exit;
 - an attach from each workstation, killed mid-session, and a handover whose second connection fails;
 - a forward with a busy local port, and Ctrl-C on a live forward.
+
+## Amendments
+
+### HLA amendments proposed
+
+- D1: doctor keeps its `ssh` and `scp` PATH rows and adds the resolver's verdict.
+- D2: the terminal half uses `-t`, not `-tt`; liveness options apply to every connection.
+- D3: a per-string kernel limit of 131,071 bytes on argv elements and `K=V` strings.
+- D4 and D13: the client reads ssh's diagnostics from a `-E` log, to type `HOST_KEY` and to show its
+  tail in errors.
+- D5: a new `LoginShell` request.
+- D8: a timed-out park writes `end` and `refused handover`; the forward is a blocking call with no
+  readiness probe, handle or context manager.
+- D9: the VM policy keeps the null device for `GlobalKnownHostsFile`, not `none`.
+- D13: a new `RequestRefused`, and `stream`'s mapping of a refusal to status 126, 127 or 125;
+  `TrustMismatch`'s PR A hint names the manual path; `oplog.py` and the `LOG_DIR` move land in slice
+  3 (D13 says slice 2).
+- Module layout: the HLA's `launcher.py` row becomes `agw_launch.py`, with stage 0 in
+  `ssh_process.py` and `launcher_source()` in `envelope.py`.
+- Incident inventory: I19 is re-proved in slice 2 as well as 6, and row I21 is added.
+
+### Plan amendments proposed
+
+- The slice 2 doctor box keeps the `ssh` and `scp` presence check beside the resolver's verdict.
+- The slice 2 box "Move the old `LOG_DIR` readers to `oplog`'s constant" and `oplog.py` move to
+  slice 3, with the writer.
+- The sensitive-stdin conformance vector moves to slice 5, with `Bytes` input and its first
+  consumer.
