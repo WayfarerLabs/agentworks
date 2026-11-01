@@ -213,6 +213,13 @@ On local Lima on Windows:
 
 > Yeah, let's add that to the evidence. I'll have the integration tester add support.
 
+On the launcher's name and the number of implementation PRs, after the lead proposed folding the
+plan's eight slices into three PRs:
+
+> Ok. Let's go with the 'agentworks launcher', (agw-launch). Undersells but clean.
+>
+> The reduced PRs sound great. Thanks!
+
 On python3, after the lead found it installed only at init on `main`:
 
 > Are you sure that Python isn't now part of provisioning? I swear we changed that. It should still
@@ -221,8 +228,12 @@ On python3, after the lead found it installed only at init on `main`:
 > way so as to not require Python. It's up to you but my feeling is that it would ultimately be way
 > easier to implement agw-launch in Python vs bash.
 
-On R3, after the lead proposed reading it as "the command never sees the effects of startup", since
-sshd always runs the account's login shell first:
+On the lead's final delivery recommendation and R3. The lead recommended that every request travel
+on stdin, with the terminal half of an attach fetching its request over a second connection; that
+agw-launch be written in Python and python3 be installed at provisioning; that managed accounts'
+login shells stay limited to `sh`, `dash`, `bash` and `zsh`, since the account shell still parses
+one fixed line; and that R3 be read as "the command never sees the effects of startup", since sshd
+always runs the account's login shell first. The operator answered:
 
 > Sounds good. And I agree with that change to R3.
 

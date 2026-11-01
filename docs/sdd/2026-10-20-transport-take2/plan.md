@@ -76,7 +76,8 @@ answer.
 - [ ] Collateral: update the command reference and completions, add an operator guide section on the
       one-time import, add release notes, and update `cli/agentworks/execution/README.md`.
 - [ ] Live evidence, on every platform: create, the operator's own `ssh` to a managed entry, import
-      of an existing VM, and an address change after rekey. Cells:
+      of an existing VM, an address change after rekey, a stop and start, and the operator's
+      `known_hosts` byte-identical after a create. Cells:
   - Remote Lima from macOS and Linux;
   - local Lima from macOS;
   - WSL2;
@@ -112,7 +113,7 @@ a VM connection.
       initialization and must still reach a VM without python3 (`vms/manager/lifecycle.py:946`).
       Keep `vm exec`'s single-argument form as a shell command line, sent as a `Script` under the
       identity's default shell, and several arguments as a literal argv, as today
-      (`vms/manager/exec.py:270`).
+      (`vms/manager/exec.py:271`).
 - [ ] Type a VM without python3 as `VMNotReady` with a hint naming `agw vm reinit`, whose legacy
       Phase A still runs there, and say so in release notes.
 - [ ] Limit the admin and agent template `shell` fields to `sh`, `dash`, `bash` and `zsh` at the
@@ -140,7 +141,8 @@ a VM connection.
   - the deadline;
   - sensitive stdin absent from logs and exceptions;
   - binary stdin and stdout on Windows.
-- [ ] Re-prove incident rows I1 to I7.
+- [ ] Re-prove incident rows I1 to I7 and I11, the last with a conformance vector in which a bash
+      child of the payload reads no account startup file.
 - [ ] Amend ADRs 0013 and 0014.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
@@ -152,7 +154,8 @@ a VM connection.
   - Windows against WSL2;
   - one cloud.
 
-  Include a Debian 12 and a Debian 13 guest.
+  Include a Debian 12 and a Debian 13 guest, and an OpenSSH 8.5 client on one workstation; if no bed
+  has one, that cell goes to the operator for disposition.
 
 Definition of done: the migrated commands reach VMs only through `agentworks.execution`, their files
 pass the static check, and the package's tests pass with the legacy modules blocked.
@@ -167,7 +170,8 @@ pass the static check, and the package's tests pass with the legacy modules bloc
   - `reachability`.
 - [ ] Add python3 to `PROVISIONING_PACKAGES`, which every platform's bootstrap already installs
       (`lima.py:385`, `wsl2_bootstrap.py:65`, and the AWS, Azure, GCP and Proxmox platforms).
-- [ ] Make `ProvisionResult.tailnet_address` required on every platform, and delete
+- [ ] Make `ProvisionResult.tailnet_address` required on every platform, with each platform retrying
+      the address read after a successful join so the key is never sent twice (HLA D11), and delete
       `ProvisionResult.native_transport` and Phase A's native `tailscale ip -4` fallback.
 - [ ] Move Phase A and release probing (`vms/manager/release.py`) onto `VMAccess`: the first
       connection in Enroll mode, then the base checks (including Debian attestation), then
@@ -177,7 +181,7 @@ pass the static check, and the package's tests pass with the legacy modules bloc
       elevation refused before dispatch and an elevated attach refused, and prove an elevated
       request on a fresh, never-initialized Debian 12 and 13 VM.
 - [ ] Add `vms/contract.py`. Run the base checks first at reinit and the initialized checks at the
-      end of Phase B.
+      end of Phase B. Add `vms/contract.py` to the package guard (HLA D14).
 - [ ] Amend ADR 0025.
 - [ ] Tests:
   - a VM failing a base check is not reported ready;
@@ -209,13 +213,18 @@ first operation there is the base contract check.
   - Remote Lima's host connection, under the host policy, and its host-side detached create;
   - `plugins/proxmox/guest_agent.py`, replacing `plugins/proxmox/transport.py`;
   - the Lima and WSL2 wrappers.
-- [ ] Port `tailscale_join.py` and `wsl2_bootstrap.py` off `ExecTransport`.
-- [ ] Implement `capabilities/vm_platform/public_ssh.py` for the clouds.
+- [ ] Port `tailscale_join.py` and `wsl2_bootstrap.py` off `ExecTransport`, keeping the auth key out
+      of command lines, logs, exceptions and retained provisioning artifacts, and re-prove incident
+      row I10 with a test.
+- [ ] Implement `capabilities/vm_platform/public_ssh.py` for the clouds. Make `transient_route` and
+      `probe_failure_hint` private to each platform's native code, and add `public_ssh.py` and
+      `vms/recovery.py` to the package guard once the rehome frees
+      `capabilities/vm_platform/__init__.py` of legacy imports (HLA D14).
 - [ ] Move rejoin, rekey and delete-time logout onto `run_recovery`, with rejoin run only by
       `agw vm recover`. Make `vm start` and the activation gate start the VM, wait for Tailscale to
       reconnect, and fail with a hint naming `agw vm recover` when it does not, as the operator
-      ruled on 2026-10-31 and 2026-11-01. Delete `vm start`'s rejoin and its conditional auth-key
-      read (`vms/manager/power.py:83-112`).
+      ruled on 2026-10-31 and 2026-11-01. Both waits use `reachability.wait`. Delete `vm start`'s
+      rejoin and its conditional auth-key read (`vms/manager/power.py:83-112`).
 - [ ] Add `agw vm recover <vm>`: host-key re-establishment first when the record is missing, then
       access repair (installing python3 when it is missing), rejoin and SSH verification. Repoint
       `VMNotReady` and `TrustMissing` guidance at it.
@@ -268,7 +277,8 @@ no platform's private access imports a legacy module.
   - JSON null survives an update;
   - a malformed destination is refused;
   - a symlinked destination is refused;
-  - cleanup touches only what the operation created.
+  - cleanup touches only what the operation created;
+  - `preserve=True` keeps the existing file's owner, group, mode and ACLs.
 - [ ] Amend ADR 0019.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
@@ -321,7 +331,7 @@ Definition of done: create and reinit run entirely on the new transport.
       grant (`_write_sudoers_console_setenv`), with reinit removing the installed fragment from
       existing VMs.
 - [ ] Re-prove incident rows I6a and I8.
-- [ ] Amend ADR 0017.
+- [ ] Supersede ADR 0017.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
 - [ ] Collateral: guides for sessions, consoles and backup where behavior changes.
