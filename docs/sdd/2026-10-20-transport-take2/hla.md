@@ -549,9 +549,9 @@ Host connections such as Remote Lima's keep their own configuration and are not 
 - **Older VMs without python3.** python3 joined init only on 2026-09-14 (`2841cb9fa`), so a VM
   initialized before then lacks it unless its image shipped it; the WSL2 Debian root filesystem is
   the likely case. Such a VM gets `VMNotReady`. In PR A its hint names `agw vm reinit`, whose
-  release probe and Phase A stay on the legacy stack until slice 3, so reinit still runs there
-  without python3; from PR B it names `agw vm recover`, whose access repair installs python3 (D11).
-  Release notes say so.
+  release probe and initialization stay on the legacy stack until slice 3 (reinit has no Phase A),
+  so reinit still runs there without python3; from PR B it names `agw vm recover`, whose access
+  repair installs python3 (D11). Release notes say so.
 
 ### D11. The platform surface (R1, R2, R7)
 
@@ -748,7 +748,7 @@ linked issues and fix history) and adds rows before anything is deleted.
 | I12 | No connection sharing: no `ControlMaster`, since a shared master keeps stale supplementary groups and PAM state (ADR 0015; `execution/carriers/ssh/connection.py:140-141` at `fd1256b1f`)                                                          | 2            |
 | I13 | The operator's identity file passed explicitly on every VM connection, for keys with non-default names on Windows (`3b8413291`; `transports/__init__.py:97`)                                                                                       | 2            |
 | I14 | `-T` on every non-terminal run, so an operator's `RequestTTY force` never injects a pseudo-terminal (`584ac5f6e`, `e9eb9565a`; `transports/ssh.py:186-192`, `:443`)                                                                                | 2            |
-| I15 | The reconnect wait: bounded at about 240 s, confirmed by a second probe after the first success, with closed wording (#251; `transports/__init__.py:241`, `:272-309`)                                                                              | 3            |
+| I15 | The reconnect wait: bounded at about 240 s, with a second probe confirming a success that follows a failed attempt, with closed wording (#251; `transports/__init__.py:241`, `:272-309`)                                                           | 3            |
 | I16 | A failed or interrupted Phase A secures the VM before the error propagates (`vms/initializer/driver.py:188`, `:206`)                                                                                                                               | 3            |
 | I17 | Azure's network propagation: the provisioning probe retries and shows the platform's hint before the error (`eb99a3f99`, `17f5c92c8`; `transports/__init__.py:223-237`)                                                                            | 4            |
 | I18 | A failed backend delete keeps the VM's row and its store record (#329; `vms/manager/power.py:312-320`)                                                                                                                                             | 4            |

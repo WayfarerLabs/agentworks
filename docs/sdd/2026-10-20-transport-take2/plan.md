@@ -111,7 +111,7 @@ a VM connection.
       recording fake `VMAccess`.
 - [x] Migrate `vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection` and
       `vm port-forward`. Release probing stays legacy until slice 3, because reinit runs it before
-      initialization and must still reach a VM without python3 (`vms/manager/lifecycle.py:946`).
+      initialization and must still reach a VM without python3 (`vms/manager/lifecycle.py:962`).
       Keep `vm exec`'s single-argument form as a shell command line, sent as a `Script` under the
       identity's default shell, and several arguments as a literal argv, as today
       (`vms/manager/exec.py:271`).
@@ -180,7 +180,7 @@ pass the static check, and the package's tests pass with the legacy modules bloc
   - `reachability`;
   - the operation log.
 - [ ] Add python3 to `PROVISIONING_PACKAGES`, which every platform's bootstrap already installs
-      (`lima.py:385`, `wsl2_bootstrap.py:65`, and the AWS, Azure, GCP and Proxmox platforms).
+      (`lima.py:391`, `wsl2_bootstrap.py:65`, and the AWS, Azure, GCP and Proxmox platforms).
 - [ ] Make `ProvisionResult.tailnet_address` required on every platform, with each platform retrying
       the address read after a successful join so the key is never sent twice (HLA D11), and delete
       `ProvisionResult.native_transport` and Phase A's native `tailscale ip -4` fallback.
