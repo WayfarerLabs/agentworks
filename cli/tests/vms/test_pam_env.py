@@ -43,11 +43,20 @@ def test_the_probe_output_yields_the_known_files_it_names(stdout: str, expected:
 # -- The probe itself, run by each POSIX shell an admin might log in with ----------------
 #
 # Only the home entry is asserted: the other two files are the host's own /etc.
+# The sshd PAM stack the probe consults is a temporary file, like Debian 12's by default.
+
+SSHD_PAM_PATH = "/etc/pam.d/sshd"
+DEBIAN_12_SSHD_PAM = b"session    required     pam_env.so user_readenv=1 envfile=/etc/default/locale\n"
 
 
-def run_probe(shell: str, home: Path) -> tuple[str, ...]:
+def run_probe(shell: str, home: Path, sshd_pam: bytes | None = DEBIAN_12_SSHD_PAM) -> tuple[str, ...]:
+    pam_file = home / "sshd-pam"
+    if sshd_pam is not None:
+        pam_file.write_bytes(sshd_pam)
+    probe = PAM_ENV_PROBE.replace(SSHD_PAM_PATH, str(pam_file))
+    assert probe != PAM_ENV_PROBE
     env = {"HOME": str(home), "PATH": os.environ["PATH"]}
-    completed = subprocess.run([shell, "-c", PAM_ENV_PROBE], env=env, capture_output=True, text=True, check=True)
+    completed = subprocess.run([shell, "-c", probe], env=env, capture_output=True, text=True, check=True)
     return parse_pam_env_probe(completed.stdout)
 
 
@@ -83,6 +92,37 @@ def test_the_probe_reports_a_file_only_when_it_holds_a_setting(
         (tmp_path / ".pam_environment").write_bytes(contents)
 
     assert (HOME_ENTRY in run_probe(shell, tmp_path)) is reported
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the probe is for a POSIX guest shell")
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("sshd_pam", "reported"),
+    [
+        (DEBIAN_12_SSHD_PAM, True),
+        (b"session required pam_env.so envfile=/etc/default/locale\n", False),
+        (b"# session required pam_env.so user_readenv=1\n", False),
+        (b"   #session required pam_env.so user_readenv=1\n", False),
+        (b"session required pam_unix.so user_readenv=1\n", False),
+        (b"", False),
+        (None, False),
+    ],
+    ids=[
+        "user_readenv-present",
+        "user_readenv-absent",
+        "line-commented-out",
+        "indented-line-commented-out",
+        "other-module",
+        "empty-stack",
+        "stack-missing",
+    ],
+)
+def test_the_home_file_counts_only_where_sshd_applies_it(
+    shell: str, sshd_pam: bytes | None, reported: bool, tmp_path: Path
+) -> None:
+    (tmp_path / ".pam_environment").write_bytes(b"FOO=1\n")
+
+    assert (HOME_ENTRY in run_probe(shell, tmp_path, sshd_pam)) is reported
 
 
 @pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="root reads any file")

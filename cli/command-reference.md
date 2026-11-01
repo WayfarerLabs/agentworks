@@ -691,8 +691,8 @@ ask again. Non-interactive runs never prompt (a later interactive create still a
 Changes to config (new packages, different install commands, etc.) are picked up automatically. It
 consumes both stored VM and admin instance specs but cannot change or clear either one. It warns,
 without failing, when `/etc/environment`, `/etc/security/pam_env.conf` or the admin's
-`~/.pam_environment` holds settings, because Agentworks does not apply pam_env settings to the
-commands it runs.
+`~/.pam_environment` (only where sshd reads it, as on Debian 12) holds settings, because Agentworks
+does not apply pam_env settings to the commands it runs.
 
 VMs created before SSH lifecycle-evidence tracking have no synthesized identity evidence. Ordinary
 canonical SSH commands refuse that unknown state until one successful `agw vm reinit <name>` proves

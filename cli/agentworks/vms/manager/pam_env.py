@@ -4,6 +4,11 @@
 through pam_env never reach those commands. Agentworks does not support them;
 this module only tells the operator when a VM has some.
 
+The admin's ``~/.pam_environment`` is checked only where sshd applies it: when
+a line of ``/etc/pam.d/sshd`` loads ``pam_env.so`` with ``user_readenv=1``
+(Debian 12 does, Debian 13 does not). The two system files apply on every
+release.
+
 ``/etc/default/locale`` is left out on purpose: Debian's sshd PAM stack reads
 it, every VM has it set, and ``agw-launch`` sets the locale itself.
 """
@@ -18,15 +23,24 @@ if TYPE_CHECKING:
     from agentworks.transports import ExecTransport
 
 PAM_ENV_FILES = ("/etc/environment", "/etc/security/pam_env.conf", "~/.pam_environment")
-"""The files pam_env reads, as the operator is told about them (``~`` is the admin's home)."""
+"""The files pam_env reads, as the operator is told about them (``~`` is the admin's home).
+
+``~/.pam_environment`` is reported only where sshd's PAM stack reads it; see ``PAM_ENV_PROBE``.
+"""
 
 # One line per file that holds anything other than comments and blank lines.
-# It always exits 0: an absent or unreadable file simply prints nothing.
+# The home file counts only when an uncommented line of the sshd PAM stack
+# loads pam_env.so with user_readenv=1. It always exits 0: an absent or
+# unreadable file simply prints nothing.
 PAM_ENV_PROBE = """\
 agw_has_settings() { [ -r "$2" ] && grep -qEv '^[[:space:]]*(#|$)' "$2" && printf '%s\\n' "$1"; }
 agw_has_settings /etc/environment /etc/environment
 agw_has_settings /etc/security/pam_env.conf /etc/security/pam_env.conf
-agw_has_settings '~/.pam_environment' "$HOME/.pam_environment"
+agw_reads_home_env() {
+  [ -r /etc/pam.d/sshd ] &&
+    grep -qE '^[[:space:]]*[^#[:space:]].*pam_env\\.so.*user_readenv=1' /etc/pam.d/sshd
+}
+agw_reads_home_env && agw_has_settings '~/.pam_environment' "$HOME/.pam_environment"
 true
 """
 
