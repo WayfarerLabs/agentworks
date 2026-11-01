@@ -1,5 +1,5 @@
 {
   "version": "0.2",
   "import": ["../../../.cspell.json"],
-  "words": ["HMAC", "improv", "MSYS", "recalibrations", "worktrees"]
+  "words": ["HMAC", "improv", "MSYS", "autouse", "fileno", "recalibrations", "worktrees"]
 }
