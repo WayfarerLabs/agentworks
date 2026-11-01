@@ -149,11 +149,16 @@ def publish_artifacts(
             if path in planned or path in sections or path in skipped_paths:
                 continue
             data = observed[path]
-            if data is not None and data != (prior.sha256, _mode(prior.executable, group, root)):
+            if (
+                data is not None
+                and data != (prior.sha256, _mode(prior.executable, group, root))
+                and requested_origins.intersection(prior.origins)
+            ):
                 reason = f"obsolete member at '{path}' was modified and must be retained"
                 for origin in prior.origins:
                     if origin in requested_origins:
                         conflicts.setdefault(origin, reason)
+                output.warn(f"Skipping artifact containing '{path}': {reason}.")
         # A skill's supporting files and entrypoint are one artifact. Never
         # publish part of a package when another member must be preserved.
         for path in observed:

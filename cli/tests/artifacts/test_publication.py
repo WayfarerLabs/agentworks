@@ -93,7 +93,7 @@ def test_conflicting_skill_member_preserves_the_whole_package(target):
 
 
 @pytest.mark.parametrize("rootless", [False, True])
-def test_modified_obsolete_member_preserves_requested_skill_as_a_unit(target, rootless):
+def test_modified_obsolete_member_preserves_requested_skill_as_a_unit(target, rootless, monkeypatch):
     root = target.home / "skills/review"
 
     def member(name, data=b"old"):
@@ -109,7 +109,10 @@ def test_modified_obsolete_member_preserves_requested_skill_as_a_unit(target, ro
     (root / "old.sh").write_bytes(b"operator script")
     independent = replace(artifact(target.home / "independent", b"independent"), origins=("b" * 64,))
     desired = (member("SKILL.md", b"new instructions"), member("new.sh", b"new script"), independent)
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.artifacts.publication.output.warn", warnings.append)
     result = publish_artifacts(target, desired, previous, lambda files: None, roots=(str(target.home),))
+    assert len(warnings) == 1 and str(root / "old.sh") in warnings[0]
     assert (root / "SKILL.md").read_bytes() == b"old"
     assert (root / "old.sh").read_bytes() == b"operator script"
     assert not (root / "new.sh").exists()
