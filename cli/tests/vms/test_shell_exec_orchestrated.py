@@ -17,11 +17,12 @@ import pytest
 
 from agentworks.db import VersionedPayload, VMStatus
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution.trust import HOST_TRUST
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.transports import SSHTransport
 from agentworks.vms import manager as vm_manager
-from tests.conftest import ManifestDoc, stub_vm_ssh_identity
+from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
@@ -47,6 +48,7 @@ def _env_secret(monkeypatch: pytest.MonkeyPatch) -> None:
 def _seed_vm(db: Database) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    seed_vm_trust("box")
 
 
 def _seed_workspace(
@@ -658,7 +660,7 @@ def test_shell_platform_transport_routes_through_the_node_platform(
     _seed_vm(db)
     _reachable(monkeypatch, True)
     seen: list[object] = []
-    target = SSHTransport(host="203.0.113.8")
+    target = SSHTransport(trust=HOST_TRUST, host="203.0.113.8")
     target.interactive = lambda *_args, **_kwargs: 0  # type: ignore[method-assign]
     monkeypatch.setattr(ProxmoxPlatform, "native_shell_unavailable_hint", None)
 
@@ -703,7 +705,7 @@ def test_shell_platform_transport_hands_a_secret_bearing_ctx(
     _seed_vm(db)
     _reachable(monkeypatch, True)
     seen: list[RunContext] = []
-    target = SSHTransport(host="203.0.113.8")
+    target = SSHTransport(trust=HOST_TRUST, host="203.0.113.8")
     target.interactive = lambda *_args, **_kwargs: 0  # type: ignore[method-assign]
     monkeypatch.setattr(ProxmoxPlatform, "native_shell_unavailable_hint", None)
 

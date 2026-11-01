@@ -26,6 +26,9 @@ the VM. If that succeeds, `agw vm shell NAME` opens the Agentworks-managed SSH p
 For raw SSH, the default alias is `ssh awvm--NAME`. Run `agw config sync-ssh-config` if the
 generated entry is stale; installations may configure a different alias prefix.
 
+A message that a VM has no recorded host key is fixed with `agw vm import-host-keys NAME`; see its
+`--help` for a VM with no matching entry.
+
 When the failure appears to be below SSH, use `tailscale status` to confirm the workstation is
 connected and can see the VM, then `tailscale ping HOST` with the Tailscale address from
 `agw vm describe NAME`. `agw vm logs NAME` shows the VM's recent SSH logs.

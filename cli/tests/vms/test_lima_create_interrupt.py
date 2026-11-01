@@ -32,6 +32,7 @@ from agentworks.capabilities.vm_platform.bootstrap_script import REBOOT_SENTINEL
 from agentworks.capabilities.vm_platform.lima import _REBOOT_CLEAR_MARKER, LimaPlatform
 from agentworks.debian import DebianRelease
 from agentworks.ssh import SSHError
+from tests.conftest import provisioning_trust_for_tests
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
@@ -76,6 +77,7 @@ def _request(*, tailscale_auth_key: str = "tskey-test") -> ProvisionRequest:
         admin_username="agw",
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=Path("/dev/null"),
+        provisioning_trust=provisioning_trust_for_tests("myvm"),
         tailscale_auth_key=tailscale_auth_key,
         progress=MagicMock(),
         # The vm-template layer's resolved defaults, which is the only

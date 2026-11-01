@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import Database
+from agentworks.execution.trust import HOST_TRUST
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 
@@ -616,7 +617,7 @@ def test_exec_agent_uses_direct_agent_ssh(tmp_path: Path, monkeypatch: pytest.Mo
     # Real SSHTransport so call_streaming is exercised end-to-end; the only
     # thing we monkey-patch is subprocess.call (which call_streaming uses
     # to passthrough stdio).
-    target = SSHTransport(host="100.64.0.5", user="aw-a1", identity_file=None, proxy_jump=None)
+    target = SSHTransport(trust=HOST_TRUST, host="100.64.0.5", user="aw-a1", identity_file=None, proxy_jump=None)
 
     monkeypatch.setattr(
         "agentworks.transports.agent_transport",

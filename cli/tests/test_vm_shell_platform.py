@@ -22,6 +22,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.db import Database
 from agentworks.errors import StateError
+from agentworks.execution.trust import HOST_TRUST
 from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import empty_secret_target, stub_build_registry, stub_vm_gates
 
@@ -73,7 +74,7 @@ def _stub_target() -> object:
     """
     from agentworks.transports import SSHTransport
 
-    target = SSHTransport(host="203.0.113.8")
+    target = SSHTransport(trust=HOST_TRUST, host="203.0.113.8")
     target.run = lambda *_a, **_k: SimpleNamespace(  # type: ignore[method-assign, assignment]
         returncode=0,
         stdout="ok",
@@ -391,7 +392,7 @@ def test_native_transport_opens_route_and_registers_close_for_azure(
             # SSHTransport.run would invoke a subprocess, so we wrap one
             # whose ``run`` is a stub. Subclass so isinstance(target,
             # SSHTransport) still narrows correctly.
-            t = SSHTransport(host="203.0.113.42")
+            t = SSHTransport(trust=HOST_TRUST, host="203.0.113.42")
             t.run = lambda *_a, **_k: SimpleNamespace(  # type: ignore[method-assign, assignment]
                 returncode=0,
                 stdout="ok",
@@ -528,7 +529,7 @@ def test_native_transport_retries_reachability_probe(
         name = "stub"
 
         def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> object:
-            t = SSHTransport(host="203.0.113.42")
+            t = SSHTransport(trust=HOST_TRUST, host="203.0.113.42")
             t.run = flaky_run  # type: ignore[method-assign, assignment]
             return t
 
@@ -577,7 +578,7 @@ def test_native_transport_raises_defensively_on_empty_host(
         name = "stub"
 
         def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> object:
-            return SSHTransport(host="")
+            return SSHTransport(trust=HOST_TRUST, host="")
 
         @contextlib.contextmanager  # type: ignore[arg-type]
         def transient_route(self, vm: object, ctx: object, *, config: object | None = None):  # type: ignore[no-untyped-def]

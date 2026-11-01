@@ -33,6 +33,7 @@ import pytest
 
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMStatus
 from agentworks.errors import NotFoundError, StateError
+from agentworks.execution.errors import TrustMissing
 from agentworks.output import Role
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -40,7 +41,7 @@ from agentworks.sessions import manager as session_manager
 from agentworks.sessions.manager._queries import session_listing_data
 from agentworks.vms import manager as vm_manager
 from agentworks.vms.applied_state import VMSSHIdentityPolicyError
-from tests.conftest import stub_vm_ssh_identity
+from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
@@ -58,6 +59,7 @@ def _seed_vm(db: Database, name: str, host: str | None, *, site: str = "proxmox"
     db.insert_vm(name, site=site, hostname=name)
     if host is not None:
         db.update_vm_tailscale(name, host)
+    seed_vm_trust(name)
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
         (f"ws-{name}", name, f"/srv/ws-{name}", f"ws-ws-{name}"),
@@ -1276,6 +1278,26 @@ def test_describe_session_derives_vm_from_its_structural_snapshot(
     assert description.last_started_at == "2020-01-01T00:00:00Z"
     assert description.uptime_seconds is None
     assert resolve_counter == []
+
+
+def test_session_description_warns_which_vm_has_no_host_key_record_and_degrades(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config = make_config()
+    _seed_singular(db)
+
+    def _refuse(*_args: object, **_kwargs: object) -> None:
+        raise TrustMissing("box")
+
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", _refuse)
+
+    description = session_manager.session_description(db, config, name="s1")
+
+    assert description.status == SessionStatus.UNKNOWN.value
+    assert len([w for w in captured_output.warnings if "'box'" in w]) == 1
 
 
 def test_running_session_description_derives_uptime(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import os
 import sqlite3
+import tempfile
 from collections.abc import Generator, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
@@ -17,6 +18,7 @@ import yaml
 
 from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.db import Database
+from agentworks.execution.trust import TrustBinding, TrustMode
 from agentworks.manifests.envelope import API_VERSION
 from agentworks.manifests.loader import RESOURCES_DIRNAME
 from agentworks.output import Role, StatusStyle, _render_header
@@ -38,8 +40,6 @@ def _os_symlinks_available() -> bool:
     the call entirely. Tests that exercise real symlink behavior skip where it
     is unavailable rather than fail on a host limitation.
     """
-    import tempfile
-
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "target"
         target.write_text("probe")
@@ -1006,6 +1006,40 @@ def _no_network_token_verification(monkeypatch: pytest.MonkeyPatch) -> None:
         raise OSError("network disabled in tests")
 
     monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _refuse)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_host_key_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """The suite must never read or write the operator's real host-key store.
+    Every test gets an empty store directory, so a VM-mode connection has no
+    record until the test seeds one with ``seed_vm_trust``."""
+    store = tmp_path / "host-key-store"
+    monkeypatch.setattr("agentworks.execution.trust.STORE_DIR", store)
+    return store
+
+
+def provisioning_trust_for_tests(vm_name: str) -> TrustBinding:
+    """An UNVERIFIED binding for a ``ProvisionRequest`` built by a test whose
+    SSH is faked. The file is never opened."""
+    return TrustBinding(TrustMode.UNVERIFIED, vm_name, Path(tempfile.gettempdir()) / f"provisioning-{vm_name}")
+
+
+def ssh_enrolls_on_first_use(trust_binding: object) -> None:
+    """What ssh does on a successful connection under ``accept-new`` to the VM's
+    store file: record the key. Call it from a fake transport's ``run`` with the
+    transport's ``trust``; it records only under ENROLL, as ssh would."""
+    if isinstance(trust_binding, TrustBinding) and trust_binding.mode is TrustMode.ENROLL:
+        seed_vm_trust(trust_binding.vm_name)
+
+
+def seed_vm_trust(vm_name: str) -> None:
+    """Give ``vm_name`` a host-key record in the (per-test) store, so VM-mode
+    connections to it pass the missing-record check."""
+    from agentworks.execution import trust
+
+    trust.write_records(
+        vm_name, [trust.HostKey("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAItestkeytestkeytestkeytestkeytestkeytestkey")]
+    )
 
 
 @pytest.fixture(autouse=True)

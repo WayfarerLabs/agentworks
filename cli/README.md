@@ -583,6 +583,11 @@ where the platform offers a usable recovery transport, restore the configured pu
 reinitialize. Some platform transports also depend on the configured key; use provider-native
 recovery or recreate the VM when that path cannot connect.
 
+Agentworks verifies each VM's SSH host key against its own per-VM store, never trusting a first
+connection. A VM created before the store existed needs a one-time `agw vm import-host-keys --all`;
+see [Host keys](command-reference.md#host-keys) and
+[Upgrading to 0.20](../docs/guides/upgrading-to-0.20.md).
+
 Debian distribution upgrades remain operator-led. After following Debian's release notes and
 verifying provider-native recovery, run `agw vm confirm-release <name>` to inspect and explicitly
 adopt the live release, then run the separate `agw vm reinit <name>` to converge release-aware
