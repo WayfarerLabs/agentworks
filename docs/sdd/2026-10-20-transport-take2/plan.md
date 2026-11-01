@@ -184,8 +184,8 @@ pass the static check, and the package's tests pass with the legacy modules bloc
   - the provisioning bootstrap additions;
   - `tailnet_address`;
   - Phase A on `VMAccess`;
-    - `reachability`, including how its polling meets Debian 13 sshd's `PerSourcePenalties`, which
-      drops every connection from a client after repeated authentication failures;
+  - `reachability`, including how its polling meets Debian 13 sshd's `PerSourcePenalties`, which
+    drops every connection from a client after repeated authentication failures;
   - the operation log.
 - [ ] Add python3 to `PROVISIONING_PACKAGES`, which every platform's bootstrap already installs
       (`lima.py:391`, `wsl2_bootstrap.py:65`, and the AWS, Azure, GCP and Proxmox platforms).

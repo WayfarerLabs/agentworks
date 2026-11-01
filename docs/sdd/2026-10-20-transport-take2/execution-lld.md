@@ -112,12 +112,13 @@ parsed `(major, minor)`. Every spawn takes the `SSHClient`, so no caller can lau
 The slice 2 subset of D5. Strings are `str`. `Shell` is a `StrEnum` of `sh`, `bash` and
 `user_default`. `AccountShell` is `Literal["sh", "dash", "bash", "zsh"]`, the template field type.
 
-| Type         | Fields                                                                                 | First consumer                                        |
-| ------------ | -------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| `Command`    | `argv: tuple[str, ...]`                                                                | `vm exec` with several arguments, `verify-connection` |
-| `Script`     | `source: str`, `shell: Shell`, `login: bool = False`                                   | `vm exec` with one argument, `agent exec` (login)     |
-| `LoginShell` | none                                                                                   | `vm shell`, `agent shell`                             |
-| Common       | `env: Mapping[str, str] = {}`, `cwd: str \| None`, `deadline: float \| None` (seconds) | all                                                   |
+| Type         | Fields                                                               | First consumer                                        |
+| ------------ | -------------------------------------------------------------------- | ----------------------------------------------------- |
+| `Command`    | `argv: tuple[str, ...]`                                              | `vm exec` with several arguments, `verify-connection` |
+| `Script`     | `source: str`, `shell: Shell`, `login: bool = False`                 | `vm exec` with one argument, `agent exec` (login)     |
+| `LoginShell` | none                                                                 | `vm shell`, `agent shell`                             |
+| Common       | `env: Mapping[str, str] = {}`, `cwd: str \| None`                    | all                                                   |
+| Bounded      | `deadline: float \| None` (seconds), through `BoundedRequestOptions` | `Command`, `Script`                                   |
 
 `LoginShell` is the identity's default shell as an interactive login shell. A `Script` with an empty
 source would run `shell -l -i FILE` on an empty file and exit, and a name that says "shell session"
