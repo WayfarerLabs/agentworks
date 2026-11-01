@@ -307,9 +307,12 @@ non-interactive shell before it sources the mise activation
   exceptions or retained artifacts. A secret-bearing environment does not suppress output (R4).
   Retained output has the request's secret values redacted (D13), and an explicitly sensitive stdin
   marks the streams as not retained at all.
-- **Deadlines.** A deadline bounds the local wait, kills the local client and returns `Unknown`. It
-  never claims remote termination; the predecessors measured guest trees outliving the deadline, and
-  cancellation stays deferred.
+- **Deadlines.** A deadline bounds the local wait. If it passes before both closing markers (D4)
+  have arrived, it kills the local client and returns `Unknown`, since the output may be incomplete.
+  Once both have arrived the client ends ssh at once and nothing after completion is awaited, so a
+  background child can never turn a completed request into `Unknown`. It never claims remote
+  termination; the predecessors measured guest trees outliving the deadline, and cancellation stays
+  deferred.
 - **Retries.** Only `observation=True` requests may retry, and only after `NotDelivered` or
   `Unknown`. Mutating requests are never re-dispatched.
 - **`check=True`** turns anything but `Completed(0)` into a typed error carrying the `Result`.
