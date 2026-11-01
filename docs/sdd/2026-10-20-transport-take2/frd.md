@@ -1,7 +1,7 @@
 # Transport Take 2: Functional Requirements
 
-- Status: Requirements baseline accepted by the operator on 2026-10-20 and amended on 2026-10-23 and
-  2026-10-31. Design in [hla.md](./hla.md); work tracked in [plan.md](./plan.md).
+- Status: Requirements baseline accepted by the operator on 2026-10-20 and amended on 2026-10-23,
+  2026-10-31 and 2026-11-01. Design in [hla.md](./hla.md); work tracked in [plan.md](./plan.md).
 - Started: 2026-10-20
 - Effort: `transport-take2`
 - Supersedes: [transport-improv](../2026-09-12-transport-improv/locked.md) and
@@ -231,6 +231,39 @@ Later the same day, reversing the answer on local Lima on Windows:
 > Btw, I'd like to reverse myself on Lima on Windows. As far as I can tell, this is still based on
 > WSL2 and doesn't offer anything beyond our existing WSL2 support.
 
+### 2026-11-01
+
+On the items the design left for the operator, and on rejoining at VM start:
+
+[The lead recommended: rewording R3 to list what is reset and to state resource limits, scheduling
+priority, a startup file's background process and swapped discarding streams as known gaps; refusing
+local Lima on Windows in Lima's readiness check, as its own issue; keeping script-bundle
+capabilities out of this effort; keeping stage 0 reading agw-launch from stdin; and leaving `vm
+start`'s own Tailscale rejoin in place. The operator answered in one numbered list, quoted here one
+item at a time.]
+
+On R3:
+
+> I accept your recommendations on R3
+
+On refusing local Lima on Windows:
+
+> Yeah, let's refuse it
+
+On script-bundle capabilities:
+
+> Totally agreed. I just wanted to make sure that our work here will support that future work, out
+> of scope of this PR
+
+On stage 0:
+
+> Confirmed
+
+On rejoining at VM start:
+
+> I think I'd rather simplify here. VM start should just start the VM and wait for Tailscale to
+> reconnect. If that fails, it should hint at recover.
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.
@@ -347,11 +380,14 @@ channel; what it runs there is the platform's concern.
 Literal arguments reach the guest exactly, including empty arguments, whitespace and shell special
 characters, and literal execution applies no shell startup implicitly. The destination account's
 login shell, which sshd always runs first, may read its own startup files before Agentworks code
-starts; that is acceptable only when nothing they do, including output, environment, working
-directory and umask, reaches the command. Scripts select a fixed interpreter (`sh`, `bash` or the
-execution user's default shell) explicitly, with login and interactive startup as separate explicit
-choices. The default shell is the destination identity's, never the workstation's, and a missing
-interpreter fails without substitution. A script and its stdin are separate inputs.
+starts. The command still starts from known state: output written before Agentworks code starts is
+discarded, and the environment, working directory, umask, signal handling and open descriptors are
+reset. Three effects of a startup file are known gaps rather than guarantees: resource limits or
+scheduling priority it lowered, output from a background process it leaves running, and both output
+streams swapped for pipes that discard what they receive. Scripts select a fixed interpreter (`sh`,
+`bash` or the execution user's default shell) explicitly, with login and interactive startup as
+separate explicit choices. The default shell is the destination identity's, never the workstation's,
+and a missing interpreter fails without substitution. A script and its stdin are separate inputs.
 
 Execution uses the bound identity; explicit elevation covers the whole operation, and elevation the
 identity lacks is a permission failure, never a reroute to another identity or to native access, so
@@ -419,9 +455,10 @@ first, never a later check over SSH. Apart from recovery, logout and the optiona
 makes no use of a native channel.
 
 The capability has no environment seeding, file API, detached work or streaming. Core invokes it
-only explicitly. When the activation gate, which starts a VM on another command's behalf, finds the
-VM without its tailnet registration, it fails with a hint to run recovery rather than rejoining it.
-An interactive native shell is optional and platform-declared, and it does not seed the operation
+only explicitly, through the operator's recovery command. Starting a VM, whether by command or by
+the activation gate on another command's behalf, starts it and waits for Tailscale to reconnect;
+when it does not reconnect, the start fails with a hint to run recovery rather than rejoining it. An
+interactive native shell is optional and platform-declared, and it does not seed the operation
 environment. Everything else a platform does natively, including its own provisioning, stays private
 to that platform.
 

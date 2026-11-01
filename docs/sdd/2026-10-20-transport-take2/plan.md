@@ -35,7 +35,7 @@
       findings.
 - [ ] Publish the design PR and address published feedback.
 - [x] Record the operator's answers to the HLA's open questions.
-- [ ] Record the operator's rulings on the HLA's "Awaiting the operator" items, and amend R3 if the
+- [x] Record the operator's rulings on the HLA's "Awaiting the operator" items, and amend R3 if the
       operator accepts the proposed wording.
 - [x] Revise the design for the operator's 2026-10-31 decisions (stdin delivery, agw-launch in
       Python, python3 at provisioning, the terminal handover, three PRs), and run the private review
@@ -107,10 +107,12 @@ a VM connection.
       `execution/carriers/` and their tests, after adopting what the LLD lists.
 - [ ] Add the conftest blocker under `cli/tests/execution/`, the static legacy-import check, and the
       recording fake `VMAccess`.
-- [ ] Migrate `vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection`, release
-      probing (`vms/manager/release.py`) and `vm port-forward`. Keep `vm exec`'s single-argument
-      form as a shell command line, sent as a `Script` under the identity's default shell, and
-      several arguments as a literal argv, as today (`vms/manager/exec.py:270`).
+- [ ] Migrate `vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection` and
+      `vm port-forward`. Release probing stays legacy until slice 3, because reinit runs it before
+      initialization and must still reach a VM without python3 (`vms/manager/lifecycle.py:946`).
+      Keep `vm exec`'s single-argument form as a shell command line, sent as a `Script` under the
+      identity's default shell, and several arguments as a literal argv, as today
+      (`vms/manager/exec.py:270`).
 - [ ] Type a VM without python3 as `VMNotReady` with a hint naming `agw vm reinit`, whose legacy
       Phase A still runs there, and say so in release notes.
 - [ ] Limit the admin and agent template `shell` fields to `sh`, `dash`, `bash` and `zsh` at the
@@ -124,7 +126,6 @@ a VM connection.
   - environment byte-exactness, including `%`, quotes, `${...}`, CR, LF and every other byte but
     NUL;
   - working directory;
-  - agent elevation refused before dispatch, and an elevated attach refused;
   - exit statuses 0, 1 and 255;
   - stage 0 under each supported login shell, with startup files that print and export;
   - output before the start marker dropped;
@@ -133,7 +134,8 @@ a VM connection.
   - the terminal handover: the timeout, and cleanup when the second connection fails;
   - a startup file that reads stdin, or redirects a standard stream, which leaves the request not
     delivered;
-  - signal dispositions and descriptors reset for the payload, and `TERM` kept in TTY mode;
+  - signal dispositions and descriptors reset for the payload, and a startup file that overrides
+    `TERM` or `XDG_RUNTIME_DIR` leaves the payload's values unchanged;
   - the trailer under a background child;
   - the deadline;
   - sensitive stdin absent from logs and exceptions;
@@ -163,16 +165,17 @@ pass the static check, and the package's tests pass with the legacy modules bloc
   - `tailnet_address`;
   - Phase A on `VMAccess`;
   - `reachability`.
-- [ ] Add python3 to `PROVISIONING_PACKAGES`, and confirm that every platform's bootstrap installs
-      that list, WSL2's and Lima's included.
+- [ ] Add python3 to `PROVISIONING_PACKAGES`, which every platform's bootstrap already installs
+      (`lima.py:385`, `wsl2_bootstrap.py:65`, and the AWS, Azure, GCP and Proxmox platforms).
 - [ ] Make `ProvisionResult.tailnet_address` required on every platform, and delete
       `ProvisionResult.native_transport` and Phase A's native `tailscale ip -4` fallback.
-- [ ] Move Phase A onto `VMAccess`: the first connection in Enroll mode, then the base checks
-      (including Debian attestation), then `reachability.wait` after `post_tailscale_ready`. Hand
-      Phase B a legacy target as today.
+- [ ] Move Phase A and release probing (`vms/manager/release.py`) onto `VMAccess`: the first
+      connection in Enroll mode, then the base checks (including Debian attestation), then
+      `reachability.wait` after `post_tailscale_ready`. Hand Phase B a legacy target as today.
 - [ ] Implement `reachability.py` and the `observation` request option it polls with.
-- [ ] Add elevation, with its conformance vectors, for Phase A, its first consumer, and prove an
-      elevated request on a fresh, never-initialized Debian 12 and 13 VM.
+- [ ] Add elevation, with its conformance vectors, for Phase A, its first consumer, including agent
+      elevation refused before dispatch and an elevated attach refused, and prove an elevated
+      request on a fresh, never-initialized Debian 12 and 13 VM.
 - [ ] Add `vms/contract.py`. Run the base checks first at reinit and the initialized checks at the
       end of Phase B.
 - [ ] Amend ADR 0025.
@@ -208,9 +211,11 @@ first operation there is the base contract check.
   - the Lima and WSL2 wrappers.
 - [ ] Port `tailscale_join.py` and `wsl2_bootstrap.py` off `ExecTransport`.
 - [ ] Implement `capabilities/vm_platform/public_ssh.py` for the clouds.
-- [ ] Move rejoin, rekey and delete-time logout onto `run_recovery`. Make the activation gate fail
-      with a hint naming `agw vm recover` instead of rejoining on its own, as the operator ruled on
-      2026-10-31.
+- [ ] Move rejoin, rekey and delete-time logout onto `run_recovery`, with rejoin run only by
+      `agw vm recover`. Make `vm start` and the activation gate start the VM, wait for Tailscale to
+      reconnect, and fail with a hint naming `agw vm recover` when it does not, as the operator
+      ruled on 2026-10-31 and 2026-11-01. Delete `vm start`'s rejoin and its conditional auth-key
+      read (`vms/manager/power.py:83-112`).
 - [ ] Add `agw vm recover <vm>`: host-key re-establishment first when the record is missing, then
       access repair (installing python3 when it is missing), rejoin and SSH verification. Repoint
       `VMNotReady` and `TrustMissing` guidance at it.
@@ -249,6 +254,8 @@ no platform's private access imports a legacy module.
   - cleanup.
 - [ ] Implement `PythonProgram`, `files.py` and the file program, and `RunContext.admin_access()`
       and `agent_access()`.
+- [ ] Have provisioning and init create the VM-wide file lock, `/var/lib/agentworks/files.lock` (HLA
+      D6).
 - [ ] Migrate:
   - artifact publication and session artifacts;
   - native probing;
@@ -258,7 +265,8 @@ no platform's private access imports a legacy module.
   - the git-credential providers.
 - [ ] Tests:
   - `write` applies mode and owner before the rename;
-  - `write_if` and `remove_if` detect a concurrent writer;
+  - `write_if` and `remove_if` detect a concurrent writer, including a tree upload replacing the
+    directory above the target;
   - JSON null survives an update;
   - a malformed destination is refused;
   - a symlinked destination is refused;
@@ -298,7 +306,8 @@ Definition of done: create and reinit run entirely on the new transport.
   - workspace copy, using `run` over an opaque tar stream;
   - `sessions/`, including tmux, consoles, status probes and pid repair, with session environment in
     the request and console panes taking theirs from the terminal handover, so no `tmux -e` argument
-    carries a value (HLA D8);
+    carries a value (HLA D8). Every path that creates or recreates a pane (adding a shell, console
+    restore, console recovery after a killed attach) parks a fresh handover;
   - backup's launch, observation, interrupt and download, using `detached` and `ToFile` with
     progress.
 - [ ] Tests:

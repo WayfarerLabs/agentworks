@@ -186,6 +186,14 @@ provisioning installs (D10), its standard library, and `sudo` for elevation. It 
 syntax that needs no particular python3 release. It is rewritten in Python from the proof's
 `bootstrap.py`, keeping that program's measured handling of locale and private names.
 
+**Relationship to agw-atc.** The follow-up containment effort introduces `agw-atc`, an installed,
+long-running VM program for sessions, limits and process-to-session lookup. The two stay distinct by
+lifecycle: agw-launch arrives with every request and always matches the client that sent it, and
+agw-atc is installed and versioned with the VM. Two rules keep them aligned. agw-launch stays the
+only way a request starts and takes on no long-running duty; once agw-atc exists, work it owns is a
+request whose payload runs `agw-atc`. And agw-atc never becomes a prerequisite for running a
+request, so first contact, recovery and VMs without it keep working.
+
 **What agw-launch does:**
 
 1. **Reads the envelope.** A malformed one fails before the start marker, so the request is not
@@ -199,15 +207,21 @@ syntax that needs no particular python3 release. It is rewritten in Python from 
 3. **Writes the start marker**, `<nonce> start`, to stdout and to stderr.
 4. **Resets what the payload inherits:**
    - the environment, rebuilt from `HOME`, `USER`, `LOGNAME` and `SHELL` from the identity's passwd
-     entry, a fixed `PATH`, the locale, the session variables today's shells and session workloads
-     inherit from sshd and PAM (`TERM` in TTY mode, `XDG_RUNTIME_DIR`, and `SSH_CLIENT`,
-     `SSH_CONNECTION` and `SSH_TTY`), then the request's environment;
+     entry, a fixed `PATH`, the locale, then the session variables today's shells and session
+     workloads use, each taken from a source startup files cannot touch: `TERM` from the envelope
+     (the operator's terminal type) and `SSH_TTY` from the terminal's name in TTY mode, and
+     `XDG_RUNTIME_DIR` as `/run/user/<uid>` when that directory exists and belongs to the identity;
+     then the request's environment. Nothing is copied from the inherited environment, so
+     `SSH_CLIENT` and `SSH_CONNECTION`, which no Agentworks code reads, are no longer passed, and
+     release notes say so;
    - the working directory (the home directory by default) and a fixed umask;
    - signal dispositions back to their defaults, and no inherited descriptor above 2.
 
-   Two things cannot be reset: resource limits and scheduling priority a startup file lowered, since
-   an unprivileged process cannot tell them from PAM's or raise them again. They are a stated
-   residual, put to the operator below.
+   Three things cannot be reset: resource limits and scheduling priority a startup file lowered,
+   since an unprivileged process cannot tell them from PAM's or raise them again, and a background
+   process a startup file leaves holding the session's streams, which can write into the payload's
+   output after the start marker. Keeping that process out would mean framing every byte of payload
+   output. R3 states them as known gaps (operator, 2026-11-01).
 
 5. **Runs the payload as a child.** A literal argv runs with no shell. A script runs under the
    chosen interpreter, which reads the source from a file descriptor and never from its arguments
@@ -299,9 +313,16 @@ use it. There is no scp.
 | `ensure_directory`, `prune_empty_parents`   | Operations of the same program                                                                                                  | artifacts (5), workspaces (7)                                |
 | `upload_tree(local_dir, dest, replace=)`    | A `tarfile` stream from the workstation into `tar -x -C dest`; `replace` clears `dest` first, as `copy_dir_to` does today       | sources' `fetch_dir` (6)                                     |
 
-- **One lock for every writer.** Every mutating operation takes `flock` on the destination
-  directory, so `write_if` is atomic with respect to every Agentworks writer, which is R5's
-  cooperating-writer guarantee. Hostile path races stay with the permissions effort.
+- **One lock for every writer.** Every mutating operation, tree uploads and removals included, takes
+  `flock` on one VM-wide lock file, `/var/lib/agentworks/files.lock`, root-owned and readable by
+  every identity so each can lock it. One fixed file means a tree operation and a conditional write
+  beneath it can never hold different locks, and replacing a directory never replaces a lock, so
+  `write_if` is atomic with respect to every Agentworks writer, which is R5's cooperating-writer
+  guarantee. Operations are short except tree uploads, which hold the lock while they run, and a
+  lock wait has a deadline. Provisioning and init create the file; an elevated operation creates it
+  when missing, and an unelevated one that finds it missing gets `VMNotReady` naming reinit. An
+  agent holding the lock to stall other writers is a hostile writer, which stays with the
+  permissions effort along with hostile path races.
 - **Symlinks.** A destination that is a symlink is refused, as `native_files.py` refuses today,
   rather than followed as the hand-written `tee` paths do.
 - **The merge stays on the workstation.** `update` runs
@@ -459,9 +480,10 @@ Host connections such as Remote Lima's keep their own configuration and are not 
   starts with the base check over agw-launch, so init cannot reach a VM that lacks it.
 - **Older VMs without python3.** python3 joined init only on 2026-09-14 (`2841cb9fa`), so a VM
   initialized before then lacks it unless its image shipped it; the WSL2 Debian root filesystem is
-  the likely case. Such a VM gets `VMNotReady`. In PR A its hint names `agw vm reinit`, whose legacy
-  Phase A still runs without python3; from PR B it names `agw vm recover`, whose access repair
-  installs python3 (D11). Release notes say so.
+  the likely case. Such a VM gets `VMNotReady`. In PR A its hint names `agw vm reinit`, whose
+  release probe and Phase A stay on the legacy stack until slice 3, so reinit still runs there
+  without python3; from PR B it names `agw vm recover`, whose access repair installs python3 (D11).
+  Release notes say so.
 
 ### D11. The platform surface (R1, R2, R7)
 
@@ -500,11 +522,12 @@ D5. The capability takes no environment, directory or files.
   but R4 still keeps script content out of arguments, so it travels on stdin too; the platform LLD
   settles how. agw-launch is not involved, so a VM without python3 can still be recovered.
 - **Core's recovery scripts** live in `vms/recovery.py`:
-  - **Rejoin** is today's `rejoin_tailscale`, run by `agw vm recover` and by `vm start`, an explicit
-    operator command that already announces it (`vms/manager/power.py:83-112`). The activation gate
-    no longer runs it (`VMNode.auto_start`, `vms/nodes.py:232-273`): a VM that has lost its tailnet
-    registration fails with a hint naming `agw vm recover`, as the operator ruled on 2026-10-31. The
-    lazy repair-secret protocol that exists only for the gate's rejoin goes with it:
+  - **Rejoin** is today's `rejoin_tailscale`, run only by `agw vm recover`. Starting a VM, by
+    `vm start` (`vms/manager/power.py:83-112`) or by the activation gate (`VMNode.auto_start`,
+    `vms/nodes.py:232-273`), starts it and waits for Tailscale to reconnect; when it does not, the
+    start fails with a hint naming `agw vm recover`, as the operator ruled on 2026-10-31 and
+    2026-11-01. Both starts' rejoin code goes, and with it the secret resolution that exists only
+    for it: `vm start`'s conditional auth-key read, and the gate's lazy repair-secret protocol,
     `GateTarget.repair_secret_refs` and `_GateSecrets` (`orchestration/activation.py:96-202`),
     `vms/nodes.py:186-205` and `sessions/manager/_scope.py:366-433`.
   - **Rekey** is `vm rekey`, verified over SSH afterwards, where access returns.
@@ -559,16 +582,18 @@ the facts are held once.
 It records a label, the request shape, the outcome and the streams, never the envelope's environment
 values, script source or stdin. Every retained stream has the request's secret values (its secret
 environment values and any other values the caller marks secret) removed before it is written, as
-`SSHLogger` does today (`ssh.py:113-131`); a sensitive stdin keeps the streams out of the log
-entirely. The readers of the old `LOG_DIR` constant (`doctor_state.py`, `vms/manager/lifecycle.py`,
-`vms/manager/_helpers.py`, `vm logs`) move to the new constant in slice 2.
+`SSHLogger` does today (`cli/agentworks/ssh.py:113-131`); a sensitive stdin keeps the streams out of
+the log entirely. The readers of the old `LOG_DIR` constant (`doctor_state.py`,
+`vms/manager/lifecycle.py`, `vms/manager/_helpers.py`, `vm logs`) move to the new constant in
+slice 2.
 
 ### D14. Enforcing independence (R10)
 
 - **The package guard.** The existing fresh-interpreter guard in
-  `cli/tests/execution/test_independence.py` stays. It walks every `agentworks.execution` submodule
-  with `pkgutil.walk_packages`, so new modules are covered automatically. `vms/contract.py` joins it
-  in slice 3. `public_ssh.py` and `vms/recovery.py` join it in slice 4, once the rehome leaves
+  `cli/tests/execution/test_independence.py` stays until slice 8 deletes it with the legacy modules
+  it guards against. It walks every `agentworks.execution` submodule with `pkgutil.walk_packages`,
+  so new modules are covered automatically. `vms/contract.py` joins it in slice 3. `public_ssh.py`
+  and `vms/recovery.py` join it in slice 4, once the rehome leaves
   `capabilities/vm_platform/__init__.py` importing no legacy code (today it reaches `lima.py` and
   `wsl2.py`, which do).
 - **The test guard.** A conftest under `cli/tests/execution/` blocks the six legacy modules for the
@@ -580,9 +605,8 @@ entirely. The readers of the old `LOG_DIR` constant (`doctor_state.py`, `vms/man
 
 ## Migration
 
-The work is eight slices delivered in three PRs, as the operator chose on 2026-10-31. A slice is a
-unit of design and private review inside its PR. Each PR is complete on its own terms and carries
-live evidence for what it touches (R10, R11).
+The work is eight slices delivered in three PRs, as the operator chose on 2026-10-31. Each PR is
+complete on its own terms and carries live evidence for what it touches (R10, R11).
 
 - **PR A, trust and the execution core:** slices 1 and 2.
 - **PR B, the VM lifecycle:** slices 3 and 4.
@@ -594,13 +618,13 @@ The slices:
    legacy VM-target factories bound to the store.
 2. **Execution core with the operator exec surface.** Client resolution, `ssh_process`, the
    envelope, agw-launch with the terminal handover, results, errors and the operation log.
-   Consumers: `vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection`, release
-   probing and `vm port-forward`.
+   Consumers: `vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection` and
+   `vm port-forward`.
 3. **First contact and the VM contract.**
    - Platforms report the required tailnet address.
    - Provisioning installs python3.
-   - Phase A moves onto `VMAccess`, in Enroll mode at create, with the base checks and Debian
-     attestation; the initialized checks land too.
+   - Phase A and release probing move onto `VMAccess`, in Enroll mode at create, with the base
+     checks and Debian attestation; the initialized checks land too.
    - `ProvisionResult.native_transport` goes away, and `reachability` lands for create.
 
    Phase B stays on the legacy stack until slice 6.
@@ -609,8 +633,8 @@ The slices:
    - `run_recovery` on every platform, with `public_ssh.py`.
    - Each platform's native code rehomed as private modules: Remote Lima's host connection and
      host-side detached create, the Proxmox QGA client, and the WSL2 and Lima wrappers.
-   - Rejoin, rekey and logout move onto recovery, the activation gate stops rejoining on its own,
-     and `native_shell` lands.
+   - Rejoin, rekey and logout move onto recovery, starting a VM stops rejoining on its own, and
+     `native_shell` lands.
    - `vm recover` is added, and `native_transport` and its factory are deleted.
 5. **Files and capability delivery.** `files.py` and the `RunContext` accessors. Consumers: harness,
    artifact, native-file and git-credential (scout batches 8 and 9).
@@ -658,9 +682,9 @@ nothing beyond the WSL2 platform:
 | GCP                      | yes   | yes           | yes     |
 
 That is 18 cells. Lima's code still accepts local placement on Windows whenever `limactl` is
-installed (`capabilities/vm_platform/lima.py:189`); whether to refuse it there is put to the
-operator below. Each slice names the cells it covers. Removal needs every cell, or the operator's
-disposition of it.
+installed (`capabilities/vm_platform/lima.py:189`); issue #861 refuses it there, as the operator
+ruled on 2026-11-01. Each slice names the cells it covers. Removal needs every cell, or the
+operator's disposition of it.
 
 ## ADR amendments
 
@@ -695,40 +719,35 @@ exactly true.
 
 ## Operator decisions
 
-The operator answered the design's open questions on 2026-10-31. The requirement-level rulings (R3,
-R7, R11 and python3 at provisioning) are quoted in the FRD.
+The operator answered the design's open questions on 2026-10-31 and 2026-11-01. The
+requirement-level rulings (R3, R7, R11 and python3 at provisioning) are quoted in the FRD.
 
 1. **Command names.** `agw vm import-host-keys` and `agw vm recover` stand.
 2. **Account shell startup (R3).** R3 now accepts the account shell's own startup running before
-   stage 0, provided nothing it does reaches the command (D4). Managed accounts are limited to the
-   `sh`, `dash`, `bash` and `zsh` login shells, a new restriction on operator-authored config, which
-   this design needs for the constant command line to parse.
-3. **Automatic rejoin (R7).** The activation gate fails with a hint naming `agw vm recover` instead
-   of rejoining on its own (D11).
+   stage 0. It lists what agw-launch resets and states resource limits, scheduling priority, a
+   startup file's background process and swapped discarding streams as known gaps (D4). Managed
+   accounts are limited to the `sh`, `dash`, `bash` and `zsh` login shells, a new restriction on
+   operator-authored config, which this design needs for the constant command line to parse.
+3. **Automatic rejoin (R7).** Neither `vm start` nor the activation gate rejoins Tailscale. Each
+   starts the VM, waits for Tailscale to reconnect, and fails with a hint naming `agw vm recover`
+   when it does not (D11).
 4. **Local Lima on Windows** is not a supported pairing (evidence matrix). The operator first added
-   it, then reversed that the same day.
+   it, then reversed that the same day, and issue #861 refuses it in Lima's readiness check.
 5. **The launcher's name** is `agw-launch`, the Agentworks launcher.
 6. **Three PRs** instead of eight (migration).
 7. **Delivery.** Every request travels on stdin, agw-launch is written in Python, python3 is a
    provisioning requirement, and terminals use the two-connection handover.
-
-## Awaiting the operator
-
-1. **Resource limits and priority under R3.** As amended, R3 accepts startup files only when nothing
-   they do reaches the command. agw-launch resets output, the environment, the working directory,
-   the umask, signal handling and open descriptors, but cannot undo resource limits or a scheduling
-   priority a startup file lowered, or detect both streams swapped for discarding pipes (D4). The
-   lead's proposal: R3 names what is reset and states those two as inherited.
-2. **Refusing local Lima on Windows.** Lima defines no `unsupported_reason`, since Remote Lima from
-   Windows is supported, so local placement on Windows is accepted whenever `limactl` is installed.
-   The lead's recommendation: have Lima's readiness check refuse local placement on Windows with a
-   hint naming WSL2, tracked as its own issue, since the transport does not depend on it.
+8. **Stage 0** reads agw-launch from stdin, so the command line stays one short constant line.
+9. **Script-bundle capabilities** are a later effort, outside this one. This design supplies the
+   pieces they need: `Script` and `PythonProgram` requests that take their inputs as data, the file
+   operations, the contract's check table, and the identities and elevation of `VMAccess`.
 
 ## Alternatives considered
 
 - **The whole request by `SendEnv`**, this document's first draft. It needed the AcceptEnv fragment
   at provisioning, a sudo `env_keep` line, numbered parts under a 256 KiB cap and a not-ready path
-  for older VMs, and it passed secrets through the login shell's environment.
+  for VMs that lacked the AcceptEnv fragment, and it passed secrets through the login shell's
+  environment.
 - **`SendEnv` for terminal requests only.** A second delivery path kept for one mode.
 - **Relaying the terminal through agw.** ssh takes window size and terminal modes from its own
   stdin, so agw would have to relay a pseudo-terminal on three workstation operating systems, and
