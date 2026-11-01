@@ -1,7 +1,7 @@
 # Transport Take 2: Functional Requirements
 
-- Status: Requirements baseline accepted by the operator on 2026-10-20 and amended on 2026-10-23.
-  Design in [hla.md](./hla.md); work tracked in [plan.md](./plan.md).
+- Status: Requirements baseline accepted by the operator on 2026-10-20 and amended on 2026-10-23 and
+  2026-10-31. Design in [hla.md](./hla.md); work tracked in [plan.md](./plan.md).
 - Started: 2026-10-20
 - Effort: `transport-take2`
 - Supersedes: [transport-improv](../2026-09-12-transport-improv/locked.md) and
@@ -189,6 +189,34 @@ operator chose:]
 
 > VMs only (Recommended)
 
+### 2026-10-31
+
+On the open questions in the high-level architecture:
+
+[The lead asked four questions: whether the names `agw vm import-host-keys` and `agw vm recover`
+stand; whether account-shell startup running before Agentworks code satisfies R3; whether the
+activation gate's announced automatic Tailscale rejoin counts as explicit recovery under R7, or
+should instead fail and name the recovery command; and whether local Lima on Windows is a supported
+pairing for R11's evidence. The operator answered:]
+
+> 1. Yep, those commands are good
+> 2. Given that we now have a command for this, I think it would be better to fail with a hint to
+>    use it.
+> 3. Yeah, let's add that to the evidence. I'll have the integration tester add support.
+
+On python3, after the lead found it installed only at init on `main`:
+
+> Are you sure that Python isn't now part of provisioning? I swear we changed that. It should still
+> be installed via init to account for older machines. But if it isn't, I'm 100% ok with adding it
+> as a provisioning requirement. And/or we can run the first apt commands during init in a special
+> way so as to not require Python. It's up to you but my feeling is that it would ultimately be way
+> easier to implement agw-launch in Python vs bash.
+
+On R3, after the lead proposed reading it as "the command never sees the effects of startup", since
+sshd always runs the account's login shell first:
+
+> Sounds good. And I agree with that change to R3.
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.
@@ -303,11 +331,13 @@ channel; what it runs there is the platform's concern.
 ### R3. Commands and scripts
 
 Literal arguments reach the guest exactly, including empty arguments, whitespace and shell special
-characters, and literal execution applies no shell startup implicitly. Scripts select a fixed
-interpreter (`sh`, `bash` or the execution user's default shell) explicitly, with login and
-interactive startup as separate explicit choices. The default shell is the destination identity's,
-never the workstation's, and a missing interpreter fails without substitution. A script and its
-stdin are separate inputs.
+characters, and literal execution applies no shell startup implicitly. The destination account's
+login shell, which sshd always runs first, may read its own startup files before Agentworks code
+starts; that is acceptable only when nothing they do, including output, environment, working
+directory and umask, reaches the command. Scripts select a fixed interpreter (`sh`, `bash` or the
+execution user's default shell) explicitly, with login and interactive startup as separate explicit
+choices. The default shell is the destination identity's, never the workstation's, and a missing
+interpreter fails without substitution. A script and its stdin are separate inputs.
 
 Execution uses the bound identity; explicit elevation covers the whole operation, and elevation the
 identity lacks is a permission failure, never a reroute to another identity or to native access, so
@@ -375,9 +405,11 @@ first, never a later check over SSH. Apart from recovery, logout and the optiona
 makes no use of a native channel.
 
 The capability has no environment seeding, file API, detached work or streaming. Core invokes it
-only explicitly. An interactive native shell is optional and platform-declared, and it does not seed
-the operation environment. Everything else a platform does natively, including its own provisioning,
-stays private to that platform.
+only explicitly, through operator commands for recovery, rekey and deletion. A VM found without its
+tailnet registration fails with a hint to run recovery rather than being rejoined automatically. An
+interactive native shell is optional and platform-declared, and it does not seed the operation
+environment. Everything else a platform does natively, including its own provisioning, stays private
+to that platform.
 
 ### R8. SSH policy and trust
 

@@ -11,12 +11,12 @@
 ## Summary
 
 One package, `agentworks.execution`, owns everything core does on a managed VM after provisioning.
-It reaches the VM only through the installed OpenSSH client at the VM's tailnet address. The client
-runs a constant guest launcher, a short Bash program, and passes the launcher the whole request in
-one encoded envelope in the client's own environment: argv or script, environment, working
-directory, interpreter and elevation. Buffered and streaming commands, terminal attachment, files,
-port forwarding and detached work are all built on that one mechanism. Host keys live in an
-Agentworks-owned store bound to the VM.
+It reaches the VM only through the installed OpenSSH client at the VM's tailnet address. Every
+connection runs the Agentworks launcher, `agw-launch`, a Python program the client sends on stdin
+behind a constant first stage. The client then sends the whole request on the same stdin: argv or
+script, environment, working directory, interpreter and elevation, followed by the caller's own
+input. Buffered and streaming commands, terminal attachment, files and detached work are all built
+on that one mechanism. Host keys live in an Agentworks-owned store bound to the VM.
 
 Platforms stop exposing a general native transport. Each one keeps its native access private and
 supplies a single recovery capability that runs a core-owned script as root. Provisioning reports
@@ -33,11 +33,11 @@ contract.
                       VMAccess (passive)
         run / stream / attach / forward / detached / files
                             |
-         request envelope in the client's environment (SendEnv)
+       stdin: agw-launch source, request header, caller input
                             |
      ssh client process: resolved executable, VM policy, VM-bound trust
                             |
-            installed OpenSSH  ==tailnet==>  sshd  ->  guest launcher (bash)
+            installed OpenSSH  ==tailnet==>  sshd  ->  stage 0  ->  agw-launch (python3)
 
  platform plugins: private native access + run_recovery(script, stdin) + optional native shell
  shared SSH machinery for platforms: execution.ssh_process (host policy or VM policy)
@@ -61,8 +61,8 @@ contract.
 | `execution/client.py`                    | Resolve the OpenSSH executable once to an absolute path, read its version and build, refuse unsupported builds before dispatch                    | `carriers/ssh/client.py` version probe                            |
 | `execution/ssh_process.py`               | Build a client argv from a policy (VM or host) and run it: stdin source, stdout and stderr pump, local deadline. The only place that spawns `ssh` | `carriers/ssh/connection.py`, `_io.py`                            |
 | `execution/trust.py`                     | The VM-bound host-key store: lookup, enrollment, import, re-establishment, removal                                                                | new                                                               |
-| `execution/envelope.py`                  | Encode a request into one value; frame and parse the completion trailer                                                                           | `preparation.py`, adapted                                         |
-| `execution/guest_launcher.py`            | The constant Bash program that runs on the guest                                                                                                  | `bootstrap.py`, adapted                                           |
+| `execution/envelope.py`                  | Encode a request into its envelope; frame and parse the start and completion markers                                                              | `preparation.py`, adapted                                         |
+| `execution/launcher.py`                  | `agw-launch`: the constant stage 0, the Python launcher it receives, and the terminal handover                                                    | `bootstrap.py` ideas, rewritten in Python                         |
 | `execution/requests.py`, `results.py`    | The caller vocabulary and typed outcomes                                                                                                          | `preparation.py` types; `carrier.py` ideas                        |
 | `execution/errors.py`                    | Typed failures, each subclassing the matching `agentworks.errors` kind                                                                            | new                                                               |
 | `execution/access.py`                    | `VMAccess`: identity-bound, passive entry point holding `run`, `stream`, `attach` and `forward`, plus `files` and `detached`                      | new                                                               |
@@ -120,106 +120,105 @@ directory.
   chooses whether operator configuration applies and supplies the trust options. Remote Lima's host
   connection honors operator configuration, as ruled on 2026-10-23.
 
-**Request delivery.** The encoded request goes into the client process's own environment as
-`AGENTWORKS_EXEC_0`, `AGENTWORKS_EXEC_1` and so on, and the client forwards them with
-`-o SendEnv=AGENTWORKS_EXEC_*`.
+**Request delivery.** Everything request-bearing travels on the client's stdin, never on a command
+line or in the environment.
 
-- **Why the client's environment.** A process's environment is readable only by its own user and
-  administrators, unlike its arguments, so environment values, script content and secrets never
-  reach any command line. Nothing touches disk.
-- **Conflicts.** The variables are set only in the child's environment, which first drops any
-  matching names the operator's shell happened to hold.
-- **What reaches the command line.** The client's arguments are the policy options, `-T`, `-tt` or
-  `-N -L`, the destination and the constant launcher command (D4).
+- **What reaches the command line.** The client's arguments are the policy options, `-T` or `-tt`
+  (`-N -L` for a forward), the destination and one of three constant stage 0 commands (D4). None of
+  them carries request data.
+- **Why stdin.** The pipe belongs to the client, so request content appears in no process list on
+  either machine and never touches disk. It has no size limit, and it depends on no client version
+  and no sshd or sudo configuration, so it works from core's first connection to a new VM.
+- **Terminals.** An attach is the one case where stdin is the operator's terminal. It uses two
+  connections (D8), so its request still travels on a private stdin.
 
 ### D3. The request envelope (R3, R4)
 
-The envelope holds a version tag, a random completion nonce, the elevation choice, the interpreter
-and startup flags, the literal argv or script source, the environment and the working directory.
-Each field is base64-encoded, and the fields are joined with `.`, which is outside the base64
-alphabet and needs no quoting. The resulting token is cut into parts of at most 30,000 bytes, one
-per `AGENTWORKS_EXEC_<n>` variable, and the launcher joins them in order. Part 0 records the part
-count and total length, so a missing or stale part is a typed refusal rather than an undecodable
-envelope.
+The client writes three things on stdin, in order:
 
-- **Why `SendEnv`.** It works in every mode, including a TTY attach, where stdin is the terminal and
-  cannot carry a header, and it leaves stdin wholly to the caller, the separation R3 asks for.
-- **Why one encoded token.** OpenSSH silently truncates a `SetEnv` value at a newline (measured on
-  9.2p1), and the current stack's coalesced `SetEnv` is first-value-wins (ADR 0014). An encoded
-  token in numbered parts avoids both.
-- **Size.** Each part stays below Windows' 32,767-character limit for one environment variable and
-  Linux's 131,072-byte limit for one environment string. The whole envelope is bounded at 256 KiB,
-  and a larger request gets a typed refusal before dispatch. The largest program that travels in a
-  request today is the native probe (`artifacts/native/probe.py`, 14,391 bytes, about 19,200
-  encoded), which a single part would barely hold, hence the parts. Bulk data travels on stdin,
-  never in the envelope. The complexity review measured a 131,044-byte value arriving intact by
-  `SendEnv` from a 9.2p1 client; slice 2 proves the multi-part form, including on Windows.
-- **Acceptance.** The VM must accept the variables. Today only Phase B writes the
-  `50-agentworks-accept-env.conf` fragment (`AcceptEnv *`, `vms/initializer/shell_env.py:397-460`).
-  This design adds the same fragment to the shared provisioning bootstrap script, so a brand new VM
-  accepts the envelope at core's first connection (D10).
-- **When it is missing.** An older VM that never received the fragment reaches the launcher with no
-  envelope. The launcher then writes a constant marker, since it has no nonce. The client reports a
-  typed `VMNotReady` naming `agw vm reinit` (which still writes the fragment through the legacy
-  initializer) until slice 4 adds `agw vm recover`, and recovery afterwards.
+1. **The agw-launch source**, length-prefixed, which stage 0 reads and runs (D4).
+2. **The envelope**, a length-prefixed JSON object holding a version tag, a random nonce, the
+   elevation choice, the interpreter and startup flags, the literal argv or script source, the
+   environment and the working directory. Byte-valued fields are base64 inside the JSON, so every
+   byte but NUL arrives exactly (R3).
+3. **The caller's input**, untouched, until end of file.
 
-### D4. The guest launcher and completion (R3, R4)
+- **Exact reads.** Stage 0 and agw-launch read the two prefixed parts with unbuffered reads of
+  exactly their length. The payload inherits stdin positioned at the caller's first byte, with no
+  copy loop on the guest.
+- **Size.** Nothing bounds a request but memory. The largest program in a request today is the
+  native probe (`artifacts/native/probe.py`, 14,391 bytes).
+- **What it replaces.** The current stack's coalesced `-o SetEnv` truncates at a newline and is
+  first-value-wins (ADR 0014), and OpenSSH 10.x expands `%` and `${HOME}` in `SetEnv` values where
+  9.x does not (#845). Nothing in the envelope passes through OpenSSH option parsing.
 
-**The command line.** The remote command is constant:
-`/usr/bin/env -u BASH_ENV -u ENV /bin/bash --noprofile --norc -c '<launcher>'`. It carries no
-request data.
+### D4. agw-launch and completion (R3, R4)
+
+**Stage 0.** The remote command is one of three constants:
+
+- `/usr/bin/python3 -I -S -c '<stage 0>'` for an ordinary request;
+- `sudo -n /usr/bin/python3 -I -S -c '<stage 0>'` for an elevated one;
+- `/usr/bin/python3 -I -S -c '<stage 0>' <handover path>` for the terminal half of an attach (D8).
+
+Stage 0 is a few hundred characters. It reads the length-prefixed agw-launch source from stdin, or
+from the handover socket, and runs it. `-I` ignores Python's environment variables and the user site
+directory, and `-S` skips site packages, so no Python startup applies. A short constant line stays
+far below Windows' 32,767-character command-line limit and keeps sudo's log entry to one line.
+Elevation is the whole operation running under `sudo -n`, so no variable has to survive sudo.
 
 **Account shell precondition.** sshd hands that command to the destination account's login shell as
-`$SHELL -c`, so the account shell parses one constant line before the launcher runs. Managed
-accounts must use a POSIX-family shell (`sh`, `dash`, `bash` or `zsh`). The admin and agent
-templates enforce this at the config boundary, and the base contract check verifies this for the
-admin and every agent (D10). Before the launcher starts, that shell may read its own non-interactive
-startup file: zsh's `.zshenv`, or the `.bashrc` read Debian's bash performs under sshd. The payload
-itself runs with no startup files. This is the closest OpenSSH allows to R3's "no shell startup
-implicitly"; it is listed for the operator under open questions. A shell outside the family, such as
-`tcsh`, can parse the line wrongly and report an ordinary-looking status (measured), which is why
-the contract check refuses it rather than leaving it to completion framing.
+`$SHELL -c`, so the account shell parses one constant line before stage 0 runs. Managed accounts
+must use `sh`, `dash`, `bash` or `zsh`. The admin and agent templates enforce this at the config
+boundary, and the base contract check verifies it for the admin and every agent (D10). A shell
+outside that list, such as `tcsh`, can parse the line wrongly and report an ordinary-looking status
+(measured), which is why the check refuses it. Before stage 0 starts, the account shell may read its
+own non-interactive startup file: zsh's `.zshenv`, or the `.bashrc` Debian's bash reads under sshd.
+R3, as amended on 2026-10-31, accepts that because nothing those files do reaches the command:
+agw-launch drops output written before its start marker, and it rebuilds the environment, directory
+and umask itself.
 
-**What the launcher needs.** The launcher is adapted from the proof's `bootstrap.py`, keeping its
-measured handling of locale and private names. It needs Bash 5.1, GNU coreutils, util-linux and
-`getent`, which every recognized Debian release (bookworm and trixie, `debian.py`) provides from
-provisioning onward. It needs no Python.
+**What agw-launch needs.** python3 3.11 or newer, which every recognized Debian release provides
+(bookworm 3.11, trixie 3.13, `debian.py`) and provisioning installs (D10), its standard library, and
+`sudo` for elevation. It is rewritten in Python from the proof's `bootstrap.py`, keeping that
+program's measured handling of locale and private names.
 
-**What the launcher does:**
+**What agw-launch does:**
 
-1. **Reads and checks the envelope.** With none, it writes the constant marker and exits.
-2. **Elevates when asked.** If the request is elevated and the launcher is not root, it re-executes
-   itself under `sudo -n`. The provisioning bootstrap adds
-   `Defaults:<admin> env_keep += "AGENTWORKS_EXEC_*"` beside its `NOPASSWD:ALL` line, so the
-   variables survive sudo on a VM that Phase B has not reached yet. Phase B's existing
-   `env_keep += "AGENTWORKS_*"` covers older VMs. Slice 3, the first to elevate before Phase B,
-   proves this on a fresh VM.
-3. **Clears the variables**, then applies the environment and the working directory.
+1. **Reads and checks the envelope.** A malformed envelope or an unknown version gets a `refused`
+   trailer.
+2. **Writes the start marker**, `<nonce> start`, to stdout and to stderr.
+3. **Builds the payload's environment from nothing:** `HOME`, `USER`, `LOGNAME` and `SHELL` from the
+   identity's passwd entry, a fixed `PATH`, the locale, then the request's environment. It sets the
+   working directory (the home directory by default) and a fixed umask. Nothing the account shell's
+   startup did is inherited.
 4. **Runs the payload as a child.** A literal argv runs with no shell. A script runs under the
    chosen interpreter, which reads the source from a file descriptor and never from its arguments
    (R4). Login or interactive startup applies only when requested. `sh` and `bash` are fixed paths.
-   The default shell is the destination identity's `getent passwd` entry. A missing interpreter
-   fails rather than being substituted.
-5. **Reports completion.** Except in TTY mode, after the payload exits the launcher writes one
-   framed trailer to stderr: `<nonce> exit <status>`, or `<nonce> refused <reason>` for its own
-   failures. In TTY mode it execs the payload instead.
+   The default shell is the destination identity's passwd entry. A missing interpreter fails rather
+   than being substituted.
+5. **Reports completion.** Except in TTY mode, after the payload exits it writes one framed trailer
+   to stderr: `<nonce> exit <status>`, or `<nonce> refused <reason>` for its own failures. In TTY
+   mode it execs the payload instead.
 
 **Completion rules:**
 
+- **Start marker.** The client discards everything before the start marker on each stream, so
+  shell-startup output never reaches the caller.
 - **The trailer is the only completion evidence.** The client strips it, so a guest exit of 255 is
   reported as completed with status 255.
-- **No trailer means unknown,** whatever the client's own exit status.
-- **Not delivered.** A client status of 255 with no trailer counts as not delivered only when the
-  launcher provably never started: OpenSSH's own refusal of the connection or authentication.
-  Anything else is unknown.
+- **Not delivered.** A remote exit status other than 255 with no start marker means stage 0 never
+  reached the payload, since a clean exit delivers all prior output first. Status 127 there means
+  the account shell found no python3 or sudo, which is typed `VMNotReady`. Status 255 with no start
+  marker counts as not delivered only when OpenSSH itself refused the connection or authentication.
+- **Unknown.** A start marker with no trailer, or 255 for any other reason, is unknown, whatever the
+  client's own exit status.
 - **TTY mode.** An attach returns its exit code; a 255 is reported as "connection ended or command
   exited 255", never guessed.
 - **Late output.** Background children can write to stderr after the trailer. The client takes the
   last well-formed trailer bearing the nonce and keeps later bytes as stderr.
-- **Forgery.** The nonce leaves the payload's environment before it starts, so ordinary payload
-  output does not forge a trailer. Another process of the same user that reads the launcher's
-  `/proc/<pid>/environ` could. That is outside R4's threat model, which concerns honesty, not a
-  hostile same-user process.
+- **Forgery.** The nonce is never in the payload's argv or environment, so ordinary payload output
+  cannot forge a marker. A hostile process of the same user could read agw-launch's memory. That is
+  outside R4's threat model, which concerns honesty, not a hostile same-user process.
 
 ### D5. Requests and results (R3, R4)
 
@@ -248,18 +247,19 @@ Each vocabulary item lands in the slice that migrates its first consumer.
 
 ### D6. Files built on execution (R5)
 
-Every file operation is a `run` of a short core-owned `sh` script, with content on stdin or stdout.
-There is no scp and no Python on the guest.
+Every file operation is a `run` of a short core-owned Python program, sent as a literal
+`python3 -I -S -c` argv inside the request, with content on stdin or stdout. The programs start from
+the file program `native_files.py` already runs on `main`. There is no scp.
 
-| Operation                                   | Mechanism                                                                                                                           | Current consumers (slice)                                    |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `read(path) -> (bytes, digest)`             | `cat`; the workstation computes the digest from the bytes it received, so the pair always matches                                   | artifacts, native CLI transcripts, settings (5)              |
-| `write(path, data, mode, owner, group)`     | Under the lock: `mktemp` in the destination directory, content from stdin, `chown` and `chmod` on the temp file, `sync` it, `mv -f` | initializer fragments, profiles, tmuxinator, sources (5, 6)  |
-| `write_if(path, data, expected, ...)`       | As `write`, after comparing the current digest (or absence) with `expected` under the lock                                          | artifact publication, settings merges (5)                    |
-| `update(path, transform, ...)`              | `read`, apply `transform` on the workstation, `write_if`; retry on conflict                                                         | harness JSON and TOML settings, marked profile blocks (5, 6) |
-| `remove(path)`, `remove_if(path, expected)` | Under the lock                                                                                                                      | artifact cleanup (5), workspaces (7)                         |
-| `ensure_directory`, `prune_empty_parents`   | Short scripts                                                                                                                       | artifacts (5), workspaces (7)                                |
-| `upload_tree(local_dir, dest, replace=)`    | A `tarfile` stream from the workstation into `tar -x -C dest`; `replace` clears `dest` first, as `copy_dir_to` does today           | sources' `fetch_dir` (6)                                     |
+| Operation                                   | Mechanism                                                                                                                       | Current consumers (slice)                                    |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `read(path) -> (bytes, digest)`             | Open without following symlinks and copy to stdout; the workstation computes the digest from the bytes it received              | artifacts, native CLI transcripts, settings (5)              |
+| `write(path, data, mode, owner, group)`     | Under the lock: a temporary file in the destination directory filled from stdin, owner and mode set on it, `fsync`, then rename | initializer fragments, profiles, tmuxinator, sources (5, 6)  |
+| `write_if(path, data, expected, ...)`       | As `write`, after comparing the current digest (or absence) with `expected` under the lock                                      | artifact publication, settings merges (5)                    |
+| `update(path, transform, ...)`              | `read`, apply `transform` on the workstation, `write_if`; retry on conflict                                                     | harness JSON and TOML settings, marked profile blocks (5, 6) |
+| `remove(path)`, `remove_if(path, expected)` | Under the lock                                                                                                                  | artifact cleanup (5), workspaces (7)                         |
+| `ensure_directory`, `prune_empty_parents`   | Short programs                                                                                                                  | artifacts (5), workspaces (7)                                |
+| `upload_tree(local_dir, dest, replace=)`    | A `tarfile` stream from the workstation into `tar -x -C dest`; `replace` clears `dest` first, as `copy_dir_to` does today       | sources' `fetch_dir` (6)                                     |
 
 - **One lock for every writer.** Every mutating operation takes `flock` on the destination
   directory, so `write_if` is atomic with respect to every Agentworks writer, which is R5's
@@ -275,10 +275,7 @@ There is no scp and no Python on the guest.
   workstation.
 - **Elevation and identity.** Elevated placement is the request's `elevated` flag, so callers write
   no copy, chmod or sudo wrappers. Agent writes use the agent's `VMAccess`.
-- **Failures.** A failure removes only the temp file the operation created.
-- **python3.** The guest still needs python3 for the consumers that run Python programs today
-  (`artifacts/native/probe.py`, the native CLI's login resolution). That keeps python3 in the
-  initialized contract.
+- **Failures.** A failure removes only the temporary file the operation created.
 
 ### D7. Detached work (R6)
 
@@ -305,11 +302,29 @@ platform-private (D11).
 
 ### D8. Streaming, attach, forwarding and reachability (R2, R4)
 
-- **`stream(request)`** inherits the operator's stdin and stdout, and pumps stderr through the
-  trailer filter with a short hold-back window. Consumers: `vm exec`, `agent exec`.
-- **`attach(request, clear_screen_on_exit=)`** runs with `-tt` under `guarded_terminal`, keeping the
-  post-guard notice for a dropped connection and the Windows clear behavior. Consumers: session and
-  console attach, `vm shell`, `agent shell`.
+- **`stream(request)`** writes the agw-launch source and the envelope, then copies the operator's
+  stdin into the pipe in binary mode until end of file. Stdout passes through after the start
+  marker, and stderr goes through the trailer filter with a short hold-back window. Consumers:
+  `vm exec`, `agent exec`.
+- **`attach(request, clear_screen_on_exit=)`** uses two connections, so ssh keeps the operator's
+  real terminal (its window size and modes come from its own stdin) while the request still travels
+  on a private stdin:
+  1. **Park.** A buffered request with `-T` carries the envelope, marked for handover. agw-launch
+     creates a 0700 directory with a random name, listens on a Unix socket in it, reports the path
+     after its start marker, and waits.
+  2. **Attach.** The client runs `ssh -tt` with the handover form of stage 0 naming that path, under
+     `guarded_terminal`. Stage 0 connects, checks that the peer runs as the same account, and
+     receives the agw-launch source and the envelope. agw-launch then prepares the payload as in D4
+     and execs it on the terminal.
+  3. **Finish.** The parked agw-launch serves one connection, removes its directory and exits with a
+     trailer. With no connection within 30 seconds it exits all the same, so nothing is left behind.
+
+  Every attach pays one extra SSH handshake, which ADR 0015 measured at 150 to 300 ms. While it
+  waits, the socket is reachable by other processes of the same account, which can already read that
+  account's processes, so no boundary is crossed. The post-guard notice for a dropped connection and
+  the Windows clear behavior are kept. Consumers: session and console attach, `vm shell`,
+  `agent shell`.
+
 - **`forward(local, remote)`** is a context manager running `ssh -N -L` under the VM policy, minus
   the forwarding restrictions, with `ExitOnForwardFailure=yes`. It returns once the local port
   accepts a connection, raises a typed error with the client's diagnostic if the client exits first,
@@ -384,20 +399,23 @@ Host connections such as Remote Lima's keep their own configuration and are not 
   - a recognized Debian release, under ADR 0025's policy and recording;
   - systemd as PID 1;
   - the admin account and `sudo -n true`;
-  - POSIX-family login shells for the admin and every agent;
+  - supported login shells (`sh`, `dash`, `bash` or `zsh`) for the admin and every agent;
   - Tailscale up at the recorded address;
-  - the envelope accepted, which the check's own request proves;
-  - Bash 5.1 or newer, coreutils, util-linux, `tar` and `getent`.
+  - python3 3.11 or newer, which the check's own request proves, plus coreutils, util-linux and
+    `tar`.
 
   Because this is core's first operation, the release check is the first thing core does on the
   common path.
 
-- **Initialized checks** run at the end of Phase B: python3 and the `INIT_SYSTEM_PACKAGES` tools.
+- **Initialized checks** run at the end of Phase B: the `INIT_SYSTEM_PACKAGES` tools.
 - **Diagnosis.** A failure reinit can fix leaves the VM not ready and names reinit. A failure reinit
   cannot fix (an unrecognized release, no systemd) names recreation.
-- **Provisioning additions.** The shared provisioning bootstrap script gains the AcceptEnv fragment
-  and the envelope `env_keep` line. Phase B keeps writing both, so reinit converges older VMs whose
-  envelope is accepted, and recovery covers those whose envelope is not.
+- **Provisioning additions.** python3 joins the shared provisioning package list
+  (`PROVISIONING_PACKAGES`, `capabilities/vm_platform/cloud_init.py:16`), which every platform's
+  bootstrap installs, so a new VM runs agw-launch from core's first connection. Init keeps
+  installing it (`INIT_SYSTEM_PACKAGES`, `:27`), so reinit converges older VMs. Every VM that has
+  completed init already has it. A VM that never did gets `VMNotReady`, and `agw vm recover`
+  installs it (D11).
 
 ### D11. The platform surface (R1, R2, R7)
 
@@ -433,17 +451,18 @@ D5. The capability takes no environment, directory or files.
 - **Cloud public-address SSH.** The public address reaches the same sshd, with the same host key, as
   the tailnet, so cloud recovery verifies against the VM's store entry. It runs
   `sudo -n /bin/sh -c '<wrapped script>'`. The script is core-owned and secret-free; sensitive input
-  goes on stdin. No envelope is involved, so a VM whose sshd no longer accepts the envelope can
-  still be recovered.
+  goes on stdin. agw-launch is not involved, so a VM without python3 can still be recovered.
 - **Core's recovery scripts** live in `vms/recovery.py`:
-  - **Rejoin** is today's `rejoin_tailscale`. The activation gate still runs it, announced, when a
-    VM has lost its tailnet registration; see the open questions.
+  - **Rejoin** is today's `rejoin_tailscale`, run by `agw vm recover`. The activation gate no longer
+    runs it on its own (`_ensure_tailscale`, `vms/manager/tailscale.py:191`): a VM that has lost its
+    tailnet registration fails with a hint naming `agw vm recover`, as the operator ruled on
+    2026-10-31.
   - **Rekey** is `vm rekey`, verified over SSH afterwards, where access returns.
   - **Logout** runs at delete. Its result is the script's own status, or unknown if the connection
     drops first.
-  - **Access repair** restores the admin authorized key, re-applies the Agentworks sshd fragments
-    (AcceptEnv and `env_keep`) and reloads sshd on every platform, and prints the public host keys.
-    Where the platform's channel does not need sshd, it also repairs and restarts sshd.
+  - **Access repair** restores the admin authorized key, installs python3 when it is missing, and
+    reloads sshd on every platform, and prints the public host keys. Where the platform's channel
+    does not need sshd, it also repairs and restarts sshd.
 - **The operator entry point** is the new `agw vm recover <vm>`. It first offers host-key
   re-establishment (D9) when the VM has no store record, since every other step needs trust. It then
   runs access repair, rejoins if needed, and verifies over SSH. When the channel needs the guest's
@@ -467,8 +486,8 @@ D5. The capability takes no environment, directory or files.
   remains a second layer, so an agent placed in a sudo group by hand still never gains admin
   authority through the transport.
 - **Tests.** Manager tests use a recording fake `VMAccess` returning canned typed results, so they
-  run on every CI host. The real launcher runs only in the conformance suite, against a local Bash
-  on Linux and against live targets.
+  run on every CI host. agw-launch runs only in the conformance suite, against a local sshd and
+  python3 on Linux and against live targets.
 
 ### D13. Errors and the operation log
 
@@ -480,7 +499,6 @@ D5. The capability takes no environment, directory or files.
 | `CommandFailed` (carries the `Result`)       | `ExternalError`      |
 | `PermissionDenied`                           | `AuthorizationError` |
 | `FeatureUnavailable`, `VMNotReady`           | `StateError`         |
-| `RequestTooLarge`                            | `ValidationError`    |
 | `TrustMissing`, `TrustMismatch`              | `StateError`         |
 | `ClientUnsupported`                          | `ConfigError`        |
 
@@ -509,17 +527,25 @@ table. The readers of the old `LOG_DIR` constant (`doctor_state.py`, `vms/manage
 
 ## Migration
 
-The plan sequences eight slices. Each is complete on its own terms, and each carries live evidence
-for what it touches (R10, R11).
+The work is eight slices delivered in three PRs, as the operator chose on 2026-10-31. A slice is a
+unit of design and private review inside its PR. Each PR is complete on its own terms and carries
+live evidence for what it touches (R10, R11).
+
+- **PR A, trust and the execution core:** slices 1 and 2.
+- **PR B, the VM lifecycle:** slices 3 and 4.
+- **PR C, consumers and removal:** slices 5 to 8.
+
+The slices:
 
 1. **Trust.** The store, explicit trust modes, import, create's enrollment, managed entries, and the
    legacy VM-target factories bound to the store.
-2. **Execution core with the operator exec surface.** Client resolution, `ssh_process`, envelope,
-   launcher, results, errors and the operation log. Consumers: `vm exec`, `vm shell`, `agent exec`,
-   `agent shell`, `vm verify-connection`, release probing and `vm port-forward`.
+2. **Execution core with the operator exec surface.** Client resolution, `ssh_process`, the
+   envelope, agw-launch with the terminal handover, results, errors and the operation log.
+   Consumers: `vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection`, release
+   probing and `vm port-forward`.
 3. **First contact and the VM contract.**
    - Platforms report the required tailnet address.
-   - Provisioning writes the AcceptEnv and `env_keep` lines.
+   - Provisioning installs python3.
    - Phase A moves onto `VMAccess`, in Enroll mode at create, with the base checks and Debian
      attestation; the initialized checks land too.
    - `ProvisionResult.native_transport` goes away, and `reachability` lands for create.
@@ -530,7 +556,8 @@ for what it touches (R10, R11).
    - `run_recovery` on every platform, with `public_ssh.py`.
    - Each platform's native code rehomed as private modules: Remote Lima's host connection and
      host-side detached create, the Proxmox QGA client, and the WSL2 and Lima wrappers.
-   - Rejoin, rekey and logout move onto recovery, and `native_shell` lands.
+   - Rejoin, rekey and logout move onto recovery, the activation gate stops rejoining on its own,
+     and `native_shell` lands.
    - `vm recover` is added, and `native_transport` and its factory are deleted.
 5. **Files and capability delivery.** `files.py` and the `RunContext` accessors. Consumers: harness,
    artifact, native-file and git-credential (scout batches 8 and 9).
@@ -562,65 +589,86 @@ scouting.
 
 ## Evidence matrix (R11)
 
-Code-supported pairings, from each platform's `unsupported_reason` and readiness checks:
+Supported pairings, from each platform's `unsupported_reason` and readiness checks, plus the
+operator's 2026-10-31 ruling that local Lima on Windows is supported:
 
-| Platform                 | Linux | macOS         | Windows                 |
-| ------------------------ | ----- | ------------- | ----------------------- |
-| Lima, local              | yes   | yes           | pending operator ruling |
-| Remote Lima (macOS host) | yes   | yes (primary) | yes                     |
-| WSL2                     | no    | no            | yes                     |
-| Proxmox                  | yes   | yes           | yes                     |
-| AWS                      | yes   | yes           | yes                     |
-| Azure                    | yes   | yes           | yes                     |
-| GCP                      | yes   | yes           | yes                     |
+| Platform                 | Linux | macOS         | Windows |
+| ------------------------ | ----- | ------------- | ------- |
+| Lima, local              | yes   | yes           | yes     |
+| Remote Lima (macOS host) | yes   | yes (primary) | yes     |
+| WSL2                     | no    | no            | yes     |
+| Proxmox                  | yes   | yes           | yes     |
+| AWS                      | yes   | yes           | yes     |
+| Azure                    | yes   | yes           | yes     |
+| GCP                      | yes   | yes           | yes     |
 
-That is 19 cells. Lima defines no `unsupported_reason`, so local Lima on Windows is code-supported
-whenever `limactl` is installed. Whether it is an Agentworks-supported pairing is an open question.
-Each slice names the cells it covers. Removal needs every cell, or the operator's disposition of it.
+That is 20 cells. The integration-test environment is adding support for local Lima on Windows. Each
+slice names the cells it covers. Removal needs every cell, or the operator's disposition of it.
 
 ## ADR amendments
 
-| ADR                               | Change                                                                                                                    | Slice |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----- |
-| 0013 (secret injection)           | Secret environment travels in the envelope, not as `-o SetEnv` arguments                                                  | 2     |
-| 0014 (`AcceptEnv` wildcard)       | Environment travels in one encoded variable by `SendEnv`; the newline limit is gone; provisioning writes the fragment too | 2     |
-| 0017 (console pane environment)   | The console's environment channel changes from `tmux -e` arguments to the request environment                             | 7     |
-| 0019 (command plans)              | Its `admin_target`/`agent_target` description moves to the new accessors                                                  | 5     |
-| 0025 (one current Debian release) | Core attests the release over SSH as the first base check                                                                 | 3     |
+| ADR                               | Change                                                                                                       | Slice |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------ | ----- |
+| 0013 (secret injection)           | Secret environment travels in the request on stdin, not as `-o SetEnv` arguments                             | 2     |
+| 0014 (`AcceptEnv` wildcard)       | The transport no longer sends environment through SSH; slice 8 decides whether the fragment still has a user | 2, 8  |
+| 0017 (console pane environment)   | The console's environment channel changes from `tmux -e` arguments to the request environment                | 7     |
+| 0019 (command plans)              | Its `admin_target`/`agent_target` description moves to the new accessors                                     | 5     |
+| 0025 (one current Debian release) | Core attests the release over SSH as the first base check                                                    | 3     |
 
 ADR 0003 needs no change: its statement that access after bootstrap is SSH over Tailscale becomes
 exactly true.
 
 ## Risks and early proofs
 
-| Risk                                                        | Proof, and its slice                                              |
-| ----------------------------------------------------------- | ----------------------------------------------------------------- |
-| `-F none` and `SendEnv` on 8.5 and on Win32-OpenSSH         | Envelope round trip at the bound, slice 2, all three workstations |
-| `env_keep` for the envelope on a VM Phase B has not reached | Elevated request on a fresh Debian 12 and 13 VM, slice 3          |
-| The trailer with a background child holding stderr          | Conformance vector, slice 2                                       |
-| `flock` on a directory across Debian releases               | Conformance vector, slice 5                                       |
-| Encrypted keys served by the agent                          | Live cell, slice 1                                                |
-| Older VMs without the AcceptEnv fragment                    | Reinit path in slice 2, recovery path in slice 4                  |
-| Cloud host-key re-establishment                             | Lost-record recovery on one cloud, slice 4                        |
-| `UserKnownHostsFile=NUL` with Win32-OpenSSH                 | Cloud create from Windows, slice 1                                |
+| Risk                                                                                       | Proof, and its slice                                        |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| Stage 0 parsed alike by `sh`, `dash`, `bash` and `zsh`, with noisy startup files           | Conformance vector per shell, slice 2                       |
+| Exact stdin positioning, so the payload reads the caller's first byte                      | Conformance vector, slice 2                                 |
+| `-F none` and the stdin protocol on 8.5 and on Win32-OpenSSH                               | Round trip from all three workstations, slice 2             |
+| Copying the operator's stdin for `stream` on Windows: binary mode, end of file, early exit | Live `vm exec` from Windows, slice 2                        |
+| The terminal handover: peer check, timeout, and cleanup when the second connection fails   | Conformance vectors and live attach from all three, slice 2 |
+| `sudo -n` passing stdin through under Debian's sudoers defaults                            | Elevated request on a fresh Debian 12 and 13 VM, slice 3    |
+| python3 at provisioning on every platform's image                                          | Create on every platform, slice 3                           |
+| The trailer with a background child holding stderr                                         | Conformance vector, slice 2                                 |
+| `flock` on a directory across Debian releases                                              | Conformance vector, slice 5                                 |
+| Encrypted keys served by the agent                                                         | Live cell, slice 1                                          |
+| Cloud host-key re-establishment                                                            | Lost-record recovery on one cloud, slice 4                  |
+| `UserKnownHostsFile=NUL` with Win32-OpenSSH                                                | Cloud create from Windows, slice 1                          |
 
-## Open questions for the operator
+## Operator decisions
 
-1. **Command names.** `agw vm import-host-keys` and `agw vm recover` are new operator-facing
-   commands. The FRD requires their behavior, not their names.
-2. **Account shell startup (R3).** The account's own shell parses the constant launcher line, so
-   zsh's `.zshenv` or Debian bash's sshd-triggered `.bashrc` can run before the launcher. The
-   payload gets no startup files. The lead's read: this satisfies R3's intent, because no startup
-   applies to what the caller asked to run. The alternative is restricting managed accounts to `sh`
-   and `dash` login shells, which would break zsh admins. Either way the admin and agent template
-   `shell` fields, free strings today (`vms/admin.py:99`, `agents/templates.py:33`), become limited
-   to the POSIX family at the config boundary. That is a new restriction on operator-authored
-   config, with the base check kept as a backstop.
-3. **Automatic rejoin (R7).** R7 says core invokes recovery only explicitly. The lead reads
-   "explicitly" as a named core flow that announces what it is doing, as opposed to the transport
-   silently falling back. On that reading, the activation gate's announced rejoin of a VM that lost
-   its tailnet registration stays. The alternative is to fail and name `agw vm recover`.
-4. **Local Lima on Windows.** Is it a supported pairing for R11's matrix?
+The operator answered the design's open questions on 2026-10-31. The requirement-level rulings (R3,
+R7, R11 and python3 at provisioning) are quoted in the FRD.
+
+1. **Command names.** `agw vm import-host-keys` and `agw vm recover` stand.
+2. **Account shell startup (R3).** R3 now accepts the account shell's own startup running before
+   stage 0, since nothing it does reaches the command (D4).
+3. **Automatic rejoin (R7).** The activation gate fails with a hint naming `agw vm recover` instead
+   of rejoining on its own (D11).
+4. **Local Lima on Windows** is a supported pairing (evidence matrix).
+5. **The launcher's name** is `agw-launch`, the Agentworks launcher.
+6. **Three PRs** instead of eight (migration).
+7. **Delivery.** Every request travels on stdin, agw-launch is written in Python, python3 is a
+   provisioning requirement, and terminals use the two-connection handover.
+
+## Alternatives considered
+
+- **The whole request by `SendEnv`**, this document's first draft. It needed the AcceptEnv fragment
+  at provisioning, a sudo `env_keep` line, numbered parts under a 256 KiB cap and a not-ready path
+  for older VMs, and it passed secrets through the login shell's environment.
+- **`SendEnv` for terminal requests only.** A second delivery path kept for one mode.
+- **Relaying the terminal through agw.** ssh takes window size and terminal modes from its own
+  stdin, so agw would have to relay a pseudo-terminal on three workstation operating systems, and
+  wait for the guest to turn echo off before sending the request.
+- **A reverse-forwarded socket with a one-time token by `SendEnv`.** It saves the second handshake,
+  but adds a workstation listener, a forward that may not be ready when the command starts, and an
+  unmeasured Windows forward of a VM-side Unix socket.
+- **A long-lived control channel multiplexing requests.** It would bring back the stale
+  supplementary groups and PAM state that ADR 0015 removed connection sharing to avoid.
+- **`/bin/sh` as every managed account's login shell.** It would change the operator's direct SSH
+  sessions.
+- **The launcher in Bash.** Exact stdin reads, a rebuilt environment, the handover socket and the
+  file programs are all simpler in Python's standard library.
 
 ## Requirements traceability
 
