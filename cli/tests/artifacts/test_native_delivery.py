@@ -829,21 +829,24 @@ def test_claude_observes_version_only_for_delivered_session_prompt(monkeypatch, 
 
 
 @pytest.mark.parametrize(
-    "render,argument",
+    "render,args",
     [
-        (claude.session_artifacts, "--bare"),
-        (codex.session_artifacts, "--profile"),
-        (grok.session_artifacts, "--no-subagents"),
+        (claude.session_artifacts, ["--bare"]),
+        (codex.session_artifacts, ["--profile"]),
+        (grok.session_artifacts, ["--no-subagents"]),
+        (claude.session_artifacts, ["--", "prompt"]),
+        (codex.session_artifacts, ["--", "prompt"]),
+        (grok.session_artifacts, ["--", "prompt"]),
     ],
 )
-def test_ancestor_only_override_is_reported_without_blocking(render, argument, monkeypatch):
+def test_ancestor_only_override_is_reported_without_blocking(render, args, monkeypatch):
     warnings: list[str] = []
     monkeypatch.setattr(output, "warn", warnings.append)
     existing = claude.outer_artifacts(received(artifact(ArtifactType.AGENT)), "/home/alice/.claude")
     result = render(
         context=context(ancestors=tuple(owned(file) for file in existing.files)),
         configured=None,
-        extra_args=[argument],
+        extra_args=args,
     )
     assert warnings
     assert not result.application.files and not result.argv
@@ -1014,3 +1017,22 @@ def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, m
     assert any(file.path == str(entrypoint) for file in result.files) is modified
     assert all(Path(file.path).exists() for file in result.files)
     assert any(good.origin_identity in file.origins for file in result.files)
+
+
+@pytest.mark.parametrize("render", [claude.session_artifacts, codex.session_artifacts, grok.session_artifacts])
+@pytest.mark.parametrize("matching_owner", ["user", "workspace"])
+def test_new_carrier_cannot_choose_one_of_competing_ancestor_origins(render, matching_owner):
+    first = artifact(ArtifactType.AGENT, owner="user")
+    second = artifact(ArtifactType.AGENT, owner="workspace")
+    earlier = (
+        *claude.outer_artifacts(received(first), "/home/alice/.claude").files,
+        *claude.outer_artifacts(received(second), "/workspace/.claude").files,
+    )
+    selected = first if matching_owner == "user" else second
+    with pytest.raises(ConfigError):
+        render(
+            context=context(selected, ancestors=tuple(owned(file) for file in earlier)),
+            configured=None,
+            extra_args=[],
+            enabled_workarounds=enabled(render),
+        )

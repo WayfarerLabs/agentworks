@@ -265,7 +265,7 @@ def inspect_artifacts(
         for name in names:
             views: dict[ArtifactComponent, ArtifactOwnerView] = {}
             for owner in owners:
-                inherited: dict[ArtifactOwner, ArtifactGroup] | None = {}
+                inherited: dict[ArtifactOwner, ArtifactGroup] = {}
                 if owner.component in ("admin", "agent", "workspace"):
                     inherited = available_deferred_inputs(
                         views["vm"], "workspace" if owner.component == "workspace" else "user", name
@@ -342,12 +342,12 @@ def _artifact_metadata(
 
 
 def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView) -> IntegrationMetadata:
-    from agentworks.artifacts.routing import deferred_inputs, inactive_destination
+    from agentworks.artifacts.routing import available_deferred_inputs, inactive_destination
 
     destination = (
-        inactive_destination(owner.facet) if view.status == "inactive" and owner.component != "session" else None
+        inactive_destination(owner.facet) if name not in owner.activations and owner.component != "session" else None
     )
-    passthrough = deferred_inputs(view, destination) if destination is not None else {}
+    passthrough = available_deferred_inputs(view, destination, name) if destination is not None else {}
     record = view.record
     deferred = (
         ()
@@ -380,7 +380,7 @@ def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView
         handled,
         deferred,
         placements,
-        tuple(item.identity for group in (passthrough or {}).values() for item in group.items()),
+        tuple(item.identity for group in passthrough.values() for item in group.items()),
         destination if passthrough else None,
         skipped,
     )

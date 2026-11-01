@@ -216,11 +216,13 @@ def ancestor_diagnostics(integration: str) -> Iterator[None]:
 def validate_ancestor_names(context: SessionArtifactContext, application: ArtifactApplication) -> None:
     """Report old branch collisions; refuse conflicts introduced by new delivery."""
     files_by_name: dict[str, OwnedArtifactFile | ArtifactFile] = {}
+    conflicting_ancestors: dict[str, OwnedArtifactFile] = {}
     for ancestor in context.ancestor_files:
         if ancestor.native_identity is None:
             continue
         prior = files_by_name.setdefault(ancestor.native_identity, ancestor)
-        if set(prior.origins) != set(ancestor.origins):
+        if set(prior.origins) != set(ancestor.origins) and ancestor.native_identity not in conflicting_ancestors:
+            conflicting_ancestors[ancestor.native_identity] = ancestor
             output.warn(
                 f"Existing scopes share native artifact identity '{ancestor.native_identity}': "
                 f"{prior.path!r} and {ancestor.path!r}. Continuing with existing placement."
@@ -229,6 +231,8 @@ def validate_ancestor_names(context: SessionArtifactContext, application: Artifa
         if file.native_identity is None:
             continue
         prior = files_by_name.setdefault(file.native_identity, file)
+        if file.native_identity in conflicting_ancestors and set(prior.origins) == set(file.origins):
+            prior = conflicting_ancestors[file.native_identity]
         if set(prior.origins) != set(file.origins):
             raise ConfigError(
                 f"multiple scopes claim native artifact identity '{file.native_identity}': "

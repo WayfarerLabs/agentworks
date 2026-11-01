@@ -288,7 +288,7 @@ def test_session_inspection_uses_runtime_diamond_order(db: Database, unhandled: 
     db.instance_state.replace_applied_slices(
         "session", "review", "fixture", {AppliedStateKey.HARNESS_NATIVE_SETUP: VersionedPayload(2, {"broken": True})}
     )
-    own_failure = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited=None)
+    own_failure = inspect_owner_artifacts(db, fixture.registry, owner, "shell")
     assert own_failure.status == "unavailable"
     result = inspect_artifacts(db, fixture.registry, session_name="review")
     assert result.owners[-1].integrations[0].reason == own_failure.reason
@@ -418,3 +418,54 @@ def test_skipped_section_is_inspectable_without_being_handled_or_deferred(db: Da
     assert integration.recorded_skipped == (skipped,)
     encoded = json.dumps(inspection_data(result))
     assert skipped.path in encoded and item.content.text not in encoded
+
+
+@pytest.mark.parametrize("component", ["vm", "agent", "workspace"])
+def test_stale_inactive_capture_explains_available_passthrough_without_refresh(db: Database, monkeypatch, component):
+    from agentworks.artifacts.inspection import inspect_artifacts, inspection_data
+    from agentworks.artifacts.routing import setup_artifacts
+    from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
+    from agentworks.db import VersionedPayload
+    from agentworks.origin import Origin
+    from agentworks.package_sources import PackageCapture
+    from tests.artifacts.test_routing import graph
+
+    fixture = graph(db)
+    fixture.registry.add(
+        "harness-integration", "shell", HarnessIntegrationEntry(name="shell"), Origin.built_in(source="test")
+    )
+    db.instance_state.put_desired_overlay(component, component, VersionedPayload(1, {"artifacts": {"bundles": []}}))
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("inspection acquired sources or changed instance state")
+
+    monkeypatch.setattr(PackageCapture, "capture", forbidden)
+    monkeypatch.setattr(type(db.instance_state), "replace_applied_slices", forbidden)
+    result = inspect_artifacts(
+        db,
+        fixture.registry,
+        vm_name="vm" if component == "vm" else None,
+        agent_name="agent" if component == "agent" else None,
+        workspace_name="workspace" if component == "workspace" else None,
+        integration_name="shell",
+    )
+    owner = result.owners[-1]
+    integration = owner.integrations[0]
+    groups = ("vm", "agent") if component == "agent" else (component,)
+    expected = tuple(item.identity for group in groups for item in fixture.captures[group].inputs.items())
+    destination = "user" if component == "vm" else "session"
+    assert owner.capture_status == "stale" and integration.status == "stale"
+    assert not integration.activated and integration.passthrough_inputs == expected
+    assert integration.passthrough_destination == destination
+    encoded = json.loads(json.dumps(inspection_data(result)))["owners"][-1]["integrations"][0]
+    assert encoded["status"] == "stale" and encoded["passthrough_inputs"] == list(expected)
+    assert encoded["passthrough_destination"] == destination
+    if component == "vm":
+        runtime = setup_artifacts(db, fixture.registry, fixture.owners["agent"], fixture.vm, "shell")
+        assert (
+            tuple(item.identity for item in runtime.deferred[fixture.captures["vm"].inputs.owner].items()) == expected
+        )
+    else:
+        runtime = fixture.route().inputs
+        known = {item.identity for item in runtime.items()}
+        assert set(expected) <= known

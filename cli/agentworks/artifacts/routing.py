@@ -52,13 +52,9 @@ def inspect_owner_artifacts(
     inputs: SetupInputs,
     integration_name: str | None = None,
     *,
-    inherited: Mapping[ArtifactOwner, ArtifactGroup] | None = MappingProxyType({}),
+    inherited: Mapping[ArtifactOwner, ArtifactGroup] = MappingProxyType({}),
 ) -> ArtifactOwnerView:
-    """Project persisted evidence without fetching or repairing any owner.
-
-    ``inherited=None`` explicitly means an ancestor's route is unavailable. It
-    cannot be substituted with empty input to claim this owner's result current.
-    """
+    """Project persisted evidence and known inputs without fetching or repairing owners."""
     captured = None
     record = None
     reason = ""
@@ -72,7 +68,7 @@ def inspect_owner_artifacts(
             capture_status, reason = "stale", "Captured artifacts do not match the owner's current bundle declarations."
     except (ConfigError, StateError, KeyError):
         capture_status, reason = "unavailable", "The owner's artifact declarations or captured state are unavailable."
-    prepared = ArtifactInputs(local=captured.inputs if captured is not None else None, deferred=inherited or {})
+    prepared = ArtifactInputs(local=captured.inputs if captured is not None else None, deferred=inherited)
     if integration_name is not None:
         try:
             record = next(
@@ -106,16 +102,6 @@ def inspect_owner_artifacts(
         return ArtifactOwnerView(inputs, captured, capture_status, "inactive", record=record)
     if capture_status != "current":
         return ArtifactOwnerView(inputs, captured, capture_status, capture_status, reason, record, prepared)
-    if inherited is None:
-        return ArtifactOwnerView(
-            inputs,
-            captured,
-            capture_status,
-            "unavailable",
-            "An ancestor's artifact routing result is unavailable.",
-            record,
-            prepared=prepared,
-        )
     if integration_name is None:
         return ArtifactOwnerView(inputs, captured, capture_status, "current", prepared=prepared)
     if block is None:
@@ -244,23 +230,6 @@ def _declaration_changes(before: Mapping[str, object], after: Mapping[str, objec
 def inactive_destination(facet: ArtifactFacet) -> ArtifactFacet:
     """Route inactive VM facets through the user; inner facets pass to session."""
     return "user" if facet == "vm" else "session"
-
-
-def deferred_inputs(view: ArtifactOwnerView, destination: ArtifactFacet) -> dict[ArtifactOwner, ArtifactGroup] | None:
-    """Project one route, preserving input order; unknown evidence stays unknown."""
-    if view.status not in ("current", "inactive") or view.prepared is None:
-        return None
-    if view.status == "inactive":
-        return (
-            {group.owner: group for group in view.prepared.groups() if group}
-            if destination == inactive_destination(view.owner.facet)
-            else {}
-        )
-    if view.record is None:
-        return {}
-    identities = {item.input_id for item in view.record.deferred if item.destination == destination}
-    selected = (group.select(identities) for group in view.prepared.groups())
-    return {group.owner: group for group in selected if group}
 
 
 def available_deferred_inputs(

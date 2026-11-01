@@ -136,7 +136,8 @@ def session_artifacts(
         forbidden.update({"--plugin-dir", "--disable-slash-commands"})
     if has_agents:
         forbidden.add("--agents")
-    reject_flags(extra_args, forbidden, "claude-code")
+    if inputs:
+        reject_flags(extra_args, forbidden, "claude-code")
     if context.ancestor_files:
         ancestor_flags = {"--bare", "--settings", "--setting-sources"}
         if any(name.startswith("skill:") for name in ancestor_names):

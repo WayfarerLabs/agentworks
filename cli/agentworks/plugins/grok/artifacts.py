@@ -114,7 +114,8 @@ def session_artifacts(
         forbidden.update({"--agents", "--no-subagents"})
     if has_skills:
         forbidden.update({"--plugin-dir", "--disable-skills"})
-    reject_flags(extra_args, forbidden, "grok-build")
+    if inputs:
+        reject_flags(extra_args, forbidden, "grok-build")
     if context.ancestor_files:
         ancestor_flags = set()
         if any(name.startswith("agent:") for name in ancestor_names):

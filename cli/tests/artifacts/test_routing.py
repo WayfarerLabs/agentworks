@@ -12,7 +12,7 @@ from agentworks.artifacts.bundle import ArtifactBundle
 from agentworks.artifacts.declarations import ArtifactsConfig, HintArtifactSpec
 from agentworks.artifacts.model import ArtifactGroup, ArtifactInputs, ArtifactOwner
 from agentworks.artifacts.routing import (
-    deferred_inputs,
+    available_deferred_inputs,
     inspect_owner_artifacts,
     session_artifacts,
     setup_artifacts,
@@ -151,9 +151,11 @@ def test_inactive_vm_inputs_are_handled_by_actual_active_user(db, user):
 def test_inactive_vm_routes_only_to_user_and_workspace_keeps_local_inputs(db):
     fixture = graph(db)
     vm = inspect_owner_artifacts(db, fixture.registry, fixture.owners["vm"], "shell")
-    assert deferred_inputs(vm, "user") == {fixture.captures["vm"].inputs.owner: fixture.captures["vm"].inputs}
-    assert deferred_inputs(vm, "workspace") == {}
-    assert deferred_inputs(vm, "session") == {}
+    assert available_deferred_inputs(vm, "user", "shell") == {
+        fixture.captures["vm"].inputs.owner: fixture.captures["vm"].inputs
+    }
+    assert available_deferred_inputs(vm, "workspace", "shell") == {}
+    assert available_deferred_inputs(vm, "session", "shell") == {}
     assert setup_artifacts(db, fixture.registry, fixture.owners["workspace"], fixture.vm, "shell") == ArtifactInputs(
         local=fixture.captures["workspace"].inputs
     )
@@ -180,12 +182,12 @@ def test_inactive_branch_passes_inherited_and_local_inputs_to_session(db, compon
     fixture.save("vm", routes={"vm-0": owner.facet})
     inherited = fixture.captures["vm"].inputs
     view = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited={inherited.owner: inherited})
-    assert deferred_inputs(view, "session") == {
+    assert available_deferred_inputs(view, "session", "shell") == {
         inherited.owner: inherited,
         fixture.captures[component].inputs.owner: fixture.captures[component].inputs,
     }
-    assert deferred_inputs(view, "user") == {}
-    assert deferred_inputs(view, "workspace") == {}
+    assert available_deferred_inputs(view, "user", "shell") == {}
+    assert available_deferred_inputs(view, "workspace", "shell") == {}
     result = fixture.route()
     assert [item.origin.component for item in result.inputs.items()] == ["vm", "agent", "workspace"]
     assert len({item.identity for item in result.inputs.items()}) == sum(1 for _ in result.inputs.items())
@@ -231,7 +233,7 @@ def test_active_noncurrent_results_report_without_blocking_other_branches(db, co
     assert [item.origin.component for item in fixture.route().inputs.items()] == ["workspace"]
     view = inspect_owner_artifacts(db, fixture.registry, fixture.owners["agent"], "shell")
     assert view.status == ("missing" if condition == "legacy" else condition)
-    assert deferred_inputs(view, "session") is None
+    assert available_deferred_inputs(view, "session", "shell") == {}
 
 
 def test_owner_declaration_change_is_not_hidden_by_old_capture(db):
@@ -276,13 +278,6 @@ def test_unrelated_plugin_claims_do_not_block_passthrough(db):
     assert sum(1 for _ in fixture.route().inputs.items()) == 3
 
 
-def test_unavailable_parent_route_does_not_manufacture_current_empty_input(db):
-    fixture = graph(db, active=("agent",))
-    fixture.save("agent")
-    view = inspect_owner_artifacts(db, fixture.registry, fixture.owners["agent"], "shell", inherited=None)
-    assert view.status == "unavailable" and view.prepared is not None
-
-
 def test_workspace_only_vm_change_does_not_stale_user_branch(db):
     fixture = graph(db, active=("vm", "agent"), counts={"vm": 2})
     fixture.save("vm", routes={"vm-0": "user", "vm-1": "workspace"})
@@ -311,19 +306,12 @@ def test_config_and_env_freshness_still_apply(db):
     assert "operator-private-value" not in view.reason
 
 
-def test_inactive_session_does_not_inherit_an_unrelated_artifact_gap(db):
-    fixture = graph(db)
-    owner = SetupInputs("session", "review", "session", {}, SecretTarget(vm={}, session={}))
-    view = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited=None)
-    assert view.status == "inactive"
-
-
 def test_inactive_session_with_stale_capture_has_no_setup_obligation(db):
     fixture = graph(db)
     owner = SetupInputs("session", "review", "session", {}, SecretTarget(vm={}, session={}))
     stale_capture = replace(fixture.captures["agent"], declaration="outdated")
     owner = replace(owner, artifact_snapshot=stale_capture)
-    view = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited=None)
+    view = inspect_owner_artifacts(db, fixture.registry, owner, "shell")
     assert view.capture_status == "stale"
     assert view.status == "inactive"
 
@@ -337,7 +325,7 @@ def test_inactive_session_with_stale_capture_has_no_setup_obligation(db):
         artifact_files=(file,),
     )
     write_native_setup(db, "session", "review", NativeSetupState(records=(record,)), operation="fixture")
-    retirement = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited=None)
+    retirement = inspect_owner_artifacts(db, fixture.registry, owner, "shell")
     assert retirement.capture_status == "stale"
     assert retirement.status == "retirement"
 
@@ -411,10 +399,14 @@ def test_session_projection_shares_canonical_diamond_order(db):
     fixture.save("vm", routes={"vm-0": "user", "vm-1": "session", "vm-2": "workspace"})
     vm = inspect_owner_artifacts(db, fixture.registry, fixture.owners["vm"], "shell")
     user = inspect_owner_artifacts(
-        db, fixture.registry, fixture.owners["agent"], "shell", inherited=deferred_inputs(vm, "user")
+        db, fixture.registry, fixture.owners["agent"], "shell", inherited=available_deferred_inputs(vm, "user", "shell")
     )
     workspace = inspect_owner_artifacts(
-        db, fixture.registry, fixture.owners["workspace"], "shell", inherited=deferred_inputs(vm, "workspace")
+        db,
+        fixture.registry,
+        fixture.owners["workspace"],
+        "shell",
+        inherited=available_deferred_inputs(vm, "workspace", "shell"),
     )
     inherited = session_inherited_inputs(vm, user, workspace, integration_name="shell")
     assert inherited == fixture.route().inputs.deferred
@@ -494,17 +486,6 @@ def test_upstream_owned_files_survive_handled_payload_elision(db):
     assert result.active_facets == ("user",)
 
 
-def test_missing_parent_route_remains_unknown_at_session_join(db):
-    from agentworks.artifacts.routing import session_inherited_inputs
-
-    fixture = graph(db, active=("vm",))
-    vm = inspect_owner_artifacts(db, fixture.registry, fixture.owners["vm"], "shell")
-    user = inspect_owner_artifacts(db, fixture.registry, fixture.owners["agent"], "shell", inherited=None)
-    workspace = inspect_owner_artifacts(db, fixture.registry, fixture.owners["workspace"], "shell", inherited=None)
-    inherited = session_inherited_inputs(vm, user, workspace, integration_name="shell")
-    assert [item.origin.component for group in inherited.values() for item in group.items()] == ["agent", "workspace"]
-
-
 def test_removed_bundle_declaration_remains_inspectable(db):
     fixture = graph(db)
     owner = replace(fixture.owners["agent"], artifacts=ArtifactsConfig(bundles=["removed"]))
@@ -565,8 +546,7 @@ def test_database_round_trip_retains_map_order_and_current_routing(db):
     assert view.status == "current" and view.record == record
     assert view.prepared is not None
     assert [item.content.name for item in view.prepared.items()] == ["zebra", "alpha"]
-    deferred = deferred_inputs(view, "session")
-    assert deferred is not None
+    deferred = available_deferred_inputs(view, "session", "shell")
     assert list(deferred[capture.inputs.owner].hints) == ["zebra", "alpha"]
 
 
