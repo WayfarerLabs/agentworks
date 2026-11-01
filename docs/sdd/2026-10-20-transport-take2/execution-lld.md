@@ -48,7 +48,7 @@ them:
 | `agentworks/execution/access.py`                 | `VMAccess`, `Admin`, `Agent`, `vm_access`                                                                        |
 | `agentworks/execution/attach.py`                 | The two-connection attach under `guarded_terminal`                                                               |
 | `agentworks/execution/forwarding.py`             | The forward context manager                                                                                      |
-| `agentworks/execution/oplog.py`                  | `LOG_DIR`, `OperationLog`                                                                                        |
+| `agentworks/execution/oplog.py`                  | `LOG_DIR`; `OperationLog` arrives in slice 3                                                                     |
 | `agentworks/execution/errors.py`                 | Adds `ExecutionIncomplete`, `CommandFailed`, `VMNotReady`, `TrustMismatch`, `ClientUnsupported`, `ForwardFailed` |
 | `agentworks/vms/manager/port_forward.py`         | `port_forward_vm`, moved out of `tailscale.py` so the file can pass the static import check                      |
 | `agentworks/vms/manager/platform_shell.py`       | `vm shell --platform`, moved out of `exec.py`; legacy until slice 4                                              |
@@ -149,11 +149,11 @@ Unknown(reason)        CONNECTION | HOST_KEY | TRUNCATED | DEADLINE | OUTPUT_LIM
 
 ## The access object
 
-`execution.vm_access(vm, config, identity, *, log=None) -> VMAccess`, with `identity` either
-`Admin()` or `Agent(name, linux_user)`. Construction copies the VM name, its tailnet address, the
-SSH user (`admin_username` or the agent's `linux_user`), the identity file path and the log, and
-nothing else (R9): no key is read, no trust file is opened and nothing is spawned. Its trust is
-always `TrustBinding(TrustMode.VM, vm.name)`; Enroll arrives with slice 3.
+`execution.vm_access(vm, config, identity) -> VMAccess`, with `identity` either `Admin()` or
+`Agent(name, linux_user)`. Construction copies the VM name, its tailnet address, the SSH user
+(`admin_username` or the agent's `linux_user`) and the identity file path, and nothing else (R9): no
+key is read, no trust file is opened and nothing is spawned. Its trust is always
+`TrustBinding(TrustMode.VM, vm.name)`; Enroll arrives with slice 3.
 
 | Operation                                                         | Returns                   |
 | ----------------------------------------------------------------- | ------------------------- |
@@ -164,7 +164,7 @@ always `TrustBinding(TrustMode.VM, vm.name)`; Enroll arrives with slice 3.
 
 Each operation runs in this order, so everything before the spawn raises with nothing dispatched:
 `resolve_ssh()` (`ClientUnsupported`), encode the request (`ValidationError`), build the options
-(`TrustMissing`), spawn, pump, classify, log. A VM with no tailnet address is a `StateError` at that
+(`TrustMissing`), spawn, pump, classify. A VM with no tailnet address is a `StateError` at that
 point, the first use of a persisted value.
 
 ## Policies and the client argv
@@ -204,7 +204,7 @@ as `-o` (the proof's list at `connection.py:109-153`, reconciled with D2 and `tr
 
 | Mode                              | Argv                                                                                      |
 | --------------------------------- | ----------------------------------------------------------------------------------------- |
-| `run`, `stream`, the parking half | `ssh -F none -T <options> -l <user> -- <host> <stage0>`                                   |
+| `run`, `stream`, the parking half | `ssh -F none -T -E <client log> <options> -l <user> -- <host> <stage0>`                   |
 | Terminal half of an attach        | `ssh -F none -t <options> -l <user> -- <host> <stage0> <socket path>`                     |
 | Forward                           | `ssh -F none -N -n <options> -o ExitOnForwardFailure=yes [-v] -L ... -l <user> -- <host>` |
 
@@ -217,6 +217,13 @@ as `-o` (the proof's list at `connection.py:109-153`, reconciled with D2 and `tr
   HLA's `-tt`, as `transports/ssh.py:380` does. `-tt` would force a pty when the operator's stdin is
   not a terminal, which breaks `echo ls | agw vm shell`. In TTY mode agw-launch accepts a non-pty.
 - **Forwarded addresses.** `-L <bind>:<local>:localhost:<remote>` as `tailscale.py` builds it today.
+- **The client's own log.** `-E` sends ssh's own diagnostics, never the remote's output, to a
+  private file: `tempfile.mkstemp` (0600) in `CONFIG_DIR / "run"` (0700), removed when the operation
+  ends, quoted by `literal_path`. stderr then carries only what the guest wrote, so the filters need
+  no OpenSSH token, and the client's diagnostics can be shown without the risk that pre-marker
+  stderr quotes request bytes. The terminal half and the forward keep ssh's diagnostics on the
+  operator's terminal, as today. A live cell confirms that `Host key verification failed` and the
+  authentication and connection errors land in the `-E` file on 8.5, 9.x and Win32-OpenSSH.
 
 **The host policy** lands in slice 4 with its first callers, and nothing in `build_argv` precludes
 it. It omits `-F none` and the isolation pins, honors the operator's configuration, takes
@@ -359,9 +366,7 @@ execute), 127 (not found) or 125 (other), as `env(1)` does.
 `envelope.py` holds one filter per stream. Each runs three phases:
 
 - **Seeking.** Search for the start marker, dropping everything before it and keeping only a tail of
-  marker length across chunks. The stderr filter also notes, without retaining text, whether the
-  dropped bytes contained `Host key verification failed`. This is the single OpenSSH token the
-  client reads (HLA D4).
+  marker length across chunks. Nothing in the dropped bytes is read.
 - **Passing.** Forward payload bytes at once, holding back only the longest suffix that is a proper
   prefix of the closing prefix (`0x1E`, nonce, space). No timer is involved.
 - **Done.** After the closing line, drop everything. stdout closes with `end`, stderr with `exit N`
@@ -369,16 +374,16 @@ execute), 127 (not found) or 125 (other), as `env(1)` does.
 
 The classifier combines both filters with ssh's own exit status:
 
-| Evidence                                                          | Completion                                                                     |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `end` on stdout and `exit N` on stderr                            | `Completed(N)`; ssh's own status is ignored                                    |
-| `end` on stdout and `refused CODE` on stderr                      | `NotDelivered(REFUSED, CODE)`                                                  |
-| No start marker, ssh exit 127                                     | `NotDelivered(PYTHON_MISSING)`                                                 |
-| No start marker, ssh exit 0 to 254 otherwise                      | `NotDelivered(LAUNCHER_FAILED)`                                                |
-| No start marker, ssh exit 255, a signal, or a status above 255    | `Unknown(CONNECTION)`, or `Unknown(HOST_KEY)` when the token was seen on a 255 |
-| A start marker, but no `end` or no trailer at exit or end of file | `Unknown(TRUNCATED)`                                                           |
-| Deadline reached, or a stream over its capture limit              | `Unknown(DEADLINE)`, `Unknown(OUTPUT_LIMIT)`                                   |
-| `Popen` raised                                                    | `NotDelivered(CLIENT_START)`                                                   |
+| Evidence                                                          | Completion                                                                                                      |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `end` on stdout and `exit N` on stderr                            | `Completed(N)`; ssh's own status is ignored                                                                     |
+| `end` on stdout and `refused CODE` on stderr                      | `NotDelivered(REFUSED, CODE)`                                                                                   |
+| No start marker, ssh exit 127                                     | `NotDelivered(PYTHON_MISSING)`                                                                                  |
+| No start marker, ssh exit 0 to 254 otherwise                      | `NotDelivered(LAUNCHER_FAILED)`                                                                                 |
+| No start marker, ssh exit 255, a signal, or a status above 255    | `Unknown(CONNECTION)`, or `Unknown(HOST_KEY)` when the client log holds `Host key verification failed` on a 255 |
+| A start marker, but no `end` or no trailer at exit or end of file | `Unknown(TRUNCATED)`                                                                                            |
+| Deadline reached, or a stream over its capture limit              | `Unknown(DEADLINE)`, `Unknown(OUTPUT_LIMIT)`                                                                    |
+| `Popen` raised                                                    | `NotDelivered(CLIENT_START)`                                                                                    |
 
 - **Ending the client.** Once both streams are done the client closes ssh's stdin, waits up to one
   second for a natural exit and kills it. It never waits for end of file or on a timer, so a
@@ -386,8 +391,10 @@ The classifier combines both filters with ssh's own exit status:
   it keeps pumping until the other completes or both reach end of file.
 - **No pre-marker text is kept.** `NotDelivered` and `Unknown` carry reasons, never stream text:
   with no start marker, the stderr may be a traceback quoting request bytes a startup file left
-  unread. ssh's own diagnostics are therefore not shown for `run` and `stream`; the operation log
-  records the ssh argv, which has no request data, so an operator can reproduce a failure by hand.
+  unread. They do carry the last 20 lines of the client log, which holds only ssh's own diagnostics
+  (`Permission denied (publickey)`, `Connection timed out`), so the operator sees why a connection
+  failed. This is the one OpenSSH output the client reads, and it reads one token from it to type an
+  error (HLA D4).
 
 ## Terminal handover
 
@@ -433,8 +440,8 @@ stderr captured (inherited under `verbose`) and then waits for readiness:
   closes at once, a side effect the HLA accepts by choosing this signal.
 - **Not ready** is the client exiting first (`ExitOnForwardFailure=yes`, a refused connection) or
   the 60 s elapsing. `ForwardFailed(ConnectivityError)` carries the client's stderr, which holds no
-  request data, and a seen `Host key verification failed` raises `TrustMismatch` instead. **HLA
-  amendment proposed:** D13 gains `ForwardFailed`.
+  request data, since a forward runs no request, and `Host key verification failed` there raises
+  `TrustMismatch` instead. **HLA amendment proposed:** D13 gains `ForwardFailed`.
 - **The handle** has `wait() -> int` (polling `Popen.wait(timeout=0.2)` so Ctrl-C is delivered) and
   exit ends the client: terminate, one second, kill.
 - **Signals.** The library installs none. `port_forward_vm` installs a `SIGTERM` handler that raises
@@ -444,14 +451,14 @@ stderr captured (inherited under `verbose`) and then waits for readiness:
 
 ## Errors
 
-| Error                 | Kind                | Raised for                                                                     | PR A hint                                                                   |
-| --------------------- | ------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| `ClientUnsupported`   | `ConfigError`       | No acceptable OpenSSH, before dispatch                                         | The install guidance in the message                                         |
-| `VMNotReady`          | `StateError`        | `NotDelivered(PYTHON_MISSING)` (an unelevated 127)                             | `agw vm reinit <vm>`, whose Phase A still runs without python3              |
-| `TrustMismatch`       | `StateError`        | `Unknown(HOST_KEY)`, and the forward's token                                   | Verify the new key, remove the store file, `import-host-keys --known-hosts` |
-| `ExecutionIncomplete` | `ConnectivityError` | Any other `NotDelivered` or `Unknown`; carries the `Result` and names which    | A `NotDelivered` command did not start; an `Unknown` one may have run       |
-| `CommandFailed`       | `ExternalError`     | `check=True` with a non-zero status; message has the status, never stream text | none                                                                        |
-| `ForwardFailed`       | `ConnectivityError` | A forward that never became ready                                              | none                                                                        |
+| Error                 | Kind                | Raised for                                                                                                | PR A hint                                                                   |
+| --------------------- | ------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `ClientUnsupported`   | `ConfigError`       | No acceptable OpenSSH, before dispatch                                                                    | The install guidance in the message                                         |
+| `VMNotReady`          | `StateError`        | `NotDelivered(PYTHON_MISSING)` (an unelevated 127)                                                        | `agw vm reinit <vm>`, whose Phase A still runs without python3              |
+| `TrustMismatch`       | `StateError`        | `Unknown(HOST_KEY)`, and the forward's token                                                              | Verify the new key, remove the store file, `import-host-keys --known-hosts` |
+| `ExecutionIncomplete` | `ConnectivityError` | Any other `NotDelivered` or `Unknown`; carries the `Result`, names which, and shows the client log's tail | A `NotDelivered` command did not start; an `Unknown` one may have run       |
+| `CommandFailed`       | `ExternalError`     | `check=True` with a non-zero status; message has the status, never stream text                            | none                                                                        |
+| `ForwardFailed`       | `ConnectivityError` | A forward that never became ready                                                                         | none                                                                        |
 
 **HLA amendment proposed:** `TrustMismatch`'s hint cannot name `agw vm recover` in PR A, which lands
 in slice 4 (PR B). Until then it names the manual path, since import never rewrites an existing
@@ -469,20 +476,17 @@ call time) so one test patch reaches them all.
   `power.py:323` and `cli/commands/vm.py:441`. `ssh.py` drops its constant and `SSHLogger`
   (`ssh.py:99`) reads `oplog.LOG_DIR`. The session fixture at `tests/conftest.py:83` patches
   `oplog.LOG_DIR`, and so do the eight test files that patched `agentworks.ssh.LOG_DIR`.
-- **`OperationLog(vm_name, stem, redactions=())`** writes `<vm>-<UTC timestamp>-<stem>.log` in that
-  directory, so the existing globs (`<vm>-*.log`, `<vm>-*-vm-create.log`) keep matching. It records,
-  per operation: the label the caller gives; the request shape (kind, flags, the names of the
-  environment variables, `cwd`, input size, `sensitive`, deadline, the ssh argv without request
-  data); the outcome (`completed N`, `not delivered: REASON`, `unknown: REASON`) with elapsed time;
-  and the streams after redaction, decoded with `errors="replace"`. It never records argv values,
-  environment values, script text or stdin.
-- **Redaction** copies `SSHLogger`'s: each secret in its raw and `shlex.quote`d forms, longest
-  first. A sensitive stdin keeps both streams out entirely.
-- **Opt-in.** `vm_access(..., log=None)`; a log only goes to an operation whose caller passes one.
-  Today's `vm exec`, `shell` and `verify-connection` write none, and a log from them would also
-  displace the create log that the readers above show newest-first. The first writer is slice 3's
-  create. Until then the only consumers are the conformance vectors. This is the one piece of slice
-  2 with no production caller; the plan lists it for this slice.
+- **The writer waits for its first consumer.** None of the six migrated commands writes a log today,
+  and a log from them would displace the create log that the readers above show newest-first. HLA
+  D5's rule lands nothing before its consumer, so `OperationLog` arrives in slice 3 with create's
+  Phase A. Its contract is fixed now so slice 3 inherits it: `<vm>-<UTC timestamp>-<stem>.log` in
+  `LOG_DIR`, so the existing globs keep matching; per operation the caller's label, the request
+  shape (kind, flags, environment variable names, `cwd`, input size, `sensitive`, deadline, the ssh
+  argv without request data), the outcome with elapsed time, the client log, and the streams after
+  `SSHLogger`'s redaction (raw and `shlex.quote`d forms, longest first), with a sensitive stdin
+  keeping both streams out. It never records argv values, environment values, script text or stdin.
+  **Plan amendment:** the slice 2 box names `oplog.py`; slice 2 lands its constant and slice 3 its
+  writer.
 
 ## The migrated commands
 
@@ -563,7 +567,6 @@ attribute so one patch reaches every manager.
     3.11 and imports only the standard library;
   - passivity: `vm_access` on a VM with no address and a missing key file raises nothing and spawns
     nothing;
-  - the operation log: redaction, no payload fields, a sensitive stdin leaves no stream;
   - error messages and `repr` hold no stream, environment value or stdin;
   - the pump (the adapted proof cases), `@pytest.mark.windows` for binary stdio and end of file;
   - doctor's `ssh` row; invalid template shells refuse at config load; the six commands refuse an
@@ -600,7 +603,7 @@ workstation. `zsh` and `dash` are required on CI (a missing shell fails there, s
 | Deadline: `Unknown(DEADLINE)` at the deadline, client reaped                                                                   | L S    |
 | Handover: success, the 30 s timeout, second connection never arrives, nothing left behind                                      | L S V  |
 | Host key mismatch is `TrustMismatch`                                                                                           | S      |
-| Sensitive stdin absent from the log and exceptions                                                                             | L      |
+| Sensitive stdin absent from exceptions and the client log                                                                      | L      |
 | Binary stdin and stdout, from Windows (`windows` mark) and live                                                                | pump V |
 
 The stdout-after-trailer ordering is a unit test of the filters, not a vector, since pipes do not
