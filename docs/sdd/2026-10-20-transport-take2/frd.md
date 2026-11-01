@@ -381,14 +381,13 @@ Literal arguments reach the guest exactly, including empty arguments, whitespace
 characters, and literal execution applies no shell startup implicitly. The destination account's
 login shell, which sshd always runs first, may read its own startup files before Agentworks code
 starts. The command still starts from known state: output written before Agentworks code starts is
-discarded (on an attach it can still reach the operator's terminal, never the command), and the
-environment, working directory, umask, signal handling and open descriptors are reset. Three effects
-of a startup file are known gaps rather than guarantees: resource limits or scheduling priority it
-lowered, output from a background process it leaves running, and both output streams swapped for
-pipes that discard what they receive. Scripts select a fixed interpreter (`sh`, `bash` or the
-execution user's default shell) explicitly, with login and interactive startup as separate explicit
-choices. The default shell is the destination identity's, never the workstation's, and a missing
-interpreter fails without substitution. A script and its stdin are separate inputs.
+discarded, and the environment, working directory, umask, signal handling and open descriptors are
+reset. Three effects of a startup file are known gaps rather than guarantees: resource limits or
+scheduling priority it lowered, output from a background process it leaves running, and both output
+streams swapped for pipes that discard what they receive. Scripts select a fixed interpreter (`sh`,
+`bash` or the execution user's default shell) explicitly, with login and interactive startup as
+separate explicit choices. The default shell is the destination identity's, never the workstation's,
+and a missing interpreter fails without substitution. A script and its stdin are separate inputs.
 
 Execution uses the bound identity; explicit elevation covers the whole operation, and elevation the
 identity lacks is a permission failure, never a reroute to another identity or to native access, so

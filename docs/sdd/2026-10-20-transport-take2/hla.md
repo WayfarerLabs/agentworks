@@ -189,11 +189,12 @@ syntax that needs no particular python3 release. It is rewritten in Python from 
 **Relationship to agw-atc.** The follow-up containment effort introduces `agw-atc`, an installed,
 long-running VM program for sessions, limits and process-to-session lookup. The two stay distinct by
 lifecycle: agw-launch arrives with every request and always matches the client that sent it, and
-agw-atc is installed and versioned with the VM. The operator asked for the two to be aligned, so
-this design fixes its side: agw-launch stays the only way a request starts, and it outlives its own
-request only as the brief parked half of a handover. Work agw-atc will own is a request whose
-payload runs `agw-atc`, so running a request never depends on agw-atc being installed. The
-containment effort's own SDD owns everything else about agw-atc.
+agw-atc is installed and versioned with the VM. The operator asked on 2026-11-01 for the two to be
+aligned ("It feels like we should align these one way or another"), and the lead's answer is to keep
+two names and fix this design's side: agw-launch stays the only way a request starts, and it
+outlives its own request only as the brief parked half of a handover. Work agw-atc will own is a
+request whose payload runs `agw-atc`, so running a request never depends on agw-atc being installed.
+The containment effort's own SDD owns everything else about agw-atc.
 
 **What agw-launch does:**
 
@@ -317,17 +318,20 @@ use it. There is no scp.
 
 - **One lock for every writer.** Every mutating file operation, tree uploads and removals included,
   takes `flock` on one VM-wide lock file, `/run/lock/agentworks-files.lock`. `/run/lock` is a
-  sticky, world-writable tmpfs on Debian, so whichever identity first needs the file creates it
-  (without following a symlink, mode 0644), every identity can open and lock it, and a boot clears
-  it; no provisioning, init step or contract check is involved. One fixed file means a tree upload
-  and a conditional write beneath it can never hold different locks, and replacing a directory never
+  sticky, world-writable tmpfs on Debian, so whichever identity first needs the file creates it and
+  a boot clears it; no provisioning, init step or contract check is involved. Because Debian sets
+  `fs.protected_regular` (2 on this design's own Debian 12 host), opening another identity's file
+  there with `O_CREAT` fails, so the file program opens it read-only without following symlinks,
+  creates it with `O_CREAT|O_EXCL` only when it is missing, sets mode 0644 explicitly whatever the
+  umask, and on losing that race opens it read-only again. One fixed file means a tree upload and a
+  conditional write beneath it can never hold different locks, and replacing a directory never
   replaces a lock, so `write_if` is atomic with respect to every Agentworks writer, which is R5's
   cooperating-writer guarantee. A tree upload extracts into a temporary directory beside its
-  destination without the lock and takes it only to move the result into place, so every hold is
-  short, and a lock wait has a deadline. Workspace copy's opaque tar stream is a `run`, not a file
-  operation, and takes no lock. An agent that creates the file unreadable, or holds the lock to
-  stall other writers, is a hostile writer, which stays with the permissions effort along with
-  hostile path races.
+  destination without the lock and takes it only to move the result into place (with `replace`, the
+  old tree aside and the new one in), so every hold is short, and a lock wait has a deadline.
+  Workspace copy's opaque tar stream is a `run`, not a file operation, and takes no lock. An agent
+  that creates the file unreadable, or holds the lock to stall other writers, is a hostile writer,
+  which stays with the permissions effort along with hostile path races.
 - **Symlinks.** A destination that is a symlink is refused, as `native_files.py` refuses today,
   rather than followed as the hand-written `tee` paths do.
 - **The merge stays on the workstation.** `update` runs
@@ -706,21 +710,21 @@ exactly true.
 
 ## Risks and early proofs
 
-| Risk                                                                                            | Proof, and its slice                                        |
-| ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| Stage 0 parsed alike by `sh`, `dash`, `bash` and `zsh`, with noisy startup files                | Conformance vector per shell, slice 2                       |
-| A startup file that redirects the standard streams or reads stdin                               | Conformance vectors, slice 2                                |
-| Exact stdin positioning, so the payload reads the caller's first byte                           | Conformance vector, slice 2                                 |
-| `-F none` and the stdin protocol on 8.5 and on Win32-OpenSSH                                    | Round trip from all three workstations, slice 2             |
-| Copying the operator's stdin for `stream` on Windows: binary mode, end of file, early exit      | Live `vm exec` from Windows, slice 2                        |
-| The terminal handover: timeout, and cleanup when the second connection fails                    | Conformance vectors and live attach from all three, slice 2 |
-| `sudo -n` passing stdin through under Debian's sudoers defaults                                 | Elevated request on a fresh Debian 12 and 13 VM, slice 3    |
-| python3 at provisioning on every platform's image                                               | Create on every platform, slice 3                           |
-| The trailer with a background child holding stderr                                              | Conformance vector, slice 2                                 |
-| `/run/lock` sticky and world-writable, and `flock` on the shared lock file, on Debian 12 and 13 | Conformance vector, slice 5                                 |
-| Encrypted keys served by the agent                                                              | Live cell, slice 1                                          |
-| Cloud host-key re-establishment                                                                 | Lost-record recovery on one cloud, slice 4                  |
-| `UserKnownHostsFile=NUL` with Win32-OpenSSH                                                     | Cloud create from Windows, slice 1                          |
+| Risk                                                                                                                          | Proof, and its slice                                        |
+| ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Stage 0 parsed alike by `sh`, `dash`, `bash` and `zsh`, with noisy startup files                                              | Conformance vector per shell, slice 2                       |
+| A startup file that redirects the standard streams or reads stdin                                                             | Conformance vectors, slice 2                                |
+| Exact stdin positioning, so the payload reads the caller's first byte                                                         | Conformance vector, slice 2                                 |
+| `-F none` and the stdin protocol on 8.5 and on Win32-OpenSSH                                                                  | Round trip from all three workstations, slice 2             |
+| Copying the operator's stdin for `stream` on Windows: binary mode, end of file, early exit                                    | Live `vm exec` from Windows, slice 2                        |
+| The terminal handover: timeout, and cleanup when the second connection fails                                                  | Conformance vectors and live attach from all three, slice 2 |
+| `sudo -n` passing stdin through under Debian's sudoers defaults                                                               | Elevated request on a fresh Debian 12 and 13 VM, slice 3    |
+| python3 at provisioning on every platform's image                                                                             | Create on every platform, slice 3                           |
+| The trailer with a background child holding stderr                                                                            | Conformance vector, slice 2                                 |
+| The shared lock file under `/run/lock` with `protected_regular`, a creator in another group, and `flock`, on Debian 12 and 13 | Conformance vector, slice 5                                 |
+| Encrypted keys served by the agent                                                                                            | Live cell, slice 1                                          |
+| Cloud host-key re-establishment                                                                                               | Lost-record recovery on one cloud, slice 4                  |
+| `UserKnownHostsFile=NUL` with Win32-OpenSSH                                                                                   | Cloud create from Windows, slice 1                          |
 
 ## Operator decisions
 
