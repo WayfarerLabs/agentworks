@@ -14,8 +14,8 @@
   consumer its slices name, the collateral those pieces outdate, and live evidence for the cells its
   slices list. No vocabulary item or module lands before the slice that migrates its first consumer
   (R10).
-- **Slices are review units.** Each slice inside a PR gets its own private review round, so no
-  single review covers a whole PR's diff at once.
+- **Slices are review units.** Each slice inside a PR gets its own private review round as it
+  completes, and the assembled PR gets a closing review before it goes ready.
 - **LLDs come first.** Each slice that needs an LLD starts by writing it in this directory and
   taking it through the private review loop before code. The slice's first checkbox links it.
 - **Reviews and validation.** Every slice runs the private quality loop before its PR goes ready:
@@ -69,12 +69,14 @@ answer.
   - Enroll mode is reachable only from create;
   - managed entries carry store options only once a record exists.
 - [ ] Re-prove incident row I9 (host keys preserved across stop and start).
+- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+      issues and fix history), and add incident inventory rows before deleting anything.
 - [ ] Collateral: update the command reference and completions, add an operator guide section on the
       one-time import, add release notes, and update `cli/agentworks/execution/README.md`.
 - [ ] Live evidence, on every platform: create, the operator's own `ssh` to a managed entry, import
       of an existing VM, and an address change after rekey. Cells:
   - Remote Lima from macOS and Linux;
-  - local Lima from macOS;
+  - local Lima from macOS and Windows;
   - WSL2;
   - Proxmox, AWS, Azure and GCP from at least one workstation each, Windows among them.
 
@@ -104,7 +106,11 @@ a VM connection.
 - [ ] Add the conftest blocker under `cli/tests/execution/`, the static legacy-import check, and the
       recording fake `VMAccess`.
 - [ ] Migrate `vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection`, release
-      probing (`vms/manager/release.py`) and `vm port-forward`.
+      probing (`vms/manager/release.py`) and `vm port-forward`. Keep `vm exec`'s single-argument
+      form as a shell command line, sent as a `Script` under the identity's default shell, and
+      several arguments as a literal argv, as today (`vms/manager/exec.py:270`).
+- [ ] Type a VM without python3 as `VMNotReady` with a hint naming `agw vm reinit`, whose legacy
+      Phase A still runs there, and say so in release notes.
 - [ ] Limit the admin and agent template `shell` fields to `sh`, `dash`, `bash` and `zsh` at the
       config boundary (HLA D4), with sample-config comments and release notes.
 - [ ] Move the old `LOG_DIR` readers to `oplog`'s constant.
@@ -116,26 +122,29 @@ a VM connection.
   - environment byte-exactness, including `%`, quotes, `${...}`, CR, LF and every other byte but
     NUL;
   - working directory;
-  - elevation;
-  - agent elevation refused before dispatch;
+  - agent elevation refused before dispatch, and an elevated attach refused;
   - exit statuses 0, 1 and 255;
   - stage 0 under each supported login shell, with startup files that print and export;
   - output before the start marker dropped;
   - not delivered versus unknown, and status 127 typed as `VMNotReady`;
   - exact stdin positioning, so the payload reads the caller's first byte;
-  - the terminal handover: the peer check, the timeout, and cleanup when the second connection
-    fails;
+  - the terminal handover: the timeout, and cleanup when the second connection fails;
+  - a startup file that reads stdin, or redirects a standard stream, which leaves the request not
+    delivered;
+  - signal dispositions and descriptors reset for the payload, and `TERM` kept in TTY mode;
   - the trailer under a background child;
   - the deadline;
   - sensitive stdin absent from logs and exceptions;
   - binary stdin and stdout on Windows.
 - [ ] Re-prove incident rows I1 to I7.
 - [ ] Amend ADRs 0013 and 0014.
+- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+      issues and fix history), and add incident inventory rows before deleting anything.
 - [ ] Collateral: update the command reference and guides for any changed behavior, and
       `cli/agentworks/execution/README.md`.
 - [ ] Live evidence:
   - all three workstations against Remote Lima;
-  - Linux and macOS against local Lima;
+  - all three workstations against local Lima;
   - Windows against WSL2;
   - one cloud.
 
@@ -160,7 +169,8 @@ pass the static check, and the package's tests pass with the legacy modules bloc
       (including Debian attestation), then `reachability.wait` after `post_tailscale_ready`. Hand
       Phase B a legacy target as today.
 - [ ] Implement `reachability.py` and the `observation` request option it polls with.
-- [ ] Prove an elevated request on a fresh, never-initialized Debian 12 and 13 VM.
+- [ ] Add elevation, with its conformance vectors, for Phase A, its first consumer, and prove an
+      elevated request on a fresh, never-initialized Debian 12 and 13 VM.
 - [ ] Add `vms/contract.py`. Run the base checks first at reinit and the initialized checks at the
       end of Phase B.
 - [ ] Amend ADR 0025.
@@ -168,6 +178,8 @@ pass the static check, and the package's tests pass with the legacy modules bloc
   - a VM failing a base check is not reported ready;
   - each diagnosis names reinit or recreation;
   - a platform that cannot report the address fails create.
+- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+      issues and fix history), and add incident inventory rows before deleting anything.
 - [ ] Collateral: platform author documentation for `tailnet_address`, and the command reference for
       create and reinit diagnoses.
 - [ ] Live evidence: create and reinit on every platform from at least one workstation each.
@@ -198,8 +210,13 @@ first operation there is the base contract check.
       with a hint naming `agw vm recover` instead of rejoining on its own, as the operator ruled on
       2026-10-31.
 - [ ] Add `agw vm recover <vm>`: host-key re-establishment first when the record is missing, then
-      access repair (including python3 when it is missing), rejoin and SSH verification. Repoint
+      access repair (installing python3 when it is missing), rejoin and SSH verification. Repoint
       `VMNotReady` and `TrustMissing` guidance at it.
+- [ ] Delete the activation gate's lazy repair-secret protocol, which only its rejoin used:
+      `GateTarget.repair_secret_refs`, `_GateSecrets`, and the call sites in `vms/nodes.py` and
+      `sessions/manager/_scope.py`. Update the collateral that names it, including the
+      `agentworks-reviewer` persona's sanctioned conditional-repair shape.
+- [ ] Send cloud recovery's script on stdin rather than in `sudo -n /bin/sh` arguments (R4).
 - [ ] Delete `VMPlatform.native_transport`, the `transports.native_transport` factory and
       `native_shell_unavailable_hint`.
 - [ ] Tests:
@@ -208,6 +225,8 @@ first operation there is the base contract check.
   - logout reports the script's status or unknown, and never checks SSH afterwards;
   - a platform without a native shell refuses with `FeatureUnavailable` before credentials are
     resolved.
+- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+      issues and fix history), and add incident inventory rows before deleting anything.
 - [ ] Collateral: platform author documentation, the command reference, completions, and an operator
       guide section on recovery.
 - [ ] Live evidence:
@@ -226,7 +245,8 @@ no platform's private access imports a legacy module.
   - the symlink policy;
   - mode and ownership;
   - cleanup.
-- [ ] Implement `files.py` and `RunContext.admin_access()` and `agent_access()`.
+- [ ] Implement `PythonProgram`, `files.py` and the file program, and `RunContext.admin_access()`
+      and `agent_access()`.
 - [ ] Migrate:
   - artifact publication and session artifacts;
   - native probing;
@@ -242,6 +262,8 @@ no platform's private access imports a legacy module.
   - a symlinked destination is refused;
   - cleanup touches only what the operation created.
 - [ ] Amend ADR 0019.
+- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+      issues and fix history), and add incident inventory rows before deleting anything.
 - [ ] Collateral: update `capabilities/README.md` and plugin author documentation for the new
       accessors.
 - [ ] Live evidence: harness setup and a session start with artifacts, on Remote Lima from macOS and
@@ -259,6 +281,8 @@ Definition of done: `native_files.py` has no remaining callers.
   - the harness setup runners. The `SetupRunner` environment rules become request environment.
 - [ ] Replace hand-written `printf | sudo tee`, `tee -a` and `write_file` plus `chmod` sequences
       with `files.write` and `files.update`.
+- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+      issues and fix history), and add incident inventory rows before deleting anything.
 - [ ] Collateral: guides or reference pages whose described init behavior changes.
 - [ ] Live evidence: create and reinit on every platform from at least one workstation each.
 
@@ -271,7 +295,8 @@ Definition of done: create and reinit run entirely on the new transport.
   - workspace backends, rehome and repair;
   - workspace copy, using `run` over an opaque tar stream;
   - `sessions/`, including tmux, consoles, status probes and pid repair, with session environment in
-    the request rather than in `tmux -e` arguments where tmux inherits it;
+    the request and console panes taking theirs from the terminal handover, so no `tmux -e` argument
+    carries a value (HLA D8);
   - backup's launch, observation, interrupt and download, using `detached` and `ToFile` with
     progress.
 - [ ] Tests:
@@ -279,8 +304,12 @@ Definition of done: create and reinit run entirely on the new transport.
   - observation resumes across a dropped connection;
   - interrupt stops the work;
   - the detached base is never world-writable.
+- [ ] Retire the newline refusals for environment values (`manifests/decode.py:254-261` and the
+      environment use in `env/compose.py:73-81`), now that no path sends environment by `SetEnv`.
 - [ ] Re-prove incident rows I6a and I8.
 - [ ] Amend ADR 0017.
+- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+      issues and fix history), and add incident inventory rows before deleting anything.
 - [ ] Collateral: guides for sessions, consoles and backup where behavior changes.
 - [ ] Live evidence:
   - session and console create, attach, detach and restore on Remote Lima from all three
@@ -302,6 +331,8 @@ Definition of done: no workspace, session or backup module imports a legacy modu
   - `agentworks.plugins.proxmox.transport`
 - [ ] Delete `RunContext.admin_target()` and `agent_target()`, and the `SSHError` special case in
       `cli/_entry.py`.
+- [ ] Delete the independence guards that can no longer fail once the legacy modules are gone: the
+      fresh-interpreter guard, the conftest blocker and the static legacy-import check.
 - [ ] Make the managed SSH entries' store options unconditional, with release notes for operators
       who never imported.
 - [ ] Search for remaining users of the `AcceptEnv` fragment. If none remain, stop writing it and

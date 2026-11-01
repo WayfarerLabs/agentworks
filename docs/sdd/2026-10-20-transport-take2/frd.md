@@ -197,12 +197,21 @@ On the open questions in the high-level architecture:
 stand; whether account-shell startup running before Agentworks code satisfies R3; whether the
 activation gate's announced automatic Tailscale rejoin counts as explicit recovery under R7, or
 should instead fail and name the recovery command; and whether local Lima on Windows is a supported
-pairing for R11's evidence. The operator answered:]
+pairing for R11's evidence. The operator answered the first, third and fourth in one numbered list,
+quoted here one item at a time, and answered the second separately (below).]
 
-> 1. Yep, those commands are good
-> 2. Given that we now have a command for this, I think it would be better to fail with a hint to
->    use it.
-> 3. Yeah, let's add that to the evidence. I'll have the integration tester add support.
+On the command names:
+
+> Yep, those commands are good
+
+On the activation gate's automatic rejoin:
+
+> Given that we now have a command for this, I think it would be better to fail with a hint to use
+> it.
+
+On local Lima on Windows:
+
+> Yeah, let's add that to the evidence. I'll have the integration tester add support.
 
 On python3, after the lead found it installed only at init on `main`:
 
@@ -405,9 +414,9 @@ first, never a later check over SSH. Apart from recovery, logout and the optiona
 makes no use of a native channel.
 
 The capability has no environment seeding, file API, detached work or streaming. Core invokes it
-only explicitly, through operator commands for recovery, rekey and deletion. A VM found without its
-tailnet registration fails with a hint to run recovery rather than being rejoined automatically. An
-interactive native shell is optional and platform-declared, and it does not seed the operation
+only explicitly. When the activation gate, which starts a VM on another command's behalf, finds the
+VM without its tailnet registration, it fails with a hint to run recovery rather than rejoining it.
+An interactive native shell is optional and platform-declared, and it does not seed the operation
 environment. Everything else a platform does natively, including its own provisioning, stays private
 to that platform.
 
