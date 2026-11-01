@@ -7,17 +7,14 @@ that direction.
 
 ## The ruling
 
-The operator ruled on 2026-10-31 that facets are independent and converge. The ruling is recorded
-verbatim in the saga's `target-state.md` under "Facets are independent and converge":
+The operator ruled on 2026-10-31 that facets are independent and converge: no facet blocks another,
+and "never silently lost" means reported, not blocked. That settles the 2026-09-07 question this
+effort inherited: an entry still deferred at the session facet is reported, never a launch block.
+The ruling and its exact terms are in the saga's `target-state.md` under "Facets are independent and
+converge".
 
-- **No facet blocks another.** A stale or incomplete upstream facet is reported at session start,
-  naming its owner and repair command, and the session launches with what is placed.
-- **Applying a facet converges what it owns** to its declaration rather than refusing on current
-  state.
-- **Refusal is reserved** for the facet's own failures and for overwriting content Agentworks does
-  not own that differs from the declaration, scoped to that entry.
-- **"Never silently lost" means reported, not blocked.** This settles the 2026-09-07 question this
-  effort inherited: an entry still deferred at the session facet is reported, never a launch block.
+**Who does the work.** The operator plans to hand this to this effort's lead, within this SDD,
+rather than chartering a new one (2026-11-01).
 
 ## What it changes here
 
@@ -35,6 +32,9 @@ verbatim in the saga's `target-state.md` under "Facets are independent and conve
 
 Under the ruling, each of those becomes a report at session start, naming the owner and the repair
 command. The session launches with what is placed. The session's own facet failures still refuse.
+This SDD's HLA keeps unowned or manually changed content "retained and diagnosed"
+(`hla.md:352-353`), which the ruling leaves standing: only content identical to the declaration is
+adopted.
 
 <!-- cspell:ignore MSYS -->
 
