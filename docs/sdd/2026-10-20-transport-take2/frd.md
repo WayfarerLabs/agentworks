@@ -381,13 +381,14 @@ Literal arguments reach the guest exactly, including empty arguments, whitespace
 characters, and literal execution applies no shell startup implicitly. The destination account's
 login shell, which sshd always runs first, may read its own startup files before Agentworks code
 starts. The command still starts from known state: output written before Agentworks code starts is
-discarded, and the environment, working directory, umask, signal handling and open descriptors are
-reset. Three effects of a startup file are known gaps rather than guarantees: resource limits or
-scheduling priority it lowered, output from a background process it leaves running, and both output
-streams swapped for pipes that discard what they receive. Scripts select a fixed interpreter (`sh`,
-`bash` or the execution user's default shell) explicitly, with login and interactive startup as
-separate explicit choices. The default shell is the destination identity's, never the workstation's,
-and a missing interpreter fails without substitution. A script and its stdin are separate inputs.
+discarded (on an attach it can still reach the operator's terminal, never the command), and the
+environment, working directory, umask, signal handling and open descriptors are reset. Three effects
+of a startup file are known gaps rather than guarantees: resource limits or scheduling priority it
+lowered, output from a background process it leaves running, and both output streams swapped for
+pipes that discard what they receive. Scripts select a fixed interpreter (`sh`, `bash` or the
+execution user's default shell) explicitly, with login and interactive startup as separate explicit
+choices. The default shell is the destination identity's, never the workstation's, and a missing
+interpreter fails without substitution. A script and its stdin are separate inputs.
 
 Execution uses the bound identity; explicit elevation covers the whole operation, and elevation the
 identity lacks is a permission failure, never a reroute to another identity or to native access, so
@@ -455,12 +456,12 @@ first, never a later check over SSH. Apart from recovery, logout and the optiona
 makes no use of a native channel.
 
 The capability has no environment seeding, file API, detached work or streaming. Core invokes it
-only explicitly, through the operator's recovery command. Starting a VM, whether by command or by
-the activation gate on another command's behalf, starts it and waits for Tailscale to reconnect;
-when it does not reconnect, the start fails with a hint to run recovery rather than rejoining it. An
-interactive native shell is optional and platform-declared, and it does not seed the operation
-environment. Everything else a platform does natively, including its own provisioning, stays private
-to that platform.
+only explicitly, through the operator's recovery, rekey and delete commands. Starting a VM, whether
+by command or by the activation gate on another command's behalf, starts it and waits for Tailscale
+to reconnect; when it does not reconnect, the start fails with a hint to run recovery rather than
+rejoining it. An interactive native shell is optional and platform-declared, and it does not seed
+the operation environment. Everything else a platform does natively, including its own provisioning,
+stays private to that platform.
 
 ### R8. SSH policy and trust
 

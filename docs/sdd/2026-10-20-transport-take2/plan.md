@@ -254,8 +254,6 @@ no platform's private access imports a legacy module.
   - cleanup.
 - [ ] Implement `PythonProgram`, `files.py` and the file program, and `RunContext.admin_access()`
       and `agent_access()`.
-- [ ] Have provisioning and init create the VM-wide file lock, `/var/lib/agentworks/files.lock` (HLA
-      D6).
 - [ ] Migrate:
   - artifact publication and session artifacts;
   - native probing;
