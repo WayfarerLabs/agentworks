@@ -336,19 +336,20 @@ use it. There is no scp.
   takes `flock` on one VM-wide lock file, `/run/lock/agentworks-files.lock`. `/run/lock` is a
   sticky, world-writable tmpfs on Debian, so whichever identity first needs the file creates it and
   a boot clears it; no provisioning, init step or contract check is involved. Because Debian sets
-  `fs.protected_regular` (2 on this design's own Debian 12 host), opening another identity's file
-  there with `O_CREAT` fails, so the file program opens it read-only without following symlinks,
-  creates it with `O_CREAT|O_EXCL` only when it is missing, sets mode 0644 explicitly whatever the
-  umask, and on losing that race opens it read-only again. One fixed file means a tree upload and a
-  conditional write beneath it can never hold different locks, and replacing a directory never
-  replaces a lock, so `write_if` is atomic with respect to every Agentworks writer, which is R5's
-  cooperating-writer guarantee. A tree upload extracts into a temporary directory beside its
-  destination without the lock and takes it only to move the result into place (the old tree aside
-  and the new one in), and a `write` likewise stages its temporary file first, so every hold is
-  short, and a lock wait has a deadline. Workspace copy's opaque tar stream is a `run`, not a file
-  operation, and takes no lock. An agent that creates the file unreadable, or holds the lock to
-  stall other writers, is a hostile writer, which stays with the permissions effort along with
-  hostile path races.
+  `fs.protected_regular` to 2, an `O_CREAT` open of another identity's file there fails with
+  `EACCES`, for root as well (measured on Debian 12 and 13 in the integration delta on #856), so
+  every identity, elevated or not, follows one order: the file program opens it read-only without
+  following symlinks, creates it with `O_CREAT|O_EXCL` only when it is missing, sets mode 0644
+  explicitly whatever the umask, and on losing that race opens it read-only again. One fixed file
+  means a tree upload and a conditional write beneath it can never hold different locks, and
+  replacing a directory never replaces a lock, so `write_if` is atomic with respect to every
+  Agentworks writer, which is R5's cooperating-writer guarantee. A tree upload extracts into a
+  temporary directory beside its destination without the lock and takes it only to move the result
+  into place (the old tree aside and the new one in), and a `write` likewise stages its temporary
+  file first, so every hold is short, and a lock wait has a deadline. Workspace copy's opaque tar
+  stream is a `run`, not a file operation, and takes no lock. An agent that creates the file
+  unreadable, or holds the lock to stall other writers, is a hostile writer, which stays with the
+  permissions effort along with hostile path races.
 - **Symlinks.** A destination that is a symlink is refused, as `native_files.py` refuses today,
   rather than followed as the hand-written `tee` paths do.
 - **The merge stays on the workstation.** `update` runs
