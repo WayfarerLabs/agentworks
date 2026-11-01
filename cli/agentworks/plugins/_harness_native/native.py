@@ -313,9 +313,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
 
         def skip(role: str, identifier: str, reason: str) -> None:
             protected.add(_native_key(tool, role, identifier))
-            invocation.report_incomplete(
-                f"Retained {role} '{identifier}': {reason}; resolve it and retry owning setup."
-            )
+            invocation.report_incomplete(f"Retained {role} '{identifier}': {reason}.")
             if role == "marketplace":
                 blocked_markets.add(identifier)
                 protected.update(
@@ -447,7 +445,12 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                     ),
                     None,
                 )
-                if existing_plugin is None or not existing_plugin.enabled or existing_plugin.source is None:
+                if (
+                    existing_plugin is None
+                    or not existing_plugin.enabled
+                    or existing_plugin.source is None
+                    or _plugin_market(existing_plugin) != parent_market.source
+                ):
                     raise StateError("native user plugin installation could not be confirmed")
             elif existing_plugin.source is None:
                 skip("plugin", selector, "its installation source cannot be observed")

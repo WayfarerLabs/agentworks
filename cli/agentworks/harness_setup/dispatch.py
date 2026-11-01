@@ -78,6 +78,11 @@ def run_setup(
     if not isinstance(invocation, expected[inputs.facet]):
         raise StateError("native setup invocation does not match its facet")
     facet = cast('Literal["vm", "user", "workspace"]', inputs.facet)
+    remediation = (
+        f"Inspect workspace '{inputs.name}' before deciding whether to recreate it; no workspace reinit is available."
+        if inputs.component == "workspace"
+        else f"Run 'agw {'agent' if inputs.component == 'agent' else 'vm'} reinit {inputs.name}'."
+    )
     with native_mutation_guard(db.path, invocation.vm.name, held=held):
         if inputs.artifact_snapshot is not None and not buffered:
             write_capture(db, inputs.kind, inputs.name, inputs.component, inputs.artifact_snapshot, operation=operation)
@@ -199,7 +204,9 @@ def run_setup(
                 if not isinstance(reason, str) or not reason.strip():
                     raise StateError("integration returned an invalid incomplete-setup reason")
                 incomplete = True
-                output.warn(f"Native setup for {inputs.component}/{inputs.name} via {integration_name}: {reason}")
+                output.warn(
+                    f"Native setup for {inputs.component}/{inputs.name} via {integration_name}: {reason} {remediation}"
+                )
 
             scoped_secrets = {ref.name: invocation.secrets[ref.name] for ref in integration.config_secret_refs()}
             call = replace(
