@@ -93,18 +93,17 @@ a VM connection.
 
 ## Slice 2: Execution core and the operator exec surface (HLA D1 to D5, D8, D12 to D14; PR A)
 
-- [ ] Write `execution-lld.md`. It covers:
+- [x] Write [execution-lld.md](./execution-lld.md). It covers:
   - client resolution per workstation;
-  - the VM and host policies;
+  - the VM policy (the host policy is slice 4's);
   - the stdin framing and the envelope format;
   - stage 0 and agw-launch's steps, markers and trailer;
   - the terminal handover;
   - request and result types;
   - error mapping;
-  - the operation log;
   - the adoption and deletion list for the proof modules.
-- [ ] Implement `client.py`, `ssh_process.py`, `envelope.py`, `launcher.py`, `requests.py` (the
-      items this slice's consumers use), `results.py`, the remaining `errors.py`, `oplog.py`,
+- [ ] Implement `client.py`, `ssh_process.py` (with stage 0), `envelope.py`, `agw_launch.py`,
+      `requests.py` (the items this slice's consumers use), `results.py`, the remaining `errors.py`,
       `access.py`, `attach.py` and `forwarding.py`.
 - [ ] Delete `execution/carrier.py`, `execution/preparation.py`, `execution/bootstrap.py`,
       `execution/carriers/` and their tests, after adopting what the LLD lists.
@@ -120,8 +119,8 @@ a VM connection.
       Phase A still runs there, and say so in release notes.
 - [ ] Limit the admin and agent template `shell` fields to `sh`, `dash`, `bash` and `zsh` at the
       config boundary (HLA D4), with sample-config comments and release notes.
-- [ ] Move the old `LOG_DIR` readers to `oplog`'s constant.
-- [ ] Replace doctor's `ssh` and `scp` presence check with the resolver's verdict.
+- [ ] Add the resolver's verdict to doctor's required-tools group, beside the existing `ssh`, `scp`
+      and `tailscale` presence rows, which stay until the legacy paths go (slice 8).
 - [ ] Conformance vectors, run against a local sshd and python3 on Linux and on live targets:
   - literal argv, including empty arguments, whitespace and shell characters;
   - script versus stdin, with script source absent from guest argv;
@@ -132,22 +131,28 @@ a VM connection.
   - exit statuses 0, 1 and 255;
   - stage 0 under each supported login shell, with startup files that print and export;
   - output before the start marker dropped;
-  - not delivered versus unknown, and status 127 typed as `VMNotReady`;
+  - not delivered versus unknown, status 127 typed as `VMNotReady`, and the status of a python3
+    without its standard library also typed `VMNotReady`;
+  - the refusal statuses: a missing command 127, another `exec` failure 126, a missing working
+    directory 125;
+  - the kernel size limits: an argument and an environment value at 131,071 bytes run, one more is
+    refused, and a total over `ARG_MAX` is refused by `exec`;
   - exact stdin positioning, so the payload reads the caller's first byte;
-  - the terminal handover: the timeout, and cleanup when the second connection fails;
+  - the terminal handover: the timeout, cleanup when the second connection fails, an existing
+    directory name refused, and `SigIgn` and `SigBlk` zero in the resulting shell;
   - a startup file that reads stdin, or redirects a standard stream, which leaves the request not
     delivered;
   - signal dispositions and descriptors reset for the payload, and a startup file that overrides
     `TERM` or `XDG_RUNTIME_DIR` leaves the payload's values unchanged;
-  - the end marker and trailer under a background child that holds both streams, and with stdout's
-    last bytes arriving after the trailer;
+  - the end marker and trailer under a background child that holds both streams;
   - payload stdout that does not end in a newline, and a `refused` trailer;
   - the deadline;
-  - sensitive stdin absent from logs and exceptions;
   - binary stdin and stdout on Windows.
-- [ ] Re-prove incident rows I1 to I7 and I11, the last with a conformance vector in which a bash
-      child of the payload reads no account startup file, run with a pipe and with a socket on
-      stdin.
+- [ ] Unit-test the stream filters under every split and interleaving of the two streams, which
+      covers stdout's last bytes arriving after the trailer.
+- [ ] Re-prove incident rows I1 to I7, I11 to I14, I19 and I21, I11 with a conformance vector in
+      which a bash child of the payload reads no account startup file, run with a pipe and with a
+      socket on stdin.
 - [ ] Amend ADRs 0013 and 0014.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
@@ -172,7 +177,8 @@ pass the static check, and the package's tests pass with the legacy modules bloc
   - the provisioning bootstrap additions;
   - `tailnet_address`;
   - Phase A on `VMAccess`;
-  - `reachability`.
+  - `reachability`;
+  - the operation log.
 - [ ] Add python3 to `PROVISIONING_PACKAGES`, which every platform's bootstrap already installs
       (`lima.py:385`, `wsl2_bootstrap.py:65`, and the AWS, Azure, GCP and Proxmox platforms).
 - [ ] Make `ProvisionResult.tailnet_address` required on every platform, with each platform retrying
@@ -182,6 +188,10 @@ pass the static check, and the package's tests pass with the legacy modules bloc
       connection in Enroll mode, then the base checks (including Debian attestation), then
       `reachability.wait` after `post_tailscale_ready`. Hand Phase B a legacy target as today.
 - [ ] Implement `reachability.py` and the `observation` request option it polls with.
+- [ ] Implement `oplog.py` with Phase A as its first writer: the `LOG_DIR` constant, `OperationLog`
+      and its redaction, and move the old `LOG_DIR` readers (`doctor_state.py`,
+      `vms/manager/lifecycle.py`, `vms/manager/_helpers.py`, `vms/manager/power.py`, `vm logs`) and
+      their test patch sites to it.
 - [ ] Add elevation, with its conformance vectors, for Phase A, its first consumer, including agent
       elevation refused before dispatch and an elevated attach refused, and prove an elevated
       request on a fresh, never-initialized Debian 12 and 13 VM.
@@ -210,10 +220,13 @@ first operation there is the base contract check.
   - `native_shell`;
   - each platform's recovery channel and private access;
   - `public_ssh.py`;
+  - the host policy;
   - the recovery scripts;
   - `vm recover`;
   - each cloud's provider-side host-key fingerprint source.
 - [ ] Implement `run_recovery`, `read_host_keys` and `native_shell` on every platform.
+- [ ] Implement the host policy (HLA D2) in `ssh_process.py`, for Remote Lima's host connection and
+      `public_ssh.py`, its first callers.
 - [ ] Rehome native code as plugin-private modules:
   - Remote Lima's host connection, under the host policy, and its host-side detached create;
   - `plugins/proxmox/guest_agent.py`, replacing `plugins/proxmox/transport.py`;
@@ -269,8 +282,8 @@ no platform's private access imports a legacy module.
   - the symlink policy;
   - mode and ownership;
   - cleanup.
-- [ ] Implement `PythonProgram`, `files.py` and the file program, and `RunContext.admin_access()`
-      and `agent_access()`.
+- [ ] Implement `PythonProgram`, `files.py` and the file program, finite stdin for `run` with
+      `Bytes(data, sensitive=)`, and `RunContext.admin_access()` and `agent_access()`.
 - [ ] Migrate:
   - artifact publication and session artifacts;
   - native probing;
@@ -286,7 +299,8 @@ no platform's private access imports a legacy module.
   - a malformed destination is refused;
   - a symlinked destination is refused;
   - cleanup touches only what the operation created;
-  - `preserve_metadata=True` keeps the existing file's owner, group, mode and ACLs.
+  - `preserve_metadata=True` keeps the existing file's owner, group, mode and ACLs;
+  - a sensitive stdin is absent from logs and exceptions (a conformance vector).
 - [ ] Amend ADR 0019.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
@@ -365,6 +379,7 @@ Definition of done: no workspace, session or backup module imports a legacy modu
   - `agentworks.plugins.proxmox.transport`
 - [ ] Delete `RunContext.admin_target()` and `agent_target()`, and the `SSHError` special case in
       `cli/_entry.py`.
+- [ ] Delete doctor's `ssh` and `scp` `PATH` presence rows, which the resolver's verdict replaces.
 - [ ] Delete the independence guards that can no longer fail once the legacy modules are gone: the
       fresh-interpreter guard, the conftest blocker and the static legacy-import check.
 - [ ] Make the managed SSH entries' store options unconditional, with release notes for operators

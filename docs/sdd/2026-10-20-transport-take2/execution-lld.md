@@ -1,6 +1,6 @@
 # Transport Take 2: Execution Core Low-Level Design (Slice 2)
 
-- Status: Draft for review. Nothing here is implemented.
+- Status: Reviewed; not yet implemented.
 - Date: 2026-11-01
 - Architecture: [hla.md](./hla.md) D1 to D5, D8, D12 to D14; requirements: R2 to R5, R8 to R11
 - Plan: [plan.md](./plan.md), slice 2, delivered in PR A with slice 1
@@ -17,8 +17,8 @@ surface:
 - request and result types and error mapping;
 - the migrated commands, the guards and the proof modules' adoption and deletion.
 
-Where the HLA or plan is wrong or silent, the narrowest choice is made here and marked **HLA
-amendment proposed** or **Plan amendment proposed**; the last section lists them all.
+Where the HLA or plan was silent, the narrowest choice is made here. The HLA and plan carry the
+choices that change them.
 
 **Left to the first consumer.** HLA D5 lands each vocabulary item with its first consumer, and no
 slice 2 consumer uses these, so they are specified only where a later slice's contract depends on
@@ -101,8 +101,7 @@ parsed `(major, minor)`. Every spawn takes the `SSHClient`, so no caller can lau
 - **Doctor.** `_check_required_tools` (`doctor.py:526`) keeps its PATH presence rows for `ssh`,
   `scp` and `tailscale`, because the legacy paths still use bare `ssh` and `scp`, and adds a row
   with the resolver's verdict: path and version, or the refusal. Slice 7 or 8 removes the `ssh` and
-  `scp` rows with the last legacy user. **HLA amendment proposed:** D1 and the plan's slice 2 box
-  replace the presence check now.
+  `scp` rows with the last legacy user.
 
 ## Requests and results
 
@@ -116,10 +115,10 @@ The slice 2 subset of D5. Strings are `str`. `Shell` is a `StrEnum` of `sh`, `ba
 | `LoginShell` | none                                                                                   | `vm shell`, `agent shell`                             |
 | Common       | `env: Mapping[str, str] = {}`, `cwd: str \| None`, `deadline: float \| None` (seconds) | all                                                   |
 
-**HLA amendment proposed:** D5 gains `LoginShell`, the identity's default shell as an interactive
-login shell. A `Script` with an empty source would run `shell -l -i FILE` on an empty file and exit,
-and a name that says "shell session" is more truthful than that. It is valid only for `attach`;
-`run` and `stream` refuse it, and `attach` refuses a request with a `deadline`.
+`LoginShell` is the identity's default shell as an interactive login shell. A `Script` with an empty
+source would run `shell -l -i FILE` on an empty file and exit, and a name that says "shell session"
+is more truthful than that. It is valid only for `attach`; `run` and `stream` refuse it, and
+`attach` refuses a request with a `deadline`.
 
 `Result` holds `completion` and `stdout` and `stderr` as bytes (both `repr=False`).
 `Result.require_completed(vm_name) -> int` returns the status of a `Completed` and otherwise raises
@@ -193,12 +192,11 @@ as `-o` (the proof's list at `connection.py:109-153`, cut to what `-F none` leav
   `GlobalKnownHostsFile=none`, `UpdateHostKeys`, `CheckHostIP`, `UserKnownHostsFile` and
   `HostKeyAlias` (now `trust.py`'s one copy), `IdentityAgent`, `RevokedHostKeys` (no consumer) and
   the `known_hosts_file` plumbing.
-- **HLA amendment proposed:** D9 says slice 2's VM policy uses `none` values for
-  `GlobalKnownHostsFile`. It keeps the null device `trust.ssh_options` already pins, which every
-  version accepts, so the legacy paths and the VM policy share one function.
-- **HLA amendment proposed:** the liveness options apply to every connection, not only streaming,
-  attach and forward (D2). A dead peer then ends a `run` that has no deadline within a minute,
-  instead of hanging, and one option list has no per-mode branches.
+- `GlobalKnownHostsFile` stays the null device `trust.ssh_options` already pins, not `none`, which
+  every version accepts, so the legacy paths and the VM policy share one function.
+- The liveness options apply to every connection, not only streaming, attach and forward. A dead
+  peer then ends a `run` that has no deadline within a minute, instead of hanging, and one option
+  list has no per-mode branches.
 - **Environment.** Nothing is sent through ssh. Under `-F none` no `SendEnv` applies, and the
   request's environment is in the envelope (D3).
 
@@ -215,9 +213,9 @@ as `-o` (the proof's list at `connection.py:109-153`, cut to what `-F none` leav
   there (PR #736, 80 of 80), so "closed stdin" is the client closing its pipe after the request and
   the caller's input. A forward carries no request and uses `-n`.
 - **`-T` and `-t`.** `-T` on every pipe mode (I14); it also beats an operator's `RequestTTY force`,
-  and no configuration is read anyway. **HLA amendment proposed:** the terminal half uses `-t`, not
-  the HLA's `-tt`, as `transports/ssh.py:380` does. `-tt` would force a pty when the operator's
-  stdin is not a terminal, which breaks `echo ls | agw vm shell`. tty mode accepts a non-pty.
+  and no configuration is read anyway. The terminal half uses `-t`, as `transports/ssh.py:380` does.
+  `-tt` would force a pty when the operator's stdin is not a terminal, which breaks
+  `echo ls | agw vm shell`. tty mode accepts a non-pty.
 - **Forwarded addresses.** `-L <bind>:<local>:localhost:<remote>` as `tailscale.py` builds it today.
 - **The client log.** `-E` appends ssh's own diagnostics, never the remote's output, to a file from
   `tempfile.mkstemp()` in the system temporary directory (0600), whose descriptor is closed before
@@ -227,9 +225,8 @@ as `-o` (the proof's list at `connection.py:109-153`, cut to what `-F none` leav
   from OpenSSH, and the client's diagnostics can be shown without the risk that pre-marker stderr
   quotes request bytes. The terminal half keeps ssh's diagnostics on the operator's terminal, as
   today. A live cell confirms that `Host key verification failed` and the authentication and
-  connection errors land in the file on 8.5, 9.x and Win32-OpenSSH. **HLA amendment proposed:** D4
-  and D13 say the client does not read OpenSSH's diagnostics; it now reads this log, to type
-  `Host key verification failed` and to show its last 20 lines in errors.
+  connection errors land in the file on 8.5, 9.x and Win32-OpenSSH. The client reads this log, to
+  type `Host key verification failed` and to show its last 20 lines in errors.
 
 **Spawning.** `subprocess.Popen(argv, stdin=PIPE, stdout=PIPE, stderr=PIPE, bufsize=0)` with the
 proof's Windows environment strip (`_io.py:104-114`). The pump is the proof's single-threaded loop
@@ -308,8 +305,7 @@ uncaught exception before the start marker, and one build ships both halves.
   `MAX_ARG_STRLEN`, 131,072 bytes counting the NUL (measured: 131,071 runs, 131,072 fails).
   `envelope.encode` refuses a larger element or string with a `ValidationError` naming which. A
   total over `ARG_MAX` stays `refused exec E2BIG`. Script source is unaffected, since it goes to a
-  memfd. **HLA amendment proposed:** D3 says nothing bounds a request but memory; the per-string
-  limit is the kernel's.
+  memfd. Nothing else bounds a request but memory.
 - **Markers.** Every marker is `0x1E`, the nonce, a space, a word, a newline: `start`, `end`,
   `exit N`, `refused CODE`, `parked`. Payload output is the bytes between the start marker and the
   closing one, so it needs no trailing newline. The lead byte is one no text emits, so the filters'
@@ -440,9 +436,8 @@ The classifier combines both filters with ssh's own exit status:
    seconds. On a connection it sends the launcher frame (`g`) and the envelope re-serialized with
    `mode: "tty"`, closes the connection, then writes `end` and `exit 0`. On stdin end of file (the
    client closing its pipe) or the timeout it writes `end` and `refused handover`. In every case a
-   `finally` removes the socket and the directory, so a failed second connection leaves nothing.
-   **HLA amendment proposed:** D8 says the parked half exits after 30 seconds with no trailer; it
-   writes this one so the client can tell a timeout from a drop.
+   `finally` removes the socket and the directory, so a failed second connection leaves nothing. The
+   trailer lets the client tell a timeout from a drop.
 5. After the second connection returns, still inside the guard, `guard.clean_exit = code == 0`.
    After the guard, a code of 255 prints the notice "connection ended or the command exited 255;
    terminal restored" with the existing detail line (I6), reimplemented in `attach.py` because the
@@ -472,8 +467,7 @@ above and waits for the client, polling `Popen.wait(timeout=0.2)` so Ctrl-C is d
   last 20 lines through `agentworks.output`, and a `Host key verification failed` there raises
   `TrustMismatch` instead. Under `verbose` there is no log, so no tail and no `TrustMismatch`
   typing. The client always ends on the way out: terminate, one second, kill, and the log is
-  removed. **HLA amendment proposed:** D8 describes a context manager that returns once the local
-  port accepts a connection.
+  removed.
 - **Signals.** The library installs none. `port_forward_vm` installs a `SIGTERM` handler that raises
   `KeyboardInterrupt` for the duration of the forward and restores the previous handler (today's
   handlers are never restored, `tailscale.py:180-181`). `port_forward_vm` owns the 0 on an operator
@@ -491,13 +485,11 @@ above and waits for the client, polling `Popen.wait(timeout=0.2)` so Ctrl-C is d
 | `ExecutionIncomplete` | `ConnectivityError` | Any other `NotDelivered` or `Unknown`; carries the `Result`, names which, and shows the client log tail | A `NotDelivered` command did not start; an `Unknown` one may have run       |
 | `CommandFailed`       | `ExternalError`     | `check=True` with a non-zero status; message has the status, never stream text                          | none                                                                        |
 
-**HLA amendment proposed:** D13 gains `RequestRefused` and the refusal mapping above, and its errors
-may show the client log's tail. **HLA amendment proposed:** `TrustMismatch`'s hint cannot name
-`agw vm recover` in PR A, which lands in slice 4 (PR B). Until then it names the manual path, since
-import never rewrites an existing record (`trust-lld.md`). The hint is one constant slice 4 changes.
-`TrustMissing` already exists (`errors.py`). `PermissionDenied` and `FeatureUnavailable` land with
-their first consumers. No error message, `repr` or hint holds a stream, an environment value or
-script text.
+Errors may show the client log's tail. `TrustMismatch`'s hint cannot name `agw vm recover` in PR A,
+which lands in slice 4 (PR B). Until then it names the manual path, since import never rewrites an
+existing record (`trust-lld.md`). The hint is one constant slice 4 changes. `TrustMissing` already
+exists (`errors.py`). `PermissionDenied` and `FeatureUnavailable` land with their first consumers.
+No error message, `repr` or hint holds a stream, an environment value or script text.
 
 ## The migrated commands
 
@@ -528,8 +520,8 @@ the package attribute so one patch reaches every manager.
   `Unknown(CONNECTION)` falls back to running `true` as the admin: if that completes, the agent
   predates the rollout (the existing `StateError` and hint); otherwise the VM is unreachable (the
   existing `ConnectivityError`). Every other outcome raises as it is: `VMNotReady`, `TrustMismatch`,
-  `RequestRefused` or `ExecutionIncomplete`. This keeps incident row I19, so **I19 is also re-proved
-  in slice 2** (inventory amendment proposed).
+  `RequestRefused` or `ExecutionIncomplete`. This keeps incident row I19, so I19 is re-proved in
+  slice 2 as well as 6.
 - **Behavior changes** for release notes and the 0.20 guide:
   - OpenSSH 8.5 or newer is required for these six commands, and Windows needs the native build.
   - A VM without `python3` is `VMNotReady`, not a shell error.
@@ -698,43 +690,4 @@ client on one workstation (else the operator's disposition). For each, the V vec
 
 ## Amendments
 
-### HLA amendments proposed
-
-- D1: doctor keeps its `ssh` and `scp` PATH rows and adds the resolver's verdict.
-- D2 (`hla.md:111`): the terminal half uses `-t`, not `-tt`; liveness options apply to every
-  connection; connection sharing, forwarding and proxy commands are off by the `-F none` defaults
-  rather than by explicit pins.
-- D3 (`hla.md:149`): a per-string kernel limit of 131,071 bytes on argv elements and `K=V` strings;
-  agw-launch has its own exact-read loop rather than reusing stage 0's `r`.
-- D4 and D13: the client reads ssh's diagnostics from a `-E` log, to type `HOST_KEY` and to show its
-  tail in errors; `STDLIB_MISSING` is a not-delivered reason that maps to `VMNotReady`.
-- D4 (`hla.md:192`): `bootstrap.py`'s locale handling is not kept; the launcher sets `LANG=C.UTF-8`.
-- D4 step 6 (`hla.md:245`): a missing passwd entry is an exception before the marker, not `refused`;
-  `refused` has no `passwd` or `interpreter` code.
-- D5: a new `LoginShell` request.
-- D8 (`hla.md:397`): the terminal half uses `-t`; the client picks the handover token and the guest
-  writes a bare `parked`; a timed-out park writes `end` and `refused handover`; the forward is a
-  blocking call that returns the client's status, with no readiness probe, handle or context
-  manager.
-- D9: the VM policy keeps the null device for `GlobalKnownHostsFile`, not `none`.
-- D13: a new `RequestRefused`, and `stream`'s mapping of a refusal to status 126, 127 or 125;
-  `TrustMismatch`'s PR A hint names the manual path; `oplog.py` and the `LOG_DIR` move land in slice
-  3 (D13 says slice 2).
-- Module layout: the HLA's `launcher.py` row becomes `agw_launch.py`, with stage 0 in
-  `ssh_process.py` and `launcher_source()` in `envelope.py`.
-- Incident inventory: I19 is re-proved in slice 2 as well as 6, and row I21 is added.
-
-### Plan amendments proposed
-
-- The LLD box (`plan.md:98`, `:104`) names the host policy and the operation log; the host policy is
-  deferred to slice 4 and the operation log to slice 3.
-- The implement box (`plan.md:106`) names `launcher.py` and `oplog.py`: they become `agw_launch.py`
-  (with stage 0 in `ssh_process.py`), and `oplog.py` is slice 3's.
-- The re-prove box (`plan.md:148`) gains I12 to I14, I19 and I21.
-- The stdout-after-trailer vector (`plan.md:143`) becomes a unit test of the filters, since pipes do
-  not reorder.
-- The slice 2 doctor box keeps the `ssh` and `scp` presence check beside the resolver's verdict.
-- The slice 2 box "Move the old `LOG_DIR` readers to `oplog`'s constant" and `oplog.py` move to
-  slice 3, with the writer.
-- The sensitive-stdin conformance vector moves to slice 5, with `Bytes` input and its first
-  consumer.
+The HLA and the plan carry the choices here that change them.
