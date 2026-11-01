@@ -31,6 +31,7 @@ from agentworks.artifacts.native.common import (
     ancestor_diagnostics,
     defer,
     defer_setup_conflicts,
+    delivery_probe_files,
     native_home,
     validate_discovery_paths,
     validate_native_command,
@@ -253,7 +254,11 @@ class GrokBuildIntegration(HarnessIntegration):
                 runner = ctx.admin_target() if self._admin else ctx.agent_target()
                 if runner is None:
                     raise StateError("artifact delivery requires the actual native launch target")
-                files = self._artifact_plan.application.files if own_delivery else artifact_context.ancestor_files
+                files = (
+                    delivery_probe_files(artifact_context, self._artifact_plan.application)
+                    if own_delivery
+                    else artifact_context.ancestor_files
+                )
                 native_root = probe_native(
                     runner,
                     tool="grok",

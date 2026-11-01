@@ -244,6 +244,26 @@ def has_artifacts(context: SessionArtifactContext | None) -> bool:
     return context is not None and bool(context.inputs or context.ancestor_files)
 
 
+def delivery_probe_files(
+    context: SessionArtifactContext, application: ArtifactApplication
+) -> tuple[OwnedArtifactFile | ArtifactFile, ...]:
+    """Recognize earlier placements only for the same native identity and origin.
+
+    A removed activation can forward an artifact whose old native file remains.
+    New delivery recognizes that logical artifact without widening policy checks
+    to unrelated ancestor content.
+    """
+    proposed = {
+        (file.native_identity, frozenset(file.origins))
+        for file in application.files
+        if file.native_identity is not None
+    }
+    recognized = tuple(
+        file for file in context.ancestor_files if (file.native_identity, frozenset(file.origins)) in proposed
+    )
+    return (*recognized, *application.files)
+
+
 def validate_discovery_paths(
     context: SessionArtifactContext, roots: tuple[str, ...], *, files: tuple[str, ...] = ()
 ) -> None:
