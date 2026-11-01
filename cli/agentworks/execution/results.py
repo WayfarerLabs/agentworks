@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from agentworks.execution.errors import (
     ExecutionIncomplete,
@@ -18,6 +19,9 @@ from agentworks.execution.errors import (
     TrustMismatch,
     VMNotReady,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class NotDeliveredReason(StrEnum):
@@ -79,8 +83,11 @@ class Result:
     stderr: bytes = field(default=b"", repr=False)
     client_log_tail: str = ""
 
-    def require_completed(self, vm_name: str) -> int:
-        """The status of a :class:`Completed`; otherwise raise the typed error for the outcome."""
+    def require_completed(self, vm_name: str, *, identity_file: Path | None = None) -> int:
+        """The status of a :class:`Completed`; otherwise raise the typed error for the outcome.
+
+        ``identity_file`` is passed through to :class:`ExecutionIncomplete` for its key hint.
+        """
         completion = self.completion
         if isinstance(completion, Completed):
             return completion.status
@@ -91,4 +98,4 @@ class Result:
                 raise RequestRefused(vm_name, completion.code or "", self)
         elif completion.reason is UnknownReason.HOST_KEY:
             raise TrustMismatch(vm_name, self.client_log_tail)
-        raise ExecutionIncomplete(vm_name, self)
+        raise ExecutionIncomplete(vm_name, self, identity_file=identity_file)

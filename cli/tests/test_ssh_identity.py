@@ -18,6 +18,7 @@ from agentworks.ssh_identity import (
     UnverifiableSSHIdentity,
     VerifiedSSHIdentity,
     fingerprint_public_blob,
+    identity_is_passphrase_protected,
     parse_public_ssh_identity,
     read_private_ssh_identity,
 )
@@ -343,3 +344,50 @@ def test_real_native_openssh_key_matches_ssh_keygen_fingerprint(tmp_path: Path, 
     ).stdout.split()[1]
 
     assert read_private_ssh_identity(private_key) == VerifiedSSHIdentity(fingerprint)
+
+
+@pytest.mark.parametrize(
+    ("cipher", "protected"),
+    [(b"none", False), (b"aes256-ctr", True), (b"chacha20-poly1305@openssh.com", True)],
+)
+def test_the_envelope_cipher_decides_whether_a_key_is_passphrase_protected(
+    tmp_path: Path, cipher: bytes, protected: bool
+) -> None:
+    key = _write(tmp_path / "id", _native_armor(_native_envelope(cipher=cipher)))
+
+    assert identity_is_passphrase_protected(key) is protected
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [
+        b"",
+        b"not a key at all",
+        b"-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n-----END RSA PRIVATE KEY-----\n",
+        _OPENSSH_BEGIN + b"\n!!!not base64!!!\n" + _OPENSSH_END + b"\n",
+        _OPENSSH_BEGIN + b"\n" + base64.b64encode(_OPENSSH_MAGIC + b"\x00\x00") + b"\n" + _OPENSSH_END + b"\n",
+        _OPENSSH_BEGIN + b"\nno end armor",
+    ],
+)
+def test_an_unreadable_or_unparsable_identity_is_not_passphrase_protected(tmp_path: Path, contents: bytes) -> None:
+    assert identity_is_passphrase_protected(_write(tmp_path / "id", contents)) is False
+
+
+def test_a_missing_identity_is_not_passphrase_protected(tmp_path: Path) -> None:
+    assert identity_is_passphrase_protected(tmp_path / "absent") is False
+
+
+@pytest.mark.skipif(_SSH_KEYGEN is None, reason="ssh-keygen is not installed")
+@pytest.mark.parametrize(("passphrase", "protected"), [("", False), ("test-passphrase", True)])
+def test_real_openssh_keys_report_whether_they_are_passphrase_protected(
+    tmp_path: Path, passphrase: str, protected: bool
+) -> None:
+    private_key = tmp_path / "id_ed25519"
+    subprocess.run(
+        [_SSH_KEYGEN or "ssh-keygen", "-q", "-t", "ed25519", "-N", passphrase, "-f", str(private_key)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert identity_is_passphrase_protected(private_key) is protected

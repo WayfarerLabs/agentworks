@@ -80,7 +80,7 @@ class VMAccess:
         stdout, stderr = pump.Capture(), pump.Capture()
         result = self._execute(request, stdin=None, on_stdout=stdout, on_stderr=stderr)
         result = Result(result.completion, bytes(stdout.data), bytes(stderr.data), result.client_log_tail)
-        if check and result.require_completed(self.vm_name) != 0:
+        if check and result.require_completed(self.vm_name, identity_file=self._identity_file) != 0:
             assert isinstance(result.completion, Completed)
             raise CommandFailed(self.vm_name, result.completion.status, result)
         return result
@@ -114,7 +114,7 @@ class VMAccess:
                 stderr.write(f"agw: {describe_refusal(code)}\n".encode())
                 stderr.flush()
             return refusal_status(code)
-        return result.require_completed(self.vm_name)
+        return result.require_completed(self.vm_name, identity_file=self._identity_file)
 
     def attach(self, request: LoginShell) -> int:
         """Attach the operator's terminal to a login shell and return its exit status."""
@@ -140,7 +140,13 @@ class VMAccess:
                 ssh_process.stage0_command(attach_module.socket_path(token)),
             )
             return attach_module.attach(
-                vm_name=self.vm_name, wire=wire, nonce=nonce, parking_argv=parking, terminal_argv=terminal, log=log
+                vm_name=self.vm_name,
+                wire=wire,
+                nonce=nonce,
+                parking_argv=parking,
+                terminal_argv=terminal,
+                log=log,
+                identity_file=self._identity_file,
             )
 
     def forward(self, forwards: Sequence[Forward], *, verbose: bool = False) -> int:
