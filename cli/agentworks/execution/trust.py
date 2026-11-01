@@ -119,10 +119,14 @@ def _checked_name(vm_name: str) -> str:
     return vm_name
 
 
-def _literal_path(path: PurePath) -> str:
-    # OpenSSH expands tokens after parsing quotes. Refuse such a path rather
-    # than turning a configured file name into another file or an environment
-    # lookup.
+def literal_path(path: PurePath, what: str) -> str:
+    """``path`` as an ``ssh`` option value, or a :class:`ConfigError` naming ``what``.
+
+    OpenSSH expands tokens after parsing quotes. Refuse such a path rather
+    than turning a configured file name into another file or an environment
+    lookup. Shared by the store paths and the VM policy's identity file, so one
+    set of rules quotes every path ssh is given.
+    """
     value = path.as_posix()
     if (
         not path.is_absolute()
@@ -130,7 +134,7 @@ def _literal_path(path: PurePath) -> str:
         or any(ord(c) < 32 or ord(c) == 127 for c in value)
     ):
         raise ConfigError(
-            f"host-key store path '{format_host_path(Path(path))}' cannot be passed to ssh: it must be "
+            f"{what} '{format_host_path(Path(path))}' cannot be passed to ssh: it must be "
             "absolute and free of '%', '$', quotes, backslashes and control characters",
         )
     return value
@@ -289,13 +293,16 @@ def ssh_options(trust: TrustBinding | HostTrust) -> tuple[str, ...]:
         return ("-o", "StrictHostKeyChecking=accept-new")
     if trust.mode is TrustMode.UNVERIFIED:
         assert trust.provisioning_file is not None  # TrustBinding.__post_init__
-        values = [f'UserKnownHostsFile="{_literal_path(trust.provisioning_file)}"', "StrictHostKeyChecking=accept-new"]
+        values = [
+            f'UserKnownHostsFile="{literal_path(trust.provisioning_file, "host-key store path")}"',
+            "StrictHostKeyChecking=accept-new",
+        ]
     else:
         if trust.mode is TrustMode.VM:
             require_record(trust.vm_name)
         checking = "yes" if trust.mode is TrustMode.VM else "accept-new"
         values = [
-            f'UserKnownHostsFile="{_literal_path(store_file(trust.vm_name))}"',
+            f'UserKnownHostsFile="{literal_path(store_file(trust.vm_name), "host-key store path")}"',
             f"HostKeyAlias={host_key_alias(trust.vm_name)}",
             f"StrictHostKeyChecking={checking}",
         ]
@@ -315,7 +322,7 @@ def entry_options(vm_name: str) -> tuple[str, ...]:
         return ()
     return (
         f"HostKeyAlias {host_key_alias(vm_name)}",
-        f'UserKnownHostsFile "{_literal_path(store_file(vm_name))}"',
+        f'UserKnownHostsFile "{literal_path(store_file(vm_name), "host-key store path")}"',
         "StrictHostKeyChecking yes",
         *(f"{name} {value}" for name, value in _pinned_options()),
     )

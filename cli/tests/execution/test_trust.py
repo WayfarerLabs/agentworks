@@ -110,7 +110,7 @@ def test_host_trust_is_first_use_against_the_operators_configuration(tmp_path: P
 def test_windows_paths_use_forward_slashes() -> None:
     path = PureWindowsPath("C:\\Users\\Op Erator\\.config\\agentworks\\known_hosts\\vm-web")
 
-    assert trust._literal_path(path) == "C:/Users/Op Erator/.config/agentworks/known_hosts/vm-web"
+    assert trust.literal_path(path, "host-key store path") == "C:/Users/Op Erator/.config/agentworks/known_hosts/vm-web"
 
 
 @pytest.mark.windows
@@ -126,7 +126,7 @@ def test_windows_paths_use_forward_slashes() -> None:
 )
 def test_paths_ssh_would_expand_or_misread_are_refused_by_name(path: PureWindowsPath) -> None:
     with pytest.raises(ConfigError):
-        trust._literal_path(path)
+        trust.literal_path(path, "host-key store path")
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX path rules")
