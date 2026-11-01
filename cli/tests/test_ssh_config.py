@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -232,6 +234,7 @@ def test_format_entry_quotes_spaces_in_identity_file(tmp_path: Path) -> None:
         hostname="1.2.3.4",
         user="me",
         identity_file=Path("/home/my user/keys/id_ed25519"),
+        vm_name="web",
     )
     m = re.search(r'IdentityFile "([^"]*my user[^"]*id_ed25519)"', entry)
     assert m is not None, f"expected quoted path containing space, got: {entry!r}"
@@ -245,6 +248,7 @@ def test_format_entry_no_quotes_without_spaces(tmp_path: Path) -> None:
         hostname="1.2.3.4",
         user="me",
         identity_file=Path("/home/user/.ssh/id_ed25519"),
+        vm_name="web",
     )
     assert '"' not in entry
 
@@ -437,3 +441,106 @@ def test_declined_slug_keeps_default_file_name(tmp_path: Path) -> None:
     _rebuild_config_dir(config, db)
 
     assert (ssh_dir / "config.d" / _MANAGED_CONF).exists()
+
+
+# -- Host-key store options ---------------------------------------------------
+
+
+def _managed_blocks(content: str) -> dict[str, str]:
+    """The managed file's Host blocks, keyed by alias."""
+    blocks: dict[str, str] = {}
+    for block in content.split("Host ")[1:]:
+        alias, _, body = block.partition("\n")
+        blocks[alias] = body
+    return blocks
+
+
+@pytest.mark.parametrize("rebuild", ["config_dir", "legacy"])
+def test_store_options_appear_exactly_for_vms_with_a_record(tmp_path: Path, rebuild: str) -> None:
+    from agentworks import ssh_config as ssh_config_module
+    from agentworks.execution import trust
+
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("known", "100.64.0.1"), _mock_vm("fresh", "100.64.0.2")]
+    db.list_agents.side_effect = lambda vm_name: [_mock_agent(f"agent-{vm_name}", "agt-claude", vm_name)]
+    trust.write_records("known", [trust.HostKey("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAA")])
+
+    if rebuild == "config_dir":
+        _rebuild_config_dir(config, db)
+        content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    else:
+        ssh_config_module._legacy_rebuild(config, db)
+        content = (ssh_dir / "config").read_text()
+
+    blocks = _managed_blocks(content)
+    assert set(blocks) == {"awvm--known", "awagent--agent-known", "awvm--fresh", "awagent--agent-fresh"}
+    for alias in ("awvm--known", "awagent--agent-known"):
+        assert "    HostKeyAlias agentworks-vm-known\n" in blocks[alias]
+        assert f'    UserKnownHostsFile "{trust.store_file("known").as_posix()}"\n' in blocks[alias]
+        assert "    StrictHostKeyChecking yes\n" in blocks[alias]
+        assert "    UpdateHostKeys no\n" in blocks[alias]
+        assert "    HashKnownHosts no\n" in blocks[alias]
+    for alias in ("awvm--fresh", "awagent--agent-fresh"):
+        assert "IdentityFile" in blocks[alias]
+        assert not any(
+            option in blocks[alias]
+            for option in ("HostKeyAlias", "UserKnownHostsFile", "StrictHostKeyChecking", "UpdateHostKeys")
+        )
+
+
+def test_an_entry_gains_and_loses_the_store_options_with_the_record(tmp_path: Path) -> None:
+    from agentworks.execution import trust
+
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
+    db.list_agents.return_value = []
+    conf = ssh_dir / "config.d" / _MANAGED_CONF
+
+    _rebuild_config_dir(config, db)
+    assert "HostKeyAlias" not in conf.read_text()
+
+    trust.write_records("web", [trust.HostKey("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAA")])
+    _rebuild_config_dir(config, db)
+    assert "HostKeyAlias agentworks-vm-web" in conf.read_text()
+
+    trust.remove("web")
+    _rebuild_config_dir(config, db)
+    assert "HostKeyAlias" not in conf.read_text()
+
+
+@pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
+def test_the_installed_client_resolves_the_managed_entry_against_the_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.execution import trust
+
+    store = tmp_path / "store with space"
+    monkeypatch.setattr(trust, "STORE_DIR", store)
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("known", "100.64.0.1")]
+    db.list_agents.return_value = []
+    trust.write_records("known", [trust.HostKey("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAA")])
+    _rebuild_config_dir(config, db)
+
+    # -G resolves the configuration and exits; it never connects.
+    out = subprocess.run(
+        ["ssh", "-G", "-F", str(ssh_dir / "config.d" / _MANAGED_CONF), "awvm--known"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    ).stdout
+    settings = dict(line.split(" ", 1) for line in out.splitlines())
+
+    assert settings["hostname"] == "100.64.0.1"
+    assert settings["hostkeyalias"] == "agentworks-vm-known"
+    assert settings["userknownhostsfile"] == trust.store_file("known").as_posix()
+    assert settings["stricthostkeychecking"] == "true"
+    assert settings["updatehostkeys"] == "false"
+    assert settings["hashknownhosts"] == "no"

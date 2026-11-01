@@ -11,11 +11,12 @@ cleaned up automatically.
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.atomic_write import atomic_write_text
+from agentworks.execution import trust
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -111,6 +112,7 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
                 hostname=vm.tailscale_host,
                 user=vm.admin_username,
                 identity_file=config.operator.ssh_private_key,
+                vm_name=vm.name,
             )
         )
         # Per-agent aliases on this VM (parity with _rebuild_config_dir).
@@ -121,6 +123,7 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
                     hostname=vm.tailscale_host,
                     user=agent.linux_user,
                     identity_file=config.operator.ssh_private_key,
+                    vm_name=vm.name,
                 )
             )
 
@@ -174,6 +177,7 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
                 hostname=vm.tailscale_host,
                 user=vm.admin_username,
                 identity_file=config.operator.ssh_private_key,
+                vm_name=vm.name,
             )
         )
         # Per-agent aliases on this VM. Same HostName / IdentityFile as the
@@ -188,6 +192,7 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
                     hostname=vm.tailscale_host,
                     user=agent.linux_user,
                     identity_file=config.operator.ssh_private_key,
+                    vm_name=vm.name,
                 )
             )
 
@@ -204,7 +209,7 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
         return
 
     blocks.extend(host_entries)
-    _atomic_write(conf_path, "\n".join(blocks))
+    atomic_write_text(conf_path, "\n".join(blocks))
 
 
 def _ensure_include(ssh_config: Path) -> None:
@@ -260,24 +265,18 @@ def _format_entry(
     hostname: str,
     user: str,
     identity_file: Path,
+    vm_name: str,
 ) -> str:
-    """Format a single SSH config Host block."""
+    """Format a single SSH config Host block for an entry on the VM ``vm_name``.
+
+    A VM with a host-key record gets the options that make the operator's own
+    ``ssh`` verify against the store; one without is left as it was.
+    """
     id_str = _to_ssh_path(identity_file)
     if " " in id_str:
         id_str = f'"{id_str}"'
-    return f"Host {alias}\n    HostName {hostname}\n    User {user}\n    IdentityFile {id_str}\n"
-
-
-def _atomic_write(path: Path, content: str) -> None:
-    """Write content to a file atomically via temp file + rename."""
-    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-    try:
-        with open(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-        Path(tmp).replace(path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
+    trust_lines = "".join(f"    {option}\n" for option in trust.entry_options(vm_name))
+    return f"Host {alias}\n    HostName {hostname}\n    User {user}\n    IdentityFile {id_str}\n{trust_lines}"
 
 
 def _read_managed(ssh_config: Path) -> tuple[str, dict[str, str]]:
