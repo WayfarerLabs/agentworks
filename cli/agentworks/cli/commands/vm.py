@@ -222,6 +222,34 @@ def vm_verify_connection(
     output.result(f"VM '{result.name}' connection verified via {result.transport}.")
 
 
+@vm_app.command("import-host-keys")
+def vm_import_host_keys(
+    names: Annotated[
+        list[str] | None,
+        typer.Argument(help="VMs to import host keys for (or use --all)", show_default=False),
+    ] = None,
+    all_vms: Annotated[bool, typer.Option("--all", help="Import for every VM")] = False,
+    known_hosts: Annotated[
+        Path | None,
+        typer.Option(
+            "--known-hosts",
+            help="known_hosts file to read instead of ~/.ssh/known_hosts. It is never modified.",
+        ),
+    ] = None,
+) -> None:
+    """Import VM host keys from a known_hosts file into the host-key store.
+
+    Matches each VM's tailnet address with OpenSSH's own ssh-keygen, so the
+    result is what ssh would have trusted. A VM that already has a record is
+    never changed. Exits non-zero while any selected VM has no record.
+    """
+    from agentworks.config import load_config
+    from agentworks.vms.manager.host_keys import import_host_keys, render_import
+
+    outcomes = import_host_keys(get_db(), load_config(), names or [], all_vms=all_vms, known_hosts=known_hosts)
+    raise typer.Exit(render_import(outcomes))
+
+
 @vm_app.command("start")
 def vm_start(
     name: Annotated[str, typer.Argument(help="VM name")],
