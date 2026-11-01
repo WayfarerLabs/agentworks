@@ -135,8 +135,8 @@ path and needs none of what follows. Everything else keeps its current path for 
   `/etc/security/pam_env.conf` or the admin's `~/.pam_environment` holds settings, since these
   commands no longer apply them. The home file is checked only where sshd applies it (Debian 12).
   Lima's `env:` settings and its proxy propagation are written into `/etc/environment`, so on such a
-  VM they no longer reach `agw` commands and reinit warns. The warning appears only when you run
-  `vm reinit`, so this guide is where you learn of it beforehand.
+  VM they no longer reach `agw` commands and reinit warns. Check now if you rely on them: the
+  warning appears only when you run `vm reinit`.
 - **A literal command skips the account shell.** `vm exec VM prog arg...` runs the program directly.
   `vm exec VM 'one argument'` is, as before, a shell command line run by the admin's default shell
   without login startup. What changes is where its `PATH` comes from: sshd's `PATH` plus `pam_env`

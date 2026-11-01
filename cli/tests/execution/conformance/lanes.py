@@ -33,7 +33,7 @@ from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, ssh_process, trust
 from agentworks.execution.access import VMAccess
 from agentworks.execution.client import SSHClient
-from agentworks.execution.requests import Command, Request, Script, Shell
+from agentworks.execution.requests import Command, RunRequest, Script, Shell
 from agentworks.execution.results import Completed, Result
 
 if TYPE_CHECKING:
@@ -77,10 +77,10 @@ class Lane:
 
     # -- Requests ------------------------------------------------------------
 
-    def run(self, request: Request) -> Result:
+    def run(self, request: RunRequest) -> Result:
         return self.access.run(request)
 
-    def stream(self, request: Request, stdin: bytes | None = b"") -> Streamed:
+    def stream(self, request: RunRequest, stdin: bytes | None = b"") -> Streamed:
         out, err = io.BytesIO(), io.BytesIO()
         status = self.access.stream(request, stdin=None if stdin is None else io.BytesIO(stdin), stdout=out, stderr=err)
         return Streamed(status, out.getvalue(), err.getvalue())

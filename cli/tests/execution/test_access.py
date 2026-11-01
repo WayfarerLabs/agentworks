@@ -309,7 +309,7 @@ def test_the_key_is_read_only_after_a_failure(
     supported_client: SSHClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     reads: list[str] = []
-    monkeypatch.setattr(VMAccess, "passphrase_hint", lambda self: reads.append(self.vm_name))
+    monkeypatch.setattr("agentworks.ssh_identity.passphrase_hint", lambda path: reads.append(str(path)))
     monkeypatch.setattr(VMAccess, "_execute", lambda self, *a, **k: result(Completed(0)))
     access = vm_access(vm(), config(tmp_path / "key"), Admin())
 
