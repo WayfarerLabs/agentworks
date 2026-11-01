@@ -277,6 +277,24 @@ On rejoining at VM start:
 > I think I'd rather simplify here. VM start should just start the VM and wait for Tailscale to
 > reconnect. If that fails, it should hint at recover.
 
+### 2026-11-01, later
+
+[On the three behavior changes PR A ships (no MOTD or last-login line without `--workspace`; an
+encrypted key must be loaded in the SSH agent, since ssh never prompts for a passphrase; pam_env not
+applied), the operator accepted all three and wrote:]
+
+> So please, please, please don't take on a bunch of extra complexity to solve problems like this.
+> Agentworks is a controlled environment. I'm much rather just not support stuff like PAM. But if we
+> do that, we need to check and alert if someone tries to use it.
+
+[On the two items #856 left for the operator, the operator selected both:]
+
+> Amend R1 (auth key once)
+
+[and]
+
+> Keep python3 at init
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.
@@ -367,8 +385,9 @@ an actionable diagnosis. Release support keeps the existing policy: current and 
 are ordinarily operable, and older recognized releases continue best effort with a warning.
 
 Platform provisioning performs the VM's first Tailscale join, installs the admin's authorized key
-and reports the VM's tailnet address, using whatever native access the platform needs. Core's work
-on a new VM starts over SSH at that address.
+and reports the VM's tailnet address, using whatever native access the platform needs. That first
+join sends the auth key once and keeps it out of retained provisioning artifacts, command lines,
+logs and exceptions. Core's work on a new VM starts over SSH at that address.
 
 A difference between platforms is fixed in provisioning or initialization, not carried as a branch
 in core. Reinit converges an existing VM onto the contract. Differences inherent to a platform

@@ -517,11 +517,11 @@ above and waits for the client, polling `Popen.wait(timeout=0.2)` so Ctrl-C is d
 | `ExecutionIncomplete` | `ConnectivityError` | Any other `NotDelivered` or `Unknown`; carries the `Result`, names which, and shows the client log tail | A `NotDelivered` command did not start; an `Unknown` one may have run       |
 | `CommandFailed`       | `ExternalError`     | `check=True` with a non-zero status; message has the status, never stream text                          | none                                                                        |
 
-Errors may show the client log's tail. `TrustMismatch`'s hint cannot name `agw vm recover` in PR A,
-which lands in slice 4 (PR B). Until then it names the manual path, since import never rewrites an
-existing record (`trust-lld.md`). The hint is one constant slice 4 changes. `TrustMissing` already
-exists (`errors.py`). `PermissionDenied` and `FeatureUnavailable` land with their first consumers.
-No error message, `repr` or hint holds a stream, an environment value or script text.
+Errors may show the client log's tail. `TrustMismatch`'s hint names the manual path, since import
+never rewrites an existing record (`trust-lld.md`) and recovery re-establishes only a missing one
+(HLA D4). `TrustMissing` already exists (`errors.py`). `PermissionDenied` and `FeatureUnavailable`
+land with their first consumers. No error message, `repr` or hint holds a stream, an environment
+value or script text.
 
 ## The migrated commands
 
@@ -567,13 +567,15 @@ the package attribute so one patch reaches every manager.
   - `IdentityAgent` set only in `~/.ssh/config` (1Password, Secretive) is ignored by the six
     commands, since no configuration is read; the agent named by `SSH_AUTH_SOCK` serves the key.
   - `vm shell` and `agent shell` without `--workspace` lose the message of the day and last-login
-    line, because sshd prints them only when it runs the login shell itself. Operator disposition
-    pending.
+    line, because sshd prints them only when it runs the login shell itself. Accepted by the
+    operator on 2026-11-01; nothing breaks, so there is no alert.
   - An encrypted key the default agent does not hold can no longer prompt for its passphrase on
-    `vm shell` and `agent shell`, since every connection runs with `BatchMode=yes`. Operator
-    disposition pending.
+    `vm shell` and `agent shell`, since every connection runs with `BatchMode=yes`. Accepted on
+    2026-11-01; a connection that fails before the start marker with a passphrase-protected key
+    hints at the agent (HLA D2).
   - `/etc/environment` and other `pam_env` variables no longer reach the payload, which gets only
-    the rebuilt environment. Operator disposition pending.
+    the rebuilt environment. Accepted on 2026-11-01; reinit warns when a VM has pam_env settings
+    (HLA D10).
   - `vm port-forward` exits 0 on an operator stop.
 - **Template `shell` fields** (`vms/admin.py:99`, `agents/template.py:101`): the type becomes
   `AccountShell` with a before-validator that reduces a path to its basename, so `/usr/bin/zsh`

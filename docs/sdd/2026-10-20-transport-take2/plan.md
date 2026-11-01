@@ -115,6 +115,12 @@ a VM connection.
       Keep `vm exec`'s single-argument form as a shell command line, sent as a `Script` under the
       identity's default shell, and several arguments as a literal argv, as today
       (`vms/manager/exec.py:271`).
+- [ ] Alert where PR A drops a behavior an operator may rely on (operator, 2026-11-01): warn at
+      reinit when `/etc/environment`, `/etc/security/pam_env.conf` or the admin's
+      `~/.pam_environment` holds settings, and when a VM connection fails before the start marker
+      while the configured key is passphrase-protected, hint to load it into the SSH agent. Test the
+      pam_env parser over file contents, that reinit warns and never fails on it, and that the hint
+      appears only for a passphrase-protected key.
 - [x] Type a VM without python3 as `VMNotReady` with a hint naming `agw vm reinit`, whose legacy
       Phase A still runs there, and say so in release notes.
 - [x] Limit the admin and agent template `shell` fields to `sh`, `dash`, `bash` and `zsh` at the
@@ -144,7 +150,8 @@ a VM connection.
     delivered;
   - signal dispositions and descriptors reset for the payload, and a startup file that overrides
     `TERM` or `XDG_RUNTIME_DIR` leaves the payload's values unchanged;
-  - the end marker and trailer under a background child that holds both streams;
+  - the end marker and trailer under a background child that holds both streams, and with stdout's
+    last bytes arriving after the trailer;
   - payload stdout that does not end in a newline, and a `refused` trailer;
   - the deadline;
   - binary stdin and stdout on Windows.
@@ -182,7 +189,8 @@ pass the static check, and the package's tests pass with the legacy modules bloc
 - [ ] Add python3 to `PROVISIONING_PACKAGES`, which every platform's bootstrap already installs
       (`lima.py:391`, `wsl2_bootstrap.py:65`, and the AWS, Azure, GCP and Proxmox platforms).
 - [ ] Make `ProvisionResult.tailnet_address` required on every platform, with each platform retrying
-      the address read after a successful join so the key is never sent twice (HLA D11), and delete
+      the address read after a successful join so the key is never sent twice, and logging the node
+      out over the provisioning channel when the reads are exhausted (HLA D11), and delete
       `ProvisionResult.native_transport` and Phase A's native `tailscale ip -4` fallback.
 - [ ] Move Phase A and release probing (`vms/manager/release.py`) onto `VMAccess`: the first
       connection in Enroll mode, then the base checks (including Debian attestation), then
@@ -196,12 +204,15 @@ pass the static check, and the package's tests pass with the legacy modules bloc
       elevation refused before dispatch and an elevated attach refused, and prove an elevated
       request on a fresh, never-initialized Debian 12 and 13 VM.
 - [ ] Add `vms/contract.py`. Run the base checks first at reinit and the initialized checks at the
-      end of Phase B. Add `vms/contract.py` to the package guard (HLA D14).
+      end of Phase B, replacing slice 2's reinit pam_env warning. Add `vms/contract.py` to the
+      package guard (HLA D14).
 - [ ] Amend ADR 0025.
 - [ ] Tests:
   - a VM failing a base check is not reported ready;
   - each diagnosis names reinit or recreation;
-  - a platform that cannot report the address fails create.
+  - a platform that cannot report the address logs the node out over its provisioning channel and
+    fails create, without a second join, and names the node when the logout fails;
+  - a VM with pam_env settings gets a warning naming the file and still passes the contract.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
 - [ ] Collateral: platform author documentation for `tailnet_address`, and the command reference for
@@ -214,7 +225,7 @@ first operation there is the base contract check.
 ## Slice 4: Recovery and the platform surface (HLA D11 second half; PR B)
 
 - [ ] Write `platform-lld.md`. It covers:
-  - `run_recovery`, `RecoveryResult` and its trailer wrapper;
+  - `run_as_root`, and core's `run_recovery`, `RecoveryResult` and its marker wrapper;
   - `read_host_keys` and its cloud overrides;
   - `recovery_needs_guest_sshd`;
   - `native_shell`;
@@ -223,8 +234,10 @@ first operation there is the base contract check.
   - the host policy;
   - the recovery scripts;
   - `vm recover`;
-  - each cloud's provider-side host-key fingerprint source.
-- [ ] Implement `run_recovery`, `read_host_keys` and `native_shell` on every platform.
+  - each cloud's provider-side host-key fingerprint source;
+  - `RawRun`, and how each channel bounds its output and its wait by the deadline.
+- [ ] Implement core's `run_recovery` in `vms/recovery.py`, `run_as_root` on every platform,
+      `read_host_keys` on the clouds, and `native_shell` where a platform offers one.
 - [ ] Implement the host policy (HLA D2) in `ssh_process.py`, for Remote Lima's host connection and
       `public_ssh.py`, its first callers.
 - [ ] Rehome native code as plugin-private modules:
@@ -250,13 +263,14 @@ first operation there is the base contract check.
       `GateTarget.repair_secret_refs`, `_GateSecrets`, and the call sites in `vms/nodes.py` and
       `sessions/manager/_scope.py`. Update the collateral that names it, including the
       `agentworks-reviewer` persona's sanctioned conditional-repair shape.
-- [ ] Send cloud recovery's script on stdin rather than in `sudo -n /bin/sh` arguments (R4).
+- [ ] Send cloud recovery's script on stdin rather than in `sudo -n /bin/sh` arguments (HLA D2).
 - [ ] Move `vm shell --platform` onto `native_shell` and delete `vms/manager/platform_shell.py`.
 - [ ] Delete `VMPlatform.native_transport`, the `transports.native_transport` factory and
       `native_shell_unavailable_hint`.
 - [ ] Tests:
   - each platform declares sshd dependence;
-  - recovery reports status, delivery failure or unknown, and never trusts a channel exit code;
+  - recovery reports the script's status only when both closing markers arrive, otherwise unknown,
+    and never trusts a channel exit code;
   - logout reports the script's status or unknown, and never checks SSH afterwards;
   - a platform without a native shell refuses with `FeatureUnavailable` before credentials are
     resolved;
@@ -272,7 +286,7 @@ first operation there is the base contract check.
   - recovery of a broken sshd on WSL2 and on Proxmox;
   - recovery of a lost store record on one cloud and on Remote Lima.
 
-Definition of done: core reaches a native channel only through `run_recovery` or `native_shell`, and
+Definition of done: core reaches a native channel only through `run_as_root` or `native_shell`, and
 no platform's private access imports a legacy module.
 
 ## Slice 5: Files and capability delivery (HLA D6, D12; PR C)
