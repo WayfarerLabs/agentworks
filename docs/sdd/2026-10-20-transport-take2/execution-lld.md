@@ -263,8 +263,8 @@ against a local shell.
   buffers, so the commands do not repeat it.
 - **A sink that would block.** Only `BrokenPipeError` and `ConnectionResetError` from a sink mean
   the consumer ended early. A sink that raises `BlockingIOError`, because the operator's own stdout
-  is a non-blocking pipe, is waited on and retried, so output is never dropped while the command
-  reports success.
+  is a non-blocking pipe, keeps its unsent remainder and is retried, so output is never dropped
+  while the command reports success. Any other `OSError` from a sink (`ENOSPC`, `EIO`) propagates.
 
 ## The wire
 
@@ -438,10 +438,11 @@ The classifier combines both filters with ssh's own exit status:
 `attach(request)` does, in order:
 
 1. `VMAccess.attach` generates `token = secrets.token_hex(8)`, creates the client log, and builds
-   both argvs before anything spawns; `attach.py` receives the token, the two argvs and the log as
-   data, as the forward does. The first connection gets the `tty` envelope for the request with
-   `term`, as `mode: "park"` with `handover: token` (argv shape `run`, stage 0 with no argument).
-   The socket path, `/tmp/agw-handover-<token>/s`, is computed locally.
+   both argvs before anything spawns; `attach.py` receives the framed request (`envelope.message`),
+   its nonce, the two argvs and the log as data, as the forward does. The first connection gets the
+   `tty` envelope for the request with `term`, as `mode: "park"` with `handover: token` (argv shape
+   `run`, stage 0 with no argument). The socket path, `/tmp/agw-handover-<token>/s`, is computed
+   locally.
 2. agw-launch, in `park` mode, first pre-checks what the terminal half would otherwise fail on: the
    working directory (`cwd`, or home) must be enterable and the shell executable. A failure is
    `refused cwd` or `refused exec <ERRNO>`, so it comes back typed before the terminal is touched.
