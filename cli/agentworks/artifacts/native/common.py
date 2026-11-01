@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, ArtifactFile
 from agentworks.artifacts.model import ArtifactInputs, ArtifactType
-from agentworks.errors import ConfigError
+from agentworks.errors import AgentworksError, ConfigError
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterator, Mapping, Sequence
 
     from agentworks.artifacts.application import OwnedArtifactFile, SessionArtifactContext
     from agentworks.artifacts.model import ArtifactFacet, ArtifactInput
@@ -152,11 +154,31 @@ def json_text(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
 
 
+@contextmanager
+def ancestor_diagnostics(integration: str) -> Iterator[None]:
+    """Keep native checks of existing upstream placement advisory at session start."""
+    try:
+        yield
+    except AgentworksError as error:
+        hint = f" {error.hint}" if error.hint else ""
+        output.warn(
+            f"Existing ancestor artifacts via {integration}: {error}.{hint} Continuing with existing placement."
+        )
+
+
 def validate_ancestor_names(context: SessionArtifactContext, application: ArtifactApplication) -> None:
-    """Reject native shadowing between independently applied ancestor branches and this run."""
+    """Report old branch collisions; refuse conflicts introduced by new delivery."""
     files_by_name: dict[str, OwnedArtifactFile | ArtifactFile] = {}
-    files: tuple[OwnedArtifactFile | ArtifactFile, ...] = (*context.ancestor_files, *application.files)
-    for file in files:
+    for ancestor in context.ancestor_files:
+        if ancestor.native_identity is None:
+            continue
+        prior = files_by_name.setdefault(ancestor.native_identity, ancestor)
+        if set(prior.origins) != set(ancestor.origins):
+            output.warn(
+                f"Existing scopes share native artifact identity '{ancestor.native_identity}': "
+                f"{prior.path!r} and {ancestor.path!r}. Continuing with existing placement."
+            )
+    for file in application.files:
         if file.native_identity is None:
             continue
         prior = files_by_name.setdefault(file.native_identity, file)
@@ -177,17 +199,10 @@ def validate_discovery_paths(
     """Previously applied files must remain inside directories this launch discovers."""
     for file in context.ancestor_files:
         if file.path not in files and not any(file.path.startswith(root + "/") for root in roots):
-            raise ConfigError(
-                "native artifact discovery no longer includes an applied ancestor destination",
-                hint="Restore the native home override or reinitialize the owning facet with the intended home.",
+            output.warn(
+                f"Native discovery no longer includes ancestor artifact '{file.path}'. "
+                "Restore the native home override or refresh its owning facet; continuing with existing placement."
             )
-
-
-def delivery_files(
-    context: SessionArtifactContext, application: ArtifactApplication
-) -> tuple[OwnedArtifactFile | ArtifactFile, ...]:
-    """Native preflight uses ancestor ownership metadata and this run's proposed files."""
-    return (*context.ancestor_files, *application.files)
 
 
 # Leave room for the launcher's shell/tmux wrapping below Linux's per-argument limit.

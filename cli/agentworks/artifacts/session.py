@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, OwnedArtifactFile, SessionArtifactContext
 from agentworks.artifacts.publication import publish_artifacts, validate_application
 from agentworks.artifacts.reporting import report_applied, report_deferrals
@@ -48,7 +49,7 @@ def prepare_session_artifacts(
     linux_user: str,
     session_uuid: str | None = None,
 ) -> PreparedSessionArtifacts:
-    """Capture local inputs and validate ancestor results before runtime teardown."""
+    """Capture local inputs and report ancestor state before runtime teardown."""
     from agentworks.artifacts.routing import session_artifacts
     from agentworks.harness_setup.readiness import _applicable_evidence
 
@@ -68,11 +69,15 @@ def prepare_session_artifacts(
             runner=runner,
         )
         if not evidence.current:
-            raise StateError("ancestor artifact placement is not current", hint=evidence.remediation)
+            output.warn(
+                f"Artifact placement via {template.harness_integration} at "
+                f"{evidence.owner_kind}/{evidence.owner_name} is {evidence.status}. "
+                f"{evidence.remediation} Continuing with existing placement."
+            )
     # The actual launch user's home is an identity, never a workspace-derived path.
     home = f"/home/{linux_user}"
     prior = read_native_setup(db, "session", name)
-    if routed.inputs or routed.ancestor_files or any(item.artifact_files for item in prior.records):
+    if routed.inputs or any(item.artifact_files for item in prior.records):
         result = runner.run('printf "%s" "$HOME"', check=False)
         if not result.ok:
             raise StateError("could not determine the session artifact home")

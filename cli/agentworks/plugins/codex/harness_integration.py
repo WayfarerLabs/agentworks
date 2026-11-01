@@ -105,6 +105,7 @@ from __future__ import annotations
 import json
 import re
 import shlex
+from contextlib import nullcontext
 from dataclasses import replace
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, NamedTuple
 
@@ -114,7 +115,7 @@ from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
-    delivery_files,
+    ancestor_diagnostics,
     native_home,
     validate_discovery_paths,
     validate_native_command,
@@ -603,39 +604,38 @@ class CodexIntegration(HarnessIntegration):
             enabled_workarounds=self.config.enabled_workarounds,
         )
         artifact_context = self._session_binding.artifact_context
-        if artifact_context is not None and (
-            artifact_context.ancestor_files or self._artifact_plan.application.files or self._artifact_plan.argv
-        ):
-            runner = ctx.admin_target() if self._admin else ctx.agent_target()
-            if runner is None:
-                raise StateError("artifact delivery requires the actual native launch target")
-            files = delivery_files(artifact_context, self._artifact_plan.application)
-            native_root = probe_native(
-                runner,
-                tool="codex",
-                environment=artifact_context.environment,
-                home=artifact_context.home,
-                workspace=self._workspace_path,
-                files=files,
-                session_plugin="--plugin-dir" in self._artifact_plan.argv,
-            )
-            validate_discovery_paths(
-                artifact_context,
-                (
-                    f"{artifact_context.home}/.agents/skills",
-                    f"{native_root}/agents",
-                    f"{self._workspace_path}/.agents/skills",
-                    f"{self._workspace_path}/.codex/agents",
-                    "/etc/codex/skills",
-                ),
-                files=(
-                    f"{native_root}/AGENTS.md",
-                    f"{native_root}/AGENTS.override.md",
-                    f"{self._workspace_path}/AGENTS.md",
-                    f"{self._workspace_path}/AGENTS.override.md",
-                ),
-            )
-
+        own_delivery = bool(self._artifact_plan.application.files or self._artifact_plan.argv)
+        if artifact_context is not None and (artifact_context.ancestor_files or own_delivery):
+            with nullcontext() if own_delivery else ancestor_diagnostics("codex"):
+                runner = ctx.admin_target() if self._admin else ctx.agent_target()
+                if runner is None:
+                    raise StateError("artifact delivery requires the actual native launch target")
+                files = self._artifact_plan.application.files if own_delivery else artifact_context.ancestor_files
+                native_root = probe_native(
+                    runner,
+                    tool="codex",
+                    environment=artifact_context.environment,
+                    home=artifact_context.home,
+                    workspace=self._workspace_path,
+                    files=files,
+                    session_plugin="--plugin-dir" in self._artifact_plan.argv,
+                )
+                validate_discovery_paths(
+                    artifact_context,
+                    (
+                        f"{artifact_context.home}/.agents/skills",
+                        f"{native_root}/agents",
+                        f"{self._workspace_path}/.agents/skills",
+                        f"{self._workspace_path}/.codex/agents",
+                        "/etc/codex/skills",
+                    ),
+                    files=(
+                        f"{native_root}/AGENTS.md",
+                        f"{native_root}/AGENTS.override.md",
+                        f"{self._workspace_path}/AGENTS.md",
+                        f"{self._workspace_path}/AGENTS.override.md",
+                    ),
+                )
         self._decision = None
         self._adopted_id = None
         self._dropped_stale = False

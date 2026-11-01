@@ -825,3 +825,76 @@ def test_claude_observes_version_only_for_delivered_session_prompt(monkeypatch, 
     integration.start(RunContext(admin_target=_FakeTarget()), intent=HarnessLaunchIntent.CREATE)
     assert snapshot.called is (workaround == "session-prompt")
     assert ("--system-prompt-snapshot" in integration._artifact_plan.argv) is (workaround == "session-prompt")
+
+
+@pytest.mark.parametrize(
+    "render,argument",
+    [
+        (claude.session_artifacts, "--bare"),
+        (codex.session_artifacts, "--profile"),
+        (grok.session_artifacts, "--no-subagents"),
+    ],
+)
+def test_ancestor_only_override_is_reported_without_blocking(render, argument, monkeypatch):
+    warnings: list[str] = []
+    monkeypatch.setattr(output, "warn", warnings.append)
+    existing = claude.outer_artifacts(received(artifact(ArtifactType.AGENT)), "/home/alice/.claude")
+    result = render(
+        context=context(ancestors=tuple(owned(file) for file in existing.files)),
+        configured=None,
+        extra_args=[argument],
+    )
+    assert warnings
+    assert not result.application.files and not result.argv
+
+
+@pytest.mark.parametrize(
+    "integration_class,module,workaround",
+    [
+        (ClaudeCodeIntegration, "claude", "session-prompt"),
+        (CodexIntegration, "codex", "session-developer-instructions"),
+        (GrokBuildIntegration, "grok", "session-rules"),
+    ],
+)
+@pytest.mark.parametrize("own_delivery", [False, True])
+def test_failed_native_probe_is_advisory_only_without_new_carriers(
+    integration_class, module, workaround, own_delivery, monkeypatch
+):
+    from importlib import import_module
+
+    from agentworks.capabilities.harness_integration import HarnessLaunchIntent
+    from agentworks.errors import ExternalError
+    from tests.conftest import _FakeTarget
+
+    warnings: list[str] = []
+    monkeypatch.setattr(output, "warn", warnings.append)
+    native = import_module(f"agentworks.plugins.{module}.harness_integration")
+
+    def fail_probe(*args, **kwargs):
+        raise ExternalError("fixture native discovery unavailable")
+
+    monkeypatch.setattr(native, "probe_native", fail_probe)
+    ancestor = claude.outer_artifacts(received(artifact(ArtifactType.RULE)), "/home/alice/.claude")
+    prepared = context(
+        *([artifact(ArtifactType.RULE)] if own_delivery else []),
+        ancestors=tuple(owned(file) for file in ancestor.files),
+    )
+    integration = integration_class(
+        integration_class.name,
+        {"enabled_workarounds": [workaround] if own_delivery else []},
+        session_name="s1",
+        vm_name="vm",
+        workspace_name="ws",
+        workspace_path="/ws",
+        target=None,
+        admin=True,
+        state={},
+        artifact_context=prepared,
+    )
+    monkeypatch.setattr(integration, "_resume_or_launch", lambda *args, **kwargs: "fixture-launch")
+    if own_delivery:
+        with pytest.raises(ExternalError):
+            integration.start(RunContext(admin_target=_FakeTarget()), intent=HarnessLaunchIntent.RESUME_OR_NEW)
+    else:
+        result = integration.start(RunContext(admin_target=_FakeTarget()), intent=HarnessLaunchIntent.RESUME_OR_NEW)
+        assert result.command == "fixture-launch" and warnings

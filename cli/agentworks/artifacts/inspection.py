@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -225,7 +225,11 @@ def inspect_artifacts(
     integration_name: str | None = None,
 ) -> ArtifactInspection:
     """Project declarations and recorded application without acquiring or applying anything."""
-    from agentworks.artifacts.routing import deferred_inputs, inspect_owner_artifacts, session_inherited_inputs
+    from agentworks.artifacts.routing import (
+        available_deferred_inputs,
+        inspect_owner_artifacts,
+        session_inherited_inputs,
+    )
 
     with db.snapshot():
         context = resolve_context(
@@ -262,20 +266,14 @@ def inspect_artifacts(
             views: dict[ArtifactComponent, ArtifactOwnerView] = {}
             for owner in owners:
                 inherited: dict[ArtifactOwner, ArtifactGroup] | None = {}
-                blocker: ArtifactOwnerView | None = None
                 if owner.component in ("admin", "agent", "workspace"):
-                    inherited = deferred_inputs(views["vm"], "workspace" if owner.component == "workspace" else "user")
+                    inherited = available_deferred_inputs(
+                        views["vm"], "workspace" if owner.component == "workspace" else "user", name
+                    )
                 elif owner.component == "session":
                     ancestors = (views["vm"], views["admin" if context.admin else "agent"], views["workspace"])
-                    blocker = next((view for view in ancestors if view.status not in ("current", "inactive")), None)
-                    inherited = session_inherited_inputs(*ancestors)
+                    inherited = session_inherited_inputs(*ancestors, integration_name=name)
                 view = inspect_owner_artifacts(db, registry, owner, name, inherited=inherited)
-                if view.ancestor_blocked and blocker is not None:
-                    source = blocker.owner
-                    view = replace(
-                        view,
-                        reason=f"Blocked by {source.component}/{source.name} ({blocker.status}): {blocker.reason}",
-                    )
                 views[owner.component] = view
                 integrations[owner.component].append(_integration_metadata(owner, name, view))
         projected = []

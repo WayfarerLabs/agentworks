@@ -280,7 +280,7 @@ def test_session_inspection_uses_runtime_diamond_order(db: Database, unhandled: 
     )
     blocked = inspect_artifacts(db, fixture.registry, session_name="review")
     assert blocked.owners[1].integrations[0].status == "incomplete"
-    assert blocked.owners[-1].integrations[0].status == "unavailable"
+    assert blocked.owners[-1].integrations[0].status == "current"
 
     from agentworks.artifacts.routing import inspect_owner_artifacts
     from agentworks.db import AppliedStateKey, VersionedPayload
@@ -289,7 +289,7 @@ def test_session_inspection_uses_runtime_diamond_order(db: Database, unhandled: 
         "session", "review", "fixture", {AppliedStateKey.HARNESS_NATIVE_SETUP: VersionedPayload(2, {"broken": True})}
     )
     own_failure = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited=None)
-    assert own_failure.status == "unavailable" and not own_failure.ancestor_blocked
+    assert own_failure.status == "unavailable"
     result = inspect_artifacts(db, fixture.registry, session_name="review")
     assert result.owners[-1].integrations[0].reason == own_failure.reason
 
@@ -331,7 +331,7 @@ def test_removed_bundle_reference_preserves_unknown_and_historical_metadata(db: 
     assert owner.integrations[0].status == "unavailable"
 
 
-def test_integration_config_values_are_excluded_from_both_outputs(db: Database, capsys) -> None:
+def test_integration_config_values_are_excluded_from_both_outputs(db: Database, capsys, monkeypatch) -> None:
     from agentworks.artifacts.inspection import inspect_artifacts, inspection_data, render_artifacts
     from agentworks.harness_setup.model import NativeSetupState
     from agentworks.harness_setup.state import write_native_setup
@@ -339,14 +339,25 @@ def test_integration_config_values_are_excluded_from_both_outputs(db: Database, 
 
     fixture = graph(db, active=("agent",))
     record = fixture.save("agent")
+    from agentworks.schema import CapabilityConfig
+
     confidential = "operator-supplied-private-value"
-    record = record.model_copy(update={"declaration": {"config": {"private_setting": confidential}}})
+    previous = "previous-private-value"
+    # A third-party facet may expose arbitrary native config strings. Exercise
+    # both the persisted and current sides of the comparison without requiring a CLI.
+    monkeypatch.setattr("agentworks.harness_setup.inputs.validate_capability_config", lambda **kwargs: None)
+    fixture.registry.lookup("agent-template", "agent").harness_integrations["shell"] = CapabilityConfig.model_validate(
+        {"private_setting": confidential}
+    )
+    record = record.model_copy(update={"declaration": {"config": {"private_setting": previous}}})
     write_native_setup(db, "agent", "agent", NativeSetupState(records=(record,)), operation="fixture")
     result = inspect_artifacts(db, fixture.registry, agent_name="agent")
     assert result.owners[-1].integrations[0].status == "stale"
-    assert confidential not in json.dumps(inspection_data(result))
+    encoded = json.dumps(inspection_data(result))
+    assert confidential not in encoded and previous not in encoded
     render_artifacts(result)
-    assert confidential not in capsys.readouterr().out
+    rendered = capsys.readouterr().out
+    assert confidential not in rendered and previous not in rendered
 
 
 @pytest.mark.parametrize("component", ["vm", "agent", "workspace"])

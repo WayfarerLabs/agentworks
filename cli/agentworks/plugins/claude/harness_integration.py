@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import shlex
 import uuid
+from contextlib import nullcontext
 from dataclasses import replace
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
@@ -38,7 +39,7 @@ from pydantic import Field
 from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
-    delivery_files,
+    ancestor_diagnostics,
     native_home,
     validate_discovery_paths,
     validate_native_command,
@@ -335,33 +336,32 @@ class ClaudeCodeIntegration(HarnessIntegration):
             enabled_workarounds=self.config.enabled_workarounds,
         )
         artifact_context = self._session_binding.artifact_context
-        if artifact_context is not None and (
-            artifact_context.ancestor_files or self._artifact_plan.application.files or self._artifact_plan.argv
-        ):
-            runner = ctx.admin_target() if self._admin else ctx.agent_target()
-            if runner is None:
-                raise StateError("artifact delivery requires the actual native launch target")
-            files = delivery_files(artifact_context, self._artifact_plan.application)
-            native_root = probe_native(
-                runner,
-                tool="claude",
-                environment=artifact_context.environment,
-                home=artifact_context.home,
-                workspace=self._workspace_path,
-                files=files,
-                session_plugin="--plugin-dir" in self._artifact_plan.argv,
-            )
-            validate_discovery_paths(
-                artifact_context,
-                (native_root, f"{self._workspace_path}/.claude", "/etc/claude-code/.claude"),
-                files=("/etc/claude-code/CLAUDE.md",),
-            )
-            if "--append-system-prompt-file" in self._artifact_plan.argv:
-                self._artifact_plan = replace(
-                    self._artifact_plan,
-                    argv=self._artifact_plan.argv + session_prompt_snapshot(runner, artifact_context.environment),
+        own_delivery = bool(self._artifact_plan.application.files or self._artifact_plan.argv)
+        if artifact_context is not None and (artifact_context.ancestor_files or own_delivery):
+            with nullcontext() if own_delivery else ancestor_diagnostics("claude-code"):
+                runner = ctx.admin_target() if self._admin else ctx.agent_target()
+                if runner is None:
+                    raise StateError("artifact delivery requires the actual native launch target")
+                files = self._artifact_plan.application.files if own_delivery else artifact_context.ancestor_files
+                native_root = probe_native(
+                    runner,
+                    tool="claude",
+                    environment=artifact_context.environment,
+                    home=artifact_context.home,
+                    workspace=self._workspace_path,
+                    files=files,
+                    session_plugin="--plugin-dir" in self._artifact_plan.argv,
                 )
-
+                validate_discovery_paths(
+                    artifact_context,
+                    (native_root, f"{self._workspace_path}/.claude", "/etc/claude-code/.claude"),
+                    files=("/etc/claude-code/CLAUDE.md",),
+                )
+                if "--append-system-prompt-file" in self._artifact_plan.argv:
+                    self._artifact_plan = replace(
+                        self._artifact_plan,
+                        argv=self._artifact_plan.argv + session_prompt_snapshot(runner, artifact_context.environment),
+                    )
         command = self._resume_or_launch(ctx, intent=intent)
         if intent is HarnessLaunchIntent.FORCE_NEW:
             note = "Fresh Claude Code session requested. Starting a new one without resuming prior state..."

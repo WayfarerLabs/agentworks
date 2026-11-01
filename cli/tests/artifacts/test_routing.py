@@ -17,7 +17,7 @@ from agentworks.artifacts.routing import (
     session_artifacts,
     setup_artifacts,
 )
-from agentworks.artifacts.state import CapturedArtifacts, capture_owner, write_capture
+from agentworks.artifacts.state import CapturedArtifacts, capture_owner, read_captures, write_capture
 from agentworks.db import Database, VMRow, WorkspaceRow
 from agentworks.env.entry import EnvEntry
 from agentworks.errors import StateError
@@ -159,7 +159,7 @@ def test_inactive_vm_routes_only_to_user_and_workspace_keeps_local_inputs(db):
     )
 
 
-def test_newly_inherited_vm_inputs_require_active_user_setup(db):
+def test_newly_inherited_vm_inputs_are_unknown_until_active_user_setup(db):
     fixture = graph(db, active=("agent",))
     previous = fixture.save("agent")
     inherited = fixture.captures["vm"].inputs
@@ -167,8 +167,7 @@ def test_newly_inherited_vm_inputs_require_active_user_setup(db):
         db, fixture.registry, fixture.owners["agent"], "shell", inherited={inherited.owner: inherited}
     )
     assert view.status == "stale"
-    with pytest.raises(StateError):
-        fixture.route()
+    assert [item.origin.component for item in fixture.route().inputs.items()] == ["workspace"]
     assert read_native_setup(db, "agent", "agent").records == (previous,)
     fixture.save("agent", inherited=inherited)
     assert [item.origin.component for item in fixture.route().inputs.items()] == ["workspace"]
@@ -222,15 +221,14 @@ def test_setup_routes_only_requested_vm_branch_and_uses_prospective_capture(db):
 
 
 @pytest.mark.parametrize("condition", ["missing", "incomplete", "stale", "legacy"])
-def test_active_results_must_be_current_and_complete(db, condition):
+def test_active_noncurrent_results_report_without_blocking_other_branches(db, condition):
     fixture = graph(db, active=("agent",))
     if condition != "missing":
         record = fixture.save("agent", complete=condition != "incomplete")
         if condition in ("stale", "legacy"):
             changed = record.model_copy(update={"artifact_inputs": () if condition == "stale" else None})
             write_native_setup(db, "agent", "agent", NativeSetupState(records=(changed,)), operation="fixture")
-    with pytest.raises(StateError):
-        fixture.route()
+    assert [item.origin.component for item in fixture.route().inputs.items()] == ["workspace"]
     view = inspect_owner_artifacts(db, fixture.registry, fixture.owners["agent"], "shell")
     assert view.status == ("missing" if condition == "legacy" else condition)
     assert deferred_inputs(view, "session") is None
@@ -242,7 +240,7 @@ def test_owner_declaration_change_is_not_hidden_by_old_capture(db):
     view = inspect_owner_artifacts(db, fixture.registry, owner, "shell")
     assert view.status == "stale"
     assert view.captured is not None and view.captured.inputs
-    assert view.prepared is None
+    assert view.prepared is not None
     with pytest.raises(StateError):
         setup_artifacts(db, fixture.registry, owner, fixture.vm, "shell")
 
@@ -264,8 +262,9 @@ def test_removed_activation_with_owned_artifacts_requires_retirement(db):
     fixture.save("agent", files=(file,))
     view = inspect_owner_artifacts(db, fixture.registry, fixture.owners["agent"], "shell")
     assert view.status == "retirement"
-    with pytest.raises(StateError):
-        fixture.route()
+    result = fixture.route()
+    assert [item.origin.component for item in result.inputs.items()] == ["vm", "agent", "workspace"]
+    assert result.ancestor_files == (file,)
 
 
 def test_unrelated_plugin_claims_do_not_block_passthrough(db):
@@ -281,7 +280,7 @@ def test_unavailable_parent_route_does_not_manufacture_current_empty_input(db):
     fixture = graph(db, active=("agent",))
     fixture.save("agent")
     view = inspect_owner_artifacts(db, fixture.registry, fixture.owners["agent"], "shell", inherited=None)
-    assert view.status == "unavailable" and view.prepared is None
+    assert view.status == "unavailable" and view.prepared is not None
 
 
 def test_workspace_only_vm_change_does_not_stale_user_branch(db):
@@ -358,8 +357,7 @@ def test_independent_consumers_do_not_discharge_other_users(db, active_vm):
         tuple(other.inputs.items())[0].origin_identity
         != tuple(fixture.captures["agent"].inputs.items())[0].origin_identity
     )
-    with pytest.raises(StateError):
-        fixture.route(user="other")
+    assert [item.origin.component for item in fixture.route(user="other").inputs.items()] == ["workspace"]
     fixture.owners["other"] = replace(fixture.owners["agent"], name="other")
     fixture.captures["other"] = other
     fixture.save("other", inherited=fixture.captures["vm"].inputs)
@@ -402,8 +400,7 @@ def test_illegal_persisted_route_is_not_reused(db):
     fixture.save("agent", routes={"agent-0": "workspace"})
     view = inspect_owner_artifacts(db, fixture.registry, fixture.owners["agent"], "shell")
     assert view.status == "unavailable"
-    with pytest.raises(StateError):
-        fixture.route()
+    assert [item.origin.component for item in fixture.route().inputs.items()] == ["workspace"]
 
 
 def test_session_projection_shares_canonical_diamond_order(db):
@@ -419,7 +416,7 @@ def test_session_projection_shares_canonical_diamond_order(db):
     workspace = inspect_owner_artifacts(
         db, fixture.registry, fixture.owners["workspace"], "shell", inherited=deferred_inputs(vm, "workspace")
     )
-    inherited = session_inherited_inputs(vm, user, workspace)
+    inherited = session_inherited_inputs(vm, user, workspace, integration_name="shell")
     assert inherited == fixture.route().inputs.deferred
     db.insert_session(
         "session",
@@ -504,7 +501,8 @@ def test_missing_parent_route_remains_unknown_at_session_join(db):
     vm = inspect_owner_artifacts(db, fixture.registry, fixture.owners["vm"], "shell")
     user = inspect_owner_artifacts(db, fixture.registry, fixture.owners["agent"], "shell", inherited=None)
     workspace = inspect_owner_artifacts(db, fixture.registry, fixture.owners["workspace"], "shell", inherited=None)
-    assert session_inherited_inputs(vm, user, workspace) is None
+    inherited = session_inherited_inputs(vm, user, workspace, integration_name="shell")
+    assert [item.origin.component for group in inherited.values() for item in group.items()] == ["agent", "workspace"]
 
 
 def test_removed_bundle_declaration_remains_inspectable(db):
@@ -513,7 +511,7 @@ def test_removed_bundle_declaration_remains_inspectable(db):
     view = inspect_owner_artifacts(db, fixture.registry, owner, "shell")
     assert view.status == "unavailable"
     assert view.captured is not None and view.captured.inputs
-    assert view.prepared is None
+    assert view.prepared is not None
 
 
 def test_provenance_only_capture_refresh_uses_current_winner_with_retained_handling(db):
@@ -593,3 +591,85 @@ def test_skipped_reapplication_keeps_cleanup_evidence_without_ancestor_delivery(
     assert result.ancestor_files == ()
     assert item.identity not in {value.identity for value in result.inputs.items()}
     assert read_native_setup(db, "agent", "agent").records[0].artifact_files == (prior,)
+
+
+@pytest.mark.parametrize("active", [False, True])
+def test_stale_capture_reuses_only_known_routes_without_mutation(db, monkeypatch, active):
+    from agentworks import output
+
+    fixture = graph(db, active=("vm",) if active else ())
+    if active:
+        fixture.save("vm", routes={"vm-0": "session"})
+    fixture.registry.lookup("vm-template", "vm").artifacts.bundles.clear()
+    warnings: list[str] = []
+    monkeypatch.setattr(output, "warn", warnings.append)
+    previous = read_native_setup(db, "vm", "vm")
+    result = fixture.route()
+    assert [item.origin.component for item in result.inputs.items()] == ["vm", "agent", "workspace"]
+    assert warnings
+    assert read_native_setup(db, "vm", "vm") == previous
+    assert read_captures(db, "vm", "vm")["vm"] == fixture.captures["vm"]
+
+
+def test_incomplete_ancestor_still_forwards_its_recorded_deferrals(db, monkeypatch):
+    from agentworks import output
+
+    fixture = graph(db, active=("agent",))
+    record = fixture.save(
+        "agent", inherited=fixture.captures["vm"].inputs, routes={"agent-0": "session"}, complete=False
+    )
+    warnings: list[str] = []
+    monkeypatch.setattr(output, "warn", warnings.append)
+    assert [item.origin.entry for item in fixture.route().inputs.items()] == ["agent-0", "workspace-0"]
+    assert warnings and read_native_setup(db, "agent", "agent").records == (record,)
+
+
+@pytest.mark.parametrize("slice_key", ["artifact-inputs", "harness-native-setup"])
+def test_unreadable_ancestor_state_preserves_healthy_branches(db, monkeypatch, slice_key):
+    from agentworks import output
+    from agentworks.db import AppliedStateKey, VersionedPayload
+
+    fixture = graph(db, active=("vm",))
+    fixture.save("vm", routes={"vm-0": "session"})
+    key = AppliedStateKey(slice_key)
+    db.instance_state.replace_applied_slices("vm", "vm", "fixture", {key: VersionedPayload(999, {})})
+    previous = db.instance_state.get_applied_slices("vm", "vm")
+    warnings: list[str] = []
+    monkeypatch.setattr(output, "warn", warnings.append)
+    assert [item.origin.entry for item in fixture.route().inputs.items()] == ["agent-0", "workspace-0"]
+    assert warnings and db.instance_state.get_applied_slices("vm", "vm") == previous
+
+
+def test_stale_route_with_missing_content_is_reported_without_inventing_delivery(db, monkeypatch):
+    from agentworks import output
+
+    fixture = graph(db, active=("vm",))
+    record = fixture.save("vm", routes={"vm-0": "session"})
+    previous = fixture.captures["vm"]
+    item = tuple(previous.inputs.items())[0]
+    refreshed = replace(previous, inputs=group(replace(item, content=replace(item.content, text="new content"))))
+    write_capture(db, "vm", "vm", "vm", refreshed, operation="fixture")
+    warnings: list[str] = []
+    monkeypatch.setattr(output, "warn", warnings.append)
+    assert [item.origin.entry for item in fixture.route().inputs.items()] == ["agent-0", "workspace-0"]
+    assert warnings and read_native_setup(db, "vm", "vm").records == (record,)
+
+
+def test_overlapping_stale_diamond_routes_deliver_same_input_once(db, monkeypatch):
+    from agentworks import output
+    from agentworks.artifacts.routing import session_inherited_inputs
+
+    fixture = graph(db, active=("vm", "agent"))
+    source = fixture.captures["vm"].inputs
+    fixture.save("vm", routes={"vm-0": "session"})
+    fixture.save("agent", inherited=source, routes={"vm-0": "session"})
+    vm = inspect_owner_artifacts(db, fixture.registry, fixture.owners["vm"], "shell")
+    user = inspect_owner_artifacts(
+        db, fixture.registry, fixture.owners["agent"], "shell", inherited={source.owner: source}
+    )
+    workspace = inspect_owner_artifacts(db, fixture.registry, fixture.owners["workspace"], "shell")
+    warnings: list[str] = []
+    monkeypatch.setattr(output, "warn", warnings.append)
+    result = session_inherited_inputs(vm, user, workspace, integration_name="shell", report=True)
+    assert [item.origin.entry for group in result.values() for item in group.items()] == ["vm-0", "workspace-0"]
+    assert len(warnings) == 1

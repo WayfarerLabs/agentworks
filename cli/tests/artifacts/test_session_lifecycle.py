@@ -487,7 +487,7 @@ def test_session_delete_refuses_while_vm_native_mutation_is_held(lifecycle):
 
 
 @pytest.mark.parametrize("operation", ["start", "restart", "create"])
-def test_uncaptured_ancestor_refuses_before_secrets(lifecycle, monkeypatch, operation):
+def test_uncaptured_ancestor_does_not_block_session_operations(lifecycle, monkeypatch, operation):
     from agentworks.vms.templates import ResolvedVMTemplate
 
     monkeypatch.setattr(
@@ -500,33 +500,42 @@ def test_uncaptured_ancestor_refuses_before_secrets(lifecycle, monkeypatch, oper
         lifecycle.db.insert_agent_grant("a1", "ws1", "explicit")
         monkeypatch.setattr("agentworks.agents.manager._assert_agent_ssh_works", lambda *a, **k: None)
     lifecycle.events.clear()
-    with pytest.raises(StateError):
-        if operation == "create":
-            manager.create_session(
-                lifecycle.db,
-                lifecycle.config,
-                name="s2",
-                workspace="ws1",
-                agent="a1",
-                interaction=TtyInteractionPolicy.REFUSE,
-            )
-        elif operation == "start":
-            manager.start_session(lifecycle.db, lifecycle.config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
-        else:
-            lifecycle.restart()
-    assert "resolve" not in lifecycle.events and "resolve_env" not in lifecycle.events
-    assert "kill" not in lifecycle.events and not lifecycle.files()
+    if operation == "create":
+        manager.create_session(
+            lifecycle.db,
+            lifecycle.config,
+            name="s2",
+            workspace="ws1",
+            agent="a1",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    elif operation == "start":
+        manager.start_session(lifecycle.db, lifecycle.config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
+    else:
+        lifecycle.restart()
+    name = "s2" if operation == "create" else "s1"
+    record = read_native_setup(lifecycle.db, "session", name).records[0]
+    assert record.complete and record.artifact_files
+    assert "resolve" in lifecycle.events and "tmux_create" in lifecycle.events
 
 
-def test_new_agent_does_not_hide_known_vm_artifact_gap(lifecycle, monkeypatch):
+def test_new_agent_preflight_does_not_block_on_known_vm_artifact_gap(lifecycle, monkeypatch):
+    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.templates import ResolvedVMTemplate
 
     monkeypatch.setattr(
         "agentworks.vms.templates.resolve_live_template",
         lambda *a, **k: ResolvedVMTemplate("default", artifacts=ArtifactsConfig(bundles=["team"])),
     )
-    lifecycle.events.clear()
-    with pytest.raises(StateError) as error:
+
+    class PassedPreflight(Exception):
+        pass
+
+    def stop_after_preflight(*args, **kwargs):
+        raise PassedPreflight
+
+    monkeypatch.setattr(Resolver, "resolve", stop_after_preflight)
+    with pytest.raises(PassedPreflight):
         manager.create_session(
             lifecycle.db,
             lifecycle.config,
@@ -535,6 +544,26 @@ def test_new_agent_does_not_hide_known_vm_artifact_gap(lifecycle, monkeypatch):
             new_agent=True,
             interaction=TtyInteractionPolicy.REFUSE,
         )
-    assert error.value.entity_kind == "vm" and error.value.entity_name == "vm1"
-    assert "resolve" not in lifecycle.events and "resolve_env" not in lifecycle.events
     assert lifecycle.db.get_agent("s2") is None and lifecycle.db.get_session("s2") is None
+
+
+@pytest.mark.parametrize("status", ["stale", "incomplete", "unavailable"])
+def test_upstream_placement_readiness_is_reported_without_blocking_restart(lifecycle, monkeypatch, status):
+    from agentworks import output
+    from agentworks.artifacts.model import ArtifactInputs
+    from agentworks.artifacts.routing import RoutingResult
+    from agentworks.capabilities.harness_integration.setup import SetupEvidence
+
+    warnings: list[str] = []
+    monkeypatch.setattr(output, "warn", warnings.append)
+    monkeypatch.setattr(
+        "agentworks.artifacts.routing.session_artifacts",
+        lambda *args, **kwargs: RoutingResult(ArtifactInputs(local=args[-1]), active_facets=("user",)),
+    )
+    monkeypatch.setattr(
+        "agentworks.harness_setup.readiness._applicable_evidence",
+        lambda *args, **kwargs: SetupEvidence(status, "agent", "a1", "fixture owning repair"),
+    )
+    lifecycle.restart()
+    assert warnings and "kill" in lifecycle.events and "tmux_create" in lifecycle.events
+    assert read_native_setup(lifecycle.db, "session", "s1").records[0].complete

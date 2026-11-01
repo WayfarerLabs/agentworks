@@ -254,7 +254,7 @@ def test_ambiguous_native_inventory_refuses_instead_of_skipping_candidates(tmp_p
 
 
 @pytest.mark.parametrize("kind", [ArtifactType.SKILL, ArtifactType.AGENT])
-def test_launch_checks_unmanaged_workspace_collision_with_only_handled_ancestor(tmp_path, monkeypatch, kind):
+def test_existing_ancestor_collision_is_diagnosed_without_blocking_launch(tmp_path, monkeypatch, kind):
     import shlex
     from types import SimpleNamespace
 
@@ -262,7 +262,6 @@ def test_launch_checks_unmanaged_workspace_collision_with_only_handled_ancestor(
     from agentworks.artifacts.model import ArtifactInputs
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
-    from agentworks.errors import StateError
     from agentworks.plugins.claude.artifacts import outer_artifacts
     from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
     from tests.artifacts._fixtures import received
@@ -326,11 +325,9 @@ def test_launch_checks_unmanaged_workspace_collision_with_only_handled_ancestor(
         state={},
         artifact_context=prepared,
     )
-    monkeypatch.setattr(
-        integration, "_resume_or_launch", lambda *args, **kwargs: pytest.fail("launch reached after collision")
-    )
-    with pytest.raises(StateError):
-        integration.start(RunContext(admin_target=SimpleNamespace(run=run)), intent=HarnessLaunchIntent.CREATE)
+    monkeypatch.setattr(integration, "_resume_or_launch", lambda *args, **kwargs: "fixture-launch")
+    result = integration.start(RunContext(admin_target=SimpleNamespace(run=run)), intent=HarnessLaunchIntent.CREATE)
+    assert result.command == "fixture-launch"
     assert len(observed_requests) == 1
     assert not prepared.inputs
     assert set(observed_requests[0]["entries"]) == {file.path for file in application.files if file.native_identity}
