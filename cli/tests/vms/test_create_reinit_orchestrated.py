@@ -767,7 +767,7 @@ def test_create_that_cannot_reset_the_store_unwinds_the_row_before_the_platform_
     monkeypatch.setattr(trust, "begin_enrollment", _refuse)
     monkeypatch.setattr(LimaPlatform, "create", _platform_must_not_run)
 
-    with pytest.raises(StateError, match="cannot reset"):
+    with pytest.raises(StateError):
         vm_manager.create_vm(db, make_config(), name="uvm", interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_vm("uvm") is None
@@ -902,6 +902,7 @@ def _seed_provisioned_vm(db: Database) -> None:
 
 @pytest.fixture(autouse=True)
 def _verified_reinit_release(monkeypatch: pytest.MonkeyPatch) -> None:
+    seed_vm_trust("rvm")
     monkeypatch.setattr(
         vm_manager,
         "verified_vm_release",

@@ -18,6 +18,7 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
+from agentworks.execution.errors import TrustMissing
 from agentworks.list_sorting import nullable_sort_value, sort_rows
 from agentworks.runtime_time import derive_uptime_seconds, format_short_uptime, format_uptime
 from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
@@ -455,6 +456,10 @@ def session_description(
             require_vm_ssh_boundary(db, config, vm)
         except UserAbort:
             raise
+        except TrustMissing:
+            # Describe degrades to an unknown runtime status, as it does for the
+            # other SSH preconditions; the warning below says so.
+            pass
         except (ConfigError, ConnectivityError, VMSSHIdentityPolicyError):
             pass
         else:

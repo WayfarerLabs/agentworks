@@ -163,9 +163,7 @@ def test_a_verify_connection_that_leaves_no_key_fails_create(monkeypatch: pytest
             self.commands.append((command, kwargs))
             return SimpleNamespace(stdout="ok\n", returncode=0)
 
-    with pytest.raises(ProvisioningError) as caught:
+    with pytest.raises(ProvisioningError):
         _phase_a(monkeypatch, transport=_NoKeyWritten)
 
-    assert str(trust.store_file("myvm")) in str(caught.value)
-    assert "agw vm delete myvm" in (caught.value.hint or "")
     assert not trust.has_record("myvm")

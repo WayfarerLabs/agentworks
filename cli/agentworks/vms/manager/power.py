@@ -342,12 +342,14 @@ def delete_vm(
 
         from agentworks.ssh_config import sync_ssh_config
 
-        sync_ssh_config(config, db)
-        # The store file goes whenever the VM's row goes. Reaching here means
-        # the platform delete succeeded (it raises, keeping the row and the
-        # record, when it cannot remove the backend VM) or backend cleanup was
-        # skipped after a binding failure.
-        trust.remove(name)
+        # The store file goes whenever the VM's row goes, even if the SSH config
+        # rebuild raises. Reaching here means the platform delete succeeded (it
+        # raises, keeping the row and the record, when it cannot remove the
+        # backend VM) or backend cleanup was skipped after a binding failure.
+        try:
+            trust.remove(name)
+        finally:
+            sync_ssh_config(config, db)
         output.result(f"VM '{name}' deleted")
 
 

@@ -17,7 +17,6 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from agentworks.execution import trust as host_trust
-from agentworks.execution.errors import TrustMissing
 from agentworks.ssh import (
     SSH_DEFAULT_RETRIES,
     SSH_INTERACTIVE_ALIVE_COUNT_MAX,
@@ -40,16 +39,6 @@ if TYPE_CHECKING:
 
     from agentworks.execution.trust import HostTrust, TrustBinding
     from agentworks.ssh import SSHLogger
-
-
-class SSHTrustMissing(SSHError, TrustMissing):
-    """A VM-mode connection was refused because the VM has no host-key record.
-
-    The legacy-side form of :class:`TrustMissing`. It is also an ``SSHError``
-    so a handler that reports a failure and carries on keeps treating it as an
-    unreachable VM, while the loops that retry and fall back to repair re-raise
-    ``TrustMissing`` ahead of their ``except SSHError``.
-    """
 
 
 def _decoded_output(value: str | bytes) -> str:
@@ -184,12 +173,12 @@ class SSHTransport(Transport):
 
         Public for the callers that build their own ``ssh`` or ``scp`` argv
         from this transport (backup's progress-reporting scp, workspace copy).
-        Raises :class:`SSHTrustMissing` for a VM with no host-key record.
+        Raises :class:`TrustMissing` for a VM with no host-key record. It is
+        deliberately not an ``SSHError``: a missing record is a state problem the
+        operator must fix, not an unreachable peer, so the best-effort and
+        retrying ``except SSHError`` handlers must not absorb it.
         """
-        try:
-            return host_trust.ssh_options(self.trust)
-        except TrustMissing as e:
-            raise SSHTrustMissing(e.vm_name) from e
+        return host_trust.ssh_options(self.trust)
 
     def _ssh_base_args(
         self,

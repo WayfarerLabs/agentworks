@@ -15,7 +15,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.execution.trust import HOST_TRUST
+from agentworks.execution.trust import HOST_TRUST, ssh_options
 from agentworks.transports._shared import env_assignment_prefix
 from agentworks.transports.base import Transport
 from agentworks.transports.ssh import SSHTransport, keepalive_args, note_ssh_interactive_exit
@@ -135,8 +135,7 @@ class RemoteLimaTransport(Transport):
         args = [
             "ssh",
             "-t",
-            "-o",
-            "StrictHostKeyChecking=accept-new",
+            *ssh_options(HOST_TRUST),
             *keepalive_args(),
             self.vm_host_ssh,
             wrapped,
@@ -227,5 +226,5 @@ class RemoteLimaTransport(Transport):
         env_prefix = env_assignment_prefix(env)
         lima_cmd = _lima_shell_command(self.vm_name, f"{env_prefix}{command}")
         wrapped = f"$SHELL -lc {shlex.quote(lima_cmd)}"
-        args = ["ssh", "-T", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes", self.vm_host_ssh, wrapped]
+        args = ["ssh", "-T", *ssh_options(HOST_TRUST), "-o", "BatchMode=yes", self.vm_host_ssh, wrapped]
         return subprocess.call(args)

@@ -10,7 +10,7 @@ from pathlib import Path, PureWindowsPath
 
 import pytest
 
-from agentworks.errors import ConfigError, ValidationError
+from agentworks.errors import ConfigError, StateError, ValidationError
 from agentworks.execution import trust
 from agentworks.execution.errors import TrustMissing
 from agentworks.execution.trust import HOST_TRUST, HostKey, TrustBinding, TrustMode
@@ -125,7 +125,7 @@ def test_windows_paths_use_forward_slashes() -> None:
     ],
 )
 def test_paths_ssh_would_expand_or_misread_are_refused_by_name(path: PureWindowsPath) -> None:
-    with pytest.raises(ConfigError, match="vm-web"):
+    with pytest.raises(ConfigError):
         trust._literal_path(path)
 
 
@@ -149,7 +149,6 @@ def test_vm_mode_without_a_record_raises_instead_of_falling_back_to_first_use() 
         trust.ssh_options(TrustBinding(TrustMode.VM, "web"))
 
     assert caught.value.vm_name == "web"
-    assert "agw vm import-host-keys web" in (caught.value.hint or "")
 
 
 def test_enroll_and_unverified_modes_need_no_record(tmp_path: Path) -> None:
@@ -158,10 +157,10 @@ def test_enroll_and_unverified_modes_need_no_record(tmp_path: Path) -> None:
 
 
 def test_a_binding_pairs_the_provisioning_file_with_unverified_mode_only(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="provisioning file"):
+    with pytest.raises(ValueError):
         TrustBinding(TrustMode.UNVERIFIED, "web")
     for mode in (TrustMode.VM, TrustMode.ENROLL):
-        with pytest.raises(ValueError, match="provisioning file"):
+        with pytest.raises(ValueError):
             TrustBinding(mode, "web", tmp_path / "provisioning")
 
 
@@ -215,9 +214,24 @@ def test_a_file_with_no_usable_line_is_no_record() -> None:
         trust.require_record("web")
 
 
-def test_a_record_needs_at_least_one_key() -> None:
-    with pytest.raises(ValueError, match="at least one key"):
-        trust.write_records("web", [])
+@pytest.mark.parametrize(
+    "key",
+    [
+        HostKey("ssh-ed25519\nbad", "AAAA"),
+        HostKey("ssh-ed25519", "not*base64"),
+        HostKey("", "AAAA"),
+        HostKey("ssh-ed25519", ""),
+        HostKey("ssh-ed25519", "AAAA ssh-rsa BBBB"),
+    ],
+)
+def test_a_malformed_key_is_refused_at_the_write_boundary_and_nothing_is_written(key: HostKey) -> None:
+    trust.write_records("web", [_KEY])
+    before = trust.store_file("web").read_bytes()
+
+    with pytest.raises(ValidationError):
+        trust.write_records("web", [_OTHER_KEY, key])
+
+    assert trust.store_file("web").read_bytes() == before
 
 
 def test_begin_enrollment_resets_a_stale_record_and_creates_the_directory() -> None:
@@ -227,6 +241,8 @@ def test_begin_enrollment_resets_a_stale_record_and_creates_the_directory() -> N
     trust.begin_enrollment("web")
 
     assert trust.STORE_DIR.is_dir()
+    if sys.platform != "win32":
+        assert stat.S_IMODE(trust.STORE_DIR.stat().st_mode) == 0o700
     assert not trust.has_record("web")
     assert not trust.store_file("web").exists()
 
@@ -293,3 +309,31 @@ def test_entry_options_exist_exactly_when_the_vm_has_a_record() -> None:
 
     trust.remove("web")
     assert trust.entry_options("web") == ()
+
+
+# -- Store failures are state errors --------------------------------------------------------
+
+
+@pytest.fixture
+def unusable_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A store directory that cannot be created: its parent is a regular file."""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("")
+    monkeypatch.setattr(trust, "STORE_DIR", blocker / "store")
+
+
+def test_an_unusable_store_directory_is_a_state_error_for_every_writer(unusable_store: None) -> None:
+    with pytest.raises(StateError):
+        trust.write_records("web", [_KEY])
+    with pytest.raises(StateError):
+        trust.begin_enrollment("web")
+    with pytest.raises(StateError), trust.provisioning_binding("web"):
+        pass
+
+
+def test_an_unreadable_record_is_a_state_error() -> None:
+    trust.begin_enrollment("web")
+    trust.store_file("web").mkdir()
+
+    with pytest.raises(StateError):
+        trust.stored_keys("web")

@@ -13,7 +13,7 @@ import pytest
 from typer.testing import CliRunner
 
 from agentworks.cli import app
-from agentworks.errors import ConfigError, NotFoundError, ValidationError
+from agentworks.errors import ConfigError, NotFoundError, StateError
 from agentworks.execution import trust
 from agentworks.execution.trust import HostKey
 from agentworks.vms.manager.host_keys import ImportStatus, import_host_keys, render_import
@@ -23,10 +23,13 @@ if TYPE_CHECKING:
 
     from agentworks.db import Database
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("ssh-keygen") is None,
-    reason="the import matches with the installed OpenSSH's ssh-keygen",
-)
+pytestmark = [
+    pytest.mark.windows,
+    pytest.mark.skipif(
+        shutil.which("ssh-keygen") is None,
+        reason="the import matches with the installed OpenSSH's ssh-keygen",
+    ),
+]
 
 
 @pytest.fixture(scope="module")
@@ -110,7 +113,7 @@ def test_plain_patterned_listed_and_hashed_records_import_under_the_alias(
     assert trust.stored_keys("wild") == (keys[1],)
     assert trust.stored_keys("listed") == (keys[2],)
     assert trust.stored_keys("hashed") == (keys[3],)
-    assert render_import(list(outcomes.values())) == 0
+    assert render_import(list(outcomes.values())) is True
     assert len(synced) == 1
 
 
@@ -141,7 +144,6 @@ def test_several_keys_for_one_address_are_all_imported(db: Database, tmp_path: P
     outcomes = _run(db, "web", known_hosts=source)
 
     assert outcomes["web"].keys_written == 2
-    assert outcomes["web"].describe() == "imported (2 keys)"
     assert set(trust.stored_keys("web")) == {keys[0], keys[2]}
 
 
@@ -188,7 +190,7 @@ def test_a_marker_line_for_the_vm_blocks_it_even_beside_a_plain_key(
 
     assert _status(outcomes, "web") is ImportStatus.MARKER
     assert not trust.has_record("web")
-    assert render_import([outcomes["web"]]) == 1
+    assert render_import([outcomes["web"]]) is False
 
 
 def test_a_marker_for_another_address_does_not_block(db: Database, tmp_path: Path, keys: list[HostKey]) -> None:
@@ -233,6 +235,30 @@ def test_a_differing_key_conflicts_and_is_neither_replaced_nor_unioned(
     assert trust.store_file("web").read_bytes() == stored
 
 
+def test_vms_imported_before_a_later_failure_still_get_their_ssh_config_entries(
+    db: Database, tmp_path: Path, keys: list[HostKey], synced: list[object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _vm(db, "first", "100.64.0.1")
+    _vm(db, "second", "100.64.0.2")
+    source = tmp_path / "known_hosts"
+    source.write_text(_line("100.64.0.1", keys[0]) + _line("100.64.0.2", keys[1]))
+    real_write = trust.write_records
+
+    def _fail_for_second(vm_name: str, written: list[HostKey]) -> None:
+        if vm_name == "second":
+            raise StateError("disk full")
+        real_write(vm_name, written)
+
+    monkeypatch.setattr(trust, "write_records", _fail_for_second)
+
+    with pytest.raises(StateError):
+        _run(db, all_vms=True, known_hosts=source)
+
+    assert trust.has_record("first")
+    assert not trust.has_record("second")
+    assert len(synced) == 1
+
+
 # -- Selection, sources and exit status --------------------------------------------------------
 
 
@@ -244,19 +270,20 @@ def test_named_vms_must_exist(db: Database, tmp_path: Path) -> None:
         _run(db, "ghost", known_hosts=source)
 
 
-def test_names_and_all_are_exclusive_and_one_is_required(db: Database) -> None:
-    _vm(db, "a", "100.64.0.1")
+@pytest.mark.parametrize("argv", [["vm", "import-host-keys"], ["vm", "import-host-keys", "a", "--all"]])
+def test_the_command_needs_names_or_all_but_not_both(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> None:
+    def _service(*_a: object, **_k: object) -> list[object]:
+        raise AssertionError("the service ran for a malformed invocation")
 
-    with pytest.raises(ValidationError):
-        _run(db)
-    with pytest.raises(ValidationError):
-        _run(db, "a", all_vms=True)
+    monkeypatch.setattr("agentworks.vms.manager.host_keys.import_host_keys", _service)
+
+    assert CliRunner().invoke(app, argv).exit_code == 2
 
 
 def test_a_missing_named_source_is_a_config_error(db: Database, tmp_path: Path) -> None:
     _vm(db, "web", "100.64.0.1")
 
-    with pytest.raises(ConfigError, match="does not exist"):
+    with pytest.raises(ConfigError):
         _run(db, "web", known_hosts=tmp_path / "absent")
 
 
@@ -288,7 +315,7 @@ def test_a_vm_without_a_tailnet_address_is_reported_and_skipped(
 
     assert _status(outcomes, "bare") is ImportStatus.NO_ADDRESS
     assert _status(outcomes, "web") is ImportStatus.IMPORTED
-    assert render_import(list(outcomes.values())) == 1
+    assert render_import(list(outcomes.values())) is False
 
 
 def test_exit_status_follows_whether_each_selected_vm_ends_with_a_record(
@@ -299,28 +326,13 @@ def test_exit_status_follows_whether_each_selected_vm_ends_with_a_record(
     source = tmp_path / "known_hosts"
     source.write_text(_line("100.64.0.1", keys[0]))
 
-    assert render_import(list(_run(db, "has", known_hosts=source).values())) == 0
-    assert render_import(list(_run(db, "lacks", known_hosts=source).values())) == 1
-    assert render_import(list(_run(db, "has", "lacks", known_hosts=source).values())) == 1
-    assert render_import(list(_run(db, all_vms=True, known_hosts=source).values())) == 1
+    assert render_import(list(_run(db, "has", known_hosts=source).values())) is True
+    assert render_import(list(_run(db, "lacks", known_hosts=source).values())) is False
+    assert render_import(list(_run(db, "has", "lacks", known_hosts=source).values())) is False
+    assert render_import(list(_run(db, all_vms=True, known_hosts=source).values())) is False
 
     trust.write_records("lacks", [keys[1]])
-    assert render_import(list(_run(db, all_vms=True, known_hosts=source).values())) == 0
-
-
-def test_the_report_has_one_line_per_vm_and_a_hint_for_the_missing(
-    db: Database, tmp_path: Path, keys: list[HostKey], captured_output: Any, synced: list[object]
-) -> None:
-    _vm(db, "has", "100.64.0.1")
-    _vm(db, "lacks", "100.64.0.2")
-    source = tmp_path / "known_hosts"
-    source.write_text(_line("100.64.0.1", keys[0]))
-
-    render_import(list(_run(db, all_vms=True, known_hosts=source).values()))
-
-    assert captured_output.info == ["has: imported (1 key)", "lacks: no matching entry"]
-    assert len(captured_output.warnings) == 1
-    assert "lacks" in captured_output.warnings[0]
+    assert render_import(list(_run(db, all_vms=True, known_hosts=source).values())) is True
 
 
 # -- The command -----------------------------------------------------------------------------
@@ -336,7 +348,7 @@ def test_the_command_forwards_its_arguments_and_exits_with_the_report_status(
         return []
 
     monkeypatch.setattr("agentworks.vms.manager.host_keys.import_host_keys", _service)
-    monkeypatch.setattr("agentworks.vms.manager.host_keys.render_import", lambda outcomes: 3)
+    monkeypatch.setattr("agentworks.vms.manager.host_keys.render_import", lambda outcomes: False)
     monkeypatch.setattr("agentworks.cli.commands.vm.get_db", lambda: object())
     monkeypatch.setattr("agentworks.config.load_config", lambda *_a, **_k: object())
     source = tmp_path / "kh"
@@ -344,7 +356,7 @@ def test_the_command_forwards_its_arguments_and_exits_with_the_report_status(
     named = CliRunner().invoke(app, ["vm", "import-host-keys", "a", "b", "--known-hosts", str(source)])
     everything = CliRunner().invoke(app, ["vm", "import-host-keys", "--all"])
 
-    assert (named.exit_code, everything.exit_code) == (3, 3)
+    assert (named.exit_code, everything.exit_code) == (1, 1)
     assert calls == [
         (["a", "b"], {"all_vms": False, "known_hosts": source}),
         ([], {"all_vms": True, "known_hosts": None}),

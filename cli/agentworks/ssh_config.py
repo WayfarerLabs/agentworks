@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.atomic_write import atomic_write_text
+from agentworks.errors import AgentworksError
 from agentworks.execution import trust
 
 if TYPE_CHECKING:
@@ -260,6 +261,17 @@ def _remove_legacy_section(ssh_config: Path) -> None:
 # -- Shared helpers --------------------------------------------------------
 
 
+def _trust_options(vm_name: str) -> tuple[str, ...]:
+    """The VM's store options, or none with a warning when its record cannot be
+    read or its store path cannot be written into an SSH config. One VM's store
+    problem never aborts the rebuild for every VM."""
+    try:
+        return trust.entry_options(vm_name)
+    except AgentworksError as e:
+        output.warn(f"Host-key options left out of the SSH config entries for VM '{vm_name}': {e}")
+        return ()
+
+
 def _format_entry(
     alias: str,
     hostname: str,
@@ -275,7 +287,7 @@ def _format_entry(
     id_str = _to_ssh_path(identity_file)
     if " " in id_str:
         id_str = f'"{id_str}"'
-    trust_lines = "".join(f"    {option}\n" for option in trust.entry_options(vm_name))
+    trust_lines = "".join(f"    {option}\n" for option in _trust_options(vm_name))
     return f"Host {alias}\n    HostName {hostname}\n    User {user}\n    IdentityFile {id_str}\n{trust_lines}"
 
 

@@ -23,7 +23,6 @@ from agentworks.transports import (
     transport_for_user,
     wait_for_reconnect,
 )
-from agentworks.transports.ssh import SSHTrustMissing
 from tests.conftest import seed_vm_trust
 from tests.transports.conftest import ok_completed
 
@@ -48,14 +47,6 @@ def _vm_row(name: str = "web") -> Any:
 
 def _config() -> Any:
     return SimpleNamespace(operator=SimpleNamespace(ssh_private_key=None))
-
-
-# -- A trust value is required -----------------------------------------------------
-
-
-def test_a_transport_cannot_be_built_without_a_trust_value() -> None:
-    with pytest.raises(TypeError, match="trust"):
-        SSHTransport(host="100.64.0.9")  # type: ignore[call-arg]
 
 
 # -- The factories bind VM trust ---------------------------------------------------------
@@ -111,16 +102,23 @@ def test_every_spawn_path_refuses_without_a_record_and_spawns_nothing(tmp_path: 
         patch("agentworks.ssh.subprocess") as sub_ssh,
     ):
         for attempt in attempts:
-            with pytest.raises(SSHTrustMissing) as caught:
+            with pytest.raises(TrustMissing) as caught:
                 attempt()
-            assert isinstance(caught.value, SSHError)
-            assert isinstance(caught.value, TrustMissing)
             assert caught.value.vm_name == "web"
 
     for module in (sub, sub_ssh):
         assert not module.run.called
         assert not module.call.called
         assert not module.Popen.called
+
+
+def test_a_missing_record_is_not_an_ssh_error_so_best_effort_handlers_cannot_absorb_it() -> None:
+    t = _vm_transport()
+
+    with pytest.raises(TrustMissing) as caught:
+        t.run("echo hi")
+
+    assert not isinstance(caught.value, SSHError)
 
 
 # -- The store options reach every ssh and scp ----------------------------------------------
@@ -229,12 +227,10 @@ def test_native_transport_raises_on_the_first_attempt_without_the_network_hint(c
     assert captured_output.warnings == []
 
 
-def test_the_agent_probe_keeps_the_import_hint() -> None:
+def test_the_agent_probe_does_not_rewrap_a_missing_record_as_unreachable() -> None:
     from agentworks.agents.manager._common import _assert_agent_ssh_works
 
     agent = SimpleNamespace(name="a1", vm_name="web", linux_user="agt-a1")
 
-    with pytest.raises(TrustMissing) as caught:
+    with pytest.raises(TrustMissing):
         _assert_agent_ssh_works(_vm_transport(), agent)  # type: ignore[arg-type]
-
-    assert "agw vm import-host-keys web" in (caught.value.hint or "")

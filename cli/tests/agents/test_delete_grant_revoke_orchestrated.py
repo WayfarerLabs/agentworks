@@ -31,11 +31,17 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
+from agentworks.execution import trust
+from agentworks.execution.errors import TrustMissing
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from agentworks.vms import manager as vm_manager
+from agentworks.vms.manager.boundary import require_vm_ssh_boundary
 from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
+
+# Captured at import, before the autouse fixture stubs the SSH precondition.
+_REAL_SSH_BOUNDARY = require_vm_ssh_boundary
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
@@ -319,6 +325,34 @@ def test_delete_reachable_vm_is_one_boundary_burst(
 
     assert resolve_counter == [["proxmox-token"]]
     assert db.get_agent("a1") is None
+
+
+def test_delete_on_a_vm_with_no_host_key_record_refuses_before_touching_the_row_or_the_vm(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeAdminTarget,
+    synced: list[object],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The remote cleanup is best-effort over SSH errors, so a missing record
+    must refuse up front: deleting the row would orphan the VM-side user."""
+    config = make_config()
+    _seed(db)
+    trust.remove("box")
+    _reachable(monkeypatch, True)
+    # The module stubs the SSH precondition; this test is about the real one.
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", _REAL_SSH_BOUNDARY)
+    monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", _REAL_SSH_BOUNDARY)
+
+    with pytest.raises(TrustMissing):
+        agent_manager.delete_agent(db, config, name="a1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_agent("a1") is not None
+    assert target.commands == []
+    assert resolve_counter == []
+    assert synced == []
 
 
 def test_delete_stopped_vm_gate_burst_seeds_the_whole_union(

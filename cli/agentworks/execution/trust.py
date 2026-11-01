@@ -136,12 +136,23 @@ def _literal_path(path: PurePath) -> str:
     return value
 
 
+def _store_error(action: str, path: Path, error: OSError, vm_name: str | None = None) -> StateError:
+    return StateError(
+        f"cannot {action} '{format_host_path(path)}': {error}",
+        entity_kind="vm",
+        entity_name=vm_name,
+    )
+
+
 def _ensure_store_dir() -> None:
-    STORE_DIR.mkdir(parents=True, exist_ok=True)
-    if sys.platform != "win32":
-        # mkdir's mode is masked by the umask and ignored for an existing
-        # directory; the store holds trust decisions, so pin it.
-        STORE_DIR.chmod(0o700)
+    try:
+        STORE_DIR.mkdir(parents=True, exist_ok=True)
+        if sys.platform != "win32":
+            # mkdir's mode is masked by the umask and ignored for an existing
+            # directory; the store holds trust decisions, so pin it.
+            STORE_DIR.chmod(0o700)
+    except OSError as e:
+        raise _store_error("prepare the host-key store directory", STORE_DIR, e) from e
 
 
 def stored_keys(vm_name: str) -> tuple[HostKey, ...]:
@@ -157,22 +168,19 @@ def stored_keys(vm_name: str) -> tuple[HostKey, ...]:
     except FileNotFoundError:
         return ()
     except OSError as e:
-        raise StateError(
-            f"cannot read the host-key store '{format_host_path(path)}': {e}", entity_kind="vm", entity_name=vm_name
-        ) from e
+        raise _store_error("read the host-key store", path, e, vm_name) from e
     keys: list[HostKey] = []
     for line in text.splitlines():
         fields = line.split()
-        if (
-            len(fields) >= 3
-            and fields[0] == alias
-            and _KEY_TYPE.fullmatch(fields[1])
-            and _KEY_BLOB.fullmatch(fields[2])
-        ):
+        if len(fields) >= 3 and fields[0] == alias and _is_key(fields[1], fields[2]):
             key = HostKey(fields[1], fields[2])
             if key not in keys:
                 keys.append(key)
     return tuple(keys)
+
+
+def _is_key(key_type: str, blob: str) -> bool:
+    return bool(_KEY_TYPE.fullmatch(key_type) and _KEY_BLOB.fullmatch(blob))
 
 
 def has_record(vm_name: str) -> bool:
@@ -187,13 +195,25 @@ def require_record(vm_name: str) -> None:
 
 
 def write_records(vm_name: str, keys: Sequence[HostKey]) -> None:
-    """Replace the VM's record with ``keys``, atomically and privately."""
-    if not keys:
-        raise ValueError("a host-key record needs at least one key")
+    """Replace the VM's record with ``keys``, atomically and privately.
+
+    Boundary: the key fields often come from a file the operator supplied, and
+    they become lines of a file ``ssh`` trusts, so a malformed field is refused
+    here rather than written.
+    """
+    for key in keys:
+        if not _is_key(key.key_type, key.blob):
+            raise ValidationError(
+                f"refusing to record a malformed host key for VM '{vm_name}'", entity_kind="vm", entity_name=vm_name
+            )
     alias = host_key_alias(vm_name)
     content = "".join(f"{alias} {key.key_type} {key.blob}\n" for key in keys)
+    path = store_file(vm_name)
     _ensure_store_dir()
-    atomic_write_text(store_file(vm_name), content, newline="\n")
+    try:
+        atomic_write_text(path, content, newline="\n")
+    except OSError as e:
+        raise _store_error("write the host-key store", path, e, vm_name) from e
 
 
 def begin_enrollment(vm_name: str) -> None:
@@ -203,13 +223,11 @@ def begin_enrollment(vm_name: str) -> None:
     ``UserKnownHostsFile``: under ``accept-new`` a failed write only warns.
     """
     path = store_file(vm_name)
+    _ensure_store_dir()
     try:
-        _ensure_store_dir()
         path.unlink(missing_ok=True)
     except OSError as e:
-        raise StateError(
-            f"cannot reset the host-key store '{format_host_path(path)}': {e}", entity_kind="vm", entity_name=vm_name
-        ) from e
+        raise _store_error("reset the host-key store", path, e, vm_name) from e
 
 
 def remove(vm_name: str) -> None:
@@ -218,9 +236,7 @@ def remove(vm_name: str) -> None:
     try:
         path.unlink(missing_ok=True)
     except OSError as e:
-        raise StateError(
-            f"cannot remove the host-key store '{format_host_path(path)}': {e}", entity_kind="vm", entity_name=vm_name
-        ) from e
+        raise _store_error("remove the host-key store", path, e, vm_name) from e
 
 
 @contextlib.contextmanager
@@ -233,13 +249,28 @@ def provisioning_binding(vm_name: str) -> Iterator[TrustBinding]:
     """
     _checked_name(vm_name)
     _ensure_store_dir()
-    fd, name = tempfile.mkstemp(dir=STORE_DIR, prefix=f"provisioning-{vm_name}-", suffix=".tmp")
-    os.close(fd)
+    try:
+        fd, name = tempfile.mkstemp(dir=STORE_DIR, prefix=f"provisioning-{vm_name}-", suffix=".tmp")
+        os.close(fd)
+    except OSError as e:
+        raise _store_error("create a provisioning file in", STORE_DIR, e, vm_name) from e
     path = Path(name)
     try:
         yield TrustBinding(TrustMode.UNVERIFIED, vm_name, path)
     finally:
         path.unlink(missing_ok=True)
+
+
+def _pinned_options() -> tuple[tuple[str, str], ...]:
+    """Settings every VM connection pins, whatever configuration says, as
+    (name, value). Shared by the spawn-time ``-o`` arguments and the managed
+    SSH entries, so the operator's own ``ssh`` pins what Agentworks pins."""
+    return (
+        ("GlobalKnownHostsFile", _NULL_DEVICE),
+        ("UpdateHostKeys", "no"),
+        ("HashKnownHosts", "no"),
+        ("CheckHostIP", "no"),
+    )
 
 
 def ssh_options(trust: TrustBinding | HostTrust) -> tuple[str, ...]:
@@ -268,7 +299,7 @@ def ssh_options(trust: TrustBinding | HostTrust) -> tuple[str, ...]:
             f"HostKeyAlias={host_key_alias(trust.vm_name)}",
             f"StrictHostKeyChecking={checking}",
         ]
-    values += [f"GlobalKnownHostsFile={_NULL_DEVICE}", "UpdateHostKeys=no", "HashKnownHosts=no", "CheckHostIP=no"]
+    values += [f"{name}={value}" for name, value in _pinned_options()]
     return tuple(arg for value in values for arg in ("-o", value))
 
 
@@ -277,8 +308,8 @@ def entry_options(vm_name: str) -> tuple[str, ...]:
     against the store, or none while the VM has no record.
 
     Until the VM has a record the operator's ``ssh`` keeps working against their
-    own ``known_hosts``. ``UpdateHostKeys no`` and ``HashKnownHosts no`` stop
-    that ``ssh`` from writing to the store or hashing it.
+    own ``known_hosts``. The pinned settings stop that ``ssh`` from reading a
+    global known-hosts file, writing to the store, or hashing it.
     """
     if not has_record(vm_name):
         return ()
@@ -286,6 +317,5 @@ def entry_options(vm_name: str) -> tuple[str, ...]:
         f"HostKeyAlias {host_key_alias(vm_name)}",
         f'UserKnownHostsFile "{_literal_path(store_file(vm_name))}"',
         "StrictHostKeyChecking yes",
-        "UpdateHostKeys no",
-        "HashKnownHosts no",
+        *(f"{name} {value}" for name, value in _pinned_options()),
     )

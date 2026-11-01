@@ -5,7 +5,9 @@ from __future__ import annotations
 from enum import Enum
 from typing import TYPE_CHECKING
 
+from agentworks import output
 from agentworks.errors import AgentworksError, ConfigError, ConnectivityError, NotFoundError, StateError, UserAbort
+from agentworks.execution.errors import TrustMissing
 from agentworks.sessions.tmux import ProbeStatus
 from agentworks.status_observation import (
     GUEST_OBSERVATION_ATTEMPTS,
@@ -101,6 +103,11 @@ def observe_console_statuses(
             require_vm_ssh_boundary(db, config, vm)
         except UserAbort:
             raise
+        except TrustMissing as exc:
+            # One VM's missing host key must not abort the listing for the
+            # others: report it and leave that VM's consoles UNKNOWN.
+            output.warn(f"Console status on VM '{vm_name}' is unavailable: {exc}. {exc.hint}")
+            continue
         except (ConfigError, ConnectivityError, VMSSHIdentityPolicyError):
             continue
         try:

@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.errors import ConfigError, ExternalError, ValidationError
+from agentworks.errors import ConfigError, ExternalError
 from agentworks.execution import trust
 from agentworks.execution.trust import HostKey
 from agentworks.path_rendering import format_host_path
@@ -71,13 +71,6 @@ def default_known_hosts() -> Path:
 
 
 def locate_ssh_keygen() -> str:
-    """``ssh-keygen`` from the directory of the ``ssh`` on ``PATH``, so the
-    matcher is the client's own sibling, falling back to ``PATH`` itself."""
-    ssh = shutil.which("ssh")
-    if ssh is not None:
-        beside = shutil.which("ssh-keygen", path=str(Path(ssh).parent))
-        if beside is not None:
-            return beside
     found = shutil.which("ssh-keygen")
     if found is None:
         raise ExternalError(
@@ -165,8 +158,6 @@ def import_host_keys(
     where absence just means nothing to import. A named file that does not
     exist is a :class:`ConfigError`.
     """
-    if all_vms == bool(names):
-        raise ValidationError("name the VMs to import, or pass --all, but not both", entity_kind="vm")
     vms = db.list_vms() if all_vms else [_require_vm(db, name) for name in dict.fromkeys(names)]
 
     if known_hosts is None:
@@ -178,36 +169,34 @@ def import_host_keys(
         source = known_hosts
 
     keygen = locate_ssh_keygen() if source is not None else ""
-    outcomes = tuple(_import_one(vm, keygen, source) for vm in vms)
+    outcomes: list[HostKeyImport] = []
+    try:
+        for vm in vms:
+            outcomes.append(_import_one(vm, keygen, source))
+    finally:
+        # Whatever was imported before a later VM failed has a record now, so
+        # its managed entries must carry the store options.
+        if any(o.status is ImportStatus.IMPORTED for o in outcomes):
+            from agentworks.ssh_config import sync_ssh_config
 
-    if any(o.status is ImportStatus.IMPORTED for o in outcomes):
-        # The imported VMs' managed entries now carry the store options.
-        from agentworks.ssh_config import sync_ssh_config
-
-        try:
-            sync_ssh_config(config, db)
-        except Exception as e:
-            output.warn(f"SSH config sync failed: {e}")
-    return outcomes
+            try:
+                sync_ssh_config(config, db)
+            except Exception as e:
+                output.warn(f"SSH config sync failed: {e}")
+    return tuple(outcomes)
 
 
-def render_import(outcomes: Sequence[HostKeyImport]) -> int:
-    """Print one line per VM and return the command's exit status.
-
-    Non-zero when any selected VM ends without a record, since each such VM
-    stays unusable.
-    """
+def render_import(outcomes: Sequence[HostKeyImport]) -> bool:
+    """Print one line per VM. True when every selected VM ends with a record."""
     for o in outcomes:
         output.info(f"{o.vm_name}: {o.describe()}")
     missing = [o.vm_name for o in outcomes if not o.has_record]
-    if not missing:
-        return 0
-    output.warn(
-        f"No host key is recorded for: {', '.join(missing)}. For a VM with no matching entry, verify its host "
-        "key fingerprints against its console or provider, gather the keys with ssh-keyscan into a file, and "
-        "pass it with --known-hosts."
-    )
-    return 1
+    if missing:
+        output.warn(
+            f"No host key is recorded for: {', '.join(missing)}. "
+            "See 'agw vm import-host-keys --help' for a VM with no matching entry."
+        )
+    return not missing
 
 
 __all__ = ["HostKeyImport", "ImportStatus", "import_host_keys", "render_import"]

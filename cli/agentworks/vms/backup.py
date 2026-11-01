@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, NoReturn
 
 from agentworks import output
 from agentworks.errors import BackupError, NotFoundError, StateError
+from agentworks.execution import trust
 from agentworks.path_rendering import format_host_path
 from agentworks.vms.applied_state import canonicalize_vm_applied_slice
 from agentworks.vms.manager import gated_vm_boundary
@@ -64,6 +65,9 @@ def backup_vm(
             entity_kind="vm",
             entity_name=vm_name,
         )
+    # A VM with no host-key record refuses every SSH read the backup makes, so
+    # the archive would otherwise be written with its live uid/gid unreadable.
+    trust.require_record(vm_name)
     if not _host_supports_private_backup_permissions() and db.instance_state.has_vm_owner_tree_desired_overlay(vm_name):
         _raise_windows_overlay_backup_error(vm_name)
     registry = load_request_registry(config, live_database=db)

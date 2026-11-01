@@ -482,6 +482,8 @@ def test_store_options_appear_exactly_for_vms_with_a_record(tmp_path: Path, rebu
         assert "    StrictHostKeyChecking yes\n" in blocks[alias]
         assert "    UpdateHostKeys no\n" in blocks[alias]
         assert "    HashKnownHosts no\n" in blocks[alias]
+        assert "    CheckHostIP no\n" in blocks[alias]
+        assert f"    GlobalKnownHostsFile {trust._NULL_DEVICE}\n" in blocks[alias]
     for alias in ("awvm--fresh", "awagent--agent-fresh"):
         assert "IdentityFile" in blocks[alias]
         assert not any(
@@ -512,6 +514,7 @@ def test_an_entry_gains_and_loses_the_store_options_with_the_record(tmp_path: Pa
     assert "HostKeyAlias" not in conf.read_text()
 
 
+@pytest.mark.windows
 @pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
 def test_the_installed_client_resolves_the_managed_entry_against_the_store(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -544,3 +547,54 @@ def test_the_installed_client_resolves_the_managed_entry_against_the_store(
     assert settings["stricthostkeychecking"] == "true"
     assert settings["updatehostkeys"] == "false"
     assert settings["hashknownhosts"] == "no"
+    assert settings["checkhostip"] == "no"
+    assert settings["globalknownhostsfile"] == trust._NULL_DEVICE
+
+
+def test_one_vms_store_problem_leaves_its_trust_lines_out_without_aborting_the_rebuild(
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    from agentworks.execution import trust
+
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("broken", "100.64.0.1"), _mock_vm("good", "100.64.0.2")]
+    db.list_agents.return_value = []
+    key = trust.HostKey("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAA")
+    trust.write_records("good", [key])
+    trust.begin_enrollment("broken")
+    trust.store_file("broken").mkdir()  # reading it raises
+
+    _rebuild_config_dir(config, db)
+
+    blocks = _managed_blocks((ssh_dir / "config.d" / _MANAGED_CONF).read_text())
+    assert set(blocks) == {"awvm--broken", "awvm--good"}
+    assert "HostKeyAlias" not in blocks["awvm--broken"]
+    assert "HostKeyAlias agentworks-vm-good" in blocks["awvm--good"]
+    assert len(captured_output.warnings) == 1
+
+
+def test_a_store_path_ssh_would_expand_leaves_the_trust_lines_out_for_every_vm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    from agentworks.execution import trust
+
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("one", "100.64.0.1"), _mock_vm("two", "100.64.0.2")]
+    db.list_agents.return_value = []
+    monkeypatch.setattr(trust, "STORE_DIR", tmp_path / "100%")
+    for name in ("one", "two"):
+        trust.write_records(name, [trust.HostKey("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAA")])
+
+    _rebuild_config_dir(config, db)
+
+    blocks = _managed_blocks((ssh_dir / "config.d" / _MANAGED_CONF).read_text())
+    assert set(blocks) == {"awvm--one", "awvm--two"}
+    assert all("HostKeyAlias" not in body for body in blocks.values())
+    assert len(captured_output.warnings) == 2

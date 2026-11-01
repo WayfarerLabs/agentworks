@@ -27,7 +27,6 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
-from agentworks.execution.errors import TrustMissing
 from agentworks.execution.trust import TrustBinding, TrustMode
 from agentworks.transports.base import ExecTransport, Transport
 from agentworks.transports.lima import LimaTransport
@@ -232,10 +231,6 @@ def native_transport(
         try:
             target.run("echo ok", timeout=10)
             break
-        except TrustMissing:
-            # Retrying cannot create a record, and the platform's network
-            # hint would misdirect the operator from the import.
-            raise
         except SSHError:
             if attempt == 0:
                 output.detail("Waiting for provisioning transport...")
@@ -294,7 +289,8 @@ def wait_for_reconnect(
     to handle flapping. Polymorphic over any :class:`Transport` via its
     :meth:`Transport.run`. Returns ``True`` if the connection
     stabilized, ``False`` if it timed out. A VM with no host-key record raises
-    :class:`TrustMissing` on the first attempt.
+    :class:`TrustMissing` on the first attempt (it is not an ``SSHError``), so
+    callers never mistake it for an unreachable peer and rejoin Tailscale.
 
     ``context`` selects the operator-facing lines from the
     :class:`TailscaleWait` vocabulary. The default ``RECONNECT``
@@ -315,11 +311,6 @@ def wait_for_reconnect(
                 target.run("echo ok", timeout=10)
             output.detail(context.success_message)
             return True
-        except TrustMissing:
-            # Not an unreachable peer: a False return would send vm start and
-            # the activation gate into a Tailscale rejoin that spends the auth
-            # key and still cannot connect.
-            raise
         except SSHError:
             if attempt == max_attempts - 1:
                 output.warn("Tailscale SSH did not reconnect after ~240s, proceeding anyway")

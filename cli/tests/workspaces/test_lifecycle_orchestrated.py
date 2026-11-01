@@ -37,13 +37,19 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
+from agentworks.execution import trust
+from agentworks.execution.errors import TrustMissing
 from agentworks.execution.trust import HOST_TRUST
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.transports import SSHTransport
 from agentworks.vms import manager as vm_manager
+from agentworks.vms.manager.boundary import require_vm_ssh_boundary
 from agentworks.workspaces import manager as workspace_manager
 from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
+
+# Captured at import, before the autouse fixture stubs the SSH precondition.
+_REAL_SSH_BOUNDARY = require_vm_ssh_boundary
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -959,6 +965,32 @@ def test_delete_reachable_vm_is_one_boundary_burst(
     assert any("rm -rf /srv/ws1" in c for c in target.commands)
     assert db.get_workspace("ws1") is None
     assert "Workspace 'ws1' deleted" in captured_output.info
+
+
+def test_delete_on_a_vm_with_no_host_key_record_refuses_before_touching_the_row_or_the_vm(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeAdminTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The remote cleanup is best-effort over SSH errors, so a missing record
+    must refuse up front: deleting the row would orphan the VM-side directory."""
+    config = make_config()
+    _seed(db)
+    trust.remove("box")
+    _reachable(monkeypatch, True)
+    # The module stubs the SSH precondition; this test is about the real one.
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", _REAL_SSH_BOUNDARY)
+    monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", _REAL_SSH_BOUNDARY)
+
+    with pytest.raises(TrustMissing):
+        workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_workspace("ws1") is not None
+    assert target.commands == []
+    assert resolve_counter == []
 
 
 def test_delete_stopped_vm_gate_burst_seeds_the_whole_union(
