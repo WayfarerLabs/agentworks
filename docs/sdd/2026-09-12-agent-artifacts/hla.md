@@ -337,8 +337,8 @@ workspace cannot stale a user's unchanged inputs. Missing, interrupted or stale 
 report the owner's setup operation, including workspace recreation where applicable, without
 blocking a receiving facet. Active facets forward only their recorded explicit deferrals whose
 identities still resolve to readable captured inputs. Resolve them against original owner captures,
-independently of subsequent upstream routing changes. Missing handling or unresolvable identities are
-reported and omitted, rather than acknowledged or rerouted speculatively. Inactive facets use
+independently of subsequent upstream routing changes. Missing handling or unresolvable identities
+are reported and omitted, rather than acknowledged or rerouted speculatively. Inactive facets use
 core's default routes. Unavailable branches do not discard known contributions from healthy ones.
 This projection never reruns an ancestor integration during session start.
 

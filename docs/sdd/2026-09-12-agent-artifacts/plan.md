@@ -1081,30 +1081,51 @@ unlocked until that evidence is audited and the remaining requirements are compl
 
 ## Facet independence feedback, round 1 of 3
 
-PR [862](https://github.com/WayfarerLabs/agentworks/pull/862) opened ready at `72923b6`; all CI
-jobs passed. After the one-hour reporting window, the first authorized public correction round began
-on 2026-11-01 at 07:38 UTC, with the PR returned to draft before source changes. The fixed batch
-contains Copilot's six threads and the initial saga and Muntz reports. No independent live acceptance
-report is claimed from those code reviews.
+PR [862](https://github.com/WayfarerLabs/agentworks/pull/862) opened ready at `72923b6`; all CI jobs
+passed. After the one-hour reporting window, the first authorized public correction round began on
+2026-11-01 at 07:38 UTC, with the PR returned to draft before source changes. The fixed batch
+contains Copilot's six threads and the initial saga and Muntz reports. No independent live
+acceptance report is claimed from those code reviews.
 
 The accepted corrections cover whole-file session collisions before teardown, modified obsolete
-members of requested skills, pre-render setup name collisions, recorded routes independent of current
-upstream routing, shared strict/advisory native discovery and adoption-report events. Optional
-simplifications stay within those paths. The native inventory reread and safe retirement guards stay:
-marketplace registration can change the source observable for an installed plugin, so manual inventory
-updates do not replace the fresh observation.
+members of requested skills, pre-render setup name collisions, recorded routes independent of
+current upstream routing, shared strict/advisory native discovery and adoption-report events.
+Optional simplifications stay within those paths. The native inventory reread and safe retirement
+guards stay: marketplace registration can change the source observable for an installed plugin, so
+manual inventory updates do not replace the fresh observation.
 
 Codex's listing follows current marketplace registration without proving an unclaimed installation's
 original source. The operator has been asked to choose conservative preservation with a reported
-recovery limit or persisted installation-intent tracking. That finding remains unresolved; independent
-corrections proceed without inventing ownership or an intent-state protocol. The `awaiting-direction`
-label identifies this decision. The remaining round allowance stays dormant after this round until the
-operator resolves it.
+recovery limit or persisted installation-intent tracking. That finding remains unresolved;
+independent corrections proceed without inventing ownership or an intent-state protocol. The
+`awaiting-direction` label identifies this decision. The remaining round allowance stays dormant
+after this round until the operator resolves it.
 
-- [ ] Complete the independent accepted corrections and their focused regression checks.
+- [x] Complete the independent accepted corrections and their focused regression checks.
 - [ ] Resolve the Codex provenance decision through authenticated operator direction and complete
       the resulting correction within its agreed boundary.
-- [ ] Run the three private review lanes and required gates on the corrected exact head; publish
-      the complete handoff with the appropriate draft/ready signal.
-- [ ] Audit independent live acceptance against every retained requirement and finish promotion
-      and both locks. Unit tests and CI alone do not close the live obligations above.
+- [ ] Run the three private review lanes and required gates on the corrected exact head; publish the
+      complete handoff with the appropriate draft/ready signal.
+- [ ] Audit independent live acceptance against every retained requirement and finish promotion and
+      both locks. Unit tests and CI alone do not close the live obligations above.
+
+Round 1's independent corrections are reviewed clean through `eb1a081`, whose production code is
+unchanged from `a13ddfe`. Each private lane independently passed 400 relevant tests; the project and
+complexity lanes also checked collateral and plan honesty. The complexity lane reproduced the
+negative control that makes a single setup probe unsafe: deferring a proposed persona after an
+identity mismatch can expose another native collision. The iterative probe remains. The fresh native
+inventory observation and safe retirement guards also remain. Reporting checks assert event emission
+and runtime entry identities, without pinning authored wording.
+
+The full CI-selected local run passed **10,334 tests, 11 skipped** on the corrected production code.
+The final type-only fixture changes repair three mypy errors without changing that behavior; full
+mypy passes across 885 files, and Ruff lint/format passes across 921 files. Wheel and source builds
+pass. Website validation passed 160 Python and 103 Node tests, with 14 files identical across both
+builds for each site base. The real CLI passed help, isolated config initialization, both guide
+topics and artifact inspection help. Managed temporary fixture/build roots and the isolated HOME
+were independently verified removed. After correcting fixture types and document formatting, file
+lint, locked-SDD and Rulesync 7.14.0 checks passed. CI and checkpoint state are recorded on PR 862;
+the complete correction handoff remains pending the Codex decision.
+
+Codex provenance remains unresolved under the operator question above. These are independent code
+and local CLI results, not live VM acceptance or whole-PR readiness. Neither SDD is locked.

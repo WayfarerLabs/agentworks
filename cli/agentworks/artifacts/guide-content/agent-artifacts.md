@@ -37,9 +37,9 @@ plugins. Session files still use their private directory beneath `HOME`.
 Native preflight conservatively refuses relevant restrictions for new delivery in the configuration
 files it inspects. Restrictions affecting existing ancestor placement warn without blocking session
 launch, including when the session also supplies new artifacts. The check cannot verify that a later
-native settings layer reenables an artifact, so new delivery through such a restriction is unsupported
-even when the native tool would allow it. Inspect the effective native policy before changing
-restrictions; the error does not establish that the tool itself disables the artifact.
+native settings layer reenables an artifact, so new delivery through such a restriction is
+unsupported even when the native tool would allow it. Inspect the effective native policy before
+changing restrictions; the error does not establish that the tool itself disables the artifact.
 
 <!-- agw:include path="artifacts/README.md" heading="Session workarounds" -->
 

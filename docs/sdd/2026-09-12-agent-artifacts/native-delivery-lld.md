@@ -167,8 +167,8 @@ inspectable and retryable. Retirement reverses that order: `SKILL.md` stays pres
 any owned supporting member or required parent cleanup remains. Modified or unowned files remain
 untouched. A modified obsolete member of a still-requested skill skips the whole package before
 publication, so new instructions cannot be combined with that retained member. A differing whole
-file in a prospective session directory refuses staging before the old runtime is torn down;
-setup's per-entry skip policy does not authorize launching with that content.
+file in a prospective session directory refuses staging before the old runtime is torn down; setup's
+per-entry skip policy does not authorize launching with that content.
 
 Retirement prunes empty parents of each removed owned skill member only within the exact package
 root supplied by the integration and retained on that file's existing record. Core validates that
