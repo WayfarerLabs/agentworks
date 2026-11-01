@@ -41,7 +41,8 @@ them:
 | Module                                           | Contents                                                                                                          |
 | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
 | `agentworks/execution/client.py`                 | `resolve_ssh`, `SSHClient`: resolution, banner and version check                                                  |
-| `agentworks/execution/ssh_process.py`            | `VMPolicy`, `build_argv`, the stage 0 string, `Deadline`, and the pump that spawns a client                       |
+| `agentworks/execution/ssh_process.py`            | `VMPolicy`, `build_argv`, the stage 0 string, the client log and `spawn`, the one place a client is started       |
+| `agentworks/execution/pump.py`                   | `Deadline` and `PipeSession`, the argv-agnostic pump                                                              |
 | `agentworks/execution/envelope.py`               | Frames, the JSON envelope, markers, the stream filters, the classifier and `launcher_source()`                    |
 | `agentworks/execution/agw_launch.py`             | The guest program. Stage 0 execs it; the client imports only its two shared definitions                           |
 | `agentworks/execution/requests.py`, `results.py` | The slice 2 vocabulary, with `Shell` and `AccountShell` (below)                                                   |
@@ -138,10 +139,10 @@ Unknown(reason)        CONNECTION | HOST_KEY | TRUNCATED | DEADLINE | OUTPUT_LIM
   inputs: no operation combines input with a terminal, so incident row I4's refusal is structural.
 - **Refusals.** `stream` maps `NotDelivered(REFUSED)` as tty mode does: `exec ENOENT` is status 127,
   any other `exec` errno is 126, and `cwd` and `handover` are 125, with one line naming the refusal
-  on the stderr it was given. So `vm exec VM nosuchcmd` still exits 127. `run` raises
-  `RequestRefused(StateError)` for the same outcome, and `attach` raises it when the parking
-  connection refuses, before the terminal is touched. One `refusal_status(code)` in `agw_launch.py`
-  is the table for the guest and the client alike.
+  on the stderr it was given. So `vm exec VM nosuchcmd` still exits 127. `run` returns the outcome
+  as `NotDelivered(REFUSED)`, `require_completed` raises `RequestRefused(StateError)` for it, and
+  `attach` raises it when the parking connection refuses, before the terminal is touched. One
+  `refusal_status(code)` in `agw_launch.py` is the table for the guest and the client alike.
 - **Validation** lives in the one function that turns a request into bytes (`envelope.encode`).
   Boundary: environment, arguments, working directory and script text come from operator-authored
   config and from secret backends. It refuses NUL anywhere, an environment name outside
@@ -228,15 +229,25 @@ as `-o` (the proof's list at `connection.py:109-153`, cut to what `-F none` leav
   connection errors land in the file on 8.5, 9.x and Win32-OpenSSH. The client reads this log, to
   type `Host key verification failed` and to show its last 20 lines in errors.
 
-**Spawning.** `subprocess.Popen(argv, stdin=PIPE, stdout=PIPE, stderr=PIPE, bufsize=0)` with the
-proof's Windows environment strip (`_io.py:104-114`). The pump is the proof's single-threaded loop
-(`_io.py:32-205`): non-blocking pipes (supported on Windows pipes from Python 3.12), 64 KiB chunks,
-a 10 ms sleep when nothing moved, the deadline, then kill and a 0.5 s reap, and cleanup on
-`BaseException`. It is argv-agnostic, which is what lets the conformance suite run it against a
-local shell.
+`build_argv` takes the client log path and a `verbose` flag. `verbose` replaces `-E` with `-v` and
+is accepted only for a forward, since in a pipe mode ssh's debug lines would reach the guest's
+stderr after the marker; the terminal half takes neither.
+
+**Spawning.** One `spawn(argv, ...)` in `ssh_process.py` runs
+`subprocess.Popen(argv, stdin=PIPE, stdout=PIPE, stderr=PIPE, bufsize=0)` (the forward passes no
+pipes) with the proof's Windows environment strip (`_io.py:104-114`, at `fd1256b1f`), and maps a
+failure to start to `ClientUnsupported`. The pump lives in `pump.py`. The pump is the proof's
+single-threaded loop (`_io.py:32-205`): non-blocking pipes (supported on Windows pipes from Python
+3.12), 64 KiB chunks, a 10 ms sleep when nothing moved, the deadline, then kill and a 0.5 s reap,
+and cleanup on `BaseException`. It is argv-agnostic, which is what lets the conformance suite run it
+against a local shell.
 
 - **Who uses it.** `run`, `stream` and the parking connection of an attach reuse the one pump. The
-  terminal half (inherited stdio, `subprocess` wait) and the forward (no pipes) do not.
+  terminal half (inherited stdio, `subprocess` wait) and the forward (no pipes) do not. The parking
+  connection sets `hold_stdin_open`, so the pump sends the request and leaves the pipe open: the
+  parked launcher reads end of file as the client giving up.
+- **Deadline and output limit.** Either stops the pump and kills the client at once, then reaps for
+  0.5 s; only a natural end waits for the client to exit.
 - **Operator stdin for `stream`.** The caller passes `sys.stdin.buffer.raw`. A daemon thread reads
   `stdin.read(65536)` into a queue and the pump drains one chunk per pass into ssh's stdin, closing
   it at end of file. A thread is needed because Windows cannot poll a console or pipe handle, and
@@ -248,6 +259,12 @@ local shell.
   start marker is the consumer ending early, not a failure.
 - **Binary stdio.** Callers pass `sys.stdout.buffer` and `sys.stderr.buffer` (the text layer's
   `newline="\n"` at `cli/_entry.py:38` does not apply), after flushing the text layer (I2).
+  `stream_to_operator(access, request)` in `access.py` is that wiring, flush, raw stdin and binary
+  buffers, so the commands do not repeat it.
+- **A sink that would block.** Only `BrokenPipeError` and `ConnectionResetError` from a sink mean
+  the consumer ended early. A sink that raises `BlockingIOError`, because the operator's own stdout
+  is a non-blocking pipe, is waited on and retried, so output is never dropped while the command
+  reports success.
 
 ## The wire
 
@@ -359,13 +376,16 @@ defined once. Steps, mapped to HLA D4:
      `MFD_NOEXEC_SEAL` (`0x8`, kernel 6.3 and later) with a retry without it on `EINVAL`, passed in
      `pass_fds` and named `/dev/fd/N`, so script text is in no argv and the interpreter's stdin
      stays the caller's. The interpreter is `/bin/sh`, `/bin/bash` or the passwd shell, run as
-     `[interp] [-l] /dev/fd/N`. The interpreter's own children inherit that descriptor, the only one
-     they inherit; it holds the script they came from. The payload's stdin is agw-launch's,
-     positioned at the caller's first byte. There is no copy loop.
-6. **Complete.** After `wait`, write `<M>end` to descriptor 1 then `<M>exit N` to descriptor 2, with
-   `N` the exit status, or 128 plus the signal for a payload killed by one. A refusal writes `end`
-   then `refused CODE` instead. Codes are `cwd`, `exec <ERRNO>` and, for a parked launcher,
-   `handover`.
+     `[interp] [-l] /dev/fd/N`. The memfd is created and filled before the start marker, so a
+     failure there (`EMFILE`, say) is a launcher failure, not an outcome that may have run. The
+     interpreter's own children inherit that descriptor, the only one they inherit; it holds the
+     script they came from. The payload's stdin is agw-launch's, positioned at the caller's first
+     byte. There is no copy loop.
+6. **Complete.** After `wait`, set descriptors 1 and 2 back to blocking, since the payload shares
+   their open file descriptions and may have made them non-blocking, then write `<M>end` to
+   descriptor 1 then `<M>exit N` to descriptor 2, with `N` the exit status, or 128 plus the signal
+   for a payload killed by one. A refusal writes `end` then `refused CODE` instead. Codes are `cwd`,
+   `exec <ERRNO>` and, for a parked launcher, `handover`.
 
 **`tty` mode** (the terminal half of an attach) runs `LoginShell` only, since a script's memfd could
 not survive the descriptor close. It runs steps 1, 4 and 5 with no check, no markers and no child:
@@ -417,9 +437,11 @@ The classifier combines both filters with ssh's own exit status:
 
 `attach(request)` does, in order:
 
-1. Generate `token = secrets.token_hex(8)`, build the `tty` envelope for the request with `term`,
-   and send it to a first connection as `mode: "park"` with `handover: token` (argv shape `run`,
-   stage 0 with no argument). The socket path, `/tmp/agw-handover-<token>/s`, is computed locally.
+1. `VMAccess.attach` generates `token = secrets.token_hex(8)`, creates the client log, and builds
+   both argvs before anything spawns; `attach.py` receives the token, the two argvs and the log as
+   data, as the forward does. The first connection gets the `tty` envelope for the request with
+   `term`, as `mode: "park"` with `handover: token` (argv shape `run`, stage 0 with no argument).
+   The socket path, `/tmp/agw-handover-<token>/s`, is computed locally.
 2. agw-launch, in `park` mode, first pre-checks what the terminal half would otherwise fail on: the
    working directory (`cwd`, or home) must be enterable and the shell executable. A failure is
    `refused cwd` or `refused exec <ERRNO>`, so it comes back typed before the terminal is touched.
@@ -428,7 +450,10 @@ The classifier combines both filters with ssh's own exit status:
    `refused handover`, so a pre-planted path is never reused. The path is fixed under `/tmp`, so
    `TMPDIR` plays no part. It binds a Unix stream socket `s` in the directory under umask 077,
    listens, and writes `<M>parked` to stdout.
-3. The client reads that line from the parking connection, then, inside
+3. The client reads that line from the parking connection, within `ConnectTimeout` plus the
+   launcher's 30 second wait; past that it kills the connection and raises
+   `ExecutionIncomplete(Unknown(DEADLINE))` with the terminal untouched, which covers a startup file
+   that reads stdin (it would otherwise hold the connection open forever). Then, inside
    `with guarded_terminal() as guard:`, runs the terminal half. Its stage 0 gets the socket path as
    `sys.argv[1]`, connects, reads the launcher frame and the envelope frame from the socket, and
    runs agw-launch in `tty` mode. No guest text reaches a command line.

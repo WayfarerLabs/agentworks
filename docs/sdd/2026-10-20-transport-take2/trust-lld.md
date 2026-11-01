@@ -33,8 +33,8 @@ primitive slice 4 reuses for it.
 `trust.py` and `errors.py` import no legacy module (R10), and the existing package guard covers them
 as it walks `agentworks.execution`. Legacy modules call them, never the reverse. Slice 2 builds its
 VM policy's trust options from `trust.ssh_options`. Slice 2 also deletes the proof carrier, whose
-copy of these options (`execution/carriers/ssh/connection.py:105-157`) is the model here, so only
-one copy survives.
+copy of these options (`execution/carriers/ssh/connection.py:105-157` at `fd1256b1f`) is the model
+here, so only one copy survives.
 
 ## The client
 
@@ -57,17 +57,17 @@ which every version accepts, and that holds for scp, whose own `ssh` reads the s
   and `nul`, and Windows reserves those with any extension too, so a prefix is the safe fix. HLA D9
   is amended to match.
 - **Alias.** `HostKeyAlias=agentworks-vm-<name>`. It satisfies the alias rule the proof enforces
-  (`execution/carriers/ssh/connection.py:64`). It is deliberately not derived from the configurable
-  `ssh_host_prefix`, so changing that prefix never orphans trust.
+  (`execution/carriers/ssh/connection.py:64` at `fd1256b1f`). It is deliberately not derived from
+  the configurable `ssh_host_prefix`, so changing that prefix never orphans trust.
 - **Record format.** Plain `known_hosts` lines, `<alias> <keytype> <base64>`, one per key. A record
   the import writes is mode 0600; the file `ssh` creates at enrollment takes the umask, which the
   0700 directory makes harmless. Writes go through a temporary file in the directory and a rename,
   reusing `ssh_config.py`'s `_atomic_write` (`ssh_config.py:271`) moved to a shared helper rather
   than adding a third copy.
 - **Path quoting.** Option values follow the proof's `_literal_path` rules
-  (`execution/carriers/ssh/connection.py:19`): an absolute path, forward slashes on Windows, and a
-  refusal of `%`, `$`, `"`, backslash and control characters. The path is always double-quoted. A
-  home directory that breaks those rules is a `ConfigError` naming the path.
+  (`execution/carriers/ssh/connection.py:19` at `fd1256b1f`): an absolute path, forward slashes on
+  Windows, and a refusal of `%`, `$`, `"`, backslash and control characters. The path is always
+  double-quoted. A home directory that breaks those rules is a `ConfigError` naming the path.
 
 ## Trust modes and options
 

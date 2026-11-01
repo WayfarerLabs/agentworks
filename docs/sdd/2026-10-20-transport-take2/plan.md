@@ -251,6 +251,7 @@ first operation there is the base contract check.
       `sessions/manager/_scope.py`. Update the collateral that names it, including the
       `agentworks-reviewer` persona's sanctioned conditional-repair shape.
 - [ ] Send cloud recovery's script on stdin rather than in `sudo -n /bin/sh` arguments (R4).
+- [ ] Move `vm shell --platform` onto `native_shell` and delete `vms/manager/platform_shell.py`.
 - [ ] Delete `VMPlatform.native_transport`, the `transports.native_transport` factory and
       `native_shell_unavailable_hint`.
 - [ ] Tests:
@@ -352,6 +353,8 @@ Definition of done: create and reinit run entirely on the new transport.
       path and its memo in `sessions/multi_console/`, and the `Defaults:<admin> setenv` sudoers
       grant (`_write_sudoers_console_setenv`), with reinit removing the installed fragment from
       existing VMs.
+- [ ] Move the session callers of `_assert_agent_ssh_works` (`sessions/manager/_create.py`,
+      `_create_roll.py`, `_pids.py`) to `_assert_agent_access_works`, and delete the legacy probe.
 - [ ] Re-prove incident rows I6a and I8.
 - [ ] Supersede ADR 0017.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
