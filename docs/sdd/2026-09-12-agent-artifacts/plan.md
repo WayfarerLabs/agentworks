@@ -16,14 +16,14 @@ explicitly lists the retained live acceptance obligations. Neither SDD locks ahe
 acceptance. The final closeout records the R1-R16/R1-R10 audits and adds both lockfiles together.
 Transport work remains with its owner; this implementation uses today's transport APIs.
 
-- [ ] Amend owned requirements and architecture to independent facets, matching-content adoption,
+- [x] Amend owned requirements and architecture to independent facets, matching-content adoption,
       per-entry conflict reports and advisory stale-ancestor artifact delivery.
-- [ ] Implement native adoption/convergence and interrupted-run retry with truthful partial setup
+- [x] Implement native adoption/convergence and interrupted-run retry with truthful partial setup
       evidence, preserving differing unowned entries and independent setup work.
-- [ ] Implement runtime routing over available captures and known deferrals without an ancestor
+- [x] Implement runtime routing over available captures and known deferrals without an ancestor
       freshness gate, recapture, implicit setup or duplicate delivery; preserve own-facet errors.
-- [ ] Align artifact publication, permanent guides and diagnostics with the amended contract.
-- [ ] Complete private project, complexity and correctness reviews and the required gates.
+- [x] Align artifact publication, permanent guides and diagnostics with the amended contract.
+- [x] Complete private project, complexity and correctness reviews and the required gates.
 - [ ] Publish the complete ready handoff with the full live-test emphasis; critically assess and
       incorporate or rebut feedback within the three-round allowance.
 - [ ] Audit the independent live evidence against every retained acceptance requirement, reconcile
@@ -1041,3 +1041,40 @@ These observations close only handoff bookkeeping. Remaining native option, mana
 shared-workspace and VM placement acceptance must be established by the new ready handoff's
 integration-test run before either SDD locks. Empty non-package session directories were reported as
 an optional observation without retained content, not an open accepted failure.
+
+## Facet independence implementation evidence, 2026-11-01
+
+The complete implementation was reviewed at `06fa0dfcb6511627e47b5e98b682ca1f6891ed11` against
+`c8d4dfb`. Independent project, complexity and correctness reviews are clean after correction of
+stale inactive inspection, obsolete strict routing, ancestor-only argument checks and same-origin
+native replay. Recognized ancestor metadata is separate from new policy paths and strict proposal
+expectations; old name drift cannot block unrelated new delivery, while actual competing names
+remain errors. No persisted-state version or transport API changed.
+
+Lead validation on that code head: **10,297 non-integration tests passed, 11 skipped**; Ruff lint
+and format passed (920 files), and mypy passed (884 files). Wheel and source builds passed. File
+lint, locked-SDD and Rulesync 7.14.0 checks passed, as did CI's Typer-isolation check. Website
+validation passed 160 Python and 103 Node tests, with 14 files identical across both repeated builds
+for each site base. Actual isolated local marketplace tests used Claude Code 2.1.316 and Codex
+0.166.0; those are observed versions, not minimum requirements. Target-side native probes exercise
+Claude, Codex and Grok replay without starting a model.
+
+The real CLI ran help, isolated config initialization, both harness/artifact guide topics and
+artifact inspection help successfully. The temporary HOME was independently verified removed. An
+attempted workspace-local pytest fixture root inherited default ACLs and exceeded tmux's socket path
+limit, producing 14 fixture failures. Unchanged `c8d4dfb` reproduced the initial ACL failure:
+
+```text
+AssertionError: assert 'system.posix_acl_access' not in ['system.posix_acl_access']
+```
+
+The tmux failure reported `File name too long`. All 145 tests from the affected modules then passed
+under a short clean temporary root, followed by the full passing run above. Both short roots were
+verified removed; no failing cases were filtered out and no product checks were weakened.
+
+The operator directed live validation to the separate integration-test session triggered by the
+ready PR. This lead created no live backend resources and claims no completed live matrix from these
+local checks. The handoff requests every retained acceptance scenario below, with particular
+attention to interrupted native registration, independent facets during upstream drift, actual users
+and workspaces, own-session failure before teardown, native options and cleanup. Both SDDs remain
+unlocked until that evidence is audited and the remaining requirements are complete.
