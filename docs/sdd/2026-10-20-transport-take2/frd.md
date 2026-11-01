@@ -228,12 +228,14 @@ On python3, after the lead found it installed only at init on `main`:
 > way so as to not require Python. It's up to you but my feeling is that it would ultimately be way
 > easier to implement agw-launch in Python vs bash.
 
-On the lead's final delivery recommendation and R3. The lead recommended that every request travel
-on stdin, with the terminal half of an attach fetching its request over a second connection; that
-agw-launch be written in Python and python3 be installed at provisioning; that managed accounts'
-login shells stay limited to `sh`, `dash`, `bash` and `zsh`, since the account shell still parses
-one fixed line; and that R3 be read as "the command never sees the effects of startup", since sshd
-always runs the account's login shell first. The operator answered:
+On the lead's final delivery recommendation and R3:
+
+[The lead's final recommendation, in one message: every request travels on stdin, with the terminal
+half of an attach fetching its request over a second connection; agw-launch is written in Python,
+and python3 is installed at provisioning; managed accounts' login shells stay limited to `sh`,
+`dash`, `bash` and `zsh`, since the account shell still parses one fixed line. The same message
+asked whether R3 can be read as "the command never sees the effects of startup", since sshd always
+runs the account's login shell first. The operator answered:]
 
 > Sounds good. And I agree with that change to R3.
 

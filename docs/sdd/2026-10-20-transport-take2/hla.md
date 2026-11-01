@@ -179,11 +179,11 @@ outside that list, such as `tcsh`, was measured (salvage list) parsing the old B
 wrongly while reporting an ordinary-looking status. The Python stage 0 did parse under `tcsh` in the
 integration report on #856, but the list stays to the four shells the conformance vectors cover.
 Before stage 0 starts, the account shell may read its own non-interactive startup file: zsh's
-`.zshenv`, or the `.bashrc` Debian's bash reads under sshd. R3, as amended on 2026-10-31, accepts
-that because nothing those files do reaches the command: agw-launch drops output written before its
-start marker, and it rebuilds the environment, directory and umask itself. A startup file that reads
-stdin would consume the request; the request then fails as not delivered, and a conformance vector
-covers it.
+`.zshenv`, or the `.bashrc` Debian's bash reads under sshd. R3, as amended on 2026-11-01, accepts
+that and lists what agw-launch resets: output written before its start marker, the environment, the
+working directory, the umask, signal handling and open descriptors. Its three known gaps are in step
+4 below. A startup file that reads stdin would consume the request; the request then fails as not
+delivered, and a conformance vector covers it.
 
 **What agw-launch needs.** The python3 of every recognized Debian release (`debian.py`), which
 provisioning installs (D10), its standard library, and `sudo` for elevation. It is written in plain
@@ -215,14 +215,15 @@ the same installed program (`2026-08-04-next-steps/target-state.md`).
 3. **Writes the start marker**, `<nonce> start`, to stdout and to stderr.
 4. **Resets what the payload inherits:**
    - the environment, rebuilt from `HOME`, `USER`, `LOGNAME` and `SHELL` from the identity's passwd
-     entry, a fixed `PATH`, the locale, then the session variables today's shells and session
-     workloads use, each taken from a source startup files cannot touch: `TERM` from the envelope
-     (the operator's terminal type, with a default the LLD sets for a Windows workstation that has
-     none) and `SSH_TTY` from the terminal's name in TTY mode, and `XDG_RUNTIME_DIR` as
-     `/run/user/<uid>` when that directory exists and belongs to the identity; then the request's
-     environment. Nothing is copied from the inherited environment, so `SSH_CLIENT` and
-     `SSH_CONNECTION`, which no Agentworks code reads, are no longer passed, and release notes say
-     so;
+     entry, a fixed `PATH`, the locale, `SHLVL=1` (so a bash child of the payload never reads the
+     account's `~/.bashrc`, whichever of Debian bash's triggers is present), then the session
+     variables today's shells and session workloads use, each taken from a source startup files
+     cannot touch: `TERM` from the envelope (the operator's terminal type, with a default the LLD
+     sets for a Windows workstation that has none) and `SSH_TTY` from the terminal's name in TTY
+     mode, and `XDG_RUNTIME_DIR` as `/run/user/<uid>` when that directory exists and belongs to the
+     identity; then the request's environment. Nothing is copied from the inherited environment, so
+     `SSH_CLIENT` and `SSH_CONNECTION`, which no Agentworks code reads, are no longer passed, and
+     release notes say so;
    - the working directory (the home directory by default) and a fixed umask;
    - signal dispositions back to their defaults, and no inherited descriptor above 2.
 
@@ -248,11 +249,12 @@ the same installed program (`2026-08-04-next-steps/target-state.md`).
   the command's caller. On the terminal half of an attach the client is not in the stream, so such
   output can appear on the operator's terminal; it still never reaches the command.
 - **The trailer is the only completion evidence.** The client strips it, so a guest exit of 255 is
-  reported as completed with status 255. Once the trailer and the remote exit status have arrived,
-  the client keeps reading for a short, fixed linger and then ends the client process. Bytes that
-  arrive in that window, from background children of the payload, are kept as stderr. It never waits
-  for end of file, because a background child that holds stderr would otherwise stall the request
-  for its whole lifetime (measured in the integration report on #856).
+  reported as completed with status 255. Once the trailer has arrived, the client keeps reading for
+  a short, fixed linger and then ends the client process; the trailer already carries the payload's
+  status, and the ssh client's own exit waits for the channel to close. Bytes that arrive in that
+  window, from background children of the payload, are kept as stderr. It never waits for end of
+  file, because a background child that holds stderr would otherwise stall the request for its whole
+  lifetime (measured in the integration report on #856).
 - **Not delivered.** A remote exit status other than 255 with no start marker means the payload
   never started: a clean exit delivers all prior output first, and step 2 refuses streams the marker
   could not reach. Status 127 without `sudo` there means the account shell found no python3, which

@@ -37,6 +37,8 @@
 - [x] Record the operator's answers to the HLA's open questions.
 - [x] Record the operator's rulings on the HLA's "Awaiting the operator" items, and amend R3 if the
       operator accepts the proposed wording.
+- [ ] Record the operator's answers on the auth key's handling in provisioning (amending R1 if the
+      operator accepts) and on python3 at init.
 - [x] Revise the design for the operator's 2026-10-31 decisions (stdin delivery, agw-launch in
       Python, python3 at provisioning, the terminal handover, three PRs), and run the private review
       on the revision.
@@ -142,7 +144,8 @@ a VM connection.
   - sensitive stdin absent from logs and exceptions;
   - binary stdin and stdout on Windows.
 - [ ] Re-prove incident rows I1 to I7 and I11, the last with a conformance vector in which a bash
-      child of the payload reads no account startup file.
+      child of the payload reads no account startup file, run with a pipe and with a socket on
+      stdin.
 - [ ] Amend ADRs 0013 and 0014.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
