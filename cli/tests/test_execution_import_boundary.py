@@ -15,16 +15,10 @@ from pathlib import Path
 
 import pytest
 
+from tests.execution.legacy_modules import is_legacy
+
 PACKAGE = Path(__file__).resolve().parents[1] / "agentworks"
 
-LEGACY_MODULES = (
-    "agentworks.transports",
-    "agentworks.ssh",
-    "agentworks.remote_exec",
-    "agentworks.harness_setup.runner",
-    "agentworks.native_files",
-    "agentworks.plugins.proxmox.transport",
-)
 
 # Later slices append the files they migrate.
 MIGRATED_FILES = (
@@ -33,10 +27,6 @@ MIGRATED_FILES = (
     "vms/manager/port_forward.py",
     "agents/manager/access.py",
 )
-
-
-def _is_legacy(name: str) -> bool:
-    return any(name == legacy or name.startswith(legacy + ".") for legacy in LEGACY_MODULES)
 
 
 def legacy_imports(source: str, *, module: str, is_package: bool = False, filename: str = "<unknown>") -> list[str]:
@@ -50,7 +40,7 @@ def legacy_imports(source: str, *, module: str, is_package: bool = False, filena
     found: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            found += [alias.name for alias in node.names if _is_legacy(alias.name)]
+            found += [alias.name for alias in node.names if is_legacy(alias.name)]
         elif isinstance(node, ast.ImportFrom):
             base = node.module or ""
             if node.level:
@@ -58,7 +48,7 @@ def legacy_imports(source: str, *, module: str, is_package: bool = False, filena
                 base = ".".join([*anchor, base]) if base else ".".join(anchor)
             # `from agentworks import ssh` names the module in the alias.
             found += [
-                f"{base}.{alias.name}" for alias in node.names if _is_legacy(base) or _is_legacy(f"{base}.{alias.name}")
+                f"{base}.{alias.name}" for alias in node.names if is_legacy(base) or is_legacy(f"{base}.{alias.name}")
             ]
     return found
 

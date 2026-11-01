@@ -3,8 +3,9 @@
 Callers build an access object with :func:`vm_access` and call its ``run``,
 ``stream``, ``attach`` and ``forward``; requests and results are in
 ``agentworks.execution.requests`` and ``results``. The functions here import
-their modules on first use, so importing the package stays cheap and a test
-reaches every caller by patching the one attribute on this package.
+their modules on first use: ``trust`` pulls in ``config``, about 250 ms, which
+a command that never connects should not pay. A test reaches every caller by
+patching the one attribute on this package.
 
 This package imports nothing from the legacy transport stack (HLA D14).
 """

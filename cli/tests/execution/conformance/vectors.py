@@ -8,6 +8,7 @@ completion, the bytes, the status. None restates a message.
 from __future__ import annotations
 
 import ast
+import io
 import os
 import subprocess
 import time
@@ -18,7 +19,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.errors import ValidationError
-from agentworks.execution.errors import RequestRefused, TrustMismatch
+from agentworks.execution.errors import ExecutionIncomplete, RequestRefused, TrustMismatch
 from agentworks.execution.requests import Command, LoginShell, Script, Shell
 from agentworks.execution.results import (
     Completed,
@@ -241,6 +242,37 @@ def deadline(lane: Lane) -> None:
     assert all(process.poll() is not None for process in spawned)
 
 
+class SlowSink(io.BytesIO):
+    """An operator stream that is slow to take output, so a pipe stays full while the guest finishes."""
+
+    def write(self, data: object, /) -> int:  # type: ignore[override]
+        time.sleep(0.2)
+        return super().write(data)  # type: ignore[arg-type]
+
+
+def payload_leaves_the_shared_streams_non_blocking_and_full(lane: Lane) -> None:
+    # The payload shares descriptors 1 and 2 with the launcher, so what it does to them applies to the
+    # launcher's closing markers. Both pipes are full when it exits, and the reader is slow.
+    program = (
+        "import os\n"
+        "for fd in (1, 2):\n"
+        "    os.set_blocking(fd, False)\n"
+        "    for chunk in (b'x' * 4096, b'x'):\n"
+        "        try:\n"
+        "            while True:\n"
+        "                os.write(fd, chunk)\n"
+        "        except BlockingIOError:\n"
+        "            pass\n"
+    )
+    out, err = SlowSink(), SlowSink()
+
+    status = lane.access.stream(cmd("python3", "-c", program), stdin=None, stdout=out, stderr=err)
+
+    assert status == 0
+    assert out.getvalue() == b"x" * len(out.getvalue()) != b""
+    assert err.getvalue() == b"x" * len(err.getvalue()) != b""
+
+
 # -- Handover ---------------------------------------------------------------------------
 
 
@@ -301,6 +333,21 @@ def handover_gives_up_after_its_wait(lane: Lane) -> None:
 
     assert time.monotonic() - started < 15
     assert lane.wait_gone(f"/tmp/agw-handover-{token}")
+
+
+def parking_that_never_reports_is_bounded_and_leaves_the_terminal_alone(lane: Lane) -> None:
+    account = local(lane)
+    needs_startup_files(account)
+    account.startup(startup_file(account), "cat >/dev/null\n")  # holds the request and the connection open
+    account.shorten_parking_wait(2)
+
+    with account.terminal() as terminal, pytest.raises(ExecutionIncomplete) as raised:
+        started = time.monotonic()
+        account.access.attach(LoginShell(cwd=account.workdir))
+
+    assert time.monotonic() - started < 15
+    assert raised.value.result.completion == Unknown(UnknownReason.DEADLINE)
+    assert terminal.calls == 0
 
 
 # -- S only -----------------------------------------------------------------------------
@@ -426,8 +473,11 @@ def signals_descriptors_and_session_variables_are_reset(lane: Lane) -> None:
         startup_file(account),
         "trap '' HUP INT TERM USR1 USR2\nexec 9</etc/passwd\nexport TERM=startup-term XDG_RUNTIME_DIR=/startup-xdg\n",
     )
+    # The shell reads its own signal state with builtins. A child (grep) reading the shell's
+    # status can catch the shell between blocking signals for a fork and restoring them, which
+    # shows a blocked mask under load that the payload never had.
     inspect = (
-        "grep -E 'SigIgn|SigBlk' /proc/$$/status; "
+        'while read key value; do case $key in SigBlk:|SigIgn:) echo "$key $value";; esac; done < /proc/$$/status; '
         "ls /proc/$$/fd; "
         'echo "TERM=${TERM-unset}"; echo "XDG=${XDG_RUNTIME_DIR-unset}"'
     )
@@ -439,8 +489,8 @@ def signals_descriptors_and_session_variables_are_reset(lane: Lane) -> None:
     owned = os.path.isdir(runtime) and os.stat(runtime).st_uid == uid
     assert result.completion == Completed(0)
     assert result.stdout.decode().splitlines() == [
-        "SigBlk:\t0000000000000000",
-        "SigIgn:\t0000000000000000",
+        "SigBlk: 0000000000000000",
+        "SigIgn: 0000000000000000",
         "0",
         "1",
         "2",
@@ -507,6 +557,7 @@ def build() -> list[Vector]:
             handover_whose_second_connection_never_arrives_leaves_nothing,
         ),
         Vector("handover-wait-expires", "LSV", handover_gives_up_after_its_wait),
+        Vector("streams-left-non-blocking", "LSV", payload_leaves_the_shared_streams_non_blocking_and_full),
         Vector("host-key-mismatch", "S", host_key_mismatch_is_trust_mismatch),
     ]
     startup_exits = [
@@ -541,6 +592,7 @@ def build() -> list[Vector]:
             "resets-signals-descriptors-session-variables", "L", signals_descriptors_and_session_variables_are_reset
         ),
         Vector("handover-clean-dispositions", "L", handover_shell_starts_with_clean_dispositions),
+        Vector("parking-never-reports", "L", parking_that_never_reports_is_bounded_and_leaves_the_terminal_alone),
     ]
     return [*shared, *startup_exits, *startup_redirects, *local_only]
 

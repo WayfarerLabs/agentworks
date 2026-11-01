@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.execution import ssh_process
-from agentworks.execution.errors import ClientUnsupported, TrustMismatch
+from agentworks.execution.errors import TrustMismatch
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -28,24 +28,21 @@ def run_forward(argv: Sequence[str], *, vm_name: str, log: Path | None) -> int:
 
     Never raises for a non-zero status: ``ExitOnForwardFailure`` and
     ``ConnectTimeout`` make a setup failure the same non-zero exit, so there is
-    no readiness probe. On a non-zero exit it reports the log's last lines, and
-    a host-key failure there is a :class:`TrustMismatch`. With ``log=None`` the
-    client inherits the operator's stderr (``verbose``), so there is no tail and
-    no trust typing. Polling ``wait`` with a timeout is what lets Ctrl-C arrive.
+    no readiness probe. A client killed by a signal reports 128 plus the
+    signal. On a non-zero exit it reports the log's last lines, and a host-key
+    failure there is a :class:`TrustMismatch`. With ``log=None`` the client
+    inherits the operator's stderr (``verbose``), so there is no tail and no
+    trust typing. Polling ``wait`` with a timeout is what lets Ctrl-C arrive.
     """
+    process = ssh_process.spawn(
+        argv,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        # An unread stderr pipe stalls the client after about a thousand refused channels.
+        stderr=None if log is None else subprocess.DEVNULL,
+    )
     try:
-        process = subprocess.Popen(
-            list(argv),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            # An unread stderr pipe stalls the client after about a thousand refused channels.
-            stderr=None if log is None else subprocess.DEVNULL,
-            env=ssh_process.child_environment(),
-        )
-    except OSError as error:
-        raise ClientUnsupported(f"the OpenSSH client could not be started: {error.strerror or error}") from error
-    try:
-        status = _wait(process)
+        status = ssh_process.exit_status(_wait(process))
     finally:
         _end(process)
     if status != 0 and log is not None:

@@ -118,6 +118,11 @@ def encode(request: Request, *, nonce: str, term: str | None = None, handover: s
     return json.dumps(body, ensure_ascii=True, separators=(",", ":")).encode("ascii")
 
 
+def message(request: Request, *, nonce: str, term: str | None = None, handover: str | None = None) -> bytes:
+    """What a request writes to ssh's stdin ahead of the caller's input: the launcher frame, then the envelope frame."""
+    return frame(launcher_source()) + frame(encode(request, nonce=nonce, term=term, handover=handover))
+
+
 def _checked_cwd(cwd: str | None) -> str | None:
     if cwd is None:
         return None
@@ -202,10 +207,10 @@ class StreamFilter:
     def done(self) -> bool:
         return self._phase is _Phase.DONE
 
-    def take_parked(self) -> bool:
-        """Whether a ``parked`` line arrived since the last call."""
-        parked, self._parked = self._parked, False
-        return parked
+    @property
+    def parked(self) -> bool:
+        """Whether a ``parked`` line has arrived. Sticky: a parking connection sends it once."""
+        return self._parked
 
     def feed(self, data: bytes) -> bytes:
         """Take the next chunk of the stream; return the payload bytes it releases."""

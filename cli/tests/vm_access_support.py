@@ -50,8 +50,8 @@ class RecordingVMAccess(VMAccess):
             host="100.64.0.9",
             user="agentworks" if isinstance(identity, Admin) else identity.linux_user,
             identity_file=Path("/nonexistent/key"),
-            identity=identity,
         )
+        self.identity = identity
         self.calls = calls
         self.run_outcomes: list[Result | BaseException] = []
         self.stream_status: int | BaseException = 0
@@ -115,10 +115,6 @@ class AccessRecorder:
 
     def requests(self, operation: str) -> list[Any]:
         return [call.request for call in self.calls if call.operation == operation]
-
-
-def _label(identity: Identity) -> str:
-    return "admin" if isinstance(identity, Admin) else identity.name
 
 
 __all__ = ["AccessRecorder", "Admin", "Agent", "Call", "RecordingVMAccess"]

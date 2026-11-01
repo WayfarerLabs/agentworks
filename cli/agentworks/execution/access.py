@@ -10,13 +10,14 @@ nothing dispatched: resolve the client, encode the request, build the options
 from __future__ import annotations
 
 import contextlib
+import os
 import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import attach as attach_module
-from agentworks.execution import client, envelope, forwarding, ssh_process
+from agentworks.execution import client, envelope, forwarding, pump, ssh_process
 from agentworks.execution.agw_launch import refusal_status
 from agentworks.execution.errors import CommandFailed, describe_refusal
 from agentworks.execution.requests import LoginShell
@@ -59,11 +60,9 @@ class VMAccess:
         host: str | None,
         user: str,
         identity_file: Path,
-        identity: Identity,
         port: int = 22,
     ) -> None:
         self.vm_name = vm_name
-        self.identity = identity
         self._host = host
         self._user = user
         self._identity_file = identity_file
@@ -78,7 +77,7 @@ class VMAccess:
         read up to one pump constant (1 MiB); more is ``Unknown(OUTPUT_LIMIT)``.
         With ``check`` a result that is not ``Completed(0)`` raises its typed error.
         """
-        stdout, stderr = ssh_process.Capture(), ssh_process.Capture()
+        stdout, stderr = pump.Capture(), pump.Capture()
         result = self._execute(request, stdin=None, on_stdout=stdout, on_stderr=stderr)
         result = Result(result.completion, bytes(stdout.data), bytes(stderr.data), result.client_log_tail)
         if check and result.require_completed(self.vm_name) != 0:
@@ -96,10 +95,14 @@ class VMAccess:
         working directory. Anything else that is not a completion raises.
         """
 
-        def deliver(sink: BinaryIO) -> ssh_process.Sink:
+        def deliver(sink: BinaryIO) -> pump.Sink:
             def write(payload: bytes) -> None:
-                sink.write(payload)
-                sink.flush()
+                sink.write(payload)  # a full non-blocking pipe raises BlockingIOError(characters_written)
+                try:
+                    sink.flush()
+                except BlockingIOError as error:
+                    # The payload is in the stream's buffer; the pump offers an empty remainder to flush it.
+                    raise BlockingIOError(error.errno, error.strerror, len(payload)) from None
 
             return write
 
@@ -115,20 +118,30 @@ class VMAccess:
 
     def attach(self, request: LoginShell) -> int:
         """Attach the operator's terminal to a login shell and return its exit status."""
+        if request.deadline is not None:
+            raise ValidationError(
+                "an attached shell cannot carry a deadline", entity_kind="vm", entity_name=self.vm_name
+            )
         ssh = client.resolve_ssh()
         policy, destination = self._policy(), self._destination()
-
-        def parking_argv(log: Path) -> list[str]:
-            command = ssh_process.stage0_command()
-            return ssh_process.build_argv(ssh, policy, destination, ssh_process.ArgvMode.PIPE, command, client_log=log)
-
-        def terminal_argv(socket_path: str) -> list[str]:
-            command = ssh_process.stage0_command(socket_path)
-            return ssh_process.build_argv(ssh, policy, destination, ssh_process.ArgvMode.TERMINAL, command)
-
-        return attach_module.attach(
-            request, vm_name=self.vm_name, parking_argv=parking_argv, terminal_argv=terminal_argv
-        )
+        token, nonce = envelope.new_handover_token(), envelope.new_nonce()
+        term = os.environ.get("TERM") or envelope.DEFAULT_TERM
+        wire = envelope.message(request, nonce=nonce, term=term, handover=token)
+        with ssh_process.client_log() as log:
+            # Both argvs are built before anything spawns, so a missing trust record raises first.
+            parking = ssh_process.build_argv(
+                ssh, policy, destination, ssh_process.ArgvMode.PIPE, ssh_process.stage0_command(), client_log=log
+            )
+            terminal = ssh_process.build_argv(
+                ssh,
+                policy,
+                destination,
+                ssh_process.ArgvMode.TERMINAL,
+                ssh_process.stage0_command(attach_module.socket_path(token)),
+            )
+            return attach_module.attach(
+                vm_name=self.vm_name, wire=wire, nonce=nonce, parking_argv=parking, terminal_argv=terminal, log=log
+            )
 
     def forward(self, forwards: Sequence[Forward], *, verbose: bool = False) -> int:
         """Forward local ports until the client exits, and return its status."""
@@ -169,27 +182,27 @@ class VMAccess:
         request: Request,
         *,
         stdin: BinaryIO | None,
-        on_stdout: ssh_process.Sink,
-        on_stderr: ssh_process.Sink,
+        on_stdout: pump.Sink,
+        on_stderr: pump.Sink,
     ) -> Result:
         if isinstance(request, LoginShell):
             raise ValidationError("a login shell can only be attached", entity_kind="vm", entity_name=self.vm_name)
         ssh = client.resolve_ssh()
         nonce = envelope.new_nonce()
-        wire = envelope.frame(envelope.launcher_source()) + envelope.frame(envelope.encode(request, nonce=nonce))
+        wire = envelope.message(request, nonce=nonce)
         policy, destination = self._policy(), self._destination()
         with ssh_process.client_log() as log:
             argv = ssh_process.build_argv(
                 ssh, policy, destination, ssh_process.ArgvMode.PIPE, ssh_process.stage0_command(), client_log=log
             )
-            with ssh_process.PipeSession(
+            with pump.PipeSession(
                 argv,
                 request=wire,
                 nonce=nonce,
                 stdin=stdin,
                 on_stdout=on_stdout,
                 on_stderr=on_stderr,
-                deadline=ssh_process.Deadline.after(request.deadline),
+                deadline=pump.Deadline.after(request.deadline),
             ) as session:
                 stop = session.pump()
                 session.end()
@@ -219,5 +232,4 @@ def vm_access(vm: VMRow, config: Config, identity: Identity) -> VMAccess:
         host=vm.tailscale_host,
         user=user,
         identity_file=config.operator.ssh_private_key,
-        identity=identity,
     )

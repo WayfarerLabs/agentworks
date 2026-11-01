@@ -64,9 +64,14 @@ class VMNotReady(StateError):
     HINT_TEMPLATE = "Run 'agw vm reinit {vm}' to install python3."
 
     def __init__(self, vm_name: str, reason: NotDeliveredReason) -> None:
+        # results.py imports this module for the errors it raises.
+        from agentworks.execution.results import NotDeliveredReason
+
         self.vm_name = vm_name
         what = (
-            "its python3 lacks the standard library" if reason == "stdlib_missing" else "python3 is not installed on it"
+            "its python3 lacks the standard library"
+            if reason is NotDeliveredReason.STDLIB_MISSING
+            else "python3 is not installed on it"
         )
         super().__init__(
             f"VM '{vm_name}' cannot run Agentworks requests: {what}",

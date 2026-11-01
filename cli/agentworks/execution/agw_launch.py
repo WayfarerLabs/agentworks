@@ -78,8 +78,12 @@ def main(f: int, g: bytes) -> None:
         return text.encode("utf-8", "surrogateescape")
 
     def emit(fd: int, data: bytes) -> None:
-        # The peer may already be gone; there is nothing useful to do about it.
+        # Descriptors 1 and 2 share their open file descriptions with whatever ran
+        # before this write (a startup file, the payload), which may have made
+        # them non-blocking; a marker must not be lost to EAGAIN. The peer may
+        # already be gone; there is nothing useful to do about that.
         try:
+            os.set_blocking(fd, True)
             while data:
                 data = data[os.write(fd, data) :]
         except OSError:
@@ -181,6 +185,28 @@ def main(f: int, g: bytes) -> None:
     if (out_info.st_dev, out_info.st_ino) == (err_info.st_dev, err_info.st_ino):
         sys.exit("agw-launch: standard output and error are the same stream")
 
+    # The script is staged before the start marker, so a failure to create or
+    # fill it is a launcher failure, not an outcome that may have run.
+    script_fd = -1
+    pass_fds: tuple[int, ...] = ()
+    if request["kind"] == "script":
+        try:
+            # MFD_NOEXEC_SEAL (kernel 6.3 and later), retried without it only on
+            # EINVAL; any other failure (EMFILE, say) is a launcher failure.
+            script_fd = os.memfd_create("agw-script", os.MFD_CLOEXEC | 0x8)
+        except OSError as error:
+            if error.errno != errno.EINVAL:
+                raise
+            script_fd = os.memfd_create("agw-script", os.MFD_CLOEXEC)
+        remaining = source
+        while remaining:
+            remaining = remaining[os.write(script_fd, remaining) :]
+        interpreter = {"sh": "/bin/sh", "bash": "/bin/bash", "user_default": shell}[request["shell"]]
+        arguments = [enc(interpreter)]
+        if request["login"]:
+            arguments.append(b"-l")
+        arguments.append(b"/dev/fd/%d" % script_fd)
+        pass_fds = (script_fd,)
     # -- 3. Start marker, to stdout and then stderr.
 
     emit(1, marker + b"start\n")
@@ -251,23 +277,6 @@ def main(f: int, g: bytes) -> None:
 
     # -- 5. Run the payload as a child, not a shell.
 
-    script_fd = -1
-    pass_fds: tuple[int, ...] = ()
-    if request["kind"] == "script":
-        try:
-            # MFD_NOEXEC_SEAL (kernel 6.3 and later), retried without it on EINVAL.
-            script_fd = os.memfd_create("agw-script", os.MFD_CLOEXEC | 0x8)
-        except OSError:
-            script_fd = os.memfd_create("agw-script", os.MFD_CLOEXEC)
-        remaining = source
-        while remaining:
-            remaining = remaining[os.write(script_fd, remaining) :]
-        interpreter = {"sh": "/bin/sh", "bash": "/bin/bash", "user_default": shell}[request["shell"]]
-        arguments = [enc(interpreter)]
-        if request["login"]:
-            arguments.append(b"-l")
-        arguments.append(b"/dev/fd/%d" % script_fd)
-        pass_fds = (script_fd,)
     try:
         child = subprocess.Popen(
             arguments,
@@ -282,7 +291,8 @@ def main(f: int, g: bytes) -> None:
     if script_fd >= 0:
         os.close(script_fd)
 
-    # -- 6. Complete: the end marker on stdout, then the trailer on stderr.
+    # -- 6. Complete: the end marker on stdout, then the trailer on stderr
+    # (emit puts the shared descriptors back to blocking first).
 
     emit(1, marker + b"end\n")
     emit(2, marker + b"exit %d\n" % (128 - code if code < 0 else code))

@@ -108,8 +108,7 @@ def test_a_parked_line_is_removed_and_reported_without_ending_the_stream() -> No
         assert stream.closing == "end"
     stream = StreamFilter(NONCE)
     stream.feed(START + PREFIX + b"parked\n")
-    assert stream.take_parked()
-    assert not stream.take_parked()
+    assert stream.parked
     assert not stream.done
 
 

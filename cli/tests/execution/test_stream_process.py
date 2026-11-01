@@ -1,8 +1,8 @@
 """``stream`` in a real process: the operator's stdin stays open, the guest exits, and the interpreter exits cleanly.
 
 The pump copies stdin from a daemon thread. A thread blocked in a buffered
-read aborts the interpreter at exit (status 134), so the call takes the raw
-stream. That only shows in a separate process whose stdin is still open when
+read aborts the interpreter at exit (status 134), so ``stream_to_operator``
+passes the raw stream. That only shows in a separate process whose stdin is still open when
 the command finishes.
 """
 
@@ -19,7 +19,7 @@ CHILD = r"""
 import getpass, sys
 from pathlib import Path
 from agentworks.execution import client, ssh_process
-from agentworks.execution.access import Admin, VMAccess
+from agentworks.execution.access import VMAccess, stream_to_operator
 from agentworks.execution.client import SSHClient
 from agentworks.execution.requests import Command
 
@@ -30,12 +30,9 @@ ssh_process.build_argv = lambda ssh, policy, destination, mode, command, *a, **k
 ]
 access = VMAccess(
     vm_name="local", host="127.0.0.1", user=getpass.getuser(),
-    identity_file=Path("/nonexistent"), identity=Admin(),
+    identity_file=Path("/nonexistent"),
 )
-status = access.stream(
-    Command(("sh", "-c", "echo out; echo err >&2; exit 3"), deadline=30),
-    stdin=sys.stdin.buffer.raw, stdout=sys.stdout.buffer, stderr=sys.stderr.buffer,
-)
+status = stream_to_operator(access, Command(("sh", "-c", "echo out; echo err >&2; exit 3"), deadline=30))
 sys.stdout.flush()
 sys.exit(status)
 """

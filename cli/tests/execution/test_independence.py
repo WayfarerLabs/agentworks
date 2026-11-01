@@ -7,20 +7,20 @@ import sys
 
 import pytest
 
+from tests.execution.legacy_modules import LEGACY_MODULES
+
 
 @pytest.mark.windows
 def test_new_execution_imports_in_a_fresh_process_without_legacy() -> None:
-    script = r"""
+    script = (
+        "retired = "
+        + repr(LEGACY_MODULES)
+        + r"""
 import importlib
 import importlib.abc
 import pkgutil
 import sys
 
-retired = (
-    "agentworks.transports", "agentworks.ssh", "agentworks.remote_exec",
-    "agentworks.harness_setup.runner", "agentworks.native_files",
-    "agentworks.plugins.proxmox.transport",
-)
 class BlockRetired(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         if any(fullname == name or fullname.startswith(name + ".") for name in retired):
@@ -41,5 +41,6 @@ assert not any(
     for loaded in sys.modules for name in retired
 )
 """
+    )
     result = subprocess.run([sys.executable, "-I", "-c", script], capture_output=True, timeout=20)
     assert result.returncode == 0, result.stderr.decode(errors="replace")

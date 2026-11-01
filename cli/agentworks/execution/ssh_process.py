@@ -1,27 +1,19 @@
-"""Build the ssh client's argv and run the client.
+"""Build the ssh client's argv and start the client.
 
 This is the only module that spawns ``ssh``. It holds the VM policy, stage 0
-(the constant command line every request starts with), the local deadline and
-the pump: a single-threaded loop that drives one client process through its
-non-blocking pipes. The pump knows nothing about ssh, which is what lets the
-conformance suite run it against a local shell.
-
-A deadline bounds the local wait and never claims the guest command stopped.
+(the constant command line every request starts with), the client log and
+:func:`spawn`, the one place a client process is started. The pump that drives
+a client through pipes is in ``pump.py``.
 """
 
 from __future__ import annotations
 
 import contextlib
 import enum
-import math
 import os
-import queue
 import re
 import subprocess
 import tempfile
-import threading
-import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from ipaddress import IPv6Address
 from pathlib import Path
@@ -29,15 +21,15 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
 from agentworks.execution import trust
-from agentworks.execution.envelope import StreamFilter, classify
+from agentworks.execution.envelope import classify
 from agentworks.execution.errors import ClientUnsupported
-from agentworks.execution.results import Completion, Result, Unknown, UnknownReason
+from agentworks.execution.results import Completion, Result, Unknown
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
-    from typing import BinaryIO
 
     from agentworks.execution.client import SSHClient
+    from agentworks.execution.pump import PipeSession, StopReason
     from agentworks.execution.requests import Forward
     from agentworks.execution.trust import TrustBinding
 
@@ -61,16 +53,9 @@ CONNECT_TIMEOUT_SECONDS = 30
 SERVER_ALIVE_INTERVAL_SECONDS = 15
 SERVER_ALIVE_COUNT_MAX = 4
 
-CHUNK_BYTES = 65_536
-CAPTURE_LIMIT_BYTES = 1_048_576
 CLIENT_LOG_TAIL_LINES = 20
+CLIENT_LOG_READ_BYTES = 65_536
 HOST_KEY_FAILURE = "Host key verification failed"
-
-_POLL_SECONDS = 0.01
-_NATURAL_EXIT_SECONDS = 1.0
-_REAP_SECONDS = 0.5
-_EXIT_DRAIN_SECONDS = 0.1
-_STDIN_QUEUE_CHUNKS = 4
 
 _HOST = re.compile(r"[A-Za-z0-9_:][A-Za-z0-9_.:-]*")
 _USER = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*\$?")
@@ -86,35 +71,6 @@ def stage0_command(handover_socket: str | None = None, *, python: str = DEFAULT_
     return command if handover_socket is None else f"{command} {handover_socket}"
 
 
-@dataclass(frozen=True)
-class Deadline:
-    """One local observation budget, not guest cancellation; None is unbounded."""
-
-    expires_at: float | None
-
-    def __post_init__(self) -> None:
-        if self.expires_at is not None and not math.isfinite(self.expires_at):
-            raise ValidationError("Deadline must be finite or explicitly unbounded")
-
-    @classmethod
-    def after(cls, seconds: float | None) -> Deadline:
-        if seconds is None:
-            return cls(None)
-        if not math.isfinite(seconds) or seconds < 0:
-            raise ValidationError("Deadline duration must be finite and nonnegative")
-        return cls(time.monotonic() + seconds)
-
-    def remaining(self) -> float | None:
-        if self.expires_at is None:
-            return None
-        return max(0.0, self.expires_at - time.monotonic())
-
-    @property
-    def expired(self) -> bool:
-        remaining = self.remaining()
-        return remaining is not None and remaining <= 0
-
-
 # -- Policy and argv ---------------------------------------------------------------------
 
 
@@ -122,7 +78,7 @@ class Deadline:
 class Destination:
     """Where the client connects. Validated at the boundary the values come from: the database.
 
-    The port is 22 except in tests, which run a local sshd.
+    The port is 22 except in tests, which run a local sshd; it is never operator input.
     """
 
     host: str
@@ -139,8 +95,6 @@ class Destination:
                 raise ValidationError("SSH IPv6 host must be an unbracketed address without a scope") from None
         if not _USER.fullmatch(self.user):
             raise ValidationError("SSH user must be a literal POSIX account name")
-        if type(self.port) is not int or not 1 <= self.port <= 65535:
-            raise ValidationError("SSH port must be an integer from 1 through 65535")
 
 
 @dataclass(frozen=True)
@@ -204,11 +158,15 @@ def build_argv(
       ``-tt`` would force a pty when stdin is not a terminal, which breaks
       ``echo ls | agw vm shell``.
     - ``FORWARD``: ``-N -n`` (no request, so no stdin to keep), ``-E`` or
-      ``-v``, ``ExitOnForwardFailure`` and one ``-L`` per forward.
+      ``-v`` when ``verbose`` (only a forward may be verbose),
+      ``ExitOnForwardFailure`` and one ``-L`` per forward.
 
     No ``-n`` on a request-bearing connection: it would replace the request's
     stdin with the null device.
     """
+    if verbose and mode is not ArgvMode.FORWARD:
+        # In a pipe mode ssh's debug lines would reach the guest's stderr after the marker.
+        raise ValueError("verbose output is only for a forward")
     argv = [client.path, "-F", "none"]
     if mode is ArgvMode.PIPE:
         argv.append("-T")
@@ -256,9 +214,16 @@ def client_log() -> Iterator[Path]:
 
 
 def client_log_text(path: Path) -> str:
-    """The whole client log, empty when unreadable."""
+    """The end of the client log (its last 64 KiB), empty when unreadable.
+
+    ssh's diagnostics are short, but ``-v`` or a long-lived forward can grow the
+    file, and only its end is ever shown.
+    """
     try:
-        return path.read_text(encoding="utf-8", errors="replace")
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - CLIENT_LOG_READ_BYTES))
+            return handle.read().decode("utf-8", errors="replace")
     except OSError:
         return ""
 
@@ -291,294 +256,36 @@ def child_environment() -> dict[str, str] | None:
     return {name: value for name, value in os.environ.items() if name.upper() not in hidden}
 
 
-def run_terminal(argv: Sequence[str]) -> int:
-    """Run the client on the operator's terminal and return its exit status."""
+def spawn(
+    argv: Sequence[str], *, stdin: int | None, stdout: int | None, stderr: int | None, bufsize: int = -1
+) -> subprocess.Popen[bytes]:
+    """Start the client, or raise :class:`ClientUnsupported` when the operating system cannot.
+
+    The one place a client process is started, so the environment strip and the
+    error mapping exist once. ``None`` for a stream inherits the operator's.
+    """
     try:
-        return subprocess.call(list(argv), env=child_environment())
+        return subprocess.Popen(
+            list(argv), stdin=stdin, stdout=stdout, stderr=stderr, bufsize=bufsize, env=child_environment()
+        )
     except OSError as error:
         raise ClientUnsupported(f"the OpenSSH client could not be started: {error.strerror or error}") from error
 
 
-Sink = Callable[[bytes], None]
-"""Receives payload bytes as they are released."""
+def exit_status(returncode: int) -> int:
+    """A process's exit status as a shell reports it: 128 plus the signal for a client killed by one."""
+    return 128 - returncode if returncode < 0 else returncode
 
 
-class OutputLimitExceeded(Exception):
-    """A capture sink received more than its limit."""
-
-
-class Capture:
-    """A sink that keeps up to ``limit`` bytes and refuses more."""
-
-    def __init__(self, limit: int = CAPTURE_LIMIT_BYTES) -> None:
-        self.data = bytearray()
-        self._limit = limit
-
-    def __call__(self, chunk: bytes) -> None:
-        self.data += chunk
-        if len(self.data) > self._limit:
-            del self.data[self._limit :]
-            raise OutputLimitExceeded
-
-
-class StopReason(enum.Enum):
-    """Why :meth:`PipeSession.pump` returned."""
-
-    DONE = enum.auto()
-    """Both streams reached their closing line."""
-    CONDITION = enum.auto()
-    """The caller's stop condition became true."""
-    EXITED = enum.auto()
-    """The client exited and its pipes stopped producing."""
-    EOF = enum.auto()
-    """Both pipes reached end of file."""
-    DEADLINE = enum.auto()
-    OUTPUT_LIMIT = enum.auto()
-
-
-class _InputFeeder:
-    """Copies the operator's stdin into a queue from a daemon thread.
-
-    A thread is needed because Windows cannot poll a console or pipe handle,
-    and one mechanism serves every platform. It reads the raw stream because a
-    daemon thread blocked in ``BufferedReader.read1`` aborts the interpreter at
-    exit. The queue is bounded so a slow consumer does not buffer the stream.
-    """
-
-    def __init__(self, stream: BinaryIO) -> None:
-        self._stream = stream
-        self._queue: queue.Queue[bytes] = queue.Queue(maxsize=_STDIN_QUEUE_CHUNKS)
-        self.exhausted = False
-
-    def start(self) -> None:
-        threading.Thread(target=self._run, daemon=True, name="agw-stdin").start()
-
-    def _run(self) -> None:
-        try:
-            while True:
-                chunk = self._stream.read(CHUNK_BYTES)
-                if chunk is None:
-                    time.sleep(_POLL_SECONDS)
-                    continue
-                self._queue.put(chunk)
-                if not chunk:
-                    return
-        except (OSError, ValueError):
-            self._queue.put(b"")
-
-    def poll(self) -> bytes | None:
-        """The next chunk, ``b""`` at end of input, or ``None`` when nothing is ready."""
-        try:
-            chunk = self._queue.get_nowait()
-        except queue.Empty:
-            return None
-        if not chunk:
-            self.exhausted = True
-        return chunk
-
-
-class PipeSession:
-    """One client process driven through pipes, until the caller has what it needs.
-
-    The session writes ``request`` and then the caller's ``stdin`` to the
-    client, runs both output streams through :class:`StreamFilter` and passes
-    payload bytes to the sinks. :meth:`pump` can be called more than once, which
-    is how a terminal handover keeps its parking connection while the terminal
-    half runs.
-
-    The client's stdin closes once the request and the caller's input are sent,
-    unless ``hold_stdin_open`` keeps it open for :meth:`close_stdin` (a parked
-    launcher treats its closing as the client leaving).
-
-    A write that fails to the client's stdin is the consumer ending early, not a
-    failure: the session stops sending and keeps reading. A sink that raises
-    ``OSError`` is dropped the same way.
-    """
-
-    def __init__(
-        self,
-        argv: Sequence[str],
-        *,
-        request: bytes,
-        nonce: str,
-        stdin: BinaryIO | None = None,
-        hold_stdin_open: bool = False,
-        on_stdout: Sink,
-        on_stderr: Sink,
-        deadline: Deadline | None = None,
-    ) -> None:
-        self._argv = list(argv)
-        self._outbox = bytearray(request)
-        self._feeder = None if stdin is None else _InputFeeder(stdin)
-        self._sinks = {"out": on_stdout, "err": on_stderr}
-        self._deadline = deadline or Deadline(None)
-        self._hold_stdin_open = hold_stdin_open
-        self._eof = {"out": False, "err": False}
-        self._proc: subprocess.Popen[bytes] | None = None
-        self.stdout = StreamFilter(nonce)
-        self.stderr = StreamFilter(nonce)
-        self.exit_status: int | None = None
-        """The client's own exit status, when it exited by itself; ``None`` while it runs or if it was killed."""
-
-    def __enter__(self) -> PipeSession:
-        self.start()
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self._cleanup()
-
-    def start(self) -> None:
-        try:
-            self._proc = subprocess.Popen(
-                self._argv,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=0,
-                env=child_environment(),
-            )
-        except OSError as error:
-            raise ClientUnsupported(f"the OpenSSH client could not be started: {error.strerror or error}") from error
-        for pipe in (self._proc.stdin, self._proc.stdout, self._proc.stderr):
-            assert pipe is not None
-            os.set_blocking(pipe.fileno(), False)
-        if self._feeder is not None:
-            self._feeder.start()
-
-    def pump(self, stop: Callable[[], bool] | None = None, *, budget: Deadline | None = None) -> StopReason:
-        """Drive the client until a stop reason applies.
-
-        ``budget`` bounds this call on top of the session's own deadline.
-        """
-        proc = self._proc
-        assert proc is not None
-        budget = budget or Deadline(None)
-        last_activity = time.monotonic()
-        while True:
-            if self.exit_status is None:
-                self.exit_status = proc.poll()
-                if self.exit_status is not None:
-                    last_activity = time.monotonic()
-            try:
-                progressed = self._read("out") | self._read("err")
-            except OutputLimitExceeded:
-                return StopReason.OUTPUT_LIMIT
-            progressed |= self._write()
-            if self.stdout.done and self.stderr.done:
-                return StopReason.DONE
-            if stop is not None and stop():
-                return StopReason.CONDITION
-            if self._deadline.expired or budget.expired:
-                return StopReason.DEADLINE
-            if self._eof["out"] and self._eof["err"]:
-                return StopReason.EOF
-            now = time.monotonic()
-            if progressed:
-                last_activity = now
-                continue
-            if self.exit_status is not None and now - last_activity >= _EXIT_DRAIN_SECONDS:
-                return StopReason.EXITED
-            waits = [_POLL_SECONDS, self._deadline.remaining(), budget.remaining()]
-            time.sleep(min(wait for wait in waits if wait is not None))
-
-    def close_stdin(self) -> None:
-        """Close the client's stdin now: the guest then sees end of input."""
-        self._outbox.clear()
-        self._finish_input()
-
-    def end(self) -> None:
-        """End the client: close its stdin, wait up to a second for it to exit, then kill it."""
-        self.close_stdin()
-        proc = self._proc
-        if proc is not None and self.exit_status is None:
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                proc.wait(timeout=_NATURAL_EXIT_SECONDS)
-            self.exit_status = proc.poll()
-        self._cleanup()
-
-    def _read(self, which: str) -> bool:
-        if self._eof[which]:
-            return False
-        proc = self._proc
-        assert proc is not None
-        pipe = proc.stdout if which == "out" else proc.stderr
-        assert pipe is not None
-        stream_filter = self.stdout if which == "out" else self.stderr
-        try:
-            chunk = os.read(pipe.fileno(), CHUNK_BYTES)
-        except BlockingIOError:
-            return False
-        except OSError:
-            chunk = b""
-        payload = stream_filter.feed(chunk) if chunk else stream_filter.finish()
-        if not chunk:
-            self._eof[which] = True
-        if payload:
-            self._deliver(which, payload)
-        return True
-
-    def _deliver(self, which: str, payload: bytes) -> None:
-        try:
-            self._sinks[which](payload)
-        except OSError:
-            # The consumer ended early; keep reading so the command can finish.
-            self._sinks[which] = _discard
-
-    def _write(self) -> bool:
-        proc = self._proc
-        assert proc is not None
-        stdin = proc.stdin
-        if stdin is None or stdin.closed:
-            return False
-        progressed = False
-        if not self._outbox and self._feeder is not None and not self._feeder.exhausted:
-            chunk = self._feeder.poll()
-            if chunk:
-                self._outbox += chunk
-                progressed = True
-            elif chunk is not None:
-                progressed = True
-        if self._outbox:
-            try:
-                written = os.write(stdin.fileno(), bytes(self._outbox[:CHUNK_BYTES]))
-            except BlockingIOError:
-                return progressed
-            except OSError:
-                self._outbox.clear()
-                self._finish_input()
-                return True
-            del self._outbox[:written]
-            progressed |= written > 0
-        if not self._hold_stdin_open and not self._outbox and (self._feeder is None or self._feeder.exhausted):
-            self._finish_input()
-            progressed = True
-        return progressed
-
-    def _finish_input(self) -> None:
-        proc = self._proc
-        if proc is not None and proc.stdin is not None and not proc.stdin.closed:
-            with contextlib.suppress(OSError):
-                proc.stdin.close()
-        if self._feeder is not None:
-            self._feeder.exhausted = True
-
-    def _cleanup(self) -> None:
-        """Close owned pipes and bound local kill and reap, even on interruption."""
-        proc = self._proc
-        if proc is None:
-            return
-        for pipe in (proc.stdin, proc.stdout, proc.stderr):
-            if pipe is not None:
-                with contextlib.suppress(OSError):
-                    pipe.close()
-        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
-            if proc.poll() is None:
-                proc.kill()
-            proc.wait(timeout=_REAP_SECONDS)
-
-
-def _discard(_payload: bytes) -> None:
-    return None
+def run_terminal(argv: Sequence[str]) -> int:
+    """Run the client on the operator's terminal and return its exit status."""
+    process = spawn(argv, stdin=None, stdout=None, stderr=None)
+    try:
+        return exit_status(process.wait())
+    except BaseException:
+        process.kill()
+        process.wait()
+        raise
 
 
 def outcome(session: PipeSession, stop: StopReason, log: Path) -> Result:
@@ -587,10 +294,9 @@ def outcome(session: PipeSession, stop: StopReason, log: Path) -> Result:
     The result carries no stream bytes; the caller's sinks hold those.
     """
     text = client_log_text(log)
-    if stop is StopReason.DEADLINE:
-        completion: Completion = Unknown(UnknownReason.DEADLINE)
-    elif stop is StopReason.OUTPUT_LIMIT:
-        completion = Unknown(UnknownReason.OUTPUT_LIMIT)
+    limit = stop.limit
+    if limit is not None:
+        completion: Completion = Unknown(limit)
     else:
         completion = classify(
             session.stdout, session.stderr, session.exit_status, host_key_failed=HOST_KEY_FAILURE in text

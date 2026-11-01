@@ -18,23 +18,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tests.execution.legacy_modules import LEGACY_MODULES, is_legacy
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from importlib.machinery import ModuleSpec
     from types import ModuleType
-
-LEGACY_MODULES = (
-    "agentworks.transports",
-    "agentworks.ssh",
-    "agentworks.remote_exec",
-    "agentworks.harness_setup.runner",
-    "agentworks.native_files",
-    "agentworks.plugins.proxmox.transport",
-)
-
-
-def is_legacy(name: str) -> bool:
-    return any(name == legacy or name.startswith(legacy + ".") for legacy in LEGACY_MODULES)
 
 
 class _BlockLegacy(importlib.abc.MetaPathFinder):

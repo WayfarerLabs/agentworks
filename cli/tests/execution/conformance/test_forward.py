@@ -76,6 +76,15 @@ def test_with_no_log_nothing_is_read_and_the_status_is_returned(tmp_path: Path) 
     assert forwarding.run_forward(stand_in("import sys; sys.exit(3)"), vm_name="box", log=None) == 3
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="signal statuses are POSIX")
+def test_a_client_killed_by_a_signal_is_128_plus_the_signal(tmp_path: Path) -> None:
+    program = "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"
+
+    status = forwarding.run_forward(stand_in(program), vm_name="box", log=tmp_path / "log")
+
+    assert status == 128 + signal.SIGKILL
+
+
 def test_a_client_that_cannot_start_is_a_typed_refusal() -> None:
     with pytest.raises(ClientUnsupported):
         forwarding.run_forward(["/nonexistent/agw-ssh"], vm_name="box", log=None)

@@ -15,10 +15,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.execution import envelope, ssh_process
+from agentworks.execution import envelope, pump, ssh_process
 from agentworks.execution.errors import ClientUnsupported
+from agentworks.execution.pump import Capture, Deadline, PipeSession, StopReason
 from agentworks.execution.results import Completed, Unknown, UnknownReason
-from agentworks.execution.ssh_process import Capture, Deadline, PipeSession, StopReason
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -202,6 +202,77 @@ def test_a_deadline_keeps_partial_output_and_reaps_the_client() -> None:
     assert reason is StopReason.DEADLINE
     assert bytes(run.out.data) == b"partial"
     assert run.session.exit_status is None
+    run.assert_closed()
+
+
+def test_a_deadline_does_not_wait_for_the_client_to_exit_on_its_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pump, "_NATURAL_EXIT_SECONDS", 60.0)
+    run = Run("start(); out.write(b'partial'); out.flush(); time.sleep(30)", seconds=0.3)
+
+    started = time.monotonic()
+    run.go()
+
+    assert time.monotonic() - started < 10
+    run.assert_closed()
+
+
+def test_an_output_limit_does_not_wait_for_the_client_to_exit_on_its_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pump, "_NATURAL_EXIT_SECONDS", 60.0)
+    run = Run("start(); out.write(b'o' * 100); out.flush(); time.sleep(30)")
+    run.session._sinks["out"] = Capture(8)  # noqa: SLF001 - swap the sink for a small limit
+
+    started = time.monotonic()
+    reason = run.go()
+
+    assert reason is StopReason.OUTPUT_LIMIT
+    assert time.monotonic() - started < 10
+    run.assert_closed()
+
+
+class _FullPipeSink:
+    """A sink standing in for a non-blocking pipe: it takes a few bytes at a time, and refuses in between."""
+
+    def __init__(self) -> None:
+        self.data = bytearray()
+        self.refusals = 0
+        self._calls = 0
+
+    def __call__(self, payload: bytes) -> None:
+        self._calls += 1
+        if self._calls % 3 == 0:
+            self.refusals += 1
+            raise BlockingIOError(11, "would block", 0)
+        if len(payload) > 5:
+            self.data += payload[:5]
+            self.refusals += 1
+            raise BlockingIOError(11, "would block", 5)
+        self.data += payload
+
+
+def test_a_sink_that_would_block_is_waited_on_and_no_output_is_dropped_or_repeated() -> None:
+    payload = bytes(range(256)) * 40
+    sink = _FullPipeSink()
+    script = f"start(); out.write({payload!r}); out.flush(); finish(0)"
+    session = PipeSession(
+        [sys.executable, "-c", PRELUDE + script], request=b"", nonce=NONCE, on_stdout=sink, on_stderr=Capture()
+    )
+    with session:
+        assert session.pump() is StopReason.DONE
+        session.end()
+
+    assert bytes(sink.data) == payload
+    assert sink.refusals > 0
+    assert envelope.classify(session.stdout, session.stderr, session.exit_status) == Completed(0)
+
+
+def test_a_sink_that_never_stops_blocking_ends_at_the_deadline_with_the_client_reaped() -> None:
+    def blocked(_payload: bytes) -> None:
+        raise BlockingIOError(11, "would block", 0)
+
+    run = Run("start(); out.write(b'x'); out.flush(); finish(0)", seconds=0.5)
+    run.session._sinks["out"] = blocked  # noqa: SLF001
+
+    assert run.go() is StopReason.DEADLINE
     run.assert_closed()
 
 

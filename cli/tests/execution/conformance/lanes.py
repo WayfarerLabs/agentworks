@@ -6,7 +6,7 @@
   exported as sshd does. It covers the shells and runs on every Linux CI host.
 - **S** runs the real client against a rootless local ``sshd`` (loopback, a
   temporary host key and ``AuthorizedKeysFile``, no PAM) and ``trust.write_records``
-  for the test host key. It skips when no ``sshd`` binary exists.
+  for the test host key. It skips when no ``sshd`` binary exists, and fails on CI.
 - **V** runs against a live VM named by ``AGW_CONFORMANCE_VM``, as the operator's
   own configured admin. It is the integration lane, run by the tester from each
   workstation.
@@ -29,14 +29,16 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, ssh_process, trust
-from agentworks.execution.access import Admin, VMAccess
+from agentworks.execution.access import VMAccess
 from agentworks.execution.client import SSHClient
 from agentworks.execution.requests import Command, Request, Script, Shell
 from agentworks.execution.results import Completed, Result
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
+    from typing import NoReturn
 
 SHELLS = ("sh", "dash", "bash", "zsh")
 STARTUP_TIMEOUT_SECONDS = 15
@@ -143,6 +145,10 @@ class Lane:
         self.monkeypatch.setattr(envelope, "new_handover_token", lambda: token)
         return token
 
+    def shorten_parking_wait(self, seconds: float = 2.0) -> None:
+        """Make the client give up on a parking connection that never reports ``parked`` after ``seconds``."""
+        self.monkeypatch.setattr(attach_module, "PARKING_WAIT_SECONDS", seconds)
+
     def shorten_handover_wait(self, seconds: int = 1) -> None:
         """Send a launcher whose parked half gives up after ``seconds``, instead of 30."""
         source = envelope.launcher_source()
@@ -186,14 +192,18 @@ def find_shell(name: str) -> str | None:
     return shutil.which(name)
 
 
+def unavailable(message: str) -> NoReturn:
+    """What a lane's missing prerequisite does: fail on CI, where the workflow installs them, and skip elsewhere."""
+    if os.environ.get("CI"):
+        pytest.fail(message)
+    pytest.skip(message)
+
+
 def require_shell(name: str) -> str:
     """The shell's path; a missing one fails on CI and skips elsewhere."""
     found = find_shell(name)
     if found is None:
-        message = f"conformance needs {name}"
-        if os.environ.get("CI"):
-            pytest.fail(message)
-        pytest.skip(message)
+        unavailable(f"conformance needs {name}")
     return found
 
 
@@ -236,7 +246,6 @@ class LocalLane(LocalFilesystem):
             host="127.0.0.1",
             user=getpass.getuser(),
             identity_file=Path("/nonexistent/identity"),
-            identity=Admin(),
         )
         monkeypatch.setattr(client, "resolve_ssh", lambda: SSHClient("/nonexistent/ssh", (9, 9)))
         monkeypatch.setattr(ssh_process, "build_argv", self._argv)
@@ -302,7 +311,7 @@ def rootless_sshd(directory: Path) -> Iterator[SSHDServer]:
     """A loopback sshd run by the current user, with a temporary host key and authorized key."""
     sshd = find_sshd()
     if sshd is None:
-        pytest.skip("S lane needs an sshd binary")
+        unavailable("S lane needs an sshd binary")
     directory.mkdir(parents=True, exist_ok=True)
     host_key, client_key = directory / "host_key", directory / "client_key"
     for key in (host_key, client_key):
@@ -335,13 +344,13 @@ def rootless_sshd(directory: Path) -> Iterator[SSHDServer]:
         deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
         while True:
             if server.poll() is not None:
-                pytest.skip(f"sshd could not start: {(server.stderr.read() if server.stderr else b'')[:300]!r}")
+                unavailable(f"sshd could not start: {(server.stderr.read() if server.stderr else b'')[:300]!r}")
             try:
                 socket.create_connection(("127.0.0.1", port), timeout=1).close()
                 break
             except OSError:
                 if time.monotonic() > deadline:
-                    pytest.skip("sshd did not start listening")
+                    unavailable("sshd did not start listening")
                 time.sleep(0.1)
         key_fields = Path(f"{host_key}.pub").read_text().split()
         yield SSHDServer(port, client_key, trust.HostKey(key_fields[0], key_fields[1]))
@@ -376,7 +385,6 @@ class SSHDLane(LocalFilesystem):
             host="127.0.0.1",
             user=getpass.getuser(),
             identity_file=server.client_key,
-            identity=Admin(),
             port=server.port,
         )
 

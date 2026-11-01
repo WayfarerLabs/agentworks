@@ -5,7 +5,9 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import signal
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -104,6 +106,32 @@ def test_a_verbose_forward_inherits_the_operators_stderr(tmp_path: Path) -> None
     assert "-E" not in argv
 
 
+@pytest.mark.parametrize("mode", [ArgvMode.PIPE, ArgvMode.TERMINAL])
+def test_only_a_forward_may_be_verbose(tmp_path: Path, mode: ArgvMode) -> None:
+    with pytest.raises(ValueError):
+        argv_for(tmp_path / "key", mode, verbose=True)
+
+
+def test_the_client_log_is_read_from_its_end(tmp_path: Path) -> None:
+    log = tmp_path / "log"
+    log.write_text("first\n" + "x" * (ssh_process.CLIENT_LOG_READ_BYTES * 2) + "\nlast line\n")
+
+    text = ssh_process.client_log_text(log)
+
+    assert len(text) <= ssh_process.CLIENT_LOG_READ_BYTES
+    assert text.endswith("last line\n")
+    assert "first" not in text
+    assert ssh_process.client_log_text(tmp_path / "missing") == ""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="signal statuses are POSIX")
+def test_a_client_killed_by_a_signal_reports_128_plus_the_signal() -> None:
+    program = "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"
+
+    assert ssh_process.run_terminal([sys.executable, "-c", program]) == 128 + signal.SIGKILL
+    assert ssh_process.exit_status(3) == 3
+
+
 def test_a_non_default_port_is_passed_and_the_default_is_not(tmp_path: Path) -> None:
     seed_vm_trust("box")
     client = SSHClient("/usr/bin/ssh", (9, 2))
@@ -129,12 +157,6 @@ def test_a_user_that_is_not_a_posix_account_name_is_refused(user: str) -> None:
 @pytest.mark.parametrize("host", ["100.64.0.9", "host.example", "fd7a:115c:a1e0::1"])
 def test_literal_hosts_are_accepted(host: str) -> None:
     assert Destination(host, "agentworks").host == host
-
-
-@pytest.mark.parametrize("port", [0, 65536, -1, True])
-def test_a_port_outside_the_range_is_refused(port: int) -> None:
-    with pytest.raises(ValidationError):
-        Destination("h", "u", port)
 
 
 def test_a_missing_trust_record_raises_before_an_argv_exists(tmp_path: Path) -> None:

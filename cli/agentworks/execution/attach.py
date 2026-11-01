@@ -12,21 +12,24 @@ connection's argv.
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.errors import ValidationError
-from agentworks.execution import envelope, ssh_process
+from agentworks.execution import ssh_process
 from agentworks.execution.errors import ExecutionIncomplete
+from agentworks.execution.pump import Deadline, PipeSession, StopReason
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.terminal import guarded_terminal
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Sequence
     from pathlib import Path
 
-    from agentworks.execution.requests import LoginShell
+HANDOVER_WAIT_SECONDS = 30
+"""How long the parked launcher waits for the terminal half; the same figure is in ``agw_launch.py``."""
+
+PARKING_WAIT_SECONDS = ssh_process.CONNECT_TIMEOUT_SECONDS + HANDOVER_WAIT_SECONDS
+"""How long to wait for the parking connection to report ``parked``, before the terminal is touched."""
 
 PARKING_SHUTDOWN_SECONDS = 2.0
 """How long to let the parked launcher clean up after the terminal half returns."""
@@ -34,55 +37,47 @@ PARKING_SHUTDOWN_SECONDS = 2.0
 _SSH_STATUS_CONNECTION_ENDED = 255
 
 
+def socket_path(token: str) -> str:
+    """Where the parked launcher listens on the guest, for a handover ``token``."""
+    return f"/tmp/agw-handover-{token}/s"
+
+
 def attach(
-    request: LoginShell,
     *,
     vm_name: str,
-    parking_argv: Callable[[Path], list[str]],
-    terminal_argv: Callable[[str], list[str]],
+    wire: bytes,
+    nonce: str,
+    parking_argv: Sequence[str],
+    terminal_argv: Sequence[str],
+    log: Path,
 ) -> int:
     """Park the request, run the terminal half under the guard, and return its exit status.
 
-    ``parking_argv`` builds the first connection's argv from the client log's
-    path and ``terminal_argv`` builds the terminal half's from the guest socket
-    path. Both are built before anything is spawned, so a missing trust record
-    raises with nothing dispatched. The parking connection fails first on a
-    missing python3, a trust mismatch, a refusal or a refused connection, so the
-    typed error is raised before the terminal is touched.
+    ``wire`` is the parking connection's message and ``log`` is the client log
+    its argv writes. Both argvs arrive built, before anything is spawned, so a
+    missing trust record raises with nothing dispatched. The parking
+    connection fails first on a missing python3, a trust mismatch, a refusal or
+    a refused connection, so the typed error is raised before the terminal is
+    touched. So is a parking connection that never reports ``parked`` (a
+    startup file that reads stdin would hold it forever).
     """
-    if request.deadline is not None:
-        raise ValidationError("an attached shell cannot carry a deadline", entity_kind="vm", entity_name=vm_name)
-    token = envelope.new_handover_token()
-    nonce = envelope.new_nonce()
-    body = envelope.encode(request, nonce=nonce, term=os.environ.get("TERM") or envelope.DEFAULT_TERM, handover=token)
-    wire = envelope.frame(envelope.launcher_source()) + envelope.frame(body)
-    with ssh_process.client_log() as log:
-        parking = parking_argv(log)
-        terminal = terminal_argv(f"/tmp/agw-handover-{token}/s")
-        with ssh_process.PipeSession(
-            parking, request=wire, nonce=nonce, hold_stdin_open=True, on_stdout=_ignore, on_stderr=_ignore
-        ) as session:
-            parked = False
-
-            def is_parked() -> bool:
-                nonlocal parked
-                parked = session.stdout.take_parked() or parked
-                return parked
-
-            session.pump(is_parked)
-            if not parked:
-                _raise_parking_failure(vm_name, session, log)
-            with guarded_terminal() as guard:
-                code = ssh_process.run_terminal(terminal)
-                guard.clean_exit = code == 0
-            # After the guard: its exit pass leaves the alternate screen, which
-            # would wipe anything written before it closes (I6).
-            if code == _SSH_STATUS_CONNECTION_ENDED:
-                output.warn("connection ended or the command exited 255; terminal restored.")
-                output.detail("Remote state is untouched. Re-run the same command to reattach.")
-            session.close_stdin()
-            session.pump(budget=ssh_process.Deadline.after(PARKING_SHUTDOWN_SECONDS))
-            session.end()
+    with PipeSession(
+        parking_argv, request=wire, nonce=nonce, hold_stdin_open=True, on_stdout=_ignore, on_stderr=_ignore
+    ) as session:
+        stop = session.pump(lambda: session.stdout.parked, budget=Deadline.after(PARKING_WAIT_SECONDS))
+        if not session.stdout.parked:
+            _raise_parking_failure(vm_name, session, stop, log)
+        with guarded_terminal() as guard:
+            code = ssh_process.run_terminal(terminal_argv)
+            guard.clean_exit = code == 0
+        # After the guard: its exit pass leaves the alternate screen, which
+        # would wipe anything written before it closes (I6).
+        if code == _SSH_STATUS_CONNECTION_ENDED:
+            output.warn("connection ended or the command exited 255; terminal restored.")
+            output.detail("Remote state is untouched. Re-run the same command to reattach.")
+        session.close_stdin()
+        session.pump(budget=Deadline.after(PARKING_SHUTDOWN_SECONDS))
+        session.end()
     return code
 
 
@@ -90,19 +85,11 @@ def _ignore(_payload: bytes) -> None:
     return None
 
 
-def _raise_parking_failure(vm_name: str, session: ssh_process.PipeSession, log: Path) -> None:
+def _raise_parking_failure(vm_name: str, session: PipeSession, stop: StopReason, log: Path) -> None:
     session.end()
-    text = ssh_process.client_log_text(log)
-    completion = envelope.classify(
-        session.stdout,
-        session.stderr,
-        session.exit_status,
-        host_key_failed=ssh_process.HOST_KEY_FAILURE in text,
-    )
-    result = Result(completion, client_log_tail=ssh_process.tail_lines(text))
+    result = ssh_process.outcome(session, stop, log)
     # A parking connection that completed without ever parking broke the protocol.
-    if isinstance(completion, Completed):
+    if isinstance(result.completion, Completed):
         result = Result(Unknown(UnknownReason.TRUNCATED), client_log_tail=result.client_log_tail)
-        raise ExecutionIncomplete(vm_name, result)
     result.require_completed(vm_name)
     raise ExecutionIncomplete(vm_name, result)  # pragma: no cover - require_completed raises for all else
