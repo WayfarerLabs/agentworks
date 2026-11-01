@@ -112,10 +112,14 @@ a VM connection.
       recording fake `VMAccess`.
 - [ ] Migrate `vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection` and
       `vm port-forward`. Release probing stays legacy until slice 3, because reinit runs it before
-      initialization and must still reach a VM without python3 (`vms/manager/lifecycle.py:962`).
+      initialization and must still reach a VM without python3 (`vms/manager/lifecycle.py:946`).
       Keep `vm exec`'s single-argument form as a shell command line, sent as a `Script` under the
       identity's default shell, and several arguments as a literal argv, as today
       (`vms/manager/exec.py:271`).
+- [ ] Alert where PR A drops a behavior an operator may rely on (operator, 2026-11-01): warn at
+      reinit when `/etc/environment`, `/etc/security/pam_env.conf` or the admin's
+      `~/.pam_environment` holds settings, and when a VM connection fails before the start marker
+      while the configured key is passphrase-protected, hint to load it into the SSH agent.
 - [ ] Type a VM without python3 as `VMNotReady` with a hint naming `agw vm reinit`, whose legacy
       Phase A still runs there, and say so in release notes.
 - [ ] Limit the admin and agent template `shell` fields to `sh`, `dash`, `bash` and `zsh` at the
@@ -174,9 +178,10 @@ pass the static check, and the package's tests pass with the legacy modules bloc
   - Phase A on `VMAccess`;
   - `reachability`.
 - [ ] Add python3 to `PROVISIONING_PACKAGES`, which every platform's bootstrap already installs
-      (`lima.py:391`, `wsl2_bootstrap.py:65`, and the AWS, Azure, GCP and Proxmox platforms).
+      (`lima.py:385`, `wsl2_bootstrap.py:65`, and the AWS, Azure, GCP and Proxmox platforms).
 - [ ] Make `ProvisionResult.tailnet_address` required on every platform, with each platform retrying
-      the address read after a successful join so the key is never sent twice (HLA D11), and delete
+      the address read after a successful join so the key is never sent twice, and logging the node
+      out over the provisioning channel when the reads are exhausted (HLA D11), and delete
       `ProvisionResult.native_transport` and Phase A's native `tailscale ip -4` fallback.
 - [ ] Move Phase A and release probing (`vms/manager/release.py`) onto `VMAccess`: the first
       connection in Enroll mode, then the base checks (including Debian attestation), then
@@ -191,8 +196,8 @@ pass the static check, and the package's tests pass with the legacy modules bloc
 - [ ] Tests:
   - a VM failing a base check is not reported ready;
   - each diagnosis names reinit or recreation;
-  - a platform that cannot report the address logs the node out over its provisioning channel and
-    fails create, without a second join;
+    - a platform that cannot report the address logs the node out over its provisioning channel and
+      fails create, without a second join, and names the node when the logout fails;
   - a VM with pam_env settings gets a warning naming the file and still passes the contract.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
@@ -214,9 +219,8 @@ first operation there is the base contract check.
   - `public_ssh.py`;
   - the recovery scripts;
   - `vm recover`;
-  - each cloud's provider-side host-key fingerprint source;
-  - whether the QEMU guest agent waits for the output pipes to close, so that a background child of
-    a recovery script would stall Proxmox recovery, and what the platform does about it.
+    - each cloud's provider-side host-key fingerprint source;
+  - `RawRun`, and how each channel bounds its output and its wait by the deadline.
 - [ ] Implement core's `run_recovery` in `vms/recovery.py`, and `run_as_root`, `read_host_keys` and
       `native_shell` on every platform.
 - [ ] Rehome native code as plugin-private modules:

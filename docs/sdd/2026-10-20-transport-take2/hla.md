@@ -40,7 +40,7 @@ contract.
                             |
             installed OpenSSH  ==tailnet==>  sshd  ->  stage 0  ->  agw-launch (python3)
 
- platform plugins: private native access + run_as_root(program, stdin) + optional native shell
+ platform plugins: private native access + run_as_root(script, stdin) + optional native shell
  shared SSH machinery for platforms: execution.ssh_process (host policy or VM policy)
 ```
 
@@ -73,7 +73,7 @@ contract.
 | `execution/reachability.py`              | Wait until a VM answers over SSH, with the operator-facing wait wording                                                                           | `transports.wait_for_reconnect`                                   |
 | `execution/oplog.py`                     | Per-VM operation log: label, request shape, outcome; never payloads                                                                               | `SSHLogger` file layout                                           |
 | `capabilities/vm_platform/public_ssh.py` | The cloud platforms' SSH to a VM's public address, for provisioning and recovery, composed from `ssh_process`                                     | cloud `SSHTransport` uses                                         |
-| `vms/contract.py`, `vms/recovery.py`     | The VM contract checks; core's recovery scripts and `vm recover`                                                                                  | new; scripts from `vms/initializer/credentials.py` and `power.py` |
+| `vms/contract.py`, `vms/recovery.py`     | The VM contract checks; `run_recovery` with its marker wrapper, core's recovery scripts and `vm recover`                                          | new; scripts from `vms/initializer/credentials.py` and `power.py` |
 
 `agentworks.terminal` is not one of the six legacy modules, so attach keeps using its guard. The
 proof modules that do not fit are deleted when the package is adopted: `carrier.py`'s generic
@@ -236,7 +236,7 @@ if one proves necessary, is the same installed program (`2026-08-04-next-steps/t
 
 5. **Runs the payload as a child.** A literal argv runs with no shell. A script runs under the
    chosen interpreter, which reads the source from a file descriptor and never from its arguments
-   (R4). Login or interactive startup applies only when requested. `sh` and `bash` are fixed paths.
+   (D2). Login or interactive startup applies only when requested. `sh` and `bash` are fixed paths.
    The default shell is the destination identity's passwd entry. A missing interpreter fails rather
    than being substituted.
 6. **Reports completion.** Except in TTY mode, once the payload exits, or once it finds it cannot
@@ -269,10 +269,10 @@ if one proves necessary, is the same installed program (`2026-08-04-next-steps/t
   without both the end marker and the trailer, or 255 with no start marker. The client does not read
   OpenSSH's diagnostics to tell a refused connection from a dropped one. It reads one OpenSSH token
   only to type an error: `Host key verification failed` on a 255 becomes `TrustMismatch`. Its hint
-  names the manual path: verify the new key through the platform console or provider, remove the
-  store file and import a verified file, or recreate the VM. `agw vm recover` cannot fix it, since
-  recovery re-establishes only a missing record and verifies against an existing one; a flow that
-  replaces a changed key is not part of this design.
+  names the store file: after verifying the new key through the platform console or provider, remove
+  that file and follow the `TrustMissing` guidance (import in PR A, `agw vm recover` from PR B), or
+  recreate the VM. Recovery alone cannot fix a mismatch, since it re-establishes only a missing
+  record; no flow in this design replaces a changed key.
 - **TTY mode.** An attach never elevates to root; an elevated attach request is refused before
   dispatch, and no current attach consumer elevates. The root `sudo -n` prefix and the handover
   argument are never combined. An attach returns its exit code; a 255 is reported as "connection
@@ -296,7 +296,7 @@ if one proves necessary, is the same installed program (`2026-08-04-next-steps/t
 Each vocabulary item lands in the slice that migrates its first consumer. `PythonProgram` is not one
 of R3's script interpreters. It carries core's own Python programs, which travel in `python3 -c`
 argv on `main` (`artifacts/native/probe.py:402`, `native_files.py:338`), so their source stays out
-of guest arguments (R4). With `login` and `interactive`, the identity's default shell runs that
+of guest arguments (D2). With `login` and `interactive`, the identity's default shell runs that
 startup and then execs the interpreter, with the program's arguments passed positionally so no
 quoting is needed. That is how the native probe and the native CLI's login resolution keep seeing
 the native workload's login and interactive environment, as they do today through `"$SHELL" -lic`
@@ -307,9 +307,9 @@ non-interactive shell before it sources the mise activation
 - **Bytes, not text.** Results carry bytes with no newline conversion; a `text()` helper decodes.
   Stdin is written in binary mode on every workstation (incident row I2).
 - **Sensitive inputs.** Sensitive input, environment values and script content never appear in logs,
-  exceptions or retained artifacts. A secret-bearing environment does not suppress output (R4).
-  Retained output has the request's secret values redacted (D13), and an explicitly sensitive stdin
-  marks the streams as not retained at all.
+  exceptions or retained artifacts; sensitive is what the caller marks secret (D13). A
+  secret-bearing environment does not suppress output (R4). Retained output has the request's secret
+  values redacted (D13), and an explicitly sensitive stdin marks the streams as not retained at all.
 - **Deadlines.** A deadline bounds the local wait. If it passes before both closing markers (D4)
   have arrived, it kills the local client and returns `Unknown`, since the output may be incomplete.
   Once both have arrived the client ends ssh at once and nothing after completion is awaited, so a
@@ -453,7 +453,7 @@ Host connections such as Remote Lima's keep their own configuration and are not 
 - **Identity.** The VM name keys `vms` (`db/migrations.py:240`) and survives every tailnet address
   change. Delete removes the store file, and create resets it, so a reused name never inherits a
   key.
-- **Lookup.** A missing file is a typed `TrustMissing` naming the import and recovery commands. It
+- **Lookup.** A missing record is a typed `TrustMissing` naming the import and recovery commands. It
   never falls back to first use, so a missing record never makes an existing VM new.
 - **Enrollment.** Create resets the VM's store file and makes its first core connection in Enroll
   mode. That connection runs the base contract check (D10). The store is the only place the key is
@@ -473,9 +473,9 @@ Host connections such as Remote Lima's keep their own configuration and are not 
 - **Re-establishment.** This is part of `agw vm recover` (D11). It calls the platform's
   `read_host_keys`, shows the fingerprints, and writes them to the store only after the operator
   confirms.
-  - **Default implementation.** `run_recovery` (D11) with a fixed script that prints the public host
-    keys. Its channel does not use the VM's store: WSL2's `wsl.exe`, Proxmox's guest agent, and
-    Lima's `limactl shell` over Lima's own host-local access.
+  - **Default implementation.** Core's `run_recovery` (D11) with a fixed script that prints the
+    public host keys. Its channel does not use the VM's store: WSL2's `wsl.exe`, Proxmox's guest
+    agent, and Lima's `limactl shell` over Lima's own host-local access.
   - **Clouds.** They override it and read the keys in Unverified mode. Where a provider publishes
     fingerprints (for example EC2 console output or GCE guest attributes), the platform may return
     them for the operator to compare; R7 requires only the operator's confirmation. The platform LLD
@@ -509,10 +509,13 @@ Host connections such as Remote Lima's keep their own configuration and are not 
   - Tailscale up at the recorded address;
   - python3 and agw-launch running, which the check's own request proves, plus coreutils, util-linux
     and `tar`;
-  - no pam_env settings: `/etc/environment`, `/etc/security/pam_env.conf` and the admin's and each
-    agent's `~/.pam_environment` hold nothing but comments and blank lines. agw-launch does not
-    apply pam_env (the operator's 2026-11-01 ruling), so a VM that uses it gets a warning naming the
-    file, and the contract still passes.
+    - pam_env settings, a warning and never a failure: agw-launch does not apply pam_env (the
+      operator's 2026-11-01 ruling), so if `/etc/environment`, `/etc/security/pam_env.conf` or the
+      admin's `~/.pam_environment` holds anything but comments and blank lines, the check warns and
+      names the file. `/etc/default/locale`, which Debian's sshd PAM stack also reads, is left out
+      on purpose, since it is set on every VM and agw-launch sets the locale itself. Agent homes are
+      not read. PR A already gives this warning at reinit, where the behavior ships; this check
+      takes it over.
 
   Because this is core's first operation, the release check is the first thing core does on the
   common path.
@@ -536,24 +539,26 @@ Host connections such as Remote Lima's keep their own configuration and are not 
 
 Changes to `capabilities/vm_platform/base.py`:
 
-| Today                                         | After                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ProvisionResult.native_transport` (required) | Removed in slice 3, when Phase A and Debian attestation move onto SSH                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `ProvisionResult.tailscale_ip: str \| None`   | `tailnet_address: str`, required. After a successful join the platform retries reading the address within its own provisioning step, so a transient failure costs neither the VM nor a second use of the key. If it still cannot read it, the platform logs the node out over that same provisioning channel, which is still open and still pinned, and create fails without a second join; the failed VM is kept for `agw vm delete`, with no node left to remove. Today's join-once rule (`tailscale_join.py:65-71`, `vms/initializer/driver.py:386-398`) carries over |
-| `native_transport(vm, ctx, config)`           | Removed in slice 4, when rejoin, rekey, logout and the native shell move                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| (none)                                        | `run_as_root(vm, ctx, program, stdin, deadline) -> RawRun`: runs core's program as root through the platform's channel, once, with no Tailscale dependency and VM trust only, and returns the channel's status and both streams unread                                                                                                                                                                                                                                                                                                                                   |
-| (none)                                        | `read_host_keys(vm, ctx) -> HostKeyReading`, the key-reading half of the same R7 capability, not a second one: the VM's public host keys, plus any provider-side fingerprints. The default runs a fixed script through `run_recovery`; a cloud overrides it with its private access under Unverified trust                                                                                                                                                                                                                                                               |
-| (none)                                        | `ClassVar recovery_needs_guest_sshd: bool`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `native_shell_unavailable_hint`               | `native_shell(vm, ctx) -> int`. A platform offers a shell by overriding it. Core detects the override on the class before the operation boundary, so it refuses with `FeatureUnavailable` before credentials are resolved (R2). A platform may set guidance text for the refusal                                                                                                                                                                                                                                                                                         |
-| `transient_route`, `probe_failure_hint`       | Private to each platform's own native code (recovery and native shell)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Today                                         | After                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ProvisionResult.native_transport` (required) | Removed in slice 3, when Phase A and Debian attestation move onto SSH                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `ProvisionResult.tailscale_ip: str \| None`   | `tailnet_address: str`, required. After a successful join the platform retries reading the address within its own provisioning step, so a transient failure costs neither the VM nor a second use of the key. If it still cannot read it, the platform logs the node out over that same provisioning channel, which is still open and still pinned, and create fails without a second join; the failed VM is kept for `agw vm delete`. This matters for the clouds: core never enrolled the host key, so delete's recovery, which runs under VM trust, could not log the node out later. When the logout does not report success, create's error names the node for removal in the Tailscale admin console Today's join-once rule (`tailscale_join.py:65-71`, `vms/initializer/driver.py:386-398`) carries over |
+| `native_transport(vm, ctx, config)`           | Removed in slice 4, when rejoin, rekey, logout and the native shell move                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| (none)                                        | `run_as_root(vm, ctx, script, stdin, deadline) -> RawRun`: runs core's `sh` script as root through the platform's channel, once, with no Tailscale dependency and VM trust only, and returns both streams when the channel ends or the deadline passes, with output bounded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| (none)                                        | `read_host_keys(vm, ctx) -> HostKeyReading`, the key-reading half of the same R7 capability, not a second one: the VM's public host keys, plus any provider-side fingerprints. An optional override that core detects on the class, as with `native_shell`: when a platform has none, core's `vms/recovery.py` runs a fixed script through `run_recovery`; a cloud overrides it with its private access under Unverified trust                                                                                                                                                                                                                                                                                                                                                                                  |
+| (none)                                        | `ClassVar recovery_needs_guest_sshd: bool`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `native_shell_unavailable_hint`               | `native_shell(vm, ctx) -> int`. A platform offers a shell by overriding it. Core detects the override on the class before the operation boundary, so it refuses with `FeatureUnavailable` before credentials are resolved (R2). A platform may set guidance text for the refusal                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `transient_route`, `probe_failure_hint`       | Private to each platform's own native code (recovery and native shell)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
-**RecoveryResult.** Core's `run_recovery` in `vms/recovery.py` wraps the script in a small `sh`
-wrapper that writes D4's closing markers, passes it to the platform's `run_as_root`, and reads the
-raw streams with D4's own reader, so a recovery result is the script's status, delivery failure, or
-unknown. A platform author runs `sh` as root and returns what came back; only core knows the
-markers. It never relies on `limactl` or `wsl.exe` exit codes; the salvage message measured WSL
-passing raw wait statuses through, which makes a signal and an exit indistinguishable. Sensitive
-stdin follows D5. The capability takes no environment, directory or files.
+**`run_recovery`.** Core's `run_recovery` in `vms/recovery.py` wraps the script in a small `sh`
+wrapper that writes D4's start and closing markers, passes it to the platform's `run_as_root`, and
+reads the streams with D4's reader. Its `RecoveryResult` is the script's status when both closing
+markers arrived and unknown otherwise, since no channel's own status is trusted. A platform author
+runs `sh` as root and returns what came back; only core knows the markers. Core's recovery scripts
+leave no background child, so no channel waits on a descendant that holds its output open. It never
+relies on `limactl` or `wsl.exe` exit codes; the salvage message measured WSL passing raw wait
+statuses through, which makes a signal and an exit indistinguishable. Sensitive stdin follows D5.
+The capability takes no environment, directory or files.
 
 **Per platform:**
 
@@ -568,8 +573,8 @@ stdin follows D5. The capability takes no environment, directory or files.
 - **Cloud public-address SSH.** The public address reaches the same sshd, with the same host key, as
   the tailnet, so cloud recovery verifies against the VM's store entry. It runs the wrapped script
   under `sudo -n /bin/sh`, with sensitive input on stdin. The script is core-owned and secret-free,
-  but R4 still keeps script content out of arguments, so it travels on stdin too; the platform LLD
-  settles how. agw-launch is not involved, so a VM without python3 can still be recovered.
+  but D2 keeps script content out of arguments, so it travels on stdin too; the platform LLD settles
+  how. agw-launch is not involved, so a VM without python3 can still be recovered.
 - **Core's recovery scripts** live in `vms/recovery.py`:
   - **Rejoin** is today's `rejoin_tailscale`, run only by `agw vm recover`. Starting a VM, by
     `vm start` (`vms/manager/power.py:83-112`) or by the activation gate (`LiveVMNode.auto_start`,
@@ -631,10 +636,12 @@ the facts are held once.
 It records a label, the request shape, the outcome and the streams, never the envelope's environment
 values, script source or stdin. Every retained stream has the request's secret values (its secret
 environment values and any other values the caller marks secret) removed before it is written, as
-`SSHLogger` does today (`cli/agentworks/ssh.py:113-131`); a sensitive stdin keeps the streams out of
-the log entirely. The readers of the old `LOG_DIR` constant (`doctor_state.py`,
-`vms/manager/lifecycle.py`, `vms/manager/_helpers.py`, `vm logs`) move to the new constant in
-slice 2.
+`SSHLogger` does today (`cli/agentworks/ssh.py:113-131`). R4's "sensitive" qualifies input,
+environment and script content alike, so script source that an interpreter quotes in its own error
+output is retained output, with the caller's secret values removed like any other. A sensitive stdin
+keeps the streams out of the log entirely. The readers of the old `LOG_DIR` constant
+(`doctor_state.py`, `vms/manager/lifecycle.py`, `vms/manager/_helpers.py`, `vm logs`) move to the
+new constant in slice 2.
 
 ### D14. Enforcing independence (R10)
 
@@ -724,9 +731,10 @@ D5, metadata and ACL preservation in D6, python3 from provisioning in D10) or be
 this effort only repoints onto `VMAccess` (settings merges, publication and sections, session
 identity, restart confirmation), whose existing tests stay green in the slice that moves its caller.
 The source table's row asking that destination and home paths come from composition and bounded file
-observations rather than discovery commands is dropped on purpose: those probes
-(`harness_setup/dispatch.py:47`, `:52`, `artifacts/session.py:76`) stay ordinary requests, and the
-`HOME` they read is trustworthy because agw-launch rebuilds it (D5).
+observations rather than discovery commands is dropped on purpose: those probes (the machine-id read
+and destination `stat` at `harness_setup/dispatch.py:47`, `:52`, and the `HOME` read at
+`artifacts/session.py:76`) stay ordinary requests: fixed read-only commands that agw-launch runs
+literally, with a `HOME` it rebuilt from the passwd entry (D4).
 
 ## Evidence matrix (R11)
 
@@ -801,9 +809,17 @@ requirement-level rulings (R3, R7, R11 and python3 at provisioning) are quoted i
 7. **Delivery.** Every request travels on stdin, agw-launch is written in Python, python3 is a
    provisioning requirement, and terminals use the two-connection handover.
 8. **Stage 0** reads agw-launch from stdin, so the command line stays one short constant line.
-9. **Script-bundle capabilities** are a later effort, outside this one. This design supplies the
-   pieces they need: `Script` and `PythonProgram` requests that take their inputs as data, the file
-   operations, the contract's check table, and the identities and elevation of `VMAccess`.
+9. **R1** says provisioning's first Tailscale join sends the auth key once and keeps it out of
+   retained artifacts, command lines, logs and exceptions (incident row I10), and init keeps
+   installing python3.
+10. **Unsupported, with an alert.** Shells without `--workspace` print no MOTD or last-login line,
+    ssh never prompts for a key passphrase, and pam_env is not applied. Where an operator could be
+    relying on one of these, Agentworks says so: a failed connection with a passphrase-protected key
+    hints at the SSH agent, and pam_env settings draw a warning (D10). The operator asked for no
+    extra machinery beyond that.
+11. **Script-bundle capabilities** are a later effort, outside this one. This design supplies the
+    pieces they need: `Script` and `PythonProgram` requests that take their inputs as data, the file
+    operations, the contract's check table, and the identities and elevation of `VMAccess`.
 
 ## Awaiting the operator
 
@@ -834,10 +850,10 @@ keeps installing python3.
 
 | Requirement | Decisions                          |
 | ----------- | ---------------------------------- |
-| R1          | D10, D11                           |
+| R1          | D10, D11, incident row I10         |
 | R2          | D2, D8, D11                        |
 | R3          | D3, D4, D5                         |
-| R4          | D2, D3, D4, D5, D8                 |
+| R4          | D2, D3, D4, D5, D8, D13            |
 | R5          | D6                                 |
 | R6          | D7                                 |
 | R7          | D11                                |
