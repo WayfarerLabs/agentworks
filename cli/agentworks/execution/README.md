@@ -96,8 +96,9 @@ directory under `/tmp`, listens and waits. The second runs the terminal half, wh
 to that socket, collects the launcher and the request, and execs the login shell on the terminal. No
 guest text reaches a command line, and the parked launcher removes its directory when the second
 connection is served, when the client closes its end, after 30 seconds, or on `SIGHUP` or `SIGTERM`.
-The client gives up on a parking connection that never reports `parked` after the connect timeout
-plus that 30 seconds, and raises before the terminal is touched.
+The client gives up on a parking connection that never reports `parked` within 60 seconds (its own
+bound for connecting and running the account's startup files; the 30 seconds above start only after
+`parked`), and raises before the terminal is touched.
 
 ## Host-key trust
 

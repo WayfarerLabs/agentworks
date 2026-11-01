@@ -149,12 +149,16 @@ class Lane:
         """Make the client give up on a parking connection that never reports ``parked`` after ``seconds``."""
         self.monkeypatch.setattr(attach_module, "PARKING_WAIT_SECONDS", seconds)
 
+    def rewrite_launcher(self, old: bytes, new: bytes) -> None:
+        """Send a launcher whose source has ``old`` replaced by ``new``, to make the guest behave as a fault would."""
+        source = envelope.launcher_source()
+        rewritten = source.replace(old, new)
+        assert rewritten != source
+        self.monkeypatch.setattr(envelope, "launcher_source", lambda: rewritten)
+
     def shorten_handover_wait(self, seconds: int = 1) -> None:
         """Send a launcher whose parked half gives up after ``seconds``, instead of 30."""
-        source = envelope.launcher_source()
-        shortened = source.replace(b"handover_wait_seconds = 30", b"handover_wait_seconds = %d" % seconds)
-        assert shortened != source
-        self.monkeypatch.setattr(envelope, "launcher_source", lambda: shortened)
+        self.rewrite_launcher(b"handover_wait_seconds = 30", b"handover_wait_seconds = %d" % seconds)
 
 
 class LocalFilesystem(Lane):

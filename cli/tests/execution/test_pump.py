@@ -192,6 +192,31 @@ def test_a_sink_that_fails_is_dropped_and_the_command_still_completes() -> None:
     assert envelope.classify(session.stdout, session.stderr, session.exit_status) == Completed(7)
 
 
+def test_a_sink_writing_to_a_pipe_whose_reader_closed_is_the_consumer_leaving() -> None:
+    # CPython raises BrokenPipeError for this on POSIX and OSError(EINVAL) on Windows; either
+    # means the consumer ended early, so the command still completes.
+    reader, writer = os.pipe()
+    os.close(reader)
+    delivered: list[int] = []
+
+    def sink(payload: bytes) -> None:
+        delivered.append(os.write(writer, payload))
+
+    script = "start(); out.write(b'a'); out.flush(); time.sleep(.2); out.write(b'b'); finish(7)"
+    session = PipeSession(
+        [sys.executable, "-c", PRELUDE + script], request=b"", nonce=NONCE, on_stdout=sink, on_stderr=Capture()
+    )
+    try:
+        with session:
+            assert session.pump() is StopReason.DONE
+            session.end()
+    finally:
+        os.close(writer)
+
+    assert delivered == []
+    assert envelope.classify(session.stdout, session.stderr, session.exit_status) == Completed(7)
+
+
 def test_a_deadline_keeps_partial_output_and_reaps_the_client() -> None:
     run = Run("start(); out.write(b'partial'); out.flush(); time.sleep(30)", seconds=0.5)
 

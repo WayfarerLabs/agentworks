@@ -240,7 +240,7 @@ def tail_lines(text: str, count: int = CLIENT_LOG_TAIL_LINES) -> str:
     return sanitize_terminal_output("\n".join(lines[-count:]))
 
 
-# -- Spawning and the pump ----------------------------------------------------------------
+# -- Spawning, the terminal half and outcomes ------------------------------------------
 
 
 def child_environment() -> dict[str, str] | None:

@@ -25,11 +25,12 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-HANDOVER_WAIT_SECONDS = 30
-"""How long the parked launcher waits for the terminal half; the same figure is in ``agw_launch.py``."""
+PARKING_WAIT_SECONDS = 60
+"""How long to wait for the parking connection to report ``parked``, before the terminal is touched.
 
-PARKING_WAIT_SECONDS = ssh_process.CONNECT_TIMEOUT_SECONDS + HANDOVER_WAIT_SECONDS
-"""How long to wait for the parking connection to report ``parked``, before the terminal is touched."""
+Its own bound for connecting, authenticating and running the account's startup
+files. The launcher's 30 second handover wait starts only after ``parked``.
+"""
 
 PARKING_SHUTDOWN_SECONDS = 2.0
 """How long to let the parked launcher clean up after the terminal half returns."""
@@ -91,5 +92,8 @@ def _raise_parking_failure(vm_name: str, session: PipeSession, stop: StopReason,
     # A parking connection that completed without ever parking broke the protocol.
     if isinstance(result.completion, Completed):
         result = Result(Unknown(UnknownReason.TRUNCATED), client_log_tail=result.client_log_tail)
+    # Whatever the connection's fate, no shell started.
+    if isinstance(result.completion, Unknown) and result.completion.reason is not UnknownReason.HOST_KEY:
+        raise ExecutionIncomplete(vm_name, result, attaching=True)
     result.require_completed(vm_name)
     raise ExecutionIncomplete(vm_name, result)  # pragma: no cover - require_completed raises for all else

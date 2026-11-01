@@ -151,16 +151,28 @@ class ExecutionIncomplete(ConnectivityError):
 
     Carries the whole ``Result`` and names which case it is, so that fact is
     held once. A ``NotDelivered`` command did not start; an ``Unknown`` one may
-    have run.
+    have run. ``attaching`` is for the parking connection of a terminal attach,
+    where an unknown outcome still means no shell started: the message says so
+    instead of that the command may have run.
     """
 
-    def __init__(self, vm_name: str, result: Result) -> None:
-        from agentworks.execution.results import NotDelivered
+    def __init__(self, vm_name: str, result: Result, *, attaching: bool = False) -> None:
+        from agentworks.execution.results import NotDelivered, UnknownReason
 
         self.vm_name = vm_name
         self.result = result
         completion = result.completion
-        if isinstance(completion, NotDelivered):
+        if attaching:
+            reason = getattr(completion, "reason", None)
+            why = getattr(reason, "value", reason)
+            summary = f"no shell started on VM '{vm_name}': the connection did not become ready ({why})"
+            hint = "Nothing was started on the VM, so connecting again is safe."
+            if reason is UnknownReason.DEADLINE:
+                hint += (
+                    " A startup file of the login account that reads standard input"
+                    " (a bare 'cat' in ~/.bashrc or ~/.zshenv, say) is the usual cause."
+                )
+        elif isinstance(completion, NotDelivered):
             summary = f"the command did not start on VM '{vm_name}' ({completion.reason.value})"
             hint = "The command did not start, so running it again is safe."
         else:

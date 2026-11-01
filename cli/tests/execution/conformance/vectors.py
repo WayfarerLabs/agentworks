@@ -11,6 +11,7 @@ import ast
 import io
 import os
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from functools import partial
@@ -251,6 +252,8 @@ class SlowSink(io.BytesIO):
 
 
 def payload_leaves_the_shared_streams_non_blocking_and_full(lane: Lane) -> None:
+    # L is the regression guard: its pump is in this process and the slow sink keeps the pipes full.
+    # S and V drain too fast through sshd and the network to catch a lost closing marker.
     # The payload shares descriptors 1 and 2 with the launcher, so what it does to them applies to the
     # launcher's closing markers. Both pipes are full when it exits, and the reader is slow.
     program = (
@@ -340,14 +343,50 @@ def parking_that_never_reports_is_bounded_and_leaves_the_terminal_alone(lane: La
     needs_startup_files(account)
     account.startup(startup_file(account), "cat >/dev/null\n")  # holds the request and the connection open
     account.shorten_parking_wait(2)
+    caught: list[BaseException] = []
 
-    with account.terminal() as terminal, pytest.raises(ExecutionIncomplete) as raised:
-        started = time.monotonic()
-        account.access.attach(LoginShell(cwd=account.workdir))
+    def attach() -> None:
+        try:
+            account.access.attach(LoginShell(cwd=account.workdir))
+        except BaseException as error:  # noqa: BLE001 - the thread hands every outcome to the vector
+            caught.append(error)
 
-    assert time.monotonic() - started < 15
-    assert raised.value.result.completion == Unknown(UnknownReason.DEADLINE)
+    # A regression in the bound would hang the attach forever, so the vector bounds itself.
+    with account.terminal() as terminal:
+        thread = threading.Thread(target=attach, daemon=True)
+        thread.start()
+        thread.join(timeout=30)
+        assert not thread.is_alive(), "the parking wait did not end"
+
+    assert len(caught) == 1
+    assert isinstance(caught[0], ExecutionIncomplete)
+    assert caught[0].result.completion == Unknown(UnknownReason.DEADLINE)
     assert terminal.calls == 0
+
+
+def memfd_refusing_the_noexec_seal_still_runs_the_script(lane: Lane) -> None:
+    # Kernels before 6.3 reject MFD_NOEXEC_SEAL with EINVAL, and so does any kernel for a flag it does not know.
+    account = local(lane)
+    account.rewrite_launcher(b"os.MFD_CLOEXEC | 0x8)", b"os.MFD_CLOEXEC | 0x40000000)")
+
+    result = account.run(script("echo ran"))
+
+    assert (result.completion, result.stdout) == (Completed(0), b"ran\n")
+
+
+def memfd_that_cannot_be_created_is_not_delivered(lane: Lane) -> None:
+    # No descriptor is free, so memfd_create fails with EMFILE, which is not the seal's EINVAL.
+    account = local(lane)
+    account.rewrite_launcher(
+        b"    script_fd = -1\n",
+        b"    script_fd = -1\n    import resource\n    resource.setrlimit(resource.RLIMIT_NOFILE, (3, 3))\n",
+    )
+    marker = f"{account.make_dir()}/ran"
+
+    result = account.run(script(f"touch {marker}"))
+
+    assert result.completion == NotDelivered(NotDeliveredReason.LAUNCHER_FAILED)
+    assert not account.exists(marker)
 
 
 # -- S only -----------------------------------------------------------------------------
@@ -593,6 +632,8 @@ def build() -> list[Vector]:
         ),
         Vector("handover-clean-dispositions", "L", handover_shell_starts_with_clean_dispositions),
         Vector("parking-never-reports", "L", parking_that_never_reports_is_bounded_and_leaves_the_terminal_alone),
+        Vector("memfd-noexec-seal-refused", "L", memfd_refusing_the_noexec_seal_still_runs_the_script),
+        Vector("memfd-cannot-be-created", "L", memfd_that_cannot_be_created_is_not_delivered),
     ]
     return [*shared, *startup_exits, *startup_redirects, *local_only]
 

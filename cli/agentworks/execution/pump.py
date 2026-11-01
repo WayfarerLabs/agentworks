@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import contextlib
 import enum
+import errno
 import os
 import queue
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -68,7 +70,8 @@ Sink = Callable[[bytes], None]
 A sink that cannot take them yet raises ``BlockingIOError`` with
 ``characters_written`` set to what it did take; the pump holds the rest and
 offers it again (an empty remainder asks the sink to finish, say a flush).
-``BrokenPipeError`` and ``ConnectionResetError`` mean the consumer has gone.
+``BrokenPipeError`` and ``ConnectionResetError`` mean the consumer has gone
+(on Windows so does ``OSError(EINVAL)``); any other ``OSError`` propagates.
 """
 
 
@@ -309,6 +312,11 @@ class PipeSession:
             self._pending[which] = payload[getattr(error, "characters_written", 0) :]
         except (BrokenPipeError, ConnectionResetError):
             # The consumer ended early; keep reading so the command can finish.
+            self._sinks[which] = _discard
+        except OSError as error:
+            # CPython reports a pipe whose reader closed as EINVAL on Windows.
+            if sys.platform != "win32" or error.errno != errno.EINVAL:
+                raise
             self._sinks[which] = _discard
 
     def _offer_again(self, which: str) -> bool:
