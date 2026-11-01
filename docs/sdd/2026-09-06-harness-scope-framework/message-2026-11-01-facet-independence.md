@@ -7,21 +7,14 @@ that direction.
 
 ## The ruling
 
-The operator ruled on 2026-10-31 that facets are independent and converge. The ruling is recorded
-verbatim in the saga's `target-state.md` under "Facets are independent and converge":
+The operator ruled on 2026-10-31 that facets are independent and converge: no facet blocks another,
+applying a facet converges what it owns, and refusal is reserved for a facet's own failures and for
+differing content Agentworks does not own. The ruling and its exact terms are in the saga's
+`target-state.md` under "Facets are independent and converge". The operator also confirmed this
+effort's unsupported-facet error rule, and the saga's `scope-participation-contract.md` now matches.
 
-- **No facet blocks another.** A stale or incomplete upstream facet is reported at session start,
-  naming its owner and repair command, and the session launches with what is placed.
-- **Applying a facet converges what it owns** to its declaration rather than refusing on current
-  state. Matching content is adopted, and an interrupted run heals on retry.
-- **Refusal is reserved** for the facet's own failures and for overwriting content Agentworks does
-  not own that differs from the declaration. Such a refusal is scoped to that entry, not to the
-  whole initialization.
-- **"Never silently lost" means reported, not blocked.**
-
-The operator also confirmed this effort's unsupported-facet rule. Activating a facet an integration
-does not implement stays an error. The saga's `scope-participation-contract.md` is corrected to
-match, and its earlier no-op-defaults wording is retired.
+**Who does the work.** The operator plans to hand this to this effort's lead, within this SDD,
+rather than chartering a new one (2026-11-01).
 
 ## What it changes here
 
@@ -36,6 +29,11 @@ match, and its earlier no-op-defaults wording is retired.
 - The claim is written after the native mutation (`native.py:347-376`), so an interruption orphans
   the entry. That window should close, either by recording a provisional claim first or by making
   the retry adopt the identical result.
+- This SDD's own text says the opposite in two places, and the ruling changes both, pending the
+  operator's amendment: the FRD's "never silently adopt ... operator ... content" (`frd.md:276-279`)
+  and the HLA's "do not adopt it just because bytes match" for interrupted-run residue
+  (`hla.md:598-599`). The saga contract now reads adoption of identical content as recorded and
+  reported, so it is not silent, and differing content is still never overwritten.
 - Because the refusal raises inside `user_init`, it fails the whole VM initialization, and the VM is
   then marked failed so `vm start` refuses. A refusal the ruling still allows must stay scoped to
   the entry it concerns.
