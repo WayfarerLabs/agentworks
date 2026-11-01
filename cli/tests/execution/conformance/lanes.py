@@ -1,4 +1,4 @@
-"""The three carriers the conformance vectors run on.
+"""The three lanes the conformance vectors run on.
 
 - **L** runs ``$SHELL -c <remote command>`` locally, through the real
   ``VMAccess`` and pump, with ``ssh_process.build_argv`` replaced by a local
@@ -65,7 +65,7 @@ class TerminalHalf:
 
 
 class Lane:
-    """What a vector may rely on, whichever carrier it runs on."""
+    """What a vector may rely on, whichever lane it runs on."""
 
     name = "?"
     access: VMAccess

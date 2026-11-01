@@ -1,4 +1,4 @@
-"""The conformance vectors, as one list that three carriers run.
+"""The conformance vectors, as one list that three lanes run.
 
 Each vector says which lanes it runs on: ``L`` (a local shell), ``S`` (a local
 sshd) and ``V`` (a live VM). A vector asserts only observable behavior: the

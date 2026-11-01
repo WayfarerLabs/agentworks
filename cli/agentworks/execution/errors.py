@@ -60,9 +60,6 @@ class VMNotReady(StateError):
     run on the legacy stack and so reach a VM without python3.
     """
 
-    # One constant so the slice that adds `agw vm recover` changes one place.
-    HINT_TEMPLATE = "Run 'agw vm reinit {vm}' to install python3."
-
     def __init__(self, vm_name: str, reason: NotDeliveredReason) -> None:
         # results.py imports this module for the errors it raises.
         from agentworks.execution.results import NotDeliveredReason
@@ -77,7 +74,7 @@ class VMNotReady(StateError):
             f"VM '{vm_name}' cannot run Agentworks requests: {what}",
             entity_kind="vm",
             entity_name=vm_name,
-            hint=self.HINT_TEMPLATE.format(vm=vm_name),
+            hint=f"Run 'agw vm reinit {vm_name}' to install python3.",
         )
 
 
@@ -88,23 +85,21 @@ class TrustMismatch(StateError):
     names the manual path, because import never rewrites an existing record.
     """
 
-    # One constant so the slice that adds `agw vm recover` changes one place.
-    HINT_TEMPLATE = (
-        "If the VM was rebuilt or rekeyed, verify its new host key through the platform console or "
-        "provider, remove {store} and run 'agw vm import-host-keys {vm} --known-hosts FILE' with a "
-        "verified file. If you did not expect a change, do not connect."
-    )
-
     def __init__(self, vm_name: str, client_log_tail: str = "") -> None:
         from agentworks.execution.trust import store_file
         from agentworks.path_rendering import format_host_path
 
         self.vm_name = vm_name
+        store = f"'{format_host_path(store_file(vm_name))}'"
         super().__init__(
             _with_tail(f"host key verification failed for VM '{vm_name}'", client_log_tail),
             entity_kind="vm",
             entity_name=vm_name,
-            hint=self.HINT_TEMPLATE.format(store=f"'{format_host_path(store_file(vm_name))}'", vm=vm_name),
+            hint=(
+                "If the VM was rebuilt or rekeyed, verify its new host key through the platform console or "
+                f"provider, remove {store} and run 'agw vm import-host-keys {vm_name} --known-hosts FILE' with a "
+                "verified file. If you did not expect a change, do not connect."
+            ),
         )
 
 

@@ -33,7 +33,7 @@ returns canned outcomes without ssh.
 ## Conformance vectors
 
 `conformance/vectors.py` is one list of vectors, each naming the lanes that run it, and
-`conformance/lanes.py` has the three carriers:
+`conformance/lanes.py` has the three lanes:
 
 - **L** runs `$SHELL -c <remote command>` locally through the real `VMAccess` and pump, with the
   account's startup files set per vector and `SSH_CLIENT` exported as sshd does. It runs under each
