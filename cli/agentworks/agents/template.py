@@ -13,11 +13,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from agentworks.artifacts.declarations import ArtifactsConfig, artifact_references
 from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
+from agentworks.execution.requests import AccountShell, account_shell_basename
 from agentworks.git_credentials.credential import credential_references
 from agentworks.schema import CapabilityConfig, NonEmptyStr, ResourceRef
 from agentworks.schema.reference import RefRelationship
@@ -98,8 +99,14 @@ class AgentTemplate(DeclaredResource):
     ] = Field(default_factory=list)
     """Parent templates this one composes, nearest last."""
 
-    shell: str | None = None
-    """The agent user's login shell."""
+    shell: AccountShell | None = None
+    """The agent user's login shell: `sh`, `dash`, `bash` or `zsh`. A path such as
+    `/usr/bin/zsh` is read as its basename."""
+
+    @field_validator("shell", mode="before")
+    @classmethod
+    def _shell_basename(cls, value: object) -> object:
+        return account_shell_basename(value)
 
     git_credentials: list[Annotated[str, ResourceRef(kind="git-credential", usage="the git credential")]] | None = None
     """Names of ``git-credential`` resources installed for the agent user."""

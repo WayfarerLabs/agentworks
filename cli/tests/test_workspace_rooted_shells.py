@@ -5,13 +5,13 @@ and ``agw agent exec`` (and the cross-VM mismatch check that was
 hoisted into ``agent shell``'s shared resolver as part of the same
 refactor). Issue #125 / PR #140.
 
-The tests stay hermetic by monkeypatching the eager-resolve, transport,
+The tests stay hermetic by monkeypatching the eager-resolve, access,
 and VM-gate boundaries. The intent is to catch regressions in:
 
 - The vm-mismatch ``ValidationError`` raised before any SSH work.
 - The agent-side ``AuthorizationError`` on a missing grant.
 - Workspace-template env actually flowing into the ``SecretTarget``.
-- The remote command shape (``cd <quoted-path> && ...``).
+- The request shape (the workspace as the working directory).
 """
 
 from __future__ import annotations
@@ -23,8 +23,10 @@ import pytest
 
 from agentworks.db import Database
 from agentworks.errors import AuthorizationError, NotFoundError, ValidationError
+from agentworks.execution.requests import Command, LoginShell
 from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import empty_secret_target, stub_build_registry, stub_vm_gates
+from tests.vm_access_support import AccessRecorder
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -74,8 +76,15 @@ def _seed_db(tmp_path: Path) -> Database:
     return db
 
 
-def _patch_vm_common(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub the env / secret / transport / VM-gate boundaries for
+def _install_recorder(monkeypatch: pytest.MonkeyPatch) -> AccessRecorder:
+    recorder = AccessRecorder()
+    monkeypatch.setattr("agentworks.execution.vm_access", recorder.vm_access)
+    monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: recorder.client)
+    return recorder
+
+
+def _patch_vm_common(monkeypatch: pytest.MonkeyPatch) -> AccessRecorder:
+    """Stub the env / secret / access / VM-gate boundaries for
     ``shell_vm`` and ``exec_vm`` so the tests exercise the manager's
     branching without invoking real SSH or secret resolution."""
     from agentworks.vms import manager as vm_manager
@@ -92,10 +101,11 @@ def _patch_vm_common(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
     stub_vm_gates(monkeypatch)
+    return _install_recorder(monkeypatch)
 
 
-def _patch_agent_common(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub the env / secret / transport / VM-gate boundaries for
+def _patch_agent_common(monkeypatch: pytest.MonkeyPatch) -> AccessRecorder:
+    """Stub the env / secret / access / VM-gate boundaries for
     ``exec_agent``."""
     from agentworks.agents import manager as agent_manager
 
@@ -115,7 +125,8 @@ def _patch_agent_common(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
     stub_vm_gates(monkeypatch)
-    monkeypatch.setattr(agent_manager, "_assert_agent_ssh_works", lambda *a, **k: None)
+    monkeypatch.setattr(agent_manager, "_assert_agent_access_works", lambda *a, **k: None)
+    return _install_recorder(monkeypatch)
 
 
 # ---------------------------------------------------------------------------
@@ -151,48 +162,28 @@ def test_shell_vm_workspace_cross_vm_raises_validation(
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
-    _patch_vm_common(monkeypatch)
+    recorder = _patch_vm_common(monkeypatch)
     config = SimpleNamespace()
-
-    interactive_calls: list[str] = []
-
-    def _factory(*_a: object, **_k: object) -> object:
-        return SimpleNamespace(
-            interactive=lambda cmd, **_k: interactive_calls.append(cmd) or 0,
-        )
-
-    monkeypatch.setattr("agentworks.transports.transport", _factory)
 
     with pytest.raises(ValidationError, match="belongs to VM 'vm2', not 'vm1'"):
         vm_manager.shell_vm(  # type: ignore[arg-type]
             db, config, "vm1", workspace_name="ws2", interaction=TtyInteractionPolicy.REFUSE
         )
 
-    assert interactive_calls == [], (
-        "the mismatch must be detected before any SSH work; interactive() must not have been called"
-    )
+    assert recorder.calls == [], "the mismatch must be detected before any SSH work; nothing may have been attached"
 
 
 def test_shell_vm_workspace_cds_into_workspace_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When ``--workspace`` is set, the interactive shell command must
-    start with ``cd <quoted-workspace-path> && exec $SHELL -l``."""
+    """When ``--workspace`` is set, the login shell attaches with the
+    workspace path as its working directory."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
-    _patch_vm_common(monkeypatch)
+    recorder = _patch_vm_common(monkeypatch)
     config = SimpleNamespace()
-
-    captured_cmd: list[str] = []
-
-    def _factory(*_a: object, **_k: object) -> object:
-        return SimpleNamespace(
-            interactive=lambda cmd, **_k: captured_cmd.append(cmd) or 0,
-        )
-
-    monkeypatch.setattr("agentworks.transports.transport", _factory)
 
     assert (
         vm_manager.shell_vm(  # type: ignore[arg-type]
@@ -201,35 +192,24 @@ def test_shell_vm_workspace_cds_into_workspace_path(
         == 0
     )
 
-    assert len(captured_cmd) == 1
-    assert captured_cmd[0] == "cd /opt/agentworks/workspaces/ws1 && exec $SHELL -l"
+    assert recorder.requests("attach") == [LoginShell(cwd="/opt/agentworks/workspaces/ws1", env={})]
 
 
-def test_shell_vm_no_workspace_keeps_empty_command(
+def test_shell_vm_no_workspace_starts_in_the_home_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``vm shell`` without ``--workspace`` retains the existing
-    behavior: ``interactive("")`` (no remote command, default login
-    shell)."""
+    """``vm shell`` without ``--workspace`` attaches the default login
+    shell with no working directory, so the guest starts it in the home."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
-    _patch_vm_common(monkeypatch)
+    recorder = _patch_vm_common(monkeypatch)
     config = SimpleNamespace()
-
-    captured_cmd: list[str] = []
-
-    def _factory(*_a: object, **_k: object) -> object:
-        return SimpleNamespace(
-            interactive=lambda cmd, **_k: captured_cmd.append(cmd) or 0,
-        )
-
-    monkeypatch.setattr("agentworks.transports.transport", _factory)
 
     assert vm_manager.shell_vm(db, config, "vm1", interaction=TtyInteractionPolicy.REFUSE) == 0  # type: ignore[arg-type]
 
-    assert captured_cmd == [""]
+    assert recorder.requests("attach") == [LoginShell(cwd=None, env={})]
 
 
 # ---------------------------------------------------------------------------
@@ -245,78 +225,52 @@ def test_exec_vm_workspace_cross_vm_raises_validation(
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
-    _patch_vm_common(monkeypatch)
+    recorder = _patch_vm_common(monkeypatch)
     config = SimpleNamespace()
-
-    streaming_calls: list[str] = []
-
-    def _factory(*_a: object, **_k: object) -> object:
-        return SimpleNamespace(
-            call_streaming=lambda cmd, **_k: streaming_calls.append(cmd) or 0,
-        )
-
-    monkeypatch.setattr("agentworks.transports.transport", _factory)
 
     with pytest.raises(ValidationError, match="belongs to VM 'vm2', not 'vm1'"):
         vm_manager.exec_vm(  # type: ignore[arg-type]
             db, config, "vm1", ["echo", "hi"], workspace_name="ws2", interaction=TtyInteractionPolicy.REFUSE
         )
 
-    assert streaming_calls == []
+    assert recorder.requests("stream") == []
 
 
 def test_exec_vm_workspace_prefixes_cd(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``vm exec --workspace`` runs ``cd <path> && <joined-command>``."""
+    """``vm exec --workspace`` runs the literal argv with the workspace
+    path as its working directory."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
-    _patch_vm_common(monkeypatch)
+    recorder = _patch_vm_common(monkeypatch)
     config = SimpleNamespace()
-
-    captured: list[str] = []
-
-    def _factory(*_a: object, **_k: object) -> object:
-        return SimpleNamespace(
-            call_streaming=lambda cmd, **_k: captured.append(cmd) or 0,
-        )
-
-    monkeypatch.setattr("agentworks.transports.transport", _factory)
 
     rc = vm_manager.exec_vm(  # type: ignore[arg-type]
         db, config, "vm1", ["echo", "hi"], workspace_name="ws1", interaction=TtyInteractionPolicy.REFUSE
     )
 
     assert rc == 0
-    assert captured == ["cd /opt/agentworks/workspaces/ws1 && echo hi"]
+    assert recorder.requests("stream") == [Command(("echo", "hi"), cwd="/opt/agentworks/workspaces/ws1", env={})]
 
 
 def test_exec_vm_no_workspace_unchanged(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``vm exec`` without ``--workspace`` keeps the original behavior:
-    just the joined command, no ``cd`` prefix."""
+    """``vm exec`` without ``--workspace`` runs the argv with no working
+    directory, so the guest uses the home directory."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
-    _patch_vm_common(monkeypatch)
+    recorder = _patch_vm_common(monkeypatch)
     config = SimpleNamespace()
-
-    captured: list[str] = []
-
-    def _factory(*_a: object, **_k: object) -> object:
-        return SimpleNamespace(
-            call_streaming=lambda cmd, **_k: captured.append(cmd) or 0,
-        )
-
-    monkeypatch.setattr("agentworks.transports.transport", _factory)
 
     vm_manager.exec_vm(db, config, "vm1", ["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
-    assert captured == ["echo hi"]
+    assert recorder.requests("stream") == [Command(("echo", "hi"), cwd=None, env={})]
 
 
 # ---------------------------------------------------------------------------
@@ -337,24 +291,15 @@ def test_exec_agent_workspace_cross_vm_raises_validation(
     # Grant ws2 so the only thing that should fail is the vm-match.
     db.insert_agent_grant("a1", "ws2", "explicit")
 
-    _patch_agent_common(monkeypatch)
+    recorder = _patch_agent_common(monkeypatch)
     config = SimpleNamespace()
-
-    streaming_calls: list[str] = []
-
-    def _factory(*_a: object, **_k: object) -> object:
-        return SimpleNamespace(
-            call_streaming=lambda cmd, **_k: streaming_calls.append(cmd) or 0,
-        )
-
-    monkeypatch.setattr("agentworks.transports.agent_transport", _factory)
 
     with pytest.raises(ValidationError, match="belongs to VM 'vm2', not 'vm1'"):
         agent_manager.exec_agent(  # type: ignore[arg-type]
             db, config, name="a1", command=["echo", "hi"], workspace_name="ws2", interaction=TtyInteractionPolicy.REFUSE
         )
 
-    assert streaming_calls == []
+    assert recorder.requests("stream") == []
 
 
 def test_exec_agent_workspace_missing_grant_raises_authz(
@@ -369,61 +314,39 @@ def test_exec_agent_workspace_missing_grant_raises_authz(
     db = _seed_db(tmp_path)
     # Intentionally no grant for ws1.
 
-    _patch_agent_common(monkeypatch)
+    recorder = _patch_agent_common(monkeypatch)
     config = SimpleNamespace()
-
-    streaming_calls: list[str] = []
-
-    def _factory(*_a: object, **_k: object) -> object:
-        return SimpleNamespace(
-            call_streaming=lambda cmd, **_k: streaming_calls.append(cmd) or 0,
-        )
-
-    monkeypatch.setattr("agentworks.transports.agent_transport", _factory)
 
     with pytest.raises(AuthorizationError, match="does not have access"):
         agent_manager.exec_agent(  # type: ignore[arg-type]
             db, config, name="a1", command=["echo", "hi"], workspace_name="ws1", interaction=TtyInteractionPolicy.REFUSE
         )
 
-    assert streaming_calls == []
+    assert recorder.requests("stream") == []
 
 
 def test_exec_agent_workspace_prefixes_cd(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``agent exec --workspace`` wraps the command with the workspace
-    ``cd``, then wraps the whole thing in ``$SHELL -lc`` so the agent's
-    login profile is sourced."""
+    """``agent exec --workspace`` runs the command line in a login shell,
+    so the agent's login profile is sourced, with the workspace path as
+    its working directory."""
     from agentworks.agents import manager as agent_manager
 
     db = _seed_db(tmp_path)
     db.insert_agent_grant("a1", "ws1", "explicit")
 
-    _patch_agent_common(monkeypatch)
+    recorder = _patch_agent_common(monkeypatch)
     config = SimpleNamespace()
-
-    captured: list[str] = []
-
-    def _factory(*_a: object, **_k: object) -> object:
-        return SimpleNamespace(
-            call_streaming=lambda cmd, **_k: captured.append(cmd) or 0,
-        )
-
-    monkeypatch.setattr("agentworks.transports.agent_transport", _factory)
 
     rc = agent_manager.exec_agent(  # type: ignore[arg-type]
         db, config, name="a1", command=["echo", "hi"], workspace_name="ws1", interaction=TtyInteractionPolicy.REFUSE
     )
 
     assert rc == 0
-    assert len(captured) == 1
-    # The login-shell wrap shell-quotes the inner command. The exact
-    # quoting is shlex's choice; verify both halves are present.
-    assert captured[0].startswith("$SHELL -lc ")
-    assert "cd /opt/agentworks/workspaces/ws1" in captured[0]
-    assert "echo hi" in captured[0]
+    (request,) = recorder.requests("stream")
+    assert (request.source, request.login, request.cwd) == ("echo hi", True, "/opt/agentworks/workspaces/ws1")
 
 
 # ---------------------------------------------------------------------------
@@ -601,10 +524,7 @@ def test_shell_vm_passes_workspace_scope_to_secret_target(
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
     stub_vm_gates(monkeypatch)
 
-    def _factory(*_a: object, **_k: object) -> object:
-        return SimpleNamespace(interactive=lambda *_a, **_k: 0)
-
-    monkeypatch.setattr("agentworks.transports.transport", _factory)
+    _install_recorder(monkeypatch)
 
     config = SimpleNamespace()
 

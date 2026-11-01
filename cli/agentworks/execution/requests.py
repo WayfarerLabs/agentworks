@@ -22,6 +22,16 @@ command line is verified to parse under. The template ``shell`` fields use this
 type, so the restriction is enforced where operator config is loaded."""
 
 
+def account_shell_basename(value: object) -> object:
+    """Reduce a shell path to its basename, so ``/usr/bin/zsh`` is read as ``zsh``.
+
+    The before-validator of the template ``shell`` fields. Anything that is not
+    a path passes through unchanged for :data:`AccountShell` to judge, so a
+    shell outside the list is refused by name at the config boundary.
+    """
+    return value.rsplit("/", 1)[-1] if isinstance(value, str) else value
+
+
 class Shell(StrEnum):
     """The interpreter a :class:`Script` runs under.
 

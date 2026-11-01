@@ -5,11 +5,11 @@
 arguments that look like options (``ls -la``, ``tail -f /path``). The
 trade-off is that an agentworks flag (e.g. ``--workspace``) placed
 after the VM / agent positional ends up in the passthrough argv rather
-than being consumed by Click. sshd then executes
-``$SHELL -c '--workspace ws1 pwd'`` (or ``$SHELL -lc '...'`` when the
-transport's ``login_shell`` is set), and the remote shell (both zsh
-and bash do this) parses the script's leading ``-`` as further
-shell options, producing cryptic errors:
+than being consumed by Click. The VM would then be asked to run a
+program named ``--workspace`` (``vm exec`` with several arguments: not
+found, status 127), or a shell line that begins with it, which the
+shell (zsh and bash both do this) parses as further shell options,
+producing cryptic errors:
 
 - zsh: ``no such option: workspace ws1 pwd``
 - bash: ``--: invalid option`` (with the usage screen)

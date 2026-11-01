@@ -10,6 +10,7 @@ nothing dispatched: resolve the client, encode the request, build the options
 from __future__ import annotations
 
 import contextlib
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -193,6 +194,21 @@ class VMAccess:
                 stop = session.pump()
                 session.end()
             return ssh_process.outcome(session, stop, log)
+
+
+def stream_to_operator(access: VMAccess, request: Request) -> int:
+    """Stream ``request`` with the process's own stdio and return the guest's status.
+
+    Newline translation by the text layers (a Windows console's, and the
+    bare-LF setting in ``cli/_entry.py``) must not touch a binary stream, so
+    the callers get the binary buffers, with the text layers flushed first so
+    earlier output keeps its order (I2). Stdin is the raw stream: a daemon
+    thread blocked in a buffered read aborts the interpreter at exit.
+    """
+    sys.stdout.flush()
+    sys.stderr.flush()
+    stdin = None if sys.stdin is None else getattr(sys.stdin.buffer, "raw", sys.stdin.buffer)
+    return access.stream(request, stdin=stdin, stdout=sys.stdout.buffer, stderr=sys.stderr.buffer)
 
 
 def vm_access(vm: VMRow, config: Config, identity: Identity) -> VMAccess:

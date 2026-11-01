@@ -7,8 +7,8 @@ exists primarily so an operator can reach a VM to fix Tailscale itself
 tailscaled and would terminate a Tailscale-SSH session mid-sequence).
 
 These tests pin the branching behavior in ``shell_vm`` and the early
-execution-only refusal. They mock the interactive SSH layer so the tests
-stay hermetic.
+execution-only refusal. They mock the attach layer (a recording ``VMAccess``) so the
+tests stay hermetic.
 """
 
 from __future__ import annotations
@@ -22,9 +22,11 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.db import Database
 from agentworks.errors import StateError
+from agentworks.execution.access import Admin
 from agentworks.execution.trust import HOST_TRUST
 from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import empty_secret_target, stub_build_registry, stub_vm_gates
+from tests.vm_access_support import AccessRecorder
 
 if TYPE_CHECKING:
     pass
@@ -107,7 +109,7 @@ def _patch_common(
     interactive_log: list[bool],
 ) -> None:
     """Monkeypatch the boilerplate every shell_vm test needs to stub:
-    env resolution, secrets, interactive, and the VM gates."""
+    env resolution, secrets, the recording ``VMAccess``, and the VM gates."""
     monkeypatch.setattr(
         vm_manager,
         "_resolve_vm_admin_env_scopes",
@@ -123,19 +125,11 @@ def _patch_common(
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
     stub_vm_gates(monkeypatch)
 
-    def _track_interactive(*_a: object, **_k: object) -> int:
-        interactive_log.append(True)
-        return 0
-
-    # The interactive call now lives on the Transport itself; patch the
-    # factory's return value to give every call site a target with our
-    # tracking interactive method.
-    def _factory(*_a: object, **_k: object) -> object:
-        t = _stub_target()
-        t.interactive = _track_interactive  # type: ignore[attr-defined]
-        return t
-
-    monkeypatch.setattr("agentworks.transports.transport", _factory)
+    # The admin's attach is the shell the operator sees; count its opens.
+    recorder = AccessRecorder()
+    monkeypatch.setattr("agentworks.execution.vm_access", recorder.vm_access)
+    monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: recorder.client)
+    recorder.access(Admin()).attach = lambda request: interactive_log.append(True) or 0  # type: ignore[method-assign]
 
 
 # -- Tailscale-host gate ------------------------------------------------------
@@ -666,8 +660,7 @@ def test_exec_vm_warns_but_continues_on_failed_init(
 
     # Stub out everything below the guard so we can confirm the guard
     # warns rather than raises without actually invoking SSH. exec_vm
-    # ends in target.call_streaming(remote_cmd, env=env), so the stub
-    # target has to expose that method too.
+    # streams through the VMAccess, so a recording one stands in for it.
     monkeypatch.setattr(
         vm_manager,
         "_resolve_vm_admin_env_scopes",
@@ -678,12 +671,9 @@ def test_exec_vm_warns_but_continues_on_failed_init(
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
     stub_vm_gates(monkeypatch)
 
-    def exec_target_stub(*_a: object, **_k: object) -> object:
-        return SimpleNamespace(
-            call_streaming=lambda *_aa, **_kk: 0,
-        )
-
-    monkeypatch.setattr("agentworks.transports.transport", exec_target_stub)
+    recorder = AccessRecorder()
+    monkeypatch.setattr("agentworks.execution.vm_access", recorder.vm_access)
+    monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: recorder.client)
 
     exit_code = vm_manager.exec_vm(db, _make_config(), "vm1", ["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
     assert exit_code == 0  # the underlying exec returned 0

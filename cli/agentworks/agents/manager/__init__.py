@@ -51,7 +51,7 @@ from ._common import (
     agent_scope,
     derive_linux_user,
 )
-from .access import exec_agent, shell_agent
+from .access import _assert_agent_access_works, exec_agent, shell_agent
 from .inspect import (
     agent_description,
     agent_listing,
@@ -68,6 +68,7 @@ __all__ = [
     "MAX_GRANTS_DISPLAY",
     "_AgentDirectEnvScopes",
     "_agent_direct_secret_target",
+    "_assert_agent_access_works",
     "_assert_agent_ssh_works",
     "_require_vm",
     "_require_vm_for_workspace",

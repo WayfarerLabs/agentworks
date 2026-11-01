@@ -20,11 +20,27 @@ from agentworks.execution.errors import ClientUnsupported, TrustMismatch
 from agentworks.execution.requests import Forward
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from tests.execution.conformance.lanes import SSHDLane
 
 
 def stand_in(script: str) -> list[str]:
     return [sys.executable, "-c", script]
+
+
+@pytest.fixture
+def interruptible() -> Iterator[None]:
+    """Make SIGINT raise ``KeyboardInterrupt`` even when the runner started us with it ignored.
+
+    A process started as a background job inherits SIGINT as ignored, and Python then installs
+    no handler, so a test that raises the signal to model Ctrl-C would wait forever.
+    """
+    previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, previous)
 
 
 def test_a_client_that_exits_zero_is_status_zero(tmp_path: Path) -> None:
@@ -66,7 +82,9 @@ def test_a_client_that_cannot_start_is_a_typed_refusal() -> None:
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal delivery")
-def test_an_interrupt_ends_the_client_before_propagating(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_interrupt_ends_the_client_before_propagating(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, interruptible: None
+) -> None:
     marker = tmp_path / "started"
     script = f"import pathlib, time; pathlib.Path({str(marker)!r}).touch(); time.sleep(60)"
     spawned: list[int] = []
@@ -94,7 +112,7 @@ def test_an_interrupt_ends_the_client_before_propagating(tmp_path: Path, monkeyp
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal delivery")
-def test_a_real_forward_carries_a_connection_until_interrupted(sshd_lane: SSHDLane) -> None:
+def test_a_real_forward_carries_a_connection_until_interrupted(sshd_lane: SSHDLane, interruptible: None) -> None:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         local_port = probe.getsockname()[1]

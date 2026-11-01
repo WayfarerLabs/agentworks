@@ -64,10 +64,16 @@ def test_the_terminal_is_restored_when_the_terminal_half_is_interrupted(
     def interrupted(argv: list[str], half: object) -> int:
         raise KeyboardInterrupt
 
-    with local_lane.terminal(behavior=interrupted), pytest.raises(KeyboardInterrupt):
-        local_lane.access.attach(LoginShell(cwd=local_lane.workdir))
+    token = local_lane.handover_token()
+    try:
+        with local_lane.terminal(behavior=interrupted), pytest.raises(KeyboardInterrupt):
+            local_lane.access.attach(LoginShell(cwd=local_lane.workdir))
 
-    assert events == [("enter", None), ("exit", False)]  # I21
+        assert events == [("enter", None), ("exit", False)]  # I21
+    finally:
+        # The pump kills the parking client at once here, and in this lane that kills the launcher
+        # itself; over ssh the launcher sees its stdin close and removes the directory.
+        local_lane.remove_dir(f"/tmp/agw-handover-{token}")
 
 
 def test_the_terminal_half_runs_the_handover_stage_and_not_the_request(local_lane: LocalLane) -> None:

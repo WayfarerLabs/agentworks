@@ -12,12 +12,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated
 
-from pydantic import Field, ValidationInfo, model_validator
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
 from agentworks.artifacts.declarations import ArtifactsConfig, artifact_references
 from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
+from agentworks.execution.requests import AccountShell, account_shell_basename
 from agentworks.git_credentials.credential import credential_references
 from agentworks.schema import CapabilityConfig, NonEmptyStr, ResourceRef
 
@@ -96,8 +97,14 @@ class AdminConfig(DeclaredResource):
     username: str = "agentworks"
     """The Linux user provisioned as the VM's admin."""
 
-    shell: str = "bash"
-    """The admin user's login shell."""
+    shell: AccountShell = "bash"
+    """The admin user's login shell: `sh`, `dash`, `bash` or `zsh`. A path such as
+    `/usr/bin/zsh` is read as its basename."""
+
+    @field_validator("shell", mode="before")
+    @classmethod
+    def _shell_basename(cls, value: object) -> object:
+        return account_shell_basename(value)
 
     git_credentials: list[Annotated[str, ResourceRef(kind="git-credential", usage="the git credential")]] = Field(
         default_factory=list

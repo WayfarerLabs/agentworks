@@ -47,13 +47,15 @@ def shell_vm(
     translation to process exit (check 9: no sys.exit in the service),
     mirroring :func:`exec_vm`.
 
-    By default uses the Tailscale SSH transport. Pass
+    By default attaches over SSH through ``agentworks.execution``. Pass
     ``platform_transport=True`` (the ``vm shell --platform`` flag) to
     use the platform-native transport instead (``limactl shell`` for
     Lima, ``wsl.exe`` for WSL2, SSH via public IP for Azure). That is
     the right choice when Tailscale connectivity is the thing you need
     to fix (e.g. healing the issue #117 latched DNS state, which
-    involves restarting tailscaled itself).
+    involves restarting tailscaled itself). The native shell is the
+    legacy part of the command, in ``platform_shell.py``, until the
+    platform surface moves.
 
     When ``workspace_name`` is set, the shell ``cd``s into the workspace
     directory and the workspace template's env joins the env chain. The
@@ -65,12 +67,15 @@ def shell_vm(
     just-in-time values seed the boundary resolver), and the
     held-active span covers the whole interactive session.
     """
-    import shlex
-
+    import agentworks.execution as execution
     import agentworks.vms.manager as _mgr
     from agentworks.env import ResourceContext, compose_env
-    from agentworks.transports import native_transport, transport
+    from agentworks.execution.access import Admin
+    from agentworks.execution.requests import LoginShell
 
+    if not platform_transport:
+        # Before any database read or guard: an unsupported client refuses first.
+        execution.resolve_ssh()
     vm = _require_vm(db, name)
     # Init failure warns instead of blocks: shelling into a partially-
     # initialized VM is exactly the kind of operation that lets the
@@ -155,28 +160,24 @@ def shell_vm(
             admin=scopes.admin,
         )
 
-        # --platform builds the platform-native transport, which on a
-        # cloud backend is an authenticated call: it gets the boundary's
-        # op-start context (site secrets scoped to the site's declared
-        # names), the same one the no-gate power commands hand their ops.
         if platform_transport:
-            from agentworks.transports import Transport
+            # --platform builds the platform-native transport, which on a
+            # cloud backend is an authenticated call: it gets the boundary's
+            # op-start context (site secrets scoped to the site's declared
+            # names), the same one the no-gate power commands hand their ops.
+            from .platform_shell import attach_via_native_transport
 
-            target = native_transport(vm, vm_node.site.platform, config, ctx=ops_ctx, stack=stack)
-            if not isinstance(target, Transport):
-                raise StateError(
-                    f"VM platform '{vm_node.site.platform.name}' declared native shell support "
-                    "but returned an execution-only transport.",
-                    entity_kind="vm",
-                    entity_name=vm.name,
-                    hint="Update Agentworks so the VM platform and core capability contract match.",
-                )
-        else:
-            target = transport(vm, config)
-        if ws is not None:
-            cmd = f"cd {shlex.quote(ws.workspace_path)} && exec $SHELL -l"
-            return target.interactive(cmd, env=env)
-        return target.interactive("", env=env)
+            return attach_via_native_transport(
+                vm,
+                vm_node.site.platform,
+                config,
+                ctx=ops_ctx,
+                stack=stack,
+                workspace_path=ws.workspace_path if ws else None,
+                env=env,
+            )
+        access = execution.vm_access(vm, config, Admin())
+        return access.attach(LoginShell(cwd=ws.workspace_path if ws else None, env=env))
 
 
 def exec_vm(
@@ -190,8 +191,13 @@ def exec_vm(
 ) -> int:
     """Execute a command on a VM as the admin user via direct admin SSH.
 
-    Uses inherited stdio for streaming output without buffering.
-    Returns the remote exit code.
+    Streams the command's output live and copies the operator's stdin to
+    it. Returns the remote exit code: a command that cannot start is 127
+    (not found), 126 (found but not runnable) or 125 (the workspace
+    directory is missing), with one line from agw.
+
+    One argument is a shell command line, run by the admin's default shell;
+    several arguments are a literal argv.
 
     When ``workspace_name`` is set, the command runs from the workspace
     directory and the workspace template's env joins the env chain. The
@@ -201,13 +207,15 @@ def exec_vm(
     :func:`shell_vm`: the gate opens before the preflight sweep and
     the held-active span covers the streamed remote command.
     """
-    import shlex
-
+    import agentworks.execution as execution
     import agentworks.vms.manager as _mgr
     from agentworks.env import ResourceContext, compose_env
     from agentworks.exec_validation import normalize_exec_command
-    from agentworks.transports import transport
+    from agentworks.execution.access import Admin, stream_to_operator
+    from agentworks.execution.requests import Command, Script, Shell
 
+    # Before any database read or guard: an unsupported client refuses first.
+    execution.resolve_ssh()
     command = normalize_exec_command(command, kind="vm", name=name)
 
     vm = _require_vm(db, name)
@@ -219,9 +227,7 @@ def exec_vm(
 
     ws = _resolve_workspace_for_vm(db, vm, workspace_name)
 
-    # transport() raises StateError when tailscale_host is None; guard first so
-    # the operator gets an actionable StateError instead of an AssertionError
-    # (which also disappears under python -O).
+    # Guard first so the operator gets the VM-specific hint before any gate opens.
     if vm.tailscale_host is None:
         raise StateError(
             f"VM '{name}' has no Tailscale IP",
@@ -267,8 +273,11 @@ def exec_vm(
             admin=scopes.admin,
         )
 
-        target = transport(vm, config)
-        remote_cmd = command[0] if len(command) == 1 else shlex.join(command)
-        if ws is not None:
-            remote_cmd = f"cd {shlex.quote(ws.workspace_path)} && {remote_cmd}"
-        return target.call_streaming(remote_cmd, env=env)
+        access = execution.vm_access(vm, config, Admin())
+        cwd = ws.workspace_path if ws else None
+        request = (
+            Script(command[0], Shell.USER_DEFAULT, cwd=cwd, env=env)
+            if len(command) == 1
+            else Command(tuple(command), cwd=cwd, env=env)
+        )
+        return stream_to_operator(access, request)
