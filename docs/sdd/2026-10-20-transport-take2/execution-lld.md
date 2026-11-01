@@ -41,7 +41,8 @@ them:
 | Module                                           | Contents                                                                                                          |
 | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
 | `agentworks/execution/client.py`                 | `resolve_ssh`, `SSHClient`: resolution, banner and version check                                                  |
-| `agentworks/execution/ssh_process.py`            | `VMPolicy`, `build_argv`, the stage 0 string, `Deadline`, and the pump that spawns a client                       |
+| `agentworks/execution/ssh_process.py`            | `VMPolicy`, `build_argv`, the stage 0 string, the client log and `spawn`, the one place a client is started       |
+| `agentworks/execution/pump.py`                   | `Deadline` and `PipeSession`, the argv-agnostic pump                                                              |
 | `agentworks/execution/envelope.py`               | Frames, the JSON envelope, markers, the stream filters, the classifier and `launcher_source()`                    |
 | `agentworks/execution/agw_launch.py`             | The guest program. Stage 0 execs it; the client imports only its two shared definitions                           |
 | `agentworks/execution/requests.py`, `results.py` | The slice 2 vocabulary, with `Shell` and `AccountShell` (below)                                                   |
@@ -61,14 +62,17 @@ was refusing.
 
 ## The proof modules
 
+Citations of the proof in this LLD (`carrier.py`, `connection.py`, `_io.py` and the rest) are at
+`fd1256b1f`, the last commit that has it.
+
 | Proof module                                                    | Fate                                                                                                                                                                                                                                                                                                                                                                                    |
 | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `carrier.py`                                                    | Deleted. `Deadline` (`:20`) moves into `ssh_process.py`; the report types give way to `results.py`                                                                                                                                                                                                                                                                                      |
+| `carrier.py`                                                    | Deleted. `Deadline` (`:20`) moves into `pump.py`; the report types give way to `results.py`                                                                                                                                                                                                                                                                                             |
 | `preparation.py`                                                | Deleted. The base64 line envelope and its 256 KiB cap are superseded by `envelope.py`; the `Command` and `Script` shapes carry over to `requests.py`. Its reserved-environment list existed for the Bash bootstrap and does not carry over                                                                                                                                              |
 | `bootstrap.py`                                                  | Deleted, replaced by `agw_launch.py`. Its locale save, force and restore (`:31-33`, `:135`) was for Bash's own parsing and has no counterpart in a Python launcher                                                                                                                                                                                                                      |
 | `carriers/ssh/client.py`                                        | Adopted into `client.py`: the banner regex (`:27`) and the 8.5 floor (`:61`). The probe on every execute becomes once per process; `SSHCarrier` is deleted                                                                                                                                                                                                                              |
 | `carriers/ssh/connection.py`                                    | Adopted into `ssh_process.py`: the option list (`:109-153`, cut down below) and the host and user checks (`:51-58`). Its trust options are `trust.ssh_options`, so only one copy survives                                                                                                                                                                                               |
-| `carriers/ssh/_io.py`                                           | Adopted into `ssh_process.py`: the single-threaded non-blocking pump, kill and reap, the Windows environment strip (`:104-114`) and cleanup on `BaseException` (`:191`)                                                                                                                                                                                                                 |
+| `carriers/ssh/_io.py`                                           | Adopted: the single-threaded non-blocking pump, kill and reap and cleanup on `BaseException` (`:191`) into `pump.py`, the Windows environment strip (`:104-114`) into `ssh_process.spawn`                                                                                                                                                                                               |
 | `carriers/proxmox.py`, `carriers/_proxmox_http.py`              | Deleted (R10). Slice 4 writes the QGA client fresh                                                                                                                                                                                                                                                                                                                                      |
 | `tests/execution/` proof tests, `conformance.py`, their READMEs | Deleted with their modules, except the process-level cases of `carriers/ssh/test_client.py` (duplex pressure `:146`, EOF on empty input `:164`, capture limits `:174`, short and failed writes `:219` and `:234`, deadline reap `:272`, interruption `:430`, local signals `:449`, descendant handles `:459` and `:507`, the Windows environment `:543`), which are adapted to the pump |
 
@@ -138,10 +142,10 @@ Unknown(reason)        CONNECTION | HOST_KEY | TRUNCATED | DEADLINE | OUTPUT_LIM
   inputs: no operation combines input with a terminal, so incident row I4's refusal is structural.
 - **Refusals.** `stream` maps `NotDelivered(REFUSED)` as tty mode does: `exec ENOENT` is status 127,
   any other `exec` errno is 126, and `cwd` and `handover` are 125, with one line naming the refusal
-  on the stderr it was given. So `vm exec VM nosuchcmd` still exits 127. `run` raises
-  `RequestRefused(StateError)` for the same outcome, and `attach` raises it when the parking
-  connection refuses, before the terminal is touched. One `refusal_status(code)` in `agw_launch.py`
-  is the table for the guest and the client alike.
+  on the stderr it was given. So `vm exec VM nosuchcmd` still exits 127. `run` returns the outcome
+  as `NotDelivered(REFUSED)`, `require_completed` raises `RequestRefused(StateError)` for it, and
+  `attach` raises it when the parking connection refuses, before the terminal is touched. One
+  `refusal_status(code)` in `agw_launch.py` is the table for the guest and the client alike.
 - **Validation** lives in the one function that turns a request into bytes (`envelope.encode`).
   Boundary: environment, arguments, working directory and script text come from operator-authored
   config and from secret backends. It refuses NUL anywhere, an environment name outside
@@ -228,15 +232,25 @@ as `-o` (the proof's list at `connection.py:109-153`, cut to what `-F none` leav
   connection errors land in the file on 8.5, 9.x and Win32-OpenSSH. The client reads this log, to
   type `Host key verification failed` and to show its last 20 lines in errors.
 
-**Spawning.** `subprocess.Popen(argv, stdin=PIPE, stdout=PIPE, stderr=PIPE, bufsize=0)` with the
-proof's Windows environment strip (`_io.py:104-114`). The pump is the proof's single-threaded loop
-(`_io.py:32-205`): non-blocking pipes (supported on Windows pipes from Python 3.12), 64 KiB chunks,
-a 10 ms sleep when nothing moved, the deadline, then kill and a 0.5 s reap, and cleanup on
-`BaseException`. It is argv-agnostic, which is what lets the conformance suite run it against a
-local shell.
+`build_argv` takes the client log path and a `verbose` flag. `verbose` replaces `-E` with `-v` and
+is accepted only for a forward, since in a pipe mode ssh's debug lines would reach the guest's
+stderr after the marker; the terminal half takes neither.
+
+**Spawning.** One `spawn(argv, ...)` in `ssh_process.py` runs
+`subprocess.Popen(argv, stdin=PIPE, stdout=PIPE, stderr=PIPE, bufsize=0)` (the forward passes no
+pipes) with the proof's Windows environment strip (`_io.py:104-114`, at `fd1256b1f`), and maps a
+failure to start to `ClientUnsupported`. The pump lives in `pump.py`. The pump is the proof's
+single-threaded loop (`_io.py:32-205`): non-blocking pipes (supported on Windows pipes from Python
+3.12), 64 KiB chunks, a 10 ms sleep when nothing moved, the deadline, then kill and a 0.5 s reap,
+and cleanup on `BaseException`. It is argv-agnostic, which is what lets the conformance suite run it
+against a local shell.
 
 - **Who uses it.** `run`, `stream` and the parking connection of an attach reuse the one pump. The
-  terminal half (inherited stdio, `subprocess` wait) and the forward (no pipes) do not.
+  terminal half (inherited stdio, `subprocess` wait) and the forward (no pipes) do not. The parking
+  connection sets `hold_stdin_open`, so the pump sends the request and leaves the pipe open: the
+  parked launcher reads end of file as the client giving up.
+- **Deadline and output limit.** Either stops the pump and kills the client at once, then reaps for
+  0.5 s; only a natural end waits for the client to exit.
 - **Operator stdin for `stream`.** The caller passes `sys.stdin.buffer.raw`. A daemon thread reads
   `stdin.read(65536)` into a queue and the pump drains one chunk per pass into ssh's stdin, closing
   it at end of file. A thread is needed because Windows cannot poll a console or pipe handle, and
@@ -248,6 +262,13 @@ local shell.
   start marker is the consumer ending early, not a failure.
 - **Binary stdio.** Callers pass `sys.stdout.buffer` and `sys.stderr.buffer` (the text layer's
   `newline="\n"` at `cli/_entry.py:38` does not apply), after flushing the text layer (I2).
+  `stream_to_operator(access, request)` in `access.py` is that wiring, flush, raw stdin and binary
+  buffers, so the commands do not repeat it.
+- **A sink that would block.** Only `BrokenPipeError` and `ConnectionResetError` from a sink mean
+  the consumer ended early, plus `OSError(EINVAL)` on Windows, where CPython reports a pipe whose
+  reader closed that way. A sink that raises `BlockingIOError`, because the operator's own stdout is
+  a non-blocking pipe, keeps its unsent remainder and is retried, so output is never dropped while
+  the command reports success. Any other `OSError` from a sink (`ENOSPC`, `EIO`) propagates.
 
 ## The wire
 
@@ -359,13 +380,16 @@ defined once. Steps, mapped to HLA D4:
      `MFD_NOEXEC_SEAL` (`0x8`, kernel 6.3 and later) with a retry without it on `EINVAL`, passed in
      `pass_fds` and named `/dev/fd/N`, so script text is in no argv and the interpreter's stdin
      stays the caller's. The interpreter is `/bin/sh`, `/bin/bash` or the passwd shell, run as
-     `[interp] [-l] /dev/fd/N`. The interpreter's own children inherit that descriptor, the only one
-     they inherit; it holds the script they came from. The payload's stdin is agw-launch's,
-     positioned at the caller's first byte. There is no copy loop.
-6. **Complete.** After `wait`, write `<M>end` to descriptor 1 then `<M>exit N` to descriptor 2, with
-   `N` the exit status, or 128 plus the signal for a payload killed by one. A refusal writes `end`
-   then `refused CODE` instead. Codes are `cwd`, `exec <ERRNO>` and, for a parked launcher,
-   `handover`.
+     `[interp] [-l] /dev/fd/N`. The memfd is created and filled before the start marker, so a
+     failure there (`EMFILE`, say) is a launcher failure, not an outcome that may have run. The
+     interpreter's own children inherit that descriptor, the only one they inherit; it holds the
+     script they came from. The payload's stdin is agw-launch's, positioned at the caller's first
+     byte. There is no copy loop.
+6. **Complete.** After `wait`, set descriptors 1 and 2 back to blocking, since the payload shares
+   their open file descriptions and may have made them non-blocking, then write `<M>end` to
+   descriptor 1 then `<M>exit N` to descriptor 2, with `N` the exit status, or 128 plus the signal
+   for a payload killed by one. A refusal writes `end` then `refused CODE` instead. Codes are `cwd`,
+   `exec <ERRNO>` and, for a parked launcher, `handover`.
 
 **`tty` mode** (the terminal half of an attach) runs `LoginShell` only, since a script's memfd could
 not survive the descriptor close. It runs steps 1, 4 and 5 with no check, no markers and no child:
@@ -417,9 +441,12 @@ The classifier combines both filters with ssh's own exit status:
 
 `attach(request)` does, in order:
 
-1. Generate `token = secrets.token_hex(8)`, build the `tty` envelope for the request with `term`,
-   and send it to a first connection as `mode: "park"` with `handover: token` (argv shape `run`,
-   stage 0 with no argument). The socket path, `/tmp/agw-handover-<token>/s`, is computed locally.
+1. `VMAccess.attach` generates `token = secrets.token_hex(8)`, creates the client log, and builds
+   both argvs before anything spawns; `attach.py` receives the framed request (`envelope.message`),
+   its nonce, the two argvs and the log as data, as the forward does. The first connection gets the
+   `tty` envelope for the request with `term`, as `mode: "park"` with `handover: token` (argv shape
+   `run`, stage 0 with no argument). The socket path, `/tmp/agw-handover-<token>/s`, is computed
+   locally.
 2. agw-launch, in `park` mode, first pre-checks what the terminal half would otherwise fail on: the
    working directory (`cwd`, or home) must be enterable and the shell executable. A failure is
    `refused cwd` or `refused exec <ERRNO>`, so it comes back typed before the terminal is touched.
@@ -428,7 +455,12 @@ The classifier combines both filters with ssh's own exit status:
    `refused handover`, so a pre-planted path is never reused. The path is fixed under `/tmp`, so
    `TMPDIR` plays no part. It binds a Unix stream socket `s` in the directory under umask 077,
    listens, and writes `<M>parked` to stdout.
-3. The client reads that line from the parking connection, then, inside
+3. The client reads that line from the parking connection within 60 seconds, its own bound for
+   connecting, authenticating and running the account's startup files (the launcher's 30 second wait
+   starts only after `parked`). Past that it kills the connection and raises
+   `ExecutionIncomplete(Unknown(DEADLINE))` with the terminal untouched; for an attach the message
+   says no shell started, and names a startup file that reads stdin as the usual cause, since such a
+   file would otherwise hold the connection open forever. Then, inside
    `with guarded_terminal() as guard:`, runs the terminal half. Its stage 0 gets the socket path as
    `sys.argv[1]`, connects, reads the launcher frame and the envelope frame from the socket, and
    runs agw-launch in `tty` mode. No guest text reaches a command line.
@@ -603,10 +635,11 @@ sshd does; its interpreter path is a parameter. It covers the shells and runs on
 host, once with `/usr/bin/python3` and once with a 3.11 interpreter from `uv python install 3.11`,
 since `ast.parse` cannot catch 3.12-only standard library calls. **S** runs the real client against
 a rootless local `sshd` (`ListenAddress 127.0.0.1`, a temporary host key and `AuthorizedKeysFile`,
-`UsePAM no`, `StrictModes no`) and `trust.write_records` for the test host key; it skips when no
-`sshd` binary exists, and the CI job installs `openssh-server` if the runner image lacks it. **V**
-is the live lane, `-m integration` with `AGW_CONFORMANCE_VM`, run by the tester from each
-workstation. `zsh` and `dash` are required on CI (a missing shell fails there, skips locally).
+`UsePAM no`, `StrictModes no`) and `trust.write_records` for the test host key; it skips locally
+when `sshd` is missing or cannot start, fails on CI in either case, and the CI job installs
+`openssh-server` if the runner image lacks it. **V** is the live lane, `-m integration` with
+`AGW_CONFORMANCE_VM`, run by the tester from each workstation. `zsh` and `dash` are required on CI
+(a missing shell fails there, skips locally).
 
 | Vector                                                                                                                                                                                          | Lanes  |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
@@ -629,6 +662,9 @@ workstation. `zsh` and `dash` are required on CI (a missing shell fails there, s
 | Payload stdout with no trailing newline; a `refused` trailer                                                                                                                                    | L S    |
 | Deadline: `Unknown(DEADLINE)` at the deadline, client reaped                                                                                                                                    | L S    |
 | Handover: success, the 30 s timeout, an existing directory name, a missing `cwd`, second connection never arrives, nothing left behind                                                          | L S V  |
+| The payload leaves stdout and stderr non-blocking and full, then exits 0: `Completed(0)` with both closing markers (L is the regression guard; S and V drain too fast to catch it)              | L S V  |
+| A startup file that reads stdin under an attach: the parking wait expires with the terminal untouched, bounded by the vector itself                                                             | L      |
+| `memfd_create` refusing `MFD_NOEXEC_SEAL` (`EINVAL`) runs the script; `EMFILE` is `NotDelivered(LAUNCHER_FAILED)` with the payload not run                                                      | L      |
 | Host key mismatch is `TrustMismatch`, read from the client log                                                                                                                                  | S      |
 | Binary stdin and stdout, from Windows (`windows` mark) and live                                                                                                                                 | pump V |
 

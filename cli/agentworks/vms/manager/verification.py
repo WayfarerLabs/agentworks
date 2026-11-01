@@ -32,6 +32,12 @@ def verify_vm_connection(
     name: str,
 ) -> VMConnectionVerification:
     """Prove the stored VM accepts one bounded, canonical, non-mutating command."""
+    import agentworks.execution as execution
+    from agentworks.execution.access import Admin
+    from agentworks.execution.requests import Command
+
+    # Before any database read: an unsupported client refuses first.
+    execution.resolve_ssh()
     vm = db.get_vm(name)
     if vm is None:
         raise NotFoundError(
@@ -51,13 +57,7 @@ def verify_vm_connection(
 
     require_vm_ssh_boundary(db, config, vm)
 
-    import agentworks.transports as transports
-
-    target = transports.transport(vm, config)
-    target.run("true", sudo=False, tty=False, env=None, timeout=_VERIFY_CONNECTION_TIMEOUT_SECONDS)
-    description = target.describe()
-    kind, separator, _endpoint = description.partition(":")
-    return VMConnectionVerification(
-        name=name,
-        transport=kind if separator else description,
-    )
+    access = execution.vm_access(vm, config, Admin())
+    access.run(Command(("true",), deadline=_VERIFY_CONNECTION_TIMEOUT_SECONDS), check=True)
+    # Every connection is SSH to the tailnet address; the kind is not a variable.
+    return VMConnectionVerification(name=name, transport="ssh")

@@ -11,7 +11,7 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from textwrap import dedent
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import pytest
 import yaml
@@ -25,6 +25,9 @@ from agentworks.output import Role, StatusStyle, _render_header
 from agentworks.resources.registry import Registry
 from agentworks.schema import CapabilityBlock
 from tests.ssh_fixtures import write_test_ssh_keypair
+
+if TYPE_CHECKING:
+    from tests.vm_access_support import AccessRecorder
 
 # The orchestrated-command suites' shared fixture trio (proxmox
 # section, make_config, resolve_counter) lives in its own module so it
@@ -1030,6 +1033,17 @@ def ssh_enrolls_on_first_use(trust_binding: object) -> None:
     transport's ``trust``; it records only under ENROLL, as ssh would."""
     if isinstance(trust_binding, TrustBinding) and trust_binding.mode is TrustMode.ENROLL:
         seed_vm_trust(trust_binding.vm_name)
+
+
+@pytest.fixture
+def vm_access_recorder(monkeypatch: pytest.MonkeyPatch) -> AccessRecorder:
+    """Route every ``execution.vm_access`` call to a recording fake, and resolve ssh without a client."""
+    from tests.vm_access_support import AccessRecorder
+
+    recorder = AccessRecorder()
+    monkeypatch.setattr("agentworks.execution.vm_access", recorder.vm_access)
+    monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: recorder.client)
+    return recorder
 
 
 def seed_vm_trust(vm_name: str) -> None:

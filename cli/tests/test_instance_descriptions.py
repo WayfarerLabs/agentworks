@@ -118,7 +118,7 @@ def test_workspace_and_agent_descriptions_include_current_final_layers(
     db.insert_workspace("work", "/srv/work", "box", "ws-work")
     db.insert_agent("dev", "box", "agt-dev")
     workspace_overlay = parse_instance_spec("workspace", '{"tmuxinator":false}')
-    agent_overlay = parse_instance_spec("agent", '{"shell":"/bin/fish"}')
+    agent_overlay = parse_instance_spec("agent", '{"shell":"zsh"}')
     db.instance_state.put_desired_overlay("workspace", "work", workspace_overlay.payload)
     db.instance_state.put_desired_overlay("agent", "dev", agent_overlay.payload)
 
@@ -135,7 +135,7 @@ def test_workspace_and_agent_descriptions_include_current_final_layers(
     agent_slot = agent.instance_state.declarations[0]
     assert agent_slot.instance_spec.status == "present"
     assert agent_slot.current.status == "resolved"
-    assert agent_slot.current.spec["shell"] == "/bin/fish"
+    assert agent_slot.current.spec["shell"] == "zsh"
     assert agent.instance_state.lifecycle_evidence == ()
 
 
@@ -168,7 +168,7 @@ def test_workspace_and_agent_descriptions_retain_database_facts_when_registry_is
         socket_path="/tmp/run.sock",
     )
     workspace_overlay = parse_instance_spec("workspace", '{"tmuxinator":false}')
-    agent_overlay = parse_instance_spec("agent", '{"shell":"/bin/fish"}')
+    agent_overlay = parse_instance_spec("agent", '{"shell":"zsh"}')
     db.instance_state.put_desired_overlay("workspace", "work", workspace_overlay.payload)
     db.instance_state.put_desired_overlay("agent", "dev", agent_overlay.payload)
 
@@ -187,7 +187,7 @@ def test_workspace_and_agent_descriptions_retain_database_facts_when_registry_is
 
     for state, expected_spec in (
         (workspace.instance_state, {"tmuxinator": False}),
-        (agent.instance_state, {"shell": "/bin/fish"}),
+        (agent.instance_state, {"shell": "zsh"}),
     ):
         slot = state.declarations[0]
         assert slot.instance_spec.status == "present"

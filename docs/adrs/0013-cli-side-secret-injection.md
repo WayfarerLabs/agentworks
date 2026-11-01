@@ -8,6 +8,12 @@ Accepted. The resolution mechanism ("env var, then prompt" as a hardcoded sourci
 superseded by ADR 0016's configured `secret-source` model; the decision itself remains CLI-side
 injection with no VM-side secret storage.
 
+Amended for the commands that run through `agentworks.execution` (`vm exec`, `vm shell`,
+`agent exec`, `agent shell`; see the [transport take 2 SDD](../sdd/2026-10-20-transport-take2/)):
+secret environment travels in the request on the client's stdin, not as `-o SetEnv` arguments. The
+decision stands, and Negative 2's command-line exposure no longer applies to those commands, since
+no secret appears in any argument vector on either machine.
+
 ## Context
 
 The env-and-secrets SDD introduces a general mechanism for propagating environment variables and

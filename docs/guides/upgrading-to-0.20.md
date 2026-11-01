@@ -80,3 +80,65 @@ store as well, and your own `ssh` never writes to it.
 
 `vm create` records the VM's key on its first connection, over the tailnet, and writes it to the
 store only. Your `~/.ssh/known_hosts` is no longer touched. `vm delete` removes the record.
+
+## Connecting for `exec`, `shell` and `port-forward`
+
+`agw vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection` and `vm port-forward`
+now run through a new connection layer that sends each request to the VM over the OpenSSH client's
+standard input instead of on the `ssh` command line. `vm shell --platform` keeps its platform-native
+path and needs none of what follows. Everything else keeps its current path for now.
+
+### What the six commands need
+
+- **OpenSSH 8.5 or newer on the workstation.** Agentworks uses the first `ssh` on your `PATH`
+  (ignoring empty and relative `PATH` entries) and checks its version once per run. A missing or
+  older client is refused before anything else happens, with the paths it tried. `agw doctor` shows
+  which client Agentworks resolved.
+- **The native Windows build on Windows.** Agentworks never searches `PATH` there, because `PATH`
+  commonly finds the `ssh` bundled with Git for Windows, whose argument handling breaks these
+  commands. It looks for Win32-OpenSSH in `System32\OpenSSH` and then `Program Files\OpenSSH`
+  (including the 32-bit file system redirects) and judges each. Windows 10's inbox client is OpenSSH
+  8.1, so install the Win32-OpenSSH MSI from <https://github.com/PowerShell/Win32-OpenSSH/releases>.
+- **`python3` on the VM.** Every request starts a small Python program on the VM. A VM without
+  `python3`, or with one that lacks its standard library, is reported as unable to run Agentworks
+  requests. Run `agw vm reinit NAME`, which still works on such a VM and installs it.
+- **A supported login shell for the admin and every agent.** The admin and agent template `shell`
+  fields now accept only `sh`, `dash`, `bash` and `zsh`; a path such as `/usr/bin/zsh` is read as
+  its basename. Any other shell, such as `fish` or `tcsh`, is a configuration error that names the
+  field and the allowed values. Accounts that already exist are not checked yet. A stored agent
+  instance spec that names another shell, such as `{"shell": "/bin/fish"}`, now reads as
+  `instance-spec-malformed`; replace it with `agw agent reinit NAME --spec JSON`.
+
+### What behaves differently
+
+- **No ssh configuration is read.** These commands run `ssh -F none`, so `~/.ssh/config` and the
+  system configuration do not apply to them. An `IdentityAgent` set only in `~/.ssh/config`
+  (1Password, Secretive) is ignored; the agent named by `SSH_AUTH_SOCK` serves the key. Every
+  connection runs in batch mode, so ssh never prompts for a key's passphrase: an encrypted key has
+  to be loaded in that agent first.
+- **Exit statuses.** A command that cannot start exits 127 when it is not found, 126 when it is
+  found but cannot run (no execute bit, or a script with no `#!` line, since there is no shell
+  fallback), and 125 when the workspace directory is missing, each with one line from `agw`. A
+  command that exits 255 is no longer confused with a lost connection: under `exec`, a lost
+  connection now exits 1 with an error from `agw` instead of 255. `vm shell` and `agent shell` still
+  return 255 for both and print a notice.
+- **The guest environment is rebuilt.** The command sees a fixed `PATH`
+  (`/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/games:/usr/games`),
+  `LANG=C.UTF-8`, `SHLVL=1`, the account's `HOME`, `USER`, `LOGNAME` and `SHELL`, and your
+  environment on top. It no longer sees `SSH_CLIENT`, `SSH_CONNECTION`, `/etc/environment` or other
+  `pam_env` variables, or anything the account's shell exported while sshd ran it to start the
+  request. Login startup files still run where the command asks for a login shell: `agent exec`,
+  `vm shell` and `agent shell` read them after the environment is rebuilt, and zsh reads `.zshenv`
+  for a single-argument `vm exec`.
+- **A literal command skips the account shell.** `vm exec VM prog arg...` runs the program directly.
+  `vm exec VM 'one argument'` is, as before, a shell command line run by the admin's default shell
+  without login startup. What changes is where its `PATH` comes from: sshd's `PATH` plus `pam_env`
+  before, the fixed `PATH` above now, so additions made only in profile files are not applied; use
+  `vm exec VM bash -lc '...'` to get them. `agent exec` still runs in the agent's login shell.
+- **Large arguments are refused up front.** One argument or one `NAME=VALUE` environment string over
+  131,071 bytes is refused before anything runs, because Linux cannot execute it.
+- **`vm shell` and `agent shell` without `--workspace` no longer print the message of the day or the
+  last-login line.** sshd prints them only when it runs the login shell itself.
+- **`vm port-forward` exits 0 when you stop it** with Ctrl-C or `SIGTERM`, exits non-zero when a
+  forward cannot be set up (a busy local port, for example) instead of running with nothing
+  forwarded.

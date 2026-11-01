@@ -524,12 +524,28 @@ def _check_python() -> HealthGroup:
 
 
 def _check_required_tools() -> HealthGroup:
+    """PATH presence rows, then the OpenSSH resolver's verdict.
+
+    The ``ssh`` and ``scp`` rows stay until the last legacy path that runs a
+    bare ``ssh`` or ``scp`` goes. The resolver row is what the migrated
+    commands will use: the absolute client path and version, or the refusal
+    with its install guidance.
+    """
+    from agentworks.execution import resolve_ssh
+    from agentworks.execution.errors import ClientUnsupported
+
     g = HealthGroup("Required tools")
     for tool in ("ssh", "scp", "tailscale"):
         if shutil.which(tool):
             g.ok(tool)
         else:
             g.fail(tool, "not found")
+    try:
+        client = resolve_ssh()
+    except ClientUnsupported as e:
+        g.fail("OpenSSH client", "no supported client", hint=str(e))
+    else:
+        g.ok("OpenSSH client", f"{client.path} (OpenSSH {client.version[0]}.{client.version[1]})")
     return g
 
 

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from agentworks.agents.template import AgentTemplate
     from agentworks.db import Database
     from agentworks.env.entry import EnvEntry
+    from agentworks.execution.requests import AccountShell
     from agentworks.instance_specs import InstanceOverlay
     from agentworks.resources.inheritance import LayeredResolution
     from agentworks.resources.registry import Registry
@@ -30,7 +31,7 @@ class ResolvedAgentTemplate:
     """A fully resolved agent template with all inheritance applied."""
 
     name: str
-    shell: str = "bash"
+    shell: AccountShell = "bash"
     git_credentials: list[str] = field(default_factory=list)
     user_install_commands: list[str] = field(default_factory=list)
     dotfiles_source: str | None = None

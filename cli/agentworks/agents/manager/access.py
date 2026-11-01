@@ -2,7 +2,8 @@
 
 Direct-agent-user SSH, as opposed to the admin+sudo detour: the
 agent's own ``authorized_keys`` accepts the operator's key (see
-``agents/initializer.py``).
+``agents/initializer.py``). Both commands reach the VM through
+``agentworks.execution``, and this file imports no retired transport module.
 """
 
 from __future__ import annotations
@@ -10,7 +11,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import agentworks.agents.manager as _mgr
-from agentworks.errors import NotFoundError
+import agentworks.execution as execution
+from agentworks.errors import ConnectivityError, NotFoundError, StateError
+from agentworks.execution.access import Admin, Agent, stream_to_operator
+from agentworks.execution.requests import Command, LoginShell, Script, Shell
+from agentworks.execution.results import Completed, Unknown, UnknownReason
 from agentworks.vms.manager import gated_vm_boundary
 
 from ._common import (
@@ -19,16 +24,56 @@ from ._common import (
     agent_scope,
 )
 
-# ``_assert_agent_ssh_works``, ``_resolve_agent_direct_env_scopes``, and
-# ``_agent_direct_secret_target`` are referenced through the package object
-# (``_mgr.NAME``) at call time rather than imported by value, because tests
-# monkeypatch them on ``agentworks.agents.manager``; a by-value import here
-# would freeze a copy the patch could not reach.
+# ``_resolve_agent_direct_env_scopes`` and ``_agent_direct_secret_target`` are
+# referenced through the package object (``_mgr.NAME``) at call time rather
+# than imported by value, because tests monkeypatch them on
+# ``agentworks.agents.manager``; a by-value import here would freeze a copy
+# the patch could not reach.
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database
+    from agentworks.db import AgentRow, Database
+    from agentworks.execution.access import VMAccess
     from agentworks.secrets.policy import TtyInteractionPolicy
+
+_PROBE_DEADLINE_SECONDS = 30
+_ADMIN_PROBE_DEADLINE_SECONDS = 10
+
+
+def _assert_agent_access_works(access: VMAccess, admin: VMAccess, agent: AgentRow) -> None:
+    """Probe direct agent SSH and tell an agent that predates the rollout from an unreachable VM.
+
+    The direct-target-user-SSH rollout populates each agent's
+    ``~/.ssh/authorized_keys`` with the operator's key set at agent create /
+    reinit. An agent that existed before it has no such file, so ssh as the
+    agent is rejected (255). Run ``true`` as the agent; a ``Completed`` of any
+    status passes. Only an unknown connection failure is ambiguous, so only it
+    falls back to running ``true`` as the admin: if that completes, the VM is
+    fine and the agent is the problem (the reinit hint); otherwise the VM is
+    unreachable. Every other outcome (python3 missing, a host key mismatch, a
+    refusal, a truncated run) is not about the rollout and raises as it is.
+    """
+    result = access.run(Command(("true",), deadline=_PROBE_DEADLINE_SECONDS))
+    completion = result.completion
+    if isinstance(completion, Completed):
+        return
+    if not (isinstance(completion, Unknown) and completion.reason is UnknownReason.CONNECTION):
+        result.require_completed(access.vm_name)
+        return
+    fallback = admin.run(Command(("true",), deadline=_ADMIN_PROBE_DEADLINE_SECONDS))
+    if isinstance(fallback.completion, Completed):
+        raise StateError(
+            f"agent '{agent.name}' rejected direct SSH (likely predates the direct-target-user-SSH rollout).",
+            entity_kind="agent",
+            entity_name=agent.name,
+            hint=f"Run 'agw agent reinit {agent.name}' to populate its authorized_keys.",
+        )
+    raise ConnectivityError(
+        f"direct SSH probe to agent '{agent.name}' failed: VM '{agent.vm_name}' is unreachable",
+        entity_kind="agent",
+        entity_name=agent.name,
+        hint=f"Check that VM '{agent.vm_name}' is reachable.",
+    )
 
 
 def shell_agent(
@@ -51,6 +96,8 @@ def shell_agent(
     its just-in-time values seed the boundary resolver), and the
     held-active span covers the whole interactive session.
     """
+    # Before any database read or guard: an unsupported client refuses first.
+    execution.resolve_ssh()
     agent = db.get_agent(name)
     if agent is None:
         raise NotFoundError(
@@ -62,7 +109,6 @@ def shell_agent(
     vm = _require_vm(db, agent.vm_name)
 
     from agentworks.env import ResourceContext, compose_env
-    from agentworks.transports import agent_transport
 
     # Resolve workspace upfront (needed for authz check, env scope, AND
     # ctx) before any SSH probe so failures surface as clean validation
@@ -111,24 +157,17 @@ def shell_agent(
 
         # Direct agent SSH: no admin+sudo detour. The agent's
         # authorized_keys accepts the operator's key set.
-        target = agent_transport(vm, config, agent)
+        access = execution.vm_access(vm, config, Agent(agent.name, agent.linux_user))
 
         # Probe direct agent SSH first so pre-rollout agents (whose
         # authorized_keys was never populated) get an actionable error
         # rather than dropping into a remote shell that immediately exits
         # on Permission denied.
-        _mgr._assert_agent_ssh_works(target, agent)
+        _assert_agent_access_works(access, execution.vm_access(vm, config, Admin()), agent)
 
-        if ws is not None:
-            import shlex
-
-            q_path = shlex.quote(ws.workspace_path)
-            # SSH as the agent, then cd into the workspace and exec an
-            # interactive login shell. No sudo / su involved.
-            shell_cmd = f"cd {q_path} && exec $SHELL -li"
-            return target.interactive(shell_cmd, env=env)
-        # SSH as the agent with no command -> interactive login shell.
-        return target.interactive("", env=env)
+        # An interactive login shell as the agent, in the workspace when one
+        # is named. No sudo / su involved.
+        return access.attach(LoginShell(cwd=ws.workspace_path if ws else None, env=env))
 
 
 def exec_agent(
@@ -160,8 +199,9 @@ def exec_agent(
 
     from agentworks.env import ResourceContext, compose_env
     from agentworks.exec_validation import normalize_exec_command
-    from agentworks.transports import agent_transport
 
+    # Before any database read or guard: an unsupported client refuses first.
+    execution.resolve_ssh()
     command = normalize_exec_command(command, kind="agent", name=name)
 
     agent = db.get_agent(name)
@@ -218,19 +258,16 @@ def exec_agent(
             agent=scopes.agent,
         )
 
-        target = agent_transport(vm, config, agent)
+        access = execution.vm_access(vm, config, Agent(agent.name, agent.linux_user))
 
         # Probe direct agent SSH first so pre-rollout agents (whose
         # authorized_keys was never populated) get an actionable error.
-        _mgr._assert_agent_ssh_works(target, agent)
+        _assert_agent_access_works(access, execution.vm_access(vm, config, Admin()), agent)
 
-        remote_cmd = command[0] if len(command) == 1 else shlex.join(command)
-        if ws is not None:
-            remote_cmd = f"cd {shlex.quote(ws.workspace_path)} && {remote_cmd}"
-        # Wrap in a login shell so the agent's PATH (mise shims,
+        # A login shell runs the command so the agent's PATH (mise shims,
         # ~/.local/bin, etc.) is set up. This matches the env an operator
-        # gets via `agent shell`.
-        return target.call_streaming(
-            f"$SHELL -lc {shlex.quote(remote_cmd)}",
-            env=env,
-        )
+        # gets via `agent shell`. One argument is a command line; several are
+        # joined into one, as `$SHELL -lc` has always taken them.
+        source = command[0] if len(command) == 1 else shlex.join(command)
+        request = Script(source, Shell.USER_DEFAULT, login=True, cwd=ws.workspace_path if ws else None, env=env)
+        return stream_to_operator(access, request)
