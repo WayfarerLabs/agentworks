@@ -37,7 +37,7 @@
 - [x] Record the operator's answers to the HLA's open questions.
 - [ ] Record the operator's rulings on the HLA's "Awaiting the operator" items, and amend R3 if the
       operator accepts the proposed wording.
-- [ ] Revise the design for the operator's 2026-10-31 decisions (stdin delivery, agw-launch in
+- [x] Revise the design for the operator's 2026-10-31 decisions (stdin delivery, agw-launch in
       Python, python3 at provisioning, the terminal handover, three PRs), and run the private review
       on the revision.
 
@@ -311,7 +311,8 @@ Definition of done: create and reinit run entirely on the new transport.
       `secrets/orchestration.py:228-232`), now that no path sends environment by `SetEnv`.
 - [ ] Delete the console's env carry across sudo, which the handover replaces: the `--preserve-env`
       path and its memo in `sessions/multi_console/`, and the `Defaults:<admin> setenv` sudoers
-      grant (`_write_sudoers_console_setenv`).
+      grant (`_write_sudoers_console_setenv`), with reinit removing the installed fragment from
+      existing VMs.
 - [ ] Re-prove incident rows I6a and I8.
 - [ ] Amend ADR 0017.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked

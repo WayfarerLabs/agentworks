@@ -247,22 +247,26 @@ syntax that needs no particular python3 release. It is rewritten in Python from 
 
 ### D5. Requests and results (R3, R4)
 
-| Type                   | Shape                                                                                                                                                     | Current consumers                                                                         |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `Command`              | Literal argv tuple                                                                                                                                        | most buffered calls                                                                       |
-| `Script`               | Source plus `Shell.SH`, `Shell.BASH` or `Shell.USER_DEFAULT`, with `login` and `interactive` flags                                                        | initializers                                                                              |
-| `PythonProgram`        | Core-owned Python source and arguments, run by `/usr/bin/python3 -I -S` reading the source from a file descriptor, with the same `login` flag as `Script` | the file program, native probing, the native CLI's login resolution                       |
-| Common options         | `env`, `cwd`, `elevated`, `deadline`, `observation`                                                                                                       | `observation`: status probes that retry today                                             |
-| Input                  | `NoInput`, `Bytes(data, sensitive=)`, `FromFile(path)`                                                                                                    | `FromFile`: workspace copy (slice 7)                                                      |
-| Output sink (buffered) | `Capture(limit)`, `Discard`, `ToFile(path, on_progress=)`                                                                                                 | `Discard`: `command_checks.py`, native CLI; `ToFile`: backup and workspace copy (slice 7) |
-| `Result`               | `completion` is `Completed(status)`, `NotDelivered(reason)` or `Unknown(reason)`; `stdout` and `stderr` are bytes                                         | all                                                                                       |
+| Type                   | Shape                                                                                                                                                                        | Current consumers                                                                         |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `Command`              | Literal argv tuple                                                                                                                                                           | most buffered calls                                                                       |
+| `Script`               | Source plus `Shell.SH`, `Shell.BASH` or `Shell.USER_DEFAULT`, with `login` and `interactive` flags                                                                           | initializers                                                                              |
+| `PythonProgram`        | Core-owned Python source and arguments, run by `/usr/bin/python3 -I -S` reading the source from a file descriptor, with the same `login` and `interactive` flags as `Script` | the file program, native probing, the native CLI's login resolution                       |
+| Common options         | `env`, `cwd`, `elevated`, `deadline`, `observation`                                                                                                                          | `observation`: status probes that retry today                                             |
+| Input                  | `NoInput`, `Bytes(data, sensitive=)`, `FromFile(path)`                                                                                                                       | `FromFile`: workspace copy (slice 7)                                                      |
+| Output sink (buffered) | `Capture(limit)`, `Discard`, `ToFile(path, on_progress=)`                                                                                                                    | `Discard`: `command_checks.py`, native CLI; `ToFile`: backup and workspace copy (slice 7) |
+| `Result`               | `completion` is `Completed(status)`, `NotDelivered(reason)` or `Unknown(reason)`; `stdout` and `stderr` are bytes                                                            | all                                                                                       |
 
 Each vocabulary item lands in the slice that migrates its first consumer. `PythonProgram` is not one
 of R3's script interpreters. It carries core's own Python programs, which travel in `python3 -c`
 argv on `main` (`artifacts/native/probe.py:402`, `native_files.py:338`), so their source stays out
-of guest arguments (R4). With `login`, the identity's default shell runs its login startup and then
-execs the interpreter, which is how the native probe keeps seeing the native workload's login
-environment, as it does today through `"$SHELL" -lic` (`probe.py:402-410`).
+of guest arguments (R4). With `login` and `interactive`, the identity's default shell runs that
+startup and then execs the interpreter, with the program's arguments passed positionally so no
+quoting is needed. That is how the native probe and the native CLI's login resolution keep seeing
+the native workload's login and interactive environment, as they do today through `"$SHELL" -lic`
+(`probe.py:402-410`). The interactive half matters: the seeded `.bashrc` returns early for a
+non-interactive shell before it sources the mise activation
+(`capabilities/vm_platform/skel.py:46-50`, `:124-125`).
 
 - **Bytes, not text.** Results carry bytes with no newline conversion; a `text()` helper decodes.
   Stdin is written in binary mode on every workstation (incident row I2).
@@ -660,13 +664,13 @@ disposition of it.
 
 ## ADR amendments
 
-| ADR                               | Change                                                                                                       | Slice |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------ | ----- |
-| 0013 (secret injection)           | Secret environment travels in the request on stdin, not as `-o SetEnv` arguments                             | 2     |
-| 0014 (`AcceptEnv` wildcard)       | The transport no longer sends environment through SSH; slice 8 decides whether the fragment still has a user | 2, 8  |
-| 0017 (console pane environment)   | Console panes take their environment from the terminal handover (D8) instead of `tmux -e` arguments          | 7     |
-| 0019 (command plans)              | Its `admin_target`/`agent_target` description moves to the new accessors                                     | 5     |
-| 0025 (one current Debian release) | Core attests the release over SSH as the first base check                                                    | 3     |
+| ADR                               | Change                                                                                                                              | Slice |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| 0013 (secret injection)           | Secret environment travels in the request on stdin, not as `-o SetEnv` arguments                                                    | 2     |
+| 0014 (`AcceptEnv` wildcard)       | The transport no longer sends environment through SSH; slice 8 decides whether the fragment still has a user                        | 2, 8  |
+| 0017 (console pane environment)   | Superseded: console panes take their environment from the terminal handover (D8), retiring `tmux -e` and the `--preserve-env` carry | 7     |
+| 0019 (command plans)              | Its `admin_target`/`agent_target` description moves to the new accessors                                                            | 5     |
+| 0025 (one current Debian release) | Core attests the release over SSH as the first base check                                                                           | 3     |
 
 ADR 0003 needs no change: its statement that access after bootstrap is SSH over Tailscale becomes
 exactly true.
@@ -718,7 +722,7 @@ R7, R11 and python3 at provisioning) are quoted in the FRD.
 2. **Refusing local Lima on Windows.** Lima defines no `unsupported_reason`, since Remote Lima from
    Windows is supported, so local placement on Windows is accepted whenever `limactl` is installed.
    The lead's recommendation: have Lima's readiness check refuse local placement on Windows with a
-   hint naming WSL2, in slice 4 with the platform surface.
+   hint naming WSL2, tracked as its own issue, since the transport does not depend on it.
 
 ## Alternatives considered
 
