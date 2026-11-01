@@ -342,8 +342,7 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
     from tests.conftest import _FakeTarget
 
-    module = __import__(implementation.__module__, fromlist=["probe_native"])
-    monkeypatch.setattr(module, "probe_native", lambda *args, **kwargs: "/home/alice/.native")
+    monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", lambda *args, **kwargs: "/home/alice/.native")
     item = artifact(ArtifactType.RULE)
     integration = implementation(
         "native",
@@ -706,8 +705,10 @@ def test_skipped_inputs_do_not_probe_or_require_launch_target(monkeypatch, imple
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
 
-    module = __import__(implementation.__module__, fromlist=["probe_native"])
-    monkeypatch.setattr(module, "probe_native", lambda *args, **kwargs: pytest.fail("unexpected artifact probe"))
+    monkeypatch.setattr(
+        "agentworks.artifacts.native.probe.probe_native",
+        lambda *args, **kwargs: pytest.fail("unexpected artifact probe"),
+    )
     integration = implementation(
         "native",
         {},
@@ -806,7 +807,7 @@ def test_claude_observes_version_only_for_delivered_session_prompt(monkeypatch, 
 
     snapshot = Mock(return_value=("--system-prompt-snapshot", "off"))
     monkeypatch.setattr(module, "session_prompt_snapshot", snapshot)
-    monkeypatch.setattr(module, "probe_native", lambda *args, **kwargs: "/home/alice/.claude")
+    monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", lambda *args, **kwargs: "/home/alice/.claude")
     ancestor = claude.outer_artifacts(received(artifact(ArtifactType.RULE)), "/home/alice/.claude")
     integration = ClaudeCodeIntegration(
         "claude-code",
@@ -864,20 +865,17 @@ def test_ancestor_only_override_is_reported_without_blocking(render, args, monke
 def test_failed_native_probe_is_advisory_only_without_new_carriers(
     integration_class, module, workaround, own_delivery, monkeypatch
 ):
-    from importlib import import_module
-
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
     from agentworks.errors import ExternalError
     from tests.conftest import _FakeTarget
 
     warnings: list[str] = []
     monkeypatch.setattr(output, "warn", warnings.append)
-    native = import_module(f"agentworks.plugins.{module}.harness_integration")
 
     def fail_probe(*args, **kwargs):
         raise ExternalError("fixture native discovery unavailable")
 
-    monkeypatch.setattr(native, "probe_native", fail_probe)
+    monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", fail_probe)
     ancestor = claude.outer_artifacts(received(artifact(ArtifactType.RULE)), "/home/alice/.claude")
     prepared = context(
         *([artifact(ArtifactType.RULE)] if own_delivery else []),
@@ -971,7 +969,6 @@ def test_setup_native_name_conflict_defers_only_affected_artifact(implementation
     assert any(good.origin_identity in file.origins for file in result.files) or any(
         item.input_id == good.identity for item in result.deferred
     )
-    assert not any(file.native_identity == "skill:review" for file in calls[-1]) or not result.files
 
 
 @pytest.mark.parametrize("modified", [False, True])

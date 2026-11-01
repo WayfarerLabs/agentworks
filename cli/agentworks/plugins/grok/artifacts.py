@@ -105,15 +105,12 @@ def session_artifacts(
     validate_names(inputs)
     selected_types = {item.content.type for item in inputs.items()}
     ancestor_names = {file.native_identity or "" for file in context.ancestor_files}
-    has_skills = ArtifactType.SKILL in selected_types
     has_agents = ArtifactType.AGENT in selected_types
     forbidden = set()
     if selected_types & {ArtifactType.HINT, ArtifactType.RULE}:
         forbidden.update({"--rules", "--append-system-prompt", "--system-prompt", "--system-prompt-override"})
     if has_agents:
         forbidden.update({"--agents", "--no-subagents"})
-    if has_skills:
-        forbidden.update({"--plugin-dir", "--disable-skills"})
     if inputs:
         reject_flags(extra_args, forbidden, "grok-build")
     if context.ancestor_files:

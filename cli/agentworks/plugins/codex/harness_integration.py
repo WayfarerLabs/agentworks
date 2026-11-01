@@ -105,7 +105,6 @@ from __future__ import annotations
 import json
 import re
 import shlex
-from contextlib import nullcontext
 from dataclasses import replace
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, NamedTuple
 
@@ -115,10 +114,10 @@ from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
-    ancestor_diagnostics,
     defer_setup_conflicts,
     native_home,
-    recognized_ancestor_files,
+    probe_session_delivery,
+    render_setup_artifacts,
     validate_discovery_paths,
     validate_native_command,
     validate_user_placement,
@@ -466,7 +465,11 @@ class CodexIntegration(HarnessIntegration):
         return super().config_for(facet)
 
     def vm_init(self, invocation: VMSetupInvocation) -> ArtifactApplication:
-        plan = ArtifactApplication() if self.retiring else vm_artifacts(invocation.artifacts)
+        plan = (
+            ArtifactApplication()
+            if self.retiring
+            else render_setup_artifacts(invocation, "user", lambda inputs: vm_artifacts(inputs))
+        )
         if plan.files:
             plan = defer_setup_conflicts(
                 plan,
@@ -497,17 +500,18 @@ class CodexIntegration(HarnessIntegration):
         plan = (
             ArtifactApplication()
             if self.retiring
-            else outer_artifacts(
-                invocation.artifacts,
-                skills_root=f"{invocation.home}/.agents/skills",
-                agents_root=f"{root}/agents",
-                instructions_path=(
-                    guidance_path(invocation.runner, root)
-                    if any(
-                        item.content.type in (ArtifactType.HINT, ArtifactType.RULE)
-                        for item in invocation.artifacts.items()
-                    )
-                    else f"{root}/AGENTS.md"
+            else render_setup_artifacts(
+                invocation,
+                "session",
+                lambda inputs: outer_artifacts(
+                    inputs,
+                    skills_root=f"{invocation.home}/.agents/skills",
+                    agents_root=f"{root}/agents",
+                    instructions_path=(
+                        guidance_path(invocation.runner, root)
+                        if any(item.content.type in (ArtifactType.HINT, ArtifactType.RULE) for item in inputs.items())
+                        else f"{root}/AGENTS.md"
+                    ),
                 ),
             )
         )
@@ -537,17 +541,18 @@ class CodexIntegration(HarnessIntegration):
         plan = (
             ArtifactApplication()
             if self.retiring
-            else outer_artifacts(
-                invocation.artifacts,
-                skills_root=f"{invocation.root}/.agents/skills",
-                agents_root=f"{invocation.root}/.codex/agents",
-                instructions_path=(
-                    guidance_path(invocation.runner, invocation.root)
-                    if any(
-                        item.content.type in (ArtifactType.HINT, ArtifactType.RULE)
-                        for item in invocation.artifacts.items()
-                    )
-                    else f"{invocation.root}/AGENTS.md"
+            else render_setup_artifacts(
+                invocation,
+                "session",
+                lambda inputs: outer_artifacts(
+                    inputs,
+                    skills_root=f"{invocation.root}/.agents/skills",
+                    agents_root=f"{invocation.root}/.codex/agents",
+                    instructions_path=(
+                        guidance_path(invocation.runner, invocation.root)
+                        if any(item.content.type in (ArtifactType.HINT, ArtifactType.RULE) for item in inputs.items())
+                        else f"{invocation.root}/AGENTS.md"
+                    ),
                 ),
             )
         )
@@ -621,42 +626,32 @@ class CodexIntegration(HarnessIntegration):
             enabled_workarounds=self.config.enabled_workarounds,
         )
         artifact_context = self._session_binding.artifact_context
-        own_delivery = bool(self._artifact_plan.application.files or self._artifact_plan.argv)
-        if artifact_context is not None and (artifact_context.ancestor_files or own_delivery):
-            with nullcontext() if own_delivery else ancestor_diagnostics("codex"):
-                runner = ctx.admin_target() if self._admin else ctx.agent_target()
-                if runner is None:
-                    raise StateError("artifact delivery requires the actual native launch target")
-                files = self._artifact_plan.application.files if own_delivery else artifact_context.ancestor_files
-                recognized = (
-                    recognized_ancestor_files(artifact_context, self._artifact_plan.application) if own_delivery else ()
-                )
-                native_root = probe_native(
-                    runner,
-                    tool="codex",
-                    environment=artifact_context.environment,
-                    home=artifact_context.home,
-                    workspace=self._workspace_path,
-                    files=files,
-                    recognized_files=recognized,
-                    session_plugin="--plugin-dir" in self._artifact_plan.argv,
-                )
-                validate_discovery_paths(
-                    artifact_context,
-                    (
-                        f"{artifact_context.home}/.agents/skills",
-                        f"{native_root}/agents",
-                        f"{self._workspace_path}/.agents/skills",
-                        f"{self._workspace_path}/.codex/agents",
-                        "/etc/codex/skills",
-                    ),
-                    files=(
-                        f"{native_root}/AGENTS.md",
-                        f"{native_root}/AGENTS.override.md",
-                        f"{self._workspace_path}/AGENTS.md",
-                        f"{self._workspace_path}/AGENTS.override.md",
-                    ),
-                )
+        runner = ctx.admin_target() if self._admin else ctx.agent_target()
+        native_root = probe_session_delivery(
+            runner,
+            tool="codex",
+            integration=self.name,
+            context=artifact_context,
+            plan=self._artifact_plan,
+            workspace=self._workspace_path,
+        )
+        if artifact_context is not None and native_root is not None:
+            validate_discovery_paths(
+                artifact_context,
+                (
+                    f"{artifact_context.home}/.agents/skills",
+                    f"{native_root}/agents",
+                    f"{self._workspace_path}/.agents/skills",
+                    f"{self._workspace_path}/.codex/agents",
+                    "/etc/codex/skills",
+                ),
+                files=(
+                    f"{native_root}/AGENTS.md",
+                    f"{native_root}/AGENTS.override.md",
+                    f"{self._workspace_path}/AGENTS.md",
+                    f"{self._workspace_path}/AGENTS.override.md",
+                ),
+            )
         self._decision = None
         self._adopted_id = None
         self._dropped_stale = False

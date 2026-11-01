@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import shlex
 import uuid
-from contextlib import nullcontext
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 from pydantic import Field
@@ -28,11 +27,11 @@ from pydantic import Field
 from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
-    ancestor_diagnostics,
     defer,
     defer_setup_conflicts,
     native_home,
-    recognized_ancestor_files,
+    probe_session_delivery,
+    render_setup_artifacts,
     validate_discovery_paths,
     validate_native_command,
     validate_user_placement,
@@ -186,8 +185,12 @@ class GrokBuildIntegration(HarnessIntegration):
         plan = (
             ArtifactApplication()
             if self.retiring
-            else outer_artifacts(
-                invocation.artifacts, root or native_home(invocation.home, invocation.environment, "GROK_HOME", ".grok")
+            else render_setup_artifacts(
+                invocation,
+                "session",
+                lambda inputs: outer_artifacts(
+                    inputs, root or native_home(invocation.home, invocation.environment, "GROK_HOME", ".grok")
+                ),
             )
         )
         validate_user_placement(plan, invocation.home)
@@ -211,7 +214,9 @@ class GrokBuildIntegration(HarnessIntegration):
         plan = (
             ArtifactApplication()
             if self.retiring
-            else outer_artifacts(invocation.artifacts, f"{invocation.root}/.grok")
+            else render_setup_artifacts(
+                invocation, "session", lambda inputs: outer_artifacts(inputs, f"{invocation.root}/.grok")
+            )
         )
         if plan.files:
             plan = defer_setup_conflicts(
@@ -248,27 +253,17 @@ class GrokBuildIntegration(HarnessIntegration):
             enabled_workarounds=self.config.enabled_workarounds,
         )
         artifact_context = self._session_binding.artifact_context
-        own_delivery = bool(self._artifact_plan.application.files or self._artifact_plan.argv)
-        if artifact_context is not None and (artifact_context.ancestor_files or own_delivery):
-            with nullcontext() if own_delivery else ancestor_diagnostics("grok-build"):
-                runner = ctx.admin_target() if self._admin else ctx.agent_target()
-                if runner is None:
-                    raise StateError("artifact delivery requires the actual native launch target")
-                files = self._artifact_plan.application.files if own_delivery else artifact_context.ancestor_files
-                recognized = (
-                    recognized_ancestor_files(artifact_context, self._artifact_plan.application) if own_delivery else ()
-                )
-                native_root = probe_native(
-                    runner,
-                    tool="grok",
-                    environment=artifact_context.environment,
-                    home=artifact_context.home,
-                    workspace=self._workspace_path,
-                    files=files,
-                    recognized_files=recognized,
-                    session_plugin="--plugin-dir" in self._artifact_plan.argv,
-                )
-                validate_discovery_paths(artifact_context, (native_root, f"{self._workspace_path}/.grok"))
+        runner = ctx.admin_target() if self._admin else ctx.agent_target()
+        native_root = probe_session_delivery(
+            runner,
+            tool="grok",
+            integration=self.name,
+            context=artifact_context,
+            plan=self._artifact_plan,
+            workspace=self._workspace_path,
+        )
+        if artifact_context is not None and native_root is not None:
+            validate_discovery_paths(artifact_context, (native_root, f"{self._workspace_path}/.grok"))
         command = self._resume_or_launch(ctx, intent=intent)
         if intent is HarnessLaunchIntent.FORCE_NEW:
             note = "Fresh Grok Build session requested. Starting a new one without resuming prior state..."

@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from agentworks.artifacts.application import OwnedArtifactFile, SessionArtifactContext
     from agentworks.artifacts.model import ArtifactFacet, ArtifactInput
     from agentworks.capabilities.harness_integration.setup import SetupInvocation
+    from agentworks.transports import Transport
 
 
 # Agentworks budget for a rendered persona TOML file, including its instruction body.
@@ -59,10 +60,14 @@ def select_session_artifacts(
                 else f"No supported session workaround for artifact type {item.content.type.value}"
             )
             deferred.append(ArtifactDeferral(input_id=item.identity, destination="session", reason=reason))
+    return _select_inputs(inputs, selected), tuple(deferred)
+
+
+def _select_inputs(inputs: ArtifactInputs, selected: set[str]) -> ArtifactInputs:
     return ArtifactInputs(
         local=inputs.local.select(selected) if inputs.local is not None else None,
         deferred={owner: group.select(selected) for owner, group in inputs.deferred.items()},
-    ), tuple(deferred)
+    )
 
 
 def native_home(home: str, environment: Mapping[str, str], variable: str, default: str) -> str:
@@ -152,20 +157,50 @@ def defer_setup_conflicts(
     return application
 
 
+def _name_conflicts(inputs: ArtifactInputs) -> tuple[tuple[ArtifactInput, ...], ...]:
+    names: dict[tuple[ArtifactType, str], list[ArtifactInput]] = {}
+    for item in inputs.items():
+        if item.content.type in (ArtifactType.SKILL, ArtifactType.AGENT):
+            names.setdefault((item.content.type, item.content.name), []).append(item)
+    return tuple(tuple(items) for items in names.values() if len(items) > 1)
+
+
+def _name_conflict_reason(items: tuple[ArtifactInput, ...]) -> str:
+    content = items[0].content
+    owners = ", ".join(f"{item.origin.component}:{item.origin.resource_name}" for item in items)
+    return f"multiple artifacts claim native {content.type.value} name '{content.name}': {owners}"
+
+
+def render_setup_artifacts(
+    invocation: SetupInvocation,
+    destination: ArtifactFacet,
+    render: Callable[[ArtifactInputs], ArtifactApplication],
+) -> ArtifactApplication:
+    """Defer every colliding input origin before rendering independent setup files."""
+    rejected: dict[str, str] = {}
+    for items in _name_conflicts(invocation.artifacts):
+        reason = _name_conflict_reason(items)
+        invocation.report_incomplete(reason)
+        rejected.update((item.identity, reason) for item in items)
+    selected = {item.identity for item in invocation.artifacts.items() if item.identity not in rejected}
+    application = render(_select_inputs(invocation.artifacts, selected))
+    return replace(
+        application,
+        deferred=(
+            *application.deferred,
+            *(
+                ArtifactDeferral(input_id=identity, destination=destination, reason=reason)
+                for identity, reason in rejected.items()
+            ),
+        ),
+    )
+
+
 def validate_names(inputs: ArtifactInputs) -> None:
     """Reject colliding native names at the integration input boundary."""
-    seen: dict[tuple[ArtifactType, str], ArtifactInput] = {}
-    for item in inputs.items():
-        name = item.content.name
-        key = item.content.type, name
-        if item.content.type in (ArtifactType.SKILL, ArtifactType.AGENT) and key in seen:
-            previous = seen[key].origin.owner
-            current = item.origin.owner
-            raise ConfigError(
-                f"multiple artifacts claim native {item.content.type.value} name '{name}': "
-                f"{previous.component}:{previous.resource_name} and {current.component}:{current.resource_name}"
-            )
-        seen[key] = item
+    conflicts = _name_conflicts(inputs)
+    if conflicts:
+        raise ConfigError(_name_conflict_reason(conflicts[0]))
 
 
 def persona_options(item: ArtifactInput, integration: str, allowed: Mapping[str, type]) -> dict[str, object]:
@@ -231,12 +266,14 @@ def validate_ancestor_names(context: SessionArtifactContext, application: Artifa
         if file.native_identity is None:
             continue
         prior = files_by_name.setdefault(file.native_identity, file)
-        if file.native_identity in conflicting_ancestors and set(prior.origins) == set(file.origins):
-            prior = conflicting_ancestors[file.native_identity]
-        if set(prior.origins) != set(file.origins):
+        competing = conflicting_ancestors.get(file.native_identity)
+        if competing is not None or set(prior.origins) != set(file.origins):
+            paths = {prior.path, file.path}
+            if competing is not None:
+                paths.add(competing.path)
             raise ConfigError(
                 f"multiple scopes claim native artifact identity '{file.native_identity}': "
-                f"{prior.path!r} and {file.path!r}"
+                + ", ".join(repr(path) for path in sorted(paths))
             )
 
 
@@ -259,6 +296,50 @@ def recognized_ancestor_files(
         if file.native_identity is not None
     }
     return tuple(file for file in context.ancestor_files if (file.native_identity, frozenset(file.origins)) in proposed)
+
+
+def probe_session_delivery(
+    runner: Transport | None,
+    *,
+    tool: str,
+    integration: str,
+    context: SessionArtifactContext | None,
+    plan: NativeSessionArtifacts,
+    workspace: str,
+) -> str | None:
+    """Validate new carriers strictly and report existing ancestor restrictions separately."""
+    from agentworks.artifacts.native.probe import probe_native
+
+    if context is None:
+        return None
+    root = None
+    if plan.application.files or plan.argv:
+        if runner is None:
+            raise StateError("artifact delivery requires the actual native launch target")
+        root = probe_native(
+            runner,
+            tool=tool,
+            environment=context.environment,
+            home=context.home,
+            workspace=workspace,
+            files=plan.application.files,
+            recognized_files=recognized_ancestor_files(context, plan.application),
+            session_plugin="--plugin-dir" in plan.argv,
+        )
+    if context.ancestor_files:
+        with ancestor_diagnostics(integration):
+            if runner is None:
+                raise StateError("artifact delivery requires the actual native launch target")
+            ancestor_root = probe_native(
+                runner,
+                tool=tool,
+                environment=context.environment,
+                home=context.home,
+                workspace=workspace,
+                files=context.ancestor_files,
+            )
+            root = root or ancestor_root
+    return root
 
 
 def validate_discovery_paths(

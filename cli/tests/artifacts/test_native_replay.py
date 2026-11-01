@@ -188,6 +188,8 @@ def test_inactive_facet_replays_known_persona_without_reusing_old_policy_paths(
         artifact_context=prepared,
     )
     monkeypatch.setattr(integration, "_resume_or_launch", lambda *args, **kwargs: "fixture-launch")
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.output.warn", warnings.append)
     if prior_state == "competing":
         with pytest.raises(NativeArtifactConflictError):
             integration.start(
@@ -198,6 +200,7 @@ def test_inactive_facet_replays_known_persona_without_reusing_old_policy_paths(
             RunContext(admin_target=SimpleNamespace(run=run)), intent=HarnessLaunchIntent.RESUME_OR_NEW
         )
         assert result.command == "fixture-launch"
+        assert warnings
     proposed = integration._artifact_plan.application.files
     assert requests and set(requests[0]["entries"]) == {
         file.path for file in (*earlier.files, *proposed) if file.native_identity
