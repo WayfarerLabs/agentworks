@@ -23,6 +23,7 @@ from agentworks.errors import BackupError, StateError
 from agentworks.instance_specs import parse_vm_instance_specs
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import backup as vm_backup
+from agentworks.vms.manager import boundary
 from tests.conftest import seed_vm_trust
 
 if TYPE_CHECKING:
@@ -43,12 +44,14 @@ def test_a_vm_without_a_host_key_record_is_refused_before_anything_is_written(
     db.insert_vm("bvm", site="lima-local", hostname="bvm")
     db.update_vm_tailscale("bvm", "100.64.0.9")
     trust.remove("bvm")
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda config, **_kwargs: object())
+    # The real gate's SSH precondition refuses; the gate itself must never open.
     monkeypatch.setattr(
-        vm_backup, "gated_vm_boundary", lambda *a, **k: pytest.fail("the boundary opened for a VM with no record")
+        boundary, "_gated_vm_boundary", lambda *a, **k: pytest.fail("the gate opened for a VM with no record")
     )
 
     with pytest.raises(TrustMissing):
-        vm_backup.backup_vm(db, object(), "bvm", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
+        vm_backup.backup_vm(db, SimpleNamespace(), "bvm", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
 
 def test_missing_tailscale_fails_before_the_boundary(
