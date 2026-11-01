@@ -730,8 +730,9 @@ into the workspace; the exec variant runs the command from the workspace directo
 lives on a different VM is rejected with a `ValidationError` before any SSH work.
 
 `vm shell`, `vm exec`, `vm verify-connection`, `vm port-forward`, `agent shell` and `agent exec`
-connect with the OpenSSH client on the workstation, version 8.5 or newer. Agentworks uses the first
-`ssh` on `PATH`; on Windows it uses only the native Win32-OpenSSH under `System32\OpenSSH` or
+connect with the OpenSSH client on the workstation, version 8.5 or newer (`vm shell --platform` uses
+the platform's own path instead, and needs neither the client nor `python3`). Agentworks uses the
+first `ssh` on `PATH`; on Windows it uses only the native Win32-OpenSSH under `System32\OpenSSH` or
 `Program Files\OpenSSH`, never the `ssh` bundled with Git for Windows. `agw doctor` shows which
 client was resolved, and an unsupported one is refused before anything else runs. These commands run
 `ssh -F none` in batch mode, so `~/.ssh/config` does not apply and an encrypted private key must be

@@ -20,12 +20,15 @@ returns canned outcomes without ssh.
 - `test_stream_filters.py`: the stream filters under every split and interleaving, the classifier
   row by row, the refusal-to-status table.
 - `test_ssh_process.py`: the client argv, and `ssh -G` against the installed client.
-- `test_client_resolution.py`: the resolver against temporary executables, Windows included.
+- `test_client_resolution.py`: the resolver against temporary executables, including the Windows
+  candidate order.
 - `test_pump.py`: the pump against synthetic children that speak the marker protocol. Marked
   `windows`, so it runs in Windows CI.
 - `test_access.py`, `test_launcher_source.py`, `test_stream_process.py`: passivity and ordering, the
   launcher's structure, and `stream` in a real process whose stdin stays open.
 - `test_trust.py`: the host-key store.
+- `legacy_modules.py`: the six legacy module names, shared by the conftest blocker, the fresh
+  interpreter guard and the static import check.
 
 ## Conformance vectors
 
@@ -40,8 +43,8 @@ returns canned outcomes without ssh.
 - **S** runs the real `ssh` client against a rootless `sshd` on loopback, with a temporary host key
   and `AuthorizedKeysFile`, and the host key written to the host-key store. It needs an `sshd`
   binary (`/usr/sbin/sshd` counts, though that directory is often not on `PATH`) and skips without
-  one. The account's own login shell is the real one, so S exercises stage 0 under whatever shell
-  the user has.
+  one locally, failing when `CI` is set. The account's own login shell is the real one, so S
+  exercises stage 0 under whatever shell the user has.
 - **V** is the live lane, against a VM named by `AGW_CONFORMANCE_VM`, reached as the operator's
   configured admin with the operator's real database and host-key store:
 

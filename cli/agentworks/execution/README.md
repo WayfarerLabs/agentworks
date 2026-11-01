@@ -40,17 +40,19 @@ for `attach`). Each takes `env`, `cwd` (absolute; `None` is the home directory) 
 
 Every connection runs the same constant command, `python3 -I -S -c '<stage 0>'` (`ssh_process.py`).
 Stage 0 is a one-line program that reads the launcher's source from stdin with exact-length reads
-and runs it. The launcher, `agw_launch.py`, reads the request, resets what the payload inherits,
-runs the payload as a child and reports completion. The client writes three things to ssh's stdin in
-order: the launcher source, the JSON envelope (`envelope.py`), and the caller's input untouched. A
-frame is ten ASCII digits then that many bytes, so the payload's stdin starts at the caller's first
-byte.
+and runs it. Its reader is recursive, so a pathological drip of tiny reads fails safely, as not
+delivered, instead of running. The launcher, `agw_launch.py`, reads the request, resets what the
+payload inherits, runs the payload as a child and reports completion. The client writes three things
+to ssh's stdin in order: the launcher source, the JSON envelope (`envelope.py`), and the caller's
+input untouched. A frame is ten ASCII digits then that many bytes, so the payload's stdin starts at
+the caller's first byte.
 
 The guest's account shell may print or export before stage 0 runs. The launcher brackets the
 payload's output with marker lines (`0x1E`, a per-request nonce, a word, a newline), and the client
 drops everything before the start marker and after the closing lines. The payload gets a rebuilt
 environment (a fixed `PATH`, `LANG=C.UTF-8`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `SHLVL=1`, then the
-request's `env`), a fixed umask, default signal dispositions and no descriptors above 2.
+request's `env`), a fixed umask, default signal dispositions and no descriptors above 2. A payload
+running as the same user could learn the nonce, which only lets it misreport its own result.
 
 ## Outcomes
 
@@ -79,9 +81,11 @@ verdict.
 
 `ssh_process.py` builds the argv under `-F none`, so no operator or system configuration applies,
 with the explicit identity (`IdentitiesOnly`), `BatchMode`, publickey-only authentication, the VM's
-host-key trust options and keepalives on every connection. It is the only module that spawns `ssh`.
-The pump is one thread driving non-blocking pipes; the operator's stdin reaches it through a daemon
-thread that reads the raw stream.
+host-key trust options and keepalives on every connection. Its `spawn` is the only place a client is
+started. `pump.py` drives a started client through pipes: one thread over non-blocking pipes, with
+the operator's stdin reaching it through a daemon thread that reads the raw stream. A deadline or an
+output limit kills the client at once. A sink that would block (the operator's own stdout is a
+non-blocking pipe) is waited on, never dropped.
 
 ## Terminal handover
 
@@ -92,6 +96,8 @@ directory under `/tmp`, listens and waits. The second runs the terminal half, wh
 to that socket, collects the launcher and the request, and execs the login shell on the terminal. No
 guest text reaches a command line, and the parked launcher removes its directory when the second
 connection is served, when the client closes its end, after 30 seconds, or on `SIGHUP` or `SIGTERM`.
+The client gives up on a parking connection that never reports `parked` after the connect timeout
+plus that 30 seconds, and raises before the terminal is touched.
 
 ## Host-key trust
 

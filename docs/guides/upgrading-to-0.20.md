@@ -85,7 +85,8 @@ store only. Your `~/.ssh/known_hosts` is no longer touched. `vm delete` removes 
 
 `agw vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection` and `vm port-forward`
 now run through a new connection layer that sends each request to the VM over the OpenSSH client's
-standard input instead of on the `ssh` command line. Everything else keeps its current path for now.
+standard input instead of on the `ssh` command line. `vm shell --platform` keeps its platform-native
+path and needs none of what follows. Everything else keeps its current path for now.
 
 ### What the six commands need
 
@@ -104,7 +105,9 @@ standard input instead of on the `ssh` command line. Everything else keeps its c
 - **A supported login shell for the admin and every agent.** The admin and agent template `shell`
   fields now accept only `sh`, `dash`, `bash` and `zsh`; a path such as `/usr/bin/zsh` is read as
   its basename. Any other shell, such as `fish` or `tcsh`, is a configuration error that names the
-  field and the allowed values. Accounts that already exist are not checked yet.
+  field and the allowed values. Accounts that already exist are not checked yet. A stored agent
+  instance spec that names another shell, such as `{"shell": "/bin/fish"}`, now reads as
+  `instance-spec-malformed`; replace it with `agw agent reinit NAME --spec JSON`.
 
 ### What behaves differently
 
@@ -116,15 +119,21 @@ standard input instead of on the `ssh` command line. Everything else keeps its c
 - **Exit statuses.** A command that cannot start exits 127 when it is not found, 126 when it is
   found but cannot run (no execute bit, or a script with no `#!` line, since there is no shell
   fallback), and 125 when the workspace directory is missing, each with one line from `agw`. A
-  connection that fails is no longer confused with a command that exited 255.
+  command that exits 255 is no longer confused with a lost connection: under `exec`, a lost
+  connection now exits 1 with an error from `agw` instead of 255. `vm shell` and `agent shell` still
+  return 255 for both and print a notice.
 - **The guest environment is rebuilt.** The command sees a fixed `PATH`
   (`/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/games:/usr/games`),
   `LANG=C.UTF-8`, `SHLVL=1`, the account's `HOME`, `USER`, `LOGNAME` and `SHELL`, and your
   environment on top. It no longer sees `SSH_CLIENT`, `SSH_CONNECTION`, `/etc/environment` or other
-  `pam_env` variables, or anything its account shell's startup files exported.
+  `pam_env` variables, or anything the account's shell exported while sshd ran it to start the
+  request. Login startup files still run where the command asks for a login shell: `agent exec`,
+  `vm shell` and `agent shell` read them after the environment is rebuilt, and zsh reads `.zshenv`
+  for a single-argument `vm exec`.
 - **A literal command skips the account shell.** `vm exec VM prog arg...` runs the program directly.
-  `vm exec VM 'one argument'` is a shell command line run by the admin's default shell without its
-  login startup, so `PATH` additions made only in profile files are not applied; use
+  `vm exec VM 'one argument'` is, as before, a shell command line run by the admin's default shell
+  without login startup. What changes is where its `PATH` comes from: sshd's `PATH` plus `pam_env`
+  before, the fixed `PATH` above now, so additions made only in profile files are not applied; use
   `vm exec VM bash -lc '...'` to get them. `agent exec` still runs in the agent's login shell.
 - **Large arguments are refused up front.** One argument or one `NAME=VALUE` environment string over
   131,071 bytes is refused before anything runs, because Linux cannot execute it.
