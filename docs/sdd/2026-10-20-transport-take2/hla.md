@@ -190,16 +190,18 @@ syntax that needs no particular python3 release. It is rewritten in Python from 
 
 1. **Reads the envelope.** A malformed one fails before the start marker, so the request is not
    delivered.
-2. **Checks its standard streams.** sshd gives the command pipes or sockets (the terminal in TTY
-   mode). If a startup file redirected any of fds 0 to 2, for example with `exec >/dev/null`,
-   agw-launch exits with a fixed status before the start marker, so the payload never runs and the
-   request is reported as not delivered, never as a silent success.
+2. **Checks its standard streams.** sshd gives the command pipes or sockets, stdout and stderr
+   distinct (the terminal in TTY mode). If a startup file redirected one, for example with
+   `exec >/dev/null` or `exec 2>&1`, agw-launch exits with a fixed status before the start marker,
+   so the payload never runs and the request is reported as not delivered. A startup file that swaps
+   both streams for other pipes that discard their input still defeats the check; that contrived
+   case is a stated residual with the resource limits below.
 3. **Writes the start marker**, `<nonce> start`, to stdout and to stderr.
 4. **Resets what the payload inherits:**
    - the environment, rebuilt from `HOME`, `USER`, `LOGNAME` and `SHELL` from the identity's passwd
-     entry, a fixed `PATH`, the locale, a named set of session variables sshd and PAM provide
-     (`TERM` in TTY mode and `XDG_RUNTIME_DIR`, among others the LLD lists), then the request's
-     environment;
+     entry, a fixed `PATH`, the locale, the session variables today's shells and session workloads
+     inherit from sshd and PAM (`TERM` in TTY mode, `XDG_RUNTIME_DIR`, and `SSH_CLIENT`,
+     `SSH_CONNECTION` and `SSH_TTY`), then the request's environment;
    - the working directory (the home directory by default) and a fixed umask;
    - signal dispositions back to their defaults, and no inherited descriptor above 2.
 
@@ -218,10 +220,10 @@ syntax that needs no particular python3 release. It is rewritten in Python from 
 
 **Completion rules:**
 
-- **Start marker.** The client discards everything before the start marker on each stream, so
-  shell-startup output never reaches the command's caller. On the terminal half of an attach the
-  client is not in the stream, so such output can appear on the operator's terminal; it still never
-  reaches the command.
+- **Start marker.** A marker on either stream means the payload may have started. The client
+  discards everything before the start marker on each stream, so shell-startup output never reaches
+  the command's caller. On the terminal half of an attach the client is not in the stream, so such
+  output can appear on the operator's terminal; it still never reaches the command.
 - **The trailer is the only completion evidence.** The client strips it, so a guest exit of 255 is
   reported as completed with status 255. Bytes after the trailer, from background children of the
   payload, are kept as stderr.
@@ -232,30 +234,35 @@ syntax that needs no particular python3 release. It is rewritten in Python from 
   (D10) finds it first.
 - **Unknown.** Everything else without a trailer is unknown, whatever the client's own exit status:
   a start marker with no trailer, or 255 with no start marker. The client does not read OpenSSH's
-  diagnostics to tell a refused connection from a dropped one.
-- **TTY mode.** An attach never elevates; an elevated attach request is refused before dispatch, and
-  no current attach consumer elevates. An attach returns its exit code; a 255 is reported as
-  "connection ended or command exited 255", never guessed.
+  diagnostics to tell a refused connection from a dropped one. It reads one OpenSSH token only to
+  type an error: `Host key verification failed` on a 255 becomes `TrustMismatch`, naming
+  `agw vm recover`, since a host key that no longer matches the store needs the operator.
+- **TTY mode.** An attach never elevates to root; an elevated attach request is refused before
+  dispatch, and no current attach consumer elevates. The root `sudo -n` prefix and the handover
+  argument are never combined. An attach returns its exit code; a 255 is reported as "connection
+  ended or command exited 255", never guessed.
 - **Forgery.** The nonce is never in the payload's argv or environment, so ordinary payload output
   cannot forge a marker. A hostile process of the same user could read agw-launch's memory. That is
   outside R4's threat model, which concerns honesty, not a hostile same-user process.
 
 ### D5. Requests and results (R3, R4)
 
-| Type                   | Shape                                                                                                             | Current consumers                                                                         |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `Command`              | Literal argv tuple                                                                                                | most buffered calls                                                                       |
-| `Script`               | Source plus `Shell.SH`, `Shell.BASH` or `Shell.USER_DEFAULT`, with `login` and `interactive` flags                | initializers                                                                              |
-| `PythonProgram`        | Core-owned Python source and arguments, run by `/usr/bin/python3 -I -S` reading the source from a file descriptor | the file program, native probing, the native CLI's login resolution                       |
-| Common options         | `env`, `cwd`, `elevated`, `deadline`, `observation`                                                               | `observation`: status probes that retry today                                             |
-| Input                  | `NoInput`, `Bytes(data, sensitive=)`, `FromFile(path)`                                                            | `FromFile`: workspace copy (slice 7)                                                      |
-| Output sink (buffered) | `Capture(limit)`, `Discard`, `ToFile(path, on_progress=)`                                                         | `Discard`: `command_checks.py`, native CLI; `ToFile`: backup and workspace copy (slice 7) |
-| `Result`               | `completion` is `Completed(status)`, `NotDelivered(reason)` or `Unknown(reason)`; `stdout` and `stderr` are bytes | all                                                                                       |
+| Type                   | Shape                                                                                                                                                     | Current consumers                                                                         |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `Command`              | Literal argv tuple                                                                                                                                        | most buffered calls                                                                       |
+| `Script`               | Source plus `Shell.SH`, `Shell.BASH` or `Shell.USER_DEFAULT`, with `login` and `interactive` flags                                                        | initializers                                                                              |
+| `PythonProgram`        | Core-owned Python source and arguments, run by `/usr/bin/python3 -I -S` reading the source from a file descriptor, with the same `login` flag as `Script` | the file program, native probing, the native CLI's login resolution                       |
+| Common options         | `env`, `cwd`, `elevated`, `deadline`, `observation`                                                                                                       | `observation`: status probes that retry today                                             |
+| Input                  | `NoInput`, `Bytes(data, sensitive=)`, `FromFile(path)`                                                                                                    | `FromFile`: workspace copy (slice 7)                                                      |
+| Output sink (buffered) | `Capture(limit)`, `Discard`, `ToFile(path, on_progress=)`                                                                                                 | `Discard`: `command_checks.py`, native CLI; `ToFile`: backup and workspace copy (slice 7) |
+| `Result`               | `completion` is `Completed(status)`, `NotDelivered(reason)` or `Unknown(reason)`; `stdout` and `stderr` are bytes                                         | all                                                                                       |
 
-Each vocabulary item lands in the slice that migrates its first consumer. `PythonProgram` is not
-part of the caller vocabulary R3 describes: only core modules build one, and it exists so core's own
-Python programs, which travel in `python3 -c` argv on `main` (`artifacts/native/probe.py:402`,
-`native_files.py:338`), keep their source out of guest arguments (R4).
+Each vocabulary item lands in the slice that migrates its first consumer. `PythonProgram` is not one
+of R3's script interpreters. It carries core's own Python programs, which travel in `python3 -c`
+argv on `main` (`artifacts/native/probe.py:402`, `native_files.py:338`), so their source stays out
+of guest arguments (R4). With `login`, the identity's default shell runs its login startup and then
+execs the interpreter, which is how the native probe keeps seeing the native workload's login
+environment, as it does today through `"$SHELL" -lic` (`probe.py:402-410`).
 
 - **Bytes, not text.** Results carry bytes with no newline conversion; a `text()` helper decodes.
   Stdin is written in binary mode on every workstation (incident row I2).
@@ -347,10 +354,13 @@ platform-private (D11).
 - **Console panes.** A pane added to an existing console's tmux server inherits only that server's
   environment plus `tmux -e` arguments, and today those arguments carry resolved secrets on a guest
   command line every VM account can read (`sessions/multi_console/tmux_build.py:222-245`), which R4
-  forbids. The handover replaces them: the pane's command is the handover form of stage 0, run as
-  the pane's identity, and it fetches its environment and shell from an agw-launch parked under that
-  same identity. Sessions need no handover, since each session starts its own tmux server, which
-  inherits the request environment.
+  forbids. The handover replaces them. The pane's environment and shell are parked by a request over
+  the pane identity's own connection (the agent's, for an agent pane). The pane's command is the
+  handover form of stage 0, under `sudo -n -u <agent>` for an agent pane in the admin's server, so
+  it connects as the same account that parked. That leaves the `--preserve-env` path and the
+  `Defaults:<admin> setenv` sudoers grant (`vms/initializer/shell_env.py:543`) with no job, and
+  slice 7 deletes them. Sessions need no handover, since each session starts its own tmux server,
+  which inherits the request environment.
 
 - **`forward(local, remote)`** is a context manager running `ssh -N -L` under the VM policy, minus
   the forwarding restrictions, with `ExitOnForwardFailure=yes`. It returns once the local port
@@ -629,12 +639,13 @@ linked issues and fix history) and adds rows before anything is deleted.
 
 ## Evidence matrix (R11)
 
-Supported pairings, from each platform's `unsupported_reason` and readiness checks, plus the
-operator's 2026-10-31 ruling that local Lima on Windows is supported:
+Supported pairings, from each platform's `unsupported_reason` and readiness checks, less local Lima
+on Windows, which the operator ruled on 2026-10-31 is not supported because it runs on WSL2 and adds
+nothing beyond the WSL2 platform:
 
 | Platform                 | Linux | macOS         | Windows |
 | ------------------------ | ----- | ------------- | ------- |
-| Lima, local              | yes   | yes           | yes     |
+| Lima, local              | yes   | yes           | no      |
 | Remote Lima (macOS host) | yes   | yes (primary) | yes     |
 | WSL2                     | no    | no            | yes     |
 | Proxmox                  | yes   | yes           | yes     |
@@ -642,8 +653,10 @@ operator's 2026-10-31 ruling that local Lima on Windows is supported:
 | Azure                    | yes   | yes           | yes     |
 | GCP                      | yes   | yes           | yes     |
 
-That is 19 cells. The integration-test environment is adding support for local Lima on Windows. Each
-slice names the cells it covers. Removal needs every cell, or the operator's disposition of it.
+That is 18 cells. Lima's code still accepts local placement on Windows whenever `limactl` is
+installed (`capabilities/vm_platform/lima.py:189`); whether to refuse it there is put to the
+operator below. Each slice names the cells it covers. Removal needs every cell, or the operator's
+disposition of it.
 
 ## ADR amendments
 
@@ -688,7 +701,8 @@ R7, R11 and python3 at provisioning) are quoted in the FRD.
    this design needs for the constant command line to parse.
 3. **Automatic rejoin (R7).** The activation gate fails with a hint naming `agw vm recover` instead
    of rejoining on its own (D11).
-4. **Local Lima on Windows** is a supported pairing (evidence matrix).
+4. **Local Lima on Windows** is not a supported pairing (evidence matrix). The operator first added
+   it, then reversed that the same day.
 5. **The launcher's name** is `agw-launch`, the Agentworks launcher.
 6. **Three PRs** instead of eight (migration).
 7. **Delivery.** Every request travels on stdin, agw-launch is written in Python, python3 is a
@@ -699,8 +713,12 @@ R7, R11 and python3 at provisioning) are quoted in the FRD.
 1. **Resource limits and priority under R3.** As amended, R3 accepts startup files only when nothing
    they do reaches the command. agw-launch resets output, the environment, the working directory,
    the umask, signal handling and open descriptors, but cannot undo resource limits or a scheduling
-   priority a startup file lowered (D4). The lead's proposal: R3 names what is reset and states
-   those two as inherited.
+   priority a startup file lowered, or detect both streams swapped for discarding pipes (D4). The
+   lead's proposal: R3 names what is reset and states those two as inherited.
+2. **Refusing local Lima on Windows.** Lima defines no `unsupported_reason`, since Remote Lima from
+   Windows is supported, so local placement on Windows is accepted whenever `limactl` is installed.
+   The lead's recommendation: have Lima's readiness check refuse local placement on Windows with a
+   hint naming WSL2, in slice 4 with the platform surface.
 
 ## Alternatives considered
 

@@ -226,6 +226,11 @@ sshd always runs the account's login shell first:
 
 > Sounds good. And I agree with that change to R3.
 
+Later the same day, reversing the answer on local Lima on Windows:
+
+> Btw, I'd like to reverse myself on Lima on Windows. As far as I can tell, this is still based on
+> WSL2 and doesn't offer anything beyond our existing WSL2 support.
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.

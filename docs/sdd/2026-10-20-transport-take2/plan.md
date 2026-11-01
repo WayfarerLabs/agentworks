@@ -35,6 +35,8 @@
       findings.
 - [ ] Publish the design PR and address published feedback.
 - [x] Record the operator's answers to the HLA's open questions.
+- [ ] Record the operator's rulings on the HLA's "Awaiting the operator" items, and amend R3 if the
+      operator accepts the proposed wording.
 - [ ] Revise the design for the operator's 2026-10-31 decisions (stdin delivery, agw-launch in
       Python, python3 at provisioning, the terminal handover, three PRs), and run the private review
       on the revision.
@@ -76,7 +78,7 @@ answer.
 - [ ] Live evidence, on every platform: create, the operator's own `ssh` to a managed entry, import
       of an existing VM, and an address change after rekey. Cells:
   - Remote Lima from macOS and Linux;
-  - local Lima from macOS and Windows;
+  - local Lima from macOS;
   - WSL2;
   - Proxmox, AWS, Azure and GCP from at least one workstation each, Windows among them.
 
@@ -144,7 +146,7 @@ a VM connection.
       `cli/agentworks/execution/README.md`.
 - [ ] Live evidence:
   - all three workstations against Remote Lima;
-  - all three workstations against local Lima;
+  - Linux and macOS against local Lima;
   - Windows against WSL2;
   - one cloud.
 
@@ -304,8 +306,12 @@ Definition of done: create and reinit run entirely on the new transport.
   - observation resumes across a dropped connection;
   - interrupt stops the work;
   - the detached base is never world-writable.
-- [ ] Retire the newline refusals for environment values (`manifests/decode.py:254-261` and the
-      environment use in `env/compose.py:73-81`), now that no path sends environment by `SetEnv`.
+- [ ] Retire the newline refusals for environment values (`manifests/decode.py:254-261` and every
+      `LineOrientedSecretUse.ENVIRONMENT` use, in `env/compose.py:73-81` and
+      `secrets/orchestration.py:228-232`), now that no path sends environment by `SetEnv`.
+- [ ] Delete the console's env carry across sudo, which the handover replaces: the `--preserve-env`
+      path and its memo in `sessions/multi_console/`, and the `Defaults:<admin> setenv` sudoers
+      grant (`_write_sudoers_console_setenv`).
 - [ ] Re-prove incident rows I6a and I8.
 - [ ] Amend ADR 0017.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
@@ -321,6 +327,8 @@ Definition of done: no workspace, session or backup module imports a legacy modu
 
 ## Slice 8: Removal (PR C)
 
+- [ ] Audit the legacy modules this slice deletes for incident-derived behavior (their ADRs, linked
+      issues and fix history), and add incident inventory rows for anything not yet recorded.
 - [ ] Confirm that every incident inventory row has recorded evidence.
 - [ ] Delete the six legacy modules with their tests:
   - `agentworks.transports`
