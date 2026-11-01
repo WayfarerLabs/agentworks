@@ -119,7 +119,9 @@ a VM connection.
 - [ ] Alert where PR A drops a behavior an operator may rely on (operator, 2026-11-01): warn at
       reinit when `/etc/environment`, `/etc/security/pam_env.conf` or the admin's
       `~/.pam_environment` holds settings, and when a VM connection fails before the start marker
-      while the configured key is passphrase-protected, hint to load it into the SSH agent.
+      while the configured key is passphrase-protected, hint to load it into the SSH agent. Test the
+      pam_env parser over file contents, that reinit warns and never fails on it, and that the hint
+      appears only for a passphrase-protected key.
 - [ ] Type a VM without python3 as `VMNotReady` with a hint naming `agw vm reinit`, whose legacy
       Phase A still runs there, and say so in release notes.
 - [ ] Limit the admin and agent template `shell` fields to `sh`, `dash`, `bash` and `zsh` at the
@@ -191,13 +193,14 @@ pass the static check, and the package's tests pass with the legacy modules bloc
       elevation refused before dispatch and an elevated attach refused, and prove an elevated
       request on a fresh, never-initialized Debian 12 and 13 VM.
 - [ ] Add `vms/contract.py`. Run the base checks first at reinit and the initialized checks at the
-      end of Phase B. Add `vms/contract.py` to the package guard (HLA D14).
+      end of Phase B, replacing slice 2's reinit pam_env warning. Add `vms/contract.py` to the
+      package guard (HLA D14).
 - [ ] Amend ADR 0025.
 - [ ] Tests:
   - a VM failing a base check is not reported ready;
   - each diagnosis names reinit or recreation;
-    - a platform that cannot report the address logs the node out over its provisioning channel and
-      fails create, without a second join, and names the node when the logout fails;
+  - a platform that cannot report the address logs the node out over its provisioning channel and
+    fails create, without a second join, and names the node when the logout fails;
   - a VM with pam_env settings gets a warning naming the file and still passes the contract.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
@@ -219,10 +222,10 @@ first operation there is the base contract check.
   - `public_ssh.py`;
   - the recovery scripts;
   - `vm recover`;
-    - each cloud's provider-side host-key fingerprint source;
+  - each cloud's provider-side host-key fingerprint source;
   - `RawRun`, and how each channel bounds its output and its wait by the deadline.
-- [ ] Implement core's `run_recovery` in `vms/recovery.py`, and `run_as_root`, `read_host_keys` and
-      `native_shell` on every platform.
+- [ ] Implement core's `run_recovery` in `vms/recovery.py`, `run_as_root` on every platform,
+      `read_host_keys` on the clouds, and `native_shell` where a platform offers one.
 - [ ] Rehome native code as plugin-private modules:
   - Remote Lima's host connection, under the host policy, and its host-side detached create;
   - `plugins/proxmox/guest_agent.py`, replacing `plugins/proxmox/transport.py`;
@@ -246,12 +249,13 @@ first operation there is the base contract check.
       `GateTarget.repair_secret_refs`, `_GateSecrets`, and the call sites in `vms/nodes.py` and
       `sessions/manager/_scope.py`. Update the collateral that names it, including the
       `agentworks-reviewer` persona's sanctioned conditional-repair shape.
-- [ ] Send cloud recovery's script on stdin rather than in `sudo -n /bin/sh` arguments (R4).
+- [ ] Send cloud recovery's script on stdin rather than in `sudo -n /bin/sh` arguments (HLA D2).
 - [ ] Delete `VMPlatform.native_transport`, the `transports.native_transport` factory and
       `native_shell_unavailable_hint`.
 - [ ] Tests:
   - each platform declares sshd dependence;
-  - recovery reports status, delivery failure or unknown, and never trusts a channel exit code;
+  - recovery reports the script's status only when both closing markers arrive, otherwise unknown,
+    and never trusts a channel exit code;
   - logout reports the script's status or unknown, and never checks SSH afterwards;
   - a platform without a native shell refuses with `FeatureUnavailable` before credentials are
     resolved;
