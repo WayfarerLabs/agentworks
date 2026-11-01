@@ -115,7 +115,7 @@ a VM connection.
       Keep `vm exec`'s single-argument form as a shell command line, sent as a `Script` under the
       identity's default shell, and several arguments as a literal argv, as today
       (`vms/manager/exec.py:271`).
-- [ ] Alert where PR A drops a behavior an operator may rely on (operator, 2026-11-01): warn at
+- [x] Alert where PR A drops a behavior an operator may rely on (operator, 2026-11-01): warn at
       reinit when `/etc/environment`, `/etc/security/pam_env.conf` or the admin's
       `~/.pam_environment` holds settings, and when a VM connection fails before the start marker
       while the configured key is passphrase-protected, hint to load it into the SSH agent. Test the
