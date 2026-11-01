@@ -319,9 +319,10 @@ which reads `agw_launch.py` from the installed package. The file has no import-t
 defines `main(f, g)` and ends with
 `if __name__ == "__main__": main(globals()["f"], globals()["g"])`, so the package guard can import
 it and linters see no undefined names. Its standard-library imports sit in one `try`; an
-`ImportError` (a `python3-minimal` without them) exits with `STDLIB_MISSING_STATUS`, 69, before any
-marker. The client's classifier imports that constant and `refusal_status` from this module, so each
-is defined once. Steps, mapped to HLA D4:
+`ImportError` exits with `STDLIB_MISSING_STATUS`, 69, before any marker. That is the
+`python3-minimal` case: Debian's `libpython3.11-minimal` ships `os`, `sys` and `socket`, which stage
+0 needs, but not `json`, which is in `libpython3.11-stdlib`. The client's classifier imports that
+constant and `refusal_status` from this module, so each is defined once. Steps, mapped to HLA D4:
 
 1. **Read.** The envelope, with its own exact-read loop. Every failure before the start marker is an
    uncaught exception (exit 1) or the status above; neither is 127 or 255. The one ordering rule:
