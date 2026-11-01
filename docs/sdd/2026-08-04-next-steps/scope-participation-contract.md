@@ -69,15 +69,18 @@ methods and its config, nothing more. Facets are deliberately not scopes: core o
 scope-to-facet mapping (admin and agent both map to the user facet; session start and resume share
 the session facet), so producers never need to know their consumers. The per-scope orchestrators
 call these at the end of their pipelines for the integrations the owning template selects. Env is
-delivered through the run targets; agent artifacts arrive as inputs. The base class provides no-op
-defaults, and an integration implements what it supports; this deliberately supersedes the
-perspective's absence-means-unsupported rule (review and testing catch a mistyped override), and
-whether a lightweight supported-scopes report exists for doctor and guide output is the effort
-lead's call. A per-scope invocation is constructed for its owning resource; it never reuses a
-session instance's target identity, readiness cache, or state namespace, which stay session-bound.
-The Claude-specific template fields (`claude_marketplaces`, `claude_plugins`) migrate into the
-Claude integration's user-scope config as wave 4 work (they already carry the same shape on admin
-config and agent templates today).
+delivered through the run targets; agent artifacts arrive as inputs. An integration implements the
+facets it supports, and the base methods reject an activation at a facet it does not implement, so
+the operator sees the error. **Correction, 2026-10-31:** this originally gave the base class no-op
+defaults, on the premise that review and testing catch a mistyped override. Wave 4 shipped eight of
+twelve integration-by-facet cells accepted and inert, so the premise failed; the operator confirmed
+the error rule, and pass-through for a facet that is not activated is core's routing, recorded in
+`target-state.md`'s facet independence ruling. Whether a lightweight supported-scopes report exists
+for doctor and guide output is the effort lead's call. A per-scope invocation is constructed for its
+owning resource; it never reuses a session instance's target identity, readiness cache, or state
+namespace, which stay session-bound. The Claude-specific template fields (`claude_marketplaces`,
+`claude_plugins`) migrate into the Claude integration's user-scope config as wave 4 work (they
+already carry the same shape on admin config and agent templates today).
 
 Integration config is ordinary capability config, no different from vm-platform config: it belongs
 to the consuming resource (the vm, agent, workspace, or session template that selects the
@@ -120,15 +123,16 @@ returns the artifacts it defers, with a reason for each, and an entry still defe
 facet is not something the session silently hoists. **Correction, 2026-09-08:** this originally said
 such an entry is a typed core error before launch. The operator has reopened that policy; whether an
 unresolved session entry blocks launch or receives another explicit treatment is for the artifacts
-successor SDD to settle. Silent loss is not among the options. The integration owns representation.
-Env is naturally process-scoped. Content that cannot be represented at its own scope is hoisted into
-the session, and the integration decides placement using its harness knowledge (for example,
-session-scoped artifacts under a harness-specific workspace path keyed by `session_uuid`), including
-deduplication and double-provisioning avoidance. Hoisting is isolation, not security: other sessions
-being able to see user-scope artifacts is expected; the integration's job is that hoisted material
-only takes effect for its own workload. Session-scope env and artifacts come from the session
-template's own declarations; there is deliberately no session-feature initially (one gets added only
-if real pressure emerges).
+successor SDD to settle. Silent loss is not among the options. **Settled, 2026-10-31:** such an
+entry is reported, never a launch block (`target-state.md`, facet independence ruling). The
+integration owns representation. Env is naturally process-scoped. Content that cannot be represented
+at its own scope is hoisted into the session, and the integration decides placement using its
+harness knowledge (for example, session-scoped artifacts under a harness-specific workspace path
+keyed by `session_uuid`), including deduplication and double-provisioning avoidance. Hoisting is
+isolation, not security: other sessions being able to see user-scope artifacts is expected; the
+integration's job is that hoisted material only takes effect for its own workload. Session-scope env
+and artifacts come from the session template's own declarations; there is deliberately no
+session-feature initially (one gets added only if real pressure emerges).
 
 ### Artifact conduct
 
