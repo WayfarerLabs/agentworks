@@ -102,24 +102,24 @@ a VM connection.
   - request and result types;
   - error mapping;
   - the adoption and deletion list for the proof modules.
-- [ ] Implement `client.py`, `ssh_process.py` (with stage 0), `envelope.py`, `agw_launch.py`,
+- [x] Implement `client.py`, `ssh_process.py` (with stage 0), `envelope.py`, `agw_launch.py`,
       `requests.py` (the items this slice's consumers use), `results.py`, the remaining `errors.py`,
       `access.py`, `attach.py` and `forwarding.py`.
-- [ ] Delete `execution/carrier.py`, `execution/preparation.py`, `execution/bootstrap.py`,
+- [x] Delete `execution/carrier.py`, `execution/preparation.py`, `execution/bootstrap.py`,
       `execution/carriers/` and their tests, after adopting what the LLD lists.
-- [ ] Add the conftest blocker under `cli/tests/execution/`, the static legacy-import check, and the
+- [x] Add the conftest blocker under `cli/tests/execution/`, the static legacy-import check, and the
       recording fake `VMAccess`.
-- [ ] Migrate `vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection` and
+- [x] Migrate `vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection` and
       `vm port-forward`. Release probing stays legacy until slice 3, because reinit runs it before
       initialization and must still reach a VM without python3 (`vms/manager/lifecycle.py:946`).
       Keep `vm exec`'s single-argument form as a shell command line, sent as a `Script` under the
       identity's default shell, and several arguments as a literal argv, as today
       (`vms/manager/exec.py:271`).
-- [ ] Type a VM without python3 as `VMNotReady` with a hint naming `agw vm reinit`, whose legacy
+- [x] Type a VM without python3 as `VMNotReady` with a hint naming `agw vm reinit`, whose legacy
       Phase A still runs there, and say so in release notes.
-- [ ] Limit the admin and agent template `shell` fields to `sh`, `dash`, `bash` and `zsh` at the
+- [x] Limit the admin and agent template `shell` fields to `sh`, `dash`, `bash` and `zsh` at the
       config boundary (HLA D4), with sample-config comments and release notes.
-- [ ] Add the resolver's verdict to doctor's required-tools group, beside the existing `ssh`, `scp`
+- [x] Add the resolver's verdict to doctor's required-tools group, beside the existing `ssh`, `scp`
       and `tailscale` presence rows, which stay until the legacy paths go (slice 8).
 - [ ] Conformance vectors, run against a local sshd and python3 on Linux and on live targets:
   - literal argv, including empty arguments, whitespace and shell characters;
@@ -148,15 +148,15 @@ a VM connection.
   - payload stdout that does not end in a newline, and a `refused` trailer;
   - the deadline;
   - binary stdin and stdout on Windows.
-- [ ] Unit-test the stream filters under every split and interleaving of the two streams, which
+- [x] Unit-test the stream filters under every split and interleaving of the two streams, which
       covers stdout's last bytes arriving after the trailer.
 - [ ] Re-prove incident rows I1 to I7, I11 to I14, I19 and I21, I11 with a conformance vector in
       which a bash child of the payload reads no account startup file, run with a pipe and with a
       socket on stdin.
-- [ ] Amend ADRs 0013 and 0014.
-- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+- [x] Amend ADRs 0013 and 0014.
+- [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
-- [ ] Collateral: update the command reference and guides for any changed behavior, and
+- [x] Collateral: update the command reference and guides for any changed behavior, and
       `cli/agentworks/execution/README.md`.
 - [ ] Live evidence:
   - all three workstations against Remote Lima;
