@@ -547,7 +547,7 @@ unlocked until that evidence is audited and the remaining requirements are compl
 
 PR [862](https://github.com/WayfarerLabs/agentworks/pull/862) opened ready at `72923b6`; all CI jobs
 passed. After the one-hour reporting window, the first authorized public correction round began on
-2026-11-01 at 07:38 UTC, with the PR returned to draft before source changes. The fixed batch
+2026-11-01 at 07:38 UTC, with the PR returned to draft before source changes. The feedback batch
 contains Copilot's six threads and the initial saga and Muntz reports. No independent live
 acceptance report is claimed from those code reviews.
 
