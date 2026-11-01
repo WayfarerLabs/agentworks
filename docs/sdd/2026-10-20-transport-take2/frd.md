@@ -279,17 +279,9 @@ On rejoining at VM start:
 
 ### 2026-11-01, later
 
-[The lead asked four questions with options. On the push of PR A, which the token's missing workflow
-permission had blocked, the operator asked instead what the workflow change was; that question is
-answered on PR A.]
-
-[On a fourth feedback round for #856, for Copilot's two post-round items:] the operator chose
-
-> Yes, one more round (Recommended)
-
 [On the three behavior changes PR A ships (no MOTD or last-login line without `--workspace`; an
 encrypted key must be loaded in the SSH agent, since ssh never prompts for a passphrase; pam_env not
-applied), the operator selected all three and wrote:]
+applied), the operator accepted all three and wrote:]
 
 > So please, please, please don't take on a bunch of extra complexity to solve problems like this.
 > Agentworks is a controlled environment. I'm much rather just not support stuff like PAM. But if we
