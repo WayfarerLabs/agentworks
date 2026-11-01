@@ -56,26 +56,26 @@ answer.
   - the re-establishment hook;
   - removal;
   - managed entry options.
-- [ ] Implement `execution/trust.py` and the trust errors in `execution/errors.py`.
-- [ ] Add `agw vm import-host-keys (--all | VM...) [--known-hosts PATH]`, using the name the
+- [x] Implement `execution/trust.py` and the trust errors in `execution/errors.py`.
+- [x] Add `agw vm import-host-keys (--all | VM...) [--known-hosts PATH]`, using the name the
       operator confirmed.
-- [ ] Bind the legacy VM-target factories to the store in VM mode: `transport()`,
+- [x] Bind the legacy VM-target factories to the store in VM mode: `transport()`,
       `agent_transport()`, `transport_for_user()`, the backup scp, the workspace-copy ssh, the port
       forward and the clouds' public-address native transports. Host targets stay unchanged.
-- [ ] Make create reset the store file and run Phase A's first connection in Enroll mode. Make
+- [x] Make create reset the store file and run Phase A's first connection in Enroll mode. Make
       delete remove the store file after the platform delete succeeds.
-- [ ] Move cloud provisioning SSH to Unverified mode.
-- [ ] Have `ssh_config.py` write the store options for VMs that have a store record.
-- [ ] Tests:
+- [x] Move cloud provisioning SSH to Unverified mode.
+- [x] Have `ssh_config.py` write the store options for VMs that have a store record.
+- [x] Tests:
   - import over plain, hashed, patterned and marked records;
   - the source file is byte-identical after import;
   - a missing record raises `TrustMissing` and never falls back to first use;
   - Enroll mode is reachable only from create;
   - managed entries carry store options only once a record exists.
 - [ ] Re-prove incident row I9 (host keys preserved across stop and start).
-- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+- [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
-- [ ] Collateral: update the command reference and completions, add an operator guide section on the
+- [x] Collateral: update the command reference and completions, add an operator guide section on the
       one-time import, add release notes, and update `cli/agentworks/execution/README.md`.
 - [ ] Live evidence, on every platform: create, the operator's own `ssh` to a managed entry, import
       of an existing VM, an address change after rekey, a stop and start, and the operator's
