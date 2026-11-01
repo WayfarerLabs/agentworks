@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import subprocess
@@ -131,7 +130,7 @@ def test_agent_profile_deduplicates_without_changing_path_precedence(
         assert re.findall(r"\d+", captured_output.info[-1]) == ["2"]
         result = subprocess.run(
             [shell_path, "-c", '. "$HOME/.agentworks-profile.sh"; printf "%s\\n" "$PATH" "$AGENTWORKS_AGENT"'],
-            env={**os.environ, "HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
+            env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
             check=True,
             capture_output=True,
             text=True,
@@ -147,7 +146,7 @@ def test_agent_profile_deduplicates_without_changing_path_precedence(
     _run_commands(test_returncode=test_returncode, target=target, home=str(tmp_path), shell=shell)
     result = subprocess.run(
         [shell_path, "-c", '. "$HOME/.agentworks-profile.sh"; printf "%s" "$PATH"'],
-        env={**os.environ, "HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
+        env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
         check=True,
         capture_output=True,
         text=True,
