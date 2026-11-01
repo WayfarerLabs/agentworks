@@ -18,7 +18,9 @@ from agentworks.ssh_identity import (
     UnverifiableSSHIdentity,
     VerifiedSSHIdentity,
     fingerprint_public_blob,
+    identity_is_passphrase_protected,
     parse_public_ssh_identity,
+    passphrase_hint,
     read_private_ssh_identity,
 )
 
@@ -343,3 +345,39 @@ def test_real_native_openssh_key_matches_ssh_keygen_fingerprint(tmp_path: Path, 
     ).stdout.split()[1]
 
     assert read_private_ssh_identity(private_key) == VerifiedSSHIdentity(fingerprint)
+    assert identity_is_passphrase_protected(private_key) is bool(passphrase)
+
+
+@pytest.mark.parametrize(("cipher", "protected"), [(b"none", False), (b"aes256-ctr", True)])
+def test_the_envelope_cipher_decides_whether_a_key_is_passphrase_protected(
+    tmp_path: Path, cipher: bytes, protected: bool
+) -> None:
+    key = _write(tmp_path / "id", _native_armor(_native_envelope(cipher=cipher)))
+
+    assert identity_is_passphrase_protected(key) is protected
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [
+        b"-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n-----END RSA PRIVATE KEY-----\n",
+        _OPENSSH_BEGIN + b"\n!!!not base64!!!\n" + _OPENSSH_END + b"\n",
+        _OPENSSH_BEGIN + b"\n" + base64.b64encode(_OPENSSH_MAGIC + b"\x00\x00") + b"\n" + _OPENSSH_END + b"\n",
+    ],
+    ids=["legacy-rsa", "bad-base64", "truncated-envelope"],
+)
+def test_an_unparsable_identity_is_not_passphrase_protected(tmp_path: Path, contents: bytes) -> None:
+    assert identity_is_passphrase_protected(_write(tmp_path / "id", contents)) is False
+
+
+def test_a_missing_identity_is_not_passphrase_protected(tmp_path: Path) -> None:
+    assert identity_is_passphrase_protected(tmp_path / "absent") is False
+
+
+def test_the_hint_exists_only_for_a_passphrase_protected_key(tmp_path: Path) -> None:
+    protected = _write(tmp_path / "protected", _native_armor(_native_envelope(cipher=b"aes256-ctr")))
+    plain = _write(tmp_path / "plain", _native_armor(_native_envelope()))
+
+    assert passphrase_hint(protected) is not None
+    assert passphrase_hint(plain) is None
+    assert passphrase_hint(tmp_path / "absent") is None

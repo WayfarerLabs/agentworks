@@ -68,8 +68,10 @@ Completion comes from the markers, never from ssh's exit status:
 `VMNotReady`, `TrustMismatch`, `RequestRefused`, `ExecutionIncomplete`, `CommandFailed`. No error,
 repr or hint holds a stream, an environment value or script text; the only transcript an error may
 show is the last lines of ssh's own diagnostics, which the client keeps in a private log (`-E`)
-apart from the payload's output. `stream` reports a refusal the way a shell does: 127 for a missing
-command, 126 for any other `exec` failure, 125 for a working directory.
+apart from the payload's output. On a connection failure, `VMAccess` reads the operator's key file
+once to decide whether to hint at `ssh-add`, and only then. `stream` reports a refusal the way a
+shell does: 127 for a missing command, 126 for any other `exec` failure, 125 for a working
+directory.
 
 ## Client and policy
 

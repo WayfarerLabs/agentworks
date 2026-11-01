@@ -44,6 +44,7 @@ from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
 
 from ._helpers import _require_vm
 from .boundary import _warn_legacy_release
+from .pam_env import warn_pam_env_settings
 
 if TYPE_CHECKING:
     from typing import NoReturn
@@ -961,6 +962,7 @@ def reinit_vm(
             try:
                 verified_release = _mgr.verified_vm_release(db, vm, ts_target)
                 _warn_newly_observed_legacy(vm, verified_release)
+                warn_pam_env_settings(ts_target, name)
                 _mgr.run_initialization(
                     db,
                     config,

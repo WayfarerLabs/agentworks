@@ -17,6 +17,8 @@ import struct
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from agentworks.path_rendering import format_host_path
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -25,6 +27,7 @@ _MAX_ERROR_DETAIL_CHARACTERS = 256
 _OPENSSH_MAGIC = b"openssh-key-v1\x00"
 _OPENSSH_BEGIN = b"-----BEGIN OPENSSH PRIVATE KEY-----"
 _OPENSSH_END = b"-----END OPENSSH PRIVATE KEY-----"
+_OPENSSH_UNENCRYPTED_CIPHER = b"none"
 _ASCII_WHITESPACE = b" \t\r\n\v\f"
 _LEGACY_ARMOR_LABELS = (
     b"RSA PRIVATE KEY",
@@ -129,6 +132,23 @@ def read_private_ssh_identity(path: Path) -> SSHIdentity:
     raise _invalid("private identity uses an unrecognized envelope")
 
 
+def identity_is_passphrase_protected(path: Path) -> bool:
+    """Whether ``path`` is an OpenSSH private key whose envelope names a cipher.
+
+    Reads only the envelope's cipher name, never decrypting. Any read or parse
+    failure, and any other key format, is ``False``: this is a best-effort hint
+    for an operator-supplied file, never a gate.
+    """
+    try:
+        contents = _read_bounded_file(path)
+        if not contents.startswith(_OPENSSH_BEGIN):
+            return False
+        reader = _SSHReader(_decode_openssh_envelope(contents), offset=len(_OPENSSH_MAGIC))
+        return reader.read_string("cipher name") != _OPENSSH_UNENCRYPTED_CIPHER
+    except SSHIdentityReadError:
+        return False
+
+
 def _read_bounded_file(path: Path) -> bytes:
     descriptor: int | None = None
     try:
@@ -162,7 +182,21 @@ def _read_bounded_file(path: Path) -> bytes:
                 os.close(descriptor)
 
 
-def _parse_openssh_private_identity(contents: bytes) -> VerifiedSSHIdentity:
+def passphrase_hint(identity_file: Path) -> str | None:
+    """The line telling the operator to load ``identity_file`` into the SSH agent, or ``None``.
+
+    Only a passphrase-protected OpenSSH key gets one: ssh runs in batch mode and
+    cannot ask for the passphrase. It reads conditionally because a connection
+    failure has other causes too, such as a stopped VM or a dropped network.
+    """
+    if not identity_is_passphrase_protected(identity_file):
+        return None
+    key = format_host_path(identity_file)
+    return f"If {key} is not loaded in your SSH agent, load it with: ssh-add {key}"
+
+
+def _decode_openssh_envelope(contents: bytes) -> bytes:
+    """The binary envelope inside OpenSSH private-key armor, checked for armor, size and magic."""
     end_offset = contents.find(_OPENSSH_END, len(_OPENSSH_BEGIN))
     if end_offset < 0:
         raise _invalid("OpenSSH private identity armor is incomplete")
@@ -179,7 +213,11 @@ def _parse_openssh_private_identity(contents: bytes) -> VerifiedSSHIdentity:
         raise _invalid("OpenSSH private identity envelope exceeds the supported size limit")
     if not envelope.startswith(_OPENSSH_MAGIC):
         raise _invalid("OpenSSH private identity has invalid envelope magic")
+    return envelope
 
+
+def _parse_openssh_private_identity(contents: bytes) -> VerifiedSSHIdentity:
+    envelope = _decode_openssh_envelope(contents)
     reader = _SSHReader(envelope, offset=len(_OPENSSH_MAGIC))
     reader.skip_string("cipher name")
     reader.skip_string("KDF name")

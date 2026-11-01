@@ -900,6 +900,11 @@ def _seed_provisioned_vm(db: Database) -> None:
     db.update_vm_provisioning_status("rvm", ProvisioningStatus.COMPLETE)
 
 
+def _reinit_transport(*, stdout: str = "", returncode: int = 0) -> SimpleNamespace:
+    """A reinit transport whose only call is the pam_env probe."""
+    return SimpleNamespace(run=lambda command, **kwargs: SimpleNamespace(stdout=stdout, returncode=returncode))
+
+
 @pytest.fixture(autouse=True)
 def _verified_reinit_release(monkeypatch: pytest.MonkeyPatch) -> None:
     seed_vm_trust("rvm")
@@ -976,7 +981,7 @@ def test_reinit_runs_initialization_through_the_gate(
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
     import agentworks.transports as transports
 
-    monkeypatch.setattr(transports, "transport", lambda vm, config, **kw: SimpleNamespace())
+    monkeypatch.setattr(transports, "transport", lambda vm, config, **kw: _reinit_transport())
 
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -1080,7 +1085,7 @@ def test_reinit_resolves_the_stored_admin_template(
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
     import agentworks.transports as transports
 
-    monkeypatch.setattr(transports, "transport", lambda vm, config, **kw: SimpleNamespace())
+    monkeypatch.setattr(transports, "transport", lambda vm, config, **kw: _reinit_transport())
 
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -1114,13 +1119,47 @@ def test_reinit_applies_a_legacy_flat_vm_payload(
         captured["vm_template"] = args[3]
 
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kw: SimpleNamespace())
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kw: _reinit_transport())
 
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
     vm_template = captured["vm_template"]
     assert isinstance(vm_template, ResolvedVMTemplate)
     assert vm_template.cpus == 11
+
+
+@pytest.mark.parametrize(
+    "transport",
+    [_reinit_transport(stdout="/etc/environment\n"), _reinit_transport(returncode=127)],
+    ids=["settings", "probe-exits-non-zero"],
+)
+def test_reinit_warns_about_pam_env_settings_and_still_initializes(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,
+    transport: SimpleNamespace,
+) -> None:
+    """A VM with pam_env settings (or a probe that did not run to its end) costs a warning, never the reinit."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    config = make_config()
+    _seed_provisioned_vm(db)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+
+    @contextlib.contextmanager
+    def _hold(self: LimaPlatform, vm: object, *, config: object | None = None):
+        yield
+
+    monkeypatch.setattr(LimaPlatform, "vm_active", _hold)
+    initialized: list[bool] = []
+    monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: initialized.append(True))
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kw: transport)
+
+    vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert initialized == [True]
+    assert len(captured_output.warnings) == 1
 
 
 @pytest.mark.parametrize("admin_template", ["", "work"])

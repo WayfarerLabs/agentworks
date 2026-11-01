@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -28,6 +29,7 @@ from agentworks.execution.results import (
 )
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
+from tests.ssh_fixtures import write_test_ssh_keypair
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -85,12 +87,17 @@ AGENT = Agent("a1", "agt-a1")
 AGENT_ROW = SimpleNamespace(name="a1", vm_name="box")
 
 
-def probe(recorder: AccessRecorder, agent_outcome: Result | BaseException, admin_outcome: Result | None = None) -> None:
+def probe(
+    recorder: AccessRecorder,
+    agent_outcome: Result | BaseException,
+    admin_outcome: Result | None = None,
+    identity_file: Path = Path("/nonexistent/key"),
+) -> None:
     agent_access = recorder.access(AGENT)
     admin_access = recorder.access(Admin())
     agent_access.run_outcomes = [agent_outcome]
     admin_access.run_outcomes = [] if admin_outcome is None else [admin_outcome]
-    _assert_agent_access_works(agent_access, admin_access, AGENT_ROW)  # type: ignore[arg-type]
+    _assert_agent_access_works(agent_access, admin_access, AGENT_ROW, identity_file)  # type: ignore[arg-type]
 
 
 def test_an_agent_that_answers_passes_whatever_the_status(vm_access_recorder: AccessRecorder) -> None:
@@ -124,6 +131,25 @@ def test_a_dropped_connection_with_an_unreachable_admin_means_the_vm_is_unreacha
         probe(vm_access_recorder, Result(Unknown(UnknownReason.CONNECTION)), Result(Unknown(UnknownReason.CONNECTION)))
 
     assert type(raised.value) is ConnectivityError
+
+
+def test_an_unreachable_vm_hints_at_the_ssh_agent_only_for_an_encrypted_key(
+    vm_access_recorder: AccessRecorder, tmp_path: Path
+) -> None:
+    unreachable = Result(Unknown(UnknownReason.CONNECTION))
+    hints = []
+    for cipher in (b"none", b"aes256-ctr"):
+        key = tmp_path / f"id-{cipher.decode()}"
+        write_test_ssh_keypair(key, cipher=cipher)
+        with pytest.raises(ConnectivityError) as raised:
+            probe(vm_access_recorder, unreachable, unreachable, key)
+        hints.append(raised.value.hint)
+
+    plain, encrypted = hints
+    assert plain is not None
+    assert encrypted is not None
+    assert encrypted != plain
+    assert encrypted.startswith(plain)
 
 
 @pytest.mark.parametrize(

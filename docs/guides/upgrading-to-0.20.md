@@ -115,7 +115,9 @@ path and needs none of what follows. Everything else keeps its current path for 
   system configuration do not apply to them. An `IdentityAgent` set only in `~/.ssh/config`
   (1Password, Secretive) is ignored; the agent named by `SSH_AUTH_SOCK` serves the key. Every
   connection runs in batch mode, so ssh never prompts for a key's passphrase: an encrypted key has
-  to be loaded in that agent first.
+  to be loaded in that agent first. When a connection fails and the configured key is
+  passphrase-protected, the error's hint mentions `ssh-add`; `vm port-forward` shows ssh's own log
+  instead.
 - **Exit statuses.** A command that cannot start exits 127 when it is not found, 126 when it is
   found but cannot run (no execute bit, or a script with no `#!` line, since there is no shell
   fallback), and 125 when the workspace directory is missing, each with one line from `agw`. A
@@ -129,7 +131,9 @@ path and needs none of what follows. Everything else keeps its current path for 
   `pam_env` variables, or anything the account's shell exported while sshd ran it to start the
   request. Login startup files still run where the command asks for a login shell: `agent exec`,
   `vm shell` and `agent shell` read them after the environment is rebuilt, and zsh reads `.zshenv`
-  for a single-argument `vm exec`.
+  for a single-argument `vm exec`. `agw vm reinit` warns, without failing, when `/etc/environment`,
+  `/etc/security/pam_env.conf` or the admin's `~/.pam_environment` holds settings, since these
+  commands no longer apply them.
 - **A literal command skips the account shell.** `vm exec VM prog arg...` runs the program directly.
   `vm exec VM 'one argument'` is, as before, a shell command line run by the admin's default shell
   without login startup. What changes is where its `PATH` comes from: sshd's `PATH` plus `pam_env`

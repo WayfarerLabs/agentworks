@@ -5,11 +5,12 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution import attach as attach_module
 from agentworks.execution import client, ssh_process, trust
 from agentworks.execution.access import Admin, Agent, VMAccess, vm_access
 from agentworks.execution.client import SSHClient
@@ -32,6 +33,10 @@ from agentworks.execution.results import (
     UnknownReason,
 )
 from tests.conftest import seed_vm_trust
+from tests.ssh_fixtures import write_test_ssh_keypair
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 SECRET = "sekrit-env-value-91"
 
@@ -235,3 +240,95 @@ def test_errors_show_ssh_diagnostics_but_never_the_payload() -> None:
 def test_a_result_does_not_repr_its_streams() -> None:
     assert SECRET not in repr(Result(Completed(0), SECRET.encode(), SECRET.encode()))
     assert SECRET not in repr(Script(SECRET, Shell.SH, env={"K": SECRET}))
+
+
+# -- The passphrase-protected key hint ---------------------------------------------------
+
+
+def _key(tmp_path: Path, *, cipher: bytes) -> Path:
+    key = tmp_path / f"id-{cipher.decode()}"
+    write_test_ssh_keypair(key, cipher=cipher)
+    return key
+
+
+def _unhinted(completion: object) -> str | None:
+    return ExecutionIncomplete("box", result(completion)).hint
+
+
+def _operations(access: VMAccess) -> dict[str, Any]:
+    return {
+        "run": lambda: access.run(Command(("true",)), check=True),
+        "stream": lambda: access.stream(Command(("true",)), stdin=None, stdout=None, stderr=None),  # type: ignore[arg-type]
+        "attach": lambda: access.attach(LoginShell()),
+    }
+
+
+@pytest.fixture
+def connection_fails(supported_client: SSHClient, monkeypatch: pytest.MonkeyPatch) -> Callable[[object], None]:
+    """Make every operation fail as the given completion, the way the real layers do."""
+    seed_vm_trust("box")
+
+    def fail_with(completion: object) -> None:
+        monkeypatch.setattr(VMAccess, "_execute", lambda self, *a, **k: result(completion))
+        error = ExecutionIncomplete("box", result(completion), attaching=True)
+
+        def attach_fails(**kwargs: object) -> int:
+            raise error
+
+        monkeypatch.setattr(attach_module, "attach", attach_fails)
+
+    return fail_with
+
+
+@pytest.mark.parametrize("operation", ["run", "stream", "attach"])
+def test_a_connection_failure_with_an_encrypted_key_adds_to_the_hint(
+    connection_fails: Callable[[object], None], operation: str, tmp_path: Path
+) -> None:
+    connection_fails(Unknown(UnknownReason.CONNECTION))
+    hints = {}
+    for cipher in (b"none", b"aes256-ctr"):
+        access = vm_access(vm(), config(_key(tmp_path, cipher=cipher)), Admin())
+        with pytest.raises(ExecutionIncomplete) as caught:
+            _operations(access)[operation]()
+        hints[cipher] = caught.value.hint
+
+    plain, encrypted = hints[b"none"], hints[b"aes256-ctr"]
+    assert plain is not None
+    assert encrypted is not None
+    assert encrypted != plain
+    assert encrypted.startswith(plain)
+
+
+@pytest.mark.parametrize("operation", ["run", "stream"])
+@pytest.mark.parametrize(
+    "completion",
+    [
+        Unknown(UnknownReason.TRUNCATED),
+        Unknown(UnknownReason.DEADLINE),
+        NotDelivered(NotDeliveredReason.LAUNCHER_FAILED),
+    ],
+)
+def test_only_a_connection_failure_gets_the_hint(
+    connection_fails: Callable[[object], None], operation: str, completion: object, tmp_path: Path
+) -> None:
+    connection_fails(completion)
+    access = vm_access(vm(), config(_key(tmp_path, cipher=b"aes256-ctr")), Admin())
+
+    with pytest.raises(ExecutionIncomplete) as caught:
+        _operations(access)[operation]()
+
+    assert caught.value.hint == _unhinted(completion)
+
+
+def test_the_key_is_read_only_after_a_failure(
+    supported_client: SSHClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    reads: list[Path] = []
+    monkeypatch.setattr("agentworks.execution.access.passphrase_hint", lambda path: reads.append(path))
+    monkeypatch.setattr(VMAccess, "_execute", lambda self, *a, **k: result(Completed(0)))
+    access = vm_access(vm(), config(tmp_path / "key"), Admin())
+
+    access.run(Command(("true",)), check=True)
+    access.stream(Command(("true",)), stdin=None, stdout=None, stderr=None)  # type: ignore[arg-type]
+
+    assert reads == []
