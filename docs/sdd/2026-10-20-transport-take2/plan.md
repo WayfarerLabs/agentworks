@@ -184,7 +184,8 @@ pass the static check, and the package's tests pass with the legacy modules bloc
   - the provisioning bootstrap additions;
   - `tailnet_address`;
   - Phase A on `VMAccess`;
-  - `reachability`;
+    - `reachability`, including how its polling meets Debian 13 sshd's `PerSourcePenalties`, which
+      drops every connection from a client after repeated authentication failures;
   - the operation log.
 - [ ] Add python3 to `PROVISIONING_PACKAGES`, which every platform's bootstrap already installs
       (`lima.py:391`, `wsl2_bootstrap.py:65`, and the AWS, Azure, GCP and Proxmox platforms).
@@ -204,8 +205,8 @@ pass the static check, and the package's tests pass with the legacy modules bloc
       elevation refused before dispatch and an elevated attach refused, and prove an elevated
       request on a fresh, never-initialized Debian 12 and 13 VM.
 - [ ] Add `vms/contract.py`. Run the base checks first at reinit and the initialized checks at the
-      end of Phase B, replacing slice 2's reinit pam_env warning. Add `vms/contract.py` to the
-      package guard (HLA D14).
+      end of Phase B, moving slice 2's reinit pam_env warning into the base checks. Add
+      `vms/contract.py` to the package guard (HLA D14).
 - [ ] Amend ADR 0025.
 - [ ] Tests:
   - a VM failing a base check is not reported ready;
