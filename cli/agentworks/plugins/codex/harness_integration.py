@@ -117,8 +117,8 @@ from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     ancestor_diagnostics,
     defer_setup_conflicts,
-    delivery_probe_files,
     native_home,
+    recognized_ancestor_files,
     validate_discovery_paths,
     validate_native_command,
     validate_user_placement,
@@ -627,10 +627,9 @@ class CodexIntegration(HarnessIntegration):
                 runner = ctx.admin_target() if self._admin else ctx.agent_target()
                 if runner is None:
                     raise StateError("artifact delivery requires the actual native launch target")
-                files = (
-                    delivery_probe_files(artifact_context, self._artifact_plan.application)
-                    if own_delivery
-                    else artifact_context.ancestor_files
+                files = self._artifact_plan.application.files if own_delivery else artifact_context.ancestor_files
+                recognized = (
+                    recognized_ancestor_files(artifact_context, self._artifact_plan.application) if own_delivery else ()
                 )
                 native_root = probe_native(
                     runner,
@@ -639,6 +638,7 @@ class CodexIntegration(HarnessIntegration):
                     home=artifact_context.home,
                     workspace=self._workspace_path,
                     files=files,
+                    recognized_files=recognized,
                     session_plugin="--plugin-dir" in self._artifact_plan.argv,
                 )
                 validate_discovery_paths(

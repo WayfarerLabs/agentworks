@@ -18,15 +18,17 @@ pytestmark = requires_posix_shell
 
 
 @pytest.mark.parametrize(
-    "tool,class_name,workaround",
+    "tool,class_name,workaround,placement",
     [
-        ("claude", "ClaudeCodeIntegration", "session-agent-definitions"),
-        ("codex", "CodexIntegration", "session-agent-config"),
-        ("grok", "GrokBuildIntegration", "session-agent-definitions"),
+        ("claude", "ClaudeCodeIntegration", "session-agent-definitions", "user"),
+        ("codex", "CodexIntegration", "session-agent-config", "user"),
+        ("grok", "GrokBuildIntegration", "session-agent-definitions", "user"),
+        ("grok", "GrokBuildIntegration", "session-agent-definitions", "workspace"),
     ],
 )
-def test_removed_user_activation_replays_known_persona_without_widening_ancestor_checks(
-    tmp_path, db, monkeypatch, tool, class_name, workaround
+@pytest.mark.parametrize("prior_state", ["matching", "renamed", "competing"])
+def test_inactive_facet_replays_known_persona_without_reusing_old_policy_paths(
+    tmp_path, db, monkeypatch, tool, class_name, workaround, placement, prior_state
 ):
     import shlex
     from dataclasses import replace
@@ -36,6 +38,7 @@ def test_removed_user_activation_replays_known_persona_without_widening_ancestor
     from agentworks.artifacts.application import ArtifactApplication, SessionArtifactContext
     from agentworks.artifacts.declarations import AgentArtifactSpec
     from agentworks.artifacts.model import ArtifactGroup, ArtifactInputs, ArtifactOwner
+    from agentworks.artifacts.native.probe import NativeArtifactConflictError
     from agentworks.artifacts.routing import session_artifacts
     from agentworks.artifacts.state import capture_owner, write_capture
     from agentworks.capabilities.base import RunContext
@@ -48,25 +51,30 @@ def test_removed_user_activation_replays_known_persona_without_widening_ancestor
     from agentworks.plugins.grok import artifacts as grok_adapter
     from agentworks.schema import CapabilityConfig
     from agentworks.ssh import SSHResult
-    from tests.artifacts._fixtures import received
+    from tests.artifacts._fixtures import group, received
     from tests.artifacts.test_native_delivery import owned
     from tests.artifacts.test_routing import graph
 
     fixture = graph(db)
+    source_owner = "agent" if placement == "user" else "workspace"
+    bundle_name = f"{source_owner}-bundle"
     source = tmp_path / "review.md"
     source.write_text("---\nname: review\ndescription: Review changes\n---\nReview the implementation.\n")
-    bundle = fixture.registry.lookup("artifact-bundle", "agent-bundle")
+    bundle = fixture.registry.lookup("artifact-bundle", bundle_name)
     fixture.registry.add(
         "artifact-bundle",
-        "agent-bundle",
+        bundle_name,
         bundle.model_copy(update={"hints": {}, "agents": {"review": AgentArtifactSpec(source=f"file::{source}")}}),
         Origin.built_in(source="replay-fixture"),
     )
-    captured = capture_owner(fixture.registry, "agent", "agent", "agent", fixture.owners["agent"].artifacts)
-    write_capture(db, "agent", "agent", "agent", captured, operation="fixture")
+    captured = capture_owner(
+        fixture.registry, source_owner, source_owner, source_owner, fixture.owners[source_owner].artifacts
+    )
+    write_capture(db, source_owner, source_owner, source_owner, captured, operation="fixture")
     persona = captured.inputs.agents["review"]
     home, workspace = tmp_path / "home", tmp_path / "workspace"
     native_root = home / {"claude": ".claude", "codex": ".codex", "grok": ".grok"}[tool]
+    placement_root = native_root if placement == "user" else workspace / ".grok"
 
     def outer(inputs: ArtifactInputs) -> ArtifactApplication:
         if tool == "codex":
@@ -77,8 +85,8 @@ def test_removed_user_activation_replays_known_persona_without_widening_ancestor
                 instructions_path=str(native_root / "AGENTS.md"),
             )
         if tool == "claude":
-            return claude_adapter.outer_artifacts(inputs, str(native_root))
-        return grok_adapter.outer_artifacts(inputs, str(native_root))
+            return claude_adapter.outer_artifacts(inputs, str(placement_root))
+        return grok_adapter.outer_artifacts(inputs, str(placement_root))
 
     earlier = outer(received(persona))
     # Unrelated old entries must remain outside the new-carrier policy check.
@@ -101,15 +109,22 @@ def test_removed_user_activation_replays_known_persona_without_widening_ancestor
         (native_root / "AGENTS.override.md").write_text("Unrelated native guidance override\n")
     implementation = getattr(import_module(f"agentworks.plugins.{tool}.harness_integration"), class_name)
     record = SetupRecord(
-        component="agent",
+        component=source_owner,
         integration=implementation.name,
         destination_id="d" * 64,
-        declaration=fixture.owners["agent"].declaration(implementation.name, CapabilityConfig()),
+        declaration=fixture.owners[source_owner].declaration(implementation.name, CapabilityConfig()),
         complete=True,
         artifact_inputs=tuple(item.identity for item in captured.inputs.items()),
         artifact_files=tuple(owned(file) for file in all_files),
     )
-    write_native_setup(db, "agent", "agent", NativeSetupState(records=(record,)), operation="fixture")
+    write_native_setup(db, source_owner, source_owner, NativeSetupState(records=(record,)), operation="fixture")
+    if prior_state != "matching":
+        for file in earlier.files:
+            path = Path(file.path)
+            path.write_text(path.read_text().replace("review", "renamed"))
+    if placement == "workspace":
+        subprocess.run(["git", "init", str(workspace)], check=True, capture_output=True)
+        (workspace / ".gitignore").write_text(".grok/agents/review.md\n")
     routed = session_artifacts(
         db,
         fixture.registry,
@@ -148,8 +163,11 @@ def test_removed_user_activation_replays_known_persona_without_widening_ancestor
         )
         return SSHResult(observed.returncode, observed.stdout, observed.stderr)
 
+    inputs = routed.inputs
+    if prior_state == "competing":
+        inputs = replace(inputs, local=group(artifact(ArtifactType.AGENT, name="renamed", owner="session")))
     prepared = SessionArtifactContext(
-        inputs=routed.inputs,
+        inputs=inputs,
         home=str(home),
         directory=str(home / "private"),
         session_uuid="u",
@@ -170,11 +188,36 @@ def test_removed_user_activation_replays_known_persona_without_widening_ancestor
         artifact_context=prepared,
     )
     monkeypatch.setattr(integration, "_resume_or_launch", lambda *args, **kwargs: "fixture-launch")
-    result = integration.start(
-        RunContext(admin_target=SimpleNamespace(run=run)), intent=HarnessLaunchIntent.RESUME_OR_NEW
-    )
-    assert result.command == "fixture-launch"
+    if prior_state == "competing":
+        with pytest.raises(NativeArtifactConflictError):
+            integration.start(
+                RunContext(admin_target=SimpleNamespace(run=run)), intent=HarnessLaunchIntent.RESUME_OR_NEW
+            )
+    else:
+        result = integration.start(
+            RunContext(admin_target=SimpleNamespace(run=run)), intent=HarnessLaunchIntent.RESUME_OR_NEW
+        )
+        assert result.command == "fixture-launch"
+    proposed = integration._artifact_plan.application.files
     assert requests and set(requests[0]["entries"]) == {
-        file.path for file in (*earlier.files, *result.artifacts.files) if file.native_identity
+        file.path for file in (*earlier.files, *proposed) if file.native_identity
     }
+    assert set(requests[0]["paths"]) == {file.path for file in proposed}
+    assert set(requests[0]["identities"]) == {file.native_identity for file in proposed if file.native_identity}
+    assert not any(file.path in requests[0]["proposed"] for file in earlier.files)
     assert not any(file.path in requests[0]["paths"] for file in unrelated_files)
+
+
+def test_recognition_hint_cannot_acknowledge_a_mismatched_proposed_entry():
+    from agentworks.artifacts.native.probe import _inventory_problems
+
+    path = "/native/review.md"
+    result = _inventory_problems(
+        [{"kind": "agent", "path": path, "name": "previous"}],
+        ("agent:review",),
+        {path: "agent:review"},
+        recognized_entries={path: "agent:previous"},
+    )
+    assert [(problem.code, problem.identity, problem.path) for problem in result] == [
+        ("native-artifact-identity-mismatch", "agent:review", path)
+    ]

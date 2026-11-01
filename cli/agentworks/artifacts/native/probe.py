@@ -7,6 +7,7 @@ import shlex
 import tomllib
 from dataclasses import dataclass
 from pathlib import PurePosixPath
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from agentworks.artifacts.application import ArtifactFile
@@ -384,14 +385,20 @@ def probe_native(
     home: str | None = None,
     workspace: str = "",
     files: Sequence[ArtifactFile | OwnedArtifactFile] = (),
+    recognized_files: Sequence[OwnedArtifactFile] = (),
     session_plugin: bool = False,
     workspace_only: bool = False,
     vm_only: bool = False,
     check_policy: bool = True,
 ) -> str:
-    """Check the actual native home and relevant native policy without starting a model."""
+    """Check proposed delivery while recognizing earlier placements as inventory hints.
+
+    Recognized files do not widen the proposed paths, selected identities or policy
+    checks. Their actual native name must still agree before inventory accepts them.
+    """
     require_python3(runner)
     entries = {file.path: file.native_identity for file in files if file.native_identity}
+    recognized_entries = {file.path: file.native_identity for file in recognized_files if file.native_identity}
     identities = tuple(entries.values())
     request = {
         "tool": tool,
@@ -400,7 +407,7 @@ def probe_native(
         "home": home,
         "workspace": workspace,
         "paths": tuple(file.path for file in files),
-        "entries": entries,
+        "entries": {**recognized_entries, **entries},
         "proposed": _proposed_sizes(files, tool),
         "session_plugin": session_plugin,
         "workspace_only": workspace_only,
@@ -444,7 +451,9 @@ def probe_native(
             f"{tool} artifact discovery probe returned an invalid response",
             hint=diagnostic or None,
         ) from None
-    inventory_problems = _inventory_problems(observed.get("inventory"), identities, entries)
+    inventory_problems = _inventory_problems(
+        observed.get("inventory"), identities, entries, recognized_entries=recognized_entries
+    )
     problems.extend(problem.code for problem in inventory_problems)
     details = []
     for problem in inventory_problems:
@@ -476,7 +485,11 @@ class _InventoryProblem:
 
 
 def _inventory_problems(
-    inventory: object, identities: tuple[str, ...], entries: Mapping[str, str]
+    inventory: object,
+    identities: tuple[str, ...],
+    entries: Mapping[str, str],
+    *,
+    recognized_entries: Mapping[str, str] = MappingProxyType({}),
 ) -> list[_InventoryProblem]:
     """Interpret bounded target metadata without requiring a YAML parser on the guest."""
     try:
@@ -511,6 +524,8 @@ def _inventory_problems(
             if expected is not None:
                 if native_identity != expected:
                     problems.append(_InventoryProblem("native-artifact-identity-mismatch", expected, row["path"]))
+                continue
+            if native_identity == recognized_entries.get(row["path"]):
                 continue
             if native_identity in selected:
                 problems.append(_InventoryProblem("native-artifact-collision", native_identity, row["path"]))
