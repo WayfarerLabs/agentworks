@@ -310,7 +310,11 @@ Each test guards behavior, per the development principles and the no-prose-polic
   - the verified-file path for a VM with no entry;
     - `agw vm import-host-keys --all` as the checklist of VMs still without a record;
   - that a cloud VM deleted without a record stays on the tailnet until its node is removed;
-  - that a database restored onto another workstation needs the import again there.
+  - that a database restored onto another workstation needs the store directory copied with it,
+    since a VM created on 0.20 has its key nowhere else, with the import as the fallback for older
+    VMs;
+  - that commands acting on a VM refuse without a record, while describe and listing commands report
+    it per VM and carry on.
 
   The guide and the command reference hold the long form; the `TrustMissing` hint and the other docs
   point to them.
