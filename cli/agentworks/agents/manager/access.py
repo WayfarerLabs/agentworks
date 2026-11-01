@@ -16,7 +16,6 @@ from agentworks.errors import ConnectivityError, NotFoundError, StateError
 from agentworks.execution.access import Admin, Agent, stream_to_operator
 from agentworks.execution.requests import Command, LoginShell, Script, Shell
 from agentworks.execution.results import Completed, Unknown, UnknownReason
-from agentworks.ssh_identity import passphrase_hint
 from agentworks.vms.manager import gated_vm_boundary
 
 from ._common import (
@@ -32,8 +31,6 @@ from ._common import (
 # the patch could not reach.
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database
     from agentworks.execution.access import VMAccess
@@ -43,7 +40,7 @@ _PROBE_DEADLINE_SECONDS = 30
 _ADMIN_PROBE_DEADLINE_SECONDS = 10
 
 
-def _assert_agent_access_works(access: VMAccess, admin: VMAccess, agent: AgentRow, identity_file: Path) -> None:
+def _assert_agent_access_works(access: VMAccess, admin: VMAccess, agent: AgentRow) -> None:
     """Probe direct agent SSH and tell an agent that predates the rollout from an unreachable VM.
 
     The direct-target-user-SSH rollout populates each agent's
@@ -55,7 +52,6 @@ def _assert_agent_access_works(access: VMAccess, admin: VMAccess, agent: AgentRo
     fine and the agent is the problem (the reinit hint); otherwise the VM is
     unreachable. Every other outcome (python3 missing, a host key mismatch, a
     refusal, a truncated run) is not about the rollout and raises as it is.
-    ``identity_file`` is the operator's key, for the passphrase hint on the unreachable error.
     """
     result = access.run(Command(("true",), deadline=_PROBE_DEADLINE_SECONDS))
     completion = result.completion
@@ -77,7 +73,7 @@ def _assert_agent_access_works(access: VMAccess, admin: VMAccess, agent: AgentRo
         entity_kind="agent",
         entity_name=agent.name,
         hint=" ".join(
-            part for part in (f"Check that VM '{agent.vm_name}' is reachable.", passphrase_hint(identity_file)) if part
+            part for part in (f"Check that VM '{agent.vm_name}' is reachable.", access.passphrase_hint()) if part
         ),
     )
 
@@ -169,9 +165,7 @@ def shell_agent(
         # authorized_keys was never populated) get an actionable error
         # rather than dropping into a remote shell that immediately exits
         # on Permission denied.
-        _assert_agent_access_works(
-            access, execution.vm_access(vm, config, Admin()), agent, config.operator.ssh_private_key
-        )
+        _assert_agent_access_works(access, execution.vm_access(vm, config, Admin()), agent)
 
         # An interactive login shell as the agent, in the workspace when one
         # is named. No sudo / su involved.
@@ -270,9 +264,7 @@ def exec_agent(
 
         # Probe direct agent SSH first so pre-rollout agents (whose
         # authorized_keys was never populated) get an actionable error.
-        _assert_agent_access_works(
-            access, execution.vm_access(vm, config, Admin()), agent, config.operator.ssh_private_key
-        )
+        _assert_agent_access_works(access, execution.vm_access(vm, config, Admin()), agent)
 
         # A login shell runs the command so the agent's PATH (mise shims,
         # ~/.local/bin, etc.) is set up. This matches the env an operator

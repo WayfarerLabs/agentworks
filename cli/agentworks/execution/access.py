@@ -15,15 +15,14 @@ import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from agentworks.errors import StateError, ValidationError
+from agentworks import ssh_identity
+from agentworks.errors import StateError
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, forwarding, pump, ssh_process
 from agentworks.execution.agw_launch import refusal_status
 from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, describe_refusal
-from agentworks.execution.requests import LoginShell
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.execution.trust import TrustBinding, TrustMode
-from agentworks.ssh_identity import passphrase_hint
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -32,7 +31,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import VMRow
-    from agentworks.execution.requests import Forward, Request
+    from agentworks.execution.requests import Forward, LoginShell, RunRequest
 
 
 @dataclass(frozen=True)
@@ -71,7 +70,7 @@ class VMAccess:
 
     # -- Operations ------------------------------------------------------------
 
-    def run(self, request: Request, *, check: bool = False) -> Result:
+    def run(self, request: RunRequest, *, check: bool = False) -> Result:
         """Run ``request`` and return its buffered outcome.
 
         The client closes ssh's stdin right after the request. Each stream is
@@ -87,7 +86,7 @@ class VMAccess:
                 raise CommandFailed(self.vm_name, result.completion.status, result)
             return result
 
-    def stream(self, request: Request, *, stdin: BinaryIO | None, stdout: BinaryIO, stderr: BinaryIO) -> int:
+    def stream(self, request: RunRequest, *, stdin: BinaryIO | None, stdout: BinaryIO, stderr: BinaryIO) -> int:
         """Run ``request`` with live output and return the guest's status.
 
         ``stdin`` is copied to the guest until end of file; pass the raw
@@ -121,10 +120,6 @@ class VMAccess:
 
     def attach(self, request: LoginShell) -> int:
         """Attach the operator's terminal to a login shell and return its exit status."""
-        if request.deadline is not None:
-            raise ValidationError(
-                "an attached shell cannot carry a deadline", entity_kind="vm", entity_name=self.vm_name
-            )
         ssh = client.resolve_ssh()
         policy, destination = self._policy(), self._destination()
         token, nonce = envelope.new_handover_token(), envelope.new_nonce()
@@ -164,21 +159,25 @@ class VMAccess:
             )
             return forwarding.run_forward(argv, vm_name=self.vm_name, log=log)
 
+    def passphrase_hint(self) -> str | None:
+        """How to load the operator's key into the SSH agent, or ``None`` unless it is passphrase-protected.
+
+        ssh runs in batch mode, so an encrypted key that is not loaded in the
+        agent fails as a plain connection failure. This reads the key file, so
+        callers ask only after such a failure.
+        """
+        return ssh_identity.passphrase_hint(self._identity_file)
+
     # -- Internals -------------------------------------------------------------
 
     @contextlib.contextmanager
     def _passphrase_hint_on_connection_failure(self) -> Iterator[None]:
-        """Add the SSH agent hint to a connection failure when the operator's key is passphrase-protected.
-
-        ssh runs in batch mode, so an encrypted key that is not loaded in the
-        agent fails as a plain connection failure. The key file is read only
-        here, after such a failure.
-        """
+        """Add :meth:`passphrase_hint` to a connection failure, reading the key only after one."""
         try:
             yield
         except ExecutionIncomplete as error:
             if error.result.completion == Unknown(UnknownReason.CONNECTION):
-                hint = passphrase_hint(self._identity_file)
+                hint = self.passphrase_hint()
                 if hint is not None:
                     error.hint = f"{error.hint} {hint}" if error.hint else hint
             raise
@@ -200,14 +199,12 @@ class VMAccess:
 
     def _execute(
         self,
-        request: Request,
+        request: RunRequest,
         *,
         stdin: BinaryIO | None,
         on_stdout: pump.Sink,
         on_stderr: pump.Sink,
     ) -> Result:
-        if isinstance(request, LoginShell):
-            raise ValidationError("a login shell can only be attached", entity_kind="vm", entity_name=self.vm_name)
         ssh = client.resolve_ssh()
         nonce = envelope.new_nonce()
         wire = envelope.message(request, nonce=nonce)
@@ -230,7 +227,7 @@ class VMAccess:
             return ssh_process.outcome(session, stop, log)
 
 
-def stream_to_operator(access: VMAccess, request: Request) -> int:
+def stream_to_operator(access: VMAccess, request: RunRequest) -> int:
     """Stream ``request`` with the process's own stdio and return the guest's status.
 
     Newline translation by the text layers (a Windows console's, and the

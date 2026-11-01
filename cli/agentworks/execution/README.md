@@ -33,8 +33,8 @@ those two attributes once (the `vm_access_recorder` fixture) and every manager f
 
 A request is a `Command` (a literal argv, run with no shell), a `Script` (source text run by `sh`,
 `bash` or the identity's default shell, optionally as a login shell) or a `LoginShell` (valid only
-for `attach`). Each takes `env`, `cwd` (absolute; `None` is the home directory) and `deadline`
-(seconds of local waiting; it never claims the guest command stopped).
+for `attach`). Each takes `env` and `cwd` (absolute; `None` is the home directory); `Command` and
+`Script` also take `deadline` (seconds of local waiting; it never claims the guest command stopped).
 
 ## What a request becomes
 

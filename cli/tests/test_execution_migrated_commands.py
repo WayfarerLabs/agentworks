@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -11,7 +10,7 @@ import pytest
 from agentworks.agents import manager as agent_manager
 from agentworks.agents.manager.access import _assert_agent_access_works
 from agentworks.errors import ConnectivityError, StateError
-from agentworks.execution.access import Admin, Agent
+from agentworks.execution.access import Admin, Agent, VMAccess
 from agentworks.execution.errors import (
     ClientUnsupported,
     ExecutionIncomplete,
@@ -29,7 +28,6 @@ from agentworks.execution.results import (
 )
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
-from tests.ssh_fixtures import write_test_ssh_keypair
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -91,13 +89,12 @@ def probe(
     recorder: AccessRecorder,
     agent_outcome: Result | BaseException,
     admin_outcome: Result | None = None,
-    identity_file: Path = Path("/nonexistent/key"),
 ) -> None:
     agent_access = recorder.access(AGENT)
     admin_access = recorder.access(Admin())
     agent_access.run_outcomes = [agent_outcome]
     admin_access.run_outcomes = [] if admin_outcome is None else [admin_outcome]
-    _assert_agent_access_works(agent_access, admin_access, AGENT_ROW, identity_file)  # type: ignore[arg-type]
+    _assert_agent_access_works(agent_access, admin_access, AGENT_ROW)  # type: ignore[arg-type]
 
 
 def test_an_agent_that_answers_passes_whatever_the_status(vm_access_recorder: AccessRecorder) -> None:
@@ -133,23 +130,22 @@ def test_a_dropped_connection_with_an_unreachable_admin_means_the_vm_is_unreacha
     assert type(raised.value) is ConnectivityError
 
 
-def test_an_unreachable_vm_hints_at_the_ssh_agent_only_for_an_encrypted_key(
-    vm_access_recorder: AccessRecorder, tmp_path: Path
+def test_an_unreachable_vm_carries_the_access_objects_passphrase_hint(
+    vm_access_recorder: AccessRecorder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     unreachable = Result(Unknown(UnknownReason.CONNECTION))
     hints = []
-    for cipher in (b"none", b"aes256-ctr"):
-        key = tmp_path / f"id-{cipher.decode()}"
-        write_test_ssh_keypair(key, cipher=cipher)
+    for passphrase_hint in (None, "load the key"):
+        monkeypatch.setattr(VMAccess, "passphrase_hint", lambda self, hint=passphrase_hint: hint)
         with pytest.raises(ConnectivityError) as raised:
-            probe(vm_access_recorder, unreachable, unreachable, key)
+            probe(vm_access_recorder, unreachable, unreachable)
         hints.append(raised.value.hint)
 
-    plain, encrypted = hints
+    plain, hinted = hints
     assert plain is not None
-    assert encrypted is not None
-    assert encrypted != plain
-    assert encrypted.startswith(plain)
+    assert hinted is not None
+    assert hinted != plain
+    assert hinted.startswith(plain)
 
 
 @pytest.mark.parametrize(

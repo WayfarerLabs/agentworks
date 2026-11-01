@@ -157,21 +157,6 @@ def test_attach_builds_every_argv_before_it_spawns(
     assert no_spawn == []
 
 
-def test_a_login_shell_can_only_be_attached_and_an_attach_takes_no_deadline(
-    supported_client: SSHClient, no_spawn: list[object], tmp_path: Path
-) -> None:
-    seed_vm_trust("box")
-    access = vm_access(vm(), config(tmp_path / "key"), Admin())
-
-    with pytest.raises(ValidationError):
-        access.run(LoginShell())
-    with pytest.raises(ValidationError):
-        access.stream(LoginShell(), stdin=None, stdout=None, stderr=None)  # type: ignore[arg-type]
-    with pytest.raises(ValidationError):
-        access.attach(LoginShell(deadline=5))
-    assert no_spawn == []
-
-
 # -- Typed outcomes ----------------------------------------------------------------------
 
 
@@ -323,8 +308,8 @@ def test_only_a_connection_failure_gets_the_hint(
 def test_the_key_is_read_only_after_a_failure(
     supported_client: SSHClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    reads: list[Path] = []
-    monkeypatch.setattr("agentworks.execution.access.passphrase_hint", lambda path: reads.append(path))
+    reads: list[str] = []
+    monkeypatch.setattr(VMAccess, "passphrase_hint", lambda self: reads.append(self.vm_name))
     monkeypatch.setattr(VMAccess, "_execute", lambda self, *a, **k: result(Completed(0)))
     access = vm_access(vm(), config(tmp_path / "key"), Admin())
 

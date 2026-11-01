@@ -50,24 +50,32 @@ class RequestOptions:
 
     ``env`` is added to the guest's rebuilt environment and may override any
     of it. ``cwd`` must be absolute, and ``None`` means the home directory.
-    ``deadline`` bounds the local wait in seconds; it never claims the guest
-    command stopped.
     """
 
     env: Mapping[str, str] = field(default_factory=dict, repr=False)
     cwd: str | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class BoundedRequestOptions(RequestOptions):
+    """The options of a request that runs to a result, which a deadline can bound.
+
+    ``deadline`` bounds the local wait in seconds; it never claims the guest
+    command stopped.
+    """
+
     deadline: float | None = None
 
 
 @dataclass(frozen=True)
-class Command(RequestOptions):
+class Command(BoundedRequestOptions):
     """A literal argv, run with no shell. ``argv[0]`` is searched in the guest's ``PATH``."""
 
     argv: tuple[str, ...] = field(repr=False)
 
 
 @dataclass(frozen=True)
-class Script(RequestOptions):
+class Script(BoundedRequestOptions):
     """Source text run by an interpreter that reads it from a file descriptor.
 
     The text is in no argument vector, and the interpreter's stdin stays the
@@ -84,13 +92,17 @@ class Script(RequestOptions):
 class LoginShell(RequestOptions):
     """The identity's default shell as an interactive login shell.
 
-    Valid only for ``attach``: ``run`` and ``stream`` refuse it, and ``attach``
-    refuses one that carries a ``deadline``. A ``Script`` with an empty source
-    would run the shell on an empty file and exit, which is not a session.
+    Valid only for ``attach``, and it takes no deadline: the session lasts as
+    long as the operator keeps it. A ``Script`` with an empty source would run
+    the shell on an empty file and exit, which is not a session.
     """
 
 
-Request = Command | Script | LoginShell
+RunRequest = Command | Script
+"""The requests ``run`` and ``stream`` take."""
+
+Request = RunRequest | LoginShell
+"""Every request kind; ``LoginShell`` is the one ``attach`` takes."""
 
 
 @dataclass(frozen=True)

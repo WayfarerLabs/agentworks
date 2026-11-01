@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from typing import BinaryIO
 
-    from agentworks.execution.requests import Forward, LoginShell, Request
+    from agentworks.execution.requests import Forward, LoginShell, RunRequest
 
 
 @dataclass(frozen=True)
@@ -58,7 +58,7 @@ class RecordingVMAccess(VMAccess):
         self.attach_status: int | BaseException = 0
         self.forward_status: int | BaseException = 0
 
-    def run(self, request: Request, *, check: bool = False) -> Result:
+    def run(self, request: RunRequest, *, check: bool = False) -> Result:
         self.calls.append(Call(self.identity, "run", request, {"check": check}))
         outcome = self.run_outcomes.pop(0) if self.run_outcomes else Result(Completed(0))
         if isinstance(outcome, BaseException):
@@ -67,7 +67,7 @@ class RecordingVMAccess(VMAccess):
             raise AssertionError("a canned non-zero result under check=True; script an exception instead")
         return outcome
 
-    def stream(self, request: Request, *, stdin: BinaryIO | None, stdout: BinaryIO, stderr: BinaryIO) -> int:
+    def stream(self, request: RunRequest, *, stdin: BinaryIO | None, stdout: BinaryIO, stderr: BinaryIO) -> int:
         self.calls.append(Call(self.identity, "stream", request, {"stdin": stdin, "stdout": stdout, "stderr": stderr}))
         return self._status(self.stream_status)
 
