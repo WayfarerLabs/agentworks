@@ -148,9 +148,9 @@ def publish_artifacts(
         # publish part of a package when another member must be preserved.
         for path in observed:
             entry = planned.get(path) or current[path]
-            reason = next((conflicts[origin] for origin in entry.origins if origin in conflicts), None)
-            if reason is not None and path not in skipped_paths:
-                skipped.append(ArtifactSkip(path=path, origins=entry.origins, reason=reason))
+            conflict_reason = next((conflicts[origin] for origin in entry.origins if origin in conflicts), None)
+            if conflict_reason is not None and path not in skipped_paths:
+                skipped.append(ArtifactSkip(path=path, origins=entry.origins, reason=conflict_reason))
                 skipped_paths.add(path)
         retirement = sorted(
             current.items(),

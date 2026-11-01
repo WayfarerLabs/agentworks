@@ -370,9 +370,9 @@ confirmed ownership change. Report an entry skipped because of differing unowned
 `report_incomplete(reason)` and continue independent work. Core reports the owning resource and
 integration, and retains incomplete evidence without failing the whole initialization. Matching
 native entries can be adopted only after observing their full identity and source; adoption is
-checkpointed and reported. Core persists completion and cleanup evidence in the owning
-instance-state slice; it does not infer native ownership from filenames. Removed activations are
-invoked with absent config for retirement, and failed retirement retains evidence for retry. See
+recorded and reported. Core persists completion and cleanup evidence in the owning instance-state
+slice; it does not infer native ownership from filenames. Removed activations are invoked with
+absent config for retirement, and failed retirement retains evidence for retry. See
 [native harness setup](../../../../docs/guides/native-harness-setup.md) for the shipped cleanup
 rules and the [instance-state contract](../../db/README.md) for persistence and inspection.
 

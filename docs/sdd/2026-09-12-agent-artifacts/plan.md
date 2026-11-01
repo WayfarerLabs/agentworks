@@ -17,7 +17,7 @@ acceptance. The final closeout records the R1-R16/R1-R10 audits and adds both lo
 Transport work remains with its owner; this implementation uses today's transport APIs.
 
 - [ ] Amend owned requirements and architecture to independent facets, matching-content adoption,
-      per-entry conflict reports and nonblocking stale-ancestor artifact delivery.
+      per-entry conflict reports and advisory stale-ancestor artifact delivery.
 - [ ] Implement native adoption/convergence and interrupted-run retry with truthful partial setup
       evidence, preserving differing unowned entries and independent setup work.
 - [ ] Implement runtime routing over available captures and known deferrals without an ancestor

@@ -538,10 +538,11 @@ Worked cases the HLA and subsequent tests share:
    session plugin. No session artifact is installed into the shared project directory.
 5. **Change and removal.** Updating a Git ref and reinitializing its owner captures a new commit and
    applies/removes owned outputs. Only descendants whose actual prepared inputs change become stale.
-   Inspection explains the mismatch and launch requests the applicable owner setup operation,
-   explicitly workspace recreation when required, instead of silently mixing revisions or repairing
-   ancestors. A removed activation with retained effects still requires retirement before
-   passthrough.
+   Inspection explains the mismatch; managed launch reports the owning repair operation and uses
+   readable captures and known deferrals without repairing ancestors. Unknown handling is diagnosed
+   and omitted. A removed activation uses inactive passthrough even while retained native effects
+   await owning cleanup. Recorded placement remains visible and protects new delivery against
+   conflicting native identities.
 6. **Replacement within a scope.** Two selected bundles define `rules.conventions`. The later bundle
    replaces the complete earlier definition for that owner; inspection identifies both sources and
    the winner. The same key in `skills` remains independent. A child bundle can replace inherited
@@ -549,13 +550,16 @@ Worked cases the HLA and subsequent tests share:
 7. **Equal keys across scopes.** VM, agent and session each define `hints.setup`.
    VM-to-user-to-session deferral keeps the three contributions in their original owner groups. The
    integration preserves them in its aggregate context. Equal native skill/persona identities
-   instead require a faithful supported native namespace or an explicit refusal, including conflicts
-   with handled ancestors.
+   require a faithful supported native namespace. Setup defers affected entries it cannot represent;
+   a newly requested session carrier must not introduce shadowing. Already placed ancestor-only
+   conflicts warn without blocking launch.
 8. **Native shadowing.** The actual user and workspace each supply a `foobar` skill. Their groups
    stay distinct through core routing. If the harness would select only the workspace definition,
-   the integration refuses that combination unless it can give both faithful, distinct native
-   identities. It must not report both delivered merely because both files exist. Existing native
-   entries at supported discovery locations also participate in this check.
+   new delivery needs faithful, distinct native identities or an explicit unresolved outcome. Setup
+   can defer an affected entry; a session rejects a new conflicting carrier. If both placements
+   already exist, launch reports the conflict and continues. File existence never proves both
+   contributions are delivered. Native entries at supported discovery locations participate in the
+   check without making existing ancestor-only problems a prerequisite.
 
 ## Implementation boundaries and review gates
 
