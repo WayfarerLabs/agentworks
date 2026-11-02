@@ -114,8 +114,8 @@ a VM connection.
       `vm port-forward`. Release probing stays legacy until slice 3, because reinit runs it before
       initialization and must still reach a VM without python3 (`vms/manager/lifecycle.py:962`).
       Keep `vm exec`'s single-argument form as a shell command line, sent as a `Script` under the
-      identity's default shell, and several arguments as a literal argv, as today
-      (`vms/manager/exec.py:271`).
+      identity's default shell, and several arguments shlex-joined, with a word starting with `=`
+      quoted, as today (`vms/manager/exec.py:271`).
 - [x] Restore `vm exec`'s several-argument form to today's behavior, shell-joined (a word starting
       with `=` always quoted) and run under the identity's default shell (`vms/manager/exec.py:271`
       on `main`), which the box above wrongly described as a literal argv. Give a departed stdout
