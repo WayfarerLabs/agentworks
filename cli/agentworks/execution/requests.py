@@ -9,6 +9,7 @@ so a request never leaks through a traceback or a log line.
 
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
@@ -99,15 +100,17 @@ class LoginShell(RequestOptions):
 
 
 def shell_command_line(args: Sequence[str]) -> str:
-    """Several arguments as one shell command line, every word single-quoted.
+    """Several arguments as one shell command line, as ``shlex.join`` writes it.
 
-    Quoting every word, the first included, keeps the shell from reading any of
-    them as syntax: ``shlex.quote`` leaves ``=ls`` bare, which zsh expands to a
-    path, and a bare ``if``, ``time`` or ``FOO=bar`` is a keyword or an
-    assignment. A quoted first word is still looked up as a builtin, function or
-    program, so ``command -v`` keeps working.
+    The line is the one the account shell has always been given, so builtins,
+    functions, keywords (``time``), aliases and a leading ``NAME=value``
+    assignment keep working. The one hardening is for a word starting with
+    ``=``: ``shlex.quote`` leaves ``=ls`` bare, which zsh expands to a path, so
+    such a word is always single-quoted.
     """
-    return " ".join("'" + arg.replace("'", "'\"'\"'") + "'" for arg in args)
+    return " ".join(
+        "'" + arg.replace("'", "'\"'\"'") + "'" if arg.startswith("=") else shlex.quote(arg) for arg in args
+    )
 
 
 RunRequest = Command | Script

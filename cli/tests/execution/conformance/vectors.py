@@ -258,17 +258,18 @@ def stdout_consumer_leaves_a_quiet_payload_that_then_ends(lane: Lane) -> None:
 
 
 def several_arguments_run_as_a_shell_command_line(lane: Lane) -> None:
-    # vm exec single-quotes each word and sends the line under the account shell: a builtin still
-    # resolves from a quoted word, and nothing is read as syntax (=ls is a zsh expansion, a bare $HOME expands).
+    # vm exec shell-joins the arguments and sends the line under the account shell: builtins, a leading
+    # assignment and keywords still work, and a word starting with = is never expanded (zsh would).
     builtin = script(shell_command_line(["command", "-v", "sh"]), Shell.USER_DEFAULT)
+    assignment = script(shell_command_line(["FOO=bar", "printenv", "FOO"]), Shell.USER_DEFAULT)
     words = ["a b", "$HOME", "=ls", "-x", "it's", "*"]
     echo = script(shell_command_line(["printf", "%s|", *words]), Shell.USER_DEFAULT)
 
-    found = lane.run(builtin)
-    printed = lane.run(echo)
+    found, assigned, printed = lane.run(builtin), lane.run(assignment), lane.run(echo)
 
     assert found.completion == Completed(0)
     assert found.stdout.strip() != b""
+    assert (assigned.completion, assigned.stdout) == (Completed(0), b"bar\n")
     assert printed.completion == Completed(0)
     assert printed.stdout.decode() == "".join(f"{word}|" for word in words)
 

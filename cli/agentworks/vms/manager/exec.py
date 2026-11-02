@@ -196,9 +196,9 @@ def exec_vm(
     (not found) or 126 (found but not runnable), with the shell's message, and
     125 means the workspace directory is missing, with one line from agw.
 
-    One argument is a shell command line and several are single-quoted word
-    by word into one, run by the admin's default shell, so builtins and shell
-    functions work and no word is read as syntax.
+    One argument is a shell command line and several are shell-joined into one
+    (``shell_command_line``), run by the admin's default shell, so builtins,
+    functions and a leading ``NAME=value`` work.
 
     When ``workspace_name`` is set, the command runs from the workspace
     directory and the workspace template's env joins the env chain. The
