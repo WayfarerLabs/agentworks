@@ -1,8 +1,8 @@
 """Bounded, public-only SSH identity parsing.
 
-This leaf derives the fingerprint OpenSSH exposes for a public key. It never
-decrypts private material, consults a sibling public-key file, or invokes an
-external program.
+This leaf derives the fingerprint OpenSSH exposes for a public key and checks
+that a public-key blob is whole. It never decrypts private material, consults
+a sibling public-key file, or invokes an external program.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ _OPENSSH_MAGIC = b"openssh-key-v1\x00"
 _OPENSSH_BEGIN = b"-----BEGIN OPENSSH PRIVATE KEY-----"
 _OPENSSH_END = b"-----END OPENSSH PRIVATE KEY-----"
 _OPENSSH_UNENCRYPTED_CIPHER = b"none"
+_CERTIFICATE_SUFFIX = "-cert-v01@openssh.com"
 _PKCS8_ENCRYPTED_BEGIN = b"-----BEGIN ENCRYPTED PRIVATE KEY-----"
 _LEGACY_ENCRYPTED_HEADER = b"Proc-Type: 4,ENCRYPTED"
 _ASCII_WHITESPACE = b" \t\r\n\v\f"
@@ -75,6 +76,26 @@ def fingerprint_public_blob(blob: bytes) -> str:
     digest = hashlib.sha256(blob).digest()
     encoded = base64.standard_b64encode(digest).decode("ascii").rstrip("=")
     return f"SHA256:{encoded}"
+
+
+def is_public_key_blob(blob: bytes, key_type: str) -> bool:
+    """Whether ``blob`` is a complete public-key blob of ``key_type``.
+
+    Its first SSH string must be the key type, and a plain key must be nothing
+    but whole SSH strings after it, which catches a truncated blob. Only a
+    certificate's type is read: the rest of a certificate is not a run of
+    strings.
+    """
+    reader = _SSHReader(blob)
+    try:
+        if reader.read_string("key type").decode("ascii") != key_type:
+            return False
+        if not key_type.endswith(_CERTIFICATE_SUFFIX):
+            while not reader.exhausted:
+                reader.skip_string("key field")
+    except (SSHIdentityReadError, UnicodeDecodeError):
+        return False
+    return True
 
 
 def parse_public_ssh_identity(text: str) -> VerifiedSSHIdentity:
