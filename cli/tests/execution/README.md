@@ -17,6 +17,8 @@ returns canned outcomes without ssh.
 
 - `test_envelope.py`: every byte but NUL survives the envelope, each refusal, the kernel size
   limits.
+- `test_requests.py`: a word starting with `=` reaches zsh literally, whatever the runner's login
+  shell.
 - `test_stream_filters.py`: the stream filters under every split and interleaving, the classifier
   row by row, the refusal-to-status table.
 - `test_ssh_process.py`: the client argv, and `ssh -G` against the installed client.
