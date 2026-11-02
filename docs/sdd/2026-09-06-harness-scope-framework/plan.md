@@ -697,12 +697,12 @@ settings cases can use files supplied by repository checkout during ordinary cre
 call order and controlled fixture are recorded in `6572186080`. No workspace reinit or workspace
 plugin support is implied. Both locks remain pending.
 
-The independent round 3 corrections are complete at production head `4e286ac`. The final CI-selected
-local suite passed **10,433 tests, 11 skipped**, with real Claude Code 2.1.316 and Codex 0.166.0
-fixtures available. The first integrated source run passed 10,431 tests; private review then caught
-and corrected two diagnostic regressions: session repair incorrectly targeted a VM, and an early
-retirement shortcut could discard explicitly pending reason-only cleanup. The final full rerun
-includes both regressions and passed without filtering failures.
+At the initial private checkpoint, production head `4e286ac` passed the CI-selected local suite with
+**10,433 tests, 11 skipped**, with real Claude Code 2.1.316 and Codex 0.166.0 fixtures available.
+The first integrated source run passed 10,431 tests; private review then caught and corrected two
+diagnostic regressions: session repair incorrectly targeted a VM, and an early retirement shortcut
+could discard explicitly pending reason-only cleanup. The final full rerun includes both regressions
+and passed without filtering failures.
 
 All three independent private lanes reviewed the full PR and round 3 at `4b44d42`; project and
 correctness findings above were incorporated, and all three re-reviewed `4e286ac` clean. Independent
@@ -724,3 +724,13 @@ green handoff of all independent fixes, not merge intent or a statement that eit
 The three public correction rounds are exhausted. No additional correction is authorized solely by
 new published feedback. The operator's policy answer and final live acceptance still precede both
 locks.
+
+A final adversarial native check before publication found the same missing-declaration defects when
+Claude accepted an empty marketplace object, or one containing only an update option. Outer-key
+membership did not prove a usable source declaration. Both predicates now require the inner source
+member. Twenty-six targeted real-native cases passed, including missing, empty and update-only
+objects; eight strengthened cases verified actual native ref/sparse source metadata remained intact.
+Independent native commands can discard incomplete outer placeholders, so assertions allow that
+native normalization while rejecting a fabricated source and verifying plugin/registration/claim
+retention. Production code neither parses cache history nor restores a guessed declaration.
+Integrated validation and narrow reviews of this final predicate correction follow before handoff.
