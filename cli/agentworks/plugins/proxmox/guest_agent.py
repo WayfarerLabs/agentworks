@@ -45,9 +45,9 @@ def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: 
     try:
         pid = api.guest_agent_exec(node, vmid, command=list(_ROOT_SHELL), input_data=text, timeout=deadline)
     except Exception as error:
-        failure = _token_rejected(error, where) or ConnectivityError(
-            f"Proxmox QGA dispatch failed for VM {where}; the script may have started"
-        )
+        failure = _token_rejected(
+            error, f"Proxmox rejected the API token while dispatching a root script to VM {where}"
+        ) or ConnectivityError(f"Proxmox QGA dispatch failed for VM {where}; the script may have started")
     if failure is not None:
         raise failure
     while True:
@@ -61,7 +61,11 @@ def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: 
                 f"Proxmox QGA reported that the script on VM {where} (PID {pid}) exited, with its output cut short"
             )
         except Exception as error:
-            failure = _token_rejected(error, where) or ConnectivityError(
+            failure = _token_rejected(
+                error,
+                f"Proxmox rejected the API token while polling the root script on VM {where} (PID {pid});"
+                " the script may still be running",
+            ) or ConnectivityError(
                 f"Proxmox QGA status failed for VM {where} (PID {pid}); the script may still be running"
             )
         if failure is not None:
@@ -74,10 +78,11 @@ def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: 
         time.sleep(min(POLL_INTERVAL_SECONDS, max(0.0, expires - time.monotonic())))
 
 
-def _token_rejected(error: Exception, where: str) -> TokenRejectedError | None:
+def _token_rejected(error: Exception, message: str) -> TokenRejectedError | None:
+    """A ``TokenRejectedError`` saying ``message`` when ``error`` is the API's 401 or 403, else ``None``."""
     if isinstance(error, ProxmoxAPIError) and error.code in (401, 403):
         return TokenRejectedError(
-            f"Proxmox rejected the API token while running a root script on VM {where}",
+            message,
             hint="Check token_id and the token secret's value and permissions on the Proxmox host.",
         )
     return None
