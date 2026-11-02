@@ -35,6 +35,7 @@ A request is a `Command` (a literal argv, run with no shell), a `Script` (source
 `bash` or the identity's default shell, optionally as a login shell) or a `LoginShell` (valid only
 for `attach`). Each takes `env` and `cwd` (absolute; `None` is the home directory); `Command` and
 `Script` also take `deadline` (seconds of local waiting; it never claims the guest command stopped).
+`vm exec` sends a `Script` under the identity's default shell, with several arguments shell-joined.
 
 ## What a request becomes
 

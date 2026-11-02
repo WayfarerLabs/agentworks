@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import io
 import os
+import shlex
 import subprocess
 import threading
 import time
@@ -224,6 +225,16 @@ def stdout_consumer_leaves_an_endless_writer(lane: Lane) -> None:
             return
         time.sleep(0.05)
     pytest.fail("the guest's writer is still running")
+
+
+def several_arguments_run_as_a_shell_command_line(lane: Lane) -> None:
+    # vm exec joins several arguments with shlex and sends them under the account shell, so a builtin works.
+    joined = script(shlex.join(["command", "-v", "sh"]), Shell.USER_DEFAULT)
+
+    result = lane.run(joined)
+
+    assert result.completion == Completed(0)
+    assert result.stdout.strip() != b""
 
 
 def bash_child_reads_no_startup_file(lane: Lane) -> None:
@@ -621,6 +632,7 @@ def build() -> list[Vector]:
         Vector("stdin-positioning", "LSV", stdin_positioning),
         Vector("stdin-consumer-exits-early", "LS", stdin_consumer_exits_early),
         Vector("stdout-consumer-leaves", "LS", stdout_consumer_leaves_an_endless_writer),
+        Vector("several-arguments-run-under-the-shell", "LSV", several_arguments_run_as_a_shell_command_line),
         Vector("bash-child-reads-no-startup-file", "LSV", bash_child_reads_no_startup_file),
         Vector("background-child-holds-both-streams", "LSV", background_child_holds_both_streams),
         Vector("no-trailing-newline-and-refusal", "LS", output_without_a_trailing_newline_and_a_refusal),

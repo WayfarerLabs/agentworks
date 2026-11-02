@@ -23,7 +23,7 @@ import pytest
 
 from agentworks.db import Database
 from agentworks.errors import AuthorizationError, NotFoundError, ValidationError
-from agentworks.execution.requests import Command, LoginShell
+from agentworks.execution.requests import LoginShell, Script, Shell
 from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import empty_secret_target, stub_build_registry, stub_vm_gates
 from tests.vm_access_support import AccessRecorder
@@ -239,8 +239,8 @@ def test_exec_vm_workspace_prefixes_cd(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``vm exec --workspace`` runs the literal argv with the workspace
-    path as its working directory."""
+    """``vm exec --workspace`` runs the shell-joined command with the
+    workspace path as its working directory."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
@@ -252,15 +252,17 @@ def test_exec_vm_workspace_prefixes_cd(
     )
 
     assert rc == 0
-    assert recorder.requests("stream") == [Command(("echo", "hi"), cwd="/opt/agentworks/workspaces/ws1", env={})]
+    assert recorder.requests("stream") == [
+        Script("echo hi", Shell.USER_DEFAULT, cwd="/opt/agentworks/workspaces/ws1", env={})
+    ]
 
 
 def test_exec_vm_no_workspace_unchanged(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``vm exec`` without ``--workspace`` runs the argv with no working
-    directory, so the guest uses the home directory."""
+    """``vm exec`` without ``--workspace`` runs the shell-joined command with
+    no working directory, so the guest uses the home directory."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
@@ -269,7 +271,7 @@ def test_exec_vm_no_workspace_unchanged(
 
     vm_manager.exec_vm(db, config, "vm1", ["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
-    assert recorder.requests("stream") == [Command(("echo", "hi"), cwd=None, env={})]
+    assert recorder.requests("stream") == [Script("echo hi", Shell.USER_DEFAULT, cwd=None, env={})]
 
 
 # ---------------------------------------------------------------------------

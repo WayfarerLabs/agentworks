@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import shlex
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
@@ -196,8 +197,8 @@ def exec_vm(
     (not found), 126 (found but not runnable) or 125 (the workspace
     directory is missing), with one line from agw.
 
-    One argument is a shell command line, run by the admin's default shell;
-    several arguments are a literal argv.
+    One argument is a shell command line and several are shell-joined into
+    one, run by the admin's default shell, so builtins and shell functions work.
 
     When ``workspace_name`` is set, the command runs from the workspace
     directory and the workspace template's env joins the env chain. The
@@ -212,7 +213,7 @@ def exec_vm(
     from agentworks.env import ResourceContext, compose_env
     from agentworks.exec_validation import normalize_exec_command
     from agentworks.execution.access import Admin, stream_to_operator
-    from agentworks.execution.requests import Command, Script, Shell
+    from agentworks.execution.requests import Script, Shell
 
     # Before any database read or guard: an unsupported client refuses first.
     execution.resolve_ssh()
@@ -275,9 +276,6 @@ def exec_vm(
 
         access = execution.vm_access(vm, config, Admin())
         cwd = ws.workspace_path if ws else None
-        request = (
-            Script(command[0], Shell.USER_DEFAULT, cwd=cwd, env=env)
-            if len(command) == 1
-            else Command(tuple(command), cwd=cwd, env=env)
-        )
+        source = command[0] if len(command) == 1 else shlex.join(command)
+        request = Script(source, Shell.USER_DEFAULT, cwd=cwd, env=env)
         return stream_to_operator(access, request)

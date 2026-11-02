@@ -118,12 +118,11 @@ path and needs none of what follows. Everything else keeps its current path for 
   to be loaded in that agent first. When a connection fails and the configured key is
   passphrase-protected, the error's hint mentions `ssh-add`; `vm port-forward` shows ssh's own log
   instead.
-- **Exit statuses.** A command that cannot start exits 127 when it is not found, 126 when it is
-  found but cannot run (no execute bit, or a script with no `#!` line, since there is no shell
-  fallback), and 125 when the workspace directory is missing, each with one line from `agw`. A
-  command that exits 255 is no longer confused with a lost connection: under `exec`, a lost
-  connection now exits 1 with an error from `agw` instead of 255. `vm shell` and `agent shell` still
-  return 255 for both and print a notice.
+- **Exit statuses.** `vm exec` and `agent exec` still run the command line under the account shell,
+  so a command that cannot start exits 127 or 126 with the shell's message, as before. A missing
+  workspace directory exits 125 with one line from `agw`. A command that exits 255 is no longer
+  confused with a lost connection: under `exec`, a lost connection now exits 1 with an error from
+  `agw` instead of 255. `vm shell` and `agent shell` still return 255 for both and print a notice.
 - **The guest environment is rebuilt.** The command sees a fixed `PATH`
   (`/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/games:/usr/games`),
   `LANG=C.UTF-8`, `SHLVL=1`, the account's `HOME`, `USER`, `LOGNAME` and `SHELL`, and your
@@ -131,18 +130,19 @@ path and needs none of what follows. Everything else keeps its current path for 
   `pam_env` variables, or anything the account's shell exported while sshd ran it to start the
   request. Login startup files still run where the command asks for a login shell: `agent exec`,
   `vm shell` and `agent shell` read them after the environment is rebuilt, and zsh reads `.zshenv`
-  for a single-argument `vm exec`. `agw vm reinit` warns, without failing, when `/etc/environment`,
+  for `vm exec`. `agw vm reinit` warns, without failing, when `/etc/environment`,
   `/etc/security/pam_env.conf` or the admin's `~/.pam_environment` holds settings, since these
   commands no longer apply them. The home file is checked only where sshd applies it (Debian 12).
   Lima's `env:` settings and its proxy propagation are written into `/etc/environment`, so on such a
   VM they no longer reach `agw` commands and reinit warns. Check now if you rely on them: the
   warning appears only when you run `vm reinit`.
-- **A literal command skips the account shell.** `vm exec VM prog arg...` runs the program directly.
-  `vm exec VM 'one argument'` is, as before, a shell command line run by the admin's default shell
-  without login startup. What changes is where its `PATH` comes from: sshd's `PATH` plus `pam_env`
-  before, the fixed `PATH` above now, so additions made only in profile files are not applied; use
-  `vm exec VM bash -lc '...'` to get them. `agent exec` still runs in the agent's login shell.
-- **Large arguments are refused up front.** One argument or one `NAME=VALUE` environment string over
+- **`vm exec` takes its `PATH` from the fixed one.** `vm exec VM prog arg...` and
+  `vm exec VM 'one argument'` are, as before, shell command lines run by the admin's default shell
+  without login startup, so builtins and shell functions work. What changes is where `PATH` comes
+  from: sshd's `PATH` plus `pam_env` before, the fixed `PATH` above now, so additions made only in
+  profile files are not applied; use `vm exec VM bash -lc '...'` to get them. `agent exec` still
+  runs in the agent's login shell.
+- **Large environment values are refused up front.** One `NAME=VALUE` environment string over
   131,071 bytes is refused before anything runs, because Linux cannot execute it.
 - **`vm shell` and `agent shell` without `--workspace` no longer print the message of the day or the
   last-login line.** sshd prints them only when it runs the login shell itself.
