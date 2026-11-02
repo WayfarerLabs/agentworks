@@ -70,13 +70,13 @@ Sink = Callable[[bytes], None]
 A sink that cannot take them yet raises ``BlockingIOError`` with
 ``characters_written`` set to what it did take; the pump holds the rest and
 offers it again (an empty remainder asks the sink to finish, say a flush). An
-error for which :func:`reader_left` holds means the consumer has gone; any
+error for which :func:`consumer_left` holds means the consumer has gone; any
 other ``OSError`` propagates.
 """
 
 
-def reader_left(error: OSError) -> bool:
-    """Whether a failed write or flush means the reader at the other end has gone (``| head``).
+def consumer_left(error: OSError) -> bool:
+    """Whether a failed write or flush means the consumer at the other end has gone (``| head``).
 
     That is ``BrokenPipeError`` or ``ConnectionResetError``, and on Windows
     ``EINVAL``, which is how CPython reports a pipe whose reader closed there.
@@ -191,7 +191,7 @@ class PipeSession:
 
     A write that fails to the client's stdin is the consumer ending early, not a
     failure: the session stops sending and keeps reading. A sink that raises
-    an error for which :func:`reader_left` holds is the consumer of that
+    an error for which :func:`consumer_left` holds is the consumer of that
     stream leaving. The session closes its read end of that stream of the
     client's, so ssh sees ``EPIPE`` as it did when it held the operator's
     streams. A departed stdout makes ssh close the channel when the guest next
@@ -345,7 +345,7 @@ class PipeSession:
         except BlockingIOError as error:
             self._pending[which] = payload[getattr(error, "characters_written", 0) :]
         except OSError as error:
-            if not reader_left(error):
+            if not consumer_left(error):
                 raise
             self._abandon(which)
 

@@ -44,8 +44,8 @@ class TrustMissing(StateError):
 class ClientUnsupported(ConfigError):
     """No acceptable OpenSSH client, the resolved one failed to start, or a program it ships with is missing.
 
-    The message lists each path tried with its reason and says how to install a
-    supported client, so the caller supplies the whole text.
+    The message names what is missing and how to install a supported client,
+    so the caller supplies the whole text.
     """
 
 

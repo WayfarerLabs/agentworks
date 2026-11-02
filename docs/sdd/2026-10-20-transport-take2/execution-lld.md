@@ -284,8 +284,11 @@ conformance suite run it against a local shell.
   learned. With the trailer already in hand, stdout is pumped to its end marker and the result is
   `Completed(N)`. When stdout was abandoned and the stderr trailer still arrives, the result is the
   guest's own `Completed(N)`; otherwise it is `Unknown(CONSUMER_LEFT)`, which `stream` alone reports
-  as 141, the status of a writer killed by `SIGPIPE`. agw then flushes nothing more to the departed
-  stream, pointing it at the null device so interpreter shutdown cannot fail on it.
+  as 141, the status of a writer killed by `SIGPIPE`. `stream_to_operator` flushes both streams once
+  as it returns, and that flush is how a departure it did not see earlier is detected: a stream
+  whose consumer has gone is pointed at the null device, so interpreter shutdown cannot fail on the
+  bytes left in its buffer. That flush tries both streams and never replaces a failure already in
+  flight.
 - **Binary stdio.** Callers pass `sys.stdout.buffer` and `sys.stderr.buffer` (the text layer's
   `newline="\n"` at `cli/_entry.py:38` does not apply), after flushing the text layer (I2).
   `stream_to_operator(access, request)` in `access.py` is that wiring, flush, raw stdin and binary

@@ -109,7 +109,12 @@ def resolve(*, windows: bool, environ: Mapping[str, str]) -> SSHClient:
             return verdict
         refusals.append(f"  {path}: {verdict}")
     tried = "\n".join(refusals) if refusals else "  no OpenSSH client was found"
-    raise ClientUnsupported(f"no supported OpenSSH client:\n{tried}\n{_INSTALL_GUIDANCE[windows]}")
+    raise ClientUnsupported(f"no supported OpenSSH client:\n{tried}\n{install_guidance(windows=windows)}")
+
+
+def install_guidance(*, windows: bool) -> str:
+    """How to install a supported client on the platform, for a :class:`ClientUnsupported` message."""
+    return _INSTALL_GUIDANCE[windows]
 
 
 def tool_beside_ssh(ssh: SSHClient, name: str) -> Path:
@@ -118,12 +123,15 @@ def tool_beside_ssh(ssh: SSHClient, name: str) -> Path:
     It is never looked up on ``PATH``, for the reasons the client itself is
     not: ``PATH`` can name a relative or current-directory program, and on
     Windows it commonly finds Git for Windows' MSYS build. Raises
-    :class:`ClientUnsupported` naming the expected path when no executable
-    file is there.
+    :class:`ClientUnsupported` naming the expected path, and how to install a
+    supported client, when no executable file is there.
     """
-    tool = Path(ssh.path).with_name(f"{name}.exe" if sys.platform == "win32" else name)
+    windows = sys.platform == "win32"
+    tool = Path(ssh.path).with_name(f"{name}.exe" if windows else name)
     if not (tool.is_file() and os.access(tool, os.X_OK)):
-        raise ClientUnsupported(f"no executable {name} beside the OpenSSH client: expected {tool}")
+        raise ClientUnsupported(
+            f"no executable {name} beside the OpenSSH client: expected {tool}\n{install_guidance(windows=windows)}"
+        )
     return tool
 
 
@@ -142,13 +150,10 @@ def identity_is_loaded(ssh: SSHClient, identity_file: Path) -> bool:
     public_key = Path(f"{identity_file}.pub")
     try:
         ssh_add = tool_beside_ssh(ssh, "ssh-add")
-    except ClientUnsupported:
-        return False
-    if not public_key.is_file():
-        return False
-    try:
+        if not public_key.is_file():  # a FIFO there would block the read
+            return False
         wanted = public_key.read_text(encoding="utf-8", errors="replace").split()[:2]
-    except OSError:
+    except (ClientUnsupported, OSError):
         return False
     if len(wanted) != 2:
         return False
