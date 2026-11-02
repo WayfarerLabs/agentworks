@@ -96,7 +96,7 @@ class ConformingVMPlatform(VMPlatform):
     Subclasses add ``name`` / ``description``.
     """
 
-    contract_version = 1
+    contract_version = 2
     recovery_needs_guest_sshd = False
 
     def __init_subclass__(cls, **kwargs: object) -> None:

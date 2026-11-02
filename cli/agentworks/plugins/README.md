@@ -199,11 +199,11 @@ class ExampleCloudConfig(AgwModel):
 class ExampleCloudPlatform(VMPlatform):
     name: ClassVar[str] = "example-cloud"
     description: ClassVar[str] = "Example Cloud VMs (region-scoped)"
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     config_model: ClassVar[type[AgwModel]] = ExampleCloudConfig
 ```
 
-For vm-platform contract version 1, `create()` receives a concrete core-selected Debian release, a
+For vm-platform contract version 2, `create()` receives a concrete core-selected Debian release, a
 required Tailscale auth key, and a value-free bootstrap-progress sink in `ProvisionRequest`. The
 platform resolves the release through a local artifact map before mutation, with no default or
 fallback. It must finish the Tailscale join and return a transport through which core probes

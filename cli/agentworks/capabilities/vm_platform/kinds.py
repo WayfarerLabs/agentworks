@@ -59,7 +59,7 @@ class _VMPlatformKind:
         Proxmox uses QEMU Guest Agent for execution and directs interactive access to its
         provider console.
 
-        Contract version 1 receives core's concrete current Debian release, resolves it
+        Contract version 2 receives core's concrete current Debian release, resolves it
         to a platform-owned artifact, and fails before backend mutation when the mapping is
         missing. A platform joins Tailscale and reads the node's address through its own
         root channel before returning the address, transport and backend identity, reports
@@ -132,7 +132,7 @@ def _readiness(name: str, impl: Any) -> Readiness:
 
 VM_PLATFORM_DESCRIPTOR = CapabilityKindDescriptor(
     kind="vm-platform",
-    contract_version=1,
+    contract_version=2,
     implementation_contract=VMPlatform,
     registry=_registry,
     required_operations=frozenset(

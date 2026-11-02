@@ -316,7 +316,7 @@ def test_base_platform_vm_active_is_nullcontext() -> None:
     class _Stub(VMPlatform):
         name = "stub"
         description = "stub"
-        contract_version = 1
+        contract_version = 2
         config_model = _StubConfig
         recovery_needs_guest_sshd = False
 

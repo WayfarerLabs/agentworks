@@ -729,7 +729,7 @@ secret set from the node graph, resolves once, and exposes only declared values 
 
 A consuming domain can also own required operation values that every implementation must honor. The
 VM domain resolves its template's Tailscale auth-key reference once and selects the concrete Debian
-release from core policy. Vm-platform contract version 1 carries both through `ProvisionRequest`,
+release from core policy. Vm-platform contract version 2 carries both through `ProvisionRequest`,
 alongside a value-free progress sink. A platform must not redeclare either value in its config, read
 a substitute from ambient state, or infer its own meaning of "current." It translates the requested
 release through a platform-owned artifact map. Core probes the returned transport and persists only

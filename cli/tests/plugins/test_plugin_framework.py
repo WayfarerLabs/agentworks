@@ -176,7 +176,7 @@ class _NotAPlatform:
     nothing of the vm-platform contract. This is the class the old
     ``isinstance(impl, type)`` gate and ``cast`` waved through."""
 
-    contract_version = 1
+    contract_version = 2
     name = "not-a-platform"
     description = "has the metadata and none of the contract"
 
@@ -188,7 +188,7 @@ class _PlatformWithoutAConfigModel(ConformingVMPlatform):
 
     name = "no-config-model-platform"
     description = "declares no config model"
-    contract_version = 1
+    contract_version = 2
     config_model = None  # type: ignore[assignment]
 
 
@@ -196,7 +196,7 @@ class _AbstractPlatform(VMPlatform):
     """Derives from the contract but implements none of its power ops, so it
     can never be constructed."""
 
-    contract_version = 1
+    contract_version = 2
     name = "abstract-platform"
     description = "abstract: no power ops implemented"
 
@@ -208,7 +208,7 @@ class _NoNativeConfig(AgwModel):
 class _PlatformWithoutNativeExecution(VMPlatform):
     """Implements every operation except required native execution."""
 
-    contract_version = 1
+    contract_version = 2
     name = "no-native-platform"
     description = "omits native execution"
     config_model = _NoNativeConfig
@@ -269,13 +269,15 @@ class _BackendWithoutTtySupport:
 class _PlatformOnAnUnsupportedContract(ConformingVMPlatform):
     name = "unsupported-contract-platform"
     description = "declares a contract this build does not support"
-    contract_version = 2
+    # The version before this build's: a platform written for the old shape.
+    contract_version = 1
 
 
 class _HarnessOnAnUnsupportedContract(ConformingHarnessIntegration):
     name = "unsupported-contract-harness"
     description = "declares a contract this build does not support"
-    contract_version = 2
+    # The version before this build's: a platform written for the old shape.
+    contract_version = 1
 
 
 class _BackendWithInstanceReadiness(ConformingSecretBackend):

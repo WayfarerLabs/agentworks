@@ -141,7 +141,7 @@ def test_success_runs_primary_bootstrap_before_create_returns(monkeypatch: pytes
 
     result = WSL2Platform("wsl2", {}).create(request, RunContext())
 
-    assert WSL2Platform.contract_version == 1
+    assert WSL2Platform.contract_version == 2
     assert result.tailnet_address == ADDRESS
     bootstrap.assert_called_once()
     assert bootstrap.call_args.kwargs == {

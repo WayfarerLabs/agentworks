@@ -208,7 +208,7 @@ and DB migration.
 - `recovery_needs_guest_sshd` **MUST** be declared (no default): `True` when the root channel goes
   through the guest's sshd.
 
-Vm-platform is an internal capability API. Its complete bundled contract remains version 1, and all
+Vm-platform is an internal capability API. Its complete bundled contract is version 2, and all
 six implementations change atomically with the descriptor. Exact registration conformance rejects an
 inconsistent version or missing abstract implementation as a curation error. Returning unsupported
 or implementing a no-op still violates the contract and must be caught by review and provider tests;
@@ -309,7 +309,7 @@ the descriptor and every bundled implementation must change atomically.
 - `legacy_platform_metadata(cls, row, legacy) -> dict[str, str]` maps pre-migration DB rows into the
   `platform_metadata` shape, consumed only by the one-shot DB migration.
 
-**Inputs and outputs** are uniform under vm-platform contract version 1. Every `create` receives the
+**Inputs and outputs** are uniform under vm-platform contract version 2. Every `create` receives the
 same `ProvisionRequest`, including the concrete core-selected `debian_release`, a required resolved
 Tailscale auth key, and a required value-free bootstrap-progress sink. The platform resolves the
 release through its local artifact map before backend mutation. A missing code-owned mapping names
