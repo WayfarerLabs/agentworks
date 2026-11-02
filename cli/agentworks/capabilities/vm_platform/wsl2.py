@@ -9,7 +9,7 @@ import platform
 import subprocess
 import sys
 import urllib.request
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from agentworks import output
@@ -37,10 +37,22 @@ if TYPE_CHECKING:
 
 _STATUS_TIMEOUT_SECONDS = 10
 
-# The one place the wsl.exe program is named. A bare name on Windows is looked
-# up in the current directory before PATH, the hazard the OpenSSH resolver
-# avoids for ssh; resolving this one the same way is a separate change.
-_WSL = "wsl"
+
+def wsl_program(*, windows: bool, environ: Mapping[str, str]) -> str:
+    """The wsl.exe to run: its absolute path on Windows, never a bare name.
+
+    Windows looks a bare name up in the current directory before ``PATH``,
+    and this process is handed the Tailscale auth key on stdin, so it is
+    named the way the OpenSSH resolver names ssh. Elsewhere (only tests build
+    WSL2 argvs there) the bare name stands in.
+    """
+    if not windows:
+        return "wsl"
+    return str(PureWindowsPath(environ.get("SystemRoot") or r"C:\Windows", "System32", "wsl.exe"))
+
+
+# The one place the wsl.exe program is named.
+_WSL = wsl_program(windows=sys.platform == "win32", environ=os.environ)
 
 
 # -- Win32 job-object machinery for orphan-proof subprocess cleanup ----------

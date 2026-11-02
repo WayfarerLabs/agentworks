@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import PureWindowsPath
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform, wsl_program
 from agentworks.execution import root_script
 from agentworks.execution.root_script import RawRun
 
@@ -29,3 +30,17 @@ def test_the_script_reaches_bash_as_root_on_stdin_with_no_login_shell(monkeypatc
     ((argv, sent, _deadline),) = calls
     assert sent == script
     assert not any("tskey-private" in argument for argument in argv)
+
+
+@pytest.mark.parametrize(
+    ("environ", "expected"),
+    [
+        ({"SystemRoot": r"D:\WINDOWS"}, r"D:\WINDOWS\System32\wsl.exe"),
+        ({}, r"C:\Windows\System32\wsl.exe"),
+    ],
+)
+def test_on_windows_wsl_exe_is_named_by_absolute_path(environ: dict[str, str], expected: str) -> None:
+    program = wsl_program(windows=True, environ=environ)
+
+    assert PureWindowsPath(program).is_absolute()
+    assert program == expected
