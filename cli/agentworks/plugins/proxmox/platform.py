@@ -21,6 +21,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
+from agentworks.plugins.proxmox import guest_agent
 from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.plugins.proxmox.teardown import (
     rollback_create_on_interrupt,
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.root_script import RawRun
 
 
 def _warn_bootstrap_file_residue() -> None:
@@ -151,6 +153,8 @@ class ProxmoxPlatform(VMPlatform):
         `[plugins] system` lists it.
         """,
     )
+    # QGA reaches the guest without its sshd.
+    recovery_needs_guest_sshd: ClassVar[bool] = False
     native_shell_unavailable_hint: ClassVar[str] = (
         "Proxmox QEMU Guest Agent does not provide an interactive native shell. "
         "Use the Proxmox web UI's serial console "
@@ -484,6 +488,10 @@ class ProxmoxPlatform(VMPlatform):
         vmid = vm.platform_metadata.get("vmid", "?")
         node = vm.platform_metadata.get("node") or self.config.node
         return f"{vmid}@{node}"
+
+    def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
+        """Run ``script`` as root through the QEMU Guest Agent, which needs no guest sshd."""
+        return guest_agent.run_as_root(self._api(ctx), self._vm_node(vm), self._vmid(vm), script, deadline)
 
     def native_transport(
         self,

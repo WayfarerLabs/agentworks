@@ -27,6 +27,7 @@ MIGRATED_FILES = (
     "vms/manager/port_forward.py",
     "agents/manager/access.py",
     "capabilities/vm_platform/public_ssh.py",
+    "plugins/proxmox/guest_agent.py",
 )
 
 
