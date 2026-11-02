@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -319,7 +320,7 @@ def _request(progress: BootstrapProgress | None = None) -> ProvisionRequest:
         system_slug=None,
         admin_username="agentworks",
         ssh_public_key="ssh-ed25519 AAAA test",
-        ssh_private_key=None,
+        ssh_private_key=Path("/dev/null"),
         provisioning_trust=provisioning_trust_for_tests("a"),
         tailscale_auth_key=_TAILSCALE_SENTINEL,
         progress=progress or MagicMock(),

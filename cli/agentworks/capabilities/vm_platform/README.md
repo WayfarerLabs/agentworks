@@ -76,6 +76,8 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
 - **MUST** create the configured admin with passwordless `sudo`, SSH-key access, and no password.
 - **MUST** provide a native administrative `ExecTransport` that runs bounded, non-interactive
   commands as the admin or root without depending on the VM's Tailscale state or identity.
+- **MUST** implement `run_as_root`, core's channel for its own root scripts outside Tailscale, and
+  declare `recovery_needs_guest_sshd` (below).
 - Native interactive shell, streaming, and file transfer are optional. A platform that lacks native
   interaction **MUST** declare `native_shell_unavailable_hint` with usable provider-console
   guidance.
@@ -196,6 +198,27 @@ and DB migration.
   Proxmox remain fire-and-forget (#356).
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
+- `run_as_root(vm, ctx, script, deadline) -> RawRun` runs `/bin/bash -s` as root through the
+  platform's own channel, independent of the VM's Tailscale state, with `script` on its stdin, and
+  returns everything the channel printed on each stream when it ends or `deadline` seconds pass. It
+  stops waiting at the deadline and never claims the guest command stopped. It runs the script once
+  and never retries, parses the output or reports an exit code: `RawRun` has no field for one,
+  because no channel's status is trusted, and core reads the payload's status from markers its
+  wrapper (`agentworks.execution.root_script`) puts in the script. The script can carry a secret, so
+  it never reaches an argument, a log, an exception or a file. A channel that cannot start, or a
+  provider call that fails, raises an `AgentworksError`; core treats it like an unknown outcome and
+  never dispatches again. Lima runs `limactl shell <instance> sudo -n /bin/bash -s` (on the
+  placement host for Remote Lima), WSL2 `wsl --distribution <distro> --user root --exec /bin/bash
+  -s`, Proxmox a QEMU Guest Agent exec of `/bin/bash -s` with the script as its input, and the clouds
+  `sudo -n /bin/bash -s` over `PublicSSH` to the public address inside their transient route, with
+  the VM's host-key record required before any route opens.
+- `read_host_keys(vm, ctx) -> tuple[HostKey, ...]` has a default that reads
+  `/etc/ssh/ssh_host_*_key.pub` through `run_as_root`. The clouds override it to read under an
+  Unverified provisioning file, since a VM without a record cannot be verified.
+
+`recovery_needs_guest_sshd: ClassVar[bool]` is a descriptor requirement with no default: `True`
+where the root channel goes through the guest's sshd (Lima's `limactl shell` and the clouds' SSH),
+so a broken sshd means no root script can run, and `False` for WSL2 and Proxmox.
 
 Vm-platform is an internal capability API. Its complete bundled contract remains version 1, and all
 six implementations change atomically with the descriptor. Exact registration conformance rejects an

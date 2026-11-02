@@ -2,7 +2,8 @@
 
 - **L** runs ``root_script.run_process(["/bin/bash", "-s"], ...)`` locally, and
   again under ``sudo -n`` where the runner grants it.
-- **V** runs through a live VM's platform ``run_as_root``.
+- **V** runs through a live VM's platform ``run_as_root``, from
+  ``tests/test_root_channel_live_vectors.py``.
 
 A vector takes the lane and uses only ``lane.run``, so its body is the same
 on both. Each asserts observable behavior: a status, bytes, an effect on the
@@ -103,7 +104,13 @@ def payload_statuses_come_back_as_themselves(lane: RootLane) -> None:
 
 
 def a_trapped_payload_finishes_after_its_channel_closes(lane: RootLane) -> None:
-    """The deadline ends the local end of the channel mid-payload; the guest's payload keeps going."""
+    """The deadline ends the local end of the channel mid-payload; the guest's payload keeps going.
+
+    The guarantee is the SSH channels' (Lima's ``limactl shell``, Remote Lima, the clouds'), measured
+    live on Lima, Remote Lima and Azure. QGA has no connection to drop, and W7 records what WSL2 does.
+    """
+    if lane.name == "V" and lane.platform not in ("lima", "azure-vm"):
+        pytest.skip("W4's live cells are Lima, Remote Lima and Azure")
     flag = scratch_path()
     payload = f"trap '' HUP PIPE\nsleep 3\necho bash-write\n/bin/echo external-write\ntouch {flag}"
 

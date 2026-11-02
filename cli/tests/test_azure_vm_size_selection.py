@@ -4,6 +4,7 @@ site's ``platform_config.vm_sizes`` override (issue #178)."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
@@ -185,7 +186,7 @@ class TestCreateProvisioningOutput:
             system_slug=None,
             admin_username="agw",
             ssh_public_key="ssh-ed25519 AAAA test",
-            ssh_private_key=None,
+            ssh_private_key=Path("/dev/null"),
             provisioning_trust=provisioning_trust_for_tests("dev"),
             tailscale_auth_key="tskey-test",
             progress=MagicMock(),
@@ -303,7 +304,7 @@ class TestCreateOSDiskClamp:
             system_slug=None,
             admin_username="agw",
             ssh_public_key="ssh-ed25519 AAAA test",
-            ssh_private_key=None,
+            ssh_private_key=Path("/dev/null"),
             provisioning_trust=provisioning_trust_for_tests("dev"),
             tailscale_auth_key="tskey-test",
             progress=MagicMock(),

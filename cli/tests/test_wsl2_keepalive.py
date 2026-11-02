@@ -318,6 +318,10 @@ def test_base_platform_vm_active_is_nullcontext() -> None:
         description = "stub"
         contract_version = 1
         config_model = _StubConfig
+        recovery_needs_guest_sshd = False
+
+        def run_as_root(self, vm: Any, ctx: Any, script: bytes, deadline: float) -> Any:
+            raise NotImplementedError
 
         def create(self, request: Any, ctx: Any) -> Any:
             raise NotImplementedError

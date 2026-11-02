@@ -28,7 +28,8 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow, VMStatus
     from agentworks.debian import DebianRelease
-    from agentworks.execution.trust import TrustBinding
+    from agentworks.execution.root_script import RawRun
+    from agentworks.execution.trust import HostKey, TrustBinding
     from agentworks.transports import ExecTransport
 
 
@@ -80,9 +81,9 @@ class ProvisionRequest:
     system_slug: str | None
     admin_username: str
     ssh_public_key: str
-    # Path to the operator's SSH private key when a platform's create path
-    # constructs an SSH transport.
-    ssh_private_key: Path | None
+    # The operator's SSH private key, for a platform whose create path reaches
+    # the VM over SSH. Create always passes the configured one.
+    ssh_private_key: Path
     # Host-key trust for a platform whose create path reaches the VM over its
     # public address before the VM is in the host-key store: an UNVERIFIED
     # binding whose file the manager owns and deletes when the create ends.
@@ -192,6 +193,11 @@ class VMPlatform(Capability):
     # Operator guidance shown before attempting a native interactive shell.
     # None means the platform declares full native interaction.
     native_shell_unavailable_hint: ClassVar[str | None] = None
+
+    # Whether ``run_as_root``'s channel goes through the guest's sshd, so a
+    # broken sshd means no root script can run at all. Declared by every
+    # platform (a descriptor requirement), never defaulted here.
+    recovery_needs_guest_sshd: ClassVar[bool]
 
     # Operator guidance warned when every reachability probe of the
     # native transport fails (the transports factory emits it just
@@ -351,6 +357,38 @@ class VMPlatform(Capability):
         ``config.operator.ssh_private_key`` for the public-IP path),
         distinct from the bound ``platform_config``.
         """
+
+    @abstractmethod
+    def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
+        """Run ``/bin/bash -s`` as root through the platform's own channel, with ``script`` on its stdin.
+
+        The channel works without the VM's Tailscale state. Write ``script``,
+        close stdin, and return everything the channel printed on each
+        stream when it ends or ``deadline`` seconds pass; stop waiting at the
+        deadline and never claim the guest command stopped. Run it once:
+        never retry, parse the output or report an exit code (``RawRun`` has
+        no field for one, because no channel's status is trusted; core reads
+        the status from markers in the streams). ``script`` can carry a
+        secret, so it never reaches an argument, a log, an exception or a
+        file. Raise an ``AgentworksError`` when the channel cannot start or a
+        provider call fails; core treats that like an unknown outcome and
+        never dispatches again. ``ctx`` is the op-start context, for a
+        platform whose channel needs a credential.
+        """
+
+    def read_host_keys(self, vm: VMRow, ctx: RunContext) -> tuple[HostKey, ...]:
+        """The VM's public host keys, read through :meth:`run_as_root` by core's fixed script.
+
+        Recovery shows them to the operator, who compares them with the VM's
+        console before anything is recorded. A platform whose root channel
+        verifies the host key it is reading overrides this to read under an
+        Unverified provisioning file instead.
+        """
+        from functools import partial
+
+        from agentworks.execution import root_script
+
+        return root_script.read_host_keys(partial(self.run_as_root, vm, ctx))
 
     def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
         """Hook called once the VM's Tailscale node is up during create.

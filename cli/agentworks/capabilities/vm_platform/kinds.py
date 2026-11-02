@@ -135,9 +135,11 @@ VM_PLATFORM_DESCRIPTOR = CapabilityKindDescriptor(
     contract_version=1,
     implementation_contract=VMPlatform,
     registry=_registry,
-    required_operations=frozenset({"create", "start", "stop", "delete", "status", "display_backend_name"}),
-    # Empty: VMPlatform supplies every non-operation member a subclass needs.
-    required_attributes=frozenset(),
+    required_operations=frozenset(
+        {"create", "start", "stop", "delete", "status", "display_backend_name", "run_as_root"}
+    ),
+    # VMPlatform supplies every other non-operation member a subclass needs.
+    required_attributes=frozenset({"recovery_needs_guest_sshd"}),
     entry_factory=_entry,
     readiness=_readiness,
     publisher_source="agentworks.capabilities.vm_platform",

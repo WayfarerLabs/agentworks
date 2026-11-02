@@ -25,6 +25,7 @@ the pin on the returned transport lives here too.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import MagicMock
@@ -229,7 +230,7 @@ def _request(*, tailscale: bool) -> ProvisionRequest:
         system_slug=None,
         admin_username="agentworks",
         ssh_public_key="ssh-ed25519 AAAA test",
-        ssh_private_key=None,
+        ssh_private_key=Path("/dev/null"),
         provisioning_trust=provisioning_trust_for_tests("vm1"),
         tailscale_auth_key=_SENTINEL if tailscale else "tskey-test",
         progress=MagicMock(),

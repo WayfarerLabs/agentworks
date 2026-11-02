@@ -68,9 +68,17 @@ returns canned outcomes without ssh.
 `conformance/test_attach_terminal.py` and `conformance/test_forward.py` cover what happens around
 the terminal half and a forward, on the same lanes.
 
-`conformance/root_vectors.py` holds the root channel's vectors (W1 to W9 in the platform LLD). Its
-L lane runs `root_script.run_process(["/bin/bash", "-s"], ...)` locally, and again under `sudo -n`
-where the runner grants it (`conformance/test_root_vectors.py`).
+`conformance/root_vectors.py` holds the root channel's vectors (W1 to W9 in the platform LLD), on
+two lanes of their own. L runs `root_script.run_process(["/bin/bash", "-s"], ...)` locally, and again
+under `sudo -n` where the runner grants it (`conformance/test_root_vectors.py`). V runs through the
+platform `run_as_root` of the VM named by `AGW_CONFORMANCE_VM`, inside the same gated boundary
+`vm shell --platform` opens:
+
+```console
+AGW_CONFORMANCE_VM=my-vm uv run pytest tests/test_root_channel_live_vectors.py -m integration
+```
+
+That runner sits outside this directory because the platform boundary imports legacy modules.
 
 ## Writing a vector
 

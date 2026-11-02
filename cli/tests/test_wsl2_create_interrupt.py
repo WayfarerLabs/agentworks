@@ -58,7 +58,7 @@ def _request() -> ProvisionRequest:
         system_slug=None,
         admin_username="agw",
         ssh_public_key="ssh-ed25519 AAAA test",
-        ssh_private_key=None,
+        ssh_private_key=Path("/dev/null"),
         provisioning_trust=provisioning_trust_for_tests("vm1"),
         tailscale_auth_key="tskey-test",
         progress=MagicMock(),

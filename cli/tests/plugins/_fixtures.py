@@ -51,6 +51,7 @@ from agentworks.schema import AgwModel, AgwRootModel
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow, VMStatus
+    from agentworks.execution.root_script import RawRun
     from agentworks.transports import ExecTransport, Transport
 
 
@@ -96,6 +97,7 @@ class ConformingVMPlatform(VMPlatform):
     """
 
     contract_version = 1
+    recovery_needs_guest_sshd = False
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
@@ -117,6 +119,9 @@ class ConformingVMPlatform(VMPlatform):
         raise NotImplementedError
 
     def display_backend_name(self, vm: VMRow) -> str:
+        raise NotImplementedError
+
+    def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
         raise NotImplementedError
 
     def native_transport(self, vm: VMRow, ctx: RunContext, *, config: object | None = None) -> ExecTransport:

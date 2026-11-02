@@ -7,6 +7,7 @@ interrupt), status mapping, and strict idempotent delete.
 from __future__ import annotations
 
 import gzip
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
@@ -88,7 +89,7 @@ def _request(
         system_slug=None,
         admin_username="agw",
         ssh_public_key=ssh_key,
-        ssh_private_key=None,
+        ssh_private_key=Path("/dev/null"),
         provisioning_trust=provisioning_trust_for_tests("dev"),
         tailscale_auth_key=tailscale,
         progress=MagicMock(),

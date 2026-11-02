@@ -205,7 +205,7 @@ class _NoNativeConfig(AgwModel):
     name: Literal["no-native-platform"]
 
 
-class _PlatformWithoutNativeTransport(VMPlatform):
+class _PlatformWithoutNativeExecution(VMPlatform):
     """Implements every operation except required native execution."""
 
     contract_version = 1
@@ -452,7 +452,7 @@ class _HarnessOfferingAnUnsafeMergeContract(ConformingHarnessIntegration):
     [
         ("vm-platform", _NotAPlatform, "does not derive from VMPlatform"),
         ("vm-platform", _AbstractPlatform, "it is abstract"),
-        ("vm-platform", _PlatformWithoutNativeTransport, "it is abstract"),
+        ("vm-platform", _PlatformWithoutNativeExecution, "it is abstract"),
         ("vm-platform", _PlatformWithoutADescription, "'description' class attribute"),
         ("secret-backend", _BackendMissingItsOperations, "does not derive from SecretBackend"),
         ("secret-backend", _BackendWithoutTtySupport, "does not derive from SecretBackend"),
@@ -488,8 +488,8 @@ def test_rejects_a_non_conforming_impl_naming_the_plugin(kind: str, impl: type, 
     assert expected in message
 
 
-def test_native_transport_is_the_only_missing_platform_operation() -> None:
-    assert _PlatformWithoutNativeTransport.__abstractmethods__ == frozenset({"native_transport"})
+def test_native_execution_is_all_the_platform_omits() -> None:
+    assert _PlatformWithoutNativeExecution.__abstractmethods__ == frozenset({"native_transport", "run_as_root"})
 
 
 @pytest.mark.parametrize(
