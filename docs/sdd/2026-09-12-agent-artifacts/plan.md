@@ -1213,7 +1213,7 @@ belongs to the ready head, not the correction still under development.
 - [ ] Resolve the own-failure policy question through authenticated operator direction; retain
       today's fail-fast pipeline until that direction arrives. `awaiting-direction` tracks this
       ambiguity, not a second request for the already-authorized FRD amendments.
-- [ ] Run all three private review lanes and full gates on the integrated head, then publish the
+- [x] Run all three private review lanes and full gates on the integrated head, then publish the
       appropriate complete handoff. This round exhausts the three-round public correction allowance.
 - [ ] Audit final live acceptance against every retained requirement and create both locks only
       after the remaining actual-scope evidence exists.
@@ -1232,3 +1232,31 @@ resume-only, Grok launch or Claude workaround obligations. Workspace matching/co
 settings cases can use files supplied by repository checkout during ordinary create; the verified
 call order and controlled fixture are recorded in `6572186080`. No workspace reinit or workspace
 plugin support is implied. Both locks remain pending.
+
+The independent round 3 corrections are complete at production head `4e286ac`. The final CI-selected
+local suite passed **10,433 tests, 11 skipped**, with real Claude Code 2.1.316 and Codex 0.166.0
+fixtures available. The first integrated source run passed 10,431 tests; private review then caught
+and corrected two diagnostic regressions: session repair incorrectly targeted a VM, and an early
+retirement shortcut could discard explicitly pending reason-only cleanup. The final full rerun
+includes both regressions and passed without filtering failures.
+
+All three independent private lanes reviewed the full PR and round 3 at `4b44d42`; project and
+correctness findings above were incorporated, and all three re-reviewed `4e286ac` clean. Independent
+focused runs passed 78, 123 and 139 cases; the complexity lane also exercised 16 real-native cases
+and proved the persistence and pre-removal checks with failing deletion controls. Final narrow
+checks passed three project/complexity cases and 66 correctness cases. These are local boundary and
+native-fixture results, not a new real-VM acceptance claim.
+
+Ruff lint/format passes across 926 files and mypy across 890 files. Full file lint passed after
+correcting five spelling findings by revising the prose. Package builds, Typer isolation, Rulesync
+7.14.0 and locked-SDD checks passed. Website tests passed 160 Python and 103 Node cases, with both
+site bases deterministic. Real isolated CLI config initialization, help, both current concept guides
+and artifact inspection help passed. Managed temporary fixture homes and test/build roots were
+verified removed. Exact final-head CI and the checkpoint signal are recorded in PR 862's handoff.
+
+The checkpoint deliberately remains draft with `review-requested` while the authenticated
+own-failure policy choice is pending; `awaiting-direction` marks that question. This is a coherent,
+green handoff of all independent fixes, not merge intent or a statement that either SDD is closed.
+The three public correction rounds are exhausted. No additional correction is authorized solely by
+new published feedback. The operator's policy answer and final live acceptance still precede both
+locks.
