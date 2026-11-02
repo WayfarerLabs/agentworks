@@ -16,7 +16,7 @@ import textwrap
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
@@ -144,6 +144,14 @@ class LimaSshPlacement(AgwModel):
 
     host: NonEmptyStr = Field(examples=["me@gpu-box"])
     """The SSH host running ``limactl`` (e.g. ``user@host``)."""
+
+    @field_validator("host")
+    @classmethod
+    def _host_is_one_word(cls, value: str) -> str:
+        # Boundary: operator config that becomes one ssh argument, after ``--``.
+        if any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value):
+            raise ValueError("must not contain whitespace or control characters")
+        return value
 
 
 #: Where ``limactl`` runs. Distinct arms make SSH's required host visible to

@@ -297,3 +297,52 @@ def test_stage0_is_one_short_line_that_no_account_shell_rewrites() -> None:
     assert command.startswith("/usr/bin/python3 -I -S -c '")
     assert command.endswith(f"{program}'")
     assert stage0_command("/tmp/agw-handover-ab/s").endswith("' /tmp/agw-handover-ab/s")
+
+
+# -- The host policy -------------------------------------------------------------------
+
+
+def host_argv(mode: ArgvMode = ArgvMode.PIPE) -> list[str]:
+    return ssh_process.build_host_argv(SSHClient(SSH or "/usr/bin/ssh", (9, 2)), "me@gpu-box", mode, "limactl list")
+
+
+def test_a_host_argv_puts_the_host_after_the_option_fence_and_the_command_last() -> None:
+    argv = host_argv()
+
+    assert argv[-3:] == ["--", "me@gpu-box", "limactl list"]
+    assert "-F" not in argv
+
+
+def test_a_host_connection_forwards_nothing() -> None:
+    with pytest.raises(ValueError):
+        host_argv(ArgvMode.FORWARD)
+
+
+@needs_ssh
+def test_a_host_argv_honors_the_operators_configuration(tmp_path: Path) -> None:
+    operator_config = tmp_path / "config"
+    operator_config.write_text("Host gpu-box\n  ForwardAgent yes\n  Port 2222\n")
+    argv = host_argv()
+
+    config = effective_config([argv[0], "-F", str(operator_config), *argv[1:]])
+
+    assert config["forwardagent"] == ["yes"]
+    assert config["port"] == ["2222"]
+    assert config["stricthostkeychecking"] == ["accept-new"]
+    assert config["connecttimeout"] == ["30"]
+    assert config["serveraliveinterval"] == ["15"]
+    assert config["requesttty"] == ["false"]
+
+
+@needs_ssh
+def test_only_a_piped_host_connection_is_batch_mode(tmp_path: Path) -> None:
+    empty = tmp_path / "config"
+    empty.write_text("")
+
+    def config_for(mode: ArgvMode) -> dict[str, list[str]]:
+        argv = host_argv(mode)
+        return effective_config([argv[0], "-F", str(empty), *argv[1:]])
+
+    assert config_for(ArgvMode.PIPE)["batchmode"] == ["yes"]
+    assert config_for(ArgvMode.TERMINAL)["batchmode"] == ["no"]
+    assert config_for(ArgvMode.TERMINAL)["requesttty"] in (["yes"], ["true"])  # the rendering differs by version

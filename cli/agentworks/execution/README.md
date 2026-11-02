@@ -99,7 +99,10 @@ verdict.
 with the explicit identity (`IdentitiesOnly`), `BatchMode`, publickey-only authentication, the VM's
 host-key trust options and keepalives on every connection. Its `spawn` is the only place a client is
 started; it also starts a platform's root channel (below), and a program other than the OpenSSH client
-that cannot start is a `ConnectivityError` naming it, not `ClientUnsupported`. `pump.py` drives a started client through pipes: one thread over non-blocking pipes, with
+that cannot start is a `ConnectivityError` naming it, not `ClientUnsupported`. `build_host_argv` is the
+one other policy, for a platform's own connection to its host (Remote Lima's placement host): it
+honors the operator's SSH configuration (no `-F none`), trusts the host through `HOST_TRUST`, and
+keeps the connect timeout and keepalives, with `BatchMode` only when piped. `pump.py` drives a started client through pipes: one thread over non-blocking pipes, with
 the operator's stdin reaching it through a daemon thread that reads the raw stream. A deadline or an
 output limit kills the client at once. A sink that would block (the operator's own stdout is a
 non-blocking pipe) is waited on, never dropped.

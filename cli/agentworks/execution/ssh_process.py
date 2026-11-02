@@ -195,6 +195,34 @@ def build_argv(
     return argv
 
 
+def build_host_argv(client: SSHClient, host: str, mode: ArgvMode, remote_command: str | None = None) -> list[str]:
+    """The argv for a platform's own connection to its host (Remote Lima's), under the host policy.
+
+    Unlike a VM connection it honors the operator's SSH configuration (no
+    ``-F none``) and trusts the host through :data:`trust.HOST_TRUST`. It
+    adds the VM policy's connect timeout and keepalives, ``BatchMode`` in
+    ``PIPE`` mode only (an interactive hop may prompt), ``-T`` or ``-t``, and
+    the host after ``--``. ``host`` is operator configuration, refused at its
+    boundary when it holds whitespace or a control character. There is no
+    identity: the host's keys come from that configuration.
+    """
+    if mode is ArgvMode.FORWARD:
+        raise ValueError("a host connection forwards no ports")
+    values = [
+        f"ConnectTimeout={CONNECT_TIMEOUT_SECONDS}",
+        f"ServerAliveInterval={SERVER_ALIVE_INTERVAL_SECONDS}",
+        f"ServerAliveCountMax={SERVER_ALIVE_COUNT_MAX}",
+    ]
+    if mode is ArgvMode.PIPE:
+        values.append("BatchMode=yes")
+    argv = [client.path, "-T" if mode is ArgvMode.PIPE else "-t", *trust.ssh_options(trust.HOST_TRUST)]
+    argv += [arg for value in values for arg in ("-o", value)]
+    argv += ["--", host]
+    if remote_command is not None:
+        argv.append(remote_command)
+    return argv
+
+
 # -- The client log -----------------------------------------------------------------------
 
 
