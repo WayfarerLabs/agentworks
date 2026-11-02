@@ -29,6 +29,8 @@ returns canned outcomes without ssh.
 - `test_access.py`, `test_launcher_source.py`, `test_stream_process.py`: passivity and ordering, the
   launcher's structure, and `stream` in a real process whose stdin stays open.
 - `test_trust.py`: the host-key store.
+- `test_reachability.py`: what `reachability.wait` polls, what it raises on the first attempt, and
+  the confirming probe, over the recording fake.
 - `test_oplog.py`: the operation log record holds a request's shape and never its secrets.
 - `test_root_script.py`: the root-script wrapper over fabricated channel output (the status rule,
   the secret in no field, one dispatch), `read_host_keys`, and `run_process` against a local Bash.

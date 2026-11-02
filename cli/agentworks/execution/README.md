@@ -43,6 +43,12 @@ the launcher rebuilds the payload's environment from root's passwd entry. An age
 refuses an elevated request with `PermissionDenied` before anything resolves, and the guest's
 `sudo -n` is the second layer. `LoginShell` has no such option, so an attach never elevates.
 
+`reachability.wait(access, wording=)` is the one retry loop: it polls a fixed `true` probe (16
+attempts, 10 seconds each, 5 seconds apart, a second probe confirming an answer that followed a
+failure) and returns whether the VM answered. It polls only `CONNECTION`, `TRUNCATED` and `DEADLINE`
+and raises every other outcome at once, so a changed host key or a refused key is neither waited out
+nor repeated against the VM's sshd. The caller decides what an exhausted wait means.
+
 `execution.enrollment_access(vm, config, log=)` is the admin's access in Enroll mode, which may
 record a new host key. Create's first contact is its only caller; every other access verifies
 against the store.
