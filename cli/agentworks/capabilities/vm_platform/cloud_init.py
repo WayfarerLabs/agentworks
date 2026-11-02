@@ -12,9 +12,12 @@ from __future__ import annotations
 import textwrap
 
 # Minimal packages needed during provisioning (cloud-init/bootstrap).
-# Only what is required to get the VM to a state where init can SSH in.
+# Only what is required to get the VM to a state where core can reach it over
+# SSH: every core request runs through agw-launch, which needs python3 and its
+# standard library (Debian's python3 package depends on it).
 PROVISIONING_PACKAGES = [
     "openssh-server",
+    "python3",
     "curl",
     "sudo",
     "ca-certificates",
