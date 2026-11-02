@@ -204,9 +204,9 @@ def client_log() -> Iterator[Path]:
     handle is open. The file never holds the remote's output.
     """
     descriptor, name = tempfile.mkstemp(prefix="agw-ssh-", suffix=".log")
-    os.close(descriptor)
     path = Path(name)
     try:
+        os.close(descriptor)
         yield path
     finally:
         with contextlib.suppress(OSError):
