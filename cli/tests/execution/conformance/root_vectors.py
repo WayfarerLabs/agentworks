@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT
 from agentworks.execution import root_script
 
 if TYPE_CHECKING:
@@ -72,16 +73,34 @@ def payload_stdin_is_end_of_file_and_a_large_script_runs_whole(lane: RootLane) -
 
 
 def the_secret_reaches_the_payload_and_no_argv_or_child_env(lane: RootLane) -> None:
+    """The join's own fragment hands the secret to ``tailscale`` with no process's argv holding it.
+
+    ``JOIN_FRAGMENT`` runs as provisioning runs it, against a stub ``tailscale``
+    first on ``PATH``, so the real one is never called and a live VM's node is
+    untouched. While the stub reads the key, it counts the ``/proc/*/cmdline``
+    entries that hold it; ``grep`` reads the needle from a file, so its own
+    argv cannot match.
+    """
     tmp = scratch_path()
-    # A join pipes the secret from the printf builtin; while it is held on that pipe, no process's argv
-    # may hold it. grep reads the needle from a file, so its own argv cannot match.
+    stub = f"""#!/bin/bash
+[ "$1" = up ] || exit 2
+case "$2" in --auth-key=file:*) key=$(cat "${{2#--auth-key=file:}}") ;; *) exit 3 ;; esac
+printf '%s\\n' "$key" > {tmp}/key
+grep -l -F -f {tmp}/key /proc/[0-9]*/cmdline 2>/dev/null | wc -l > {tmp}/argv-holders
+"""
     payload = f"""
 umask 077
+mkdir {tmp}
+cat > {tmp}/tailscale <<'AGW_STUB'
+{stub}AGW_STUB
+chmod 700 {tmp}/tailscale
 [ "$AGW_SECRET" = '{SECRET}' ] && echo payload-sees-it
 /usr/bin/env | grep -c '^AGW_SECRET=' || true
-printf '%s\\n' "$AGW_SECRET" > {tmp}
-printf '%s\\n' "$AGW_SECRET" | {{ cat >/dev/null; grep -l -F -f {tmp} /proc/[0-9]*/cmdline 2>/dev/null | wc -l; }}
-rm -f {tmp}
+PATH={tmp}:$PATH
+{JOIN_FRAGMENT}
+[ "$(cat {tmp}/key)" = "$AGW_SECRET" ] && echo tailscale-read-it
+cat {tmp}/argv-holders
+rm -rf {tmp}
 tr '\\0' ' ' < /proc/$$/cmdline
 """
     result = lane.run(payload, secret=SECRET)
@@ -90,8 +109,9 @@ tr '\\0' ' ' < /proc/$$/cmdline
     lines = result.stdout.decode().splitlines()
     assert lines[0] == "payload-sees-it"  # W3
     assert lines[1] == "0"  # no child's environment
-    assert lines[2].strip() == "0"  # no process's argv during the join
-    assert lines[3].strip() == "/bin/bash -s"
+    assert lines[2] == "tailscale-read-it"  # the key reached Tailscale whole, on its stdin
+    assert lines[3].strip() == "0"  # no process's argv during the join
+    assert lines[4].strip() == "/bin/bash -s"
 
 
 def payload_statuses_come_back_as_themselves(lane: RootLane) -> None:

@@ -28,6 +28,8 @@ MIGRATED_FILES = (
     "agents/manager/access.py",
     "capabilities/vm_platform/lima_host.py",
     "capabilities/vm_platform/public_ssh.py",
+    "capabilities/vm_platform/tailscale_join.py",
+    "capabilities/vm_platform/wsl2_bootstrap.py",
     "plugins/proxmox/guest_agent.py",
 )
 
