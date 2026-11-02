@@ -29,6 +29,9 @@ returns canned outcomes without ssh.
 - `test_access.py`, `test_launcher_source.py`, `test_stream_process.py`: passivity and ordering, the
   launcher's structure, and `stream` in a real process whose stdin stays open.
 - `test_trust.py`: the host-key store.
+- `test_oplog.py`: the operation log record holds a request's shape and never its secrets.
+- `test_root_script.py`: the root-script wrapper over fabricated channel output (the status rule,
+  the secret in no field, one dispatch), `read_host_keys`, and `run_process` against a local Bash.
 - `legacy_modules.py`: the six legacy module names, shared by the conftest blocker, the fresh
   interpreter guard and the static import check.
 
@@ -64,6 +67,10 @@ returns canned outcomes without ssh.
 
 `conformance/test_attach_terminal.py` and `conformance/test_forward.py` cover what happens around
 the terminal half and a forward, on the same lanes.
+
+`conformance/root_vectors.py` holds the root channel's vectors (W1 to W9 in the platform LLD). Its
+L lane runs `root_script.run_process(["/bin/bash", "-s"], ...)` locally, and again under `sudo -n`
+where the runner grants it (`conformance/test_root_vectors.py`).
 
 ## Writing a vector
 

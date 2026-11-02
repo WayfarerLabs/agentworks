@@ -19,7 +19,7 @@ from ipaddress import IPv6Address
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ValidationError
+from agentworks.errors import ConnectivityError, ValidationError
 from agentworks.execution import trust
 from agentworks.execution.envelope import classify
 from agentworks.execution.errors import ClientUnsupported
@@ -262,17 +262,32 @@ def child_environment() -> dict[str, str] | None:
 def spawn(
     argv: Sequence[str], *, stdin: int | None, stdout: int | None, stderr: int | None, bufsize: int = -1
 ) -> subprocess.Popen[bytes]:
-    """Start the client, or raise :class:`ClientUnsupported` when the operating system cannot.
+    """Start the process, or raise a typed error naming what could not start.
 
     The one place a client process is started, so the environment strip and the
     error mapping exist once. ``None`` for a stream inherits the operator's.
+    The OpenSSH client that cannot start is :class:`ClientUnsupported`; any
+    other program (a platform's ``limactl`` or ``wsl.exe``) is a
+    ``ConnectivityError`` naming it.
     """
     try:
         return subprocess.Popen(
             list(argv), stdin=stdin, stdout=stdout, stderr=stderr, bufsize=bufsize, env=child_environment()
         )
     except OSError as error:
-        raise ClientUnsupported(f"the OpenSSH client could not be started: {error.strerror or error}") from error
+        reason = error.strerror or str(error)
+        if _is_openssh_client(argv[0]):
+            raise ClientUnsupported(f"the OpenSSH client could not be started: {reason}") from error
+        program = os.path.basename(argv[0])
+        raise ConnectivityError(
+            f"'{program}' could not be started: {reason}",
+            hint=f"Install '{program}' on this machine, or check that it is on PATH.",
+        ) from error
+
+
+def _is_openssh_client(program: str) -> bool:
+    """Whether ``program`` is an OpenSSH client: the resolver only ever yields one named ``ssh``."""
+    return os.path.basename(program).lower() in ("ssh", "ssh.exe")
 
 
 def exit_status(returncode: int) -> int:

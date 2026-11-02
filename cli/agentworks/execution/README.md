@@ -98,7 +98,8 @@ verdict.
 `ssh_process.py` builds the argv under `-F none`, so no operator or system configuration applies,
 with the explicit identity (`IdentitiesOnly`), `BatchMode`, publickey-only authentication, the VM's
 host-key trust options and keepalives on every connection. Its `spawn` is the only place a client is
-started. `pump.py` drives a started client through pipes: one thread over non-blocking pipes, with
+started; it also starts a platform's root channel (below), and a program other than the OpenSSH client
+that cannot start is a `ConnectivityError` naming it, not `ClientUnsupported`. `pump.py` drives a started client through pipes: one thread over non-blocking pipes, with
 the operator's stdin reaching it through a daemon thread that reads the raw stream. A deadline or an
 output limit kills the client at once. A sink that would block (the operator's own stdout is a
 non-blocking pipe) is waited on, never dropped.
@@ -115,6 +116,25 @@ connection is served, when the client closes its end, after 30 seconds, or on `S
 The client gives up on a parking connection that never reports `parked` within 60 seconds (its own
 bound for connecting and running the account's startup files; the 30 seconds above start only after
 `parked`), and raises before the terminal is touched.
+
+## Root scripts
+
+`root_script.py` is how core runs a script as root through a platform's own channel, which works
+without the VM's Tailscale state. A platform implements one primitive, `run_as_root(script,
+deadline) -> RawRun`: run `/bin/bash -s` as root with `script` on stdin and return both streams,
+with no status, because no channel's status is trusted. `root_script.run(run_as_root, payload, *,
+deadline, secret=None, log=None)` wraps the payload in one brace group that Bash parses whole before
+running (so a payload that reads stdin gets end of file, and a script cut short runs nothing), frames
+it with the execution markers, and returns a `RootScriptResult` whose `status` is the payload's only
+when both closing markers arrived. The one secret a script may need is an unexported shell variable,
+`AGW_SECRET`, in the script text: it is in no argument and no child's environment, and it is
+redacted from every field of the result and the log record.
+
+`run_process(argv, script, deadline)` is `run_as_root` for a channel that is a local process
+(`limactl`, `wsl.exe`, `ssh`): the pump drives it with `nonce=None`, passing both streams through,
+until it exits and its pipes go quiet, the deadline passes or a stream passes 1 MiB.
+`read_host_keys(run_as_root)` reads `/etc/ssh/ssh_host_*_key.pub` and keeps the lines
+`trust.is_valid_key` accepts; `trust.fingerprint` prints a key as OpenSSH's `SHA256:` form.
 
 ## Host-key trust
 

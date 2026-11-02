@@ -187,12 +187,16 @@ class StreamFilter:
       suffix that is a proper prefix of the closing prefix. No timer is
       involved. A ``parked`` line is removed from the stream and recorded.
     - Done: after the closing line, drop everything.
+
+    With no nonce there are no markers to find: the filter passes every byte
+    through and never closes, for a stream whose end the process's own exit
+    decides.
     """
 
-    def __init__(self, nonce: str) -> None:
-        self._prefix = marker_prefix(nonce)
-        self._start = self._prefix + b"start\n"
-        self._phase = _Phase.SEEKING
+    def __init__(self, nonce: str | None) -> None:
+        self._prefix = None if nonce is None else marker_prefix(nonce)
+        self._start = None if self._prefix is None else self._prefix + b"start\n"
+        self._phase = _Phase.SEEKING if nonce is not None else _Phase.PASSING
         self._held = b""
         self._line: bytearray | None = None
         self._parked = False
@@ -218,7 +222,11 @@ class StreamFilter:
         buffer = self._held + data
         self._held = b""
         while buffer and self._phase is not _Phase.DONE:
+            if self._prefix is None:
+                out += buffer
+                break
             if self._phase is _Phase.SEEKING:
+                assert self._start is not None
                 found = buffer.find(self._start)
                 if found < 0:
                     self._held = buffer[-(len(self._start) - 1) :]
@@ -268,6 +276,7 @@ class StreamFilter:
         self._line = None
 
     def _partial_prefix_length(self, buffer: bytes) -> int:
+        assert self._prefix is not None
         for length in range(min(len(self._prefix) - 1, len(buffer)), 0, -1):
             if buffer.endswith(self._prefix[:length]):
                 return length

@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import binascii
 import contextlib
+import hashlib
 import os
 import re
 import sys
@@ -200,6 +201,15 @@ def is_valid_key(key_type: str, blob: str) -> bool:
     except (binascii.Error, ValueError):
         return False
     return ssh_identity.is_public_key_blob(raw, key_type)
+
+
+def fingerprint(key: HostKey) -> str:
+    """The key's fingerprint as OpenSSH prints it: ``SHA256:`` and the unpadded base64 of the blob's digest.
+
+    ``key`` must be one :func:`is_valid_key` accepted, whose blob decodes.
+    """
+    digest = hashlib.sha256(base64.b64decode(key.blob, validate=True)).digest()
+    return "SHA256:" + base64.b64encode(digest).decode("ascii").rstrip("=")
 
 
 def has_record(vm_name: str) -> bool:
