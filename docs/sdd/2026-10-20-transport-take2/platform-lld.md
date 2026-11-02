@@ -790,7 +790,11 @@ the guard of `102adcff5` becomes the plain union refusal.
 
 ## Amendments
 
-For the lead to apply. Each points at the section above that holds the detail.
+These changes were folded into `hla.md`, `plan.md`, `contract-lld.md`, `execution-lld.md` and
+`trust-lld.md`, which now describe the result; the list is kept as the record of what changed. Two
+edits rode along in the fold: the HLA's and plan's slice 8 now delete the remaining legacy modules,
+since this slice deletes the Proxmox transport, and the HLA's slice 3 migration item states the
+version move from 1 to 2, which a formatter had turned into a list number.
 
 - **HLA Components.** Add `execution/root_script.py` and `capabilities/vm_platform/lima_host.py`;
   `vms/recovery.py` holds the three scripts, and `vm recover` is `vms/manager/recover.py`.

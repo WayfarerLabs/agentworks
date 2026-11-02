@@ -31,9 +31,9 @@ receive a legacy `Transport`, `driver.py:248`). `native_transport` the platform 
 rekey, logout, `vm start`'s wait and the activation gate stay until slice 4, so the legacy
 `wait_for_reconnect` and `TailscaleWait` (`transports/__init__.py:248`, `:279`) keep their callers
 (`vms/manager/tailscale.py:127`, `:149`, `vms/manager/power.py:550`) and are deleted there. The
-auth-key transport of the first join (the stdin command in `tailscale_join.py`, WSL2's staged
-script, Proxmox's guest-agent script) is not touched except where the address read and a logout are
-added after the join succeeded. `LOG_DIR`, its readers and `SSHLogger` stay until slice 8.
+first join moves onto each platform's `run_as_root` in slice 4, whose implementations land first in
+PR B ([platform-lld.md](./platform-lld.md)), so this slice's address read and logout are written
+over `run_as_root`. `LOG_DIR`, its readers and `SSHLogger` stay until slice 8.
 
 **Slices 3 and 4 ship together.** Between them a VM without python3 cannot be reinitialized and the
 `VMNotReady` hint (`errors.py:77`, naming `agw vm reinit`) is circular. PR B does not merge without
@@ -41,22 +41,22 @@ slice 4, which repoints the hint at `agw vm recover`; there is no stopgap wordin
 
 ## Module layout
 
-| Module                                                                                         | Contents                                                                                                                            |
-| ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `agentworks/vms/contract.py` (new)                                                             | The check table, `observe_release`, `check_base`, `BaseReport`, `Finding`, `enforce`                                                |
-| `agentworks/vms/initializer/phase_a.py` (new)                                                  | Phase A: the fail-closed span and the first-contact sequence, with no legacy import                                                 |
-| `agentworks/execution/reachability.py` (new)                                                   | `Wording`, `wait`                                                                                                                   |
-| `agentworks/execution/oplog.py` (new)                                                          | `format_record(request, result, *, label)`, one function                                                                            |
-| `agentworks/execution/access.py`, `execution/__init__.py`                                      | `enrollment_access`; `VMAccess` gains `identity`, `trust_mode` and `log`; `vm_access` gains `log` (wrapper `:24`)                   |
-| `agentworks/execution/requests.py`, `ssh_process.py`, `envelope.py`, `results.py`, `errors.py` | `elevated` on `BoundedRequestOptions`; `stage0_command(elevated=)`; the `AUTH_FAILED` classification; `PermissionDenied`            |
-| `agentworks/capabilities/vm_platform/base.py`, `tailscale_join.py`, `bootstrap_script.py`      | `ProvisionResult.tailnet_address`, `parse_tailnet_address`, `settle_tailnet_address`, the bootstrap parser without an address       |
-| `agentworks/capabilities/vm_platform/cloud_init.py`                                            | python3 in `PROVISIONING_PACKAGES`                                                                                                  |
-| The six platforms' `create`                                                                    | Return `tailnet_address`, settled by the shared helper                                                                              |
-| `agentworks/vms/initializer/driver.py`, `vms/manager/lifecycle.py`, `vms/manager/release.py`   | `bootstrap_vm` becomes a thin caller of `phase_a`; create and reinit run the contract; release observation and reconciliation split |
-| `agentworks/ssh.py`                                                                            | `SSHLogger.record(request, result)`, a step label, nothing else                                                                     |
-| `agentworks/debian.py`                                                                         | `probe_debian_release` deleted (no caller remains); `verify_os_release` stays                                                       |
-| `agentworks/vms/manager/pam_env.py`                                                            | Deleted; its probe becomes the contract's pam-env row                                                                               |
-| The vm-platform kind, six platforms and their docs                                             | `contract_version` 1 to 2                                                                                                           |
+| Module                                                                                         | Contents                                                                                                                                              |
+| ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agentworks/vms/contract.py` (new)                                                             | The check table, `observe_release`, `check_base`, `BaseReport`, `Finding`, `enforce`                                                                  |
+| `agentworks/vms/initializer/phase_a.py` (new)                                                  | Phase A: the fail-closed span and the first-contact sequence, with no legacy import                                                                   |
+| `agentworks/execution/reachability.py` (new)                                                   | `Wording`, `wait`                                                                                                                                     |
+| `agentworks/execution/oplog.py` (new)                                                          | `format_record(request, result, *, label)`, one function                                                                                              |
+| `agentworks/execution/access.py`, `execution/__init__.py`                                      | `enrollment_access`; `VMAccess` gains `identity`, `trust_mode` and `log`; `vm_access` gains `log` (wrapper `:24`)                                     |
+| `agentworks/execution/requests.py`, `ssh_process.py`, `envelope.py`, `results.py`, `errors.py` | `elevated` on `BoundedRequestOptions`; `stage0_command(elevated=)`; the `AUTH_FAILED` classification; `PermissionDenied`                              |
+| `agentworks/capabilities/vm_platform/base.py`, `tailscale_join.py`, `bootstrap_script.py`      | `ProvisionResult.tailnet_address`, `parse_tailnet_address`, `read_tailnet_address`, `settle_tailnet_address`, the bootstrap parser without an address |
+| `agentworks/capabilities/vm_platform/cloud_init.py`                                            | python3 in `PROVISIONING_PACKAGES`                                                                                                                    |
+| The six platforms' `create`                                                                    | Return `tailnet_address`, settled by the shared helper                                                                                                |
+| `agentworks/vms/initializer/driver.py`, `vms/manager/lifecycle.py`, `vms/manager/release.py`   | `bootstrap_vm` becomes a thin caller of `phase_a`; create and reinit run the contract; release observation and reconciliation split                   |
+| `agentworks/ssh.py`                                                                            | `SSHLogger.record(request, result)`, a step label, nothing else                                                                                       |
+| `agentworks/debian.py`                                                                         | `probe_debian_release` deleted (no caller remains); `verify_os_release` stays                                                                         |
+| `agentworks/vms/manager/pam_env.py`                                                            | Deleted; its probe becomes the contract's pam-env row                                                                                                 |
+| The vm-platform kind, six platforms and their docs                                             | `contract_version` 1 to 2                                                                                                                             |
 
 **Independence.** `contract.py`, `reachability.py` and `oplog.py` import nothing from the six legacy
 modules (R10). The fresh-interpreter guard walks only `agentworks.execution`
@@ -98,14 +98,15 @@ class ProvisionResult:
 (`lima.py:465`, `wsl2.py:788`, Proxmox `platform.py:432`, AWS `:601`, Azure `:674`, GCP `:470`), so
 the edit at each is: drop the transport, rename the address, and stop building a transport only to
 return it (Lima's `self._transport_for` at `lima.py:456`, the `assert prov_transport is not None` at
-`aws/platform.py:599`). Each platform keeps the provisioning transport it already holds as a local.
+`aws/platform.py:599`). Each platform keeps its provisioning channel, slice 4's `run_as_root`, as a
+local.
 
 **Validation.** `parse_tailnet_address(text) -> str` in `base.py` strips, parses with
 `ipaddress.ip_address` and returns the canonical text, or raises `ValueError`. It is called at two
 boundaries:
 
-1. By the shared settle helper (below), on each read, inside the platform's rollback window, so a
-   bad read fails create cleanly.
+1. By the shared address read (below), on each read, inside the platform's rollback window, so a bad
+   read fails create cleanly.
 2. By `phase_a` before it writes the address to the row, because `ProvisionResult` is the platform
    plugin boundary (D3: arguments from a caller our type checker does not check). It is not in
    `ProvisionResult.__post_init__`: every platform builds the value as its last statement
@@ -119,32 +120,33 @@ verified against the VM-bound host key whatever the address, and Agentworks is a
 environment, so this is accepted.
 
 **One mechanism for all six platforms.** After the join succeeds, every platform reads the address
-over the transport it already holds, retrying a transient failure, and when the reads are exhausted
-logs the node out over that same transport and fails create. Reading the address sends no key, so
-nothing here sends the key twice. `tailscale_join.py` gets:
+over its own `run_as_root`, retrying a transient failure, and when the reads are exhausted logs the
+node out over that same channel and fails create. Reading the address sends no key, so nothing here
+sends the key twice. `tailscale_join.py` gets:
 
 ```text
-settle_tailnet_address(read: Callable[[], str], logout: Callable[[], None], *, node: str) -> str
-settle_on_transport(target: ExecTransport, *, node: str) -> str
+read_tailnet_address(run_as_root, *, node: str) -> str
+settle_tailnet_address(run_as_root, *, node: str, rerun_hint: str) -> str
 ```
 
-`settle_tailnet_address` calls `read` up to `ADDRESS_READS = 6` times, `ADDRESS_PAUSE_SECONDS = 2`
-apart, accepting the first value `parse_tailnet_address` accepts and treating `SSHError` and
-`ValueError` as a failed read. `tailscale up --auth-key` returns when the node is running, so a
-failed read right after it is rare and short. When the reads are exhausted it calls `logout` once,
-then raises `ProvisioningError`: if the logout succeeded, the message says so and that create can be
-run again; if it failed or raised, the message names `node` (the VM's hostname, `request.hostname`)
-for removal in the Tailscale admin console. `settle_on_transport` is the five-line wrapper for the
-platforms that hold an `ExecTransport`, so the two command strings exist once: `tailscale ip -4`
-(`sudo=True`, `check=True`, `timeout=15`, the command at `tailscale_join.py:106`) and
-`tailscale logout` (`sudo=True`, `check=True`, `timeout=30`).
+`read_tailnet_address` runs `tailscale ip -4` (15 s) through `root_script.run` up to
+`ADDRESS_READS = 6` times, `ADDRESS_PAUSE_SECONDS = 2` apart, accepting the first value
+`parse_tailnet_address` accepts. A read fails on a non-zero status, an unknown outcome, a
+`ValueError` from the parse, or a `ConnectivityError` the platform raises. Any other
+`AgentworksError` (`TrustMismatch`, `TrustMissing`, a provider's `StateError`) propagates at once,
+because a retry cannot change it. Exhaustion raises `ConnectivityError` naming `node`.
+`tailscale up --auth-key` returns when the node is running, so a failed read right after it is rare
+and short.
 
-| Platform        | Join                                                   | Settled with                                                                                 |
-| --------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
-| Lima, Remote    | `limactl shell` stdin command (`lima.py:425`)          | `settle_tailnet_address` with `_run_lima` callbacks (`lima.py:449`)                          |
-| WSL2            | The key-bearing script (`bootstrap_script.py:238-241`) | `settle_on_transport(native_transport)`; the `WSL2Transport` exists at `wsl2.py:764`         |
-| Proxmox         | The same script via the guest agent                    | `settle_on_transport(target)`, with `target` built before it (`platform.py:414`)             |
-| AWS, Azure, GCP | `join_tailscale_ephemerally` (`tailscale_join.py:22`)  | `EphemeralTailscaleBootstrap.complete` (`:65`) calls `settle_on_transport` and returns `str` |
+`settle_tailnet_address` is that read plus the logout. On exhaustion it runs `tailscale logout` (30
+s) once and raises `ConnectivityError` from the read's error: if the logout returned status 0, the
+message says so and gives `rerun_hint`; otherwise it names `node` (the VM's hostname,
+`request.hostname`) for removal in the Tailscale admin console. Create passes "create can be run
+again". Slice 4's rekey settles with `agw vm recover NAME` as its hint, and recover settles only
+after its repair joined, reading the address alone otherwise, so a flaky channel never logs out a
+working node. `ConnectivityError` is true for every caller, and create still reports a
+`ProvisioningError`, since the manager wraps any untyped failure of `create` in one
+(`lifecycle.py:578-584`).
 
 The exception is raised from inside the platform's existing rollback `try`, so the existing arms
 (`lima.py:457-463` and the matching arms of the other five) delete the partial backend as for any
@@ -155,29 +157,20 @@ interrupt arm as today and leaves the node, as it does for an interrupt anywhere
 that is not new behavior. The logout matters because core never enrolled the host key, so delete's
 recovery (VM trust) could not log the node out later (HLA D11).
 
-**What changes in the bootstrap script.** The key-bearing script only joins. Step 7
-(`bootstrap_script.py:238-241`) drops its `TS_IP=$(tailscale ip -4)` and its `tailscale-ip=` marker
-and prints `##SUCCESS## tailscale joined`. The lead's brief had the script read the address best
-effort with `|| true`; nothing would consume that output, since Python reads the address, so the
-read is dropped rather than kept as dead output. `parse_bootstrap_output` must stop requiring an
-address: `BootstrapResult.ok` is `exit_code == 0 and self.tailscale_ip is not None`
-(`bootstrap_script.py:319`), and the parser fills `tailscale_ip` from the marker (`:335-341`). The
-`tailscale_ip` field, its parsing and the `ipaddress` import go; `ok` is `exit_code == 0`.
-`run_wsl2_bootstrap` stops asserting and returning it (`wsl2_bootstrap.py:182-183`) and returns
-`None`; Proxmox's `_run_bootstrap_via_agent` stops returning `parsed.tailscale_ip`
-(`platform.py:633-634`) and the caller's "did not return a Tailscale IP" raise goes (`:410-412`).
-The "Phase A will retry IP discovery without the auth key" warnings (`tailscale_join.py:111`,
+**What changes in the bootstrap script.** No bootstrap script carries the key or joins: slice 4
+deletes step 7 (`bootstrap_script.py:236-242`) with the generator's key parameter, and WSL2 and
+Proxmox join through `join_tailscale` after their bootstrap ([platform-lld.md](./platform-lld.md)).
+`parse_bootstrap_output` must stop requiring an address: `BootstrapResult.ok` is
+`exit_code == 0 and self.tailscale_ip is not None` (`bootstrap_script.py:319`), and the parser fills
+`tailscale_ip` from the marker (`:335-341`). The `tailscale_ip` field, its parsing and the
+`ipaddress` import go; `ok` is `exit_code == 0`. `run_wsl2_bootstrap` stops asserting and returning
+it (`wsl2_bootstrap.py:182-183`) and returns `None`; Proxmox's caller's "did not return a Tailscale
+IP" raise goes (`platform.py:410-412`) with `_run_bootstrap_via_agent`, which slice 4 replaces. The
+"Phase A will retry IP discovery without the auth key" warnings (`tailscale_join.py:111`,
 `lima.py:454`) go with the fallback they promised.
 
 **Lima keeps today's order.** The read follows the restart-sentinel `limactl restart`
 (`lima.py:434-454`) as now, and relies on the retry.
-
-**WSL2 and Proxmox transports with `sudo=True`.** `WSL2Transport` already runs `sudo=True` commands
-after the bootstrap (`wsl2_bootstrap.py:79`, `:140`, which `transports/wsl2.py:69-70` wraps as
-`sudo -n bash -c`); the one `setsid sudo -n ... </dev/null` workaround is specific to the long
-bootstrap script (`:131`). Proxmox's guest agent runs commands as root, so `sudo=True` costs nothing
-there. (`driver.py:399-401`'s fallback never ran on these two platforms, which return an address
-from the script, so it is no evidence.) The WSL2 and Proxmox live cells cover it.
 
 **Interaction with create.** Core no longer reads the address at all. The attestation block
 (`lifecycle.py:599-626`) and the `tailscale ip -4` fallback (`driver.py:399-401`) are deleted.
@@ -592,11 +585,14 @@ None restates the implementation or our prose.
   warns and proceeds; Phase B receives a VM-bound legacy target; the only `enrollment_access` call
   is the first contact. Reinit: no enrollment and no reachability wait, release drift refuses, a
   base failure stops before `run_initialization`, the agents reach the script's environment.
-- **Provisioning.** `settle_tailnet_address`: a first-read success, a success on the last read, a
-  value that does not parse treated as a failed read, exhaustion calling `logout` exactly once and
-  raising, a failed logout naming the node, and the join having run exactly once in every case (a
-  fake transport counting it). `parse_bootstrap_output` accepts a script that joined and printed no
-  address. Each platform's `create` returns a parseable `tailnet_address` and none returns a
+- **Provisioning.** `read_tailnet_address` and `settle_tailnet_address` over a fake `run_as_root`: a
+  first-read success and a success on the last read; a value that does not parse, a non-zero status,
+  an unknown outcome and a platform `ConnectivityError` each treated as a failed read; a
+  `TrustMismatch` propagating from the first read; the read never logging out; the settle's
+  exhaustion running the logout exactly once and raising `ConnectivityError`, with `rerun_hint`
+  after a successful logout and the node named after a failed one; and the join having run exactly
+  once in every case (the fake counting it). `parse_bootstrap_output` accepts a script that printed
+  no address. Each platform's `create` returns a parseable `tailnet_address` and none returns a
   transport.
 - **Requests.** `PermissionDenied` for an agent-bound access with an elevated request, before
   `resolve_ssh` and with nothing spawned; `classify` and `outcome` for `AUTH_FAILED` (the row after
@@ -763,7 +759,9 @@ probes (its first callers) are, not slice 5 as the first draft of this list said
 - **HLA D11 (`tailnet_address` row).** The validation happens in the shared settle helper inside the
   platform's rollback window and again in Phase A, not in the value object. All six platforms read
   the address and log out over the transport they hold through `settle_tailnet_address`; the
-  key-bearing script only joins and `parse_bootstrap_output` no longer requires an address.
+  key-bearing script only joins and `parse_bootstrap_output` no longer requires an address. (The
+  platform LLD's amendments later moved the read and the logout onto `run_as_root`, split the
+  helper, and removed the join from the bootstrap script.)
 - **HLA D13** (`hla.md:674-684`; the brief's `:658-659` is the error table, not this).
   - `oplog.py` only formats: `format_record`, with `SSHLogger.record` writing it. It no longer
     "lands with its `LOG_DIR` constant" and is not "the per-operation log" itself.

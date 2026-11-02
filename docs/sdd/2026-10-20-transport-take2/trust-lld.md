@@ -168,15 +168,16 @@ authenticates, rather than over the public internet.
      receives a `VM`-bound transport, so `ENROLL` covers exactly create's first-contact connections.
   4. Nothing writes the store before Phase A, so the unwind path needs no store cleanup. The
      provisioning file is removed when the platform's `create` returns or raises.
-- **A create that fails before enrolling** is kept as failed (`lifecycle.py:595-606`). In PR A its
-  remedy is delete and recreate. From PR B, `agw vm recover` re-establishes trust.
+- **A create that fails before enrolling** is kept as failed (`lifecycle.py:595-606`), and its
+  remedy is delete and recreate: `agw vm recover` refuses a VM whose provisioning failed.
 - **Delete.** `trust.remove(vm_name)` runs after the row is deleted (`power.py:336`), and even when
   the following `sync_ssh_config` fails, so the store file goes whenever the row goes and a failure
   in between never leaves a live row without its record. It runs on the path that skips backend
   cleanup after a binding failure (`power.py:245-256`), and not when `platform.delete` raises, which
   keeps the row. Logout and session teardown (279-301) still have the store. A cloud VM with no
-  record cannot log out of Tailscale, because its native transport is `VM`-bound; delete warns and
-  carries on, and the upgrade guide says to import first or remove the node in the admin console.
+  record is not logged out of Tailscale: its `run_as_root` raises `TrustMissing` before any route
+  opens, and delete never logs out under Unverified trust. Delete warns naming the node and carries
+  on, and the upgrade guide says to import first or remove the node in the admin console.
 - **Rekey and address changes** need nothing: the alias, not the address, keys the record.
 - **Stop and start** need nothing: the key persists on the guest (incident row I9).
 

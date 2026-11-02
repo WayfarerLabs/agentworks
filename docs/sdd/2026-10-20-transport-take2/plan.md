@@ -200,10 +200,11 @@ pass the static check, and the package's tests pass with the legacy modules bloc
 - [ ] Make `ProvisionResult.tailnet_address` required on every platform, and delete
       `ProvisionResult.native_transport` and Phase A's native `tailscale ip -4` fallback:
   - all six platforms settle the address through one shared helper, `settle_tailnet_address`, over
-    the provisioning transport they hold, retrying so the key is never sent twice and logging the
-    node out over that transport when the reads are exhausted (HLA D11);
-  - the key-bearing bootstrap script only joins, and `parse_bootstrap_output` stops requiring an
-    address;
+    their own `run_as_root`, retrying so the key is never sent twice and logging the node out over
+    that channel when the reads are exhausted (HLA D11). Slice 4's `run_as_root` implementations
+    land first in PR B, so the settle is written once, over them;
+  - `parse_bootstrap_output` stops requiring an address, and the bootstrap script loses its key and
+    its join step in slice 4;
   - `parse_tailnet_address` validates each read and core validates the value again before recording
     it;
   - the provisioning trust file's lifetime narrows to the platform's `create` call.
@@ -262,71 +263,89 @@ connection enrolls the host key, and the base contract check follows, release fi
 
 ## Slice 4: Recovery and the platform surface (HLA D11 second half; PR B)
 
-- [ ] Write `platform-lld.md`. It covers:
-  - `run_as_root`, and core's `run_recovery`, `RecoveryResult` and its marker wrapper;
-  - `read_host_keys` and its cloud overrides;
-  - `recovery_needs_guest_sshd`;
-  - `native_shell`;
-  - each platform's recovery channel and private access;
-  - `public_ssh.py`;
-  - the host policy;
-  - the recovery scripts;
-  - `vm recover`;
-  - each cloud's provider-side host-key fingerprint source;
-  - whether delete may log out a cloud VM that never enrolled a host key (a create that failed after
-    the join) under Unverified trust, since the logout carries no secret;
-  - `RawRun`, and how each channel bounds its output and its wait by the deadline.
-- [ ] Implement core's `run_recovery` in `vms/recovery.py`, `run_as_root` on every platform,
-      `read_host_keys` on the clouds, and `native_shell` where a platform offers one.
-- [ ] Implement the host policy (HLA D2) in `ssh_process.py`, for Remote Lima's host connection and
-      `public_ssh.py`, its first callers.
-- [ ] Rehome native code as plugin-private modules:
-  - Remote Lima's host connection, under the host policy, and its host-side detached create;
+Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
+
+- [x] Write [`platform-lld.md`](./platform-lld.md). It covers:
+  - `run_as_root` and `RawRun`, and how each channel bounds its output and its wait by the deadline;
+  - core's `root_script` wrapper and `RootScriptResult`;
+  - `read_host_keys` and its cloud overrides, with no provider-side fingerprint source;
+  - `recovery_needs_guest_sshd` and `native_shell`;
+  - each platform's root channel and private access, `public_ssh.py` under the VM policy, and the
+    host policy for Remote Lima;
+  - the repair, rekey and logout scripts, and `vm recover`;
+  - delete's refusal to log out, under Unverified trust, a cloud VM that never enrolled a host key.
+- [ ] Implement `execution/root_script.py`: `RawRun`, `RootScriptResult`, the wrapper with its one
+      embedded secret, `run` with its optional operation log, `run_process` over
+      `PipeSession(nonce=None)`, and `read_host_keys`. `spawn` raises `ConnectivityError` naming a
+      program other than OpenSSH that cannot start, and `trust.fingerprint` lands.
+- [ ] Implement `run_as_root` on every platform before slice 3's address settle, so the settle is
+      written once over it:
+  - `lima_host.py` for Lima and Remote Lima, with Remote Lima's host-side detached create;
+  - WSL2 through `wsl --exec /bin/bash -s`, with a `_WSL` program constant shared with `_wsl`;
   - `plugins/proxmox/guest_agent.py`, replacing `plugins/proxmox/transport.py`;
-  - the Lima and WSL2 wrappers.
-- [ ] Port `tailscale_join.py` and `wsl2_bootstrap.py` off `ExecTransport`, keeping the auth key out
-      of command lines, logs, exceptions and retained provisioning artifacts, and re-prove incident
-      row I10 with a test.
-- [ ] Implement `capabilities/vm_platform/public_ssh.py` for the clouds. Make `transient_route` and
-      `probe_failure_hint` private to each platform's native code, and add `public_ssh.py` and
-      `vms/recovery.py` to the package guard once the rehome frees
-      `capabilities/vm_platform/__init__.py` of legacy imports (HLA D14).
-- [ ] Move rejoin, rekey and delete-time logout onto `run_recovery`, with rejoin run only by
-      `agw vm recover`. Make `vm start` and the activation gate start the VM, wait for Tailscale to
-      reconnect, and fail with a hint naming `agw vm recover` when it does not, as the operator
-      ruled on 2026-10-31 and 2026-11-01. Both waits use `reachability.wait`. Delete `vm start`'s
-      rejoin and its conditional auth-key read (`vms/manager/power.py:83-112`).
+  - `public_ssh.py` for the clouds under the VM policy, with each cloud's `read_host_keys`.
+    `run_as_root` and `recovery_needs_guest_sshd` become descriptor requirements, and
+    `ProvisionRequest.ssh_private_key` becomes `Path`.
+- [ ] Implement `build_host_argv` (HLA D2) in `ssh_process.py` for Remote Lima's host connection,
+      its only caller, and refuse whitespace and control characters in `LimaSshPlacement.host`.
+- [ ] Port `tailscale_join.py` onto `run_as_root`: `JOIN_FRAGMENT` through
+      `--auth-key=file:/dev/stdin`, `join_tailscale`, `read_tailnet_address`,
+      `settle_tailnet_address` with its `rerun_hint`, and `EphemeralTailscaleBootstrap`. WSL2 and
+      Proxmox run a key-free bootstrap through `run_as_root` and then join. Delete the bootstrap
+      generator's key parameter and step 7, `TAILSCALE_JOIN_STDIN_COMMAND` and the staging files,
+      and re-prove incident row I10 with a test.
+- [ ] Make `transient_route` and `probe_failure_hint` private to each cloud. Add explicit imports of
+      `public_ssh.py` and `vms/recovery.py` to the package guard, and the plugin and migrated files
+      the platform LLD lists to the static check (HLA D14).
+- [ ] Add `vms/recovery.py` with the repair, rekey and logout scripts, and move rekey and delete's
+      logout onto them, rekey with an operation log that registers the auth key. Make `vm start` and
+      the activation gate start the VM, wait for it to answer over SSH, and fail with a hint naming
+      `agw vm recover` when it does not, as the operator ruled on 2026-10-31 and 2026-11-01. Both
+      waits use `reachability.wait`. Delete `vm start`'s rejoin and its conditional auth-key read
+      (`vms/manager/power.py:85-120`), and `rejoin_tailscale` with its exports.
 - [ ] Delete the legacy `TailscaleWait` and `wait_for_reconnect` (`transports/__init__.py:248`,
       `:279`) with their last callers, which move to `reachability.wait` in this slice.
-- [ ] Add `agw vm recover <vm>`: host-key re-establishment first when the record is missing, then
-      access repair (installing python3 when it is missing), rejoin and SSH verification. Repoint
-      `VMNotReady` and `TrustMissing` guidance at it.
+- [ ] Add `agw vm recover <vm>`, with its operation log:
+  - refuse a VM whose provisioning failed, a stopped VM, and, worded separately, a VM whose power
+    state is unknown;
+  - host-key re-establishment first when the record is missing;
+  - the repair script, then the address read, settling only when the repair joined, then one wait.
+    Repoint `VMNotReady` and `TrustMissing` guidance at it.
 - [ ] Delete the activation gate's lazy repair-secret protocol, which only its rejoin used:
-      `GateTarget.repair_secret_refs`, `_GateSecrets`, and the call sites in `vms/nodes.py` and
-      `sessions/manager/_scope.py`. Update the collateral that names it, including the
-      `agentworks-reviewer` persona's sanctioned conditional-repair shape.
-- [ ] Send cloud recovery's script on stdin rather than in `sudo -n /bin/sh` arguments (HLA D2).
-- [ ] Move `vm shell --platform` onto `native_shell` and delete `vms/manager/platform_shell.py`.
-- [ ] Delete `VMPlatform.native_transport`, the `transports.native_transport` factory and
-      `native_shell_unavailable_hint`.
-- [ ] Tests:
-  - each platform declares sshd dependence;
-  - recovery reports the script's status only when both closing markers arrive, otherwise unknown,
-    and never trusts a channel exit code;
-  - logout reports the script's status or unknown, and never checks SSH afterwards;
-  - a platform without a native shell refuses with `FeatureUnavailable` before credentials are
-    resolved;
-  - `vm start` on a VM whose Tailscale does not reconnect fails with the `agw vm recover` hint and
-    resolves no secret.
+      `GateTarget.repair_secret_refs`, `_GateSecrets`, `Resolver.resolve_late_repair`, and the call
+      sites in `vms/nodes.py` and `sessions/manager/_scope.py`. Update the collateral that names it,
+      including the `agentworks-reviewer` persona's sanctioned conditional-repair shape.
+- [ ] Move `vm shell --platform` onto `native_shell`, with `FeatureUnavailable` for a platform that
+      has none and a refusal of `--workspace` with `--platform`, and delete
+      `vms/manager/platform_shell.py`.
+- [ ] Delete `VMPlatform.native_transport`, the `transports.native_transport` factory, the legacy
+      platform transports (`transports/lima.py`, `remote_lima.py`, `wsl2.py`, `_shared.py`) and
+      `plugins/proxmox/transport.py`, with their tests.
+- [ ] Tests, as the platform LLD lists them:
+  - the wrapper: the status only when both closing markers arrive, otherwise unknown, the secret in
+    no field, `repr`, error or log record, and one dispatch however it ends;
+  - `run_process`'s deadline, output limit and background child, and its error for a missing
+    program;
+  - the argv: `PublicSSH` ignoring operator configuration and the host argv honoring it;
+  - the address read and settle, including that only the settle logs out;
+  - the auth key in exactly one script on each of the six creates (I10);
+  - the commands: start and the gate failing with the recover hint and resolving no secret, recover,
+    rekey, delete's logout outcomes, and `vm shell --platform`'s refusals before the boundary;
+  - conformance vectors W1 to W9.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
-      issues and fix history), and add incident inventory rows before deleting anything.
-- [ ] Collateral: platform author documentation, the command reference, completions, an operator
-      guide section on recovery, and the Proxmox guide's start-time rejoin note
-      (`docs/guides/proxmox.md:203-205`).
+      issues and fix history); rows I29 to I34 are in the HLA inventory.
+- [ ] Collateral, as the platform LLD lists it: ADRs 0003 and 0019, platform author documentation,
+      the command reference, the READMEs, the sample config, completions, the guides (including the
+      Proxmox guide's start-time rejoin note, `docs/guides/proxmox.md:201-205`, and the
+      troubleshooting topic), the reviewer persona, and the stale docstrings and comments.
 - [ ] Live evidence:
-  - rejoin, rekey, delete and `vm recover` on every platform from at least one workstation each;
+  - create on every platform, with the key-free bootstrap's output size recorded on WSL2 and
+    Proxmox;
+  - rekey, delete's logout and `vm recover` on every platform from at least one workstation each;
+  - `vm start` after the node is removed, and after an ephemeral key's node expired;
   - recovery of a broken sshd on WSL2 and on Proxmox;
-  - recovery of a lost store record on one cloud and on Remote Lima.
+  - recovery of a lost store record on one cloud and on Remote Lima;
+  - the V cells of vectors W1 and W3 to W9.
 
 Definition of done: core reaches a native channel only through `run_as_root` or `native_shell`, and
 no platform's private access imports a legacy module.
@@ -439,13 +458,13 @@ Definition of done: no workspace, session or backup module imports a legacy modu
       `execution/oplog.py` as `SSHLogger` is deleted, matching log files by the exact
       `<vm>-<timestamp>-<stem>.log` shape so VM `dev` never matches VM `dev-2`'s logs, and update
       the `LOG_DIR` mention in the `transports/ssh.py` docstring.
-- [ ] Delete the six legacy modules with their tests:
+- [ ] Delete the remaining legacy modules with their tests (slice 4 deletes the sixth,
+      `agentworks.plugins.proxmox.transport`):
   - `agentworks.transports`
   - `agentworks.ssh`
   - `agentworks.remote_exec`
   - `agentworks.harness_setup.runner`
   - `agentworks.native_files`
-  - `agentworks.plugins.proxmox.transport`
 - [ ] Delete `RunContext.admin_target()` and `agent_target()`, and the `SSHError` special case in
       `cli/_entry.py`.
 - [ ] Delete doctor's `ssh` and `scp` `PATH` presence rows, which the resolver's verdict replaces.

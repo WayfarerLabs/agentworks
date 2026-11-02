@@ -32,12 +32,16 @@ them:
   permits (slice 7, with `detached.observe`);
 - the operation log: `oplog.format_record` and `SSHLogger.record` (slice 3, with create's Phase A,
   its first caller). `ssh.LOG_DIR`, its readers and `SSHLogger` stay until slice 8;
-- `PythonProgram`, `Script.interactive` and `FeatureUnavailable` (slice 4 and later). Measured for
-  that slice: `dash -i FILE` prints a prompt to stderr per line it reads from the file, so an
-  interactive script needs the HLA's startup shell that execs the interpreter, not `-i FILE`;
+- `FeatureUnavailable` (slice 4, with `vm shell --platform`);
+- `PythonProgram` and `Script.interactive` (a later slice). Measured for that slice: `dash -i FILE`
+  prints a prompt to stderr per line it reads from the file, so an interactive script needs the
+  HLA's startup shell that execs the interpreter, not `-i FILE`;
 - stdin and output sinks beyond the operator's stdin for `stream` (slice 5 and later), the Enroll
-  trust mode (slice 3, `enrollment_access`), the host policy (slice 4) and `attach`'s
-  `clear_screen_on_exit` (slice 7).
+  trust mode (slice 3, `enrollment_access`), `attach`'s `clear_screen_on_exit` (slice 7), and three
+  pieces for slice 4's root channel ([platform-lld.md](./platform-lld.md)): the host argv,
+  `build_host_argv`, for Remote Lima's host connection; `PipeSession(nonce=None)`, the unfiltered
+  pass-through that `root_script.run_process` uses; and `spawn`'s `ConnectivityError` naming a
+  program other than the resolved client that cannot start.
 
 ## Module layout
 
@@ -53,6 +57,8 @@ them:
 | `agentworks/execution/attach.py`                 | The two-connection attach under `guarded_terminal`                                                                |
 | `agentworks/execution/forwarding.py`             | The blocking forward                                                                                              |
 | `agentworks/execution/errors.py`                 | Adds `ExecutionIncomplete`, `CommandFailed`, `VMNotReady`, `TrustMismatch`, `ClientUnsupported`, `RequestRefused` |
+| `agentworks/execution/root_script.py` (slice 4)  | `RawRun`, `RootScriptResult`, `run`, `run_process`, `read_host_keys` ([platform-lld.md](./platform-lld.md))       |
+| `agentworks/execution/trust.py` (slice 4)        | Gains `fingerprint(key)`, OpenSSH's `SHA256:` form                                                                |
 | `agentworks/vms/manager/port_forward.py`         | `port_forward_vm`, moved out of `tailscale.py` so the file can pass the static import check                       |
 | `agentworks/vms/manager/platform_shell.py`       | The legacy-touching part of `vm shell --platform`, moved out of `exec.py`; legacy until slice 4                   |
 | `tests/execution/conftest.py`                    | The legacy-module blocker                                                                                         |
@@ -248,11 +254,11 @@ stderr after the marker; the terminal half takes neither.
 **Spawning.** One `spawn(argv, ...)` in `ssh_process.py` runs
 `subprocess.Popen(argv, stdin=PIPE, stdout=PIPE, stderr=PIPE, bufsize=0)` (the forward passes no
 pipes) with the proof's Windows environment strip (`_io.py:104-114`, at `fd1256b1f`), and maps a
-failure to start to `ClientUnsupported`. The pump lives in `pump.py`. The pump is the proof's
-single-threaded loop (`_io.py:32-205`): non-blocking pipes (supported on Windows pipes from Python
-3.12), 64 KiB chunks, a 10 ms sleep when nothing moved, the deadline, then kill and a 0.5 s reap,
-and cleanup on `BaseException`. It is argv-agnostic, which is what lets the conformance suite run it
-against a local shell.
+failure of the resolved client to start to `ClientUnsupported`. The pump lives in `pump.py`. The
+pump is the proof's single-threaded loop (`_io.py:32-205`): non-blocking pipes (supported on Windows
+pipes from Python 3.12), 64 KiB chunks, a 10 ms sleep when nothing moved, the deadline, then kill
+and a 0.5 s reap, and cleanup on `BaseException`. It is argv-agnostic, which is what lets the
+conformance suite run it against a local shell.
 
 - **Who uses it.** `run`, `stream` and the parking connection of an attach reuse the one pump. The
   terminal half (inherited stdio, `subprocess` wait) and the forward (no pipes) do not. The parking
@@ -540,8 +546,9 @@ above and waits for the client, polling `Popen.wait(timeout=0.2)` so Ctrl-C is d
 
 Errors may show the client log's tail. `TrustMismatch`'s hint names the manual path, since import
 never rewrites an existing record (`trust-lld.md`) and recovery re-establishes only a missing one
-(HLA D4). `TrustMissing` already exists (`errors.py`). `FeatureUnavailable` lands with its first
-consumer. No error message, `repr` or hint holds a stream, an environment value or script text.
+(HLA D4). `TrustMissing` already exists (`errors.py`). `FeatureUnavailable` (`StateError`) lands in
+slice 4 with `vm shell --platform`, its first consumer. No error message, `repr` or hint holds a
+stream, an environment value or script text.
 
 ## The migrated commands
 
