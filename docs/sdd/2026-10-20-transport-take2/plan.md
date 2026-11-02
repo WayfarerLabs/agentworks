@@ -120,8 +120,10 @@ a VM connection.
       with `=` always quoted) and run under the identity's default shell (`vms/manager/exec.py:271`
       on `main`), which the box above wrongly described as a literal argv. Give a departed stdout
       consumer ssh's semantics (close it, keep pumping until the channel ends, report the guest's
-      status when its trailer arrives) and end the request at once when a stderr consumer leaves
-      (execution LLD, the pump).
+      status when its trailer arrives) and end the request when a stderr consumer leaves, after
+      delivering held stdout and keeping a trailer already in hand (execution LLD, the pump); on
+      Windows the passphrase hint names the absolute path, and the agent check lists keys with
+      `ssh-add -L` rather than signing.
 - [x] Alert where PR A drops a behavior an operator may rely on (operator, 2026-11-01): warn at
       reinit when `/etc/environment`, `/etc/security/pam_env.conf` or the admin's
       `~/.pam_environment` holds settings, and when a VM connection fails before the start marker
