@@ -19,7 +19,6 @@ are mocked as in test_lima_create_flow.py; no test runs limactl.
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
@@ -142,7 +141,6 @@ def _wire(
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
     monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, yaml: None)
-    monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
 
     def _fake_run(self: LimaHost, cmd: str, **_kw: object) -> str:
         ran.append(cmd)

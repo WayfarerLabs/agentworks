@@ -319,6 +319,4 @@ def gce_platform(monkeypatch: pytest.MonkeyPatch, guest: FakeGuest) -> tuple[GCE
     platform._clients = cache  # type: ignore[assignment]
 
     install_at_run_process(monkeypatch, guest)
-    # The returned legacy transport is only constructed here.
-    monkeypatch.setattr("agentworks.plugins.gcp.platform.SSHTransport", lambda **kwargs: SimpleNamespace(**kwargs))
     return platform, cache

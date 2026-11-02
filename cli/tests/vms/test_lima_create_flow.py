@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -69,7 +68,6 @@ def _wire(
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
     monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, yaml: None)
-    monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
     install_at_run_process(monkeypatch, FakeGuest())
 
     def _fake_run(self: LimaHost, cmd: str, **_kw: object) -> str:
@@ -114,7 +112,6 @@ def test_probe_failure_warns_and_does_not_restart(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
     monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, yaml: None)
-    monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
     install_at_run_process(monkeypatch, FakeGuest())
 
     def _fake_run(self: LimaHost, cmd: str, **_kw: object) -> str:
@@ -160,7 +157,6 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
 
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
-    monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
 
     if create_method == "_create_local":
         monkeypatch.setattr(
@@ -216,7 +212,6 @@ def test_an_address_that_cannot_be_read_logs_the_node_out_and_removes_the_instan
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
     monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, lima_yaml: None)
-    monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
 
     def _fake_run(self: LimaHost, command: str, **kwargs: object) -> str:
         ran.append(command)
@@ -242,7 +237,6 @@ def test_a_failed_restart_rolls_back_before_the_key_is_sent(monkeypatch: pytest.
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
     monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, lima_yaml: None)
-    monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
 
     def _fake_run(self: LimaHost, command: str, **kwargs: object) -> str:
         ran.append(command)
@@ -271,7 +265,6 @@ def test_a_tailscaled_that_never_becomes_active_rolls_back_before_the_key_is_sen
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
     monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, lima_yaml: None)
-    monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
 
     def _fake_run(self: LimaHost, command: str, **kwargs: object) -> str:
         ran.append(command)

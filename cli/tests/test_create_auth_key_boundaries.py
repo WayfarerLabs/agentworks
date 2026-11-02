@@ -101,7 +101,6 @@ def lima(monkeypatch: pytest.MonkeyPatch, guest: FakeGuest) -> Create:
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
     monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, rendered: templates.append(rendered))
-    monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
 
     def run(self: LimaHost, command: str, **kwargs: object) -> str:
         commands.append([command, repr(kwargs)])
