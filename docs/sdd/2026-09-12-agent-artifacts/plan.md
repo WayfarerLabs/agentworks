@@ -1167,8 +1167,8 @@ Native fixture validation observed Claude Code 2.1.316 and Codex 0.166.0. The fo
 passed 104 tests. The flow slice passed 1,143 tests with four skips, including actual adapter/guest
 probes and real-manager failures preserving the existing run before teardown. The fixture-tooling
 slice passed its fresh-process CLI checks and full branch suite, with real VM execution explicitly
-unperformed. These are slice-level results, not final integrated or live acceptance claims; final
-private reviews, gates and the next ready handoff remain pending.
+unperformed. These were slice-level results at the start of the round, before integrated validation
+or live acceptance. The validation record below supersedes that interim review and handoff status.
 
 Round 2 validation is complete. The integrated CI selection passed **10,401 tests, 11 skipped** with
 Claude Code 2.1.316 and Codex 0.166.0 available for the native fixtures. The first integrated run
@@ -1191,3 +1191,44 @@ source/legacy-version handling breaks the required behavior. These are local CLI
 results, not final real-VM acceptance. The exact ready head and CI result are recorded in PR 862's
 round 2 handoff. One public correction round remains, and both locks still await the final live
 requirement audit.
+
+## Facet independence feedback, round 3 of 3, 2026-11-02
+
+The one-hour reporting window elapsed before this final authorized correction round began. PR 862
+returned to draft at `3748bcc` before edits; main remains `c8d4dfb`. The frozen batch includes live
+report `6572238674`, Muntz `6571607223`, saga `6571111808`, and every unresolved item. The live
+report confirms the original seven fixes and #840/#841, but finds two missing-Claude-declaration
+paths that still need correction. Its gates passed with 10,401 tests and 11 skips; that evidence
+belongs to the ready head, not the correction still under development.
+
+- [ ] Preserve unobservable Claude git/GitHub source associations during mapping, and preflight
+      user-scoped removal before touching marketplace dependents.
+- [ ] Make native plugin ambiguity entry-local without retiring unresolved prior associations;
+      handle malformed driver claim sources conservatively and retain legacy version support.
+- [ ] Persist current-attempt incomplete reasons in the existing versioned setup record and expose
+      entry-specific repair diagnostics without new ownership or history mechanisms.
+- [ ] Strengthen missing-target coverage, remove redundant first-party identity-format checks,
+      retain retry-progress guards and fix temporary-path-sensitive carrier assertions.
+- [ ] Align permanent guidance, bounded progress messages and current plan status with the fixes.
+- [ ] Resolve the own-failure policy question through authenticated operator direction; retain
+      today's fail-fast pipeline until that direction arrives. `awaiting-direction` tracks this
+      ambiguity, not a second request for the already-authorized FRD amendments.
+- [ ] Run all three private review lanes and full gates on the integrated head, then publish the
+      appropriate complete handoff. This round exhausts the three-round public correction allowance.
+- [ ] Audit final live acceptance against every retained requirement and create both locks only
+      after the remaining actual-scope evidence exists.
+
+The independent corrections do not wait on the pipeline policy choice. Missing native declarations,
+ambiguous selection and unreadable claim identity are handled as conservative entry-local retention;
+unexpected own process/config/persistence failures are not silently swallowed. The operator has been
+asked whether those unexpected own failures should continue sibling integrations before a final
+error. No error-aggregation mechanism is being added without that decision.
+
+The latest live run used Linux and remote Lima/Debian 13, two 2-CPU/4-GiB VMs, Claude Code 2.1.316
+and Codex 0.166.0, with local sources and no model calls. It independently verified VM/backend/SSH
+cleanup, leaving only offline tailnet records for the operator. It does not close the outstanding
+prerequisite/unsupported-facet fixture, real interruption, admin artifact, Git capture, powercycle,
+resume-only, Grok launch or Claude workaround obligations. Workspace matching/conflict and project
+settings cases can use repository-preseeded files during ordinary create; the verified call order
+and controlled fixture are recorded in `6572186080`. No workspace reinit or workspace plugin support
+is implied. Both locks remain pending.

@@ -132,9 +132,11 @@ rejected before publication rather than creating another nested key or a name co
 
 Hooks, MCP definitions and unknown option fields are not accepted through this surface. Registering
 a persona makes its native definition available; it does not silently select the primary persona.
-Existing integration `agent` configuration retains its documented behavior. In particular, Codex
-primary-persona selection remains prompt-mediated and does not promise that the persona's model or
-other runtime configuration applies to the primary thread.
+Existing integration `agent` configuration retains its documented behavior even when its same-named
+managed definition is left unhandled; the native tool can select an existing native definition. The
+warning does not claim managed-definition delivery. In particular, Codex primary-persona selection
+remains prompt-mediated and does not promise that the persona's model or other runtime configuration
+applies to the primary thread.
 
 ## Native preflight
 

@@ -378,12 +378,14 @@ integration, and retains incomplete evidence without failing the whole initializ
 native entries can be adopted after observing their full native-reported association and source;
 adoption is recorded and reported and makes the entry eligible for safe managed cleanup. Installed
 versions are mutable observation metadata, not ownership identity. This does not verify historical
-cache origin or add installation-intent tracking. Core persists completion and cleanup evidence in
-the owning instance-state slice; it does not infer native ownership from filenames. Removed
-activations are invoked with absent config for retirement, and failed retirement retains evidence
-for retry. See [native harness setup](../../../../docs/guides/native-harness-setup.md) for the
-shipped cleanup rules and the [instance-state contract](../../db/README.md) for persistence and
-inspection.
+cache origin. Core persists current-attempt `report_incomplete` reasons with completion and cleanup
+evidence in the owning instance-state slice. Reasons must be credential-free metadata identifying
+the retained entry and needed repair, without settings bodies, artifact content or resolved secrets.
+A new attempt clears prior reasons; successful setup leaves none. Core does not infer native
+ownership from filenames. Removed activations are invoked with absent config for retirement, and
+failed retirement retains evidence for retry. See
+[native harness setup](../../../../docs/guides/native-harness-setup.md) for the shipped cleanup
+rules and the [instance-state contract](../../db/README.md) for persistence and inspection.
 
 #### Config: Facet Selection
 

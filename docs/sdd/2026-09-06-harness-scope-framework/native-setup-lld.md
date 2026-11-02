@@ -89,9 +89,11 @@ facet. Each integration record contains:
 - Its name and component, unresolved effective config, env secret-reference names and hashes of
   literal env values needed for freshness. Neither literal env values nor resolved secrets are
   stored.
-- Completion state and the last confirmed successful mutation prefix.
+- Completion state, current-attempt incomplete reasons, and the last confirmed successful mutation
+  prefix.
 - Native plugin and marketplace claims identified by integration-owned role, native identifier,
-  destination and source identity. Matching files or bytes are not proof of ownership.
+  destination and source identity. A coincidentally matching name or cached file does not establish
+  native association ownership.
 - Pending-cleanup disposition where a prior native association remains relevant. Settings mappings
   retain their documents when removed and do not create ownership claims.
 
@@ -99,6 +101,10 @@ Use typed domain structures and a versioned codec, following vms/applied_state.p
 known payloads without echoing raw contents. Preserve unknown versions and unrelated integrations;
 do not replace an unknown record with empty defaults. Core persists only what the integration
 reports as native evidence. Source snapshot contents and resolved secrets never enter the codec.
+Writer version 3 adds credential-free `incomplete_reasons`; readers accept versions 1, 2 and 3, with
+empty reasons for older records. The incomplete callback persists the current attempt's reasons
+through the existing record, and a new attempt clears prior reasons. A malformed driver association
+string cannot prove ownership; retain and diagnose that entry rather than treating it as removable.
 
 Copy/rehome/restored applied-state records must match actual destination identity before satisfying
 readiness. An unknown version or different destination cannot bless setup. Backup export reads
@@ -163,6 +169,13 @@ Core leaves `complete=False` while allowing independent native entries, artifact
 later integrations to proceed. A settings mapping must preserve skipped native associations,
 including under replace policies. Query again after every command before recording its actual
 result. A command's success alone does not establish scope or identity.
+
+Claude git/GitHub inventory without its user settings declaration has unobservable full source
+identity. Preserve it and protect its settings association. Preflight scoped removability before
+retiring any marketplace dependents: an absent user declaration retains both marketplace and
+plugins, without broadening removal to all scopes or guessing replacement settings. An ambiguous
+unqualified plugin selection reports qualification advice and retains its prior associations;
+nonexistent selections remain invalid configuration.
 
 Isolated local fixtures pin concrete native query payload fields, removal behavior and
 command/settings ordering; see [native research](prior-art-research.md). Commands resolve the

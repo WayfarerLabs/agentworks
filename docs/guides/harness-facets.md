@@ -261,10 +261,11 @@ that all upstream artifact state must match its latest declarations.
 
 The shipped integrations currently declare no ancestor requirement, so session-only use is valid
 when the tool is otherwise installed and ready and any supplied artifacts can be delivered there.
-Artifact delivery additionally requires current ancestor capture and handling evidence; unsupported
-final-session delivery warns and continues without claiming those inputs were handled. Selecting a
-user activation does not select a session integration, and selecting a session integration does not
-implicitly enable or run user setup.
+Artifact delivery uses available captures, known recorded routes and existing placement. Stale or
+incomplete ancestor evidence is reported without blocking launch; unsupported final-session delivery
+warns and continues without claiming those inputs were handled. Selecting a user activation does not
+select a session integration, and selecting a session integration does not implicitly enable or run
+user setup.
 
 Evidence can be absent, incomplete, stale, unavailable, or current. Current means a completed
 applied-state record matches the effective declaration and destination identity. It does not mean
@@ -275,17 +276,19 @@ new setup secrets.
 ## Inspecting and reconciling setup
 
 Owning setup records confirmed native claims through instance state. Applied-state records track
-integration and component identity, completion, pending cleanup, and native ownership metadata.
-Resolved secrets and settings contents are not stored. A failure keeps the last confirmed mutation
-prefix so a retry can reconcile what actually completed. Fresh agent and workspace applied-state
-records commit with their owner rows.
+integration and component identity, completion, pending cleanup, native ownership metadata and
+current-attempt incomplete reasons. Resolved secrets and settings contents are not stored. A failure
+keeps the last confirmed mutation prefix so a retry can reconcile what actually completed. Fresh
+agent and workspace applied-state records commit with their owner rows.
 
 Use the existing owning inspection commands, such as `agw agent describe worker`,
 `agw workspace describe project`, or `agw vm describe dev`, to inspect the `harness-native-setup`
 lifecycle evidence. The summary includes completion, pending cleanup, and claim counts, without
-native I/O or settings values. Use `agw artifact show` to inspect artifact capture, handling, and
-deferral along the actual lineage. Doctor also checks stored evidence; it does not complete setup or
-repair native drift.
+native I/O or settings values. Use `agw artifact show` to inspect artifact capture, handling,
+deferral and the full recorded incomplete reasons along the actual lineage. Only the selected
+integration's ancestor status is relevant to its session; a shell session does not report unrelated
+Claude or Codex setup. Doctor also checks stored evidence; it does not complete setup or repair
+native drift.
 
 After editing VM/admin or agent activations, run `agw vm reinit <name>` or
 `agw agent reinit <name>`. Removing a declaration, or disabling an inherited activation with `null`,

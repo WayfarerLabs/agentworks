@@ -90,12 +90,13 @@ recorded handling. The templates themselves do not create instances. See `agw vm
 To inspect artifact delivery, use
 `agw artifact show --session <session-name> --integration <integration-name>`. Read the VM, actual
 user, workspace, then session rows in that order. An incomplete ancestor has unfinished application
-or cleanup. A stale ancestor reports changed integration config keys, declared environment variable
-names by scope, or prepared artifact names, without their values. Each owner's status is
-independent; the session row describes its own recorded application. Ancestor problems are reported
-at managed start without blocking launch. An inactive session integration has no setup obligation
-for that facet. Inspection reports recorded application, not a fresh check of native files or model
-context.
+or cleanup. Native-only incomplete setup also carries its recorded entry-specific reasons; resolve
+the retained conflict before rerunning the owning setup. A stale ancestor reports changed
+integration config keys, declared environment variable names by scope, or prepared artifact names,
+without their values. Each owner's status is independent; the session row describes its own recorded
+application. Ancestor problems are reported at managed start without blocking launch. An inactive
+session integration has no setup obligation for that facet. Inspection reports recorded application,
+not a fresh check of native files or model context.
 
 ## Composition and names
 
@@ -345,6 +346,11 @@ whole file in the prospective session directory is preserved and refuses the new
 of an existing runtime. Differing unowned file content during setup is preserved and recorded as a
 skip, leaving that setup incomplete. Incomplete native-only facets are also reported; neither case
 creates a blanket descendant launch prerequisite.
+
+Selecting a native persona and delivering its definition are separate operations. If a managed
+persona definition remains unhandled, an explicit integration `agent` selection still applies. The
+native harness may select its existing same-named persona; the warning does not claim that the
+Agentworks definition was delivered.
 
 Adopting matching artifact files makes them managed and eligible for safe cleanup when removed from
 the declaration. Confirmed file and generated-section removals and updates report bounded summaries.

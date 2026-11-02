@@ -64,7 +64,9 @@ applying a new mapping requires workspace recreation.
 User configuration has `marketplaces` and `plugins` lists, both empty by default. Marketplace
 strings use the installed harness's native source grammar. Local marketplace paths refer to the
 guest filesystem; relative paths resolve against the actual user's home. Plugin names resolve
-against the native catalog; qualify ambiguous names as `plugin@marketplace`.
+against the native catalog; qualify ambiguous names as `plugin@marketplace`. An ambiguous
+unqualified selection is retained and reported without retiring its prior associations. A name
+absent from the catalog is a configuration error.
 
 Tool discovery reads the actual user's login-shell PATH once per setup invocation. An explicit PATH
 in the prepared setup environment takes precedence. Native commands use that resolved executable and
@@ -103,7 +105,19 @@ Matching uses the native tool's reported association, including the full marketp
 ref or sparse-path options. Agentworks does not authenticate the historical origin of cached plugin
 files. An installed version can change through the native tool without changing the owned plugin
 association. A differing unowned source or association is preserved with a warning; resolve that
-native conflict before retrying setup. No installation-intent journal is maintained.
+native conflict before retrying setup.
+
+Claude's git and GitHub list entries do not expose every source option. If the corresponding user
+marketplace declaration is absent from native settings, Agentworks treats the source as unobservable
+and preserves it, including during mapped-settings publication. Restore the native user declaration
+before retrying setup. When that declaration is absent, marketplace retirement or replacement also
+retains dependent plugins before attempting any uninstall. Agentworks does not broaden user-scoped
+removal to all scopes or write a guessed declaration.
+
+Current-attempt incomplete reasons are retained with setup evidence. `agw artifact show` and managed
+session-start warnings identify the retained entry and its reason. Resolve that native or file
+conflict before running the owning repair command; repeating setup alone cannot resolve a differing
+operator-owned entry. A successful retry clears the previous incomplete reasons.
 
 Removing desired associations removes owned plugins before owned marketplaces. The integration
 refuses marketplace cleanup when it would affect an unowned or project plugin. Claude's native
