@@ -53,8 +53,9 @@ def _assert_agent_access_works(access: VMAccess, admin: VMAccess, agent: AgentRo
     to running ``true`` as the admin: if that completes, the VM is fine and
     the agent is the problem (the reinit hint); an admin refused too means
     the operator's key is (the key-refused error, with the passphrase hint);
-    otherwise the VM is unreachable. Every other outcome (python3 missing, a host key mismatch, a
-    refusal, a truncated run) is not about the rollout and raises as it is.
+    otherwise the VM is unreachable. Every other outcome (python3 missing, a
+    host key mismatch, a refusal, a truncated run) is not about the rollout
+    and raises as it is.
     """
     result = access.run(Command(("true",), deadline=_PROBE_DEADLINE_SECONDS))
     completion = result.completion
