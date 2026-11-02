@@ -114,9 +114,36 @@ def test_a_detached_command_clears_a_stale_result_and_runs_fresh(
 
     assert result.exit_code == 0
     assert sum(command.startswith("nohup ") for command in commands) == 1
-    assert any("stale result files" in warning for warning in captured_output.warnings)
+    assert len(captured_output.warnings) == 1
 
 
-def test_a_detached_command_needs_a_placement_host() -> None:
-    with pytest.raises(ValueError):
-        LimaHost(None).run_detached("limactl start vm1", base_path="/var/tmp/agw-x", timeout=600)
+def test_a_placement_host_that_drops_for_a_while_does_not_end_the_detached_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ssh's 255 with no output is an unanswered check, asked again, not a finished or vanished command."""
+    dropped = _Completed(255, "", "ssh: connect to host gpu-box port 22: Connection refused")
+    answers = {
+        "test -f /var/tmp/agw-x.status": [dropped, dropped, _Completed(1, "", ""), _Completed(0, "", "")],
+        "ps -p": [dropped, _Completed(0, "", "")],
+        "cat /var/tmp/agw-x.out 2>/dev/null": [dropped, dropped, _Completed(0, "limactl output\n", "")],
+        "cat /var/tmp/agw-x.status 2>/dev/null": [dropped, _Completed(0, "0\n", "")],
+    }
+    launched = False
+
+    def execute(host: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
+        nonlocal launched
+        launched = launched or command.startswith("nohup ")
+        for prefix, queue in answers.items():
+            if launched and command.startswith(prefix):
+                return queue.pop(0) if len(queue) > 1 else queue[0]
+        if command.startswith("test -f"):
+            return _Completed(1, "", "")
+        return _Completed(0, "", "")
+
+    monkeypatch.setattr(LimaHost, "_execute", execute)
+    monkeypatch.setattr("agentworks.capabilities.vm_platform.lima_host.time.sleep", lambda seconds: None)
+
+    result = LimaHost("me@gpu-box").run_detached("limactl start vm1", base_path="/var/tmp/agw-x", timeout=600)
+
+    assert (result.exit_code, result.output) == (0, "limactl output\n")
+    assert all(len(queue) == 1 for queue in answers.values())  # every dropped answer was asked again

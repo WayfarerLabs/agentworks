@@ -32,6 +32,9 @@ _DETACHED_POLL_SECONDS = 3
 _DETACHED_QUIET_SECONDS = 300
 _DETACHED_READ_ATTEMPTS = 6
 _DETACHED_READ_RETRY_SECONDS = 5
+# ssh's own status for a connection that failed; a remote command's 255 is indistinguishable,
+# and none of the detached checks below prints nothing and exits 255 by itself.
+_SSH_CONNECTION_FAILED = 255
 
 # Writes the PID, runs the command, then writes its status. The brace group
 # makes the redirection capture all of a compound command's output.
@@ -112,7 +115,6 @@ class LimaHost:
         seconds the command is killed and the result is exit 1 with the
         output so far. Every file is removed at the end.
         """
-        self._require_remote()
         files = _DetachedFiles(base_path)
         if self._returncode(f"test -f {files.status}") == 0:
             output.warn(f"clearing stale result files from a previous interrupted run ({base_path}.*)")
@@ -141,7 +143,6 @@ class LimaHost:
         ``nohup`` exists precisely so the command survives this process, so
         an interrupted caller must stop it before undoing what it built.
         """
-        self._require_remote()
         files = _DetachedFiles(base_path)
         try:
             with contextlib.suppress(LimaCommandFailed):
@@ -162,36 +163,43 @@ class LimaHost:
                 with contextlib.suppress(LimaCommandFailed):
                     self._returncode(f"test -f {files.pid} && kill $(cat {files.pid}) 2>/dev/null")
                 return
-            try:
-                current = self._execute(f"wc -c < {files.output} 2>/dev/null", input=None, timeout=None).stdout
-                if current.strip().isdigit() and int(current) > size:
-                    size, last_output, warned_quiet = int(current), time.monotonic(), False
-                if self._returncode(f"test -f {files.status}") == 0:
-                    return
-                if self._returncode(f"ps -p $(cat {files.pid}) > /dev/null 2>&1") != 0:
-                    return  # gone without a status: an unexpected end
-            except LimaCommandFailed:
-                # The host may be briefly unreachable; the wrapper keeps running.
+            # The host may be briefly unreachable: an unanswered check is asked again at the next
+            # poll, within the timeout, while the wrapper keeps running there.
+            written = self._ask(f"wc -c < {files.output} 2>/dev/null")
+            if written is not None and written.stdout.strip().isdigit() and int(written.stdout) > size:
+                size, last_output, warned_quiet = int(written.stdout), time.monotonic(), False
+            finished = self._ask(f"test -f {files.status}")
+            if finished is None:
                 continue
+            if finished.returncode == 0:
+                return
+            alive = self._ask(f"ps -p $(cat {files.pid}) > /dev/null 2>&1")
+            if alive is None:
+                continue
+            if alive.returncode != 0:
+                return  # gone without a status: an unexpected end
             quiet = time.monotonic() - last_output
             if quiet > _DETACHED_QUIET_SECONDS and not warned_quiet:
                 output.warn(f"the detached command printed nothing for {int(quiet)}s (still running)...")
                 warned_quiet = True
 
     def _read_with_retries(self, command: str) -> str | None:
+        """``command``'s stdout, asked up to six times while the host does not answer; ``None`` if it never does."""
         for _ in range(_DETACHED_READ_ATTEMPTS):
-            try:
-                return self._execute(command, input=None, timeout=None).stdout
-            except LimaCommandFailed:
-                time.sleep(_DETACHED_READ_RETRY_SECONDS)
+            answer = self._ask(command)
+            if answer is not None:
+                return answer.stdout
+            time.sleep(_DETACHED_READ_RETRY_SECONDS)
         return None
 
-    # -- Processes ---------------------------------------------------------------------
+    def _ask(self, command: str) -> _Completed | None:
+        """``command``'s result, or ``None`` when the host did not answer: ssh's 255 with no output."""
+        completed = self._execute(command, input=None, timeout=None)
+        if completed.returncode == _SSH_CONNECTION_FAILED and not completed.stdout:
+            return None
+        return completed
 
-    def _require_remote(self) -> None:
-        # The wrapper's redirections and nohup's background need the host's shell.
-        if not self.is_remote:
-            raise ValueError("a detached command runs on a placement host")
+    # -- Processes ---------------------------------------------------------------------
 
     def _returncode(self, command: str) -> int:
         return self._execute(command, input=None, timeout=None).returncode
