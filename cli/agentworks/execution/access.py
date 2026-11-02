@@ -264,9 +264,9 @@ def stream_to_operator(access: VMAccess, request: RunRequest) -> int:
 
 
 def _flush_or_point_at_null_device(stream: BinaryIO) -> OSError | None:
-    """Flush ``stream``, pointing its descriptor at the null device if its reader has left.
+    """Flush ``stream``, pointing its descriptor at the null device if its consumer has left.
 
-    Bytes that could not be flushed to a departed reader (``| head``) stay
+    Bytes that could not be flushed to a departed consumer (``| head``) stay
     in the stream's buffer and would fail again at interpreter shutdown,
     turning the exit status into 120 with a traceback; the null device gives
     shutdown somewhere to write them. Any other flush failure is returned for
@@ -275,7 +275,7 @@ def _flush_or_point_at_null_device(stream: BinaryIO) -> OSError | None:
     try:
         stream.flush()
     except OSError as error:
-        if not pump.reader_left(error):
+        if not pump.consumer_left(error):
             return error
         with contextlib.suppress(OSError, ValueError):
             null = os.open(os.devnull, os.O_WRONLY)
