@@ -282,7 +282,7 @@ def report_ancestor(view: ArtifactOwnerView, integration_name: str) -> None:
     if view.status not in ("current", "inactive"):
         owner = view.owner
         output.warn(
-            f"Artifacts via {integration_name} at {owner.component}/{owner.name}: {view.reason} "
+            f"Setup via {integration_name} at {owner.component}/{owner.name}: {view.reason} "
             f"{_remediation(view)} Continuing with available captured routes and existing placement."
         )
 
