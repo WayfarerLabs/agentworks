@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import time
 import uuid
+import warnings
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -144,6 +145,54 @@ def a_script_cut_short_runs_nothing(lane: RootLane) -> None:
         assert not lane.check(f"test -e {flag}"), cut
 
 
+# -- V only: WSL2 ----------------------------------------------------------------------------
+
+
+def wsl2_payload_has_no_controlling_terminal(lane: RootLane) -> None:
+    """W7's first half; its root-startup-file half is checked by hand, since it edits root's files."""
+    if lane.platform != "wsl2":
+        pytest.skip("WSL2 only")
+
+    assert lane.check("! { tty -s </dev/tty; } 2>/dev/null")  # W7
+
+
+def wsl2_records_what_killing_wsl_exe_does_to_the_payload(lane: RootLane) -> None:
+    """W7's last half: whether a payload outlives a killed wsl.exe is recorded, not required."""
+    if lane.platform != "wsl2":
+        pytest.skip("WSL2 only")
+    flag = scratch_path()
+
+    lane.run(f"trap '' HUP PIPE\nsleep 3\ntouch {flag}", deadline=1)
+    landed = _wait(lambda: lane.check(f"test -e {flag}"), seconds=10)
+    lane.run(f"rm -f {flag}")
+
+    outcome = "finished" if landed else "was killed"
+    warnings.warn(f"W7: after wsl.exe was killed mid-payload, the payload {outcome}", stacklevel=1)
+
+
+def wsl2_missing_distro_error_reads_as_text(lane: RootLane) -> None:
+    if lane.platform != "wsl2":
+        pytest.skip("WSL2 only")
+    from types import SimpleNamespace
+
+    from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+
+    platform = WSL2Platform("wsl2", {"name": "wsl2"})
+    missing: Any = SimpleNamespace(
+        name="missing", platform_metadata={"distro_name": f"agw-conformance-{uuid.uuid4().hex[:8]}"}
+    )
+    result = root_script.run(
+        lambda script, deadline: platform.run_as_root(missing, RunContext(), script, deadline),
+        "true",
+        deadline=DEADLINE,
+    )
+
+    assert result.status is None  # W8
+    assert result.channel_tail.strip()
+    assert "\0" not in result.channel_tail
+
+
 # -- The list ------------------------------------------------------------------------------
 
 
@@ -160,6 +209,9 @@ ROOT_VECTORS = [
     RootVector("w3-secret-in-no-argv-or-child-env", "LV", the_secret_reaches_the_payload_and_no_argv_or_child_env),
     RootVector("w4-trapped-payload-outlives-its-channel", "LV", a_trapped_payload_finishes_after_its_channel_closes),
     RootVector("w5-statuses", "LV", payload_statuses_come_back_as_themselves),
+    RootVector("w7-wsl2-no-controlling-terminal", "V", wsl2_payload_has_no_controlling_terminal),
+    RootVector("w7-wsl2-killed-wsl-exe-recorded", "V", wsl2_records_what_killing_wsl_exe_does_to_the_payload),
+    RootVector("w8-wsl2-missing-distro-reads-as-text", "V", wsl2_missing_distro_error_reads_as_text),
 ]
 """W6 (the core scripts on Debian 12 and 13), W9 (``BackendState``) and W4's rekey half run core's
 recovery scripts, and join this list with them."""

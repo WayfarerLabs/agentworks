@@ -19,6 +19,7 @@ from agentworks.capabilities.vm_platform.wsl2_bootstrap import run_wsl2_bootstra
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import StateError
+from agentworks.execution import root_script
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
 from agentworks.transports import WSL2Transport
@@ -30,10 +31,16 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.root_script import RawRun
     from agentworks.resources.graph import Readiness
     from agentworks.transports import Transport
 
 _STATUS_TIMEOUT_SECONDS = 10
+
+# The one place the wsl.exe program is named. A bare name on Windows is looked
+# up in the current directory before PATH, the hazard the OpenSSH resolver
+# avoids for ssh; resolving this one the same way is a separate change.
+_WSL = "wsl"
 
 
 # -- Win32 job-object machinery for orphan-proof subprocess cleanup ----------
@@ -245,7 +252,7 @@ def _wsl(args: list[str], *, check: bool = True, timeout: int = 300) -> str:
     ``_distro_exists``). Strip the NULs so both encodings parse.
     """
     result = subprocess.run(
-        ["wsl", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
+        [_WSL, *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
     )
     if check and result.returncode != 0:
         stderr = result.stderr.replace("\x00", "").strip()
@@ -407,7 +414,7 @@ def _keepalive(distro_name: str) -> Iterator[None]:
     the kernel closes the job handle and kills the orphan for us.
     """
     proc = subprocess.Popen(
-        ["wsl", "--distribution", distro_name, "--", "sleep", "infinity"],
+        [_WSL, "--distribution", distro_name, "--", "sleep", "infinity"],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
@@ -514,6 +521,9 @@ class WSL2Platform(VMPlatform):
         """,
     )
 
+    # wsl.exe reaches the distro without its sshd.
+    recovery_needs_guest_sshd: ClassVar[bool] = False
+
     @property
     def config(self) -> Wsl2Config:
         """This site's validated wsl2 config: the tag and nothing else."""
@@ -543,7 +553,7 @@ class WSL2Platform(VMPlatform):
 
         from agentworks.resources.graph import Readiness
 
-        if not shutil.which("wsl"):
+        if not shutil.which(_WSL):
             return Readiness.blocked("wsl.exe not installed; run `wsl --install`")
         return Readiness.ready()
 
@@ -554,7 +564,7 @@ class WSL2Platform(VMPlatform):
         super().preflight(ctx)
         import shutil
 
-        if not shutil.which("wsl"):
+        if not shutil.which(_WSL):
             from agentworks.errors import ConnectivityError
 
             raise ConnectivityError(
@@ -887,6 +897,18 @@ class WSL2Platform(VMPlatform):
 
     def display_backend_name(self, vm: VMRow) -> str:
         return str(vm.platform_metadata.get("distro_name", vm.name))
+
+    def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
+        """Run ``script`` as root through ``wsl.exe``.
+
+        ``--exec`` starts ``/bin/bash`` directly, so root's login shell and
+        its startup files are not between ``wsl.exe`` and Bash, and
+        ``--user root`` needs no sudo, so no ``use_pty`` gives the script a
+        terminal. ``ctx`` is unused: wsl.exe is local and needs no backend
+        credential.
+        """
+        argv = [_WSL, "--distribution", self._distro_name(vm), "--user", "root", "--exec", "/bin/bash", "-s"]
+        return root_script.run_process(argv, script, deadline)
 
     def native_transport(
         self,
