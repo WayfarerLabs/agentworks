@@ -260,7 +260,7 @@ class PipeSession:
                 return StopReason.DONE
             if self.stdout_abandoned and self.stderr.done and not waiting:
                 return StopReason.DONE
-            if self.stderr_abandoned and not waiting:
+            if self.stderr_abandoned and not waiting and self.stderr.closing is None:
                 return StopReason.STDERR_CONSUMER_LEFT
             if stop is not None and stop():
                 return StopReason.CONDITION
