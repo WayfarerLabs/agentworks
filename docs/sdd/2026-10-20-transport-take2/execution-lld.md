@@ -260,15 +260,17 @@ against a local shell.
   `BufferedReader.read1` aborts the interpreter at exit (`_enter_buffered_busy`, status 134,
   reproduced on Python 3.11; the CLI's floor is 3.12, where the subprocess test covers it). A caller
   with no stdin passes `None` and the pipe closes right after the request. The thread outlives the
-  call blocked in a read; `stream` is the last thing a command does. A consumer that leaves
-  (`| head`, quitting `less`, either stream) gets the semantics ssh gave it when ssh held the
-  operator's streams. The client closes its read end of that stream of ssh's, so ssh sees `EPIPE`,
-  and keeps pumping the other stream until the channel ends: a writer that keeps writing takes
-  `SIGPIPE` and the channel closes, while a quiet payload runs to its end. When stdout was abandoned
-  and the stderr trailer still arrives, the result is the guest's own `Completed(N)`; otherwise it
-  is `Unknown(CONSUMER_LEFT)`, which `stream` alone reports as 141, the status of a writer killed by
-  `SIGPIPE`. agw then flushes nothing more to the departed stream, pointing it at the null device so
-  interpreter shutdown cannot fail on it.
+  call blocked in a read; `stream` is the last thing a command does. A stdout consumer that leaves
+  (`| head`, quitting `less`) gets the semantics ssh gave it when ssh held the operator's stdout.
+  The client closes its read end of ssh's stdout, so ssh sees `EPIPE`, and keeps pumping stderr
+  until the channel ends: a writer that keeps writing takes `SIGPIPE` and the channel closes, while
+  a quiet payload runs to its end. A stderr consumer that leaves ends the request at once and the
+  client is killed, which ends the guest's writer: ssh only discards stderr after a failed write and
+  keeps the channel up, and the status travels on stderr, so nothing more could be learned. When
+  stdout was abandoned and the stderr trailer still arrives, the result is the guest's own
+  `Completed(N)`; otherwise it is `Unknown(CONSUMER_LEFT)`, which `stream` alone reports as 141, the
+  status of a writer killed by `SIGPIPE`. agw then flushes nothing more to the departed stream,
+  pointing it at the null device so interpreter shutdown cannot fail on it.
 - **Binary stdio.** Callers pass `sys.stdout.buffer` and `sys.stderr.buffer` (the text layer's
   `newline="\n"` at `cli/_entry.py:38` does not apply), after flushing the text layer (I2).
   `stream_to_operator(access, request)` in `access.py` is that wiring, flush, raw stdin and binary
