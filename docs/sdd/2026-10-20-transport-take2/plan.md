@@ -204,7 +204,7 @@ pass the static check, and the package's tests pass with the legacy modules bloc
   - the vm-platform `contract_version` bump.
 - [x] Add python3 to `PROVISIONING_PACKAGES`, which every platform's bootstrap already installs
       (`lima.py:391`, `wsl2_bootstrap.py:65`, and the AWS, Azure, GCP and Proxmox platforms).
-- [ ] Make `ProvisionResult.tailnet_address` required on every platform, and delete
+- [x] Make `ProvisionResult.tailnet_address` required on every platform, and delete
       `ProvisionResult.native_transport` and Phase A's native `tailscale ip -4` fallback:
   - all six platforms settle the address through one shared helper, `settle_tailnet_address`, over
     their own `run_as_root`, retrying so the key is never sent twice and logging the node out over
@@ -221,9 +221,9 @@ pass the static check, and the package's tests pass with the legacy modules bloc
 - [x] Add `UnknownReason.AUTH_FAILED` and its classifier row, typed from
       `Permission denied (publickey` in the client log, and widen the passphrase hint to
       `CONNECTION` or `AUTH_FAILED`.
-- [ ] Implement `reachability.py`: `wait(access, *, wording)` polls a fixed `true` probe, polls only
+- [x] Implement `reachability.py`: `wait(access, *, wording)` polls a fixed `true` probe, polls only
       `CONNECTION`, `TRUNCATED` and `DEADLINE`, and raises every other outcome at once.
-- [ ] Move Phase A and release probing onto `VMAccess`:
+- [x] Move Phase A and release probing onto `VMAccess`:
   - Phase A gets its own module, `vms/initializer/phase_a.py`, holding the fail-closed span and the
     sequence: record the address, first contact in Enroll mode through
     `execution.enrollment_access`, the enrollment post-condition, then the base checks including
@@ -243,11 +243,11 @@ pass the static check, and the package's tests pass with the legacy modules bloc
       and `PermissionDenied` for an agent-bound access, derived from the access's identity. An
       elevated attach is excluded by the types. Prove an elevated request on a fresh,
       never-initialized Debian 12 and 13 VM.
-- [ ] Add `vms/contract.py`: the `(id, severity, probe)` table, the script protocol and its parser,
+- [x] Add `vms/contract.py`: the `(id, severity, probe)` table, the script protocol and its parser,
       `observe_release`, `check_base` and `enforce`. Run the base checks first at reinit, moving
       slice 2's reinit pam_env warning into them, and add `vms/contract.py` to the package guard
       (HLA D14).
-- [ ] Amend ADR 0025.
+- [x] Amend ADR 0025.
 - [ ] Tests:
   - a VM failing a base check is not reported ready, and a warning-only report does not fail;
   - a platform that cannot report the address logs the node out over its provisioning channel and
