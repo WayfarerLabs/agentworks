@@ -87,8 +87,10 @@ class VMAccess:
         The client closes ssh's stdin right after the request. Each stream is
         read up to one pump constant (1 MiB); more is ``Unknown(OUTPUT_LIMIT)``.
         With ``check`` a result that is not ``Completed(0)`` raises its typed error.
-        The access's operation log, when it has one, records the request
-        before anything raises for its outcome, so a failure is logged too.
+        The access's operation log, when it has one, records every request
+        that reaches an outcome, before raising for a bad one. A request that
+        raises before it is dispatched (no client, no trust record) is not
+        logged.
         """
         stdout, stderr = pump.Capture(), pump.Capture()
         with self._passphrase_hint_on_connection_failure():

@@ -24,6 +24,7 @@ from agentworks.errors import ConnectivityError, StateError
 from agentworks.execution import envelope, pump, ssh_process, trust
 from agentworks.execution.requests import Script, Shell
 from agentworks.execution.results import Completed, Result
+from agentworks.secrets.line_safety import LineOrientedSecretUse, require_line_safe_secret
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -78,8 +79,6 @@ def run(
     dispatch: the script may have run.
     """
     if secret is not None:
-        from agentworks.secrets.line_safety import LineOrientedSecretUse, require_line_safe_secret
-
         secret = require_line_safe_secret(secret, use=LineOrientedSecretUse.TAILSCALE)
     nonce = envelope.new_nonce()
     raw = run_as_root(wrap(payload, nonce=nonce, secret=secret), deadline)

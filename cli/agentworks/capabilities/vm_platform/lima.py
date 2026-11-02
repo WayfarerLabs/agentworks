@@ -32,7 +32,8 @@ from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed, Lim
 from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConfigError, ConnectivityError, ProvisioningError, StateError
+from agentworks.errors import ConnectivityError, ProvisioningError, StateError
+from agentworks.execution.errors import ClientUnsupported
 from agentworks.naming import NAME_RE
 from agentworks.schema import AgwModel, NonEmptyStr
 from agentworks.topics import TopicProse
@@ -577,7 +578,7 @@ class LimaPlatform(VMPlatform):
             active_failure = sys.exc_info()[1]
             try:
                 self._remove_remote_template_dir(remote_template_dir)
-            except (LimaCommandFailed, ConnectivityError, ConfigError, OSError):
+            except (LimaCommandFailed, ConnectivityError, ClientUnsupported, OSError):
                 pass
             except KeyboardInterrupt:
                 if active_failure is None:
@@ -733,7 +734,7 @@ class LimaPlatform(VMPlatform):
                 check=False,
                 timeout=_STATUS_TIMEOUT_SECONDS,
             )
-        except (LimaCommandFailed, ConnectivityError, ConfigError):
+        except (LimaCommandFailed, ConnectivityError, ClientUnsupported):
             # A host that cannot be asked, or no limactl or ssh to ask it with.
             return VMStatus.UNKNOWN
 
