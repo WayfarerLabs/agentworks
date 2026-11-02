@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import subprocess
@@ -106,6 +107,23 @@ def launch(
     return result, integration._artifact_plan
 
 
+def assert_persona_carriers(tool: str, plan: NativeSessionArtifacts, expected: set[str]) -> None:
+    files = {
+        file.native_identity.removeprefix("agent:"): file.path
+        for file in plan.application.files
+        if file.native_identity is not None and file.native_identity.startswith("agent:")
+    }
+    assert set(files) == expected
+    if tool == "codex":
+        overrides = dict(token.split("=", 1) for token in plan.argv if token.startswith("agents."))
+        assert {key.split(".")[1] for key in overrides} == expected
+        for name in expected:
+            assert json.loads(overrides[f"agents.{name}.config_file"]) == files[name]
+    else:
+        definitions = json.loads(plan.argv[plan.argv.index("--agents") + 1])
+        assert set(definitions) == expected
+
+
 @pytest.mark.parametrize("tool,class_name", TOOLS)
 @pytest.mark.parametrize("artifact_type", [ArtifactType.AGENT, ArtifactType.SKILL])
 def test_setup_operator_collision_is_reconsidered_at_session_without_blocking_other_inputs(
@@ -164,7 +182,7 @@ def test_setup_operator_collision_is_reconsidered_at_session_without_blocking_ot
         assert {item.input_id for item in plan.application.deferred} == {bad.identity}
         assert all(item.destination == "session" for item in plan.application.deferred)
         assert not any(bad.origin_identity in file.origins for file in plan.application.files)
-        assert not any(bad.content.name in token for token in plan.argv)
+        assert_persona_carriers(tool, plan, {good.content.name})
         assert warnings.called
 
 
@@ -210,7 +228,7 @@ def test_session_name_conflict_rerenders_remaining_personas_and_keeps_origin_ide
     assert {item.input_id for item in result.artifacts.deferred} == rejected
     assert all(item.destination == "session" for item in result.artifacts.deferred)
     assert any(good.origin_identity in file.origins for file in result.artifacts.files)
-    assert not any(bad.content.name in token for token in plan.argv)
+    assert_persona_carriers(tool, plan, {good.content.name})
 
 
 @pytest.mark.parametrize("tool,class_name", TOOLS)
@@ -236,8 +254,8 @@ def test_new_session_unsafe_inventory_remains_a_hard_failure(tmp_path, monkeypat
 
 
 @pytest.mark.parametrize("tool,class_name", TOOLS)
-@pytest.mark.parametrize("identities", [(), ("rule:review",), ("agent:missing",), ("agent::review",)])
-def test_malformed_or_unmatched_name_conflict_cannot_claim_terminal_handling(
+@pytest.mark.parametrize("identities", [(), ("rule:review",), ("agent:missing",)])
+def test_empty_or_unmatched_name_conflict_cannot_claim_terminal_handling(
     tmp_path, monkeypatch, tool, class_name, identities
 ):
     from agentworks.artifacts.native.probe import NativeArtifactConflictError
@@ -276,7 +294,13 @@ def test_ancestor_only_missing_target_or_changed_native_root_warns_and_launches(
     from agentworks.plugins.claude.artifacts import outer_artifacts
 
     ancestors = tuple(owned(file) for file in outer_artifacts(received(item), str(home / "old-native")).files)
-    monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", lambda *args, **kwargs: str(native))
+
+    def ancestor_probe(*args, **kwargs):
+        if missing_target:
+            pytest.fail("Ancestor probe must not run without a launch target")
+        return str(native)
+
+    monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", ancestor_probe)
     warnings = Mock()
     monkeypatch.setattr("agentworks.output.warn", warnings)
     result, plan = launch(

@@ -214,7 +214,7 @@ def publish_artifacts(
             del current[path]
             checkpoint(tuple(current.values()))
         _report_file_changes("Removed", removed)
-        _report_file_changes("Removed", removed_sections, noun="managed artifact sections")
+        _report_file_changes("Removed", removed_sections, noun="managed artifact section")
         publication = sorted(
             planned.items(),
             key=lambda item: (
@@ -270,13 +270,14 @@ def publish_artifacts(
                 if path not in sections and observed_file is not None and (prior is None or path in modified):
                     adopted.append(path)
         _report_file_changes("Updated", updated)
-        _report_file_changes("Updated", updated_sections, noun="managed artifact sections")
-        _report_file_changes("Adopting", adopted, noun="matching artifact files")
+        _report_file_changes("Updated", updated_sections, noun="managed artifact section")
+        _report_file_changes("Adopting", adopted, noun="matching artifact file")
     return ArtifactPublication(tuple(current.values()), tuple(skipped))
 
 
-def _report_file_changes(action: str, paths: Sequence[str], *, noun: str = "artifact files") -> None:
+def _report_file_changes(action: str, paths: Sequence[str], *, noun: str = "artifact file") -> None:
     if paths:
+        noun += "s" if len(paths) != 1 else ""
         shown = paths if len(paths) <= 3 else (*paths[:2], "...")
         output.info(f"{action} {len(paths)} {noun} ({', '.join(shown)}).")
 

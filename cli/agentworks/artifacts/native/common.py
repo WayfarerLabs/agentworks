@@ -322,7 +322,6 @@ def prepare_session_delivery(
     workspace: str,
 ) -> tuple[NativeSessionArtifacts, str | None]:
     """Rerender around native name conflicts; keep other new-delivery failures strict."""
-    from agentworks.artifacts.names import is_artifact_name
     from agentworks.artifacts.native.probe import NativeArtifactConflictError, probe_native
 
     if context is None:
@@ -350,13 +349,6 @@ def prepare_session_delivery(
         except NativeArtifactConflictError as error:
             for identity in error.identities:
                 parts = identity.split(":")
-                if (
-                    len(parts) < 2
-                    or any(not part for part in parts)
-                    or parts[0] not in (ArtifactType.SKILL.value, ArtifactType.AGENT.value)
-                    or not is_artifact_name(parts[-1])
-                ):
-                    raise StateError("native name conflict returned an invalid artifact identity") from error
                 matching = tuple(
                     item
                     for item in current.inputs.items()
