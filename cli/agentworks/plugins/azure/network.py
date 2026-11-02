@@ -53,7 +53,7 @@ from agentworks.capabilities.vm_platform.ssh_exposure import (
     normalize_allow_cidrs,
     operator_ssh_prefixes,
 )
-from agentworks.errors import AuthorizationError, ProvisioningError
+from agentworks.errors import AgentworksError, AuthorizationError, ProvisioningError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -130,8 +130,9 @@ class AzureError(ProvisioningError):
     The optional entity / hint keywords are the base ``AgentworksError``
     ones, forwarded so a failure that KNOWS which resource it is about
     can say so (the service-principal credential build names its site and
-    its secret). :func:`wrap_azure_error`, which converts an arbitrary SDK
-    exception, has no such knowledge and passes none.
+    its secret). :func:`wrap_azure_error`, which converts an arbitrary
+    exception, has no such knowledge and passes only the hint of an
+    Agentworks error it wraps.
     """
 
     def __init__(
@@ -149,7 +150,7 @@ class AzureError(ProvisioningError):
 
 
 def wrap_azure_error(exc: Exception) -> AzureError:
-    """Convert an Azure SDK exception into an AzureError."""
+    """Convert an Azure SDK exception into an AzureError, keeping a wrapped Agentworks error's hint."""
     from azure.core.exceptions import HttpResponseError
 
     if isinstance(exc, HttpResponseError):
@@ -165,7 +166,7 @@ def wrap_azure_error(exc: Exception) -> AzureError:
         summary = f"{code}: {_trim_message(str(message))}" if code else _trim_message(str(message))
         return AzureError(summary, detail=str(exc))
 
-    return AzureError(str(exc), detail=str(exc))
+    return AzureError(str(exc), detail=str(exc), hint=exc.hint if isinstance(exc, AgentworksError) else None)
 
 
 def _trim_message(message: str) -> str:

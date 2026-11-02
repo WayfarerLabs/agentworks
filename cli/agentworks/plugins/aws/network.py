@@ -98,8 +98,8 @@ class EC2Error(ProvisioningError):
     The optional entity / hint keywords are the base ``AgentworksError`` ones,
     forwarded so a failure that KNOWS which resource it is about can say so (the
     explicit-credential build names its site and its secret). :func:`wrap_ec2_error`,
-    which converts an arbitrary SDK exception, has no such knowledge and passes
-    none.
+    which converts an arbitrary exception, has no such knowledge and passes
+    only the hint of an Agentworks error it wraps.
     """
 
     def __init__(
@@ -131,7 +131,8 @@ def error_code(exc: Exception) -> str | None:
 
 def wrap_ec2_error(exc: Exception) -> AgentworksError:
     """Map structured credential and permission codes to their domain types;
-    retain :class:`EC2Error` for other SDK and transport failures."""
+    retain :class:`EC2Error` for other SDK and transport failures, keeping a
+    wrapped Agentworks error's hint."""
     from botocore.exceptions import ClientError
 
     if isinstance(exc, (AuthorizationError, TokenRejectedError)):
@@ -146,7 +147,7 @@ def wrap_ec2_error(exc: Exception) -> AgentworksError:
         if code in _CREDENTIAL_REJECTION_CODES:
             return TokenRejectedError(f"AWS rejected the selected credential ({summary})")
         return EC2Error(summary, detail=str(exc))
-    return EC2Error(str(exc), detail=str(exc))
+    return EC2Error(str(exc), detail=str(exc), hint=exc.hint if isinstance(exc, AgentworksError) else None)
 
 
 def is_credential_rejection(exc: Exception) -> bool:

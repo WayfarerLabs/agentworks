@@ -19,6 +19,7 @@ from agentworks.debian import DebianRelease
 from agentworks.errors import (
     AuthorizationError,
     ConfigError,
+    ConnectivityError,
     NotFoundError,
     ProvisioningError,
     StateError,
@@ -342,6 +343,29 @@ def test_create_vm_preserves_typed_platform_failure(
 
     assert caught.value is failure
     assert db.get_vm("map-fail") is None
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [ConnectivityError("node did not report its address", hint="log in again"), RuntimeError("no hint here")],
+    ids=("agentworks-error", "other"),
+)
+def test_create_vm_wraps_an_untyped_platform_failure_with_its_hint(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+    failure: Exception,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    monkeypatch.setattr(LimaPlatform, "create", lambda *args, **kwargs: (_ for _ in ()).throw(failure))
+
+    with pytest.raises(ProvisioningError) as caught:
+        vm_manager.create_vm(db, make_config(), name="wrap-fail", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert caught.value.__cause__ is failure
+    assert caught.value.hint == getattr(failure, "hint", None)
 
 
 @pytest.mark.parametrize(

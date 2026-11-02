@@ -30,6 +30,7 @@ from agentworks.config import validate_admin_username
 from agentworks.db import SYSTEM_SLUG_KEY, InitStatus, ProvisioningStatus
 from agentworks.debian import CURRENT_DEBIAN_RELEASE, DebianRelease, probe_debian_release
 from agentworks.errors import (
+    AgentworksError,
     AlreadyExistsError,
     AuthorizationError,
     ConfigError,
@@ -592,6 +593,8 @@ def create_vm(
                     f"provisioning failed: {e}\nDetails: {logger.display_path}",
                     entity_kind="vm",
                     entity_name=vm_name,
+                    # The wrapped error's own guidance (a rerun, the admin console) still applies.
+                    hint=e.hint if isinstance(e, AgentworksError) else None,
                 ) from e
             db.record_vm_started(vm_name)
             # The platform's rollback window closes here: its create returned

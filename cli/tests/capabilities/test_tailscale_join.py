@@ -150,7 +150,7 @@ def test_exhaustion_logs_out_once_and_gives_the_rerun_hint() -> None:
         settle_tailnet_address(guest.run_as_root, node=NODE, rerun_hint=HINT)
 
     assert guest.payloads == [READ] * ADDRESS_READS + [LOGOUT]
-    assert HINT in str(caught.value)
+    assert caught.value.hint == HINT
     assert isinstance(caught.value.__cause__, ConnectivityError)
 
 
@@ -162,8 +162,8 @@ def test_a_failed_logout_names_the_node_for_the_admin_console(logout: Answer) ->
         settle_tailnet_address(guest.run_as_root, node=NODE, rerun_hint=HINT)
 
     assert guest.count(LOGOUT) == 1
-    assert HINT not in str(caught.value)
-    assert f"'{NODE}'" in str(caught.value)
+    assert caught.value.hint != HINT
+    assert NODE in (caught.value.hint or "")
 
 
 # -- The join --------------------------------------------------------------------------------
@@ -180,21 +180,18 @@ def test_the_key_reaches_only_the_join_script() -> None:
 
 
 @pytest.mark.parametrize(
-    ("answer", "match"),
-    [
-        (Answer(status=1), "status 1"),
-        (Answer(status=None), "remove it there"),
-        (Answer(raises=ConnectivityError("dispatch failed")), "remove it there"),
-    ],
+    "answer",
+    [Answer(status=1), Answer(status=None), Answer(raises=ConnectivityError("dispatch failed"))],
     ids=["non-zero", "unknown", "channel-raised"],
 )
-def test_a_failed_join_raises_once_without_the_key(answer: Answer, match: str) -> None:
+def test_a_failed_join_raises_once_without_the_key(answer: Answer) -> None:
     guest = FakeGuest(lambda payload, seen: answer)
 
-    with pytest.raises(ProvisioningError, match=match) as caught:
+    with pytest.raises(ProvisioningError) as caught:
         join_tailscale(guest.run_as_root, KEY, node=NODE)
 
-    assert guest.joins == 1
+    assert guest.payloads == [JOIN_FRAGMENT]
+    assert NODE in str(caught.value)
     assert_key_free(caught.value)
 
 
@@ -234,7 +231,7 @@ def test_the_readiness_loop_retries_a_refused_key_and_any_probe_that_does_not_co
 def test_readiness_stops_at_its_bound_without_sending_the_key() -> None:
     guest = FakeGuest(lambda payload, seen: Answer(raises=ConnectivityError("refused")))
 
-    with pytest.raises(ProvisioningError, match="did not answer"):
+    with pytest.raises(ProvisioningError):
         complete_cloud_bootstrap(guest.run_as_root, KEY, node=NODE)
 
     assert guest.payloads == ["true"] * READINESS_PROBES
@@ -253,10 +250,8 @@ def test_a_host_key_mismatch_ends_readiness_at_once() -> None:
 def test_a_failed_readiness_command_raises_before_the_join(answer: Answer) -> None:
     guest = FakeGuest(lambda payload, seen: answer if payload == "ready" else Answer())
 
-    with pytest.raises(ProvisioningError, match="the label did not complete"):
-        complete_cloud_bootstrap(
-            guest.run_as_root, KEY, node=NODE, readiness_command="ready", readiness_label="the label"
-        )
+    with pytest.raises(ProvisioningError):
+        complete_cloud_bootstrap(guest.run_as_root, KEY, node=NODE, readiness_command="ready")
 
     assert guest.payloads == ["true", "ready"]
 

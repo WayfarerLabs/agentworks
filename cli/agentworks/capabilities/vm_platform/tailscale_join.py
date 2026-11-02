@@ -38,7 +38,10 @@ READINESS_PAUSE_SECONDS = 10
 READINESS_PROBE_DEADLINE_SECONDS = 10
 READINESS_COMMAND_DEADLINE_SECONDS = 600
 
-CREATE_RERUN_HINT = "The create can be run again."
+CREATE_RERUN_HINT = (
+    "The partial VM was removed, so the create can be run again. The join spent the auth key: "
+    "a single-use key needs a fresh one first."
+)
 """The settle's guidance after a create's node was logged out: the backend was rolled back too."""
 
 DEFAULT_READINESS_COMMAND = "cloud-init status --wait"
@@ -64,8 +67,8 @@ def join_tailscale(run_as_root: Callable[[bytes, float], RawRun], auth_key: str,
 
 def _join_unknown(node: str) -> ProvisioningError:
     return ProvisioningError(
-        f"the outcome of joining node '{node}' to the tailnet is unknown; "
-        f"if '{node}' is listed in the Tailscale admin console, remove it there"
+        f"the outcome of joining node '{node}' to the tailnet is unknown",
+        hint=f"If '{node}' is listed in the Tailscale admin console, remove it there.",
     )
 
 
@@ -113,19 +116,19 @@ def settle_tailnet_address(run_as_root: Callable[[bytes, float], RawRun], *, nod
     A node whose address cannot be read is unusable, and core never enrolled
     its host key, so nothing could log it out later: when the reads are
     exhausted, ``tailscale logout`` runs once over the same channel. The
-    error then gives ``rerun_hint`` if the logout succeeded, and otherwise
-    names ``node`` for removal in the Tailscale admin console. The guidance
-    is in the message, since a create's caller wraps this error.
+    error's hint is then ``rerun_hint`` if the logout succeeded, and
+    otherwise names ``node`` for removal in the Tailscale admin console.
     """
     try:
         return read_tailnet_address(run_as_root, node=node)
     except ConnectivityError as error:
         failure = error
     if _log_out(run_as_root):
-        message = f"{failure}; the node was logged out of the tailnet. {rerun_hint}"
-    else:
-        message = f"{failure}, and it could not be logged out; remove '{node}' in the Tailscale admin console"
-    raise ConnectivityError(message) from failure
+        raise ConnectivityError(f"{failure}; the node was logged out of the tailnet", hint=rerun_hint) from failure
+    raise ConnectivityError(
+        f"{failure}, and it could not be logged out",
+        hint=f"Remove '{node}' in the Tailscale admin console.",
+    ) from failure
 
 
 def _log_out(run_as_root: Callable[[bytes, float], RawRun]) -> bool:

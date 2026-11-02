@@ -28,7 +28,7 @@ from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure, 
 from agentworks.capabilities.vm_platform.bootstrap_script import REBOOT_SENTINEL_PATH
 from agentworks.capabilities.vm_platform.lima import _REBOOT_CLEAR_MARKER, LimaPlatform
 from agentworks.capabilities.vm_platform.lima_host import LimaHost
-from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT
+from agentworks.capabilities.vm_platform.tailscale_join import CREATE_RERUN_HINT, JOIN_FRAGMENT
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.debian import DebianRelease
 from agentworks.errors import AgentworksError
@@ -248,6 +248,7 @@ def test_exhausted_address_reads_log_out_without_a_second_join(
     assert create.guest.joins == 1
     assert create.guest.count("tailscale logout") == 1
     assert create.guest.payloads[-1] == "tailscale logout"
+    assert caught.value.hint == CREATE_RERUN_HINT  # through every platform's own error wrapping
     assert_key_free(caught.value)
     assert_key_only_in_the_join(create, req, tmp_path, captured_output)
 
