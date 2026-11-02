@@ -120,8 +120,14 @@ class PublicAddressPlatform(VMPlatform):
 
     recovery_needs_guest_sshd: ClassVar[bool] = True
 
-    public_address_hint: ClassVar[str]
-    """Where to look when the provider reports no public address: the platform's console."""
+    @property
+    @abstractmethod
+    def public_address_hint(self) -> str:
+        """Where to look when the provider reports no public address: the platform's console.
+
+        Abstract, so registration refuses a cloud that leaves it out; a
+        subclass supplies it as a class attribute.
+        """
 
     @abstractmethod
     def _public_address(self, vm: VMRow, ctx: RunContext) -> str:

@@ -123,7 +123,7 @@ class AzureVMPlatform(PublicAddressPlatform):
         "operator.ssh_allow_cidrs in your agentworks config."
     )
 
-    public_address_hint: ClassVar[str] = (
+    public_address_hint = (
         "Check the VM's network configuration in the Azure portal (its NIC's public IP and the NSG's "
         "transient SSH allow), or use the serial console (Connect > Serial console on the VM resource page)."
     )
