@@ -118,14 +118,16 @@ def test_a_detached_command_clears_a_stale_result_and_runs_fresh(
 
 
 def test_a_placement_host_that_drops_for_a_while_does_not_end_the_detached_command(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
 ) -> None:
-    """ssh's 255 with no output is an unanswered check, asked again, not a finished or vanished command."""
+    """ssh's 255 is an unanswered check, asked again, not a finished or vanished command."""
     dropped = _Completed(255, "", "ssh: connect to host gpu-box port 22: Connection refused")
+    # A login banner on stdout does not make a dropped connection an answer.
+    dropped_after_banner = _Completed(255, "Welcome to gpu-box\n", "Connection closed by gpu-box")
     answers = {
         "test -f /var/tmp/agw-x.status": [dropped, dropped, _Completed(1, "", ""), _Completed(0, "", "")],
         "ps -p": [dropped, _Completed(0, "", "")],
-        "cat /var/tmp/agw-x.out 2>/dev/null": [dropped, dropped, _Completed(0, "limactl output\n", "")],
+        "cat /var/tmp/agw-x.out 2>/dev/null": [dropped_after_banner, dropped, _Completed(0, "limactl output\n", "")],
         "cat /var/tmp/agw-x.status 2>/dev/null": [dropped, _Completed(0, "0\n", "")],
     }
     launched = False
@@ -147,3 +149,4 @@ def test_a_placement_host_that_drops_for_a_while_does_not_end_the_detached_comma
 
     assert (result.exit_code, result.output) == (0, "limactl output\n")
     assert all(len(queue) == 1 for queue in answers.values())  # every dropped answer was asked again
+    assert len(captured_output.warnings) == 1  # the poll's first unanswered check, once
