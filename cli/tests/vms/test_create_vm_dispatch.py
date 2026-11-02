@@ -33,8 +33,6 @@ from tests.conftest import CapturedOutput, ManifestDoc, pin_wsl2_unsupported, wr
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY, write_test_ssh_keypair
 
-pytestmark = pytest.mark.usefixtures("verified_debian_release")
-
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -99,26 +97,14 @@ def test_create_vm_request_shape_and_row(
     attested_release: list[DebianRelease] = []
     outcomes: list[OverlayOutcome] = []
     start_events: list[str] = []
-    native_transport = SimpleNamespace()
     monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
-
-    def _verify_release(transport: object, *, expected: DebianRelease) -> DebianRelease:
-        assert transport is native_transport
-        start_events.append("attest")
-        attested_release.append(expected)
-        return expected
-
-    monkeypatch.setattr(
-        "agentworks.vms.manager.lifecycle.probe_debian_release",
-        _verify_release,
-    )
 
     def _fake_create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
         start_events.append("provider-create")
         captured_platform.append(self)
         captured_request.append(request)
         return ProvisionResult(
-            native_transport=native_transport,  # type: ignore[arg-type]
+            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "dvm"},
             tailnet_address="100.64.0.7",
         )
@@ -131,13 +117,17 @@ def test_create_vm_request_shape_and_row(
         record_vm_started(name)
 
     monkeypatch.setattr(db, "record_vm_started", _record_started)
-    # Phase A / Phase B are faked here: this suite pins the create()
-    # request shape and the persisted row, not the init sequence.
-    monkeypatch.setattr(
-        vm_manager,
-        "bootstrap_vm",
-        lambda *a, **k: (SimpleNamespace(), "/home/agentworks"),
-    )
+
+    # Phase A is faked here: it attests and records the release core asked
+    # for, which Phase B then receives. This suite pins the create() request
+    # shape and the persisted row, not the init sequence.
+    def _attest(*args: object, expected_release: DebianRelease, tailnet_address: str, **kwargs: object):
+        start_events.append("attest")
+        attested_release.append(expected_release)
+        db.update_vm_debian_release("dvm", expected_release)
+        return SimpleNamespace(), "/home/agentworks", expected_release
+
+    monkeypatch.setattr(vm_manager, "bootstrap_vm", _attest)
 
     def _fake_init(*args: object, **kwargs: object) -> None:
         del args
@@ -369,26 +359,25 @@ def test_create_vm_wraps_an_untyped_platform_failure_with_its_hint(
 
 
 @pytest.mark.parametrize(
-    ("failure", "wrapped"),
+    "failure",
     [
-        pytest.param(StateError("guest release mismatch"), True, id="mismatch"),
-        pytest.param(RuntimeError("private-transport-sentinel"), True, id="transport-failure"),
-        pytest.param(KeyboardInterrupt("stop"), False, id="interrupt"),
-        pytest.param(UserAbort("stop"), False, id="user-abort"),
+        pytest.param(StateError("guest release mismatch"), id="mismatch"),
+        pytest.param(RuntimeError("private-transport-sentinel"), id="phase-a-failure"),
+        pytest.param(KeyboardInterrupt("stop"), id="interrupt"),
+        pytest.param(UserAbort("stop"), id="user-abort"),
     ],
 )
-def test_create_vm_core_release_attestation_uses_core_release_and_retains_failed_row(
+def test_create_vm_attests_the_core_release_and_retains_an_unattested_vm_failed(
     db: Database,
     make_config,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
     failure: BaseException,
-    wrapped: bool,
 ) -> None:
+    """Phase A attests the release core asked for, whatever the platform did to the request, and a VM
+    whose Phase A did not complete is retained failed, addressable for delete, with no release recorded."""
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.db import InitStatus, ProvisioningStatus
-
-    native_transport = SimpleNamespace()
 
     def _create_with_mutated_request(
         _self: LimaPlatform,
@@ -397,51 +386,30 @@ def test_create_vm_core_release_attestation_uses_core_release_and_retains_failed
     ) -> ProvisionResult:
         request.debian_release = DebianRelease.BOOKWORM
         return ProvisionResult(
-            native_transport=native_transport,  # type: ignore[arg-type]
+            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "unverified"},
             tailnet_address="100.64.0.7",
         )
 
-    monkeypatch.setattr(
-        LimaPlatform,
-        "create",
-        _create_with_mutated_request,
-    )
+    monkeypatch.setattr(LimaPlatform, "create", _create_with_mutated_request)
 
-    def _fail_attestation(transport: object, *, expected: DebianRelease) -> DebianRelease:
-        assert transport is native_transport
-        assert expected is DebianRelease.TRIXIE
+    def _failing_phase_a(*args: object, expected_release: DebianRelease, **kwargs: object) -> None:
+        assert expected_release is DebianRelease.TRIXIE
         raise failure
 
+    monkeypatch.setattr(vm_manager, "bootstrap_vm", _failing_phase_a)
     monkeypatch.setattr(
-        "agentworks.vms.manager.lifecycle.probe_debian_release",
-        _fail_attestation,
-    )
-    monkeypatch.setattr(
-        vm_manager,
-        "bootstrap_vm",
-        lambda *args, **kwargs: pytest.fail("Phase A reached after core release attestation failed"),
+        vm_manager, "run_initialization", lambda *a, **k: pytest.fail("Phase B reached after Phase A failed")
     )
 
-    def _create() -> None:
-        vm_manager.create_vm(
-            db,
-            make_config(),
-            name="unverified",
-            interaction=TtyInteractionPolicy.REFUSE,
-        )
+    with pytest.raises((ProvisioningError, KeyboardInterrupt, UserAbort)) as caught:
+        vm_manager.create_vm(db, make_config(), name="unverified", interaction=TtyInteractionPolicy.REFUSE)
 
-    if wrapped:
-        with pytest.raises(StateError) as wrapped_caught:
-            _create()
-        assert wrapped_caught.value.entity_kind == "vm"
-        assert wrapped_caught.value.entity_name == "unverified"
-        assert wrapped_caught.value.__cause__ is failure
-        assert "private-transport-sentinel" not in str(wrapped_caught.value)
+    if isinstance(failure, Exception) and not isinstance(failure, UserAbort):
+        assert isinstance(caught.value, ProvisioningError)
+        assert caught.value.__cause__ is failure
     else:
-        with pytest.raises((KeyboardInterrupt, UserAbort)) as control_caught:
-            _create()
-        assert control_caught.value is failure
+        assert caught.value is failure
     row = db.get_vm("unverified")
     assert row is not None
     assert row.platform_metadata == {"instance_name": "unverified"}
@@ -475,7 +443,7 @@ def test_create_vm_logger_close_failure_retains_owner_and_reports_once(
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *args, **kwargs: (SimpleNamespace(), "/home/agentworks"),
+        lambda *args, **kwargs: (SimpleNamespace(), "/home/agentworks", DebianRelease.TRIXIE),
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *args, **kwargs: None)
     monkeypatch.setattr(SSHLogger, "close", lambda self: (_ for _ in ()).throw(RuntimeError("close failed")))
@@ -532,7 +500,7 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *a, **k: (SimpleNamespace(), "/home/agentworks"),
+        lambda *a, **k: (SimpleNamespace(), "/home/agentworks", DebianRelease.TRIXIE),
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
@@ -696,7 +664,7 @@ def test_create_vm_composes_r11_hostname_with_slug(
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *a, **k: (SimpleNamespace(), "/home/agentworks"),
+        lambda *a, **k: (SimpleNamespace(), "/home/agentworks", DebianRelease.TRIXIE),
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 

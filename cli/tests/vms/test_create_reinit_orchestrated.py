@@ -21,7 +21,7 @@ from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
 from agentworks.db import VersionedPayload, VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConfigError, ExternalError, StateError, ValidationError
+from agentworks.errors import ConfigError, ExternalError, StateError, UserAbort, ValidationError
 from agentworks.execution.requests import Script
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result
 from agentworks.output import Role
@@ -30,12 +30,10 @@ from agentworks.vms import manager as vm_manager
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.contract import ACCOUNTS_VARIABLE
 from agentworks.vms.templates import ResolvedVMTemplate
-from tests.conftest import ManifestDoc, pin_wsl2_unsupported, seed_vm_trust, ssh_enrolls_on_first_use, write_manifests
+from tests.conftest import ManifestDoc, pin_wsl2_unsupported, seed_vm_trust, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import write_test_ssh_keypair
 from tests.vm_access_support import AccessRecorder, Admin
-
-pytestmark = pytest.mark.usefixtures("verified_debian_release")
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -81,6 +79,17 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 @pytest.fixture(autouse=True)
 def _no_tailscale_check(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
+
+
+def _completed_phase_a(
+    db_: Database, config_: object, vm_name: str, *args: object, **kwargs: object
+) -> tuple[object, str, DebianRelease]:
+    """Stands in for a Phase A that passed: provisioning complete and the requested release attested."""
+    from agentworks.db import ProvisioningStatus
+
+    db_.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
+    release = cast("DebianRelease", kwargs["expected_release"])
+    return SimpleNamespace(), "/home/agentworks", release
 
 
 # -- vm create: the derived graph --------------------------------------------
@@ -268,10 +277,10 @@ def test_create_admin_spec_credential_joins_graph_and_logger_redactions(
 
     monkeypatch.setattr(LimaPlatform, "create", _create)
 
-    def _phase_a(*args: object, **kwargs: object) -> tuple[object, str]:
+    def _phase_a(*args: object, **kwargs: object) -> tuple[object, str, DebianRelease]:
         events.append("phase-a")
-        assert args[6] is loggers[0]
-        return SimpleNamespace(), "/home/agentworks"
+        assert args[5] is loggers[0]
+        return _completed_phase_a(*args, **kwargs)
 
     monkeypatch.setattr(vm_manager, "bootstrap_vm", _phase_a)
 
@@ -426,7 +435,7 @@ def test_successful_create_propagates_fresh_logger_close_interrupt(
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *args, **kwargs: (SimpleNamespace(), "/home/agentworks"),
+        _completed_phase_a,
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *args, **kwargs: None)
 
@@ -615,11 +624,7 @@ def test_create_init_failure_keeps_the_row(
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
     monkeypatch.setattr(LimaPlatform, "vm_active", _noop_hold)
     # Phase A succeeds (its steps are exercised elsewhere); Phase B explodes.
-    monkeypatch.setattr(
-        vm_manager,
-        "bootstrap_vm",
-        lambda *a, **k: (SimpleNamespace(), "/home/agentworks"),
-    )
+    monkeypatch.setattr(vm_manager, "bootstrap_vm", _completed_phase_a)
 
     def _init_boom(*a: object, **k: object) -> None:
         raise RuntimeError("init exploded")
@@ -676,6 +681,87 @@ def test_create_phase_a_failure_maps_to_provisioning_error(
     assert row.provisioning_status == ProvisioningStatus.FAILED.value
 
 
+@pytest.mark.parametrize(
+    ("failure", "raised"),
+    [
+        (KeyboardInterrupt(), KeyboardInterrupt),
+        (UserAbort("stop"), UserAbort),
+        (RuntimeError("hold failed"), ExternalError),
+    ],
+    ids=["interrupt", "user-abort", "failure"],
+)
+def test_create_retains_a_vm_failed_whenever_phase_a_did_not_complete(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,
+    failure: BaseException,
+    raised: type[BaseException],
+) -> None:
+    """The availability hold is entered before Phase A, with the row still pending: a VM stopped
+    there was never attested, so it is retained failed, out of the ordinary commands' gates."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.db import ProvisioningStatus
+
+    monkeypatch.setattr(
+        LimaPlatform,
+        "create",
+        lambda self, request, ctx: ProvisionResult(  # noqa: ARG005
+            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            platform_metadata={},
+            tailnet_address="100.64.0.7",
+        ),
+    )
+
+    @contextlib.contextmanager
+    def _hold_fails(self: LimaPlatform, vm: object, *, config: object | None = None):
+        raise failure
+        yield
+
+    monkeypatch.setattr(LimaPlatform, "vm_active", _hold_fails)
+    monkeypatch.setattr(vm_manager, "bootstrap_vm", lambda *a, **k: pytest.fail("Phase A reached"))
+
+    with pytest.raises(raised) as caught:
+        vm_manager.create_vm(db, make_config(), name="hvm", interaction=TtyInteractionPolicy.REFUSE)
+
+    row = db.get_vm("hvm")
+    assert row is not None
+    assert row.provisioning_status == ProvisioningStatus.FAILED.value
+    if isinstance(caught.value, ExternalError):
+        assert "vm delete hvm" in (caught.value.hint or "")
+
+
+def test_an_interrupt_after_phase_a_completed_leaves_the_vm_complete(
+    make_config, db: Database, monkeypatch: pytest.MonkeyPatch, captured_output
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.db import ProvisioningStatus
+
+    monkeypatch.setattr(
+        LimaPlatform,
+        "create",
+        lambda self, request, ctx: ProvisionResult(  # noqa: ARG005
+            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            platform_metadata={},
+            tailnet_address="100.64.0.7",
+        ),
+    )
+    monkeypatch.setattr(LimaPlatform, "vm_active", _noop_hold)
+    monkeypatch.setattr(vm_manager, "bootstrap_vm", _completed_phase_a)
+
+    def _interrupt(*a: object, **k: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(vm_manager, "run_initialization", _interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        vm_manager.create_vm(db, make_config(), name="cvm", interaction=TtyInteractionPolicy.REFUSE)
+
+    row = db.get_vm("cvm")
+    assert row is not None
+    assert row.provisioning_status == ProvisioningStatus.COMPLETE.value
+
+
 def _stub_create_with_trust_probes(
     monkeypatch: pytest.MonkeyPatch,
     db: Database,
@@ -696,13 +782,14 @@ def _stub_create_with_trust_probes(
         seen["file_at_create"] = binding.provisioning_file.is_file()
         return ProvisionResult(native_transport=SimpleNamespace(), platform_metadata={}, tailnet_address="100.64.0.7")  # type: ignore[arg-type]
 
-    def _bootstrap(db_: Database, config_: object, vm_name: str, *a: object, **k: object) -> tuple[object, str]:
-        # Core keeps using the create-time transport here (release probe,
-        # Phase A's fallback), so the file must still exist.
+    def _bootstrap(
+        db_: Database, config_: object, vm_name: str, *a: object, **k: object
+    ) -> tuple[object, str, DebianRelease]:
+        # Nothing after the platform's create reaches the VM at its public address.
         seen["file_at_bootstrap"] = seen["binding"].provisioning_file.is_file()  # type: ignore[attr-defined]
         if bootstrap_fails:
             raise RuntimeError("bootstrap exploded")
-        return SimpleNamespace(), "/home/agentworks"
+        return _completed_phase_a(db_, config_, vm_name, *a, **k)
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
     monkeypatch.setattr(LimaPlatform, "vm_active", _noop_hold)
@@ -731,7 +818,7 @@ def test_create_resets_the_store_once_the_row_exists_and_hands_cloud_create_an_u
     assert isinstance(binding, trust.TrustBinding)
     assert binding.mode is trust.TrustMode.UNVERIFIED
     assert seen["file_at_create"] is True
-    assert seen["file_at_bootstrap"] is True
+    assert seen["file_at_bootstrap"] is False
     assert binding.provisioning_file is not None
     assert not binding.provisioning_file.exists()
 
@@ -805,17 +892,9 @@ def test_create_phase_a_sync_failure_is_non_fatal(
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
     monkeypatch.setattr(LimaPlatform, "vm_active", _noop_hold)
 
-    class _FakeTS:
-        def __init__(self, **kwargs: object) -> None:
-            self.host = kwargs.get("host")
-            self.logger = kwargs.get("logger")
-            self.trust = kwargs.get("trust")
-
-        def run(self, cmd: str, timeout: int | None = None) -> object:
-            ssh_enrolls_on_first_use(self.trust)
-            return SimpleNamespace(ok=True, stdout="ok", returncode=0)
-
-    monkeypatch.setattr(driver, "SSHTransport", _FakeTS)
+    # Phase A runs for real over the recording access (the module's contract fixture);
+    # Phase B's legacy target is only built, since the initializer is faked.
+    monkeypatch.setattr(driver, "SSHTransport", lambda **kwargs: SimpleNamespace(**kwargs))
 
     # The SSH-config sync fails (e.g. read-only home) at the end of Phase A
     # (and again on the post-init re-sync); both sites handle it non-fatally.
@@ -862,20 +941,9 @@ def test_create_provisioning_section_has_explicit_closing_body_line(
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
     monkeypatch.setattr(LimaPlatform, "vm_active", _noop_hold)
 
-    class _FakeTS:
-        """Stand-in for the Tailscale SSHTransport: the verify and the
-        reconnect wait both call ``run`` and it just succeeds."""
-
-        def __init__(self, **kwargs: object) -> None:
-            self.host = kwargs.get("host")
-            self.logger = kwargs.get("logger")
-            self.trust = kwargs.get("trust")
-
-        def run(self, cmd: str, timeout: int | None = None) -> object:
-            ssh_enrolls_on_first_use(self.trust)
-            return SimpleNamespace(ok=True, stdout="ok", returncode=0)
-
-    monkeypatch.setattr(driver, "SSHTransport", _FakeTS)
+    # Phase A runs for real over the recording access (the module's contract fixture);
+    # Phase B's legacy target is only built, since the initializer is faked.
+    monkeypatch.setattr(driver, "SSHTransport", lambda **kwargs: SimpleNamespace(**kwargs))
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
     vm_manager.create_vm(db, config, name="pvm", interaction=TtyInteractionPolicy.REFUSE)

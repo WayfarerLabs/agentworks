@@ -74,15 +74,6 @@ requires_posix_shell = pytest.mark.skipif(
 )
 
 
-@pytest.fixture
-def verified_debian_release(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make offline manager creates observe the release they requested."""
-    monkeypatch.setattr(
-        "agentworks.vms.manager.lifecycle.probe_debian_release",
-        lambda transport, *, expected=None: expected,
-    )
-
-
 @pytest.fixture(scope="session", autouse=True)
 def _isolate_ssh_logs(tmp_path_factory: pytest.TempPathFactory) -> Generator[None, None, None]:
     """Keep default SSH logs in this worker's temporary directory."""
@@ -1037,11 +1028,12 @@ def ssh_enrolls_on_first_use(trust_binding: object) -> None:
 
 @pytest.fixture
 def vm_access_recorder(monkeypatch: pytest.MonkeyPatch) -> AccessRecorder:
-    """Route every ``execution.vm_access`` call to a recording fake, and resolve ssh without a client."""
+    """Route ``execution.vm_access`` and ``enrollment_access`` to a recording fake, and resolve ssh without a client."""
     from tests.vm_access_support import AccessRecorder
 
     recorder = AccessRecorder()
     monkeypatch.setattr("agentworks.execution.vm_access", recorder.vm_access)
+    monkeypatch.setattr("agentworks.execution.enrollment_access", recorder.enrollment_access)
     monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: recorder.client)
     return recorder
 

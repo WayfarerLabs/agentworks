@@ -7,9 +7,9 @@ imports below for why those calls are routed through the package object
 rather than a plain top-level import.
 
 ``create_vm`` splits the initializer's two phases across its output
-sections: Phase A (``bootstrap_vm``: record the platform-owned bootstrap,
-verify Tailscale connectivity, and sync SSH config) is the tail of the
-``Provisioning`` section, and Phase B
+sections: Phase A (``bootstrap_vm``: record the platform's address, enroll
+the host key on first contact, check the VM contract, and sync SSH config)
+is the tail of the ``Provisioning`` section, and Phase B
 (``run_initialization``) runs after it as the ``VM Initialization`` /
 ``Admin Initialization`` sections. A single keepalive hold (an
 ``ExitStack`` entered before Phase A, released after Phase B) spans both,
@@ -29,7 +29,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.base import RetainedProvisioningError
 from agentworks.config import validate_admin_username
 from agentworks.db import SYSTEM_SLUG_KEY, InitStatus, ProvisioningStatus
-from agentworks.debian import CURRENT_DEBIAN_RELEASE, DebianRelease, probe_debian_release
+from agentworks.debian import CURRENT_DEBIAN_RELEASE, DebianRelease
 from agentworks.errors import (
     AgentworksError,
     AlreadyExistsError,
@@ -91,13 +91,32 @@ def _warn_init_cancel(vm_name: str) -> None:
     )
 
 
+def _fail_unattested(db: Database, vm_name: str) -> bool:
+    """Mark a VM whose provisioning never completed as failed, and say whether it was one.
+
+    Phase A writes ``complete`` only once the VM contract passed, and the
+    ordinary-command gates block a ``failed`` row, so a VM interrupted or
+    failed before then is retained as failed whatever window it was in,
+    the availability hold before Phase A included. Best effort: the original
+    failure or interrupt keeps propagating.
+    """
+    try:
+        vm = db.get_vm(vm_name)
+        if vm is None or vm.provisioning_status == ProvisioningStatus.COMPLETE.value:
+            return False
+        db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
+    except Exception as error:
+        output.warn(f"could not mark VM '{vm_name}' failed: {error}")
+    return True
+
+
 def _raise_init_failure(db: Database, vm_name: str, cause: Exception) -> NoReturn:
     """Map a non-cancellation failure in either init phase to its outcome.
 
-    A VM whose provisioning is ``failed`` (Phase A marked it so) raises a
-    ``ProvisioningError`` with delete guidance; otherwise the VM provisioned
-    but a later step failed, so it raises an ``ExternalError`` (the VM may
-    still be usable, reinit guidance). Both carry the ``Details:`` pointer to
+    A VM whose provisioning is not ``complete`` (it never passed Phase A, and
+    reinit refuses such a row) raises a ``ProvisioningError`` with delete
+    guidance; otherwise the VM provisioned but a later step failed, so it
+    raises an ``ExternalError`` (the VM may still be usable, reinit guidance). Both carry the ``Details:`` pointer to
     the most recent ``vm-create`` log when one exists. Shared by Phase A and
     Phase B so both fail identically.
     """
@@ -109,7 +128,7 @@ def _raise_init_failure(db: Database, vm_name: str, cause: Exception) -> NoRetur
         log_hint = f"\nDetails: {logs[0]}"
 
     vm = db.get_vm(vm_name)
-    if vm is not None and vm.provisioning_status == ProvisioningStatus.FAILED.value:
+    if vm is not None and vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
         raise ProvisioningError(
             f"provisioning failed: {cause}{log_hint}",
             entity_kind="vm",
@@ -513,6 +532,10 @@ def create_vm(
 
             init_stack.callback(_close_create_logger)
 
+            # The provisioning trust file exists for the platform's create
+            # alone: cloud provisioning reaches the VM at its public address
+            # before it is in the store, and nothing after create does.
+            provisioning_files = ExitStack()
             try:
                 request = ProvisionRequest(
                     vm_name=vm_name,
@@ -522,11 +545,7 @@ def create_vm(
                     admin_username=resolved_admin_username,
                     ssh_public_key=prepared_ssh.public_text,
                     ssh_private_key=config.operator.ssh_private_key,
-                    # Cloud provisioning reaches the VM at its public address,
-                    # before it is in the store. The file is deleted when the
-                    # stack unwinds, after Phase B, because core keeps using
-                    # the create-time transport until Phase A.
-                    provisioning_trust=init_stack.enter_context(trust.provisioning_binding(vm_name)),
+                    provisioning_trust=provisioning_files.enter_context(trust.provisioning_binding(vm_name)),
                     tailscale_auth_key=tailscale_auth_key,
                     progress=logger,
                     cpus=resolved_cpus,
@@ -544,10 +563,12 @@ def create_vm(
                 # detail one notch deeper).
                 output.info(f"Creating VM '{vm_name}' on vm-site '{site}' ({creation_release.value})...")
             except BaseException:
+                provisioning_files.close()
                 log.unwind()
                 raise
             try:
-                result = platform_obj.create(request, platform_ctx)
+                with provisioning_files:
+                    result = platform_obj.create(request, platform_ctx)
             except RetainedProvisioningError as e:
                 # Rollback could not prove the backend clean. Persist the
                 # platform's exact identifiers and keep the provisional row so
@@ -612,44 +633,15 @@ def create_vm(
                 render_overlay_outcome(overlay_outcome)
                 raise
 
-            # A platform's success return does not prove the guest's identity,
-            # so core independently observes the live release over the returned
-            # transport. Metadata is
-            # already durable: if attestation fails after the platform closed
-            # its rollback window, the failed row still addresses the backend
-            # for an explicit delete.
-            try:
-                output.info(f"Confirming Debian release {creation_release.value}...")
-                observed_release = probe_debian_release(
-                    result.native_transport,
-                    expected=creation_release,
-                )
-            except (KeyboardInterrupt, UserAbort):
-                db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
-                output.warn(
-                    f"VM '{vm_name}' exists but its Debian release was not verified; "
-                    f"run 'agw vm delete {vm_name}' to remove it."
-                )
-                raise
-            except Exception as e:
-                db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
-                raise StateError(
-                    f"Agentworks could not verify VM '{vm_name}' as Debian {creation_release.value} "
-                    f"after vm-platform/{platform_obj.name} returned success",
-                    entity_kind="vm",
-                    entity_name=vm_name,
-                    hint=f"Run 'agw vm delete {vm_name}' to remove the unverified VM, then update the platform.",
-                ) from e
-
-            db.update_vm_debian_release(vm_name, observed_release)
-
-            # -- Phase A: record + verify connectivity (the tail of Provisioning) --
-            # Past the unwind window: if anything below fails, the VM exists on
-            # the remote host and is kept (debuggable, reinit-able). The hold is
-            # entered here so it spans Phase A and Phase B; the row exists (the
-            # insert above), so no power-state convergence is threaded, only the
-            # hold-span. The manager closes the Provisioning section explicitly
-            # after Phase A returns.
+            # -- Phase A: first contact and the VM contract (the tail of Provisioning) --
+            # Past the unwind window: the VM exists on the backend, so it is
+            # kept, and only an attested one is ever marked complete. Metadata
+            # is already durable, so a failed row still addresses the backend
+            # for an explicit delete. The hold is entered here so it spans
+            # Phase A and Phase B; the row exists (the insert above), so no
+            # power-state convergence is threaded, only the hold-span. The
+            # manager closes the Provisioning section explicitly after Phase A
+            # returns.
             init_row = db.get_vm(vm_name)
             assert init_row is not None, "create_vm inserted the row before init"
             try:
@@ -657,16 +649,16 @@ def create_vm(
                 # so a failure to open it maps like any other init failure, as
                 # it did when the hold was entered inside the old initialize_vm.
                 init_stack.enter_context(platform_obj.vm_active(init_row, config=config))
-                ts_target, home = _mgr.bootstrap_vm(
+                ts_target, home, observed_release = _mgr.bootstrap_vm(
                     db,
                     config,
                     vm_name,
-                    result.native_transport,
                     platform_obj,
                     platform_ctx,
                     logger,
                     admin_username=resolved_admin_username,
                     tailnet_address=result.tailnet_address,
+                    expected_release=creation_release,
                     on_tailscale_ready=_on_tailscale_ready,
                 )
                 output.info("Provisioning complete.")
@@ -674,10 +666,16 @@ def create_vm(
                 # An operator abort must never downgrade to a
                 # Provisioning/External error; re-raise as itself after the
                 # recovery-guidance warning.
-                _warn_init_cancel(vm_name)
+                if _fail_unattested(db, vm_name):
+                    output.warn(
+                        f"VM '{vm_name}' exists but was not verified; run 'agw vm delete {vm_name}' to remove it."
+                    )
+                else:
+                    _warn_init_cancel(vm_name)
                 render_overlay_outcome(overlay_outcome)
                 raise
             except Exception as e:
+                _fail_unattested(db, vm_name)
                 render_overlay_outcome(overlay_outcome)
                 _raise_init_failure(db, vm_name, e)
 

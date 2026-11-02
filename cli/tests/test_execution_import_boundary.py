@@ -33,6 +33,7 @@ MIGRATED_FILES = (
     "plugins/proxmox/guest_agent.py",
     "vms/contract.py",
     "vms/manager/release.py",
+    "vms/initializer/phase_a.py",
 )
 
 

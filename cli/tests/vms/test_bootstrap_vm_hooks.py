@@ -1,18 +1,15 @@
-"""``bootstrap_vm``'s platform-hook wiring, both directions.
+"""``bootstrap_vm``'s platform-hook wiring, both directions, and what it hands Phase B.
 
 Success: a completed Phase A ends in the ``on_tailscale_ready`` callback
 firing (``create_vm`` wires that callback to the platform's
-``post_tailscale_ready``, the seam where Azure removes its scoped
-bootstrap SSH allow on the happy path). Failure: the kept-FAILED path
-calls the platform's ``secure_failed_vm`` hook best-effort (fail closed:
-without it a failed Azure VM would keep its bootstrap ingress
-indefinitely), and the original error keeps propagating even when the
-hook itself fails. The same fail-closed contract holds for an operator
-interrupt (KeyboardInterrupt escapes the Exception arm but still
-secures, without touching the row's status).
+``post_tailscale_ready``, the seam where Azure removes its scoped bootstrap
+SSH allow on the happy path). Failure: the kept-failed path calls the
+platform's ``secure_failed_vm`` hook best-effort (fail closed: without it a
+failed Azure VM would keep its bootstrap ingress indefinitely), and the
+original error keeps propagating even when the hook itself fails. The same
+holds for an operator interrupt, which also leaves an unattested VM failed.
 
-``_phase_a_bootstrap`` is stubbed (its internals are exercised
-elsewhere); the real ``bootstrap_vm`` body runs over a real Database row.
+Phase A runs for real over a database row and the recording ``VMAccess``.
 """
 
 from __future__ import annotations
@@ -25,224 +22,113 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.db import ProvisioningStatus
-from agentworks.errors import ProvisioningError
+from agentworks.debian import DebianRelease
+from agentworks.errors import StateError
+from agentworks.execution import trust
 from agentworks.vms.initializer import driver
-from tests.native_exec_support import ExecutionOnlyTransport
+from tests.vms.phase_a_support import ADDRESS, VM, PhaseAHarness, contract_outcomes
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Callable
 
     from agentworks.db import Database
+    from tests.vm_access_support import AccessRecorder
 
-
-class _SpyPlatform:
-    """Platform stand-in recording the hook calls the driver makes."""
-
-    name = "stub"
-
-    def __init__(self) -> None:
-        self.secured: list[str] = []
-        self.secure_error: Exception | None = None
-
-    def secure_failed_vm(self, vm: object, ctx: object) -> None:
-        if self.secure_error is not None:
-            raise self.secure_error
-        self.secured.append(getattr(vm, "name", "?"))
-
-
-def _stub_exec_target() -> ExecutionOnlyTransport:
-    """The provisioning transport as the driver uses it directly: it
-    assigns ``.logger`` and calls ``.describe()``."""
-    return ExecutionOnlyTransport(label="stub-transport")
+FAILING_SCRIPT = b"AGW-CHECK base-tools flock\nAGW-CHECK-END\n"
 
 
 @pytest.fixture
-def _hermetic_driver(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Point the SSH log dir at tmp and stub the function-local imports
-    ``bootstrap_vm`` reaches after the hook (reconnect wait, SSH-config
-    sync) so the tests never touch the network or the operator's home."""
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    monkeypatch.setattr("agentworks.transports.wait_for_reconnect", lambda *a, **k: True)
+def phase(db: Database, vm_access_recorder: AccessRecorder, monkeypatch: pytest.MonkeyPatch) -> PhaseAHarness:
+    """Phase A's harness, with the reconnect pauses, the SSH-config sync and Phase B's transport stubbed."""
+    monkeypatch.setattr("agentworks.execution.reachability.time.sleep", lambda seconds: None)
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
+    monkeypatch.setattr(driver, "SSHTransport", lambda **kwargs: SimpleNamespace(**kwargs))
+    return PhaseAHarness(db, vm_access_recorder)
 
 
-def _call_bootstrap(db: Database, platform: _SpyPlatform, on_ready: Any) -> tuple[Any, str]:
-    logger = SimpleNamespace(display_path="~/hookvm-vm-create.log")
+def bootstrap(phase: PhaseAHarness, on_ready: Callable[[], None] | None = None, logger: Any = None) -> Any:
     return driver.bootstrap_vm(
-        db,
-        SimpleNamespace(),  # type: ignore[arg-type]  # config: unused past the stubbed seams
-        "hookvm",
-        _stub_exec_target(),
-        platform,  # type: ignore[arg-type]
+        phase.db,
+        phase.config,
+        VM,
+        phase.platform,  # type: ignore[arg-type]
         RunContext(),
-        logger,  # type: ignore[arg-type]
+        logger or phase.log,
         admin_username="agentworks",
-        tailnet_address="100.64.0.8",
+        tailnet_address=ADDRESS,
+        expected_release=DebianRelease.TRIXIE,
         on_tailscale_ready=on_ready,
     )
 
 
-def test_bootstrap_uses_manager_owned_logger_without_closing(
-    db: Database, monkeypatch: pytest.MonkeyPatch, _hermetic_driver: None
-) -> None:
-    db.insert_vm("hookvm", site="stub", hostname="hookvm")
-    monkeypatch.setattr(driver, "_phase_a_bootstrap", lambda *a, **k: SimpleNamespace())
-    exec_target = _stub_exec_target()
+def test_phase_b_receives_a_vm_bound_target_at_the_recorded_address(phase: PhaseAHarness) -> None:
+    ts_target, home, release = bootstrap(phase, lambda: None)
+
+    assert ts_target.host == ADDRESS
+    assert ts_target.trust == trust.TrustBinding(trust.TrustMode.VM, VM)
+    assert ts_target.logger is phase.log
+    assert (home, release) == ("/home/agentworks", DebianRelease.TRIXIE)
+
+
+def test_bootstrap_uses_manager_owned_logger_without_closing(phase: PhaseAHarness) -> None:
     logger = MagicMock(display_path="~/hookvm-vm-create.log")
 
-    driver.bootstrap_vm(
-        db,
-        SimpleNamespace(),  # type: ignore[arg-type]
-        "hookvm",
-        exec_target,
-        _SpyPlatform(),  # type: ignore[arg-type]
-        RunContext(),
-        logger,  # type: ignore[arg-type]
-        admin_username="admin",
-        tailnet_address="100.64.0.8",
-        on_tailscale_ready=lambda: None,
-    )
+    bootstrap(phase, lambda: None, logger=logger)
 
     logger.close.assert_not_called()
 
 
-def test_an_address_core_cannot_parse_marks_the_vm_failed_and_secures_it(
-    db: Database, monkeypatch: pytest.MonkeyPatch, _hermetic_driver: None
-) -> None:
-    """Core's own check of the platform's address runs inside the fail-closed span, before any connection."""
-    db.insert_vm("hookvm", site="stub", hostname="hookvm")
-    monkeypatch.setattr("agentworks.vms.initializer.driver.SSHTransport", _no_connection)
-    platform = _SpyPlatform()
-
-    with pytest.raises(ProvisioningError):
-        driver.bootstrap_vm(
-            db,
-            SimpleNamespace(),  # type: ignore[arg-type]
-            "hookvm",
-            _stub_exec_target(),
-            platform,  # type: ignore[arg-type]
-            RunContext(),
-            SimpleNamespace(display_path="~/hookvm-vm-create.log"),  # type: ignore[arg-type]
-            admin_username="agentworks",
-            tailnet_address="203.0.113.7.attacker",
-        )
-
-    row = db.get_vm("hookvm")
-    assert row is not None
-    assert row.provisioning_status == ProvisioningStatus.FAILED.value
-    assert row.tailscale_host is None
-    assert platform.secured == ["hookvm"]
-
-
-def _no_connection(**kwargs: object) -> None:
-    raise AssertionError("no connection is made to an address core refused")
-
-
-def test_success_path_fires_on_tailscale_ready(
-    db: Database, monkeypatch: pytest.MonkeyPatch, _hermetic_driver: None
-) -> None:
-    """A successful Phase A ends in the on_tailscale_ready callback (the
-    create_vm wiring through which Azure's post_tailscale_ready removes
-    the bootstrap allow) and never touches the fail-closed hook."""
-    db.insert_vm("hookvm", site="stub", hostname="hookvm")
-    monkeypatch.setattr(driver, "_phase_a_bootstrap", lambda *a, **k: SimpleNamespace())
-
+def test_success_path_fires_on_tailscale_ready(phase: PhaseAHarness) -> None:
+    """A successful Phase A ends in the on_tailscale_ready callback and never touches the fail-closed hook."""
     fired: list[bool] = []
-    platform = _SpyPlatform()
-    _call_bootstrap(db, platform, lambda: fired.append(True))
+
+    bootstrap(phase, lambda: fired.append(True))
 
     assert fired == [True]
-    assert platform.secured == []
+    assert phase.platform.secured == []
 
 
-def test_failed_path_secures_the_kept_vm(db: Database, monkeypatch: pytest.MonkeyPatch, _hermetic_driver: None) -> None:
-    """The kept-FAILED path calls secure_failed_vm (fail closed) and never
-    the success callback; the original failure propagates."""
-    db.insert_vm("hookvm", site="stub", hostname="hookvm")
-
-    def _boom(*_a: object, **_k: object) -> None:
-        raise RuntimeError("phase a exploded")
-
-    monkeypatch.setattr(driver, "_phase_a_bootstrap", _boom)
-
+def test_failed_path_secures_the_kept_vm(phase: PhaseAHarness) -> None:
+    """The kept-failed path calls secure_failed_vm and never the success callback; the failure propagates."""
+    phase.admin.run_outcomes = contract_outcomes(script=FAILING_SCRIPT)
     fired: list[bool] = []
-    platform = _SpyPlatform()
-    with pytest.raises(RuntimeError, match="phase a exploded"):
-        _call_bootstrap(db, platform, lambda: fired.append(True))
 
-    assert platform.secured == ["hookvm"]
+    with pytest.raises(StateError):
+        bootstrap(phase, lambda: fired.append(True))
+
+    assert phase.platform.secured == [VM]
     assert fired == []
 
 
-def test_failed_path_hook_failure_does_not_mask(
-    db: Database, monkeypatch: pytest.MonkeyPatch, _hermetic_driver: None, captured_output: Any
-) -> None:
-    """secure_failed_vm is best-effort: a hook failure warns and the
-    ORIGINAL Phase A error still propagates (never the hook's)."""
-    db.insert_vm("hookvm", site="stub", hostname="hookvm")
+def test_failed_path_hook_failure_does_not_mask(phase: PhaseAHarness, captured_output: Any) -> None:
+    """secure_failed_vm is best-effort: a hook failure warns and the original Phase A error still propagates."""
+    phase.admin.run_outcomes = contract_outcomes(script=FAILING_SCRIPT)
+    phase.platform.secure_error = RuntimeError("hook exploded")
 
-    def _boom(*_a: object, **_k: object) -> None:
-        raise RuntimeError("phase a exploded")
+    with pytest.raises(StateError):
+        bootstrap(phase)
 
-    monkeypatch.setattr(driver, "_phase_a_bootstrap", _boom)
-
-    platform = _SpyPlatform()
-    platform.secure_error = RuntimeError("hook exploded")
-    with pytest.raises(RuntimeError, match="phase a exploded"):
-        _call_bootstrap(db, platform, lambda: None)
-
-    assert any("could not secure the failed VM" in w for w in captured_output.warnings)
+    assert len(captured_output.warnings) == 2  # the hook's failure, and the log pointer
 
 
-def test_interrupt_during_tailscale_verification_secures_and_reraises(
-    db: Database, monkeypatch: pytest.MonkeyPatch, _hermetic_driver: None
-) -> None:
-    """Ctrl-C during Tailscale verification escapes the Exception arm
-    (KeyboardInterrupt is a BaseException), but the kept VM must still be
-    secured best-effort before the interrupt propagates: without it the
-    Azure bootstrap allow would stand indefinitely. The row's status is
-    left as the abort found it (nothing marks FAILED on this path), and
-    the success callback never fires."""
-    from agentworks.db import ProvisioningStatus
-
-    db.insert_vm("hookvm", site="stub", hostname="hookvm")
-    row_before = db.get_vm("hookvm")
-    assert row_before is not None
-
-    def _interrupt(*_a: object, **_k: object) -> None:
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(driver, "_phase_a_bootstrap", _interrupt)
-
+def test_interrupt_during_first_contact_secures_marks_failed_and_reraises(phase: PhaseAHarness) -> None:
+    """Ctrl-C escapes the Exception arm, but the kept VM is still secured, and, never attested, marked failed."""
+    phase.enrollment.run_outcomes = [KeyboardInterrupt()]
     fired: list[bool] = []
-    platform = _SpyPlatform()
-    with pytest.raises(KeyboardInterrupt):
-        _call_bootstrap(db, platform, lambda: fired.append(True))
 
-    assert platform.secured == ["hookvm"]
+    with pytest.raises(KeyboardInterrupt):
+        bootstrap(phase, lambda: fired.append(True))
+
+    assert phase.platform.secured == [VM]
     assert fired == []
-    row_after = db.get_vm("hookvm")
-    assert row_after is not None
-    # Status untouched by the interrupt path: in particular, never FAILED.
-    assert row_after.provisioning_status == row_before.provisioning_status
-    assert row_after.provisioning_status != ProvisioningStatus.FAILED.value
+    assert phase.row().provisioning_status == ProvisioningStatus.FAILED.value
 
 
-def test_interrupt_hook_failure_does_not_mask_the_interrupt(
-    db: Database, monkeypatch: pytest.MonkeyPatch, _hermetic_driver: None, captured_output: Any
-) -> None:
-    """A secure_failed_vm failure on the interrupt path warns and the
-    KeyboardInterrupt still propagates (never the hook's error)."""
-    db.insert_vm("hookvm", site="stub", hostname="hookvm")
+def test_interrupt_hook_failure_does_not_mask_the_interrupt(phase: PhaseAHarness, captured_output: Any) -> None:
+    phase.enrollment.run_outcomes = [KeyboardInterrupt()]
+    phase.platform.secure_error = RuntimeError("hook exploded")
 
-    def _interrupt(*_a: object, **_k: object) -> None:
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(driver, "_phase_a_bootstrap", _interrupt)
-
-    platform = _SpyPlatform()
-    platform.secure_error = RuntimeError("hook exploded")
     with pytest.raises(KeyboardInterrupt):
-        _call_bootstrap(db, platform, lambda: None)
+        bootstrap(phase)
 
-    assert any("could not secure the interrupted VM" in w for w in captured_output.warnings)
+    assert len(captured_output.warnings) == 1

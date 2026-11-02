@@ -1,95 +1,171 @@
-"""Complete-or-raise Phase A records and verifies platform bootstrap."""
+"""Phase A over ``agentworks.execution``: the sequence, the status it leaves, and what fails closed."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from typing import ClassVar
-from unittest.mock import MagicMock
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from agentworks.errors import ProvisioningError
-from agentworks.execution import trust
-from agentworks.vms.initializer import driver
-from tests.conftest import ssh_enrolls_on_first_use
+from agentworks.db import ProvisioningStatus
+from agentworks.debian import DebianRelease
+from agentworks.errors import ProvisioningError, StateError
+from agentworks.execution import reachability, trust
+from agentworks.execution.requests import Command, Script
+from agentworks.execution.results import Result, Unknown, UnknownReason
+from tests.vm_access_support import Admin
+from tests.vms.phase_a_support import (
+    ADDRESS,
+    BOOKWORM_OS_RELEASE,
+    VM,
+    PhaseAHarness,
+    contract_outcomes,
+)
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
-class _TailscaleTransport:
-    """Stands in for the Tailscale ``SSHTransport``; every instance is recorded
-    so a test can see which trust each Phase A transport was bound to."""
-
-    built: ClassVar[list[_TailscaleTransport]] = []
-
-    def __init__(self, **kwargs: object) -> None:
-        self.kwargs = kwargs
-        self.commands: list[tuple[str, dict[str, object]]] = []
-        self.built.append(self)
-
-    def run(self, command: str, **kwargs: object) -> SimpleNamespace:
-        self.commands.append((command, kwargs))
-        ssh_enrolls_on_first_use(self.kwargs["trust"])
-        return SimpleNamespace(stdout="ok\n", returncode=0)
+    from agentworks.db import Database
+    from tests.vm_access_support import AccessRecorder
 
 
 @pytest.fixture(autouse=True)
-def _reset_built_transports() -> None:
-    _TailscaleTransport.built.clear()
+def _no_pauses(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agentworks.execution.reachability.time.sleep", lambda seconds: None)
 
 
-def test_the_returned_address_is_recorded_in_canonical_form(monkeypatch: pytest.MonkeyPatch) -> None:
-    db = MagicMock()
-    config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key="/tmp/test-key"))
-    monkeypatch.setattr(driver, "SSHTransport", _TailscaleTransport)
-
-    ts_target = driver._phase_a_bootstrap(
-        db,
-        config,  # type: ignore[arg-type]
-        "myvm",
-        "agw",
-        MagicMock(),
-        tailnet_address=" 100.64.0.9\n",
-    )
-
-    assert ts_target.kwargs["host"] == "100.64.0.9"  # type: ignore[attr-defined]
-    db.update_vm_tailscale.assert_called_once_with("myvm", "100.64.0.9")
+@pytest.fixture
+def phase(db: Database, vm_access_recorder: AccessRecorder) -> PhaseAHarness:
+    return PhaseAHarness(db, vm_access_recorder)
 
 
-# -- Enrollment: Phase A's verify connection writes the VM's host key --------
+def test_the_sequence_records_enrolls_checks_then_completes(phase: PhaseAHarness) -> None:
+    address, release = phase.bootstrap(tailnet_address=f" {ADDRESS}\n")
+
+    assert (address, release) == (ADDRESS, DebianRelease.TRIXIE)
+    # The first contact enrolls; then the contract, release first, over the admin's VM-mode access.
+    assert phase.recorder.operations == [("enroll", "run"), ("admin", "run"), ("admin", "run"), ("admin", "run")]
+    first_contact, release_request, script, sudo = phase.recorder.requests("run")
+    assert first_contact == reachability.PROBE
+    assert isinstance(release_request, Command)
+    assert release_request.argv == ("cat", "/etc/os-release")
+    assert isinstance(script, Script)
+    assert isinstance(sudo, Command)
+    assert sudo.elevated
+    # Both accesses were built from the row as it was after the address was recorded.
+    assert [row.tailscale_host for row in phase.recorder.rows] == [ADDRESS, ADDRESS]
+    assert phase.recorder.enrolled == [VM]
+    assert phase.recorder.built == [(VM, Admin())]
+    row = phase.row()
+    assert row.tailscale_host == ADDRESS
+    assert row.provisioning_status == ProvisioningStatus.COMPLETE.value
+    assert row.debian_release is DebianRelease.TRIXIE
+    assert trust.has_record(VM)
+    assert phase.events() == ["provisioning_started", "provisioning_complete"]
+    assert phase.platform.secured == []
 
 
-def _phase_a(monkeypatch: pytest.MonkeyPatch, *, transport: type = _TailscaleTransport) -> _TailscaleTransport:
-    config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key="/tmp/test-key"))
-    monkeypatch.setattr(driver, "SSHTransport", transport)
-    return driver._phase_a_bootstrap(  # type: ignore[return-value]
-        MagicMock(),
-        config,  # type: ignore[arg-type]
-        "myvm",
-        "agw",
-        MagicMock(),
-        tailnet_address="100.64.0.9",
-    )
+def test_the_requests_reach_the_operation_log(phase: PhaseAHarness) -> None:
+    phase.bootstrap()
+
+    assert all(log == phase.log.record for log in phase.recorder.logs)
+    assert phase.log.steps[-1] == "Check the VM contract"
 
 
-def test_the_verify_connection_enrolls_and_phase_b_verifies(monkeypatch: pytest.MonkeyPatch) -> None:
-    returned = _phase_a(monkeypatch)
-
-    verify, phase_b = _TailscaleTransport.built
-    assert verify.kwargs["trust"].mode is trust.TrustMode.ENROLL  # type: ignore[attr-defined]
-    assert verify.commands
-    assert trust.has_record("myvm")
-    assert returned is phase_b
-    assert phase_b.kwargs["trust"].mode is trust.TrustMode.VM  # type: ignore[attr-defined]
-    assert phase_b.kwargs["host"] == verify.kwargs["host"]
-    assert phase_b.commands == []
-
-
-def test_a_verify_connection_that_leaves_no_key_fails_create(monkeypatch: pytest.MonkeyPatch) -> None:
-    class _NoKeyWritten(_TailscaleTransport):
-        def run(self, command: str, **kwargs: object) -> SimpleNamespace:
-            self.commands.append((command, kwargs))
-            return SimpleNamespace(stdout="ok\n", returncode=0)
-
+def test_an_address_core_cannot_parse_fails_before_any_connection_and_secures_the_vm(phase: PhaseAHarness) -> None:
     with pytest.raises(ProvisioningError):
-        _phase_a(monkeypatch, transport=_NoKeyWritten)
+        phase.bootstrap(tailnet_address="203.0.113.7.attacker")
 
-    assert not trust.has_record("myvm")
+    assert phase.recorder.calls == []
+    row = phase.row()
+    assert row.provisioning_status == ProvisioningStatus.FAILED.value
+    assert row.tailscale_host is None
+    assert phase.platform.secured == [VM]
+
+
+def _first_contact_times_out(phase: PhaseAHarness, monkeypatch: pytest.MonkeyPatch) -> None:
+    phase.enrollment.run_outcomes = [Result(Unknown(UnknownReason.CONNECTION))] * reachability.ATTEMPTS
+
+
+def _no_key_recorded(phase: PhaseAHarness, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agentworks.execution.trust.has_record", lambda vm_name: False)
+
+
+def _release_mismatch(phase: PhaseAHarness, monkeypatch: pytest.MonkeyPatch) -> None:
+    phase.admin.run_outcomes = contract_outcomes(os_release=BOOKWORM_OS_RELEASE)
+
+
+def _base_failure(phase: PhaseAHarness, monkeypatch: pytest.MonkeyPatch) -> None:
+    phase.admin.run_outcomes = contract_outcomes(script=b"AGW-CHECK systemd x\nAGW-CHECK-END\n")
+
+
+@pytest.mark.parametrize("arrange", [_first_contact_times_out, _no_key_recorded, _release_mismatch, _base_failure])
+def test_a_failure_before_the_contract_passes_marks_failed_and_secures(
+    phase: PhaseAHarness, monkeypatch: pytest.MonkeyPatch, arrange: Callable[[PhaseAHarness, pytest.MonkeyPatch], None]
+) -> None:
+    arrange(phase, monkeypatch)
+
+    with pytest.raises((ProvisioningError, StateError)):
+        phase.bootstrap()
+
+    assert phase.row().provisioning_status == ProvisioningStatus.FAILED.value
+    assert phase.events()[-1] == "provisioning_failed"
+    assert phase.platform.secured == [VM]
+
+
+def test_a_failed_release_check_records_no_release(phase: PhaseAHarness) -> None:
+    phase.admin.run_outcomes = contract_outcomes(os_release=BOOKWORM_OS_RELEASE)
+
+    with pytest.raises(StateError):
+        phase.bootstrap(expected_release=DebianRelease.TRIXIE)
+
+    assert phase.row().debian_release is None
+
+
+@pytest.mark.parametrize("request_index", [0, 1, 2, 3], ids=["first-contact", "release", "script", "sudo"])
+def test_an_interrupt_before_the_contract_passes_marks_failed_and_secures(
+    phase: PhaseAHarness, request_index: int
+) -> None:
+    if request_index == 0:
+        phase.enrollment.run_outcomes = [KeyboardInterrupt()]
+    else:
+        outcomes = contract_outcomes()
+        outcomes[request_index - 1] = KeyboardInterrupt()
+        phase.admin.run_outcomes = outcomes
+
+    with pytest.raises(KeyboardInterrupt):
+        phase.bootstrap()
+
+    assert phase.row().provisioning_status == ProvisioningStatus.FAILED.value
+    assert phase.platform.secured == [VM]
+
+
+def test_an_interrupt_after_complete_leaves_the_vm_complete(phase: PhaseAHarness) -> None:
+    def interrupt() -> None:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        phase.bootstrap(on_tailscale_ready=interrupt)
+
+    assert phase.row().provisioning_status == ProvisioningStatus.COMPLETE.value
+    assert phase.platform.secured == []
+
+
+def test_a_post_ready_wait_that_runs_out_warns_and_proceeds(phase: PhaseAHarness, captured_output: Any) -> None:
+    phase.admin.run_outcomes = [
+        *contract_outcomes(),
+        *[Result(Unknown(UnknownReason.CONNECTION))] * reachability.ATTEMPTS,
+    ]
+
+    address, _release = phase.bootstrap(on_tailscale_ready=lambda: None)
+
+    assert address == ADDRESS
+    assert phase.row().provisioning_status == ProvisioningStatus.COMPLETE.value
+    assert len(captured_output.warnings) == 1
+
+
+def test_the_post_ready_wait_is_on_the_vm_mode_access_and_never_enrolls(phase: PhaseAHarness) -> None:
+    phase.bootstrap(on_tailscale_ready=lambda: None)
+
+    assert phase.recorder.operations[-1] == ("admin", "run")
+    assert phase.recorder.requests("run")[-1] == reachability.PROBE
+    assert phase.recorder.enrolled == [VM]

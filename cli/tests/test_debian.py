@@ -13,12 +13,10 @@ from agentworks.debian import (
     DebianSupport,
     classify_release,
     parse_os_release,
-    probe_debian_release,
     validate_release_profiles,
+    verify_os_release,
 )
 from agentworks.errors import StateError
-from agentworks.ssh import SSHResult
-from tests.native_exec_support import ExecCall, ExecutionOnlyTransport
 
 
 @pytest.mark.parametrize(
@@ -71,18 +69,11 @@ def test_appending_a_candidate_profile_reclassifies_older_releases() -> None:
     assert classify_release(DebianRelease.BOOKWORM, candidate_profiles) is DebianSupport.LEGACY
 
 
-def test_probe_validates_the_expected_release() -> None:
-    def release_result(_call: ExecCall) -> SSHResult:
-        return SSHResult(
-            returncode=0,
-            stdout="ID=debian\nVERSION_ID=13\nVERSION_CODENAME=trixie\n",
-            stderr="",
-        )
+def test_verify_os_release_validates_the_expected_release() -> None:
+    text = "ID=debian\nVERSION_ID=13\nVERSION_CODENAME=trixie\n"
 
-    target = ExecutionOnlyTransport(release_result)
-
-    assert probe_debian_release(target, expected=DebianRelease.TRIXIE) is DebianRelease.TRIXIE
+    assert verify_os_release(text, expected=DebianRelease.TRIXIE) is DebianRelease.TRIXIE
 
     with pytest.raises(StateError) as caught:
-        probe_debian_release(target, expected=DebianRelease.BOOKWORM)
+        verify_os_release(text, expected=DebianRelease.BOOKWORM)
     assert caught.value.entity_kind == "debian-release"

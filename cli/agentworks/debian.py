@@ -18,8 +18,6 @@ from agentworks.errors import StateError
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.transports import ExecTransport
-
 
 class DebianRelease(StrEnum):
     """Debian codenames recognized by this Agentworks build."""
@@ -144,19 +142,6 @@ def parse_os_release(
         if fields["VERSION_CODENAME"] == profile.release.value and fields["VERSION_ID"] == profile.version_id:
             return profile.release
     raise _observation_error(fields, "is not recognized by this Agentworks build")
-
-
-def probe_debian_release(
-    transport: ExecTransport,
-    *,
-    expected: DebianRelease | None = None,
-) -> DebianRelease:
-    """Read and validate a VM's live Debian release through its transport."""
-
-    return verify_os_release(
-        transport.run("cat /etc/os-release").stdout,
-        expected=expected,
-    )
 
 
 def verify_os_release(
