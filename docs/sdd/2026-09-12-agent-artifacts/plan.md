@@ -1104,8 +1104,8 @@ after this round until the operator resolves it.
 - [x] Complete the independent accepted corrections and their focused regression checks.
 - [x] Resolve the Codex provenance decision through authenticated operator direction and complete
       the resulting correction within its agreed boundary.
-- [ ] Run the three private review lanes and required gates on the corrected exact head; publish the
-      complete handoff with the appropriate draft/ready signal.
+- [x] Run the three private review lanes and required gates on the corrected exact head; publish the
+      complete handoff with the appropriate draft/ready signal (completed by round 2 below).
 - [ ] Audit independent live acceptance against every retained requirement and finish promotion and
       both locks. Unit tests and CI alone do not close the live obligations above.
 
@@ -1157,7 +1157,7 @@ ownership engine. Empty session/run directories may remain after owned-file reti
 - [x] Supply a bounded fixture launcher through existing registration and the real CLI for the
       separate prerequisite/unsupported-facet live acceptance cases, without a product plugin
       loader.
-- [ ] Complete all three private review lanes and integrated gates, then publish the exact head
+- [x] Complete all three private review lanes and integrated gates, then publish the exact head
       ready with the retained acceptance matrix and no checkpoint label.
 - [ ] Assess that ready handoff's full feedback batch. One authorized public fix round remains.
 - [ ] Audit final-head live evidence, close every retained requirement, promote remaining durable
@@ -1169,3 +1169,25 @@ probes and real-manager failures preserving the existing run before teardown. Th
 slice passed its fresh-process CLI checks and full branch suite, with real VM execution explicitly
 unperformed. These are slice-level results, not final integrated or live acceptance claims; final
 private reviews, gates and the next ready handoff remain pending.
+
+Round 2 validation is complete. The integrated CI selection passed **10,401 tests, 11 skipped** with
+Claude Code 2.1.316 and Codex 0.166.0 available for the native fixtures. The first integrated run
+exposed one existing inventory test still expecting the mutable plugin version in association
+identity; the corrected test verifies stability across a version change, and the entire selection
+then passed without filtering failures. Ruff lint/format passed across 925 files; mypy passed across
+889 files. The acceptance launcher also passed separate lint, format and strict type checks.
+Wheel/source builds, Typer isolation, file lint, locked-SDD and Rulesync 7.14.0 checks all passed.
+Website checks passed 160 Python and 103 Node tests, with deterministic double builds for both site
+bases. Real isolated CLI help, config initialization, both current concept guide topics and artifact
+inspection help passed. The initial smoke used obsolete topic names; the corrected calls used the
+names exposed by `guide list`. Temporary test/build homes and roots were verified removed.
+
+All three independent private lanes reviewed the full PR and round 2 at `ef6d882`, including the
+`0dc51c7` test/document correction, without material findings. The project and correctness lanes
+identified the same stale readiness docstring; it now describes advisory artifact drift and explicit
+integration-owned prerequisites. Independent boundary suites passed 87 and 96 cases; the complexity
+lane also passed eight real-native cases and demonstrated that deleting conflict recovery or full
+source/legacy-version handling breaks the required behavior. These are local CLI/native-fixture
+results, not final real-VM acceptance. The exact ready head and CI result are recorded in PR 862's
+round 2 handoff. One public correction round remains, and both locks still await the final live
+requirement audit.

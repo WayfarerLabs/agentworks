@@ -42,8 +42,8 @@ def evaluate_setup(
 ) -> SetupEvidence:
     """Compare native setup configuration and destination evidence.
 
-    Artifact freshness is a separate condition enforced by session preparation's
-    routing check. This result alone does not authorize an artifact-bearing launch.
+    Session routing reports artifact drift separately. The integration's explicit
+    required or recommended prerequisite determines how this evidence affects launch.
     """
 
     def result(status: SetupStatus, record: SetupRecord | None = None) -> SetupEvidence:
