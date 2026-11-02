@@ -78,7 +78,7 @@ def inspect_owner_artifacts(
         elif captured is not None and captured.declaration != desired:
             capture_status, reason = "stale", "Captured artifacts do not match the owner's current bundle declarations."
     except UnsupportedArtifactCaptureVersionError as error:
-        capture_status, reason, repair_hint = "unavailable", str(error), error.hint
+        capture_status, reason, repair_hint = "unavailable", f"{error}.", error.hint
     except (ConfigError, StateError, KeyError):
         capture_status, reason = "unavailable", "The owner's artifact declarations or captured state are unavailable."
     prepared = ArtifactInputs(local=captured.inputs if captured is not None else None, deferred=inherited)
@@ -98,13 +98,23 @@ def inspect_owner_artifacts(
                 captured,
                 capture_status,
                 "unavailable",
-                str(error)
+                f"{error}."
                 if isinstance(error, UnsupportedNativeSetupVersionError)
                 else "The owner's integration state is unavailable.",
                 prepared=prepared,
                 repair_hint=error.hint if isinstance(error, UnsupportedNativeSetupVersionError) else None,
             )
     block = inputs.activations.get(integration_name) if integration_name is not None else None
+    recorded_details = ""
+    if record is not None:
+        if record.incomplete_reasons:
+            recorded_details += " Recorded incomplete entries: " + _brief(record.incomplete_reasons) + "."
+        if record.skipped:
+            recorded_details += (
+                " Skipped destinations: "
+                + _brief(tuple(f"{item.path}: {item.reason}" for item in record.skipped))
+                + "."
+            )
     if inputs.component == "session" and integration_name is not None and block is None:
         if record is not None and record.artifact_files:
             return ArtifactOwnerView(
@@ -112,7 +122,7 @@ def inspect_owner_artifacts(
                 captured,
                 capture_status,
                 "retirement",
-                "The removed activation still owns artifact files.",
+                "The removed activation still owns artifact files." + recorded_details,
                 record,
             )
         return ArtifactOwnerView(inputs, captured, capture_status, "inactive", record=record)
@@ -129,7 +139,7 @@ def inspect_owner_artifacts(
                 captured,
                 capture_status,
                 "retirement",
-                "The removed activation retains native setup or artifact cleanup evidence.",
+                "The removed activation retains native setup or artifact cleanup evidence." + recorded_details,
                 record,
                 prepared,
             )
@@ -140,10 +150,7 @@ def inspect_owner_artifacts(
             if record.pending_cleanup
             else "The activated facet's previous setup did not complete all declared entries."
         )
-        if record.skipped:
-            reason += " Skipped destinations: " + _brief(
-                tuple(f"{item.path}: {item.reason}" for item in record.skipped)
-            )
+        reason += recorded_details
         return ArtifactOwnerView(
             inputs,
             captured,
@@ -421,11 +428,19 @@ def session_inherited_inputs(
 def _remediation(view: ArtifactOwnerView) -> str:
     if view.repair_hint is not None:
         return view.repair_hint
+    conflict = (
+        "Resolve the recorded entry or destination conflicts first. "
+        if view.record is not None and (view.record.incomplete_reasons or view.record.skipped)
+        else ""
+    )
     if view.owner.component == "workspace":
-        return f"Recreate workspace '{view.owner.name}' to apply changed setup; workspace reinit is not supported."
+        return (
+            f"{conflict}Recreate workspace '{view.owner.name}' to apply changed setup; "
+            "workspace reinit is not supported."
+        )
     if view.owner.component == "agent":
-        return f"Run 'agw agent reinit {view.owner.name}'."
-    return f"Run 'agw vm reinit {view.owner.name}'."
+        return f"{conflict}Run 'agw agent reinit {view.owner.name}'."
+    return f"{conflict}Run 'agw vm reinit {view.owner.name}'."
 
 
 def _require(view: ArtifactOwnerView) -> ArtifactOwnerView:

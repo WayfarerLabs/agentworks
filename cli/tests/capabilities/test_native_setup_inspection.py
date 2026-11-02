@@ -40,6 +40,7 @@ def test_native_applied_state_is_inspected_without_io_or_payload_values(db, make
                         declaration={"config": {"private": "config-value-sentinel"}},
                         complete=mode == "complete",
                         pending_cleanup=mode == "pending",
+                        incomplete_reasons=("fixture association conflict",) if mode == "pending" else (),
                         claims=(NativeClaim(role="settings", identifier="settings", destination="/private/path"),),
                         artifact_files=(
                             OwnedArtifactFile(path="/private/artifact-file", sha256="b" * 64, origins=("c" * 64,)),
@@ -77,6 +78,7 @@ def test_native_applied_state_is_inspected_without_io_or_payload_values(db, make
         assert isinstance(summaries, list) and isinstance(summaries[0], dict)
         assert summaries[0]["claim_count"] == 1
         assert summaries[0]["artifact_file_count"] == 1
+        assert summaries[0]["incomplete_reason_count"] == (1 if mode == "pending" else 0)
     if mode == "future":
         assert state.unconsumed_records
     group = check_database(config)

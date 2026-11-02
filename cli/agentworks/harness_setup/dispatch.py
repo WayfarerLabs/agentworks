@@ -197,15 +197,17 @@ def run_setup(
                 state = replace_setup_record(state, current)
                 persist(state)
 
-            incomplete = False
-
             def report_incomplete(reason: str, *, integration_name: str = name) -> None:
-                nonlocal incomplete
+                nonlocal current, state
                 if not isinstance(reason, str) or not reason.strip():
                     raise StateError("integration returned an invalid incomplete-setup reason")
-                incomplete = True
+                if reason not in current.incomplete_reasons:
+                    current = current.model_copy(update={"incomplete_reasons": (*current.incomplete_reasons, reason)})
+                    state = replace_setup_record(state, current)
+                    persist(state)
                 output.warn(
-                    f"Native setup for {inputs.component}/{inputs.name} via {integration_name}: {reason} {remediation}"
+                    f"Native setup for {inputs.component}/{inputs.name} via {integration_name}: {reason.rstrip('.')}. "
+                    f"Resolve the reported conflict before retrying. {remediation}"
                 )
 
             scoped_secrets = {ref.name: invocation.secrets[ref.name] for ref in integration.config_secret_refs()}
@@ -241,10 +243,10 @@ def run_setup(
                 update={"artifact_files": owned, "deferred": application.deferred, "skipped": publication.skipped}
             )
             if block is None:
-                if current.claims or current.artifact_files:
+                if current.claims or current.artifact_files or current.incomplete_reasons:
                     current = current.model_copy(update={"pending_cleanup": True})
                     state = replace_setup_record(state, current)
-                    output.warn(f"Native cleanup for {name} retains outstanding ownership; retry its owning setup.")
+                    output.warn(f"Native cleanup for {name} remains pending; read diagnostics before retrying setup.")
                 else:
                     state = NativeSetupState(
                         records=tuple(
@@ -258,7 +260,7 @@ def run_setup(
                 pending_files = any(item.path not in settled_paths for item in owned)
                 current = current.model_copy(
                     update={
-                        "complete": not pending_files and not incomplete and not publication.skipped,
+                        "complete": not pending_files and not current.incomplete_reasons and not publication.skipped,
                         "pending_cleanup": pending_files,
                     }
                 )

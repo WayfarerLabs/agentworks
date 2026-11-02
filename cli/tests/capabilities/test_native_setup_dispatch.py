@@ -476,7 +476,103 @@ def test_partial_native_setup_preserves_incomplete_evidence_and_continues_public
     assert publish.call_count == 2
     records = read_native_setup(db, "agent", "agent").records
     assert not records[0].complete and records[1].complete
+    assert records[0].incomplete_reasons == ("fixture native conflict",)
     assert records[0].claims[0].identifier == "first"
     partial = False
     run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
     assert all(item.complete for item in read_native_setup(db, "agent", "agent").records)
+    assert all(not item.incomplete_reasons for item in read_native_setup(db, "agent", "agent").records)
+
+
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_callback_reasons_checkpoint_before_return_and_clear_at_next_attempt(setup_case, monkeypatch, interrupted):
+    from uuid import uuid4
+
+    from agentworks.capabilities.harness_integration import harness_integration_for
+
+    db, inputs, invocation, events, _ = setup_case
+    first = harness_integration_for("first")
+    original = first.user_init
+    reasons = tuple(f"plugin-{uuid4().hex}: association mismatch" for _ in range(2))
+    attempt = 0
+
+    def initialize(self, call):
+        nonlocal attempt
+        if self.name == "first":
+            attempt += 1
+            current = read_native_setup(db, "agent", "agent").records[0]
+            assert not current.complete and current.incomplete_reasons == ()
+            if attempt == 1:
+                for reason in (*reasons, reasons[0]):
+                    call.report_incomplete(reason)
+                current = read_native_setup(db, "agent", "agent").records[0]
+                assert not current.complete and current.incomplete_reasons == reasons
+                if interrupted:
+                    raise RuntimeError("fixture interruption after diagnostics")
+        return original(self, call)
+
+    monkeypatch.setattr(first, "user_init", initialize)
+    if interrupted:
+        with pytest.raises(RuntimeError):
+            run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
+        assert events == []
+    else:
+        run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
+        assert events == [("first", False), ("second", False)]
+    assert read_native_setup(db, "agent", "agent").records[0].incomplete_reasons == reasons
+    run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
+    records = read_native_setup(db, "agent", "agent").records
+    assert all(record.complete and not record.incomplete_reasons for record in records)
+
+
+@pytest.mark.parametrize("reason", [None, "", "  \n", 42])
+def test_registered_plugin_cannot_checkpoint_invalid_incomplete_reasons(setup_case, monkeypatch, reason):
+    from agentworks.capabilities.harness_integration import harness_integration_for
+
+    db, inputs, invocation, events, _ = setup_case
+
+    def initialize(self, call):
+        call.report_incomplete(reason)
+        pytest.fail("invalid callback returned")
+
+    monkeypatch.setattr(harness_integration_for("first"), "user_init", initialize)
+    with pytest.raises(StateError):
+        run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
+    assert events == []
+    (record,) = read_native_setup(db, "agent", "agent").records
+    assert not record.complete and not record.incomplete_reasons
+
+
+def test_retirement_keeps_callback_diagnostics_until_owning_retry_converges(setup_case, monkeypatch):
+    from uuid import uuid4
+
+    from agentworks.capabilities.harness_integration import harness_integration_for
+
+    db, inputs, invocation, _, _ = setup_case
+    run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
+    first = harness_integration_for("first")
+    original = first.user_init
+    reason = f"plugin-{uuid4().hex}: retained association differs"
+    partial = True
+
+    def initialize(self, call):
+        application = original(self, call)
+        if self.name == "first":
+            assert self.retiring
+            current = next(
+                item for item in read_native_setup(db, "agent", "agent").records if item.integration == "first"
+            )
+            assert not current.incomplete_reasons
+            if partial:
+                call.report_incomplete(reason)
+        return application
+
+    monkeypatch.setattr(first, "user_init", initialize)
+    inputs = replace(inputs, activations={"second": CapabilityConfig()})
+    run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
+    record = next(item for item in read_native_setup(db, "agent", "agent").records if item.integration == "first")
+    assert not record.complete and record.pending_cleanup and not record.claims
+    assert record.incomplete_reasons == (reason,)
+    partial = False
+    run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
+    assert [record.integration for record in read_native_setup(db, "agent", "agent").records] == ["second"]

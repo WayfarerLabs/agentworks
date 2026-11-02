@@ -128,6 +128,7 @@ class IntegrationMetadata:
     passthrough_inputs: tuple[str, ...] = ()
     passthrough_destination: ArtifactFacet | None = None
     recorded_skipped: tuple[ArtifactSkip, ...] = ()
+    recorded_incomplete_reasons: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -344,7 +345,7 @@ def _artifact_metadata(
 
 
 def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView) -> IntegrationMetadata:
-    from agentworks.artifacts.routing import available_deferred_inputs, inactive_destination
+    from agentworks.artifacts.routing import _remediation, available_deferred_inputs, inactive_destination
 
     destination = (
         inactive_destination(owner.facet) if name not in owner.activations and owner.component != "session" else None
@@ -378,13 +379,14 @@ def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView
         name,
         name in owner.activations,
         view.status,
-        view.diagnostic,
+        f"{view.diagnostic} {_remediation(view)}" if view.status in ("incomplete", "retirement") else view.diagnostic,
         handled,
         deferred,
         placements,
         tuple(item.identity for group in passthrough.values() for item in group.items()),
         destination if passthrough else None,
         skipped,
+        () if record is None else record.incomplete_reasons,
     )
 
 
@@ -429,6 +431,8 @@ def render_artifacts(inspection: ArtifactInspection) -> None:
             if integration.reason:
                 details.append(integration.reason)
             output.info(f"  {integration.name}: {'; '.join(details)}")
+            for reason in integration.recorded_incomplete_reasons:
+                output.info(f"    Recorded incomplete: {reason}")
             for input_id in integration.passthrough_inputs:
                 output.info(f"    Core passthrough: {input_id[:12]} to {integration.passthrough_destination}")
             for input_id in integration.recorded_handled:
@@ -494,6 +498,7 @@ def inspection_data(inspection: ArtifactInspection) -> JsonObject:
                         "status": item.status,
                         "reason": item.reason,
                         "recorded_handled": list(item.recorded_handled),
+                        "recorded_incomplete_reasons": list(item.recorded_incomplete_reasons),
                         "passthrough_inputs": list(item.passthrough_inputs),
                         "passthrough_destination": item.passthrough_destination,
                         "recorded_deferred": [

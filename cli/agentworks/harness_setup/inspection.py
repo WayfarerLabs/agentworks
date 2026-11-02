@@ -60,6 +60,7 @@ def include_native_setup(
             "component": record.component,
             "complete": record.complete,
             "pending_cleanup": record.pending_cleanup,
+            "incomplete_reason_count": len(record.incomplete_reasons),
             "claim_count": len(record.claims),
             "artifact_file_count": len(record.artifact_files),
         }

@@ -44,6 +44,8 @@ class SetupRecord(AgwModel):
     declaration: dict[str, JsonValue]
     complete: bool = False
     pending_cleanup: bool = False
+    # Current-attempt diagnostics only, never native contents or an event history.
+    incomplete_reasons: Annotated[tuple[Annotated[str, Field(pattern=r"\S")], ...], Field(strict=False)] = ()
     claims: Annotated[tuple[NativeClaim, ...], Field(strict=False)] = ()
 
     artifact_files: Annotated[tuple[OwnedArtifactFile, ...], Field(strict=False)] = ()
@@ -70,6 +72,8 @@ class SetupRecord(AgwModel):
             raise ValueError("native setup contains duplicate artifact inputs")
         if self.complete and self.pending_cleanup:
             raise ValueError("pending cleanup cannot be complete setup")
+        if self.complete and self.incomplete_reasons:
+            raise ValueError("incomplete reasons cannot be complete setup")
         return self
 
 
