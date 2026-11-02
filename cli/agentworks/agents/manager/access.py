@@ -14,7 +14,7 @@ import agentworks.agents.manager as _mgr
 import agentworks.execution as execution
 from agentworks.errors import ConnectivityError, NotFoundError, StateError
 from agentworks.execution.access import Admin, Agent, stream_to_operator
-from agentworks.execution.requests import Command, LoginShell, Script, Shell
+from agentworks.execution.requests import Command, LoginShell, Script, Shell, shell_command_line
 from agentworks.execution.results import Completed, Unknown, UnknownReason
 from agentworks.vms.manager import gated_vm_boundary
 
@@ -197,8 +197,6 @@ def exec_agent(
     :func:`shell_agent`: the gate opens before the preflight sweep and
     the held-active span covers the streamed remote command.
     """
-    import shlex
-
     from agentworks.env import ResourceContext, compose_env
     from agentworks.exec_validation import normalize_exec_command
 
@@ -270,6 +268,6 @@ def exec_agent(
         # ~/.local/bin, etc.) is set up. This matches the env an operator
         # gets via `agent shell`. One argument is a command line; several are
         # joined into one, as `$SHELL -lc` has always taken them.
-        source = command[0] if len(command) == 1 else shlex.join(command)
+        source = command[0] if len(command) == 1 else shell_command_line(command)
         request = Script(source, Shell.USER_DEFAULT, login=True, cwd=ws.workspace_path if ws else None, env=env)
         return stream_to_operator(access, request)

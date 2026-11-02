@@ -10,7 +10,6 @@ from __future__ import annotations
 import ast
 import io
 import os
-import shlex
 import subprocess
 import threading
 import time
@@ -23,7 +22,7 @@ import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution.errors import ExecutionIncomplete, RequestRefused, TrustMismatch
-from agentworks.execution.requests import Command, LoginShell, Script, Shell
+from agentworks.execution.requests import Command, LoginShell, Script, Shell, shell_command_line
 from agentworks.execution.results import (
     Completed,
     NotDelivered,
@@ -191,8 +190,8 @@ def stdin_consumer_exits_early(lane: Lane) -> None:
     assert (streamed.status, streamed.stdout) == (0, b"012")
 
 
-class LeavingStdout(io.BytesIO):
-    """An operator stdout whose reader leaves after a few bytes, as with ``| head -c 2``."""
+class LeavingSink(io.BytesIO):
+    """An operator stream whose reader leaves after a few bytes, as with ``| head -c 2``."""
 
     def __init__(self, after: int) -> None:
         super().__init__()
@@ -205,17 +204,7 @@ class LeavingStdout(io.BytesIO):
         return len(data)  # type: ignore[arg-type]
 
 
-def stdout_consumer_leaves_an_endless_writer(lane: Lane) -> None:
-    pid_file = f"{lane.make_dir()}/pid"
-    endless = cmd("sh", "-c", f"echo $$ > {pid_file}; exec yes", deadline=15)
-    stdout, stderr = LeavingStdout(2), io.BytesIO()
-    started = time.monotonic()
-
-    status = lane.access.stream(endless, stdin=None, stdout=stdout, stderr=stderr)  # type: ignore[arg-type]
-
-    assert time.monotonic() - started < 10
-    assert status == 141  # the status of a writer killed by SIGPIPE, which is what the guest's writer meets
-    assert stdout.getvalue()[:2] == b"y\n"
+def wait_until_gone(pid_file: str) -> None:
     pid = int(Path(pid_file).read_text())
     deadline_at = time.monotonic() + 10
     while time.monotonic() < deadline_at:
@@ -227,14 +216,61 @@ def stdout_consumer_leaves_an_endless_writer(lane: Lane) -> None:
     pytest.fail("the guest's writer is still running")
 
 
+def consumer_leaves_an_endless_writer(lane: Lane, *, writes_to: str) -> None:
+    """The writer takes SIGPIPE when the client closes its end, and the request ends as ssh's did, as 141."""
+    pid_file = f"{lane.make_dir()}/pid"
+    redirect = ">&2" if writes_to == "stderr" else ""
+    endless = cmd("sh", "-c", f"echo $$ > {pid_file}; exec yes {redirect}", deadline=15)
+    leaving, other = LeavingSink(2), io.BytesIO()
+    started = time.monotonic()
+
+    status = lane.access.stream(
+        endless,
+        stdin=None,
+        stdout=leaving if writes_to == "stdout" else other,
+        stderr=leaving if writes_to == "stderr" else other,
+    )
+
+    assert time.monotonic() - started < 10
+    assert status == 141
+    assert leaving.getvalue()[:2] == b"y\n"
+    wait_until_gone(pid_file)
+
+
+def stdout_consumer_leaves_an_endless_writer(lane: Lane) -> None:
+    consumer_leaves_an_endless_writer(lane, writes_to="stdout")
+
+
+def stderr_consumer_leaves_an_endless_writer(lane: Lane) -> None:
+    consumer_leaves_an_endless_writer(lane, writes_to="stderr")
+
+
+def stdout_consumer_leaves_a_quiet_payload_that_then_ends(lane: Lane) -> None:
+    marker = f"{lane.make_dir()}/finished"
+    quiet = cmd("sh", "-c", f"echo hello; sleep 1; echo done > {marker}; exit 4", deadline=15)
+    started = time.monotonic()
+
+    status = lane.access.stream(quiet, stdin=None, stdout=LeavingSink(1), stderr=io.BytesIO())
+
+    assert status == 4  # the guest's own status, reported once it ended
+    assert time.monotonic() - started >= 1
+    assert Path(marker).read_text() == "done\n"
+
+
 def several_arguments_run_as_a_shell_command_line(lane: Lane) -> None:
-    # vm exec joins several arguments with shlex and sends them under the account shell, so a builtin works.
-    joined = script(shlex.join(["command", "-v", "sh"]), Shell.USER_DEFAULT)
+    # vm exec single-quotes each word and sends the line under the account shell: a builtin still
+    # resolves from a quoted word, and nothing is read as syntax (=ls is a zsh expansion, a bare $HOME expands).
+    builtin = script(shell_command_line(["command", "-v", "sh"]), Shell.USER_DEFAULT)
+    words = ["a b", "$HOME", "=ls", "-x", "it's", "*"]
+    echo = script(shell_command_line(["printf", "%s|", *words]), Shell.USER_DEFAULT)
 
-    result = lane.run(joined)
+    found = lane.run(builtin)
+    printed = lane.run(echo)
 
-    assert result.completion == Completed(0)
-    assert result.stdout.strip() != b""
+    assert found.completion == Completed(0)
+    assert found.stdout.strip() != b""
+    assert printed.completion == Completed(0)
+    assert printed.stdout.decode() == "".join(f"{word}|" for word in words)
 
 
 def bash_child_reads_no_startup_file(lane: Lane) -> None:
@@ -631,7 +667,9 @@ def build() -> list[Vector]:
         Vector("exit-statuses", "LSV", exit_statuses),
         Vector("stdin-positioning", "LSV", stdin_positioning),
         Vector("stdin-consumer-exits-early", "LS", stdin_consumer_exits_early),
-        Vector("stdout-consumer-leaves", "LS", stdout_consumer_leaves_an_endless_writer),
+        Vector("stdout-consumer-leaves-endless-writer", "LS", stdout_consumer_leaves_an_endless_writer),
+        Vector("stderr-consumer-leaves-endless-writer", "LS", stderr_consumer_leaves_an_endless_writer),
+        Vector("stdout-consumer-leaves-quiet-payload", "LS", stdout_consumer_leaves_a_quiet_payload_that_then_ends),
         Vector("several-arguments-run-under-the-shell", "LSV", several_arguments_run_as_a_shell_command_line),
         Vector("bash-child-reads-no-startup-file", "LSV", bash_child_reads_no_startup_file),
         Vector("background-child-holds-both-streams", "LSV", background_child_holds_both_streams),

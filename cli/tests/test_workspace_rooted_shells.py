@@ -253,7 +253,7 @@ def test_exec_vm_workspace_prefixes_cd(
 
     assert rc == 0
     assert recorder.requests("stream") == [
-        Script("echo hi", Shell.USER_DEFAULT, cwd="/opt/agentworks/workspaces/ws1", env={})
+        Script("'echo' 'hi'", Shell.USER_DEFAULT, cwd="/opt/agentworks/workspaces/ws1", env={})
     ]
 
 
@@ -271,7 +271,7 @@ def test_exec_vm_no_workspace_unchanged(
 
     vm_manager.exec_vm(db, config, "vm1", ["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
-    assert recorder.requests("stream") == [Script("echo hi", Shell.USER_DEFAULT, cwd=None, env={})]
+    assert recorder.requests("stream") == [Script("'echo' 'hi'", Shell.USER_DEFAULT, cwd=None, env={})]
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +347,7 @@ def test_exec_agent_workspace_prefixes_cd(
 
     assert rc == 0
     (request,) = recorder.requests("stream")
-    assert (request.source, request.login, request.cwd) == ("echo hi", True, "/opt/agentworks/workspaces/ws1")
+    assert (request.source, request.login, request.cwd) == ("'echo' 'hi'", True, "/opt/agentworks/workspaces/ws1")
 
 
 # ---------------------------------------------------------------------------

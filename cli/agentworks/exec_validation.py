@@ -6,8 +6,8 @@ arguments that look like options (``ls -la``, ``tail -f /path``). The
 trade-off is that an agentworks flag (e.g. ``--workspace``) placed
 after the VM / agent positional ends up in the passthrough argv rather
 than being consumed by Click. The VM would then be asked to run a
-program named ``--workspace`` (``vm exec`` with several arguments: not
-found, status 127), or a shell line that begins with it, which the
+program named ``--workspace`` (several arguments: not found, status
+127), or, for one argument, a shell line that begins with it, which the
 shell (zsh and bash both do this) parses as further shell options,
 producing cryptic errors:
 

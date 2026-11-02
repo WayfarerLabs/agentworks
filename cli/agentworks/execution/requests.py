@@ -14,7 +14,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
 AccountShell = Literal["sh", "dash", "bash", "zsh"]
 """The login shells a managed account may use: the four the constant first-stage
@@ -96,6 +96,18 @@ class LoginShell(RequestOptions):
     long as the operator keeps it. A ``Script`` with an empty source would run
     the shell on an empty file and exit, which is not a session.
     """
+
+
+def shell_command_line(args: Sequence[str]) -> str:
+    """Several arguments as one shell command line, every word single-quoted.
+
+    Quoting every word, the first included, keeps the shell from reading any of
+    them as syntax: ``shlex.quote`` leaves ``=ls`` bare, which zsh expands to a
+    path, and a bare ``if``, ``time`` or ``FOO=bar`` is a keyword or an
+    assignment. A quoted first word is still looked up as a builtin, function or
+    program, so ``command -v`` keeps working.
+    """
+    return " ".join("'" + arg.replace("'", "'\"'\"'") + "'" for arg in args)
 
 
 RunRequest = Command | Script

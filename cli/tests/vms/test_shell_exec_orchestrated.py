@@ -244,7 +244,7 @@ def test_exec_copied_workspace_pin_no_longer_crashes(
     assert rc == 0
     (request,) = vm_access_recorder.requests("stream")
     # Still runs in the workspace dir, just without any template-derived env.
-    assert (request.source, request.cwd) == ("echo hi", "/srv/copied-ws")
+    assert (request.source, request.cwd) == ("'echo' 'hi'", "/srv/copied-ws")
     # The vm-template env still flows; the copied workspace adds nothing.
     assert request.env.get("API_KEY") == "env-val"
 
@@ -318,7 +318,7 @@ def test_exec_reachable_vm_is_one_boundary_burst(
     assert len(resolve_counter) == 1
     assert sorted(resolve_counter[0]) == ["proxmox-token", "vm-env-secret"]
     (request,) = vm_access_recorder.requests("stream")
-    assert request.source == "echo hi"
+    assert request.source == "'echo' 'hi'"
     assert request.env.get("API_KEY") == "env-val"
 
 
@@ -448,7 +448,7 @@ def test_exec_double_dash_separator_strips_only_the_first(
 
     assert rc == 0
     (request,) = vm_access_recorder.requests("stream")
-    assert request.source == "git log -- path"
+    assert request.source == "'git' 'log' '--' 'path'"
 
 
 def test_exec_double_dash_separator_preserves_an_adjacent_second(
@@ -470,7 +470,7 @@ def test_exec_double_dash_separator_preserves_an_adjacent_second(
 
     assert rc == 0
     (request,) = vm_access_recorder.requests("stream")
-    assert request.source == "-- x"
+    assert request.source == "'--' 'x'"
 
 
 def test_exec_missing_command_after_double_dash_fails_pre_gate(
@@ -511,7 +511,7 @@ def test_exec_bare_flag_after_command_word_still_works(
 
     assert rc == 0
     (request,) = vm_access_recorder.requests("stream")
-    assert request.source == "free -m"
+    assert request.source == "'free' '-m'"
 
 
 def test_cross_vm_workspace_mismatch_fails_with_zero_resolves_and_zero_gate(

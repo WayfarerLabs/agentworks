@@ -404,7 +404,7 @@ def test_exec_double_dash_separator_strips_only_the_first(
 
     assert rc == 0
     (request,) = vm_access_recorder.requests("stream")
-    assert request.source == "git log -- path"
+    assert request.source == "'git' 'log' '--' 'path'"
 
 
 def test_exec_double_dash_separator_preserves_an_adjacent_second(
@@ -428,7 +428,7 @@ def test_exec_double_dash_separator_preserves_an_adjacent_second(
 
     assert rc == 0
     (request,) = vm_access_recorder.requests("stream")
-    assert request.source == "-- x"
+    assert request.source == "'--' 'x'"
 
 
 def test_exec_bare_flag_after_command_word_still_works(
@@ -451,7 +451,7 @@ def test_exec_bare_flag_after_command_word_still_works(
 
     assert rc == 0
     (request,) = vm_access_recorder.requests("stream")
-    assert request.source == "free -m"
+    assert request.source == "'free' '-m'"
 
 
 def test_exec_missing_command_after_double_dash_fails_pre_gate(
