@@ -440,6 +440,8 @@ def owner_remediation(view: ArtifactOwnerView) -> str:
         )
     if view.owner.component == "agent":
         return f"{conflict}Run 'agw agent reinit {view.owner.name}'."
+    if view.owner.component == "session":
+        return f"{conflict}Run 'agw session restart {view.owner.name}'."
     return f"{conflict}Run 'agw vm reinit {view.owner.name}'."
 
 

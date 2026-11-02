@@ -112,6 +112,49 @@ def test_native_only_entry_diagnostics_reach_session_and_both_inspection_outputs
     assert db.instance_state.get_applied_slices("agent", "agent") == before
 
 
+@pytest.mark.parametrize("status", ["incomplete", "retirement"])
+def test_session_inspection_repairs_its_actual_session_with_restart(db, monkeypatch, status):
+    from uuid import uuid4
+
+    from agentworks.artifacts.application import OwnedArtifactFile
+    from agentworks.artifacts.inspection import inspect_artifacts
+    from agentworks.db import SessionMode
+    from agentworks.harness_setup.model import SetupRecord
+    from agentworks.package_sources import PackageCapture
+
+    fixture = graph(db)
+    name = f"review-{uuid4().hex[:8]}"
+    integration = "shell" if status == "incomplete" else "codex"
+    db.insert_session(name, "workspace", "default", SessionMode.AGENT, agent_name="agent", socket_path="/socket")
+    reason = f"entry-{uuid4().hex}: native conflict"
+    record = SetupRecord(
+        component="session",
+        integration=integration,
+        destination_id="d" * 64,
+        declaration={},
+        incomplete_reasons=(reason,),
+        artifact_files=()
+        if status == "incomplete"
+        else (OwnedArtifactFile(path="/home/worker/session/file", sha256="a" * 64, origins=("b" * 64,)),),
+    )
+    write_native_setup(db, "session", name, NativeSetupState(records=(record,)), operation="fixture")
+    before = db.instance_state.get_applied_slices("session", name)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("session inspection acquired sources or mutated state")
+
+    monkeypatch.setattr(PackageCapture, "capture", forbidden)
+    monkeypatch.setattr(type(db.instance_state), "replace_applied_slices", forbidden)
+    inspected = inspect_artifacts(db, fixture.registry, session_name=name)
+    owner = inspected.owners[-1]
+    metadata = next(item for item in owner.integrations if item.name == integration)
+    assert owner.scope == "session" and owner.resource_name == name
+    assert metadata.status == status
+    assert metadata.recorded_incomplete_reasons == (reason,)
+    assert f"agw session restart {name}" in metadata.reason
+    assert db.instance_state.get_applied_slices("session", name) == before
+
+
 @pytest.mark.parametrize("domain", [AppliedStateKey.HARNESS_NATIVE_SETUP, AppliedStateKey.ARTIFACT_INPUTS])
 def test_unsupported_ancestor_evidence_preserves_domain_version_repair(db, monkeypatch, domain):
     fixture = graph(db, active=("vm",))

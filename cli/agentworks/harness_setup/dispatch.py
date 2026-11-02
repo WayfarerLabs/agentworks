@@ -135,7 +135,14 @@ def run_setup(
         for name in (*desired, *(name for name in prior if name not in desired)):
             previous = prior.get(name)
             block = desired.get(name)
-            if block is None and previous is not None and not previous.claims and not previous.artifact_files:
+            if (
+                block is None
+                and previous is not None
+                and not previous.claims
+                and not previous.artifact_files
+                and not previous.pending_cleanup
+                and not previous.incomplete_reasons
+            ):
                 state = NativeSetupState(
                     records=tuple(
                         record

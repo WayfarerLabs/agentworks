@@ -554,10 +554,13 @@ def test_retirement_keeps_callback_diagnostics_until_owning_retry_converges(setu
     original = first.user_init
     reason = f"plugin-{uuid4().hex}: retained association differs"
     partial = True
+    retirement_calls = 0
 
     def initialize(self, call):
+        nonlocal retirement_calls
         application = original(self, call)
         if self.name == "first":
+            retirement_calls += 1
             assert self.retiring
             current = next(
                 item for item in read_native_setup(db, "agent", "agent").records if item.integration == "first"
@@ -573,6 +576,8 @@ def test_retirement_keeps_callback_diagnostics_until_owning_retry_converges(setu
     record = next(item for item in read_native_setup(db, "agent", "agent").records if item.integration == "first")
     assert not record.complete and record.pending_cleanup and not record.claims
     assert record.incomplete_reasons == (reason,)
+    assert retirement_calls == 1
     partial = False
     run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
+    assert retirement_calls == 2
     assert [record.integration for record in read_native_setup(db, "agent", "agent").records] == ["second"]
