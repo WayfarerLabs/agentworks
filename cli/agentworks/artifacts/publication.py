@@ -105,6 +105,11 @@ def publish_artifacts(
     skipped: list[ArtifactSkip] = []
     with NativeFiles(runner, root=root) as files:
         observed = {path: files.fingerprint(path) for path in dict.fromkeys((*planned, *current))}
+        modified = {
+            path
+            for path, prior in current.items()
+            if observed[path] is not None and observed[path] != (prior.sha256, _mode(prior.executable, group, root))
+        }
         for path, item in planned.items():
             prior = current.get(path)
             if observed[path] is not None and prior is not None and prior.generated_section != item.generated_section:
@@ -135,12 +140,17 @@ def publish_artifacts(
                 continue
             data = observed[path]
             prior = current.get(path)
-            if (
-                data is not None
-                and (data[0] != hashlib.sha256(item.data).hexdigest() or bool(data[1] & 0o111) != item.executable)
-                and (prior is None or data != (prior.sha256, _mode(prior.executable, group, root)))
-            ):
-                reason = f"existing content at '{path}' differs from the declaration and recorded ownership"
+            differences = []
+            if data is not None:
+                if data[0] != hashlib.sha256(item.data).hexdigest():
+                    differences.append("content")
+                if bool(data[1] & 0o111) != item.executable:
+                    differences.append("executable intent")
+            if differences and (prior is None or path in modified):
+                reason = (
+                    f"existing artifact at '{path}' has different {' and '.join(differences)} from the declaration; "
+                    "resolve that difference before retrying owning setup"
+                )
                 for origin in (*item.origins, *(prior.origins if prior is not None else ())):
                     conflicts.setdefault(origin, reason)
                 output.warn(f"Skipping artifact destination '{path}': {reason}; existing content was retained.")
@@ -148,13 +158,11 @@ def publish_artifacts(
         for path, prior in current.items():
             if path in planned or path in sections or path in skipped_paths:
                 continue
-            data = observed[path]
-            if (
-                data is not None
-                and data != (prior.sha256, _mode(prior.executable, group, root))
-                and requested_origins.intersection(prior.origins)
-            ):
-                reason = f"obsolete member at '{path}' was modified and must be retained"
+            if path in modified and requested_origins.intersection(prior.origins):
+                reason = (
+                    f"obsolete member at '{path}' was modified and must be retained; "
+                    "resolve that difference before retrying owning setup"
+                )
                 for origin in prior.origins:
                     if origin in requested_origins:
                         conflicts.setdefault(origin, reason)
@@ -174,6 +182,8 @@ def publish_artifacts(
                 -item[0].count("/") if _skill_entrypoint_directory(item[1]) is not None else 0,
             ),
         )
+        removed: list[str] = []
+        removed_sections: list[str] = []
         for path, prior in retirement:
             if path in planned or path in skipped_paths:
                 continue
@@ -188,19 +198,23 @@ def publish_artifacts(
                     files.publish(
                         path, replacement, expected=hashlib.sha256(existing).hexdigest(), preserve_metadata=True
                     )
+                    removed_sections.append(path)
                 del current[path]
                 checkpoint(tuple(current.values()))
                 continue
             data = observed[path]
-            if data is not None and data != (prior.sha256, _mode(prior.executable, group, root)):
+            if path in modified:
                 output.warn("An obsolete owned artifact was modified; its file and cleanup evidence were retained.")
                 continue
             if data is not None:
                 files.remove(path, expected=prior.sha256)
+                removed.append(path)
             if prior.package_root is not None:
                 files.prune_empty_parents(path, root=prior.package_root)
             del current[path]
             checkpoint(tuple(current.values()))
+        _report_file_changes("Removed", removed)
+        _report_file_changes("Removed", removed_sections, noun="managed artifact sections")
         publication = sorted(
             planned.items(),
             key=lambda item: (
@@ -209,6 +223,8 @@ def publish_artifacts(
             ),
         )
         adopted: list[str] = []
+        updated: list[str] = []
+        updated_sections: list[str] = []
         for path, item in publication:
             if path in skipped_paths:
                 continue
@@ -236,6 +252,8 @@ def publish_artifacts(
                         executable=item.executable,
                         preserve_metadata=True,
                     )
+                    if prior is not None:
+                        updated_sections.append(path)
             elif observed_file != (digest, _mode(item.executable, group, root)):
                 files.publish(
                     path,
@@ -244,19 +262,23 @@ def publish_artifacts(
                     group=group,
                     executable=item.executable,
                 )
+                if prior is not None:
+                    updated.append(path)
             if prior != record:
                 current[path] = record
                 checkpoint(tuple(current.values()))
-                if (
-                    path not in sections
-                    and observed_file is not None
-                    and (prior is None or observed_file != (prior.sha256, _mode(prior.executable, group, root)))
-                ):
+                if path not in sections and observed_file is not None and (prior is None or path in modified):
                     adopted.append(path)
-        if adopted:
-            shown = adopted if len(adopted) <= 3 else [*adopted[:2], "..."]
-            output.info(f"Adopting {len(adopted)} matching artifact files ({', '.join(shown)}).")
+        _report_file_changes("Updated", updated)
+        _report_file_changes("Updated", updated_sections, noun="managed artifact sections")
+        _report_file_changes("Adopting", adopted, noun="matching artifact files")
     return ArtifactPublication(tuple(current.values()), tuple(skipped))
+
+
+def _report_file_changes(action: str, paths: Sequence[str], *, noun: str = "artifact files") -> None:
+    if paths:
+        shown = paths if len(paths) <= 3 else (*paths[:2], "...")
+        output.info(f"{action} {len(paths)} {noun} ({', '.join(shown)}).")
 
 
 def _mode(executable: bool, group: str, root: bool) -> int:

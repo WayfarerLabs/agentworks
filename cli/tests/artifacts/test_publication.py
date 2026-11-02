@@ -78,6 +78,65 @@ def test_matching_unclaimed_file_is_adopted_and_retired(target, monkeypatch):
     assert len(reports) == 1 and str(path) in reports[0]
     assert not publish_artifacts(target, (), result.files, checkpoints.append, roots=(str(target.home),)).files
     assert not path.exists()
+    assert len(reports) == 2 and str(path) in reports[-1]
+
+
+@pytest.mark.parametrize("count", [1, 3, 5])
+def test_owned_file_retirement_reports_a_bounded_confirmed_summary(target, monkeypatch, count):
+    paths = tuple(target.home / f"retired-{chr(97 + index)}" for index in range(count))
+    previous = publish_artifacts(
+        target, tuple(artifact(path) for path in paths), (), lambda files: None, roots=(str(target.home),)
+    ).files
+    reports: list[str] = []
+    monkeypatch.setattr("agentworks.artifacts.publication.output.info", reports.append)
+    result = publish_artifacts(target, (), previous, lambda files: None, roots=(str(target.home),))
+    assert not result.files and all(not path.exists() for path in paths)
+    assert len(reports) == 1
+    for index, path in enumerate(paths):
+        assert (str(path) in reports[0]) == (index < (count if count <= 3 else 2))
+    reports.clear()
+    publish_artifacts(target, (), result.files, lambda files: None, roots=(str(target.home),))
+    assert not reports
+
+
+def test_owned_file_replacement_reports_confirmed_change_only(target, monkeypatch):
+    path = target.home / "replacement"
+    previous = publish_artifacts(target, (artifact(path),), (), lambda files: None, roots=(str(target.home),)).files
+    reports: list[str] = []
+    monkeypatch.setattr("agentworks.artifacts.publication.output.info", reports.append)
+    desired = (artifact(path, b"new content"),)
+    result = publish_artifacts(target, desired, previous, lambda files: None, roots=(str(target.home),))
+    assert path.read_bytes() == b"new content" and len(reports) == 1
+    assert str(path) in reports[0]
+    reports.clear()
+    publish_artifacts(target, desired, result.files, lambda files: None, roots=(str(target.home),))
+    assert not reports
+
+
+def test_generated_section_retirement_reports_without_removing_operator_content(target, monkeypatch):
+    path = target.home / "AGENTS.md"
+    original = b"Operator guidance.\n"
+    path.write_bytes(original)
+    desired = (replace(artifact(path), generated_section=True),)
+    previous = publish_artifacts(target, desired, (), lambda files: None, roots=(str(target.home),)).files
+    reports: list[str] = []
+    monkeypatch.setattr("agentworks.artifacts.publication.output.info", reports.append)
+    result = publish_artifacts(target, (), previous, lambda files: None, roots=(str(target.home),))
+    remaining = path.read_bytes()
+    assert not result.files and remaining.startswith(original)
+    assert not remaining[len(original) :].strip()
+    assert len(reports) == 1 and str(path) in reports[0]
+
+
+def test_retained_modified_file_is_not_reported_as_removed(target, monkeypatch):
+    path = target.home / "retained"
+    previous = publish_artifacts(target, (artifact(path),), (), lambda files: None, roots=(str(target.home),)).files
+    path.write_bytes(b"operator change")
+    reports: list[str] = []
+    monkeypatch.setattr("agentworks.artifacts.publication.output.info", reports.append)
+    result = publish_artifacts(target, (), previous, lambda files: None, roots=(str(target.home),))
+    assert result.files == previous and path.read_bytes() == b"operator change"
+    assert not reports
 
 
 def test_conflicting_skill_member_preserves_the_whole_package(target):
