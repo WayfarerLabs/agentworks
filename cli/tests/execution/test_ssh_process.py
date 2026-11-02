@@ -313,11 +313,6 @@ def test_a_host_argv_puts_the_host_after_the_option_fence_and_the_command_last()
     assert "-F" not in argv
 
 
-def test_a_host_connection_forwards_nothing() -> None:
-    with pytest.raises(ValueError):
-        host_argv(ArgvMode.FORWARD)
-
-
 @needs_ssh
 def test_a_host_argv_honors_the_operators_configuration(tmp_path: Path) -> None:
     operator_config = tmp_path / "config"

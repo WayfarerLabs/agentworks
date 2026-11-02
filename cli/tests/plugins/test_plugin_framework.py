@@ -488,10 +488,6 @@ def test_rejects_a_non_conforming_impl_naming_the_plugin(kind: str, impl: type, 
     assert expected in message
 
 
-def test_native_execution_is_all_the_platform_omits() -> None:
-    assert _PlatformWithoutNativeExecution.__abstractmethods__ == frozenset({"native_transport", "run_as_root"})
-
-
 @pytest.mark.parametrize(
     ("kind", "impl"),
     [

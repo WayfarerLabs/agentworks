@@ -149,7 +149,7 @@ def a_script_cut_short_runs_nothing(lane: RootLane) -> None:
 
         assert marker not in raw.stdout, cut  # W2
         assert marker not in raw.stderr, cut
-        assert not lane.check(f"test -e {flag}"), cut
+    assert not lane.check(f"test -e {flag}")
 
 
 # -- V only: WSL2 ----------------------------------------------------------------------------

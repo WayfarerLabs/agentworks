@@ -208,8 +208,6 @@ def build_host_argv(client: SSHClient, host: str, mode: ArgvMode, remote_command
     boundary when it holds whitespace or a control character. There is no
     identity: the host's keys come from that configuration.
     """
-    if mode is ArgvMode.FORWARD:
-        raise ValueError("a host connection forwards no ports")
     values = [
         f"ConnectTimeout={CONNECT_TIMEOUT_SECONDS}",
         f"ServerAliveInterval={SERVER_ALIVE_INTERVAL_SECONDS}",
