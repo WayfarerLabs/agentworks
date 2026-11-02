@@ -169,32 +169,73 @@ def test_a_failed_write_is_the_consumer_ending_early_not_a_failure(monkeypatch: 
     run.assert_closed()
 
 
-def test_a_sink_that_fails_is_dropped_and_the_command_still_completes() -> None:
-    seen: list[bytes] = []
+def leaving_sink(after: int) -> pump.Sink:
+    """An operator stream that takes ``after`` bytes and then reports its reader gone, as ``| head`` does."""
+    taken = 0
 
     def sink(payload: bytes) -> None:
-        seen.append(payload)
-        raise BrokenPipeError
+        nonlocal taken
+        taken += len(payload)
+        if taken >= after:
+            raise BrokenPipeError
 
-    script = "start(); out.write(b'a'); out.flush(); time.sleep(.2); out.write(b'b'); finish(7)"
+    return sink
+
+
+def test_a_stdout_consumer_that_leaves_ends_the_request_and_the_client_is_reaped() -> None:
+    script = (
+        "start()\n"
+        "try:\n"
+        "    while True:\n"
+        "        out.write(b'x' * 65536); out.flush()\n"
+        "except BrokenPipeError:\n"
+        "    sys.exit(0)\n"
+    )
     session = PipeSession(
         [sys.executable, "-c", PRELUDE + script],
         request=b"",
         nonce=NONCE,
-        on_stdout=sink,
+        on_stdout=leaving_sink(3),
         on_stderr=Capture(),
+        deadline=Deadline.after(20),
+    )
+    started = time.monotonic()
+    with session:
+        reason = session.pump()
+        session.end()
+
+    assert reason is StopReason.CONSUMER_LEFT
+    assert time.monotonic() - started < 10
+    process = session._proc  # noqa: SLF001 - the point is that nothing is left behind
+    assert process is not None
+    assert process.poll() is not None
+    assert all(pipe is None or pipe.closed for pipe in (process.stdin, process.stdout, process.stderr))
+
+
+def test_a_stderr_consumer_that_leaves_only_stops_that_streams_delivery() -> None:
+    err_seen: list[bytes] = []
+
+    def sink(payload: bytes) -> None:
+        err_seen.append(payload)
+        raise BrokenPipeError
+
+    out = Capture()
+    script = "start(); err.write(b'a'); err.flush(); time.sleep(.2); out.write(b'b'); err.write(b'c'); finish(7)"
+    session = PipeSession(
+        [sys.executable, "-c", PRELUDE + script], request=b"", nonce=NONCE, on_stdout=out, on_stderr=sink
     )
     with session:
         assert session.pump() is StopReason.DONE
         session.end()
 
-    assert seen == [b"a"]
+    assert err_seen == [b"a"]
+    assert bytes(out.data) == b"b"
     assert envelope.classify(session.stdout, session.stderr, session.exit_status) == Completed(7)
 
 
-def test_a_sink_writing_to_a_pipe_whose_reader_closed_is_the_consumer_leaving() -> None:
+def test_a_stdout_pipe_whose_reader_closed_is_the_consumer_leaving() -> None:
     # CPython raises BrokenPipeError for this on POSIX and OSError(EINVAL) on Windows; either
-    # means the consumer ended early, so the command still completes.
+    # means the consumer left, so the request ends.
     reader, writer = os.pipe()
     os.close(reader)
     delivered: list[int] = []
@@ -202,19 +243,18 @@ def test_a_sink_writing_to_a_pipe_whose_reader_closed_is_the_consumer_leaving() 
     def sink(payload: bytes) -> None:
         delivered.append(os.write(writer, payload))
 
-    script = "start(); out.write(b'a'); out.flush(); time.sleep(.2); out.write(b'b'); finish(7)"
+    script = "start(); out.write(b'a'); out.flush(); time.sleep(5); out.write(b'b'); finish(7)"
     session = PipeSession(
         [sys.executable, "-c", PRELUDE + script], request=b"", nonce=NONCE, on_stdout=sink, on_stderr=Capture()
     )
     try:
         with session:
-            assert session.pump() is StopReason.DONE
+            assert session.pump() is StopReason.CONSUMER_LEFT
             session.end()
     finally:
         os.close(writer)
 
     assert delivered == []
-    assert envelope.classify(session.stdout, session.stderr, session.exit_status) == Completed(7)
 
 
 def test_a_deadline_keeps_partial_output_and_reaps_the_client() -> None:

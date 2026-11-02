@@ -23,7 +23,7 @@ from agentworks.errors import ValidationError
 from agentworks.execution import trust
 from agentworks.execution.envelope import classify
 from agentworks.execution.errors import ClientUnsupported
-from agentworks.execution.results import Completion, Result, Unknown
+from agentworks.execution.results import Completed, Completion, Result, Unknown
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -56,6 +56,7 @@ SERVER_ALIVE_COUNT_MAX = 4
 CLIENT_LOG_TAIL_LINES = 20
 CLIENT_LOG_READ_BYTES = 65_536
 HOST_KEY_FAILURE = "Host key verification failed"
+SIGPIPE_STATUS = 128 + 13
 
 _HOST = re.compile(r"[A-Za-z0-9_:][A-Za-z0-9_.:-]*")
 _USER = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*\$?")
@@ -291,12 +292,16 @@ def run_terminal(argv: Sequence[str]) -> int:
 def outcome(session: PipeSession, stop: StopReason, log: Path) -> Result:
     """The typed outcome of a finished session: a local limit, or the markers and ssh's status.
 
-    The result carries no stream bytes; the caller's sinks hold those.
+    The result carries no stream bytes; the caller's sinks hold those. A stdout
+    consumer that left is reported as the status of a writer killed by
+    ``SIGPIPE``, which is what the payload meets when ssh closes the channel.
     """
     text = client_log_text(log)
     limit = stop.limit
     if limit is not None:
         completion: Completion = Unknown(limit)
+    elif stop.consumer_left:
+        completion = Completed(SIGPIPE_STATUS)
     else:
         completion = classify(
             session.stdout, session.stderr, session.exit_status, host_key_failed=HOST_KEY_FAILURE in text

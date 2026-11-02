@@ -15,6 +15,7 @@ import threading
 import time
 from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -187,6 +188,42 @@ def stdin_consumer_exits_early(lane: Lane) -> None:
     streamed = lane.stream(cmd("head", "-c", "3"), stdin=b"0123456789" * 100_000)
 
     assert (streamed.status, streamed.stdout) == (0, b"012")
+
+
+class LeavingStdout(io.BytesIO):
+    """An operator stdout whose reader leaves after a few bytes, as with ``| head -c 2``."""
+
+    def __init__(self, after: int) -> None:
+        super().__init__()
+        self._after = after
+
+    def write(self, data: object, /) -> int:  # type: ignore[override]
+        super().write(data)  # type: ignore[arg-type]
+        if self.tell() >= self._after:
+            raise BrokenPipeError
+        return len(data)  # type: ignore[arg-type]
+
+
+def stdout_consumer_leaves_an_endless_writer(lane: Lane) -> None:
+    pid_file = f"{lane.make_dir()}/pid"
+    endless = cmd("sh", "-c", f"echo $$ > {pid_file}; exec yes", deadline=15)
+    stdout, stderr = LeavingStdout(2), io.BytesIO()
+    started = time.monotonic()
+
+    status = lane.access.stream(endless, stdin=None, stdout=stdout, stderr=stderr)  # type: ignore[arg-type]
+
+    assert time.monotonic() - started < 10
+    assert status == 141  # the status of a writer killed by SIGPIPE, which is what the guest's writer meets
+    assert stdout.getvalue()[:2] == b"y\n"
+    pid = int(Path(pid_file).read_text())
+    deadline_at = time.monotonic() + 10
+    while time.monotonic() < deadline_at:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.05)
+    pytest.fail("the guest's writer is still running")
 
 
 def bash_child_reads_no_startup_file(lane: Lane) -> None:
@@ -583,6 +620,7 @@ def build() -> list[Vector]:
         Vector("exit-statuses", "LSV", exit_statuses),
         Vector("stdin-positioning", "LSV", stdin_positioning),
         Vector("stdin-consumer-exits-early", "LS", stdin_consumer_exits_early),
+        Vector("stdout-consumer-leaves", "LS", stdout_consumer_leaves_an_endless_writer),
         Vector("bash-child-reads-no-startup-file", "LSV", bash_child_reads_no_startup_file),
         Vector("background-child-holds-both-streams", "LSV", background_child_holds_both_streams),
         Vector("no-trailing-newline-and-refusal", "LS", output_without_a_trailing_newline_and_a_refusal),
