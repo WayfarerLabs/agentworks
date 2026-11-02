@@ -202,7 +202,7 @@ pass the static check, and the package's tests pass with the legacy modules bloc
     into Debian 13 sshd's `PerSourcePenalties`;
   - the operation log record;
   - the vm-platform `contract_version` bump.
-- [ ] Add python3 to `PROVISIONING_PACKAGES`, which every platform's bootstrap already installs
+- [x] Add python3 to `PROVISIONING_PACKAGES`, which every platform's bootstrap already installs
       (`lima.py:391`, `wsl2_bootstrap.py:65`, and the AWS, Azure, GCP and Proxmox platforms).
 - [ ] Make `ProvisionResult.tailnet_address` required on every platform, and delete
       `ProvisionResult.native_transport` and Phase A's native `tailscale ip -4` fallback:
@@ -215,10 +215,10 @@ pass the static check, and the package's tests pass with the legacy modules bloc
   - `parse_tailnet_address` validates each read and core validates the value again before recording
     it;
   - the provisioning trust file's lifetime narrows to the platform's `create` call.
-- [ ] Bump the vm-platform `contract_version` to 2 once, here, with slice 4 landing under the same
+- [x] Bump the vm-platform `contract_version` to 2 once, here, with slice 4 landing under the same
       number in the same PR: the kind descriptor, the six platforms, the tests that assert it and
       every "version 1" mention of this kind.
-- [ ] Add `UnknownReason.AUTH_FAILED` and its classifier row, typed from
+- [x] Add `UnknownReason.AUTH_FAILED` and its classifier row, typed from
       `Permission denied (publickey` in the client log, and widen the passphrase hint to
       `CONNECTION` or `AUTH_FAILED`.
 - [ ] Implement `reachability.py`: `wait(access, *, wording)` polls a fixed `true` probe, polls only
@@ -235,7 +235,7 @@ pass the static check, and the package's tests pass with the legacy modules bloc
     `vm confirm-release` runs on `VMAccess`, and `probe_debian_release` is deleted;
   - `vms/contract.py`, `vms/initializer/phase_a.py` and `vms/manager/release.py` join the static
     legacy-import check.
-- [ ] Implement the operation log record: `oplog.format_record`, `VMAccess`'s optional `log`
+- [x] Implement the operation log record: `oplog.format_record`, `VMAccess`'s optional `log`
       callable and `SSHLogger.record`, with redaction left at the logger's one sink. `LOG_DIR`, its
       readers and `SSHLogger` stay until slice 8.
 - [ ] Add elevation, with its conformance vectors (E1, E2, E4 and E6), for the contract's sudo
@@ -281,7 +281,7 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
     host policy for Remote Lima;
   - the repair, rekey and logout scripts, and `vm recover`;
   - delete's refusal to log out, under Unverified trust, a cloud VM that never enrolled a host key.
-- [ ] Implement `execution/root_script.py`: `RawRun`, `RootScriptResult`, the wrapper with its one
+- [x] Implement `execution/root_script.py`: `RawRun`, `RootScriptResult`, the wrapper with its one
       embedded secret, `run` with its optional operation log, `run_process` over
       `PipeSession(nonce=None)`, and `read_host_keys`. `spawn` raises `ConnectivityError` naming a
       program other than OpenSSH that cannot start, and `trust.fingerprint` lands.
@@ -293,14 +293,15 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
   - `public_ssh.py` for the clouds under the VM policy, with each cloud's `read_host_keys`.
     `run_as_root` and `recovery_needs_guest_sshd` become descriptor requirements, and
     `ProvisionRequest.ssh_private_key` becomes `Path`.
-- [ ] Implement `build_host_argv` (HLA D2) in `ssh_process.py` for Remote Lima's host connection,
+- [x] Implement `build_host_argv` (HLA D2) in `ssh_process.py` for Remote Lima's host connection,
       its only caller, and refuse whitespace and control characters in `LimaSshPlacement.host`.
 - [ ] Port `tailscale_join.py` onto `run_as_root`: `JOIN_FRAGMENT` through
       `--auth-key=file:/dev/stdin`, `join_tailscale`, `read_tailnet_address`,
-      `settle_tailnet_address` with its `rerun_hint`, and `EphemeralTailscaleBootstrap`. WSL2 and
-      Proxmox run a key-free bootstrap through `run_as_root` and then join. Delete the bootstrap
-      generator's key parameter and step 7, `TAILSCALE_JOIN_STDIN_COMMAND` and the staging files,
-      and re-prove incident row I10 with a test.
+      `settle_tailnet_address` with its `rerun_hint`, and `complete_cloud_bootstrap`. WSL2 and
+      Proxmox run the key-free bootstrap through `bootstrap_script.run_bootstrap` over `run_as_root`
+      and then join. Delete the bootstrap generator's key parameter and step 7, the staging files,
+      and `TAILSCALE_JOIN_STDIN_COMMAND` with its last callers (rekey and `vm start`'s rejoin), and
+      re-prove incident row I10 with a test.
 - [ ] Make `transient_route` and `probe_failure_hint` private to each cloud. Add explicit imports of
       `public_ssh.py` and `vms/recovery.py` to the package guard, and the plugin and migrated files
       the platform LLD lists to the static check (HLA D14).
