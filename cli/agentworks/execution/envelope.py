@@ -280,14 +280,21 @@ def classify(
     ssh_status: int | None,
     *,
     host_key_failed: bool = False,
+    stdout_abandoned: bool = False,
+    stderr_abandoned: bool = False,
 ) -> Completion:
     """Combine both filters and ssh's exit status into a completion.
 
     ``ssh_status`` is ssh's own status when it exited by itself, and ``None``
     when it was still running or was killed (a signal's negative status is not
     evidence either). A deadline or an output limit is the caller's to report.
+
+    An abandoned stream is one whose consumer left, so the client closed it
+    unread. An abandoned stdout stands in for the ``end`` line; the stderr
+    trailer still decides. A departed consumer without a trailer is
+    ``Unknown(CONSUMER_LEFT)``.
     """
-    if stdout.closing == "end" and stderr.closing is not None:
+    if (stdout.closing == "end" or stdout_abandoned) and stderr.closing is not None:
         trailer = stderr.closing
         if (match := _EXIT_LINE.fullmatch(trailer)) is not None:
             return Completed(int(match[1]))
@@ -295,6 +302,8 @@ def classify(
         if trailer.startswith("refused ") and REFUSAL_CODE.fullmatch(code):
             return NotDelivered(NotDeliveredReason.REFUSED, code)
         return Unknown(UnknownReason.TRUNCATED)
+    if stdout_abandoned or stderr_abandoned:
+        return Unknown(UnknownReason.CONSUMER_LEFT)
     if stdout.started or stderr.started:
         return Unknown(UnknownReason.TRUNCATED)
     if ssh_status == 127:

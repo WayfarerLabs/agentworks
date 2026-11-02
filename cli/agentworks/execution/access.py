@@ -10,10 +10,11 @@ nothing dispatched: resolve the client, encode the request, build the options
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from agentworks import ssh_identity
 from agentworks.errors import StateError
@@ -32,6 +33,18 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution.requests import Forward, LoginShell, RunRequest
+
+
+SIGPIPE_STATUS = 128 + 13
+"""What ``stream`` reports when a consumer left and the guest reported no status: a writer killed by ``SIGPIPE``."""
+
+
+class OutputStream(Protocol):
+    """What ``stream`` needs of an operator stream: a binary file's ``write`` and ``flush``."""
+
+    def write(self, data: bytes, /) -> int: ...
+
+    def flush(self) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -86,17 +99,20 @@ class VMAccess:
                 raise CommandFailed(self.vm_name, result.completion.status, result)
             return result
 
-    def stream(self, request: RunRequest, *, stdin: BinaryIO | None, stdout: BinaryIO, stderr: BinaryIO) -> int:
+    def stream(self, request: RunRequest, *, stdin: BinaryIO | None, stdout: OutputStream, stderr: OutputStream) -> int:
         """Run ``request`` with live output and return the guest's status.
 
         ``stdin`` is copied to the guest until end of file; pass the raw
         binary stream, or ``None`` to close the guest's input at once. A refusal
         becomes the shell's status with one line on ``stderr``: 127 for a
         missing command, 126 for any other ``exec`` failure and 125 for a
-        working directory. Anything else that is not a completion raises.
+        working directory. A consumer that leaves (``| head``) gets what ssh gave
+        it: the guest's own status when it still ends and reports one, else 141,
+        the status of a writer killed by ``SIGPIPE``. Anything else that is not
+        a completion raises.
         """
 
-        def deliver(sink: BinaryIO) -> pump.Sink:
+        def deliver(sink: OutputStream) -> pump.Sink:
             def write(payload: bytes) -> None:
                 sink.write(payload)  # a full non-blocking pipe raises BlockingIOError(characters_written)
                 try:
@@ -110,6 +126,8 @@ class VMAccess:
         with self._passphrase_hint_on_connection_failure():
             result = self._execute(request, stdin=stdin, on_stdout=deliver(stdout), on_stderr=deliver(stderr))
             completion = result.completion
+            if completion == Unknown(UnknownReason.CONSUMER_LEFT):
+                return SIGPIPE_STATUS
             if isinstance(completion, NotDelivered) and completion.reason is NotDeliveredReason.REFUSED:
                 code = completion.code or ""
                 with contextlib.suppress(OSError):
@@ -243,7 +261,52 @@ def stream_to_operator(access: VMAccess, request: RunRequest) -> int:
     sys.stdout.flush()
     sys.stderr.flush()
     stdin = None if sys.stdin is None else getattr(sys.stdin.buffer, "raw", sys.stdin.buffer)
-    return access.stream(request, stdin=stdin, stdout=sys.stdout.buffer, stderr=sys.stderr.buffer)
+    return access.stream(
+        request, stdin=stdin, stdout=_OperatorStream(sys.stdout.buffer), stderr=_OperatorStream(sys.stderr.buffer)
+    )
+
+
+class _OperatorStream:
+    """One of the process's binary streams, which stops failing once its reader has left.
+
+    When the reader leaves (``| head``), bytes that could not be flushed stay in
+    the stream's buffer and fail again at interpreter shutdown, turning the exit
+    status into 120 with a traceback. Pointing the descriptor at the null device
+    at the first failure gives shutdown somewhere to write them.
+    """
+
+    def __init__(self, stream: BinaryIO) -> None:
+        self._stream = stream
+
+    def write(self, data: bytes, /) -> int:
+        with self._reader_leaving():
+            return self._stream.write(data)
+
+    def flush(self) -> None:
+        with self._reader_leaving():
+            self._stream.flush()
+
+    @contextlib.contextmanager
+    def _reader_leaving(self) -> Iterator[None]:
+        try:
+            yield
+        except (BrokenPipeError, ConnectionResetError):
+            self._point_at_null_device()
+            raise
+        except OSError as error:
+            # CPython reports a pipe whose reader closed as EINVAL on Windows.
+            if sys.platform == "win32" and error.errno == errno.EINVAL:
+                self._point_at_null_device()
+            raise
+
+    def _point_at_null_device(self) -> None:
+        with contextlib.suppress(OSError, ValueError):
+            descriptor = self._stream.fileno()
+            null = os.open(os.devnull, os.O_WRONLY)
+            try:
+                os.dup2(null, descriptor)
+            finally:
+                os.close(null)
 
 
 def vm_access(vm: VMRow, config: Config, identity: Identity) -> VMAccess:

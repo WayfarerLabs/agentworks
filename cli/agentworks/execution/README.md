@@ -72,8 +72,11 @@ show is the last lines of ssh's own diagnostics, which the client keeps in a pri
 apart from the payload's output. On a connection failure, `VMAccess` reads the operator's key file
 once to decide whether to hint at `ssh-add`, and only then. `stream` reports a refusal the way a
 shell does: 127 for a missing command, 126 for any other `exec` failure, 125 for a working
-directory. A stdout consumer that leaves (`| head`) closes the client's read end of ssh's stdout and
-ends `stream` with 141, without waiting for the trailer.
+directory. A consumer that leaves (`| head`) gets what ssh gave it. The client closes its read end
+of that stream, so a writer takes `SIGPIPE`, while a quiet payload still runs to its end and
+`stream` reports its own status. A departed stderr ends the request at once, since the status
+travels on stderr and ssh does not end the channel for it. With no status to report, `stream`
+returns 141.
 
 ## Client and policy
 

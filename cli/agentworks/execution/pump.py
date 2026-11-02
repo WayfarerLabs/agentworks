@@ -106,8 +106,8 @@ class StopReason(enum.Enum):
     """Both pipes reached end of file."""
     DEADLINE = enum.auto()
     OUTPUT_LIMIT = enum.auto()
-    CONSUMER_LEFT = enum.auto()
-    """The stdout consumer left and the client's read end of ssh's stdout is closed."""
+    STDERR_CONSUMER_LEFT = enum.auto()
+    """The stderr consumer left, so the closing line that carries the status can no longer arrive."""
 
     @property
     def limit(self) -> UnknownReason | None:
@@ -117,10 +117,6 @@ class StopReason(enum.Enum):
         if self is StopReason.OUTPUT_LIMIT:
             return UnknownReason.OUTPUT_LIMIT
         return None
-
-    @property
-    def consumer_left(self) -> bool:
-        return self is StopReason.CONSUMER_LEFT
 
 
 class _InputFeeder:
@@ -178,15 +174,19 @@ class PipeSession:
     launcher treats its closing as the client leaving).
 
     A write that fails to the client's stdin is the consumer ending early, not a
-    failure: the session stops sending and keeps reading. A stderr sink that
-    raises ``BrokenPipeError`` or ``ConnectionResetError`` only stops that
-    stream's delivery. A stdout sink that does so ends the request, as it did
-    when ssh held the operator's stdout: the session closes its read end of the
-    client's stdout, so ssh gets ``EPIPE`` and closes the channel, and
-    :meth:`pump` returns :attr:`StopReason.CONSUMER_LEFT` without waiting for the
-    closing line. A sink that raises ``BlockingIOError`` is waited on: the session stops reading that stream
-    until the sink has taken what it was offered, so output is never dropped.
-    Any other ``OSError`` from a sink propagates.
+    failure: the session stops sending and keeps reading. A sink that raises
+    ``BrokenPipeError`` or ``ConnectionResetError`` is the consumer of that
+    stream leaving. The session closes its read end of that stream of the
+    client's, so ssh sees ``EPIPE`` as it did when it held the operator's
+    streams. A departed stdout makes ssh close the channel when the guest next
+    writes, and the session keeps pumping stderr until then, so a quiet payload
+    still reports its status. ssh does not end the channel for a departed
+    stderr, and the status travels on stderr, so :meth:`pump` returns
+    :attr:`StopReason.STDERR_CONSUMER_LEFT` at once and ending the session kills
+    the client. :attr:`stdout_abandoned` and :attr:`stderr_abandoned` say which
+    left. A sink that raises ``BlockingIOError`` is waited on: the session stops
+    reading that stream until the sink has taken what it was offered, so output
+    is never dropped. Any other ``OSError`` from a sink propagates.
     """
 
     def __init__(
@@ -211,7 +211,7 @@ class PipeSession:
         self._eof = {"out": False, "err": False}
         self._proc: subprocess.Popen[bytes] | None = None
         self._killed = False
-        self._stdout_consumer_left = False
+        self._abandoned: set[str] = set()
         self.stdout = StreamFilter(nonce)
         self.stderr = StreamFilter(nonce)
         self.exit_status: int | None = None
@@ -257,8 +257,10 @@ class PipeSession:
             waiting = any(held is not None for held in self._pending.values())
             if self.stdout.done and self.stderr.done and not waiting:
                 return StopReason.DONE
-            if self._stdout_consumer_left:
-                return StopReason.CONSUMER_LEFT
+            if self.stdout_abandoned and self.stderr.done and not waiting:
+                return StopReason.DONE
+            if self.stderr_abandoned:
+                return StopReason.STDERR_CONSUMER_LEFT
             if stop is not None and stop():
                 return StopReason.CONDITION
             if self._deadline.expired or budget.expired:
@@ -332,17 +334,27 @@ class PipeSession:
             self._consumer_left(which)
 
     def _consumer_left(self, which: str) -> None:
-        """Stop delivering ``which``. A departed stdout also closes the client's read end, so ssh sees EPIPE."""
+        """Stop delivering ``which`` and close the client's read end of it, so ssh sees ``EPIPE``."""
         self._sinks[which] = _discard
-        if which != "out":
-            return
-        self._stdout_consumer_left = True
-        self._eof["out"] = True
-        self._pending["out"] = None
+        self._abandoned.add(which)
+        self._eof[which] = True
+        self._pending[which] = None
         proc = self._proc
-        assert proc is not None and proc.stdout is not None
+        assert proc is not None
+        pipe = proc.stdout if which == "out" else proc.stderr
+        assert pipe is not None
         with contextlib.suppress(OSError):
-            proc.stdout.close()
+            pipe.close()
+
+    @property
+    def stdout_abandoned(self) -> bool:
+        """Whether the stdout consumer left, so the client's stdout was closed unread."""
+        return "out" in self._abandoned
+
+    @property
+    def stderr_abandoned(self) -> bool:
+        """Whether the stderr consumer left, so the client's stderr was closed unread."""
+        return "err" in self._abandoned
 
     def _offer_again(self, which: str) -> bool:
         held = self._pending[which]

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -415,3 +417,58 @@ def test_an_unencrypted_key_never_asks_the_agent(fake_ssh_add, monkeypatch: pyte
 
     assert vm_access(vm(), config(key), Admin()).passphrase_hint() is None
     assert not calls.exists()
+
+
+# -- A consumer that leaves ------------------------------------------------------------------
+
+
+def test_a_departed_consumer_without_a_status_is_reported_as_a_writer_killed_by_sigpipe(
+    supported_client: SSHClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seed_vm_trust("box")
+    monkeypatch.setattr(VMAccess, "_execute", lambda self, *a, **k: result(Unknown(UnknownReason.CONSUMER_LEFT)))
+    access = vm_access(vm(), config(tmp_path / "key"), Admin())
+
+    status = access.stream(Command(("true",)), stdin=None, stdout=io.BytesIO(), stderr=io.BytesIO())
+
+    assert status == 141
+
+
+# The reader leaves after the first line; the late line stays in the buffer and, unless the descriptor is
+# pointed at the null device, fails again at interpreter shutdown (exit status 120 and a traceback).
+LATE_OUTPUT = """
+import sys, time
+from agentworks.execution.access import stream_to_operator
+
+class Access:
+    def stream(self, request, *, stdin, stdout, stderr):
+        stdout.write(b"first\\n"); stdout.flush()
+        time.sleep(0.5)
+        try:
+            stdout.write(b"late\\n"); stdout.flush()
+        except BrokenPipeError:
+            pass
+        return 141
+
+status = stream_to_operator(Access(), None)
+sys.exit(0 if status == 141 else 3)
+"""
+
+
+@pytest.mark.skipif(sys.platform == "win32" or shutil.which("head") is None, reason="needs a POSIX pipeline")
+def test_output_that_arrives_after_the_reader_left_does_not_fail_at_interpreter_shutdown() -> None:
+    writer = subprocess.Popen(
+        [sys.executable, "-I", "-c", LATE_OUTPUT],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
+    )
+    assert writer.stdout is not None
+    reader = subprocess.Popen(["head", "-1"], stdin=writer.stdout, stdout=subprocess.PIPE)
+    writer.stdout.close()
+
+    reader.communicate(timeout=30)
+    _, stderr = writer.communicate(timeout=30)
+
+    assert writer.returncode == 0
+    assert stderr == b""

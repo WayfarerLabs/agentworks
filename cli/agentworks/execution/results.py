@@ -33,6 +33,7 @@ class UnknownReason(StrEnum):
     TRUNCATED = "truncated"
     DEADLINE = "deadline"
     OUTPUT_LIMIT = "output_limit"
+    CONSUMER_LEFT = "consumer_left"
 
 
 # What the guest's ``refused`` trailer may name. The text arrives from the

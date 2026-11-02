@@ -182,60 +182,106 @@ def leaving_sink(after: int) -> pump.Sink:
     return sink
 
 
-def test_a_stdout_consumer_that_leaves_ends_the_request_and_the_client_is_reaped() -> None:
-    script = (
-        "start()\n"
-        "try:\n"
-        "    while True:\n"
-        "        out.write(b'x' * 65536); out.flush()\n"
-        "except BrokenPipeError:\n"
-        "    sys.exit(0)\n"
+def completion_of(session: PipeSession) -> object:
+    return envelope.classify(
+        session.stdout,
+        session.stderr,
+        session.exit_status,
+        stdout_abandoned=session.stdout_abandoned,
+        stderr_abandoned=session.stderr_abandoned,
     )
-    session = PipeSession(
+
+
+def leaving_session(script: str, *, stdout: pump.Sink | None = None, stderr: pump.Sink | None = None) -> PipeSession:
+    return PipeSession(
         [sys.executable, "-c", PRELUDE + script],
         request=b"",
         nonce=NONCE,
-        on_stdout=leaving_sink(3),
-        on_stderr=Capture(),
+        on_stdout=stdout or Capture(),
+        on_stderr=stderr or Capture(),
         deadline=Deadline.after(20),
     )
-    started = time.monotonic()
-    with session:
-        reason = session.pump()
-        session.end()
 
-    assert reason is StopReason.CONSUMER_LEFT
-    assert time.monotonic() - started < 10
+
+def assert_reaped(session: PipeSession) -> None:
     process = session._proc  # noqa: SLF001 - the point is that nothing is left behind
     assert process is not None
     assert process.poll() is not None
     assert all(pipe is None or pipe.closed for pipe in (process.stdin, process.stdout, process.stderr))
 
 
-def test_a_stderr_consumer_that_leaves_only_stops_that_streams_delivery() -> None:
+ENDLESS = (
+    "start()\n"
+    "try:\n"
+    "    while True:\n"
+    "        {stream}.write(b'x' * 65536); {stream}.flush()\n"
+    "except BrokenPipeError:\n"
+    "    sys.exit(0)\n"
+)
+
+
+@pytest.mark.parametrize("stream", ["out", "err"])
+def test_an_endless_writer_whose_consumer_leaves_ends_with_the_consumer_left(stream: str) -> None:
+    """Closing the client's read end is what ends the writer: the child only stops on ``EPIPE``."""
+    leaving = leaving_session(
+        ENDLESS.format(stream=stream),
+        **{"stdout" if stream == "out" else "stderr": leaving_sink(3)},
+    )
+    started = time.monotonic()
+    with leaving as session:
+        reason = session.pump()
+        session.end()
+
+    assert reason is (StopReason.EOF if stream == "out" else StopReason.STDERR_CONSUMER_LEFT)
+    assert time.monotonic() - started < 10
+    assert completion_of(session) == Unknown(UnknownReason.CONSUMER_LEFT)
+    assert (session.stdout_abandoned, session.stderr_abandoned) == (stream == "out", stream == "err")
+    assert_reaped(session)
+
+
+def test_a_quiet_payload_whose_stdout_consumer_leaves_still_reports_its_own_status() -> None:
+    script = (
+        "start(); out.write(b'hello'); out.flush(); time.sleep(.5)\n"
+        "try:\n"
+        "    out.write(P + b'end\\n'); out.flush()\n"
+        "except BrokenPipeError:\n"
+        "    pass\n"
+        "err.write(P + b'exit 4\\n'); err.flush()\n"
+    )
+    leaving = leaving_session(script, stdout=leaving_sink(1))
+    started = time.monotonic()
+    with leaving as session:
+        reason = session.pump()
+        session.end()
+
+    assert reason is StopReason.DONE
+    assert time.monotonic() - started >= 0.5  # it waited for the guest to finish
+    assert completion_of(session) == Completed(4)
+    assert session.stdout_abandoned
+    assert_reaped(session)
+
+
+def test_a_stderr_consumer_that_leaves_ends_the_request_because_the_status_cannot_arrive() -> None:
     err_seen: list[bytes] = []
 
     def sink(payload: bytes) -> None:
         err_seen.append(payload)
         raise BrokenPipeError
 
-    out = Capture()
-    script = "start(); err.write(b'a'); err.flush(); time.sleep(.2); out.write(b'b'); err.write(b'c'); finish(7)"
-    session = PipeSession(
-        [sys.executable, "-c", PRELUDE + script], request=b"", nonce=NONCE, on_stdout=out, on_stderr=sink
-    )
+    script = "start(); err.write(b'a'); err.flush(); time.sleep(30)"
+    session = leaving_session(script, stderr=sink)
     with session:
-        assert session.pump() is StopReason.DONE
+        assert session.pump() is StopReason.STDERR_CONSUMER_LEFT
         session.end()
 
     assert err_seen == [b"a"]
-    assert bytes(out.data) == b"b"
-    assert envelope.classify(session.stdout, session.stderr, session.exit_status) == Completed(7)
+    assert session.stderr_abandoned
+    assert completion_of(session) == Unknown(UnknownReason.CONSUMER_LEFT)  # the trailer travels on stderr
+    assert_reaped(session)
 
 
 def test_a_stdout_pipe_whose_reader_closed_is_the_consumer_leaving() -> None:
-    # CPython raises BrokenPipeError for this on POSIX and OSError(EINVAL) on Windows; either
-    # means the consumer left, so the request ends.
+    # CPython raises BrokenPipeError for this on POSIX and OSError(EINVAL) on Windows.
     reader, writer = os.pipe()
     os.close(reader)
     delivered: list[int] = []
@@ -243,18 +289,24 @@ def test_a_stdout_pipe_whose_reader_closed_is_the_consumer_leaving() -> None:
     def sink(payload: bytes) -> None:
         delivered.append(os.write(writer, payload))
 
-    script = "start(); out.write(b'a'); out.flush(); time.sleep(5); out.write(b'b'); finish(7)"
-    session = PipeSession(
-        [sys.executable, "-c", PRELUDE + script], request=b"", nonce=NONCE, on_stdout=sink, on_stderr=Capture()
+    script = (
+        "start(); out.write(b'a'); out.flush(); time.sleep(.3)\n"
+        "try:\n"
+        "    out.write(P + b'end\\n'); out.flush()\n"
+        "except BrokenPipeError:\n"
+        "    pass\n"
+        "err.write(P + b'exit 7\\n'); err.flush()\n"
     )
+    session = leaving_session(script, stdout=sink)
     try:
         with session:
-            assert session.pump() is StopReason.CONSUMER_LEFT
+            session.pump()
             session.end()
     finally:
         os.close(writer)
 
     assert delivered == []
+    assert completion_of(session) == Completed(7)
 
 
 def test_a_deadline_keeps_partial_output_and_reaps_the_client() -> None:
