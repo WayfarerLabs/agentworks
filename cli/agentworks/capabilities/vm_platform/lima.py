@@ -7,7 +7,6 @@ import contextlib
 import json
 import re
 import shlex
-import subprocess
 import sys
 import textwrap
 
@@ -29,25 +28,23 @@ from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
 )
+from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed, LimaHost
 from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import ProvisioningError, StateError
-from agentworks.execution.trust import HOST_TRUST, ssh_options
+from agentworks.errors import ConfigError, ConnectivityError, ProvisioningError, StateError
 from agentworks.naming import NAME_RE
 from agentworks.schema import AgwModel, NonEmptyStr
-from agentworks.ssh import SSH_DEFAULT_RETRIES, SSHError, SSHTarget
-from agentworks.ssh import run as ssh_run
-from agentworks.subprocess_io import decode_stream, stdin_bytes
 from agentworks.topics import TopicProse
-from agentworks.transports import LimaTransport, RemoteLimaTransport, SSHTransport
+from agentworks.transports import LimaTransport, RemoteLimaTransport
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.vm_platform.base import BootstrapProgress
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.root_script import RawRun
     from agentworks.resources.graph import Readiness
-    from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
 
 # Markers the restart-sentinel probe echoes on stdout. The probe exits 0
@@ -199,6 +196,9 @@ class LimaPlatform(VMPlatform):
     # every host, because remote-Lima sites run limactl on the placement
     # host and need only the portable OpenSSH client locally.
 
+    # `limactl shell` is SSH to the guest's sshd with Lima's own key.
+    recovery_needs_guest_sshd: ClassVar[bool] = True
+
     @classmethod
     def not_ready(cls, config: Mapping[str, object]) -> Readiness:
         """Require local ``limactl`` only for local placement.
@@ -252,6 +252,11 @@ class LimaPlatform(VMPlatform):
     def is_remote(self) -> bool:
         return self._remote_host is not None
 
+    @property
+    def _host(self) -> LimaHost:
+        """Where this site's ``limactl`` runs."""
+        return LimaHost(self._remote_host)
+
     def _instance_name(self, vm: VMRow) -> str:
         name = vm.platform_metadata.get("instance_name")
         if not name:
@@ -274,49 +279,6 @@ class LimaPlatform(VMPlatform):
                 entity_name=vm.name,
             )
         return name
-
-    def _run_lima(
-        self,
-        command: str,
-        *,
-        check: bool = True,
-        input_text: str | None = None,
-        timeout: int | None = None,
-    ) -> str:
-        """Run a limactl command, locally or on the site's placement host."""
-        if self.is_remote:
-            assert self._remote_host is not None
-            target = SSHTarget(
-                host=self._remote_host,
-                user=None,
-                login_shell=True,
-                host_key_options=ssh_options(HOST_TRUST),
-            )
-            return ssh_run(
-                target,
-                command,
-                check=check,
-                input_text=input_text,
-                timeout=timeout,
-                retries=1 if timeout is not None else SSH_DEFAULT_RETRIES,
-            ).stdout
-        else:
-            proc = subprocess.run(
-                shlex.split(command),
-                # Byte-mode stdin: text mode rewrites LF to CRLF on Windows (see agentworks.subprocess_io).
-                input=stdin_bytes(input_text),
-                capture_output=True,
-                timeout=timeout,
-            )
-            if check and proc.returncode != 0:
-                if input_text is not None:
-                    # A parser may echo stdin to stderr, so this diagnostic
-                    # exposes neither captured stream.
-                    raise SSHError(f"limactl stdin command failed (exit {proc.returncode}): {command}")
-                raise SSHError(f"limactl failed: {decode_stream(proc.stderr).strip()}")
-            # Sensitive stdin commands do not expose their output either:
-            # an arbitrary program can reflect stdin to either stream.
-            return "" if input_text is not None else decode_stream(proc.stdout)
 
     def preflight(self, ctx: RunContext) -> None:
         """Local sites: ``limactl`` must be on PATH. Remote sites defer
@@ -422,7 +384,7 @@ class LimaPlatform(VMPlatform):
         # that was never made.
         try:
             if self.is_remote:
-                self._create_remote(instance_name, rendered, log_vm_name=request.vm_name)
+                self._create_remote(instance_name, rendered, progress=request.progress)
             else:
                 self._create_local(instance_name, rendered)
 
@@ -440,7 +402,7 @@ class LimaPlatform(VMPlatform):
             # shape it is, so a bare failure is phrased for what it does know.
             try:
                 restart_pending = self._restart_sentinel_present(instance_name)
-            except SSHError as e:
+            except LimaCommandFailed as e:
                 output.warn(f"could not check whether '{instance_name}' needs a restart to finish provisioning: {e}")
                 output.warn(
                     f"if the VM misbehaves, 'limactl restart {instance_name}' reapplies any deferred bootstrap step."
@@ -448,16 +410,16 @@ class LimaPlatform(VMPlatform):
                 restart_pending = False
             if restart_pending:
                 output.detail(f"A bootstrap step needs a reboot; restarting '{instance_name}'...")
-                self._run_lima(f"limactl restart {instance_name}")
+                self._host.run(f"limactl restart {instance_name}")
 
             # Extract the IP without retaining the key in provider state. A
             # discovery failure is safe: the manager retries only this query.
             output.detail("Retrieving Tailscale IP...")
             try:
-                ip_output = self._run_lima(f"limactl shell {instance_name} sudo tailscale ip -4")
+                ip_output = self._host.run(f"limactl shell {instance_name} sudo tailscale ip -4")
                 tailscale_ip = ip_output.strip()
                 output.detail(f"Tailscale IP: {tailscale_ip}")
-            except SSHError as e:
+            except LimaCommandFailed as e:
                 output.warn(f"could not retrieve Tailscale IP: {e}")
                 output.warn("Tailscale is joined; Phase A will retry IP discovery without the auth key.")
 
@@ -495,9 +457,9 @@ class LimaPlatform(VMPlatform):
             auth_key,
             use=LineOrientedSecretUse.TAILSCALE,
         )
-        self._run_lima(
+        self._host.run(
             f"limactl shell {instance_name} {_TAILSCALE_JOIN_STDIN_COMMAND}",
-            input_text=f"{auth_key}\n",
+            input=f"{auth_key}\n",
         )
 
     def _restart_sentinel_present(self, instance_name: str) -> bool:
@@ -511,10 +473,10 @@ class LimaPlatform(VMPlatform):
         it.
 
         The probe reports its answer on stdout and exits 0 whether or not the
-        sentinel is there, so a raised ``SSHError`` means a genuine shell or
-        transport failure and never a merely absent sentinel.
+        sentinel is there, so a raised ``LimaCommandFailed`` means a genuine
+        shell or connection failure and never a merely absent sentinel.
         """
-        probe = self._run_lima(
+        probe = self._host.run(
             f"limactl shell {instance_name} sh -c "
             f"'test -f {REBOOT_SENTINEL_PATH} "
             f"&& echo {_REBOOT_PENDING_MARKER} || echo {_REBOOT_CLEAR_MARKER}'"
@@ -523,13 +485,13 @@ class LimaPlatform(VMPlatform):
             return True
         if _REBOOT_CLEAR_MARKER in probe:
             return False
-        raise SSHError(f"unrecognized restart-sentinel probe output: {probe.strip()!r}")
+        raise LimaCommandFailed(f"unrecognized restart-sentinel probe output: {probe.strip()!r}")
 
     def _instance_exists(self, instance_name: str) -> bool:
         """Pre-flight: does a Lima instance with this name exist?"""
         try:
-            listing = self._run_lima(f"limactl list --json {instance_name}", check=False)
-        except SSHError:
+            listing = self._host.run(f"limactl list --json {instance_name}", check=False)
+        except LimaCommandFailed:
             return False
         for line in listing.strip().splitlines():
             try:
@@ -553,27 +515,14 @@ class LimaPlatform(VMPlatform):
             # provider configuration therefore never needs a local filesystem
             # path, including on Windows where unlinking an open temp file is
             # not reliable.
-            self._run_lima(
+            self._host.run(
                 f"limactl create --name {instance_name} --tty=false -",
-                input_text=lima_yaml,
+                input=lima_yaml,
             )
-            self._run_lima(f"limactl start {instance_name}")
-        except SSHError:
+            self._host.run(f"limactl start {instance_name}")
+        except LimaCommandFailed:
             self._log_provision_errors(instance_name)
             raise
-
-    def _host_transport(self, logger: SSHLogger | None = None) -> SSHTransport:
-        """An exec transport to the site's placement host (remote sites only):
-        the create path's run_detached target, and the interrupt
-        rollback's kill target."""
-        assert self._remote_host is not None
-        return SSHTransport(
-            host=self._remote_host,
-            trust=HOST_TRUST,
-            user=None,
-            login_shell=True,
-            logger=logger,
-        )
 
     @staticmethod
     def _remote_base_path(instance_name: str) -> str:
@@ -587,100 +536,57 @@ class LimaPlatform(VMPlatform):
         instance_name: str,
         lima_yaml: str,
         *,
-        log_vm_name: str,
+        progress: BootstrapProgress,
     ) -> None:
         """Create and start a Lima VM on the site's placement host.
 
         ``lima_yaml`` is the exact provider-persisted configuration and must
-        contain no resolved secret.
+        contain no resolved secret. The create and start run detached, since
+        ``limactl create`` may download the base image, and their output goes
+        to ``progress``, the create's own log.
         """
-        assert self._remote_host is not None
-        target = SSHTarget(host=self._remote_host, user=None, host_key_options=ssh_options(HOST_TRUST))
-
-        remote_template_dir = self._allocate_remote_template_dir(target)
+        host = self._host
+        remote_template_dir = self._allocate_remote_template_dir()
         remote_template = f"{remote_template_dir}/template.yaml"
         try:
-            # Stream directly into the private directory allocated above.
-            # ``umask 077`` creates mode 0600. The input is carried only on
-            # subprocess stdin and is never included in argv or logger
-            # surfaces.
-            ssh_run(
-                target,
-                f"umask 077 && cat > {shlex.quote(remote_template)}",
-                input_text=lima_yaml,
-            )
-
-            # Run limactl create + start as a single detached operation
-            from agentworks.remote_exec import run_detached
-            from agentworks.ssh import SSHLogger
-
-            # SSH log ownership follows the DB VM identity used by normal VM
-            # deletion, while Lima commands continue to use the slug-prefixed
-            # provider instance identity.
-            ssh_logger = SSHLogger(log_vm_name, "vm-provision")
-            host_target = self._host_transport(logger=ssh_logger)
+            # Stream directly into the private directory allocated above, with
+            # mode 0600; the YAML travels on stdin, never in an argument.
+            host.upload(remote_template, lima_yaml)
             lima_cmd = (
                 f"limactl create --name {instance_name} --tty=false {remote_template} && limactl start {instance_name}"
             )
             output.detail("Starting and provisioning VM via Lima (this may take several minutes)...")
-            try:
-                # reuse_completed=False: creation is one-shot, so a leftover
-                # status file can only be stale garbage from an interrupted
-                # attempt; consuming it would report a phantom result for a
-                # limactl run that never happened.
-                result = run_detached(
-                    host_target,
-                    lima_cmd,
-                    label=f"Lima ({instance_name})",
-                    base_path=self._remote_base_path(instance_name),
-                    timeout=600,
-                    quiet=True,
-                    reuse_completed=False,
+            result = host.run_detached(lima_cmd, base_path=self._remote_base_path(instance_name), timeout=600)
+            progress.step(f"limactl create and start on '{self._remote_host}'")
+            progress.output(result.output)
+            if result.exit_code != 0:
+                # Parse structured markers from provision script output if present
+                bootstrap = parse_bootstrap_output(result.output, result.exit_code)
+                for step in bootstrap.steps:
+                    if step.error:
+                        progress.log_error(f"Provision step '{step.name}': {step.error}")
+                progress.log_error(f"limactl failed (exit {result.exit_code})")
+                raise LimaCommandFailed(
+                    f"limactl create/start failed on '{self._remote_host}' (exit {result.exit_code}); "
+                    "its output is in the create's log"
                 )
-                if result.exit_code != 0:
-                    # Parse structured markers from provision script output if present
-                    bootstrap = parse_bootstrap_output(result.output, result.exit_code)
-                    for step in bootstrap.steps:
-                        if step.error:
-                            ssh_logger.log_error(f"Provision step '{step.name}': {step.error}")
-
-                    ssh_logger.log_error(f"limactl failed (exit {result.exit_code})")
-                    ssh_logger.log_error(result.output)
-                    raise SSHError(
-                        f"limactl create/start failed (exit {result.exit_code})\n"
-                        f"Sanitized output is in SSH log: {ssh_logger.display_path}"
-                    )
-            finally:
-                # Close exactly once. A close-time OSError is non-fatal, and
-                # a second Ctrl-C cannot replace an active run_detached error
-                # or the operator's first Ctrl-C. A standalone close
-                # interrupt remains visible.
-                active_failure = sys.exc_info()[1]
-                try:
-                    ssh_logger.close()
-                except OSError:
-                    pass
-                except KeyboardInterrupt:
-                    if active_failure is None:
-                        raise
         finally:
-            # Mirror the logger-close behavior above: cleanup runs after the
-            # primary span, but a second Ctrl-C cannot replace an active
-            # failure. A standalone cleanup interrupt remains visible.
+            # Cleanup runs after the primary span, but a second Ctrl-C cannot
+            # replace an active failure. A standalone cleanup interrupt
+            # remains visible.
             active_failure = sys.exc_info()[1]
             try:
-                self._remove_remote_template_dir(target, remote_template_dir)
-            except (SSHError, OSError):
+                self._remove_remote_template_dir(remote_template_dir)
+            except (LimaCommandFailed, ConnectivityError, ConfigError, OSError):
                 pass
             except KeyboardInterrupt:
                 if active_failure is None:
                     raise
 
-    def _allocate_remote_template_dir(self, target: SSHTarget) -> str:
+    def _allocate_remote_template_dir(self) -> str:
         """Atomically allocate and validate a private remote staging directory."""
         path_template = f"{_REMOTE_TEMPLATE_ROOT}/{_REMOTE_TEMPLATE_PREFIX}{'X' * _REMOTE_TEMPLATE_RANDOM_LENGTH}"
-        result = ssh_run(target, f"umask 077 && mktemp -d {shlex.quote(path_template)}")
-        remote_template_dir = result.stdout.strip()
+        remote_template_dir = self._host.run(f"umask 077 && mktemp -d {shlex.quote(path_template)}").strip()
         expected = (
             rf"{re.escape(_REMOTE_TEMPLATE_ROOT)}/{re.escape(_REMOTE_TEMPLATE_PREFIX)}"
             rf"[A-Za-z0-9]{{{_REMOTE_TEMPLATE_RANDOM_LENGTH}}}"
@@ -692,11 +598,10 @@ class LimaPlatform(VMPlatform):
             )
         return remote_template_dir
 
-    def _remove_remote_template_dir(self, target: SSHTarget, remote_template_dir: str) -> None:
+    def _remove_remote_template_dir(self, remote_template_dir: str) -> None:
         """Remove the remote Lima template staging directory."""
         quoted_dir = shlex.quote(remote_template_dir)
-        command = f"rm -rf -- {quoted_dir} && test ! -e {quoted_dir}"
-        ssh_run(target, command)
+        self._host.run(f"rm -rf -- {quoted_dir} && test ! -e {quoted_dir}")
 
     def _cleanup_partial_create(self, instance_name: str) -> None:
         """Best-effort teardown of the instance a failed ``create`` made
@@ -709,14 +614,12 @@ class LimaPlatform(VMPlatform):
         :meth:`_rollback_create_on_interrupt` can abandon the cleanup.
         """
         if self.is_remote:
-            # A failed or interrupted run_detached may still be alive on the
+            # A failed or interrupted detached create may still be alive on the
             # VM host and never reached its normal artifact cleanup. Stop it
             # and erase its output, wrapper, PID, and status before deleting
             # the instance it was mutating.
-            from agentworks.remote_exec import kill_detached
-
             with contextlib.suppress(Exception):
-                kill_detached(self._host_transport(), self._remote_base_path(instance_name))
+                self._host.kill_detached(self._remote_base_path(instance_name))
         try:
             self._delete_instance(instance_name)
         except Exception as e:
@@ -752,7 +655,7 @@ class LimaPlatform(VMPlatform):
     def _log_provision_errors(self, instance_name: str) -> None:
         """Attempt to surface provision script errors from Lima logs."""
         try:
-            log_output = self._run_lima(
+            log_output = self._host.run(
                 f"limactl shell {instance_name} cat /var/log/cloud-init-output.log 2>/dev/null || true",
                 check=False,
             )
@@ -761,7 +664,7 @@ class LimaPlatform(VMPlatform):
                 for step in bootstrap.steps:
                     if step.error:
                         output.warn(f"Provision error ({step.name}): {step.error}")
-        except SSHError:
+        except LimaCommandFailed:
             pass
 
     def start(self, vm: VMRow, ctx: RunContext) -> None:
@@ -772,7 +675,7 @@ class LimaPlatform(VMPlatform):
             output.detail(f"Lima VM '{vm.name}' is already running")
             return
         output.info(f"Starting Lima VM '{vm.name}'...")
-        self._run_lima(f"limactl start {self._instance_name(vm)}")
+        self._host.run(f"limactl start {self._instance_name(vm)}")
         output.info(f"Lima VM '{vm.name}' started")
 
     def stop(self, vm: VMRow, ctx: RunContext) -> None:
@@ -782,7 +685,7 @@ class LimaPlatform(VMPlatform):
             output.detail(f"Lima VM '{vm.name}' is already stopped")
             return
         output.info(f"Stopping Lima VM '{vm.name}'...")
-        self._run_lima(f"limactl stop {self._instance_name(vm)}")
+        self._host.run(f"limactl stop {self._instance_name(vm)}")
         output.info(f"Lima VM '{vm.name}' stopped")
 
     def _delete_instance(self, instance_name: str) -> None:
@@ -791,7 +694,7 @@ class LimaPlatform(VMPlatform):
         instance first; ``check=False`` makes it a no-op for an
         instance that is already gone or only partially exists
         (created but never started)."""
-        self._run_lima(f"limactl delete --force {instance_name}", check=False)
+        self._host.run(f"limactl delete --force {instance_name}", check=False)
 
     def delete(self, vm: VMRow, ctx: RunContext) -> None:
         output.info(f"Deleting Lima VM '{vm.name}'...")
@@ -803,6 +706,13 @@ class LimaPlatform(VMPlatform):
         if self.is_remote:
             return f"{instance}@{self._remote_host}"
         return instance
+
+    def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
+        """Run ``script`` as root through ``limactl shell``, locally or on the placement host.
+
+        ``ctx`` is unused: limactl needs no backend credential.
+        """
+        return self._host.run_as_root(self._instance_name(vm), script, deadline)
 
     def native_transport(
         self,
@@ -818,12 +728,13 @@ class LimaPlatform(VMPlatform):
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         instance_name = self._instance_name(vm)
         try:
-            listing = self._run_lima(
+            listing = self._host.run(
                 f"limactl list --json {instance_name}",
                 check=False,
                 timeout=_STATUS_TIMEOUT_SECONDS,
             )
-        except (OSError, SSHError, subprocess.TimeoutExpired):
+        except (LimaCommandFailed, ConnectivityError, ConfigError):
+            # A host that cannot be asked, or no limactl or ssh to ask it with.
             return VMStatus.UNKNOWN
 
         for line in listing.strip().splitlines():

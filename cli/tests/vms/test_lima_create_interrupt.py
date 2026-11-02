@@ -12,13 +12,12 @@ the original; a SECOND interrupt during the cleanup abandons it loudly,
 naming the removal command. The azure precedent is
 test_azure_create_interrupt.py (#338).
 
-Backend seams (``_run_lima``, ``_create_local`` / ``_create_remote``)
+Backend seams (``LimaHost.run``, ``_create_local`` / ``_create_remote``)
 are mocked as in test_lima_create_flow.py; no test runs limactl.
 """
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -30,8 +29,9 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.capabilities.vm_platform.bootstrap_script import REBOOT_SENTINEL_PATH
 from agentworks.capabilities.vm_platform.lima import _REBOOT_CLEAR_MARKER, LimaPlatform
+from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed, LimaHost
 from agentworks.debian import DebianRelease
-from agentworks.ssh import SSHError
+from agentworks.execution.client import SSHClient
 from tests.conftest import provisioning_trust_for_tests
 
 if TYPE_CHECKING:
@@ -63,9 +63,40 @@ def _assert_secret_absent_from_exception_graph(
             pending.extend(current.exceptions)
 
 
-def _remote_ssh_success(command: str) -> SimpleNamespace:
-    stdout = f"{_REMOTE_TEMPLATE_DIR}\n" if "mktemp -d" in command else ""
-    return SimpleNamespace(returncode=0, stdout=stdout, stderr="", ok=True)
+class _FakeProcess:
+    """What ``ssh_process.spawn`` returns: ``communicate`` answers, or raises ``failure``."""
+
+    def __init__(
+        self, *, returncode: int = 0, stdout: bytes = b"", stderr: bytes = b"", failure: BaseException | None = None
+    ):
+        self.returncode = returncode
+        self._streams = (stdout, stderr)
+        self._failure = failure
+        self.inputs: list[bytes | None] = []
+
+    def communicate(self, input: bytes | None = None, timeout: float | None = None) -> tuple[bytes, bytes]:
+        self.inputs.append(input)
+        if self._failure is not None:
+            raise self._failure
+        return self._streams
+
+    def kill(self) -> None:
+        pass
+
+    def wait(self) -> int:
+        return self.returncode
+
+
+def _spawn_returning(monkeypatch: pytest.MonkeyPatch, process: _FakeProcess) -> list[list[str]]:
+    argvs: list[list[str]] = []
+
+    def spawn(argv: list[str], **kwargs: object) -> _FakeProcess:
+        argvs.append(list(argv))
+        return process
+
+    monkeypatch.setattr("agentworks.capabilities.vm_platform.lima_host.ssh_process.spawn", spawn)
+    monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: SSHClient("/usr/bin/ssh", (9, 2)))
+    return argvs
 
 
 def _request(*, tailscale_auth_key: str = "tskey-test") -> ProvisionRequest:
@@ -94,9 +125,9 @@ def _wire(
     *,
     errors: dict[str, BaseException] | None = None,
 ) -> list[str]:
-    """Mock the backend seams; return the ``_run_lima`` commands issued.
+    """Mock the backend seams; return the ``LimaHost.run`` commands issued.
 
-    ``errors`` maps a command substring to the exception ``_run_lima``
+    ``errors`` maps a command substring to the exception ``LimaHost.run``
     raises when it sees it (the command is still recorded first, so
     tests can pin exactly-once attempts).
     """
@@ -107,7 +138,7 @@ def _wire(
     monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, yaml: None)
     monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
 
-    def _fake_run(self: LimaPlatform, cmd: str, **_kw: object) -> str:
+    def _fake_run(self: LimaHost, cmd: str, **_kw: object) -> str:
         ran.append(cmd)
         for needle, exc in (errors or {}).items():
             if needle in cmd:
@@ -118,7 +149,7 @@ def _wire(
             return "100.64.0.1"
         return ""
 
-    monkeypatch.setattr(LimaPlatform, "_run_lima", _fake_run)
+    monkeypatch.setattr(LimaHost, "run", _fake_run)
     return ran
 
 
@@ -138,16 +169,16 @@ def test_local_create_streams_template_without_persistent_file(monkeypatch: pyte
     calls: list[tuple[str, dict[str, object]]] = []
     _forbid_persistent_tempfiles(monkeypatch)
 
-    def _fake_run(self: LimaPlatform, command: str, **kwargs: object) -> str:
+    def _fake_run(self: LimaHost, command: str, **kwargs: object) -> str:
         calls.append((command, kwargs))
         return ""
 
-    monkeypatch.setattr(LimaPlatform, "_run_lima", _fake_run)
+    monkeypatch.setattr(LimaHost, "run", _fake_run)
 
     LimaPlatform("lima", {})._create_local("myvm", _PROVIDER_YAML)
 
     assert calls == [
-        ("limactl create --name myvm --tty=false -", {"input_text": _PROVIDER_YAML}),
+        ("limactl create --name myvm --tty=false -", {"input": _PROVIDER_YAML}),
         ("limactl start myvm", {}),
     ]
 
@@ -165,14 +196,8 @@ def test_local_stdin_io_failure_refuses_start_without_persistent_file(
     monkeypatch: pytest.MonkeyPatch,
     failure: OSError,
 ) -> None:
-    commands: list[list[str]] = []
-
-    def _fail_stdin(command: list[str], **kwargs: object) -> SimpleNamespace:
-        commands.append(command)
-        assert kwargs["input"] == _PROVIDER_YAML.encode()
-        raise failure
-
-    monkeypatch.setattr("subprocess.run", _fail_stdin)
+    process = _FakeProcess(failure=failure)
+    commands = _spawn_returning(monkeypatch, process)
 
     with pytest.raises(OSError) as caught:
         LimaPlatform("lima", {})._create_local("myvm", _PROVIDER_YAML)
@@ -180,30 +205,21 @@ def test_local_stdin_io_failure_refuses_start_without_persistent_file(
     assert caught.value is failure
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+    assert process.inputs == [_PROVIDER_YAML.encode()]
     assert commands == [["limactl", "create", "--name", "myvm", "--tty=false", "-"]]
 
 
 def test_local_lima_sensitive_stdin_failure_omits_reflected_key(monkeypatch: pytest.MonkeyPatch) -> None:
     actual_auth_key = "tskey-local-stdin-sentinel"
+    process = _FakeProcess(
+        returncode=1, stdout=f"reflected {actual_auth_key}".encode(), stderr=f"rejected {actual_auth_key}".encode()
+    )
+    _spawn_returning(monkeypatch, process)
 
-    def _reflect_stdin(*args: object, **kwargs: object) -> SimpleNamespace:
-        del args
-        assert kwargs["input"] == actual_auth_key.encode()
-        return SimpleNamespace(
-            returncode=1,
-            stdout=f"reflected {actual_auth_key}".encode(),
-            stderr=f"rejected {actual_auth_key}".encode(),
-        )
+    with pytest.raises(LimaCommandFailed) as caught:
+        LimaHost(None).run("limactl shell myvm cat", input=actual_auth_key)
 
-    monkeypatch.setattr("subprocess.run", _reflect_stdin)
-
-    with pytest.raises(SSHError) as caught:
-        LimaPlatform("lima", {})._run_lima(
-            "limactl shell myvm cat",
-            input_text=actual_auth_key,
-        )
-
-    assert str(caught.value) == "limactl stdin command failed (exit 1): limactl shell myvm cat"
+    assert process.inputs == [actual_auth_key.encode()]
     _assert_secret_absent_from_exception_graph(caught.value, actual_auth_key)
 
 
@@ -211,25 +227,16 @@ def test_remote_lima_failure_omits_sensitive_input_and_raw_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     actual_auth_key = "tskey-remote-stdin-sentinel"
+    process = _FakeProcess(
+        returncode=1, stdout=f"reflected {actual_auth_key}".encode(), stderr=f"rejected {actual_auth_key}".encode()
+    )
+    argvs = _spawn_returning(monkeypatch, process)
 
-    def _reflect_stdin(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        assert kwargs["input"] == actual_auth_key.encode()
-        return subprocess.CompletedProcess(
-            args[0],
-            1,
-            stdout=f"reflected {actual_auth_key}".encode(),
-            stderr=f"rejected {actual_auth_key}".encode(),
-        )
+    with pytest.raises(LimaCommandFailed) as caught:
+        LimaHost("user@host").run("limactl shell myvm cat", input=actual_auth_key)
 
-    monkeypatch.setattr("agentworks.ssh.subprocess.run", _reflect_stdin)
-
-    with pytest.raises(SSHError) as caught:
-        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._run_lima(
-            "limactl shell myvm cat",
-            input_text=actual_auth_key,
-        )
-
-    assert str(caught.value) == "SSH stdin command failed (exit 1): limactl shell myvm cat"
+    assert process.inputs == [actual_auth_key.encode()]
+    assert not any(actual_auth_key in argument for argument in argvs[0])
     _assert_secret_absent_from_exception_graph(caught.value, actual_auth_key)
 
 
@@ -243,10 +250,10 @@ def test_failure_mid_create_cleans_up_and_reraises(
     monkeypatch.setattr(
         LimaPlatform,
         "_create_local",
-        lambda self, name, yaml: (_ for _ in ()).throw(SSHError("provision exploded")),
+        lambda self, name, yaml: (_ for _ in ()).throw(LimaCommandFailed("provision exploded")),
     )
 
-    with pytest.raises(SSHError, match="provision exploded"):
+    with pytest.raises(LimaCommandFailed, match="provision exploded"):
         LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
 
     assert _deletes(ran) == ["limactl delete --force myvm"]
@@ -315,10 +322,10 @@ def test_ephemeral_tailscale_join_failure_cleans_up_without_key_in_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     secret = "tskey-failure-sentinel"
-    failure = SSHError("fixed command failed")
+    failure = LimaCommandFailed("fixed command failed")
     ran = _wire(monkeypatch, errors={"tailscale up --auth-key": failure})
 
-    with pytest.raises(SSHError) as caught:
+    with pytest.raises(LimaCommandFailed) as caught:
         LimaPlatform("lima", {"placement": {"mode": "local"}}).create(
             _request(tailscale_auth_key=secret),
             RunContext(),

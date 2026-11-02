@@ -12,9 +12,8 @@ module retains the small set of bare-``SSHTarget`` helpers that aren't
   ``SSHTransport`` itself).
 - ``SSHLogger`` / ``LOG_DIR``: the unified command logger, whose ``record``
   is the operation log ``agentworks.execution`` requests are written to.
-- Module-level ``run``: called from ``capabilities/vm_platform/lima.py``
-  (the SSH-placed Lima control plane), where the caller has a bare
-  ``SSHTarget`` and doesn't want to construct a full ``SSHTransport``.
+- Module-level ``run``: the bare-``SSHTarget`` command primitive that
+  ``SSHTransport`` runs its sensitive-stdin commands through.
 - Module-level ``copy_to``: retained as the bare-``SSHTarget`` scp primitive.
 """
 

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.vm_platform.lima_host import LimaHost
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
 
@@ -27,8 +28,8 @@ def test_lima_start_skips_when_already_running(monkeypatch: pytest.MonkeyPatch, 
     platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
     monkeypatch.setattr(LimaPlatform, "status", lambda self, vm, ctx: VMStatus.RUNNING)
     monkeypatch.setattr(
-        LimaPlatform,
-        "_run_lima",
+        LimaHost,
+        "run",
         lambda self, cmd, **k: (_ for _ in ()).throw(AssertionError(f"must not run: {cmd}")),
     )
     platform.start(_vm(), RunContext())  # type: ignore[arg-type]
@@ -40,8 +41,8 @@ def test_lima_stop_skips_when_already_stopped(monkeypatch: pytest.MonkeyPatch, c
     platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
     monkeypatch.setattr(LimaPlatform, "status", lambda self, vm, ctx: VMStatus.STOPPED)
     monkeypatch.setattr(
-        LimaPlatform,
-        "_run_lima",
+        LimaHost,
+        "run",
         lambda self, cmd, **k: (_ for _ in ()).throw(AssertionError(f"must not run: {cmd}")),
     )
     platform.stop(_vm(), RunContext())  # type: ignore[arg-type]
@@ -57,7 +58,7 @@ def test_lima_status_uses_bounded_provider_call(monkeypatch: pytest.MonkeyPatch)
         calls.append(kwargs)
         return '{"status":"Running"}\n'
 
-    monkeypatch.setattr(platform, "_run_lima", run)
+    monkeypatch.setattr(LimaHost, "run", lambda self, command, **kwargs: run(command, **kwargs))
 
     assert platform.status(_vm(), RunContext()) is VMStatus.RUNNING  # type: ignore[arg-type]
     assert calls == [{"check": False, "timeout": 10}]
@@ -66,13 +67,12 @@ def test_lima_status_uses_bounded_provider_call(monkeypatch: pytest.MonkeyPatch)
 def test_remote_lima_status_rejects_corrupt_stored_instance_name_before_transport(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agentworks.capabilities.vm_platform import lima as lima_mod
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
     def refuse_transport(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("transport must not receive corrupt persisted state")
 
-    monkeypatch.setattr(lima_mod, "ssh_run", refuse_transport)
+    monkeypatch.setattr(LimaHost, "_execute", refuse_transport)
     platform = LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "host.example"}})
     vm = SimpleNamespace(name="v1", platform_metadata={"instance_name": "v1; touch /tmp/pwned"})
 
@@ -88,16 +88,15 @@ def test_remote_lima_status_rejects_corrupt_stored_instance_name_before_transpor
 def test_remote_lima_status_accepts_valid_historical_instance_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agentworks.capabilities.vm_platform import lima as lima_mod
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
     calls: list[str] = []
 
-    def run(_target: object, command: str, **_kwargs: object) -> SimpleNamespace:
+    def run(_host: object, command: str, **_kwargs: object) -> str:
         calls.append(command)
-        return SimpleNamespace(stdout='{"status":"Running"}\n')
+        return '{"status":"Running"}\n'
 
-    monkeypatch.setattr(lima_mod, "ssh_run", run)
+    monkeypatch.setattr(LimaHost, "run", run)
     platform = LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "host.example"}})
     vm = SimpleNamespace(name="v1", platform_metadata={"instance_name": "legacy--team_vm"})
 
@@ -110,11 +109,7 @@ def test_lima_status_launch_failure_is_unknown(monkeypatch: pytest.MonkeyPatch) 
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
     platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
-    monkeypatch.setattr(
-        platform,
-        "_run_lima",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(FileNotFoundError("limactl")),
-    )
+    monkeypatch.setenv("PATH", "")  # no limactl can start
 
     assert platform.status(_vm(), RunContext()) is VMStatus.UNKNOWN  # type: ignore[arg-type]
 
@@ -125,7 +120,7 @@ def test_lima_start_proceeds_when_stopped(monkeypatch: pytest.MonkeyPatch, captu
     platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
     monkeypatch.setattr(LimaPlatform, "status", lambda self, vm, ctx: VMStatus.STOPPED)
     ran: list[str] = []
-    monkeypatch.setattr(LimaPlatform, "_run_lima", lambda self, cmd, **k: ran.append(cmd) or "")
+    monkeypatch.setattr(LimaHost, "run", lambda self, cmd, **k: ran.append(cmd) or "")
     platform.start(_vm(), RunContext())  # type: ignore[arg-type]
     assert ran and "limactl start" in ran[0]
 

@@ -2,7 +2,7 @@
 the arm64.nosve SVE mask.
 
 Exercised through ``create`` with the backend seams (limactl create/start,
-``_run_lima``, transport) mocked, so the test asserts the exact ``limactl``
+``LimaHost.run``, transport) mocked, so the test asserts the exact ``limactl``
 calls without a real VM.
 """
 
@@ -27,8 +27,8 @@ from agentworks.capabilities.vm_platform.lima import (
     _REBOOT_PENDING_MARKER,
     LimaPlatform,
 )
+from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed, LimaHost
 from agentworks.debian import DebianRelease
-from agentworks.ssh import SSHError
 from tests.conftest import provisioning_trust_for_tests
 
 
@@ -59,7 +59,7 @@ def _wire(
     *,
     sentinel_present: bool,
 ) -> list[str]:
-    """Mock the backend seams; return the ``_run_lima`` commands issued."""
+    """Mock the backend seams; return the ``LimaHost.run`` commands issued."""
     ran: list[str] = []
 
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
@@ -67,7 +67,7 @@ def _wire(
     monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, yaml: None)
     monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
 
-    def _fake_run(self: LimaPlatform, cmd: str, **_kw: object) -> str:
+    def _fake_run(self: LimaHost, cmd: str, **_kw: object) -> str:
         ran.append(cmd)
         if REBOOT_SENTINEL_PATH in cmd:
             # The real probe exits 0 either way and reports on stdout.
@@ -77,7 +77,7 @@ def _wire(
             return "100.64.0.1"
         return ""
 
-    monkeypatch.setattr(LimaPlatform, "_run_lima", _fake_run)
+    monkeypatch.setattr(LimaHost, "run", _fake_run)
     return ran
 
 
@@ -101,7 +101,7 @@ def test_no_restart_when_sentinel_absent(monkeypatch: pytest.MonkeyPatch, captur
 def test_probe_failure_warns_and_does_not_restart(monkeypatch: pytest.MonkeyPatch, warnings: list[str]) -> None:
     """A genuine probe failure is reported, not read as an absent sentinel.
 
-    The probe exits 0 whether or not the sentinel is there, so an SSHError
+    The probe exits 0 whether or not the sentinel is there, so a LimaCommandFailed
     means the shell or transport actually broke. Create still completes (the
     VM exists, and Phase A bootstrap follows), but the operator is told.
     """
@@ -113,13 +113,13 @@ def test_probe_failure_warns_and_does_not_restart(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, yaml: None)
     monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
 
-    def _fake_run(self: LimaPlatform, cmd: str, **_kw: object) -> str:
+    def _fake_run(self: LimaHost, cmd: str, **_kw: object) -> str:
         ran.append(cmd)
         if REBOOT_SENTINEL_PATH in cmd:
-            raise SSHError("connection reset")
+            raise LimaCommandFailed("connection reset")
         return ""
 
-    monkeypatch.setattr(LimaPlatform, "_run_lima", _fake_run)
+    monkeypatch.setattr(LimaHost, "run", _fake_run)
 
     platform.create(_request(), RunContext())
 
@@ -167,10 +167,10 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
         monkeypatch.setattr(
             LimaPlatform,
             "_create_remote",
-            lambda self, name, lima_yaml, *, log_vm_name: submitted.append(lima_yaml),
+            lambda self, name, lima_yaml, *, progress: submitted.append(lima_yaml),
         )
 
-    def _fake_run(self: LimaPlatform, command: str, **kwargs: object) -> str:
+    def _fake_run(self: LimaHost, command: str, **kwargs: object) -> str:
         calls.append((command, kwargs))
         if REBOOT_SENTINEL_PATH in command:
             return f"{_REBOOT_CLEAR_MARKER}\n"
@@ -178,7 +178,7 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
             return "100.64.0.1\n"
         return ""
 
-    monkeypatch.setattr(LimaPlatform, "_run_lima", _fake_run)
+    monkeypatch.setattr(LimaHost, "run", _fake_run)
 
     result = LimaPlatform("lima", {"placement": placement}).create(
         _request(tailscale_auth_key=secret),
@@ -194,13 +194,13 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
     assert secret not in provider_list_render
     assert all(secret not in step["script"] for step in persisted_config["provision"])
 
-    sensitive_calls = [(command, kwargs) for command, kwargs in calls if kwargs.get("input_text") is not None]
+    sensitive_calls = [(command, kwargs) for command, kwargs in calls if kwargs.get("input") is not None]
     assert sensitive_calls == [
         (
             "limactl shell myvm sudo -n /bin/bash -c "
             '\'IFS= read -r TAILSCALE_AUTH_KEY && test -n "$TAILSCALE_AUTH_KEY" '
             '&& tailscale up --auth-key "$TAILSCALE_AUTH_KEY"\'',
-            {"input_text": f"{secret}\n"},
+            {"input": f"{secret}\n"},
         )
     ]
     assert secret not in sensitive_calls[0][0]
@@ -223,15 +223,15 @@ def test_ip_probe_failure_returns_missing_ip_after_successful_join(
     )
     monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
 
-    def _fake_run(self: LimaPlatform, command: str, **kwargs: object) -> str:
+    def _fake_run(self: LimaHost, command: str, **kwargs: object) -> str:
         calls.append((command, kwargs))
         if REBOOT_SENTINEL_PATH in command:
             return f"{_REBOOT_CLEAR_MARKER}\n"
         if "tailscale ip" in command:
-            raise SSHError("temporary IP probe failure")
+            raise LimaCommandFailed("temporary IP probe failure")
         return ""
 
-    monkeypatch.setattr(LimaPlatform, "_run_lima", _fake_run)
+    monkeypatch.setattr(LimaHost, "run", _fake_run)
 
     result = LimaPlatform("lima", {"placement": {"mode": "local"}}).create(
         _request(tailscale_auth_key=secret),
@@ -240,5 +240,5 @@ def test_ip_probe_failure_returns_missing_ip_after_successful_join(
 
     assert result.tailscale_ip is None
     assert submitted and secret not in submitted[0]
-    assert sum(kwargs.get("input_text") == f"{secret}\n" for _command, kwargs in calls) == 1
+    assert sum(kwargs.get("input") == f"{secret}\n" for _command, kwargs in calls) == 1
     assert "retry IP discovery without the auth key" in "\n".join(warnings)

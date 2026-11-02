@@ -5,9 +5,8 @@ surface. Holds the argv builders, SetEnv handling, sudo-wrap, and
 login-shell wrapping for the canonical Tailscale SSH path.
 ``agentworks/ssh.py`` retains a small surface of SSH primitives
 (``SSHTarget`` / ``SSHResult`` / ``SSHError`` / ``SSHLogger`` /
-``LOG_DIR`` / module-level ``run`` / ``copy_to``) used by
-``capabilities/vm_platform/lima.py`` against bare ``SSHTarget``s; everything
-polymorphic-transport-shaped lives here.
+``LOG_DIR`` / module-level ``run`` / ``copy_to``) that work against bare
+``SSHTarget``s; everything polymorphic-transport-shaped lives here.
 """
 
 from __future__ import annotations
