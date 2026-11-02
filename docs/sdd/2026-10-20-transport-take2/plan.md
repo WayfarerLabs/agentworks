@@ -211,7 +211,7 @@ pass the static check, and the package's tests pass with the legacy modules bloc
       number in the same PR: the kind descriptor, the six platforms, the tests that assert it and
       every "version 1" mention of this kind.
 - [ ] Add `UnknownReason.AUTH_FAILED` and its classifier row, typed from
-      `Permission denied     (publickey` in the client log, and widen the passphrase hint to
+      `Permission denied (publickey` in the client log, and widen the passphrase hint to
       `CONNECTION` or `AUTH_FAILED`.
 - [ ] Implement `reachability.py`: `wait(access, *, wording)` polls a fixed `true` probe, polls only
       `CONNECTION`, `TRUNCATED` and `DEADLINE`, and raises every other outcome at once.
