@@ -2,9 +2,9 @@
 
 Wraps a bootstrap script in a #cloud-config YAML that delivers and executes
 it via write_files + runcmd. This lets Azure VMs run the same bootstrap script
-that Lima uses via its provision block. Provider-retained cloud-init always
-renders the script with its Tailscale join deferred; the resolved key crosses
-a separate post-boot stdin boundary.
+that Lima uses via its provision block. The script holds no secret, so the
+provider may retain it; the platform joins Tailscale afterwards through the
+VM's root channel.
 """
 
 from __future__ import annotations

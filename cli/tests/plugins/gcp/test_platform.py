@@ -14,7 +14,7 @@ from google.cloud import compute_v1
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import BootstrapProgress, ProvisionRequest, ssh_exposure
-from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
+from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT
 from agentworks.db import VMRow, VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import AlreadyExistsError, ConfigError, ConnectivityError, ProvisioningError, StateError
@@ -27,7 +27,7 @@ from agentworks.plugins.gcp.errors import (
 )
 from agentworks.plugins.gcp.network import FirewallState
 from agentworks.plugins.gcp.platform import GCEPlatform
-from agentworks.ssh import SSHError, SSHResult
+from tests._root_channel_fakes import Answer, FakeGuest, answer_by_payload, install_at_run_process
 from tests.conftest import provisioning_trust_for_tests
 
 _TAILSCALE_SENTINEL = "tskey-hostile-'\"$()"
@@ -255,31 +255,15 @@ class _Cache:
         return self.clients[kind]
 
 
-class _Transport:
-    def __init__(
-        self,
-        *,
-        fail_join: bool = False,
-        failures: dict[str, list[BaseException]] | None = None,
-        events: list[str] | None = None,
-    ) -> None:
-        self.calls: list[tuple[str, dict[str, object]]] = []
-        self.fail_join = fail_join
-        self.failures = failures if failures is not None else {}
-        self.events = events
-        self.host = ""
-
-    def run(self, command: str, **kwargs: object) -> SSHResult:
-        self.calls.append((command, kwargs))
-        if self.events is not None:
-            self.events.append(f"transport:{command}")
-        failures = self.failures.get(command, [])
-        if failures:
-            raise failures.pop(0)
-        if self.fail_join and kwargs.get("input_text") is not None:
-            raise SSHError("fixed stdin join failed")
-        stdout = "100.64.0.9\n" if command == "tailscale ip -4" else ""
-        return SSHResult(returncode=0, stdout=stdout, stderr="")
+def _guest(
+    *,
+    fail_join: bool = False,
+    failures: dict[str, list[BaseException]] | None = None,
+    events: list[str] | None = None,
+) -> FakeGuest:
+    """The VM behind the root channel; ``fail_join`` makes ``tailscale up`` exit 1."""
+    answers = {JOIN_FRAGMENT: Answer(status=1)} if fail_join else {}
+    return FakeGuest(answer_by_payload(failures=failures, answers=answers), events=events)
 
 
 class _Secrets:
@@ -331,7 +315,7 @@ def _request(progress: BootstrapProgress | None = None) -> ProvisionRequest:
     )
 
 
-def _platform(monkeypatch: pytest.MonkeyPatch, transport: _Transport) -> tuple[GCEPlatform, _Cache]:
+def _platform(monkeypatch: pytest.MonkeyPatch, guest: FakeGuest) -> tuple[GCEPlatform, _Cache]:
     platform = GCEPlatform(
         "gcp-site",
         {
@@ -344,11 +328,9 @@ def _platform(monkeypatch: pytest.MonkeyPatch, transport: _Transport) -> tuple[G
     cache = _Cache(_Firewalls(), _Instances())
     platform._clients = cache  # type: ignore[assignment]
 
-    def transport_factory(*_args: object, **kwargs: object) -> _Transport:
-        transport.host = str(kwargs["host"])
-        return transport
-
-    monkeypatch.setattr("agentworks.plugins.gcp.platform.SSHTransport", transport_factory)
+    install_at_run_process(monkeypatch, guest)
+    # The returned legacy transport is only constructed here.
+    monkeypatch.setattr("agentworks.plugins.gcp.platform.SSHTransport", lambda **kwargs: SimpleNamespace(**kwargs))
     return platform, cache
 
 
@@ -383,8 +365,8 @@ def _vm(result_metadata: dict[str, str]) -> VMRow:
 def test_full_create_retains_secret_free_request_and_joins_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    transport = _Transport()
-    platform, cache = _platform(monkeypatch, transport)
+    guest = _guest()
+    platform, cache = _platform(monkeypatch, guest)
     progress = MagicMock()
     result = platform.create(_request(progress), _ctx())
 
@@ -400,14 +382,9 @@ def test_full_create_retains_secret_free_request_and_joins_once(
     metadata = {item["key"]: item["value"] for item in body["metadata"]["items"]}
     assert _TAILSCALE_SENTINEL not in metadata["startup-script"]
     assert request.request_id
-    sensitive = [(command, kwargs) for command, kwargs in transport.calls if kwargs.get("input_text") is not None]
-    assert sensitive == [
-        (
-            TAILSCALE_JOIN_STDIN_COMMAND,
-            {"sudo": True, "timeout": 30, "input_text": f"{_TAILSCALE_SENTINEL}\n"},
-        )
-    ]
-    assert GCE_READINESS_COMMAND in [command for command, _kwargs in transport.calls]
+    assert [b"AGW_SECRET=" in script for script in guest.scripts] == [False, False, True, False]
+    assert guest.payloads == ["true", GCE_READINESS_COMMAND, JOIN_FRAGMENT, "tailscale ip -4"]
+    assert all(_TAILSCALE_SENTINEL not in arg for argv in guest.argvs for arg in argv)
     assert result.tailscale_ip == "100.64.0.9"
     assert "203.0.113.19" not in repr(result.platform_metadata)
     assert result.platform_metadata["allow_source_ranges"] == "198.18.0.7/32"
@@ -419,14 +396,13 @@ def test_combined_progress_precedes_readiness_and_fixed_stdin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[str] = []
-    transport = _Transport(events=events)
-    platform, _cache = _platform(monkeypatch, transport)
+    platform, _cache = _platform(monkeypatch, _guest(events=events))
 
     platform.create(_request(_Progress(events)), _ctx())
 
-    combined = events.index("progress:Wait for GCE startup marker and join Tailscale through fixed stdin")
-    readiness = events.index(f"transport:{GCE_READINESS_COMMAND}")
-    delivery = events.index(f"transport:{TAILSCALE_JOIN_STDIN_COMMAND}")
+    combined = events.index("progress:Wait for GCE startup marker and join Tailscale through the root channel")
+    readiness = events.index(f"root:{GCE_READINESS_COMMAND}")
+    delivery = events.index(f"root:{JOIN_FRAGMENT}")
     completed = events.index("output:GCE credential-free bootstrap and Tailscale join completed")
     assert combined < readiness < delivery < completed
 
@@ -435,25 +411,22 @@ def test_combined_progress_does_not_claim_completion_when_readiness_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[str] = []
-    transport = _Transport(
-        failures={GCE_READINESS_COMMAND: [SSHError("startup marker unavailable")]},
-        events=events,
-    )
-    platform, _cache = _platform(monkeypatch, transport)
+    guest = _guest(failures={GCE_READINESS_COMMAND: [ConnectivityError("startup marker unavailable")]}, events=events)
+    platform, _cache = _platform(monkeypatch, guest)
 
     with pytest.raises(ProvisioningError):
         platform.create(_request(_Progress(events)), _ctx())
 
-    assert "progress:Wait for GCE startup marker and join Tailscale through fixed stdin" in events
-    assert f"transport:{GCE_READINESS_COMMAND}" in events
-    assert f"transport:{TAILSCALE_JOIN_STDIN_COMMAND}" not in events
+    assert "progress:Wait for GCE startup marker and join Tailscale through the root channel" in events
+    assert f"root:{GCE_READINESS_COMMAND}" in events
+    assert f"root:{JOIN_FRAGMENT}" not in events
     assert "output:GCE credential-free bootstrap and Tailscale join completed" not in events
 
 
 def test_close_reconstructs_stable_allow_from_original_normalized_prefixes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    platform, cache = _platform(monkeypatch, _Transport())
+    platform, cache = _platform(monkeypatch, _guest())
     result = platform.create(_request(), _ctx("203.0.113.9"))
     vm = _vm(result.platform_metadata)
     allow_name = result.platform_metadata["allow_rule"]
@@ -474,8 +447,8 @@ def test_create_failures_clean_every_partial_resource_set(
 ) -> None:
     provider_failure = _api_error(api_exceptions.ServiceUnavailable, "provider-private-detail")
     transport_failures: dict[str, list[BaseException]] = {}
-    transport = _Transport(failures=transport_failures)
-    platform, cache = _platform(monkeypatch, transport)
+    guest = _guest(failures=transport_failures)
+    platform, cache = _platform(monkeypatch, guest)
     if failure_stage == "deny-insert":
         cache.firewalls.insert_failures = [provider_failure, provider_failure]
     elif failure_stage == "allow-insert":
@@ -483,14 +456,14 @@ def test_create_failures_clean_every_partial_resource_set(
     elif failure_stage == "instance-insert":
         cache.instances.insert_failures = [provider_failure, provider_failure]
     else:
-        transport_failures[GCE_READINESS_COMMAND] = [SSHError("startup marker unavailable")]
+        transport_failures[GCE_READINESS_COMMAND] = [ConnectivityError("startup marker unavailable")]
 
     with pytest.raises((ConnectivityError, ProvisioningError)):
         platform.create(_request(), _ctx())
 
     assert cache.instances.resource is None
     assert cache.firewalls.resources == {}
-    assert not any(kwargs.get("input_text") for _command, kwargs in transport.calls)
+    assert guest.joins == 0
     if failure_stage == "readiness":
         assert len(cache.instances.delete_requests) == 1
 
@@ -500,7 +473,7 @@ def test_first_interrupt_carries_operation_ownership_through_platform_rollback(
     monkeypatch: pytest.MonkeyPatch,
     interrupt_stage: str,
 ) -> None:
-    platform, cache = _platform(monkeypatch, _Transport())
+    platform, cache = _platform(monkeypatch, _guest())
     if interrupt_stage == "deny-wait":
         cache.firewalls.insert_wait_failures = [KeyboardInterrupt(interrupt_stage)]
     elif interrupt_stage == "allow-wait":
@@ -528,8 +501,8 @@ def test_ordinary_failure_cleanup_interrupt_reenters_idempotent_platform_rollbac
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     first = KeyboardInterrupt("first")
-    transport = _Transport(failures={TAILSCALE_JOIN_STDIN_COMMAND: [SSHError(_SERVICE_SENTINEL)]})
-    platform, cache = _platform(monkeypatch, transport)
+    guest = _guest(failures={JOIN_FRAGMENT: [ConnectivityError(_SERVICE_SENTINEL)]})
+    platform, cache = _platform(monkeypatch, guest)
     rollback_calls = 0
 
     def partial_then_complete_rollback(**kwargs: object) -> RollbackReport:
@@ -565,8 +538,7 @@ def test_second_interrupt_abandons_platform_rollback_without_mutating_survivors(
 ) -> None:
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.plugins.gcp.cleanup.output.warn", warnings.append)
-    transport = _Transport(failures={GCE_READINESS_COMMAND: [KeyboardInterrupt("first")]})
-    platform, cache = _platform(monkeypatch, transport)
+    platform, cache = _platform(monkeypatch, _guest(failures={GCE_READINESS_COMMAND: [KeyboardInterrupt("first")]}))
     cache.firewalls.delete_failures = [KeyboardInterrupt("second")]
 
     with pytest.raises(KeyboardInterrupt, match="first"):
@@ -583,8 +555,7 @@ def test_second_interrupt_abandons_platform_rollback_without_mutating_survivors(
 def test_lifecycle_is_idempotent_live_ip_and_transient_routes_are_distinct(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    transport = _Transport()
-    platform, cache = _platform(monkeypatch, transport)
+    platform, cache = _platform(monkeypatch, _guest())
     result = platform.create(_request(), _ctx())
     vm = _vm(result.platform_metadata)
     firewalls = cache.firewalls
@@ -627,7 +598,7 @@ def test_lifecycle_is_idempotent_live_ip_and_transient_routes_are_distinct(
 def test_native_transport_fails_when_the_owned_instance_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    platform, cache = _platform(monkeypatch, _Transport())
+    platform, cache = _platform(monkeypatch, _guest())
     result = platform.create(_request(), _ctx())
     vm = _vm(result.platform_metadata)
     cache.instances.resource = None
@@ -652,7 +623,7 @@ def test_power_operations_propagate_every_wait_failure(
     monkeypatch: pytest.MonkeyPatch,
     wait_failure: GCEOperationError | GCECapacityError | GCEIndeterminateOperationError,
 ) -> None:
-    platform, _cache = _platform(monkeypatch, _Transport())
+    platform, _cache = _platform(monkeypatch, _guest())
     vm = _vm(platform.create(_request(), _ctx()).platform_metadata)
 
     def fail_wait(*_args: object, **_kwargs: object) -> None:
@@ -669,9 +640,8 @@ def test_power_operations_propagate_every_wait_failure(
 def test_join_failure_rolls_back_and_exception_graph_is_secret_free(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    transport = _Transport(fail_join=True)
-    platform, cache = _platform(monkeypatch, transport)
-    with pytest.raises(SSHError) as caught:
+    platform, cache = _platform(monkeypatch, _guest(fail_join=True))
+    with pytest.raises(ProvisioningError) as caught:
         platform.create(_request(), _ctx())
     assert cache.instances.resource is None
     assert cache.firewalls.resources == {}
@@ -715,7 +685,7 @@ def test_known_machine_incompatibility_stays_pre_mutation(
     monkeypatch: pytest.MonkeyPatch,
     machine: compute_v1.MachineType,
 ) -> None:
-    platform, cache = _platform(monkeypatch, _Transport())
+    platform, cache = _platform(monkeypatch, _guest())
     cache.clients["machine-types"] = SimpleNamespace(get=lambda **_kwargs: machine)
 
     with pytest.raises(ConfigError, match="e2-standard-2"):
@@ -787,7 +757,7 @@ def test_required_machine_shape_failure_has_zero_provider_mutations(
     machine: compute_v1.MachineType,
     message: str,
 ) -> None:
-    platform, cache = _platform(monkeypatch, _Transport())
+    platform, cache = _platform(monkeypatch, _guest())
     cache.clients["machine-types"] = SimpleNamespace(get=lambda **_kwargs: machine)
 
     with pytest.raises(ConfigError, match=message):
@@ -800,7 +770,7 @@ def test_required_machine_shape_failure_has_zero_provider_mutations(
 def test_residual_definitive_insert_rejection_rolls_back_and_stays_detached(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    platform, cache = _platform(monkeypatch, _Transport())
+    platform, cache = _platform(monkeypatch, _guest())
     provider_sentinel = "provider-private-insert-SENTINEL"
     provider = _api_error(api_exceptions.ServiceUnavailable, provider_sentinel)
     provider.__cause__ = RuntimeError(provider_sentinel)
@@ -827,7 +797,7 @@ def test_residual_definitive_insert_rejection_rolls_back_and_stays_detached(
 def test_runup_is_authenticated_read_only_and_create_collision_stays_p0(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    platform, cache = _platform(monkeypatch, _Transport())
+    platform, cache = _platform(monkeypatch, _guest())
     platform.runup(_ctx())
     assert cache.secret_was_delivered
     assert cache.firewalls.insert_requests == []
@@ -843,7 +813,7 @@ def test_runup_is_authenticated_read_only_and_create_collision_stays_p0(
 def test_delete_retains_same_name_different_id_instance_and_lifetime_deny(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    platform, cache = _platform(monkeypatch, _Transport())
+    platform, cache = _platform(monkeypatch, _guest())
     result = platform.create(_request(), _ctx())
     vm = _vm(result.platform_metadata)
     assert cache.instances.resource is not None
@@ -862,7 +832,7 @@ def test_delete_retains_same_id_mutated_allow_but_still_deletes_instance_and_den
 ) -> None:
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.plugins.gcp.platform.output.warn", warnings.append)
-    platform, cache = _platform(monkeypatch, _Transport())
+    platform, cache = _platform(monkeypatch, _guest())
     result = platform.create(_request(), _ctx())
     vm = _vm(result.platform_metadata)
     allow_name = result.platform_metadata["allow_rule"]
@@ -884,7 +854,7 @@ def test_delete_retains_same_id_mutated_allow_but_still_deletes_instance_and_den
 def test_delete_refuses_noncanonical_persisted_allow_sources_before_any_mutation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    platform, cache = _platform(monkeypatch, _Transport())
+    platform, cache = _platform(monkeypatch, _guest())
     result = platform.create(_request(), _ctx())
     metadata = dict(result.platform_metadata)
     metadata["allow_source_ranges"] = "198.18.0.7"
@@ -903,7 +873,7 @@ def test_delete_continues_after_allow_read_failure_and_reports_retained_allow(
 ) -> None:
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.plugins.gcp.platform.output.warn", warnings.append)
-    platform, cache = _platform(monkeypatch, _Transport())
+    platform, cache = _platform(monkeypatch, _guest())
     result = platform.create(_request(), _ctx())
     vm = _vm(result.platform_metadata)
     allow_name = result.platform_metadata["allow_rule"]
@@ -926,7 +896,7 @@ def test_delete_continues_after_allow_read_failure_and_reports_retained_allow(
 def test_delete_keeps_deny_when_allow_read_and_instance_delete_are_indeterminate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    platform, cache = _platform(monkeypatch, _Transport())
+    platform, cache = _platform(monkeypatch, _guest())
     result = platform.create(_request(), _ctx())
     vm = _vm(result.platform_metadata)
     allow_name = result.platform_metadata["allow_rule"]
@@ -953,7 +923,7 @@ def test_stable_allow_close_hooks_fail_closed_on_provider_read_error(
 ) -> None:
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.plugins.gcp.platform.output.warn", warnings.append)
-    platform, cache = _platform(monkeypatch, _Transport())
+    platform, cache = _platform(monkeypatch, _guest())
     result = platform.create(_request(), _ctx())
     vm = _vm(result.platform_metadata)
     allow_name = result.platform_metadata["allow_rule"]
@@ -972,7 +942,7 @@ def test_stable_allow_close_hooks_fail_closed_on_provider_read_error(
 def test_transient_route_open_failure_never_yields_or_mutates_stable_deny(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    platform, cache = _platform(monkeypatch, _Transport())
+    platform, cache = _platform(monkeypatch, _guest())
     result = platform.create(_request(), _ctx())
     vm = _vm(result.platform_metadata)
     platform.post_tailscale_ready(vm, _ctx())
@@ -995,7 +965,7 @@ def test_transient_route_close_failure_warns_and_retains_only_its_exact_rule(
 ) -> None:
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.plugins.gcp.platform.output.warn", warnings.append)
-    platform, cache = _platform(monkeypatch, _Transport())
+    platform, cache = _platform(monkeypatch, _guest())
     result = platform.create(_request(), _ctx())
     vm = _vm(result.platform_metadata)
     platform.post_tailscale_ready(vm, _ctx())

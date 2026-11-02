@@ -12,6 +12,7 @@ the capability/declarable split.
 
 from __future__ import annotations
 
+import ipaddress
 from abc import abstractmethod
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -114,6 +115,20 @@ class ProvisionResult:
     native_transport: ExecTransport
     platform_metadata: dict[str, str] = field(default_factory=dict)
     tailscale_ip: str | None = None
+
+
+def parse_tailnet_address(text: object) -> str:
+    """The VM's tailnet address in canonical form, or ``ValueError``.
+
+    Validates at two boundaries: each address read over a platform's root
+    channel (guest output), and the address a platform returns in
+    :class:`ProvisionResult` before core records it (a plugin's value). The
+    check is that the text parses as an IP address; no range is assumed, so a
+    self-hosted tailnet with another prefix still parses.
+    """
+    if not isinstance(text, str):
+        raise ValueError("a tailnet address must be text")
+    return str(ipaddress.ip_address(text.strip()))
 
 
 class RetainedProvisioningError(ProvisioningError):

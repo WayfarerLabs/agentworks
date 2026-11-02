@@ -383,16 +383,3 @@ class ProxmoxAPI:
         if not isinstance(result, dict):
             raise _invalid_qga_exec_status("returned a malformed response", node=node, vmid=vmid, pid=pid)
         return _validate_qga_exec_status(result, node=node, vmid=vmid, pid=pid)
-
-    def guest_agent_file_write(self, node: str, vmid: int, path: str, content: str) -> None:
-        """Write a file inside the VM via the guest agent.
-
-        Sends raw content and lets Proxmox handle base64 encoding
-        for the guest agent.
-        """
-        self._request(
-            "POST",
-            f"/nodes/{node}/qemu/{vmid}/agent/file-write",
-            {"file": path, "content": content},
-            json_body=True,
-        )

@@ -19,12 +19,18 @@ from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedProvis
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import AgentworksError, AuthorizationError, ConfigError, StateError, TokenRejectedError
+from agentworks.errors import (
+    AgentworksError,
+    AuthorizationError,
+    ConfigError,
+    ConnectivityError,
+    StateError,
+    TokenRejectedError,
+)
 from agentworks.plugins.aws.network import EC2Error, poke_ssh_allow, remove_ssh_allow
 from agentworks.plugins.aws.platform import EC2Platform
-from agentworks.ssh import SSHError
-from agentworks.transports import SSHTransport
 from tests._aws_fakes import Controls, client_error, install_fakes, stub_egress, unreachable
+from tests._root_channel_fakes import Answer, FakeGuest, install_at_run_process
 from tests.conftest import provisioning_trust_for_tests
 
 if TYPE_CHECKING:
@@ -56,12 +62,13 @@ def _stub_egress_detection(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test runs with the shared operator egress detection stubbed (never
     a live probe) and a clean per-process cache."""
     stub_egress(monkeypatch, _DETECTED)
+    install_at_run_process(monkeypatch, FakeGuest())
 
-    def _successful_bootstrap(self: SSHTransport, command: str, **kwargs: object) -> object:
-        del self, kwargs
-        return SimpleNamespace(stdout="100.64.0.5\n" if command == "tailscale ip -4" else "", returncode=0)
 
-    monkeypatch.setattr(SSHTransport, "run", _successful_bootstrap)
+def _guest_failing(monkeypatch: pytest.MonkeyPatch, payload: str, failure: BaseException) -> FakeGuest:
+    """The VM behind the root channel, raising ``failure`` for every ``payload``."""
+    guest = FakeGuest(lambda seen_payload, seen: Answer(raises=failure) if seen_payload == payload else Answer())
+    return install_at_run_process(monkeypatch, guest)
 
 
 def _platform(**extra: object) -> EC2Platform:
@@ -247,7 +254,7 @@ class TestCreate:
         monkeypatch.setattr(
             EphemeralTailscaleBootstrap,
             "complete",
-            lambda self, auth_key: "100.64.0.5",
+            lambda self, auth_key, *, node: "100.64.0.5",
         )
         rsa_key = "ssh-rsa " + ("A" * 716) + " agw@host"
         _platform().create(_request(tailscale="tskey-abc", ssh_key=rsa_key), RunContext(config=_config()))
@@ -343,7 +350,7 @@ class TestCreate:
         monkeypatch.setattr(
             EphemeralTailscaleBootstrap,
             "complete",
-            lambda self, auth_key: "100.64.0.5",
+            lambda self, auth_key, *, node: "100.64.0.5",
         )
         result = _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
         assert result.tailscale_ip == "100.64.0.5"
@@ -376,7 +383,7 @@ class TestCreateRollback:
         monkeypatch.setattr(
             EphemeralTailscaleBootstrap,
             "complete",
-            lambda self, auth_key: (_ for _ in ()).throw(OSError("ssh: command not found")),
+            lambda self, auth_key, *, node: (_ for _ in ()).throw(OSError("ssh: command not found")),
         )
         with pytest.raises(EC2Error):
             _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
@@ -393,7 +400,7 @@ class TestCreateRollback:
         monkeypatch.setattr(
             EphemeralTailscaleBootstrap,
             "complete",
-            lambda self, auth_key: (_ for _ in ()).throw(OSError("bootstrap failed")),
+            lambda self, auth_key, *, node: (_ for _ in ()).throw(OSError("bootstrap failed")),
         )
 
         with pytest.raises(EC2Error):
@@ -408,7 +415,7 @@ class TestCreateRollback:
         monkeypatch.setattr(
             EphemeralTailscaleBootstrap,
             "complete",
-            lambda self, auth_key: (_ for _ in ()).throw(OSError("bootstrap failed")),
+            lambda self, auth_key, *, node: (_ for _ in ()).throw(OSError("bootstrap failed")),
         )
         platform = _platform()
 
@@ -459,11 +466,11 @@ class TestCreateRollback:
     @pytest.mark.parametrize(
         ("failure_command", "message", "expected_commands"),
         [
-            ("echo ok", "SSH did not become ready", ["echo ok"] * 30),
+            ("true", "did not answer over SSH", ["true"] * 30),
             (
                 "cloud-init status --wait",
                 "cloud-init did not complete",
-                ["echo ok", "cloud-init status --wait"],
+                ["true", "cloud-init status --wait"],
             ),
         ],
         ids=("ssh-readiness-exhaustion", "cloud-init-wait-failure"),
@@ -480,26 +487,16 @@ class TestCreateRollback:
         failures remove the instance and security group without stdin join or
         generated-script staging."""
         rec = install_fakes(monkeypatch)
-        calls: list[tuple[str, dict[str, object]]] = []
-
-        def _readiness_failure(self: SSHTransport, command: str, **kwargs: object) -> object:
-            calls.append((command, kwargs))
-            if command == failure_command:
-                raise SSHError(f"safe failure for {command}")
-            return SimpleNamespace(stdout="", returncode=0)
-
-        monkeypatch.setattr(SSHTransport, "run", _readiness_failure)
+        guest = _guest_failing(monkeypatch, failure_command, ConnectivityError(f"safe failure for {failure_command}"))
         monkeypatch.setattr("agentworks.capabilities.vm_platform.tailscale_join.time.sleep", lambda _seconds: None)
 
         with pytest.raises(EC2Error, match=message) as caught:
             _platform().create(_request(tailscale=_SENTINEL), RunContext(config=_config()))
 
-        assert [command for command, _kwargs in calls] == expected_commands
-        assert all("input_text" not in kwargs for _command, kwargs in calls)
-        assert not any("agentworks-bootstrap" in command for command, _kwargs in calls)
+        assert guest.payloads == expected_commands
+        assert not any(b"AGW_SECRET" in script for script in guest.scripts)
         retained_user_data = gzip.decompress(rec.kwargs_for("run_instances")["UserData"]).decode()
         assert _SENTINEL not in retained_user_data
-        assert _SENTINEL not in repr(calls)
         methods = rec.methods("ec2")
         assert "terminate_instances" in methods
         assert "delete_security_group" in methods
@@ -509,8 +506,8 @@ class TestCreateRollback:
     @pytest.mark.parametrize(
         ("failure_command", "expected_commands"),
         [
-            ("echo ok", ["echo ok"]),
-            ("cloud-init status --wait", ["echo ok", "cloud-init status --wait"]),
+            ("true", ["true"]),
+            ("cloud-init status --wait", ["true", "cloud-init status --wait"]),
         ],
         ids=("ssh-readiness", "cloud-init-wait"),
     )
@@ -523,25 +520,16 @@ class TestCreateRollback:
     ) -> None:
         rec = install_fakes(monkeypatch)
         interrupt = KeyboardInterrupt(f"interrupted during {failure_command}")
-        calls: list[tuple[str, dict[str, object]]] = []
+        guest = _guest_failing(monkeypatch, failure_command, interrupt)
 
-        def _interrupt_readiness(self: SSHTransport, command: str, **kwargs: object) -> object:
-            calls.append((command, kwargs))
-            if command == failure_command:
-                raise interrupt
-            return SimpleNamespace(stdout="", returncode=0)
-
-        monkeypatch.setattr(SSHTransport, "run", _interrupt_readiness)
         with pytest.raises(KeyboardInterrupt) as caught:
             _platform().create(_request(tailscale=_SENTINEL), RunContext(config=_config()))
 
         assert caught.value is interrupt
-        assert [command for command, _kwargs in calls] == expected_commands
-        assert all("input_text" not in kwargs for _command, kwargs in calls)
-        assert not any("agentworks-bootstrap" in command for command, _kwargs in calls)
+        assert guest.payloads == expected_commands
+        assert not any(b"AGW_SECRET" in script for script in guest.scripts)
         retained_user_data = gzip.decompress(rec.kwargs_for("run_instances")["UserData"]).decode()
         assert _SENTINEL not in retained_user_data
-        assert _SENTINEL not in repr(calls)
         assert _SENTINEL not in repr(captured_output.lines)
         assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
         assert rec.kwargs_for("delete_security_group") == {"GroupId": "sg-123"}
@@ -553,12 +541,8 @@ class TestCreateRollback:
         rec = install_fakes(monkeypatch)
 
         interrupt = KeyboardInterrupt("first")
+        _guest_failing(monkeypatch, "true", interrupt)
 
-        def _interrupt(self: SSHTransport, command: str, **kwargs: object) -> object:
-            del self, command, kwargs
-            raise interrupt
-
-        monkeypatch.setattr(SSHTransport, "run", _interrupt)
         with pytest.raises(KeyboardInterrupt) as caught:
             _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
         assert caught.value is interrupt
@@ -568,8 +552,8 @@ class TestCreateRollback:
     @pytest.mark.parametrize(
         ("failure_command", "expected_commands"),
         [
-            ("echo ok", ["echo ok"]),
-            ("cloud-init status --wait", ["echo ok", "cloud-init status --wait"]),
+            ("true", ["true"]),
+            ("cloud-init status --wait", ["true", "cloud-init status --wait"]),
         ],
         ids=("ssh-readiness", "cloud-init-wait"),
     )
@@ -582,13 +566,7 @@ class TestCreateRollback:
         """A second Ctrl-C leaves an addressable failed-create result."""
         install_fakes(monkeypatch)
         interrupt = KeyboardInterrupt(f"interrupted during {failure_command}")
-        calls: list[tuple[str, dict[str, object]]] = []
-
-        def _interrupt_readiness(self: SSHTransport, command: str, **kwargs: object) -> object:
-            calls.append((command, kwargs))
-            if command == failure_command:
-                raise interrupt
-            return SimpleNamespace(stdout="", returncode=0)
+        guest = _guest_failing(monkeypatch, failure_command, interrupt)
 
         cleanup_calls: list[dict[str, object]] = []
 
@@ -597,7 +575,6 @@ class TestCreateRollback:
             cleanup_calls.append(kwargs)
             raise KeyboardInterrupt("second")
 
-        monkeypatch.setattr(SSHTransport, "run", _interrupt_readiness)
         monkeypatch.setattr("tests._aws_fakes._FakeEC2.terminate_instances", _interrupt_cleanup)
         with pytest.raises(RetainedProvisioningError) as caught:
             _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
@@ -611,8 +588,7 @@ class TestCreateRollback:
             "security_group_id": "sg-123",
             "create_incomplete": "true",
         }
-        assert [command for command, _kwargs in calls] == expected_commands
-        assert all("input_text" not in kwargs for _command, kwargs in calls)
+        assert guest.payloads == expected_commands
         assert cleanup_calls == [{"InstanceIds": ["i-123"]}]
 
 

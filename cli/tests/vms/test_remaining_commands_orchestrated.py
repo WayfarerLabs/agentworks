@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
 from agentworks.db import VMStatus
 from agentworks.execution.requests import Forward
 from agentworks.execution.trust import HOST_TRUST
@@ -32,6 +31,7 @@ from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.ssh import SSHResult
 from agentworks.vms import manager as vm_manager
+from agentworks.vms.initializer.credentials import TAILSCALE_JOIN_STDIN_COMMAND
 from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
 from tests.native_exec_support import ExecCall, ExecutionOnlyTransport
 

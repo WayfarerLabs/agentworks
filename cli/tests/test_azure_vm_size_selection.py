@@ -175,7 +175,7 @@ class TestCreateProvisioningOutput:
         monkeypatch.setattr(AzureVMPlatform, "_compute_client", lambda self, az, ctx: fake_compute)
         monkeypatch.setattr(AzureVMPlatform, "_network_client", lambda self, az, ctx: fake_network)
         monkeypatch.setattr(AzureVMPlatform, "_vm_exists", lambda self, compute, rg, name: False)
-        monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", lambda self, auth_key: "100.64.0.5")
+        monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", lambda self, auth_key, *, node: "100.64.0.5")
 
     @staticmethod
     def _request(*, cpus: int, memory: int, disk: int = 50, swap: int = 4) -> ProvisionRequest:
@@ -296,7 +296,7 @@ class TestCreateOSDiskClamp:
         monkeypatch.setattr(AzureVMPlatform, "_compute_client", lambda self, az, ctx: fake_compute)
         monkeypatch.setattr(AzureVMPlatform, "_network_client", lambda self, az, ctx: fake_network)
         monkeypatch.setattr(AzureVMPlatform, "_vm_exists", lambda self, compute, rg, name: False)
-        monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", lambda self, auth_key: "100.64.0.5")
+        monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", lambda self, auth_key, *, node: "100.64.0.5")
         request = ProvisionRequest(
             vm_name="dev",
             debian_release=DebianRelease.TRIXIE,

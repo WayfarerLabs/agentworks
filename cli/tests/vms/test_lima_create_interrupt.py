@@ -30,8 +30,11 @@ from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.capabilities.vm_platform.bootstrap_script import REBOOT_SENTINEL_PATH
 from agentworks.capabilities.vm_platform.lima import _REBOOT_CLEAR_MARKER, LimaPlatform
 from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed, LimaHost
+from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT
 from agentworks.debian import DebianRelease
+from agentworks.errors import ProvisioningError
 from agentworks.execution.client import SSHClient
+from tests._root_channel_fakes import Answer, FakeGuest, answer_by_payload, install_at_run_process
 from tests.conftest import provisioning_trust_for_tests
 
 if TYPE_CHECKING:
@@ -124,13 +127,16 @@ def _wire(
     monkeypatch: pytest.MonkeyPatch,
     *,
     errors: dict[str, BaseException] | None = None,
+    guest: FakeGuest | None = None,
 ) -> list[str]:
     """Mock the backend seams; return the ``LimaHost.run`` commands issued.
 
     ``errors`` maps a command substring to the exception ``LimaHost.run``
     raises when it sees it (the command is still recorded first, so
-    tests can pin exactly-once attempts).
+    tests can pin exactly-once attempts). ``guest`` answers the root
+    channel, ``limactl shell`` through ``root_script.run_process``.
     """
+    install_at_run_process(monkeypatch, guest or FakeGuest())
     ran: list[str] = []
 
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
@@ -145,8 +151,6 @@ def _wire(
                 raise exc
         if REBOOT_SENTINEL_PATH in cmd:
             return f"{_REBOOT_CLEAR_MARKER}\n"
-        if "tailscale ip" in cmd:
-            return "100.64.0.1"
         return ""
 
     monkeypatch.setattr(LimaHost, "run", _fake_run)
@@ -289,7 +293,7 @@ def test_interrupt_during_post_start_steps_cleans_up_too(
     """The rollback spans the FULL create, not just limactl create/start:
     a Ctrl-C in the post-start Tailscale IP read still tears down."""
     interrupt = KeyboardInterrupt("first")
-    ran = _wire(monkeypatch, errors={"tailscale ip": interrupt})
+    ran = _wire(monkeypatch, guest=FakeGuest(answer_by_payload(failures={"tailscale ip -4": [interrupt]})))
 
     with pytest.raises(KeyboardInterrupt) as exc:
         LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
@@ -304,7 +308,8 @@ def test_interrupt_during_ephemeral_tailscale_join_cleans_up_and_does_not_render
 ) -> None:
     secret = "tskey-interrupt-sentinel"
     interrupt = KeyboardInterrupt("first")
-    ran = _wire(monkeypatch, errors={"tailscale up --auth-key": interrupt})
+    guest = FakeGuest(answer_by_payload(failures={JOIN_FRAGMENT: [interrupt]}))
+    ran = _wire(monkeypatch, guest=guest)
 
     with pytest.raises(KeyboardInterrupt) as caught:
         LimaPlatform("lima", {"placement": {"mode": "local"}}).create(
@@ -313,8 +318,9 @@ def test_interrupt_during_ephemeral_tailscale_join_cleans_up_and_does_not_render
         )
 
     assert caught.value is interrupt
+    assert guest.joins == 1
     assert _deletes(ran) == ["limactl delete --force myvm"]
-    assert secret not in repr(ran)
+    assert secret not in repr((ran, guest.argvs))
     assert secret not in "\n".join([*captured_output.detail, *captured_output.warnings])
 
 
@@ -322,19 +328,19 @@ def test_ephemeral_tailscale_join_failure_cleans_up_without_key_in_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     secret = "tskey-failure-sentinel"
-    failure = LimaCommandFailed("fixed command failed")
-    ran = _wire(monkeypatch, errors={"tailscale up --auth-key": failure})
+    guest = FakeGuest(answer_by_payload(answers={JOIN_FRAGMENT: Answer(status=1)}))
+    ran = _wire(monkeypatch, guest=guest)
 
-    with pytest.raises(LimaCommandFailed) as caught:
+    with pytest.raises(ProvisioningError) as caught:
         LimaPlatform("lima", {"placement": {"mode": "local"}}).create(
             _request(tailscale_auth_key=secret),
             RunContext(),
         )
 
-    assert caught.value is failure
+    assert guest.payloads == [JOIN_FRAGMENT]
     assert _deletes(ran) == ["limactl delete --force myvm"]
-    assert secret not in repr(caught.value)
-    assert secret not in repr(ran)
+    _assert_secret_absent_from_exception_graph(caught.value, secret)
+    assert secret not in repr((ran, guest.argvs))
 
 
 def test_second_interrupt_abandons_cleanup_loudly(

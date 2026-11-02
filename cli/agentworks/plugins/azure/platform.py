@@ -13,7 +13,7 @@ from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
 )
-from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform
+from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform, PublicSSH
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import NotFoundError, StateError
@@ -417,14 +417,13 @@ class AzureVMPlatform(PublicAddressPlatform):
         if swap > 0:
             output.detail(f"Swap: {swap} GiB")
 
-        # Azure retains custom_data. Embed the complete bootstrap with an
-        # empty Tailscale key, then deliver the resolved key once over the
-        # post-boot provisioning transport below.
+        # Azure retains custom_data, and the bootstrap holds no secret; the
+        # Tailscale key is sent once, in the join over the VM's root channel
+        # below.
         bootstrap = generate_bootstrap_script(
             admin_username=admin_username,
             ssh_public_key=ssh_pub_key,
             provisioning_packages=PROVISIONING_PACKAGES,
-            tailscale_auth_key=None,
             hostname=request.hostname,
             swap=swap,
         )
@@ -646,16 +645,19 @@ class AzureVMPlatform(PublicAddressPlatform):
             try:
                 output.detail(f"Azure VM '{vm_name}' provisioned (IP: {public_ip})")
 
+                # The provider-retained bootstrap installed Tailscale without
+                # a credential. Wait for it over the VM's root channel, then
+                # join once and settle the address.
+                target = PublicSSH(public_ip, admin_username, request.ssh_private_key, request.provisioning_trust)
+                tailscale_ip = EphemeralTailscaleBootstrap(target.run_as_root).complete(
+                    tailscale_auth_key, node=request.hostname
+                )
                 prov_transport = SSHTransport(
                     host=public_ip,
                     trust=request.provisioning_trust,
                     user=admin_username,
                     identity_file=request.ssh_private_key,
                 )
-
-                # The provider-retained bootstrap installed Tailscale without
-                # a credential. Wait for it, then join once over stdin.
-                tailscale_ip = EphemeralTailscaleBootstrap(prov_transport).complete(tailscale_auth_key)
             except Exception as exc:
                 output.detail("Cleaning up resources...")
                 # The teardown captures a VM-delete failure rather than

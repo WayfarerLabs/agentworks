@@ -508,7 +508,7 @@ def rekey_vm(
         time.sleep(stabilize_secs)
 
         output.info("Joining new tailnet...")
-        from agentworks.capabilities.vm_platform.tailscale_join import join_tailscale_ephemerally
+        from agentworks.vms.initializer.credentials import join_tailscale_ephemerally
 
         join_tailscale_ephemerally(exec_target, ts_auth_key, timeout=30)
         time.sleep(stabilize_secs)

@@ -13,7 +13,6 @@ Markers:
 
 from __future__ import annotations
 
-import ipaddress
 import shlex
 from dataclasses import dataclass, field
 
@@ -64,7 +63,6 @@ set -euo pipefail
 VM_USER={admin_username}
 SSH_PUBLIC_KEY={ssh_public_key}
 PROVISIONING_PACKAGES={provisioning_packages}
-TAILSCALE_AUTH_KEY={tailscale_auth_key}
 VM_HOSTNAME={vm_hostname}
 SWAP_GB={swap}
 
@@ -232,19 +230,6 @@ else
     curl -fsSL https://tailscale.com/install.sh | sh
     echo "##SUCCESS## tailscale installed"
 fi
-
-# -- Step 7: Join Tailscale --
-echo "##STEP## Tailscale join"
-if [ -n "$TAILSCALE_AUTH_KEY" ]; then
-    tailscale up --auth-key "$TAILSCALE_AUTH_KEY"
-    TS_IP=$(tailscale ip -4)
-    echo "##SUCCESS## tailscale-ip=$TS_IP"
-else
-    # Provider-retained bootstrap payloads embed this script without the
-    # resolved key. Their platform adapters deliver the key over a separate
-    # post-start stdin boundary.
-    echo "##SUCCESS## Tailscale join deferred to platform"
-fi
 """
 
 
@@ -253,16 +238,14 @@ def generate_bootstrap_script(
     admin_username: str,
     ssh_public_key: str,
     provisioning_packages: list[str],
-    tailscale_auth_key: str | None,
     hostname: str,
     swap: int,
 ) -> str:
     """Generate the create-time bootstrap script with parameters baked in.
 
-    ``tailscale_auth_key=None`` omits the join from the generated payload.
-    Provider adapters use this persistence-safe shape whenever their platform
-    retains the script, then deliver the required resolved key through their
-    declared ephemeral create-time boundary after the retained script has run.
+    The script holds no secret, so a provider may retain it. It installs
+    Tailscale and stops there: every platform joins afterwards through its
+    root channel (``tailscale_join``), the only script that carries the key.
 
     ``swap`` (GiB, 0 to disable) is required rather than defaulted: the
     vm-template layer resolves it and every caller has the resolved value
@@ -270,21 +253,10 @@ def generate_bootstrap_script(
     system default, free to disagree with the first. It did: this
     parameter defaulted to 0 while ``ResolvedVMTemplate.swap`` is 4.
     """
-    if tailscale_auth_key is not None:
-        from agentworks.secrets.line_safety import (
-            LineOrientedSecretUse,
-            require_line_safe_secret,
-        )
-
-        tailscale_auth_key = require_line_safe_secret(
-            tailscale_auth_key,
-            use=LineOrientedSecretUse.TAILSCALE,
-        )
     return SCRIPT_TEMPLATE.format(
         admin_username=shlex.quote(admin_username),
         ssh_public_key=shlex.quote(ssh_public_key),
         provisioning_packages=shlex.quote(" ".join(provisioning_packages)),
-        tailscale_auth_key=shlex.quote(tailscale_auth_key or ""),
         vm_hostname=shlex.quote(hostname),
         swap=swap,
         ssh_preserve_path=SSH_PRESERVE_KEYS_PATH,
@@ -310,13 +282,12 @@ class StepResult:
 @dataclass
 class BootstrapResult:
     exit_code: int
-    tailscale_ip: str | None = None
     steps: list[StepResult] = field(default_factory=list)
     raw_output: str = ""
 
     @property
     def ok(self) -> bool:
-        return self.exit_code == 0 and self.tailscale_ip is not None
+        return self.exit_code == 0
 
 
 def parse_bootstrap_output(stdout: str, exit_code: int) -> BootstrapResult:
@@ -332,13 +303,6 @@ def parse_bootstrap_output(stdout: str, exit_code: int) -> BootstrapResult:
             msg = line[12:]
             if current_step is not None:
                 current_step.success_msg = msg
-            if msg.startswith("tailscale-ip="):
-                candidate = msg.split("=", 1)[1].strip()
-                try:
-                    ipaddress.ip_address(candidate)
-                except ValueError:
-                    continue
-                result.tailscale_ip = candidate
         elif line.startswith("##WARN## "):
             if current_step is not None:
                 current_step.warnings.append(line[9:])

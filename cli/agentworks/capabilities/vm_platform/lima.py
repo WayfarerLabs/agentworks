@@ -4,6 +4,7 @@ the site's tagged platform ``placement`` selects."""
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import re
 import shlex
@@ -29,7 +30,11 @@ from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
 )
 from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed, LimaHost
-from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
+from agentworks.capabilities.vm_platform.tailscale_join import (
+    CREATE_RERUN_HINT,
+    join_tailscale,
+    settle_tailnet_address,
+)
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConnectivityError, ProvisioningError, StateError
@@ -62,7 +67,8 @@ _STATUS_TIMEOUT_SECONDS = 10
 # The provision block runs the non-secret bootstrap script (user, packages,
 # swap, SSH key, and Tailscale installation) as a system-level provisioner
 # during limactl start. Lima retains this block in its instance YAML, so the
-# resolved Tailscale auth key crosses a separate post-start stdin boundary.
+# Tailscale auth key is never in it: create joins afterwards through the VM's
+# root channel.
 _LIMA_IMAGE_BLOCKS: dict[DebianRelease, str] = {
     DebianRelease.TRIXIE: """\
   - location: https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.qcow2
@@ -112,10 +118,6 @@ provision:
     script: |
 {provision_script}
 """
-
-# Lima's lower-level execution boundary needs the complete host command, while
-# the shared helper owns the fixed guest command used by every other Transport.
-_TAILSCALE_JOIN_STDIN_COMMAND = "sudo -n /bin/bash -c " + shlex.quote(TAILSCALE_JOIN_STDIN_COMMAND)
 
 
 # Local and SSH placement use different transports, readiness rules, and
@@ -353,14 +355,13 @@ class LimaPlatform(VMPlatform):
             output.detail(f"Swap: {swap} GiB")
 
         # Lima persists its provision scripts in the instance YAML and can
-        # render them through `limactl list --json`. Embed only the non-secret
-        # bootstrap shape; the resolved Tailscale key crosses the post-start
-        # stdin boundary below and never enters this provider configuration.
+        # render them through `limactl list --json`. The bootstrap holds no
+        # secret; the Tailscale key reaches the guest only in the join below,
+        # through the root channel.
         provision_script = generate_bootstrap_script(
             admin_username=request.admin_username,
             ssh_public_key=request.ssh_public_key,
             provisioning_packages=PROVISIONING_PACKAGES,
-            tailscale_auth_key=None,
             hostname=request.hostname,
             swap=swap,
         )
@@ -391,9 +392,9 @@ class LimaPlatform(VMPlatform):
 
             output.detail(f"Lima VM '{instance_name}' created.")
 
-            tailscale_ip = None
+            run_as_root = functools.partial(self._host.run_as_root, instance_name)
             output.detail("Joining Tailscale...")
-            self._join_tailscale_ephemerally(instance_name, request.tailscale_auth_key)
+            join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
 
             # Some bootstrap steps (currently the Apple-vz SVE mask, see
             # bootstrap_script) only take effect after a reboot, and rebooting
@@ -413,16 +414,10 @@ class LimaPlatform(VMPlatform):
                 output.detail(f"A bootstrap step needs a reboot; restarting '{instance_name}'...")
                 self._host.run(f"limactl restart {instance_name}")
 
-            # Extract the IP without retaining the key in provider state. A
-            # discovery failure is safe: the manager retries only this query.
+            # The read follows any restart, and its retries cover the guest
+            # coming back up.
             output.detail("Retrieving Tailscale IP...")
-            try:
-                ip_output = self._host.run(f"limactl shell {instance_name} sudo tailscale ip -4")
-                tailscale_ip = ip_output.strip()
-                output.detail(f"Tailscale IP: {tailscale_ip}")
-            except LimaCommandFailed as e:
-                output.warn(f"could not retrieve Tailscale IP: {e}")
-                output.warn("Tailscale is joined; Phase A will retry IP discovery without the auth key.")
+            tailscale_ip = settle_tailnet_address(run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT)
 
             transport = self._transport_for(instance_name)
         except KeyboardInterrupt:
@@ -437,30 +432,6 @@ class LimaPlatform(VMPlatform):
             native_transport=transport,
             platform_metadata={"instance_name": instance_name},
             tailscale_ip=tailscale_ip,
-        )
-
-    def _join_tailscale_ephemerally(self, instance_name: str, auth_key: str) -> None:
-        """Join without putting ``auth_key`` in Lima state or host argv.
-
-        Lima stores provision scripts in its instance YAML. The fixed command
-        reads exactly one key from stdin inside the guest, then invokes
-        Tailscale. Non-interactive Bash does not write history, and neither the
-        generated Lima config nor the host-side command contains the value.
-        The guest ``tailscale`` process necessarily receives its CLI auth-key
-        argument transiently; this boundary makes no guest-process-table claim.
-        """
-        from agentworks.secrets.line_safety import (
-            LineOrientedSecretUse,
-            require_line_safe_secret,
-        )
-
-        auth_key = require_line_safe_secret(
-            auth_key,
-            use=LineOrientedSecretUse.TAILSCALE,
-        )
-        self._host.run(
-            f"limactl shell {instance_name} {_TAILSCALE_JOIN_STDIN_COMMAND}",
-            input=f"{auth_key}\n",
         )
 
     def _restart_sentinel_present(self, instance_name: str) -> bool:

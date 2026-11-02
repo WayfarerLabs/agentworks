@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import os
 import platform
@@ -15,6 +16,11 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.debian_release import code_owned_release_value
+from agentworks.capabilities.vm_platform.tailscale_join import (
+    CREATE_RERUN_HINT,
+    join_tailscale,
+    settle_tailnet_address,
+)
 from agentworks.capabilities.vm_platform.wsl2_bootstrap import run_wsl2_bootstrap
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
@@ -53,6 +59,17 @@ def wsl_program(*, windows: bool, environ: Mapping[str, str]) -> str:
 
 # The one place the wsl.exe program is named.
 _WSL = wsl_program(windows=sys.platform == "win32", environ=os.environ)
+
+
+def _run_as_root(distro_name: str, script: bytes, deadline: float) -> RawRun:
+    """The distro's root channel: ``wsl.exe --user root --exec /bin/bash -s`` with ``script`` on stdin.
+
+    ``--exec`` starts ``/bin/bash`` directly, so root's login shell and its
+    startup files are not between ``wsl.exe`` and Bash, and ``--user root``
+    needs no sudo, so no ``use_pty`` gives the script a terminal.
+    """
+    argv = [_WSL, "--distribution", distro_name, "--user", "root", "--exec", "/bin/bash", "-s"]
+    return root_script.run_process(argv, script, deadline)
 
 
 # -- Win32 job-object machinery for orphan-proof subprocess cleanup ----------
@@ -782,19 +799,21 @@ class WSL2Platform(VMPlatform):
                 _wsl(["--distribution", vm_name, "--user", "root", "--", "bash", "-c", "echo ok"])
 
                 # WSL2's generated script is its primary create-time bootstrap,
-                # so it stays inside the same distro rollback span. The manager
-                # owns the progress sink and persists the returned IP later.
-                native_transport = WSL2Transport(distro_name=distro_name, user=admin_username)
-                tailscale_ip = run_wsl2_bootstrap(
-                    native_transport,
+                # so it stays inside the same distro rollback span, as do the
+                # join and the address read over the same root channel. The
+                # manager owns the progress sink and records the address later.
+                run_as_root = functools.partial(_run_as_root, distro_name)
+                run_wsl2_bootstrap(
+                    run_as_root,
                     admin_username=admin_username,
                     ssh_public_key=request.ssh_public_key,
-                    tailscale_auth_key=request.tailscale_auth_key,
                     hostname=request.hostname,
                     swap_gib=0,
                     progress=request.progress,
                 )
-                output.detail(f"Tailscale IP: {tailscale_ip}")
+                join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
+                tailscale_ip = settle_tailnet_address(run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT)
+                native_transport = WSL2Transport(distro_name=distro_name, user=admin_username)
             except Exception:
                 # WSL2's error convention holds: the RuntimeErrors from
                 # _wsl / _powershell propagate unwrapped; the only new
@@ -911,16 +930,11 @@ class WSL2Platform(VMPlatform):
         return str(vm.platform_metadata.get("distro_name", vm.name))
 
     def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
-        """Run ``script`` as root through ``wsl.exe``.
+        """Run ``script`` as root through ``wsl.exe`` (:func:`_run_as_root`).
 
-        ``--exec`` starts ``/bin/bash`` directly, so root's login shell and
-        its startup files are not between ``wsl.exe`` and Bash, and
-        ``--user root`` needs no sudo, so no ``use_pty`` gives the script a
-        terminal. ``ctx`` is unused: wsl.exe is local and needs no backend
-        credential.
+        ``ctx`` is unused: wsl.exe is local and needs no backend credential.
         """
-        argv = [_WSL, "--distribution", self._distro_name(vm), "--user", "root", "--exec", "/bin/bash", "-s"]
-        return root_script.run_process(argv, script, deadline)
+        return _run_as_root(self._distro_name(vm), script, deadline)
 
     def native_transport(
         self,

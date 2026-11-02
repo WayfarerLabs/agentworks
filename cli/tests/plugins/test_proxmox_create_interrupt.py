@@ -39,10 +39,12 @@ from agentworks.errors import ProvisioningError
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
+from tests._root_channel_fakes import Answer, FakeGuest
 from tests.conftest import provisioning_trust_for_tests
 
 if TYPE_CHECKING:
     from agentworks.db import VMRow
+    from agentworks.execution.root_script import RawRun
     from tests.conftest import CapturedOutput
 
 _CONFIG = {
@@ -109,12 +111,9 @@ class FakeProxmoxAPI:
         self.stop_task_error: BaseException | None = None
         self.status_errors: list[BaseException | None] = []
         self.wait_errors: dict[str, list[BaseException]] = {}
-        self.bootstrap_result: dict[str, Any] | None = {
-            "exitcode": 0,
-            "out-data": "##STEP## Tailscale\n##SUCCESS## tailscale-ip=100.64.0.7\n",
-        }
-        self.files: dict[str, str] = {}
-        self.file_payloads: list[str] = []
+        # The VM behind QGA, the root channel: bootstrap, join and address read.
+        self.guest = FakeGuest()
+        self._exited: dict[int, RawRun] = {}
 
     def ops(self) -> list[str]:
         return [c[0] for c in self.calls]
@@ -197,20 +196,17 @@ class FakeProxmoxAPI:
     ) -> dict[str, Any] | None:
         argv = tuple(args or ())
         self.calls.append(("guest_agent_exec_wait", node, vmid, command, argv, timeout))
-        if command == "/usr/bin/install":
-            self.files[str(argv[-1])] = ""
-            return {"exitcode": 0, "out-data": ""}
-        if command == "/bin/bash":
-            return self.bootstrap_result
-        if command == "/bin/sh":
-            self.files.pop(str(argv[-1]), None)
-            return {"exitcode": 0, "out-data": ""}
         return {"exitcode": 0, "out-data": ""}
 
-    def guest_agent_file_write(self, node: str, vmid: int, path: str, content: str) -> None:
-        self.calls.append(("guest_agent_file_write", node, vmid, path))
-        self.files[path] = content
-        self.file_payloads.append(content)
+    def guest_agent_exec(self, node: str, vmid: int, *, command: list[str], input_data: str, timeout: float) -> int:
+        self.calls.append(("guest_agent_exec", node, vmid, tuple(command)))
+        pid = len(self.calls)
+        self._exited[pid] = self.guest.run_as_root(input_data.encode("utf-8"), timeout)
+        return pid
+
+    def guest_agent_exec_status(self, node: str, vmid: int, *, pid: int, timeout: float) -> dict[str, Any]:
+        raw = self._exited.pop(pid)
+        return {"exited": True, "out-data": raw.stdout.decode("utf-8"), "err-data": raw.stderr.decode("utf-8")}
 
 
 def _platform_with_fake(monkeypatch: pytest.MonkeyPatch) -> tuple[ProxmoxPlatform, FakeProxmoxAPI]:
@@ -248,10 +244,10 @@ def _interrupt_the_bootstrap(monkeypatch: pytest.MonkeyPatch) -> KeyboardInterru
     so tests can assert the ORIGINAL interrupt is what propagates."""
     interrupt = KeyboardInterrupt("first")
 
-    def _raise(self: ProxmoxPlatform, node: str, vmid: int, script: str, ctx: RunContext) -> str | None:
+    def _raise(self: ProxmoxPlatform, run_as_root: object, request: ProvisionRequest) -> None:
         raise interrupt
 
-    monkeypatch.setattr(ProxmoxPlatform, "_run_bootstrap_via_agent", _raise)
+    monkeypatch.setattr(ProxmoxPlatform, "_run_bootstrap", _raise)
     return interrupt
 
 
@@ -321,44 +317,26 @@ class TestFailClosedBootstrap:
         )
         assert ("stop_vm", "pve1", _NEWID) in fake.calls
         assert ("delete_vm", "pve1", _NEWID) in fake.calls
-        assert fake.file_payloads == []
+        assert fake.guest.scripts == []
         _assert_exception_graph_is_value_free(caught.value)
 
     @pytest.mark.parametrize(
-        ("bootstrap_result", "message"),
+        ("answer", "message"),
         [
-            (None, "bootstrap timed out"),
-            (
-                {
-                    "exitcode": 1,
-                    "out-data": f"##STEP## Tailscale\n##ERROR## reflected {_SENTINEL}\n",
-                    "err-data": f"stderr reflected {_SENTINEL}",
-                },
-                r"bootstrap failed \(exit 1\)",
-            ),
-            (
-                {"exitcode": 0, "out-data": "##STEP## Tailscale\n##SUCCESS## joined\n"},
-                r"bootstrap failed \(exit 0\)",
-            ),
-            (
-                {
-                    "exitcode": 0,
-                    "out-data": f"##STEP## Tailscale\n##SUCCESS## tailscale-ip={_SENTINEL}\n",
-                },
-                r"bootstrap failed \(exit 0\)",
-            ),
+            (Answer(status=None), "bootstrap is unknown"),
+            (Answer(status=1, stdout=b"##STEP## Hostname\n##ERROR## reflected\n"), r"bootstrap failed \(exit 1\)"),
         ],
-        ids=("timeout", "parsed-failure", "missing-ip", "forged-ip"),
+        ids=("unknown", "failed"),
     )
-    def test_bootstrap_failure_removes_private_stage_and_rolls_back(
+    def test_bootstrap_failure_rolls_back_before_the_key_is_sent(
         self,
         monkeypatch: pytest.MonkeyPatch,
         captured_output: CapturedOutput,
-        bootstrap_result: dict[str, Any] | None,
+        answer: Answer,
         message: str,
     ) -> None:
         platform, fake = _platform_with_fake(monkeypatch)
-        fake.bootstrap_result = bootstrap_result
+        fake.guest = FakeGuest(lambda payload, seen: answer)
 
         with pytest.raises(ProvisioningError, match=message) as caught:
             platform.create(_request(tailscale=True), RunContext())
@@ -366,11 +344,8 @@ class TestFailClosedBootstrap:
         assert ("stop_vm", "pve1", _NEWID) in fake.calls
         assert ("delete_vm", "pve1", _NEWID) in fake.calls
         assert fake.ops().index("stop_vm") < fake.ops().index("delete_vm")
-        assert fake.files == {}
-        assert len(fake.file_payloads) == 1
-        assert "TAILSCALE_AUTH_KEY='tskey-proxmox-create-" in fake.file_payloads[0]
-        guest_argv = [call for call in fake.calls if call[0] == "guest_agent_exec_wait"]
-        assert _SENTINEL not in repr(guest_argv)
+        (script,) = fake.guest.scripts
+        assert b"AGW_SECRET" not in script
         _assert_exception_graph_is_value_free(caught.value)
         assert _SENTINEL not in repr(captured_output.lines)
         _assert_template_untouched(fake)
@@ -379,10 +354,10 @@ class TestFailClosedBootstrap:
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:
         platform, fake = _platform_with_fake(monkeypatch)
-        fake.bootstrap_result = None
+        fake.guest = FakeGuest(lambda payload, seen: Answer(status=None))
         fake.delete_error = ProxmoxAPIError("VM is locked")
 
-        with pytest.raises(ProvisioningError, match="bootstrap timed out") as caught:
+        with pytest.raises(ProvisioningError, match="bootstrap is unknown") as caught:
             platform.create(_request(tailscale=True), RunContext())
 
         _assert_exception_graph_is_value_free(caught.value)

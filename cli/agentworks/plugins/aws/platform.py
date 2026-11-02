@@ -33,7 +33,7 @@ from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
 )
-from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform
+from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform, PublicSSH
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
@@ -420,14 +420,12 @@ class EC2Platform(PublicAddressPlatform):
             output.detail(f"Swap: {swap} GiB")
 
         # EC2 retains UserData. The SSH key is installed once by the cloud-init
-        # users block. When create-time bootstrap is requested, embed the full
-        # script with no Tailscale key and deliver the resolved key once over
-        # the post-boot provisioning transport below.
+        # users block, and the bootstrap holds no secret; the Tailscale key is
+        # sent once, in the join over the VM's root channel below.
         bootstrap = generate_bootstrap_script(
             admin_username=request.admin_username,
             ssh_public_key="",
             provisioning_packages=PROVISIONING_PACKAGES,
-            tailscale_auth_key=None,
             hostname=request.hostname,
             swap=swap,
         )
@@ -575,16 +573,19 @@ class EC2Platform(PublicAddressPlatform):
             public_ip = self._public_ip(ec2, instance_id)
             output.detail(f"EC2 instance '{backend_name}' provisioned (IP: {public_ip})")
 
+            # The provider-retained bootstrap installed Tailscale without a
+            # credential. Wait for it over the VM's root channel, then join
+            # once and settle the address.
+            target = PublicSSH(public_ip, request.admin_username, request.ssh_private_key, request.provisioning_trust)
+            tailscale_ip = EphemeralTailscaleBootstrap(target.run_as_root).complete(
+                request.tailscale_auth_key, node=request.hostname
+            )
             prov_transport = SSHTransport(
                 host=public_ip,
                 trust=request.provisioning_trust,
                 user=request.admin_username,
                 identity_file=request.ssh_private_key,
             )
-
-            # The provider-retained bootstrap installed Tailscale without a
-            # credential. Wait for it, then join once over stdin.
-            tailscale_ip = EphemeralTailscaleBootstrap(prov_transport).complete(request.tailscale_auth_key)
         except KeyboardInterrupt:
             output.warn(
                 f"Interrupted: cleaning up partial AWS resources for '{backend_name}', "

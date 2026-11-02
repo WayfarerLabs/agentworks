@@ -38,11 +38,11 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.debian import DebianRelease
+from agentworks.errors import ConnectivityError
 from agentworks.plugins.azure.network import AzureError
 from agentworks.plugins.azure.platform import AzureVMPlatform
-from agentworks.ssh import SSHError
-from agentworks.transports import SSHTransport
 from tests._azure_platform_support import _install_fakes
+from tests._root_channel_fakes import Answer, FakeGuest, answer_by_payload, install_at_run_process
 from tests.conftest import provisioning_trust_for_tests
 
 if TYPE_CHECKING:
@@ -74,12 +74,16 @@ def _stub_egress_detection(monkeypatch: pytest.MonkeyPatch) -> None:
     the shared ssh_exposure home now (hoisted for aws reuse)."""
     monkeypatch.setattr(ssh_exposure, "_egress_ip_cache", None)
     monkeypatch.setattr(ssh_exposure, "detect_egress_ip", lambda: "198.18.0.7")
+    install_at_run_process(monkeypatch, FakeGuest())
 
-    def _successful_bootstrap(self: SSHTransport, command: str, **kwargs: object) -> object:
-        del self, kwargs
-        return SimpleNamespace(stdout="100.64.0.5\n" if command == "tailscale ip -4" else "", returncode=0)
 
-    monkeypatch.setattr(SSHTransport, "run", _successful_bootstrap)
+def _guest_failing(monkeypatch: pytest.MonkeyPatch, payload: str | None, failure: BaseException) -> FakeGuest:
+    """The VM behind the root channel, raising ``failure`` for ``payload`` (every payload when ``None``)."""
+
+    def respond(seen_payload: str, seen: int) -> Answer:
+        return Answer(raises=failure) if payload in (None, seen_payload) else Answer()
+
+    return install_at_run_process(monkeypatch, FakeGuest(respond))
 
 
 def _platform() -> AzureVMPlatform:
@@ -113,7 +117,7 @@ def _interrupt_the_wait(monkeypatch: pytest.MonkeyPatch) -> KeyboardInterrupt:
     tests can assert the ORIGINAL interrupt is what propagates."""
     interrupt = KeyboardInterrupt("first")
 
-    def _raise(self: EphemeralTailscaleBootstrap, auth_key: str) -> None:
+    def _raise(self: EphemeralTailscaleBootstrap, auth_key: str, *, node: str) -> None:
         raise interrupt
 
     monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", _raise)
@@ -124,8 +128,8 @@ class TestInterruptDuringInlineWait:
     @pytest.mark.parametrize(
         ("failure_command", "expected_commands"),
         [
-            ("echo ok", ["echo ok"]),
-            ("cloud-init status --wait", ["echo ok", "cloud-init status --wait"]),
+            ("true", ["true"]),
+            ("cloud-init status --wait", ["true", "cloud-init status --wait"]),
         ],
         ids=("ssh-readiness", "cloud-init-wait"),
     )
@@ -142,26 +146,16 @@ class TestInterruptDuringInlineWait:
         # A managed OS disk with the owner tag, as Azure names them.
         fakes.compute.disks.disks = [SimpleNamespace(name="vm1_OsDisk_1", tags={"owner": "agentworks"})]
         interrupt = KeyboardInterrupt(f"interrupted during {failure_command}")
-        calls: list[tuple[str, dict[str, object]]] = []
-
-        def _interrupt_readiness(self: SSHTransport, command: str, **kwargs: object) -> object:
-            calls.append((command, kwargs))
-            if command == failure_command:
-                raise interrupt
-            return SimpleNamespace(stdout="", returncode=0)
-
-        monkeypatch.setattr(SSHTransport, "run", _interrupt_readiness)
+        guest = _guest_failing(monkeypatch, failure_command, interrupt)
         with pytest.raises(KeyboardInterrupt) as exc:
             _platform().create(_request(tailscale=True), RunContext())
 
         assert exc.value is interrupt
-        assert [command for command, _kwargs in calls] == expected_commands
-        assert all("input_text" not in kwargs for _command, kwargs in calls)
-        assert not any("agentworks-bootstrap" in command for command, _kwargs in calls)
+        assert guest.payloads == expected_commands
+        assert guest.joins == 0
         vm = fakes.compute.virtual_machines.created[0][2]
         retained_cloud_init = base64.b64decode(vm.os_profile.custom_data).decode()
         assert _SENTINEL not in retained_cloud_init
-        assert _SENTINEL not in repr(calls)
         assert _SENTINEL not in repr(captured_output.lines)
         assert fakes.compute.virtual_machines.deleted == [("rg1", "vm1")]
         assert fakes.network.network_interfaces.deleted == [("rg1", "vm1-nic")]
@@ -180,8 +174,8 @@ class TestInterruptDuringInlineWait:
     @pytest.mark.parametrize(
         ("failure_command", "expected_commands"),
         [
-            ("echo ok", ["echo ok"]),
-            ("cloud-init status --wait", ["echo ok", "cloud-init status --wait"]),
+            ("true", ["true"]),
+            ("cloud-init status --wait", ["true", "cloud-init status --wait"]),
         ],
         ids=("ssh-readiness", "cloud-init-wait"),
     )
@@ -196,23 +190,15 @@ class TestInterruptDuringInlineWait:
         the first interrupt and gives exact manual-removal coordinates."""
         fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
         interrupt = KeyboardInterrupt(f"interrupted during {failure_command}")
-        calls: list[tuple[str, dict[str, object]]] = []
-
-        def _interrupt_readiness(self: SSHTransport, command: str, **kwargs: object) -> object:
-            calls.append((command, kwargs))
-            if command == failure_command:
-                raise interrupt
-            return SimpleNamespace(stdout="", returncode=0)
-
-        monkeypatch.setattr(SSHTransport, "run", _interrupt_readiness)
+        guest = _guest_failing(monkeypatch, failure_command, interrupt)
         fakes.compute.virtual_machines.delete_error = KeyboardInterrupt("second")
 
         with pytest.raises(KeyboardInterrupt) as exc:
             _platform().create(_request(tailscale=True), RunContext())
 
         assert exc.value is interrupt
-        assert [command for command, _kwargs in calls] == expected_commands
-        assert all("input_text" not in kwargs for _command, kwargs in calls)
+        assert guest.payloads == expected_commands
+        assert guest.joins == 0
         # Abandoned at the first cleanup step: nothing else was touched.
         assert fakes.network.network_interfaces.deleted == []
         assert fakes.network.public_ip_addresses.deleted == []
@@ -294,10 +280,7 @@ class TestFailureDuringInlineWait:
         fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
         fakes.compute.disks.disks = [SimpleNamespace(name="vm1_OsDisk_1", tags={"owner": "agentworks"})]
 
-        def _no_ssh_binary(self: SSHTransport, command: str, **_kw: object) -> object:
-            raise FileNotFoundError("No such file or directory: 'ssh'")
-
-        monkeypatch.setattr(SSHTransport, "run", _no_ssh_binary)
+        _guest_failing(monkeypatch, None, FileNotFoundError("No such file or directory: 'ssh'"))
 
         with pytest.raises(AzureError, match="ssh"):
             _platform().create(_request(tailscale=True), RunContext())
@@ -322,52 +305,35 @@ class TestFailureDuringInlineWait:
         """SSH exhaustion raises before key delivery and removes every retained
         Azure resource, so Phase A cannot select generated-script staging."""
         fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
-        calls: list[tuple[str, dict[str, object]]] = []
-
-        def _ssh_down(self: SSHTransport, command: str, **kw: object) -> object:
-            calls.append((command, kw))
-            raise SSHError("connect timed out")
-
-        monkeypatch.setattr(SSHTransport, "run", _ssh_down)
+        guest = _guest_failing(monkeypatch, None, ConnectivityError("connect timed out"))
         # The wait sleeps 10s between its 30 probes; don't.
         monkeypatch.setattr(time, "sleep", lambda _s: None)
 
-        with pytest.raises(AzureError, match="SSH did not become ready") as caught:
+        with pytest.raises(AzureError, match="did not answer over SSH") as caught:
             _platform().create(_request(tailscale=True), RunContext())
 
-        assert len(calls) == 30
-        assert {command for command, _kwargs in calls} == {"echo ok"}
-        assert all("input_text" not in kwargs for _command, kwargs in calls)
-        self._assert_safe_provider_failure(fakes, calls, caught.value, captured_output)
+        assert guest.payloads == ["true"] * 30
+        self._assert_safe_provider_failure(fakes, guest, caught.value, captured_output)
 
     def test_cloud_init_wait_failure_fails_closed_without_key_delivery(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:
         fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
-        calls: list[tuple[str, dict[str, object]]] = []
-
-        def _cloud_init_fails(self: SSHTransport, command: str, **kwargs: object) -> object:
-            calls.append((command, kwargs))
-            if command == "cloud-init status --wait":
-                raise SSHError("cloud-init exited 1")
-            return SimpleNamespace(stdout="", returncode=0)
-
-        monkeypatch.setattr(SSHTransport, "run", _cloud_init_fails)
+        guest = install_at_run_process(
+            monkeypatch, FakeGuest(answer_by_payload(answers={"cloud-init status --wait": Answer(status=1)}))
+        )
 
         with pytest.raises(AzureError, match="cloud-init did not complete") as caught:
             _platform().create(_request(tailscale=True), RunContext())
 
-        assert calls == [
-            ("echo ok", {"check": True, "timeout": 10}),
-            ("cloud-init status --wait", {"check": True, "timeout": 600}),
-        ]
-        assert all("input_text" not in kwargs for _command, kwargs in calls)
-        self._assert_safe_provider_failure(fakes, calls, caught.value, captured_output)
+        assert guest.payloads == ["true", "cloud-init status --wait"]
+        assert guest.deadlines == [10, 600]
+        self._assert_safe_provider_failure(fakes, guest, caught.value, captured_output)
 
     @staticmethod
     def _assert_safe_provider_failure(
         fakes: Any,
-        calls: list[tuple[str, dict[str, object]]],
+        guest: FakeGuest,
         failure: AzureError,
         captured_output: CapturedOutput,
     ) -> None:
@@ -375,8 +341,7 @@ class TestFailureDuringInlineWait:
         vm = azure.compute.virtual_machines.created[0][2]
         retained_cloud_init = base64.b64decode(vm.os_profile.custom_data).decode()
         assert _SENTINEL not in retained_cloud_init
-        assert _SENTINEL not in repr(calls)
-        assert not any("agentworks-bootstrap" in command for command, _kwargs in calls)
+        assert not any(b"AGW_SECRET" in script for script in guest.scripts)
         assert azure.compute.virtual_machines.deleted == [("rg1", "vm1")]
         assert azure.network.network_interfaces.deleted == [("rg1", "vm1-nic")]
         assert azure.network.public_ip_addresses.deleted == [("rg1", "vm1-ip")]
@@ -421,10 +386,7 @@ class TestVMDeleteFailureWarns:
         fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
         fakes.compute.virtual_machines.delete_error = RuntimeError("AuthorizationFailed: client lacks permission")
 
-        def _wait_explodes(self: SSHTransport, command: str, **_kw: object) -> object:
-            raise OSError("wait exploded")
-
-        monkeypatch.setattr(SSHTransport, "run", _wait_explodes)
+        _guest_failing(monkeypatch, None, OSError("wait exploded"))
 
         with pytest.raises(AzureError, match="wait exploded"):
             _platform().create(_request(tailscale=True), RunContext())

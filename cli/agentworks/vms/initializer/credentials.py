@@ -7,13 +7,42 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.tailscale_join import join_tailscale_ephemerally
 from agentworks.errors import ConnectivityError
+from agentworks.secrets.line_safety import LineOrientedSecretUse, require_line_safe_secret
 from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
     from agentworks.db import Database
     from agentworks.transports import ExecTransport
+
+
+TAILSCALE_JOIN_STDIN_COMMAND = (
+    'IFS= read -r TAILSCALE_AUTH_KEY && test -n "$TAILSCALE_AUTH_KEY" && tailscale up --auth-key "$TAILSCALE_AUTH_KEY"'
+)
+"""The join that ``vm start``'s rejoin and ``vm rekey`` send over a native transport, with the key on stdin."""
+
+
+def join_tailscale_ephemerally(
+    target: ExecTransport,
+    auth_key: str,
+    *,
+    timeout: int | None = None,
+) -> None:
+    """Send one auth key on stdin to a fixed guest command over a native transport.
+
+    The resolved value never enters host or guest command text. Transport
+    sensitive-input semantics also keep reflected output and native failures
+    out of logs, return values, diagnostics, and chained exception objects.
+    Create joins through the platform's root channel instead
+    (``capabilities.vm_platform.tailscale_join``).
+    """
+    auth_key = require_line_safe_secret(auth_key, use=LineOrientedSecretUse.TAILSCALE)
+    target.run(
+        TAILSCALE_JOIN_STDIN_COMMAND,
+        sudo=True,
+        timeout=timeout,
+        input_text=f"{auth_key}\n",
+    )
 
 
 def verify_tailscale_available() -> None:

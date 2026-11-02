@@ -28,7 +28,10 @@ from agentworks.capabilities.vm_platform.lima import (
     LimaPlatform,
 )
 from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed, LimaHost
+from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT
 from agentworks.debian import DebianRelease
+from agentworks.errors import ConnectivityError
+from tests._root_channel_fakes import ADDRESS, Answer, FakeGuest, answer_by_payload, install_at_run_process
 from tests.conftest import provisioning_trust_for_tests
 
 
@@ -66,6 +69,7 @@ def _wire(
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
     monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, yaml: None)
     monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
+    install_at_run_process(monkeypatch, FakeGuest())
 
     def _fake_run(self: LimaHost, cmd: str, **_kw: object) -> str:
         ran.append(cmd)
@@ -73,8 +77,6 @@ def _wire(
             # The real probe exits 0 either way and reports on stdout.
             marker = _REBOOT_PENDING_MARKER if sentinel_present else _REBOOT_CLEAR_MARKER
             return f"{marker}\n"
-        if "tailscale ip" in cmd:
-            return "100.64.0.1"
         return ""
 
     monkeypatch.setattr(LimaHost, "run", _fake_run)
@@ -112,6 +114,7 @@ def test_probe_failure_warns_and_does_not_restart(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
     monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, yaml: None)
     monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
+    install_at_run_process(monkeypatch, FakeGuest())
 
     def _fake_run(self: LimaHost, cmd: str, **_kw: object) -> str:
         ran.append(cmd)
@@ -152,6 +155,7 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
     secret = "tskey-persistence-sentinel"
     submitted: list[str] = []
     calls: list[tuple[str, dict[str, object]]] = []
+    guest = install_at_run_process(monkeypatch, FakeGuest())
 
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
@@ -174,8 +178,6 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
         calls.append((command, kwargs))
         if REBOOT_SENTINEL_PATH in command:
             return f"{_REBOOT_CLEAR_MARKER}\n"
-        if "tailscale ip" in command:
-            return "100.64.0.1\n"
         return ""
 
     monkeypatch.setattr(LimaHost, "run", _fake_run)
@@ -185,7 +187,7 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
         RunContext(),
     )
 
-    assert result.tailscale_ip == "100.64.0.1"
+    assert result.tailscale_ip == ADDRESS
     assert submitted and len(submitted) == 1
     submitted_yaml = submitted[0]
     persisted_config = cast("dict[str, Any]", yaml.safe_load(submitted_yaml))
@@ -194,51 +196,39 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
     assert secret not in provider_list_render
     assert all(secret not in step["script"] for step in persisted_config["provision"])
 
-    sensitive_calls = [(command, kwargs) for command, kwargs in calls if kwargs.get("input") is not None]
-    assert sensitive_calls == [
-        (
-            "limactl shell myvm sudo -n /bin/bash -c "
-            '\'IFS= read -r TAILSCALE_AUTH_KEY && test -n "$TAILSCALE_AUTH_KEY" '
-            '&& tailscale up --auth-key "$TAILSCALE_AUTH_KEY"\'',
-            {"input": f"{secret}\n"},
-        )
-    ]
-    assert secret not in sensitive_calls[0][0]
+    # The key reaches the guest only in the join's script, on the root channel's stdin.
+    assert secret not in repr(calls)
+    assert [secret.encode() in script for script in guest.scripts] == [True, False]
+    assert guest.payloads == [JOIN_FRAGMENT, "tailscale ip -4"]
+    assert not any(secret in arg for argv in guest.argvs for arg in argv)
 
 
-def test_ip_probe_failure_returns_missing_ip_after_successful_join(
+def test_an_address_that_cannot_be_read_logs_the_node_out_and_removes_the_instance(
     monkeypatch: pytest.MonkeyPatch,
-    warnings: list[str],
 ) -> None:
     secret = "tskey-ip-probe-sentinel"
-    submitted: list[str] = []
-    calls: list[tuple[str, dict[str, object]]] = []
-
+    ran: list[str] = []
+    guest = install_at_run_process(
+        monkeypatch, FakeGuest(answer_by_payload(answers={"tailscale ip -4": Answer(status=1)}))
+    )
+    monkeypatch.setattr("agentworks.capabilities.vm_platform.tailscale_join.time.sleep", lambda seconds: None)
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
-    monkeypatch.setattr(
-        LimaPlatform,
-        "_create_local",
-        lambda self, name, lima_yaml: submitted.append(lima_yaml),
-    )
+    monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, lima_yaml: None)
     monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
 
     def _fake_run(self: LimaHost, command: str, **kwargs: object) -> str:
-        calls.append((command, kwargs))
-        if REBOOT_SENTINEL_PATH in command:
-            return f"{_REBOOT_CLEAR_MARKER}\n"
-        if "tailscale ip" in command:
-            raise LimaCommandFailed("temporary IP probe failure")
-        return ""
+        ran.append(command)
+        return f"{_REBOOT_CLEAR_MARKER}\n" if REBOOT_SENTINEL_PATH in command else ""
 
     monkeypatch.setattr(LimaHost, "run", _fake_run)
 
-    result = LimaPlatform("lima", {"placement": {"mode": "local"}}).create(
-        _request(tailscale_auth_key=secret),
-        RunContext(),
-    )
+    with pytest.raises(ConnectivityError, match="logged out"):
+        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(
+            _request(tailscale_auth_key=secret),
+            RunContext(),
+        )
 
-    assert result.tailscale_ip is None
-    assert submitted and secret not in submitted[0]
-    assert sum(kwargs.get("input") == f"{secret}\n" for _command, kwargs in calls) == 1
-    assert "retry IP discovery without the auth key" in "\n".join(warnings)
+    assert guest.joins == 1
+    assert guest.count("tailscale logout") == 1
+    assert "limactl delete --force myvm" in ran

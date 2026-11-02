@@ -78,7 +78,7 @@ def _stub_egress_detection(monkeypatch: pytest.MonkeyPatch) -> None:
     the failure branches."""
     monkeypatch.setattr(ssh_exposure, "_egress_ip_cache", None)
     monkeypatch.setattr(ssh_exposure, "detect_egress_ip", lambda: _DETECTED)
-    monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", lambda self, auth_key: "100.64.0.5")
+    monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", lambda self, auth_key, *, node: "100.64.0.5")
 
 
 def _fail_detection(monkeypatch: pytest.MonkeyPatch) -> None:

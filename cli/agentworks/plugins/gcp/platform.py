@@ -15,7 +15,7 @@ from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
 )
-from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform
+from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform, PublicSSH
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
@@ -309,7 +309,6 @@ class GCEPlatform(PublicAddressPlatform):
             admin_username=request.admin_username,
             ssh_public_key="",
             provisioning_packages=PROVISIONING_PACKAGES,
-            tailscale_auth_key=None,
             hostname=request.hostname,
             swap=request.swap_gib,
         )
@@ -412,19 +411,20 @@ class GCEPlatform(PublicAddressPlatform):
             verify_instance_network(running, network_url=network.network_url, subnet_url=network.subnet_url)
             external_ip = live_external_ipv4(running)
             request.progress.output(f"GCE instance '{names.backend_name}' is running")
+            target = PublicSSH(external_ip, request.admin_username, request.ssh_private_key, request.provisioning_trust)
+
+            request.progress.step("Wait for GCE startup marker and join Tailscale through the root channel")
+            tailscale_ip = EphemeralTailscaleBootstrap(
+                target.run_as_root,
+                readiness_command=GCE_READINESS_COMMAND,
+                readiness_label=GCE_READINESS_LABEL,
+            ).complete(request.tailscale_auth_key, node=request.hostname)
             transport = SSHTransport(
                 host=external_ip,
                 trust=request.provisioning_trust,
                 user=request.admin_username,
                 identity_file=request.ssh_private_key,
             )
-
-            request.progress.step("Wait for GCE startup marker and join Tailscale through fixed stdin")
-            tailscale_ip = EphemeralTailscaleBootstrap(
-                transport,
-                readiness_command=GCE_READINESS_COMMAND,
-                readiness_label=GCE_READINESS_LABEL,
-            ).complete(request.tailscale_auth_key)
             request.progress.output("GCE credential-free bootstrap and Tailscale join completed")
         except KeyboardInterrupt as primary:
             operator_interrupt = primary

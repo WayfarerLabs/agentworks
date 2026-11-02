@@ -1,4 +1,4 @@
-"""Shared fixed-command Tailscale auth-key delivery."""
+"""The native-transport stdin join that ``vm start``'s rejoin and ``vm rekey`` use."""
 
 from __future__ import annotations
 
@@ -6,17 +6,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentworks.capabilities.vm_platform.tailscale_join import (
-    DEFAULT_READINESS_COMMAND,
-    DEFAULT_READINESS_LABEL,
+from agentworks.errors import ValidationError
+from agentworks.ssh import SSHError, SSHResult
+from agentworks.vms.initializer.credentials import (
     TAILSCALE_JOIN_STDIN_COMMAND,
-    EphemeralTailscaleBootstrap,
+    _join_tailscale,
     join_tailscale_ephemerally,
 )
-from agentworks.errors import ProvisioningError, ValidationError
-from agentworks.plugins.gcp.bootstrap import GCE_READINESS_COMMAND, GCE_READINESS_LABEL
-from agentworks.ssh import SSHError, SSHResult
-from agentworks.vms.initializer.credentials import _join_tailscale
 from tests.native_exec_support import ExecCall, ExecutionOnlyTransport
 
 _SENTINEL = "tskey-join-'swordfish"
@@ -35,21 +31,6 @@ class _RecordingTransport:
             raise self.failure
         stdout = "100.64.0.77\n" if command == "tailscale ip -4" else ""
         return SSHResult(returncode=0, stdout=stdout, stderr="")
-
-
-class _ReadinessTransport:
-    logger = None
-
-    def __init__(self, *, fail_command: str, failure: BaseException | None = None) -> None:
-        self.fail_command = fail_command
-        self.failure = failure if failure is not None else SSHError(f"safe failure for {fail_command}")
-        self.calls: list[tuple[str, dict[str, object]]] = []
-
-    def run(self, command: str, **kwargs: object) -> SSHResult:
-        self.calls.append((command, kwargs))
-        if command == self.fail_command:
-            raise self.failure
-        return SSHResult(returncode=0, stdout="", stderr="")
 
 
 def _assert_fixed_stdin_call(call: tuple[str, dict[str, object]], *, timeout: int | None) -> None:
@@ -85,16 +66,6 @@ def test_shared_join_rejects_line_unsafe_key_before_transport(auth_key: str) -> 
     assert caught.value.__context__ is None
 
 
-def test_bootstrap_rejects_line_unsafe_key_before_readiness_transport() -> None:
-    auth_key = "prefix\r\nsuffix"
-    target = _RecordingTransport()
-
-    with pytest.raises(ValidationError):
-        EphemeralTailscaleBootstrap(target).complete(auth_key)  # type: ignore[arg-type]
-
-    assert target.calls == []
-
-
 def test_initializer_join_uses_fixed_stdin_once_then_updates_the_ip() -> None:
     db = MagicMock()
 
@@ -125,112 +96,3 @@ def test_initializer_join_failure_is_same_safe_exception_and_stops_before_ip() -
     assert len(target.calls) == 1
     _assert_fixed_stdin_call(target.calls[0], timeout=None)
     assert _SENTINEL not in repr(caught.value)
-
-
-def test_readiness_exhaustion_raises_typed_without_delivering_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    target = _ReadinessTransport(fail_command="echo ok")
-    monkeypatch.setattr("agentworks.capabilities.vm_platform.tailscale_join.time.sleep", lambda _seconds: None)
-
-    with pytest.raises(ProvisioningError, match="SSH did not become ready") as caught:
-        EphemeralTailscaleBootstrap(target).complete(_SENTINEL)  # type: ignore[arg-type]
-
-    assert len(target.calls) == 30
-    assert {command for command, _kwargs in target.calls} == {"echo ok"}
-    assert all("input_text" not in kwargs for _command, kwargs in target.calls)
-    assert _SENTINEL not in repr(caught.value)
-    assert _SENTINEL not in repr(target.calls)
-
-
-def test_cloud_init_wait_failure_raises_typed_without_delivering_key() -> None:
-    target = _ReadinessTransport(fail_command="cloud-init status --wait")
-
-    with pytest.raises(ProvisioningError, match="cloud-init did not complete") as caught:
-        EphemeralTailscaleBootstrap(target).complete(_SENTINEL)  # type: ignore[arg-type]
-
-    assert target.calls == [
-        ("echo ok", {"check": True, "timeout": 10}),
-        ("cloud-init status --wait", {"check": True, "timeout": 600}),
-    ]
-    assert all("input_text" not in kwargs for _command, kwargs in target.calls)
-    assert _SENTINEL not in repr(caught.value)
-    assert _SENTINEL not in repr(target.calls)
-
-
-def test_default_readiness_contract_preserves_azure_and_aws_behavior() -> None:
-    target = _RecordingTransport()
-
-    result = EphemeralTailscaleBootstrap(target).complete(_SENTINEL)  # type: ignore[arg-type]
-
-    assert DEFAULT_READINESS_COMMAND == "cloud-init status --wait"
-    assert DEFAULT_READINESS_LABEL == "cloud-init"
-    assert result == "100.64.0.77"
-    assert target.calls[:2] == [
-        ("echo ok", {"check": True, "timeout": 10}),
-        ("cloud-init status --wait", {"check": True, "timeout": 600}),
-    ]
-    _assert_fixed_stdin_call(target.calls[2], timeout=30)
-    assert target.calls[3] == ("tailscale ip -4", {"sudo": True, "check": True, "timeout": 15})
-
-
-def test_gce_readiness_runs_after_ssh_and_before_fixed_stdin_join() -> None:
-    target = _RecordingTransport()
-
-    result = EphemeralTailscaleBootstrap(
-        target,
-        readiness_command=GCE_READINESS_COMMAND,
-        readiness_label=GCE_READINESS_LABEL,
-    ).complete(_SENTINEL)  # type: ignore[arg-type]
-
-    assert result == "100.64.0.77"
-    assert target.calls[:2] == [
-        ("echo ok", {"check": True, "timeout": 10}),
-        (GCE_READINESS_COMMAND, {"check": True, "timeout": 600}),
-    ]
-    assert "input_text" not in target.calls[1][1]
-    assert _SENTINEL not in GCE_READINESS_COMMAND
-    _assert_fixed_stdin_call(target.calls[2], timeout=30)
-    assert target.calls[3] == ("tailscale ip -4", {"sudo": True, "check": True, "timeout": 15})
-
-
-def test_gce_readiness_timeout_is_typed_labeled_and_stops_before_stdin() -> None:
-    target = _ReadinessTransport(fail_command=GCE_READINESS_COMMAND)
-
-    with pytest.raises(ProvisioningError, match="GCE startup script did not complete") as caught:
-        EphemeralTailscaleBootstrap(
-            target,
-            readiness_command=GCE_READINESS_COMMAND,
-            readiness_label=GCE_READINESS_LABEL,
-        ).complete(_SENTINEL)  # type: ignore[arg-type]
-
-    assert target.calls == [
-        ("echo ok", {"check": True, "timeout": 10}),
-        (GCE_READINESS_COMMAND, {"check": True, "timeout": 600}),
-    ]
-    assert all("input_text" not in kwargs for _command, kwargs in target.calls)
-    assert _SENTINEL not in repr(caught.value)
-    assert _SENTINEL not in repr(target.calls)
-
-
-@pytest.mark.parametrize(
-    ("failure_command", "expected_commands"),
-    [
-        ("echo ok", ["echo ok"]),
-        ("cloud-init status --wait", ["echo ok", "cloud-init status --wait"]),
-    ],
-    ids=("ssh-readiness", "cloud-init-wait"),
-)
-def test_readiness_interrupt_preserves_identity_without_delivering_key(
-    failure_command: str,
-    expected_commands: list[str],
-) -> None:
-    interrupt = KeyboardInterrupt(f"interrupted during {failure_command}")
-    target = _ReadinessTransport(fail_command=failure_command, failure=interrupt)
-
-    with pytest.raises(KeyboardInterrupt) as caught:
-        EphemeralTailscaleBootstrap(target).complete(_SENTINEL)  # type: ignore[arg-type]
-
-    assert caught.value is interrupt
-    assert [command for command, _kwargs in target.calls] == expected_commands
-    assert all("input_text" not in kwargs for _command, kwargs in target.calls)
-    assert not any("agentworks-bootstrap" in command for command, _kwargs in target.calls)
-    assert _SENTINEL not in repr(target.calls)

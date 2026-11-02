@@ -34,9 +34,11 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, wsl2
+from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.debian import DebianRelease
 from agentworks.errors import StateError
+from tests._root_channel_fakes import ADDRESS, FakeGuest, install_at_run_process
 from tests.conftest import provisioning_trust_for_tests
 
 if TYPE_CHECKING:
@@ -77,6 +79,7 @@ class _Calls:
     def __init__(self) -> None:
         # ("wsl", <joined args>) or ("ps", <script>), in call order.
         self.events: list[tuple[str, str]] = []
+        self.guest = FakeGuest()
 
     def wsl(self, needle: str) -> list[str]:
         return [c for kind, c in self.events if kind == "wsl" and needle in c]
@@ -119,7 +122,8 @@ def _wire(
     monkeypatch.setattr(wsl2, "_powershell", _fake_powershell)
     monkeypatch.setattr(wsl2, "_download_debian_rootfs", lambda tarball, *, tag: None)
     monkeypatch.setattr(WSL2Platform, "_distro_exists", staticmethod(lambda name: False))
-    monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", lambda *args, **kwargs: "100.64.0.7")
+    monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", lambda *args, **kwargs: None)
+    calls.guest = install_at_run_process(monkeypatch, FakeGuest())
     return calls
 
 
@@ -130,24 +134,26 @@ def _assert_teardown_ran(calls: _Calls) -> None:
 
 
 def test_success_runs_primary_bootstrap_before_create_returns(monkeypatch: pytest.MonkeyPatch) -> None:
-    _wire(monkeypatch)
+    calls = _wire(monkeypatch)
     request = _request()
-    bootstrap = MagicMock(return_value="100.64.0.7")
+    bootstrap = MagicMock(return_value=None)
     monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", bootstrap)
 
     result = WSL2Platform("wsl2", {}).create(request, RunContext())
 
     assert WSL2Platform.contract_version == 1
-    assert result.tailscale_ip == "100.64.0.7"
+    assert result.tailscale_ip == ADDRESS
     bootstrap.assert_called_once()
     assert bootstrap.call_args.kwargs == {
         "admin_username": "agw",
         "ssh_public_key": "ssh-ed25519 AAAA test",
-        "tailscale_auth_key": "tskey-test",
         "hostname": "vm1",
         "swap_gib": 0,
         "progress": request.progress,
     }
+    # The join and the address read go through the root channel, after the bootstrap.
+    assert calls.guest.payloads == [JOIN_FRAGMENT, "tailscale ip -4"]
+    assert {argv[0] for argv in calls.guest.argvs} == {wsl2._WSL}
 
 
 def test_primary_bootstrap_failure_cleans_up_and_reraises(monkeypatch: pytest.MonkeyPatch) -> None:

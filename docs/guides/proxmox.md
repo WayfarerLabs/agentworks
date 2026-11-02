@@ -91,8 +91,8 @@ backups, migrate VMs, access the console, or manage users/nodes/cluster config.
 
 The `AgentworksVM` role uses `VM.Monitor` for QEMU Guest Agent access on Proxmox VE 8. On Proxmox VE
 9 it uses `VM.GuestAgent.Unrestricted`, which is required for guest exec and also authorizes the
-network inspection and file-write endpoints Agentworks uses. The setup script selects the matching
-role from the installed Proxmox VE major version and refuses unknown major versions.
+network inspection endpoint Agentworks uses. The setup script selects the matching role from the
+installed Proxmox VE major version and refuses unknown major versions.
 
 ### Manual setup
 
@@ -215,8 +215,10 @@ When you run `agw vm create <name> --site proxmox`:
 1. Clones the template into the `agentworks` pool via the Proxmox REST API
 2. Configures CPU, memory, cloud-init user/SSH keys, and DHCP networking
 3. Starts the VM and waits for the QEMU guest agent to report an IP
-4. Waits for cloud-init and runs the private bootstrap script through QEMU Guest Agent
-5. The bootstrap installs system packages, configures the admin user, and joins Tailscale
+4. Waits for cloud-init and runs the bootstrap script through QEMU Guest Agent, which installs
+   system packages and Tailscale and configures the admin user
+5. Joins Tailscale through QEMU Guest Agent, with the auth key on the script's stdin, and reads the
+   VM's Tailscale address the same way
 6. Returns the QGA execution transport to core, which verifies the live Debian release
 7. Switches to Tailscale SSH and completes initialization
 

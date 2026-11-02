@@ -3,10 +3,9 @@ via the Proxmox REST API."""
 
 from __future__ import annotations
 
-import sys
+import functools
 import time
 import urllib.parse
-import uuid
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
 from pydantic import Field, model_validator
@@ -18,9 +17,15 @@ from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
     operator_owned_release_value,
 )
+from agentworks.capabilities.vm_platform.tailscale_join import (
+    CREATE_RERUN_HINT,
+    join_tailscale,
+    settle_tailnet_address,
+)
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
+from agentworks.execution import root_script
 from agentworks.plugins.proxmox import guest_agent
 from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.plugins.proxmox.teardown import (
@@ -33,23 +38,14 @@ from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution.root_script import RawRun
 
-
-def _warn_bootstrap_file_residue() -> None:
-    """Warn about guest residue without replacing active control flow."""
-    try:  # noqa: SIM105 - warning failures must not replace the active provisioning failure
-        output.warn(
-            "could not verify removal of the Proxmox bootstrap staging file; "
-            "primary failure unchanged; plaintext may remain"
-        )
-    except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):
-        pass
+BOOTSTRAP_DEADLINE_SECONDS = 600
 
 
 class ProxmoxConfig(AgwModel):
@@ -400,20 +396,13 @@ class ProxmoxPlatform(VMPlatform):
                 output.detail("Waiting for cloud-init...")
                 self._wait_for_cloud_init(node, newid, ctx)
 
-                # 8. Run bootstrap script via guest agent
+                # 8. Run the bootstrap, join and read the address through the
+                # guest agent, the VM's root channel
                 output.detail("Running bootstrap via guest agent...")
-                bootstrap = generate_bootstrap_script(
-                    admin_username=request.admin_username,
-                    ssh_public_key=request.ssh_public_key,
-                    provisioning_packages=PROVISIONING_PACKAGES,
-                    tailscale_auth_key=request.tailscale_auth_key,
-                    hostname=request.hostname,
-                    swap=request.swap_gib,
-                )
-                tailscale_ip = self._run_bootstrap_via_agent(node, newid, bootstrap, ctx)
-                if not tailscale_ip:
-                    raise ProvisioningError("Proxmox bootstrap did not return a Tailscale IP")
-                output.detail(f"Tailscale IP: {tailscale_ip}")
+                run_as_root = functools.partial(guest_agent.run_as_root, self._api(ctx), node, newid)
+                self._run_bootstrap(run_as_root, request)
+                join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
+                tailscale_ip = settle_tailnet_address(run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT)
 
                 target = ProxmoxExecTransport(
                     self._api(ctx),
@@ -571,74 +560,17 @@ class ProxmoxPlatform(VMPlatform):
         # to reach readiness during provisioning, not an API failure.
         raise ProvisioningError(f"Timed out waiting for guest agent IP on VMID {vmid}")
 
-    def _run_bootstrap_via_agent(self, node: str, vmid: int, script: str, ctx: RunContext) -> str:
-        """Write and run the bootstrap script via the guest agent.
-
-        Returns the Tailscale IP if bootstrap succeeds. A timeout, unsuccessful
-        execution, or missing valid Tailscale IP raises so create rolls back.
-        """
-        from agentworks.capabilities.vm_platform.bootstrap_script import parse_bootstrap_output
-
-        script_path = f"/tmp/agentworks-bootstrap-{uuid.uuid4().hex}.sh"
-        api = self._api(ctx)
-        try:
-            prepared = api.guest_agent_exec_wait(
-                node,
-                vmid,
-                "/usr/bin/install",
-                ["-m", "600", "/dev/null", script_path],
-            )
-            if prepared is None or prepared.get("exitcode", -1) != 0:
-                raise ProvisioningError("could not create the private Proxmox bootstrap staging file")
-            write_failed = False
-            try:
-                api.guest_agent_file_write(node, vmid, script_path, script)
-            except ProxmoxAPIError:
-                write_failed = True
-            if write_failed:
-                raise ProxmoxAPIError("Proxmox guest-agent bootstrap file write failed") from None
-
-            # Bash is invoked explicitly so the private script does not need
-            # an executable bit. The path, never its content, is guest argv.
-            result = api.guest_agent_exec_wait(
-                node,
-                vmid,
-                "/bin/bash",
-                [script_path],
-                timeout=600,
-            )
-        finally:
-            active_failure = sys.exc_info()[1]
-            try:
-                removed = api.guest_agent_exec_wait(
-                    node,
-                    vmid,
-                    "/bin/sh",
-                    [
-                        "-c",
-                        'rm -f -- "$1" && test ! -e "$1"',
-                        "agentworks-bootstrap-cleanup",
-                        script_path,
-                    ],
-                )
-                if removed is None or removed.get("exitcode", -1) != 0:
-                    raise ProxmoxAPIError("Proxmox guest-agent bootstrap staging file removal failed")
-            except (ProxmoxAPIError, KeyboardInterrupt, SystemExit, GeneratorExit) as cleanup_failure:
-                if active_failure is None:
-                    if not isinstance(cleanup_failure, ProxmoxAPIError):
-                        raise
-                    raise ProxmoxAPIError("could not verify removal of the Proxmox bootstrap staging file") from None
-                _warn_bootstrap_file_residue()
-
-        if result is None:
-            raise ProvisioningError("Proxmox guest-agent bootstrap timed out")
-
-        exit_code = result.get("exitcode", -1)
-        stdout = result.get("out-data", "")
-        parsed = parse_bootstrap_output(stdout, exit_code)
-
-        if parsed.ok:
-            assert parsed.tailscale_ip is not None
-            return parsed.tailscale_ip
-
-        raise ProvisioningError(f"Proxmox guest-agent bootstrap failed (exit {exit_code})")
+    def _run_bootstrap(self, run_as_root: Callable[[bytes, float], RawRun], request: ProvisionRequest) -> None:
+        """Run the key-free bootstrap through the guest agent once, raising unless it exits 0."""
+        script = generate_bootstrap_script(
+            admin_username=request.admin_username,
+            ssh_public_key=request.ssh_public_key,
+            provisioning_packages=PROVISIONING_PACKAGES,
+            hostname=request.hostname,
+            swap=request.swap_gib,
+        )
+        result = root_script.run(run_as_root, script, deadline=BOOTSTRAP_DEADLINE_SECONDS)
+        if result.status is None:
+            raise ProvisioningError("the outcome of the Proxmox guest-agent bootstrap is unknown")
+        if result.status != 0:
+            raise ProvisioningError(f"Proxmox guest-agent bootstrap failed (exit {result.status})")
