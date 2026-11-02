@@ -40,21 +40,22 @@ address settle, so slice 3's `settle_on_transport` and its callback form are nev
 
 ## Module layout
 
-| Module                                                            | Contents after this slice                                                                                          |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `execution/root_script.py` (new)                                  | `RawRun`, `RootScriptResult`, `run`, `run_process`, `read_host_keys`                                               |
-| `execution/pump.py`, `ssh_process.py`                             | `PipeSession(nonce=None)`; `build_host_argv`; `spawn`'s error for a program other than OpenSSH                     |
-| `execution/trust.py`                                              | `fingerprint(key)`                                                                                                 |
-| `execution/errors.py`                                             | `FeatureUnavailable`; the `VMNotReady` and `TrustMissing` hints name `agw vm recover`                              |
-| `capabilities/vm_platform/base.py`                                | The surface below                                                                                                  |
-| `capabilities/vm_platform/public_ssh.py` (new)                    | `PublicSSH`: the clouds' SSH to a public address, under the VM policy                                              |
-| `capabilities/vm_platform/lima_host.py` (new)                     | `LimaHost`: limactl locally or on the placement host, its `run_as_root` and shell, Remote Lima's detached create   |
-| `capabilities/vm_platform/tailscale_join.py`                      | `JOIN_FRAGMENT`, `join_tailscale`, `read_tailnet_address`, `settle_tailnet_address`, `EphemeralTailscaleBootstrap` |
-| `capabilities/vm_platform/wsl2.py`, `wsl2_bootstrap.py`           | The `wsl.exe` `run_as_root` and shell; the key-free bootstrap run through it                                       |
-| `plugins/proxmox/guest_agent.py` (new)                            | `run_as_root`: QGA exec of `/bin/bash -s` with `input-data`, polled to the deadline                                |
-| `vms/recovery.py` (new)                                           | Core's three scripts and one function each: `repair`, `rekey`, `logout`                                            |
-| `vms/manager/recover.py` (new)                                    | `recover_vm`, the `agw vm recover` service                                                                         |
-| `vms/manager/tailscale.py`, `power.py`, `exec.py`, `vms/nodes.py` | `_await_tailnet`; rekey and delete on the scripts; `vm shell --platform` on `native_shell`; the gate's wait        |
+| Module                                                            | Contents after this slice                                                                                        |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `execution/root_script.py` (new)                                  | `RawRun`, `RootScriptResult`, `run`, `run_process`, `read_host_keys`                                             |
+| `execution/pump.py`, `ssh_process.py`                             | `PipeSession(nonce=None)`; `build_host_argv`; `spawn`'s error for a program other than OpenSSH                   |
+| `execution/trust.py`                                              | `fingerprint(key)`                                                                                               |
+| `execution/errors.py`                                             | `FeatureUnavailable`; the `VMNotReady` and `TrustMissing` hints name `agw vm recover`                            |
+| `capabilities/vm_platform/base.py`                                | The surface below                                                                                                |
+| `capabilities/vm_platform/public_ssh.py` (new)                    | `PublicSSH`: the clouds' SSH to a public address, under the VM policy                                            |
+| `capabilities/vm_platform/lima_host.py` (new)                     | `LimaHost`: limactl locally or on the placement host, its `run_as_root` and shell, Remote Lima's detached create |
+| `capabilities/vm_platform/tailscale_join.py`                      | `JOIN_FRAGMENT`, `join_tailscale`, `read_tailnet_address`, `settle_tailnet_address`, `complete_cloud_bootstrap`  |
+| `capabilities/vm_platform/bootstrap_script.py`                    | `run_bootstrap`, the key-free bootstrap run through a `run_as_root`; `parse_bootstrap_steps`                     |
+| `capabilities/vm_platform/wsl2.py`                                | The `wsl.exe` `run_as_root` and shell                                                                            |
+| `plugins/proxmox/guest_agent.py` (new)                            | `run_as_root`: QGA exec of `/bin/bash -s` with `input-data`, polled to the deadline                              |
+| `vms/recovery.py` (new)                                           | Core's three scripts and one function each: `repair`, `rekey`, `logout`                                          |
+| `vms/manager/recover.py` (new)                                    | `recover_vm`, the `agw vm recover` service                                                                       |
+| `vms/manager/tailscale.py`, `power.py`, `exec.py`, `vms/nodes.py` | `_await_tailnet`; rekey and delete on the scripts; `vm shell --platform` on `native_shell`; the gate's wait      |
 
 Deletions are listed under Independence and in each section.
 
@@ -292,9 +293,12 @@ takes a `run_as_root`:
 - `JOIN_FRAGMENT` is the one join command,
   `printf '%s\n' "$AGW_SECRET" | tailscale up --auth-key=file:/dev/stdin`, used by `join_tailscale`
   and by recover's repair script, so create and recover join the same way.
-- `join_tailscale(run_as_root, auth_key)` runs it once with a 30-second deadline, as today
-  (`tailscale_join.py:84`). A non-zero status raises `ProvisioningError`; an unknown one raises
-  naming the node for the admin console, since it may have joined. Neither retries (I24).
+- `join_tailscale(run_as_root, auth_key, *, node)` runs it once with a 30-second deadline, as today
+  (`tailscale_join.py:84`). A non-zero status raises `ProvisioningError`; an unknown one, or a
+  channel that raised `ConnectivityError`, raises naming `node`, with the admin console in its hint,
+  since it may have joined. Neither retries (I24). An empty or whitespace-only key never reaches it:
+  create refuses one at its boundary, beside the line-safety check (`vms/manager/lifecycle.py`),
+  since `tailscale up` would wait for an interactive login.
 - `read_tailnet_address(run_as_root, *, node) -> str` is slice 3's read loop: up to six
   `tailscale ip -4` reads (15 s each) two seconds apart. A read fails on a non-zero status, an
   unknown outcome, a `ValueError` from `parse_tailnet_address`, or a `ConnectivityError` the
@@ -303,32 +307,39 @@ takes a `run_as_root`:
   cannot change it. Exhaustion raises `ConnectivityError` naming the node.
 - `settle_tailnet_address(run_as_root, *, node, rerun_hint) -> str` is that read plus slice 3's
   logout: on exhaustion it runs one `tailscale logout` (30 s) and raises `ConnectivityError` from
-  the read's error. When the logout returned status 0, the message says so and gives `rerun_hint`,
-  where slice 3's says create can be run again; otherwise it names the node for removal in the admin
-  console. Create passes its own wording and rekey passes `agw vm recover NAME`: a node whose
-  address cannot be read is unusable, and the next recover's repair reads `NeedsLogin` and rejoins
-  it.
+  the read's error. When the logout returned status 0, the message says so and the hint is
+  `rerun_hint`; otherwise the hint names the node for removal in the admin console. Create passes
+  `CREATE_RERUN_HINT`, which says the partial VM was removed and that a single-use key spent by the
+  join needs replacing first, and rekey passes `agw vm recover NAME`: a node whose address cannot be
+  read is unusable, and the next recover's repair reads `NeedsLogin` and rejoins it.
 - `ConnectivityError` rather than slice 3's `ProvisioningError`, because it is true for all three
   callers (the VM did not report an address over its root channel). Create still reports a
   `ProvisioningError`: the manager wraps any untyped failure of `create` in one
-  (`vms/manager/lifecycle.py:578-584`).
-- `EphemeralTailscaleBootstrap(run_as_root, ...)` keeps its readiness loop
-  (`tailscale_join.py:90-97`): up to 30 probes ten seconds apart, now
-  `root_script.run(run_as_root, "true", deadline=10)`. It retries every probe that does not end with
-  status 0, a raised `ConnectivityError` included, within that bound, so `PublicSSH`'s
-  `Permission denied (publickey` refusal is retried during create. That covers a guest agent that
-  writes the key after sshd starts, as GCP's may (an inference, not measured). Then the readiness
-  command runs once (600 s), and the bootstrap joins and settles. `TAILSCALE_JOIN_STDIN_COMMAND` is
-  deleted.
+  (`vms/manager/lifecycle.py:578-584`). That wrapper, and the AWS and Azure create arms'
+  `wrap_ec2_error` and `wrap_azure_error`, keep the wrapped `AgentworksError`'s hint, so the
+  settle's guidance (and `PublicSSH`'s key-refusal hint) reaches the operator.
+- `complete_cloud_bootstrap(run_as_root, auth_key, *, node, readiness_command, readiness_label)`
+  replaces `EphemeralTailscaleBootstrap` and keeps its readiness loop (`tailscale_join.py:90-97`):
+  up to 30 probes ten seconds apart, now `root_script.run(run_as_root, "true", deadline=10)`. It
+  retries every probe that does not end with status 0, a raised `ConnectivityError` included, within
+  that bound, so `PublicSSH`'s `Permission denied (publickey` refusal is retried during create. That
+  covers a guest agent that writes the key after sshd starts, as GCP's may (an inference, not
+  measured). Then the readiness command runs once (600 s), and the bootstrap joins and settles.
+  `TAILSCALE_JOIN_STDIN_COMMAND` and the transport join leave `tailscale_join.py`; they stay in
+  `vms/initializer/credentials.py` only for rekey and `vm start`'s rejoin, and go with them.
 
 **The bootstrap script loses its key.** WSL2 and Proxmox are the last two platforms that generate
 the bootstrap with the key inside it (`capabilities/vm_platform/wsl2_bootstrap.py:62-69`,
 `plugins/proxmox/platform.py:401-408`) and stage it in a guest file that must be removed and
 verified (`wsl2_bootstrap.py:71-151`, `plugins/proxmox/platform.py:566-624`). Both now run the
-key-free script through `run_as_root` and then call `join_tailscale`, like Lima and the clouds.
-`generate_bootstrap_script` loses its `tailscale_auth_key` parameter and step 7
-(`bootstrap_script.py:236-247`), so no generated script can hold the key: I10 holds by construction,
-and the staging files go.
+key-free script through `bootstrap_script.run_bootstrap(run_as_root, *, ...)`, whose keywords are
+the bootstrap's inputs, its deadline and the progress sink, and then call `join_tailscale`, like
+Lima and the clouds. `run_bootstrap` reports each step to the console and the create log, records
+both streams' sizes there, and raises unless the script exits 0; `wsl2_bootstrap.py` goes.
+`parse_bootstrap_steps(stdout)` replaces `parse_bootstrap_output` and `BootstrapResult`, since every
+caller judges the outcome by its own status. `generate_bootstrap_script` loses its
+`tailscale_auth_key` parameter and step 7 (`bootstrap_script.py:236-247`), so no generated script
+can hold the key: I10 holds by construction, and the staging files go.
 
 **The bootstrap's output against the 1 MiB capture.** Its package steps run `apt-get -qq`
 (`bootstrap_script.py:114-117`) and every other step prints one marker line. No create log exists
@@ -364,10 +375,12 @@ The remote create keeps its private staging directory (`lima.py:671-691`). Pipin
 `instance.Prepare` (`cmd/limactl/start.go`), which downloads the base image when it is absent
 (`fileutils.DownloadFile` in `pkg/instance/start.go`, Lima's main branch), so the create belongs in
 the detached run with `start`. `create` joins with
-`join_tailscale(partial(host.run_as_root, instance), key)` instead of its own stdin command
-(`lima.py:471-493`); the restart-sentinel probe and the cloud-init log read stay `run` commands.
-`native_transport` (`:799-808`) and `_transport_for` (`:535-539`) are deleted.
-`recovery_needs_guest_sshd = True`: `limactl shell` is SSH to the guest's sshd with Lima's own key.
+`join_tailscale(partial(host.run_as_root, instance), key, node=...)` instead of its own stdin
+command (`lima.py:471-493`), after the restart-sentinel probe and any `limactl restart`, so only the
+address read sits between the join and the settle that logs a failed one out. The probe and the
+cloud-init log read stay `run` commands. `native_transport` (`:799-808`) and `_transport_for`
+(`:535-539`) are deleted. `recovery_needs_guest_sshd = True`: `limactl shell` is SSH to the guest's
+sshd with Lima's own key.
 
 ### WSL2
 
@@ -377,9 +390,10 @@ introduces for them and for `_wsl`. On Windows it is `%SystemRoot%\System32\wsl.
 when `SystemRoot` is unset), so the process handed the auth key on stdin is never found by the
 bare-name lookup D1 avoids for `ssh` (Windows searches the current directory); elsewhere, where only
 tests build WSL2 argvs, it is the bare `wsl`. `create` builds no `WSL2Transport`
-(`wsl2.py:765-775`); `run_wsl2_bootstrap(run_as_root, ...)` runs the key-free script with a
-900-second deadline (today's, `wsl2_bootstrap.py:130-134`) and parses its markers from the result's
-stdout, then create joins and settles.
+(`wsl2.py:765-775`); `run_bootstrap(run_as_root, ...)` runs the key-free script with a 900-second
+deadline (today's, `wsl2_bootstrap.py:130-134`) and parses its markers from the result's stdout,
+then create joins and settles. The bootstrap stays synchronous: a detached run would be in its own
+systemd-logind session, where `KillUserProcesses` can reap it when `wsl.exe` exits.
 
 Today's `setsid sudo -n /bin/bash FILE </dev/null` (`wsl2_bootstrap.py:131`) goes, for reasons that
 no longer apply: `setsid` was added because sudo's `use_pty` gave the bootstrap a terminal whose
@@ -398,9 +412,9 @@ stdin in the message (`transport.py:69-123`), except an HTTP 401 or 403, which r
 `TokenRejectedError`; a status failure of either kind says the script may still be running. A
 `_TruncatedQGAOutput` report raises `ConnectivityError` saying the script exited with its output cut
 short. No failure chains the API error, whose request quotes the script. `create` runs the bootstrap
-through it with today's 600-second deadline (`platform.py:600`), then joins, deleting
-`_run_bootstrap_via_agent` (`platform.py:566-636`); `native_transport` (`:488-502`) and
-`transport.py` go. No `native_shell` override. `recovery_needs_guest_sshd = False`.
+through it with `run_bootstrap` and today's 600-second deadline (`platform.py:600`), then joins and
+settles, deleting `_run_bootstrap_via_agent` (`platform.py:566-636`); `native_transport`
+(`:488-502`) and `transport.py` go. No `native_shell` override. `recovery_needs_guest_sshd = False`.
 
 ### AWS, Azure and GCP
 
@@ -430,7 +444,7 @@ open. Then:
 - `create` builds
   `PublicSSH(public address, admin, request.ssh_private_key, request.provisioning_trust)` where it
   builds an `SSHTransport` (`aws/platform.py:573-582`, `azure/platform.py:643-652`,
-  `gcp/platform.py:411-423`) and hands `EphemeralTailscaleBootstrap` its `run_as_root`.
+  `gcp/platform.py:411-423`) and hands `complete_cloud_bootstrap` its `run_as_root`.
 
 Every cloud `run_as_root` opens and closes its own route on purpose, so no firewall allow outlives
 one script, at the cost of a provider round trip and a probe per call. Recover pays one route for
@@ -609,22 +623,22 @@ The rejoin was the protocol's only user, so it goes whole:
 Slice 3's D13 ruling holds: no message, `repr` or hint holds a stream. A script's reason is in the
 operation log, and the error names the script, its status and `agw vm logs NAME`.
 
-| Situation                                              | Error                                                             | Hint or effect                                                            |
-| ------------------------------------------------------ | ----------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| No native shell on the platform                        | `FeatureUnavailable` (`StateError`, new in `execution/errors.py`) | The platform's `native_shell_unavailable_hint`, else its console          |
-| `--platform` with `--workspace`                        | `ValidationError`                                                 | `cd` inside the shell                                                     |
-| Start or gate: no answer after the wait, or no address | `ConnectivityError`                                               | `agw vm recover NAME`                                                     |
-| Recover: VM stopped / power state unknown              | `StateError`, two wordings                                        | `agw vm start NAME` / check the provider or `agw vm describe NAME`        |
-| Repair or rekey: non-zero status                       | `StateError` naming the script and status                         | The log; repair or recreate (R7) / recover                                |
-| Repair or rekey: unknown, or the platform raised       | `ConnectivityError`, or the raise                                 | The log, the sshd note where it applies; never re-dispatched              |
-| Recover: no answer after the repair                    | `ConnectivityError`                                               | Tailnet sharing and ACLs, then recreate                                   |
-| Address read or settle exhausted                       | `ConnectivityError` naming the node; create's manager wraps it    | After a logout, `rerun_hint`; else the admin console; read alone, the log |
-| Cloud: the VM refuses the key at its public address    | `ConnectivityError` from `PublicSSH`                              | The provider console, or recreate                                         |
-| A cloud VM with no store record                        | `TrustMissing` from `run_as_root`, before the route               | Recover re-establishes; delete warns naming the node                      |
-| Provisioning join or bootstrap: not status 0           | `ProvisioningError`, inside the platform's rollback               | An unknown join names the node                                            |
-| `python3` missing, or without its standard library     | `VMNotReady`                                                      | Now `agw vm recover NAME` (`execution/errors.py:77`)                      |
-| No store record                                        | `TrustMissing`                                                    | Import, or `agw vm recover NAME` (`errors.py:37-40`)                      |
-| `limactl` or `wsl.exe` cannot start                    | `ConnectivityError` naming the program                            | Install it                                                                |
+| Situation                                              | Error                                                                | Hint or effect                                                                  |
+| ------------------------------------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| No native shell on the platform                        | `FeatureUnavailable` (`StateError`, new in `execution/errors.py`)    | The platform's `native_shell_unavailable_hint`, else its console                |
+| `--platform` with `--workspace`                        | `ValidationError`                                                    | `cd` inside the shell                                                           |
+| Start or gate: no answer after the wait, or no address | `ConnectivityError`                                                  | `agw vm recover NAME`                                                           |
+| Recover: VM stopped / power state unknown              | `StateError`, two wordings                                           | `agw vm start NAME` / check the provider or `agw vm describe NAME`              |
+| Repair or rekey: non-zero status                       | `StateError` naming the script and status                            | The log; repair or recreate (R7) / recover                                      |
+| Repair or rekey: unknown, or the platform raised       | `ConnectivityError`, or the raise                                    | The log, the sshd note where it applies; never re-dispatched                    |
+| Recover: no answer after the repair                    | `ConnectivityError`                                                  | Tailnet sharing and ACLs, then recreate                                         |
+| Address read or settle exhausted                       | `ConnectivityError` naming the node; create's wrappers keep its hint | Hint: after a logout, `rerun_hint`; else the admin console; read alone, the log |
+| Cloud: the VM refuses the key at its public address    | `ConnectivityError` from `PublicSSH`                                 | The provider console, or recreate                                               |
+| A cloud VM with no store record                        | `TrustMissing` from `run_as_root`, before the route                  | Recover re-establishes; delete warns naming the node                            |
+| Provisioning join or bootstrap: not status 0           | `ProvisioningError`, inside the platform's rollback                  | An unknown join names the node                                                  |
+| `python3` missing, or without its standard library     | `VMNotReady`                                                         | Now `agw vm recover NAME` (`execution/errors.py:77`)                            |
+| No store record                                        | `TrustMissing`                                                       | Import, or `agw vm recover NAME` (`errors.py:37-40`)                            |
+| `limactl` or `wsl.exe` cannot start                    | `ConnectivityError` naming the program                               | Install it                                                                      |
 
 `TrustMissing`'s hint keeps "delete and recreate a VM whose create never enrolled", because recover
 refuses a provisioning-failed VM (step 1).
@@ -635,10 +649,9 @@ refuses a provisioning-failed VM (step 1).
   imports of `agentworks.capabilities.vm_platform.public_ssh` and `agentworks.vms.recovery`, as
   slice 3 adds `agentworks.vms.contract`. Importing `public_ssh` runs
   `capabilities/vm_platform/__init__.py` (`:30-31`), so the guard proves `lima.py`, `lima_host.py`,
-  `wsl2.py`, `wsl2_bootstrap.py`, `tailscale_join.py` and `bootstrap_script.py` legacy-free
-  transitively. Measured at the baseline: the other modules those import (`capabilities.base`, `db`,
-  `debian`, `schema`, `topics`, `subprocess_io`, `secrets.line_safety`, `execution`) load no legacy
-  module.
+  `wsl2.py`, `tailscale_join.py` and `bootstrap_script.py` legacy-free transitively. Measured at the
+  baseline: the other modules those import (`capabilities.base`, `db`, `debian`, `schema`, `topics`,
+  `subprocess_io`, `secrets.line_safety`, `execution`) load no legacy module.
 - **Static check.** The plugins cannot pass the import guard: importing any of them loads the plugin
   index (`plugins/__init__.py:26-35`), which loads the harness plugins and `native_files`
   (measured), until slice 5. They join `MIGRATED_FILES` instead

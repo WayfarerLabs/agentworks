@@ -102,8 +102,10 @@ return it (Lima's `self._transport_for` at `lima.py:456`, the `assert prov_trans
 local.
 
 **Validation.** `parse_tailnet_address(text) -> str` in `base.py` strips, parses with
-`ipaddress.ip_address` and returns the canonical text, or raises `ValueError`. It is called at two
-boundaries:
+`ipaddress.IPv4Address` (the read is `tailscale ip -4`), refuses a loopback, unspecified, multicast,
+link-local or reserved address, and returns the canonical text, or raises `ValueError`. IPv4 only
+also refuses a scoped IPv6 value such as `fe80::1%x y`, which `ssh_process.Destination` refuses and
+the SSH config writer would not check. It is called at two boundaries:
 
 1. By the shared address read (below), on each read, inside the platform's rollback window, so a bad
    read fails create cleanly.
@@ -114,10 +116,10 @@ boundaries:
    only its row unwound. In `phase_a` a bad value is an ordinary Phase A failure: the VM is retained
    as failed with delete guidance, after `secure_failed_vm`.
 
-The check is "parses as an IP address". Nothing checks that it is a tailnet address, and a range
-check would reject a valid self-hosted tailnet with another prefix. The connection that follows is
-verified against the VM-bound host key whatever the address, and Agentworks is a controlled
-environment, so this is accepted.
+The check is "an assignable IPv4 address". Nothing checks that it is in a tailnet range, which would
+reject a valid self-hosted tailnet with another prefix. The connection that follows is verified
+against the VM-bound host key whatever the address, and Agentworks is a controlled environment, so
+this is accepted.
 
 **One mechanism for all six platforms.** After the join succeeds, every platform reads the address
 over its own `run_as_root`, retrying a transient failure, and when the reads are exhausted logs the
@@ -140,13 +142,19 @@ and short.
 
 `settle_tailnet_address` is that read plus the logout. On exhaustion it runs `tailscale logout` (30
 s) once and raises `ConnectivityError` from the read's error: if the logout returned status 0, the
-message says so and gives `rerun_hint`; otherwise it names `node` (the VM's hostname,
-`request.hostname`) for removal in the Tailscale admin console. Create passes "create can be run
-again". Slice 4's rekey settles with `agw vm recover NAME` as its hint, and recover settles only
-after its repair joined, reading the address alone otherwise, so a flaky channel never logs out a
-working node. `ConnectivityError` is true for every caller, and create still reports a
-`ProvisioningError`, since the manager wraps any untyped failure of `create` in one
-(`lifecycle.py:578-584`).
+message says so and the error's hint is `rerun_hint`; otherwise the hint names `node` (the VM's
+hostname, `request.hostname`) for removal in the Tailscale admin console. Create passes
+`CREATE_RERUN_HINT`: the partial VM was removed, so create can be run again, and the join spent the
+key, so a single-use key needs replacing first. Slice 4's rekey settles with `agw vm recover NAME`
+as its hint, and recover settles only after its repair joined, reading the address alone otherwise,
+so a flaky channel never logs out a working node. `ConnectivityError` is true for every caller, and
+create still reports a `ProvisioningError`, since the manager wraps any untyped failure of `create`
+in one (`lifecycle.py:578-584`). The manager's wrapper and the AWS and Azure create arms' error
+wrappers keep the wrapped `AgentworksError`'s hint, so the guidance survives the wrapping.
+
+An empty or whitespace-only auth key never reaches a platform: create refuses it at its boundary,
+beside the line-safety check (`lifecycle.py:389`), since `tailscale up` given an empty key would
+wait for an interactive login until the deadline and read as an unknown outcome.
 
 The exception is raised from inside the platform's existing rollback `try`, so the existing arms
 (`lima.py:457-463` and the matching arms of the other five) delete the partial backend as for any
@@ -160,17 +168,19 @@ recovery (VM trust) could not log the node out later (HLA D11).
 **What changes in the bootstrap script.** No bootstrap script carries the key or joins: slice 4
 deletes step 7 (`bootstrap_script.py:236-242`) with the generator's key parameter, and WSL2 and
 Proxmox join through `join_tailscale` after their bootstrap ([platform-lld.md](./platform-lld.md)).
-`parse_bootstrap_output` must stop requiring an address: `BootstrapResult.ok` is
-`exit_code == 0 and self.tailscale_ip is not None` (`bootstrap_script.py:319`), and the parser fills
-`tailscale_ip` from the marker (`:335-341`). The `tailscale_ip` field, its parsing and the
-`ipaddress` import go; `ok` is `exit_code == 0`. `run_wsl2_bootstrap` stops asserting and returning
-it (`wsl2_bootstrap.py:182-183`) and returns `None`; Proxmox's caller's "did not return a Tailscale
-IP" raise goes (`platform.py:410-412`) with `_run_bootstrap_via_agent`, which slice 4 replaces. The
-"Phase A will retry IP discovery without the auth key" warnings (`tailscale_join.py:111`,
-`lima.py:454`) go with the fallback they promised.
+The parser stops requiring an address: `BootstrapResult.ok` was
+`exit_code == 0 and self.tailscale_ip is not None` (`bootstrap_script.py:319`). Since every caller
+judges the outcome by its own status, `parse_bootstrap_steps(stdout) -> list[StepResult]` replaces
+`parse_bootstrap_output` and `BootstrapResult`, and the `tailscale_ip` parsing goes. WSL2 and
+Proxmox share `bootstrap_script.run_bootstrap` over their `run_as_root`, which reports the steps and
+raises unless the script exits 0; `wsl2_bootstrap.py` and Proxmox's `_run_bootstrap_via_agent` go,
+with the latter's "did not return a Tailscale IP" raise (`platform.py:410-412`). The "Phase A will
+retry IP discovery without the auth key" warnings (`tailscale_join.py:111`, `lima.py:454`) go with
+the fallback they promised.
 
-**Lima keeps today's order.** The read follows the restart-sentinel `limactl restart`
-(`lima.py:434-454`) as now, and relies on the retry.
+**Lima joins after the restart.** The join moves after the restart-sentinel probe and any
+`limactl restart` (`lima.py:434-454`), so a restart failure rolls the instance back with no node
+joined, and only the address read sits between the join and the settle.
 
 **Interaction with create.** Core no longer reads the address at all. The attestation block
 (`lifecycle.py:599-626`) and the `tailscale ip -4` fallback (`driver.py:399-401`) are deleted.
@@ -595,11 +605,13 @@ None restates the implementation or our prose.
   first-read success and a success on the last read; a value that does not parse, a non-zero status,
   an unknown outcome and a platform `ConnectivityError` each treated as a failed read; a
   `TrustMismatch` propagating from the first read; the read never logging out; the settle's
-  exhaustion running the logout exactly once and raising `ConnectivityError`, with `rerun_hint`
-  after a successful logout and the node named after a failed one; and the join having run exactly
-  once in every case (the fake counting it). `parse_bootstrap_output` accepts a script that printed
-  no address. Each platform's `create` returns a parseable `tailnet_address` and none returns a
-  transport.
+  exhaustion running the logout exactly once and raising `ConnectivityError`, whose hint is
+  `rerun_hint` after a successful logout and names the node after a failed one; and the join having
+  run exactly once in every case (the fake counting it). The address parser refuses IPv6 and every
+  special-purpose IPv4 range; create refuses an empty or whitespace-only key before any platform
+  work; a wrapped create failure keeps its hint; Lima sends no key when its restart fails.
+  `parse_bootstrap_steps` reads a script that printed no address. Each platform's `create` returns a
+  parseable `tailnet_address` and none returns a transport.
 - **Requests.** `PermissionDenied` for an agent-bound access with an elevated request, before
   `resolve_ssh` and with nothing spawned; `classify` and `outcome` for `AUTH_FAILED` (the row after
   `HOST_KEY`, and a 255 whose log holds neither token stays `CONNECTION`); the passphrase hint
