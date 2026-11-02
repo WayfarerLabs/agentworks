@@ -392,7 +392,8 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
         if tool == "claude":
             declarations = _table(initial_document, "extraKnownMarketplaces")
             for name in sorted((retiring_markets | replacing_markets) & by_market.keys()):
-                if name not in declarations:
+                declaration = declarations.get(name)
+                if not isinstance(declaration, dict) or "source" not in declaration:
                     skip(
                         "marketplace",
                         name,

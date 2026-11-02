@@ -29,9 +29,11 @@ def transport(tmp_path: Path) -> LocalFixtureTransport:
     return LocalFixtureTransport(root)
 
 
-@pytest.mark.parametrize("tool", ["codex", "claude"])
+@pytest.mark.parametrize(
+    "tool,declaration", [("codex", None), ("claude", None), ("claude", {}), ("claude", {"autoUpdate": False})]
+)
 @pytest.mark.parametrize("option", ["ref", "sparse"])
-def test_incomplete_or_differing_git_source_survives_mapping(transport, tool, option):
+def test_incomplete_or_differing_git_source_survives_mapping(transport, tool, declaration, option):
     market, source = git_market(transport, tool)
     independent = copied_market(market, tool, name="independent")
     root = transport.home / (".codex" if tool == "codex" else ".claude")
@@ -55,10 +57,17 @@ def test_incomplete_or_differing_git_source_survives_mapping(transport, tool, op
         cli.command(args)
         cli.install("one@fixture-market")
         if tool == "claude":
+            # Fixture evidence only: native list cannot expose the sparse paths.
+            registered_source = json.loads((root / "plugins/known_marketplaces.json").read_bytes())["fixture-market"][
+                "source"
+            ]
+            assert ("ref" if option == "ref" else "sparsePaths") in registered_source
             document = parse_settings(destination.read_bytes(), format=format)
             declarations = document["extraKnownMarketplaces"]
             assert isinstance(declarations, dict)
             declarations.pop("fixture-market")
+            if declaration is not None:
+                declarations["fixture-market"] = declaration
             destination.write_bytes(serialize_settings(document, format=format))
         before = cli.markets()
         assert (before[0].source is None) == (tool == "claude")
@@ -86,8 +95,13 @@ def test_incomplete_or_differing_git_source_survives_mapping(transport, tool, op
         declarations = document.get("extraKnownMarketplaces", {})
         enabled = document["enabledPlugins"]
         assert isinstance(declarations, dict) and isinstance(enabled, dict)
-        assert "fixture-market" not in declarations
+        # Unrelated native registration can discard source-less settings entries.
+        assert declarations.get("fixture-market") in (None, declaration)
         assert enabled["one@fixture-market"] is True
+        assert (
+            json.loads((root / "plugins/known_marketplaces.json").read_bytes())["fixture-market"]["source"]
+            == registered_source
+        )
     with NativeFiles(transport) as files:
         cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(root))
         observed = cli.markets()
@@ -97,7 +111,10 @@ def test_incomplete_or_differing_git_source_survives_mapping(transport, tool, op
 
 @pytest.mark.parametrize("source_kind", ["local", "git"])
 @pytest.mark.parametrize("action", ["retire", "replace"])
-def test_claude_missing_user_declaration_blocks_removal_before_dependent_uninstall(transport, source_kind, action):
+@pytest.mark.parametrize("declaration", [None, {}, {"autoUpdate": False}])
+def test_claude_missing_user_declaration_blocks_removal_before_dependent_uninstall(
+    transport, source_kind, action, declaration
+):
     if source_kind == "git":
         market, source = git_market(transport, "claude")
     else:
@@ -114,6 +131,8 @@ def test_claude_missing_user_declaration_blocks_removal_before_dependent_uninsta
     destination = transport.home / ".claude/settings.json"
     document = json.loads(destination.read_bytes())
     document["extraKnownMarketplaces"].pop("fixture-market")
+    if declaration is not None:
+        document["extraKnownMarketplaces"]["fixture-market"] = declaration
     destination.write_text(json.dumps(document))
     mapping = transport.root / "mapping.json"
     mapping.write_text('{"mapped": true}')
@@ -138,7 +157,7 @@ def test_claude_missing_user_declaration_blocks_removal_before_dependent_uninsta
     }
     document = json.loads(destination.read_bytes())
     assert document["mapped"] is True
-    assert "fixture-market" not in document.get("extraKnownMarketplaces", {})
+    assert document.get("extraKnownMarketplaces", {}).get("fixture-market") in (None, declaration)
     assert document["enabledPlugins"]["one@fixture-market"] is True
     with NativeFiles(transport) as files:
         cli = NativeCLI("claude", files, home=str(transport.home), config_root=str(destination.parent))
