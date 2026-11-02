@@ -451,8 +451,9 @@ row, with the detail replaced by "(detail not shown)", so a malformed line can n
 `login-shells` names accounts, and the parser keeps only names from the set it passed in; a name the
 guest invents is dropped, and an account with no passwd entry is reported by name like any other
 problem. A missing `AGW-CHECK-END` means the probe did not complete: the report is one FAIL for the
-probe, carrying the last lines of the script's stderr (sanitized with `tail_lines`, at most five),
-instead of one per row. See Open questions.
+probe instead of one per row. It names the outcome and no stream text: the script's exit status (the
+request completed, so it has one), and points at the operation log and
+`agw vm verify-connection NAME`. No error holds a stream (D13).
 
 `BaseReport` holds `release` and `findings`; `Finding` holds `check` and `detail`.
 `enforce(report, vm_name)` prints each WARN with `output.warn` and raises `StateError` listing every
@@ -560,7 +561,7 @@ None restates the implementation or our prose.
 
 - **Contract.** The parser over fabricated script output: a problem line for each script-probed row,
   an unknown id dropped, a hostile or malformed detail still reporting its row, a missing END as one
-  FAIL with the stderr tail, a guest-invented account name dropped. The elevated request's outcome
+  FAIL naming the exit status, a guest-invented account name dropped. The elevated request's outcome
   mapping, one case per outcome. `enforce`: a FAIL raises, a WARN-only report warns and does not
   raise. The shell fragments run for real under a local `sh` where they depend only on the process
   (`login-shells` over `root` and a nonexistent account; `base-tools` with a `PATH` of stubs; the
@@ -710,13 +711,7 @@ stays slice 4's with the port off `ExecTransport`; this slice leaves the key-bea
 
 ## Open questions
 
-1. **A stderr tail in the missing-END FAIL.** The lead's decision has the FAIL carry the script's
-   stderr tail. HLA D13 and the execution LLD say no error message holds a stream, with the client
-   log as the one exception. The script is core-owned and secret-free and its stderr is sanitized
-   and capped at five lines, so the content risk is low, but the rule is stated without exception.
-   _Recommend_ confirming the carve-out and amending D13 ("except the contract probe's own stderr").
-   The alternative is to write the tail to the operation log (`format_record` already does) and have
-   the error say to read the log.
+None.
 
 ## Amendments
 
@@ -757,8 +752,6 @@ implementation, for the owners to apply:
   - "The request's secret values" are the set registered at the log's construction, as `SSHLogger`
     does; per-request marking has no consumer yet.
   - The sensitive-stdin rule is implemented with `Bytes(sensitive=)` in slice 5.
-  - If open question 1 is confirmed, the contract probe's own stderr is the one stream an error may
-    hold, besides the client log.
 - **Plan slice 3.**
   - Remove the `observation` option, the initialized checks and "the old `LOG_DIR` readers
     (`doctor_state.py`, `lifecycle.py`, `_helpers.py`, `power.py`, `vm logs`) and their test patch
