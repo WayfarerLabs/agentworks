@@ -36,7 +36,7 @@ from agentworks.execution.results import (
     UnknownReason,
 )
 from tests.conftest import seed_vm_trust
-from tests.ssh_fixtures import write_test_ssh_keypair
+from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY, write_test_ssh_keypair
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -338,15 +338,19 @@ def test_the_key_is_read_only_after_a_failure(
 
 @pytest.fixture
 def fake_ssh_add(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """Put a tiny ``ssh-add`` that records its arguments and exits with a chosen status."""
+    """Put a tiny ``ssh-add`` that records its arguments, prints some text and exits with a chosen status."""
     if sys.platform == "win32":
         pytest.skip("the fake ssh-add is a POSIX script")
 
-    def install(directory: Path, status: int) -> Path:
+    cat = shutil.which("cat") or "/bin/cat"  # the tests narrow PATH, which the script would inherit
+
+    def install(directory: Path, status: int, listing: str = "") -> Path:
         directory.mkdir(exist_ok=True)
         tool = directory / "ssh-add"
         calls = directory / "ssh-add-calls"
-        tool.write_text(f'#!/bin/sh\necho "$@" >> {calls}\nexit {status}\n')
+        listed = directory / "ssh-add-listing"
+        listed.write_text(listing)
+        tool.write_text(f'#!/bin/sh\necho "$@" >> {calls}\n{cat} {listed}\nexit {status}\n')
         tool.chmod(0o755)
         return calls
 
@@ -361,16 +365,32 @@ def agent_key(tmp_path: Path, *, with_public: bool = True) -> Path:
     return key
 
 
-@pytest.mark.parametrize(("status", "loaded"), [(0, True), (1, False), (2, False)])
-def test_the_agent_holds_the_key_when_ssh_add_beside_the_client_succeeds(
-    fake_ssh_add, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: int, loaded: bool
-) -> None:
-    calls = fake_ssh_add(tmp_path / "bin", status)
-    monkeypatch.setenv("PATH", str(tmp_path / "elsewhere"))
-    key = agent_key(tmp_path)
+OTHER_PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA other@host"
 
-    assert client.identity_is_loaded(SSHClient(str(tmp_path / "bin" / "ssh"), (9, 2)), key) is loaded
-    assert calls.read_text().split() == ["-T", "--", f"{key}.pub"]
+
+def listing_with_the_key(comment: str = "comment-the-agent-chose") -> str:
+    return f"{OTHER_PUBLIC_KEY}\n{TEST_SSH_PUBLIC_KEY.rsplit(maxsplit=1)[0]} {comment}\n"
+
+
+@pytest.mark.parametrize(
+    ("status", "listing", "loaded"),
+    [
+        (0, listing_with_the_key(), True),  # the comment is the agent's own and does not matter
+        (0, OTHER_PUBLIC_KEY + "\n", False),  # the agent holds only other keys
+        (1, "", False),  # no keys
+        (2, "", False),  # no agent
+        (1, listing_with_the_key(), False),  # a failing status is never trusted
+    ],
+    ids=["listed", "other-keys-only", "no-keys", "no-agent", "failing-status"],
+)
+def test_the_key_is_loaded_when_the_agent_lists_its_public_half(
+    fake_ssh_add, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: int, listing: str, loaded: bool
+) -> None:
+    calls = fake_ssh_add(tmp_path / "bin", status, listing)
+    monkeypatch.setenv("PATH", str(tmp_path / "elsewhere"))
+
+    assert client.identity_is_loaded(SSHClient(str(tmp_path / "bin" / "ssh"), (9, 2)), agent_key(tmp_path)) is loaded
+    assert calls.read_text().split() == ["-L"]  # listing never signs, so no agent can prompt
 
 
 def test_an_ssh_add_that_is_not_executable_is_never_run(
@@ -394,17 +414,6 @@ def test_an_ssh_add_on_path_is_never_run(fake_ssh_add, monkeypatch: pytest.Monke
     assert not calls.exists()
 
 
-def test_a_security_key_is_not_asked_because_the_probe_would_sign(
-    fake_ssh_add, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    calls = fake_ssh_add(tmp_path / "bin", 0)
-    key = agent_key(tmp_path)
-    Path(f"{key}.pub").write_text("sk-ssh-ed25519@openssh.com AAAA test\n")
-
-    assert client.identity_is_loaded(SSHClient(str(tmp_path / "bin" / "ssh"), (9, 2)), key) is False
-    assert not calls.exists()
-
-
 def test_the_agent_is_not_asked_without_a_public_key_or_an_ssh_add(
     fake_ssh_add, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -425,7 +434,7 @@ def test_a_key_the_agent_holds_gets_no_hint_and_one_it_lacks_does(
     key = agent_key(tmp_path)
     access = vm_access(vm(), config(key), Admin())
 
-    fake_ssh_add(tmp_path / "bin", 0)
+    fake_ssh_add(tmp_path / "bin", 0, listing_with_the_key())
     assert access.passphrase_hint() is None
     fake_ssh_add(tmp_path / "bin", 1)
     assert access.passphrase_hint() is not None
