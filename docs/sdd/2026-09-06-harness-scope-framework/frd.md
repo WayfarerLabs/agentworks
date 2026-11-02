@@ -614,5 +614,5 @@ source options. Preserve and warn about differing unowned associations without s
 independent setup. Matching declared associations may be adopted with recorded and reported
 ownership and normal safe-cleanup rights. Do not add independent cache-origin verification,
 installation-intent tracking or a provenance store. Native version updates do not change the stable
-owned association. This clarifies R9's comparison boundary without weakening safe native readback,
+owned association. This clarifies R9's comparison boundary without weakening native result checks,
 settings authorization or malformed-input error handling.

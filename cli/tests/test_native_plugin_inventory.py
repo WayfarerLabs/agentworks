@@ -44,10 +44,10 @@ def test_codex_inventory_preserves_unknown_sources_and_complete_registered_ident
     assert [item.source for item in installed] == [
         None,
         None,
-        identity({"marketplace": registered, "version": "3"}),
+        identity({"marketplace": registered}),
     ]
     assert [item.identifier for item in installed] == ["remote@cloud", "bundled@builtin", "one@local"]
     assert installed[-1].enabled is False
 
     plugins["installed"][-1]["version"] = "4"
-    assert cli.plugins(observed)[-1].source == identity({"marketplace": registered, "version": "4"})
+    assert cli.plugins(observed)[-1].source == installed[-1].source
