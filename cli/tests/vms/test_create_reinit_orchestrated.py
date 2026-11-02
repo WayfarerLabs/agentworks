@@ -22,14 +22,18 @@ from agentworks.config import load_config
 from agentworks.db import VersionedPayload, VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, ExternalError, StateError, ValidationError
+from agentworks.execution.requests import Script
+from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result
 from agentworks.output import Role
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from agentworks.vms.admin import AdminConfig
+from agentworks.vms.contract import ACCOUNTS_VARIABLE
 from agentworks.vms.templates import ResolvedVMTemplate
 from tests.conftest import ManifestDoc, pin_wsl2_unsupported, seed_vm_trust, ssh_enrolls_on_first_use, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import write_test_ssh_keypair
+from tests.vm_access_support import AccessRecorder, Admin
 
 pytestmark = pytest.mark.usefixtures("verified_debian_release")
 
@@ -900,20 +904,29 @@ def _seed_provisioned_vm(db: Database) -> None:
     db.update_vm_provisioning_status("rvm", ProvisioningStatus.COMPLETE)
 
 
-def _reinit_transport(*, stdout: str = "", returncode: int = 0) -> SimpleNamespace:
-    """A reinit transport whose only call is the pam_env probe."""
-    return SimpleNamespace(run=lambda command, **kwargs: SimpleNamespace(stdout=stdout, returncode=returncode))
+def _reinit_transport() -> SimpleNamespace:
+    """Phase B's legacy target, which these tests' faked initializer never uses."""
+    return SimpleNamespace()
+
+
+TRIXIE_OS_RELEASE = b'ID=debian\nVERSION_ID="13"\nVERSION_CODENAME=trixie\n'
+BOOKWORM_OS_RELEASE = b'ID=debian\nVERSION_ID="12"\nVERSION_CODENAME=bookworm\n'
+CLEAN_SCRIPT = b"AGW-CHECK-END\n"
+
+
+def _contract_outcomes(
+    *, os_release: bytes = TRIXIE_OS_RELEASE, script: bytes = CLEAN_SCRIPT, sudo: bytes = b"0\n"
+) -> list[Result | BaseException]:
+    """What the VM answers to the base checks: the release, the script, then the elevated sudo check."""
+    return [Result(Completed(0), os_release), Result(Completed(0), script), Result(Completed(0), sudo)]
 
 
 @pytest.fixture(autouse=True)
-def _verified_reinit_release(monkeypatch: pytest.MonkeyPatch) -> None:
+def _contract_passes(vm_access_recorder: AccessRecorder) -> AccessRecorder:
+    """Reinit's base checks run over the recording access, and pass unless a test scripts otherwise."""
     seed_vm_trust("rvm")
-    monkeypatch.setattr(
-        vm_manager,
-        "verified_vm_release",
-        lambda db, vm, target: DebianRelease.TRIXIE,
-        raising=False,
-    )
+    vm_access_recorder.access(vm_name="rvm").run_outcomes = _contract_outcomes()
+    return vm_access_recorder
 
 
 def test_reinit_runs_initialization_through_the_gate(
@@ -921,6 +934,7 @@ def test_reinit_runs_initialization_through_the_gate(
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,
+    _contract_passes: AccessRecorder,
 ) -> None:
     """Reinit end to end on a reachable VM: one boundary pass covering
     the union (git token; the lima site has no config secrets), scoped
@@ -959,19 +973,17 @@ def test_reinit_runs_initialization_through_the_gate(
         def __init__(self, vm_name: str, command_stem: str, *, redactions: tuple[str, ...] = ()) -> None:
             logger_redactions.append(redactions)
 
+        def step(self, name: str) -> None:
+            pass
+
+        def record(self, request: object, result: object) -> None:
+            pass
+
         def close(self) -> None:
             pass
 
     monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
-
-    observed_targets: list[object] = []
-
-    def _verified_release(db_: object, vm: object, target: object) -> DebianRelease:
-        del db_, vm
-        observed_targets.append(target)
-        return DebianRelease.BOOKWORM
-
-    monkeypatch.setattr(vm_manager, "verified_vm_release", _verified_release)
+    _contract_passes.access(vm_name="rvm").run_outcomes = _contract_outcomes(os_release=BOOKWORM_OS_RELEASE)
 
     def _fake_init(*args: object, **kwargs: object) -> None:
         captured["providers"] = args[7]
@@ -986,7 +998,8 @@ def test_reinit_runs_initialization_through_the_gate(
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
     assert captured["debian_release"] is DebianRelease.BOOKWORM
-    assert len(observed_targets) == 1
+    # The base checks, release first, over the admin's access, and nothing else on the new stack.
+    assert _contract_passes.operations == [("admin", "run")] * 3
     assert legacy_checked == ["rvm"]
     assert logger_redactions == [("ghtok",)]
     requests = cast("tuple[CredentialRequest, ...]", captured["providers"])
@@ -1128,23 +1141,19 @@ def test_reinit_applies_a_legacy_flat_vm_payload(
     assert vm_template.cpus == 11
 
 
-@pytest.mark.parametrize(
-    "transport",
-    [_reinit_transport(stdout="/etc/environment\n"), _reinit_transport(returncode=127)],
-    ids=["settings", "probe-exits-non-zero"],
-)
-def test_reinit_warns_about_pam_env_settings_and_still_initializes(
+def _reinit_with_faked_initializer(
     make_config,
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
-    captured_output,
-    transport: SimpleNamespace,
-) -> None:
-    """A VM with pam_env settings (or a probe that did not run to its end) costs a warning, never the reinit."""
+    recorder: AccessRecorder,
+    *,
+    outcomes: list[Result | BaseException],
+    initialized: list[bool] | None = None,
+) -> list[bool]:
+    """Reinit ``rvm`` with the base checks answered by ``outcomes``; ``initialized`` records each initialization."""
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
     config = make_config()
-    _seed_provisioned_vm(db)
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
 
     @contextlib.contextmanager
@@ -1152,14 +1161,102 @@ def test_reinit_warns_about_pam_env_settings_and_still_initializes(
         yield
 
     monkeypatch.setattr(LimaPlatform, "vm_active", _hold)
-    initialized: list[bool] = []
-    monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: initialized.append(True))
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kw: transport)
-
+    ran = [] if initialized is None else initialized
+    monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: ran.append(True))
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kw: _reinit_transport())
+    recorder.access(vm_name="rvm").run_outcomes = outcomes
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
+    return ran
+
+
+@pytest.mark.parametrize(
+    "script",
+    [b"AGW-CHECK pam-env /etc/environment\nAGW-CHECK-END\n", b"AGW-CHECK login-shells agentworks\nAGW-CHECK-END\n"],
+    ids=["pam-env", "admin-login-shell"],
+)
+def test_reinit_warns_for_a_contract_warning_and_still_initializes(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,
+    _contract_passes: AccessRecorder,
+    script: bytes,
+) -> None:
+    _seed_provisioned_vm(db)
+
+    initialized = _reinit_with_faked_initializer(
+        make_config, db, monkeypatch, _contract_passes, outcomes=_contract_outcomes(script=script)
+    )
 
     assert initialized == [True]
     assert len(captured_output.warnings) == 1
+
+
+@pytest.mark.parametrize(
+    "outcomes",
+    [
+        _contract_outcomes(script=b"AGW-CHECK base-tools flock\nAGW-CHECK-END\n"),
+        _contract_outcomes(script=b"AGW-CHECK pam-env /etc/environment\n"),
+        _contract_outcomes(sudo=b""),
+        [Result(NotDelivered(NotDeliveredReason.PYTHON_MISSING))],
+    ],
+    ids=["base-tools", "script-incomplete", "sudo", "no-python"],
+)
+def test_reinit_stops_before_initialization_when_the_contract_fails(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    _contract_passes: AccessRecorder,
+    outcomes: list[Result | BaseException],
+) -> None:
+    _seed_provisioned_vm(db)
+    initialized: list[bool] = []
+
+    with pytest.raises(StateError):
+        _reinit_with_faked_initializer(
+            make_config, db, monkeypatch, _contract_passes, outcomes=outcomes, initialized=initialized
+        )
+
+    assert initialized == []
+
+
+def test_reinit_refuses_live_release_drift_before_initialization(
+    make_config, db: Database, monkeypatch: pytest.MonkeyPatch, _contract_passes: AccessRecorder
+) -> None:
+    _seed_provisioned_vm(db)
+    db.update_vm_debian_release("rvm", DebianRelease.BOOKWORM)
+    enforced: list[object] = []
+    monkeypatch.setattr("agentworks.vms.contract.enforce", lambda report, name: enforced.append(report))
+
+    with pytest.raises(StateError) as caught:
+        _reinit_with_faked_initializer(
+            make_config,
+            db,
+            monkeypatch,
+            _contract_passes,
+            outcomes=_contract_outcomes(script=b"AGW-CHECK pam-env /etc/environment\nAGW-CHECK-END\n"),
+        )
+
+    assert "confirm-release" in (caught.value.hint or "")
+    # Drift refuses before any other finding is shown.
+    assert enforced == []
+    row = db.get_vm("rvm")
+    assert row is not None
+    assert row.debian_release is DebianRelease.BOOKWORM
+
+
+def test_reinit_checks_the_admin_and_every_agent_on_the_vm(
+    make_config, db: Database, monkeypatch: pytest.MonkeyPatch, _contract_passes: AccessRecorder
+) -> None:
+    _seed_provisioned_vm(db)
+    db.insert_agent("worker", "rvm", "agt-worker")
+
+    _reinit_with_faked_initializer(make_config, db, monkeypatch, _contract_passes, outcomes=_contract_outcomes())
+
+    script = _contract_passes.requests("run")[1]
+    assert isinstance(script, Script)
+    assert script.env[ACCOUNTS_VARIABLE].split() == ["agentworks", "agt-worker"]
+    assert [identity for _vm, identity in _contract_passes.built] == [Admin()]
 
 
 @pytest.mark.parametrize("admin_template", ["", "work"])

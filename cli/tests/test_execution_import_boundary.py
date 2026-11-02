@@ -32,6 +32,7 @@ MIGRATED_FILES = (
     "capabilities/vm_platform/tailscale_join.py",
     "plugins/proxmox/guest_agent.py",
     "vms/contract.py",
+    "vms/manager/release.py",
 )
 
 

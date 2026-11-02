@@ -23,6 +23,7 @@ import sys
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+import agentworks.execution as execution
 from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.base import RetainedProvisioningError
@@ -42,11 +43,12 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.execution import trust
+from agentworks.execution.access import Admin, Agent
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
+from agentworks.vms import contract
 
 from ._helpers import _require_vm
 from .boundary import _warn_legacy_release
-from .pam_env import warn_pam_env_settings
 
 if TYPE_CHECKING:
     from typing import NoReturn
@@ -974,9 +976,16 @@ def reinit_vm(
         # create / reinit and workspace create / rehome.
         try:
             try:
-                verified_release = _mgr.verified_vm_release(db, vm, ts_target)
+                # The base checks come first, over agentworks.execution: release
+                # drift refuses before any other finding is shown, and a failure
+                # stops before Phase B touches the VM.
+                logger.step("Check the VM contract")
+                access = execution.vm_access(vm, config, Admin(), log=logger.record)
+                agents = [Agent(agent.name, agent.linux_user) for agent in db.list_agents(vm_name=name)]
+                report = contract.check_base(access, expected_release=None, admin=vm.admin_username, agents=agents)
+                verified_release = _mgr.reconcile_release(db, vm, report.release)
                 _warn_newly_observed_legacy(vm, verified_release)
-                warn_pam_env_settings(ts_target, name)
+                contract.enforce(report, name)
                 _mgr.run_initialization(
                     db,
                     config,

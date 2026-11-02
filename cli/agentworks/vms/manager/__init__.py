@@ -62,7 +62,7 @@ from .inspect import (
 from .lifecycle import create_vm, reinit_vm
 from .port_forward import port_forward_vm
 from .power import delete_vm, rekey_vm, start_vm, stop_vm
-from .release import confirm_vm_release, verified_vm_release
+from .release import confirm_vm_release, reconcile_release
 from .tailscale import (
     _ensure_tailscale,
     _is_tailscale_reachable,
@@ -105,6 +105,7 @@ __all__ = [
     "port_forward_vm",
     "reinit_vm",
     "rejoin_tailscale",
+    "reconcile_release",
     "rekey_vm",
     "render_vm_listing",
     "require_vm_ssh_boundary",
@@ -115,7 +116,6 @@ __all__ = [
     "validate_slug",
     "verify_vm_connection",
     "verify_tailscale_available",
-    "verified_vm_release",
     "VMConnectionVerification",
     "VMInitializationOperation",
     "vm_description",
