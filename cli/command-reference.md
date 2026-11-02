@@ -680,6 +680,12 @@ referenced packages, credentials, secrets, and install commands. Both final laye
 desired VM record and reapplied by `vm reinit`. Templates carry no `site`: placement is per-host, so
 it never travels inside a shared template.
 
+During provisioning, the platform joins the VM to the tailnet once, through its own channel, and
+then reads the VM's Tailscale address. If the address cannot be read, create logs the node out of
+the tailnet and fails, removing the partial VM; the error says whether the logout worked, and names
+the node for removal in the Tailscale admin console when it did not. The Tailscale auth key is used
+once either way, so create can be run again after a successful logout.
+
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
 alphanumeric plus dash, no leading/trailing dash): a short identifier for this Agentworks
 installation, used to namespace VM hostnames and backend-side names (`{slug}-{vm-name}`) so installs
