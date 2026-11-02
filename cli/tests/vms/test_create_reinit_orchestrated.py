@@ -1036,7 +1036,7 @@ def test_reinit_runs_initialization_through_the_gate(
     _seed_provisioned_vm(db)
     legacy_checked: list[str] = []
     monkeypatch.setattr(
-        "agentworks.vms.manager.lifecycle._warn_legacy_release",
+        "agentworks.vms.manager.reinit._warn_legacy_release",
         lambda vm: legacy_checked.append(vm.name),
     )
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)

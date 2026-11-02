@@ -102,7 +102,7 @@ def _ensure_tailscale(
         # ``agentworks.vms.initializer``) so tests that monkeypatch
         # ``agentworks.vms.manager.verify_tailscale_available`` /
         # ``.rejoin_tailscale`` (the same two names ``create_vm`` /
-        # ``reinit_vm`` call in ``lifecycle.py``) affect this call site too.
+        # ``reinit_vm`` call in ``lifecycle.py`` and ``reinit.py``) affect this call site too.
         _mgr.verify_tailscale_available()
         exec_target = native_transport(vm, platform, config, ctx=ctx, stack=_stack)
         # A rejoin command contains the resolved auth key. This fast repair

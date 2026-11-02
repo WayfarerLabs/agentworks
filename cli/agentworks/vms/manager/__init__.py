@@ -2,14 +2,14 @@
 
 This package preserves the flat ``agentworks.vms.manager`` import surface
 that predates the split into submodules (``_helpers``, ``boundary``,
-``tailscale``, ``port_forward``, ``lifecycle``, ``inspect``, ``power``, ``exec``): every name below is
-re-exported here so ``from agentworks.vms.manager import create_vm`` (and
+``tailscale``, ``port_forward``, ``lifecycle``, ``reinit``, ``inspect``,
+``power``, ``exec``): every name below is re-exported here so ``from agentworks.vms.manager import create_vm`` (and
 the many ``agentworks.vms.manager.<name>`` attribute / monkeypatch
 references across the codebase and test suite) keep working unchanged.
 
 The four names imported from ``agentworks.vms.initializer`` are the
 canonical entry point into that package from ``manager``: submodules that
-call them (``lifecycle.py``'s ``create_vm`` / ``reinit_vm``,
+call them (``lifecycle.py``'s ``create_vm``, ``reinit.py``'s ``reinit_vm``,
 ``tailscale.py``'s ``_ensure_tailscale``) do so via
 ``import agentworks.vms.manager as _mgr`` at call time rather than
 importing these names directly, so that tests which monkeypatch e.g.
@@ -59,9 +59,10 @@ from .inspect import (
     vm_description,
     vm_listing,
 )
-from .lifecycle import create_vm, reinit_vm
+from .lifecycle import create_vm
 from .port_forward import port_forward_vm
 from .power import delete_vm, rekey_vm, start_vm, stop_vm
+from .reinit import reinit_vm
 from .release import confirm_vm_release, reconcile_release
 from .tailscale import (
     _ensure_tailscale,

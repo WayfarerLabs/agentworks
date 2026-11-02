@@ -18,7 +18,7 @@ from agentworks.errors import StateError, UserAbort
 from agentworks.execution.requests import Command
 from agentworks.execution.results import Completed, Result
 from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.vms.manager.lifecycle import _warn_newly_observed_legacy
+from agentworks.vms.manager.reinit import _warn_newly_observed_legacy
 from agentworks.vms.manager.release import confirm_vm_release, reconcile_release
 from tests.conftest import CapturedOutput
 from tests.vm_access_support import AccessRecorder
