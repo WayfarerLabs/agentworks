@@ -1,7 +1,9 @@
 """The VM contract: what every managed VM must satisfy before core relies on it.
 
-One table of checks, each an id, a severity and a probe. :func:`check_base`
-runs them over a :class:`VMAccess` and returns a :class:`BaseReport`;
+The release comes first, as its own request; then one table of checks, each
+an id, a severity and a probe (its fragment of one base script, or its own
+request). :func:`check_base` runs them over a :class:`VMAccess` and returns a
+:class:`BaseReport`;
 :func:`enforce` shows its warnings and raises for its failures. A failure means
 initialization cannot repair the VM, so it names recreation; a warning names
 the command that fixes it.
@@ -24,6 +26,7 @@ This module imports nothing from the legacy transport stack.
 from __future__ import annotations
 
 import re
+import shlex
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -50,17 +53,28 @@ class Severity(StrEnum):
 
 
 @dataclass(frozen=True)
-class Check:
-    """One row of the contract.
+class ScriptCheck:
+    """A row probed by its fragment of the base script.
 
-    ``probe`` is the row's own request, or its fragment of the base script.
     A fragment reports a problem by calling ``problem ID DETAIL`` and never
     exits.
     """
 
     id: str
     severity: Severity
-    probe: Command | str
+    fragment: str
+
+
+@dataclass(frozen=True)
+class RequestCheck:
+    """A row probed by a request of its own."""
+
+    id: str
+    severity: Severity
+    request: Command
+
+
+Check = ScriptCheck | RequestCheck
 
 
 PROBE_DEADLINE = 60
@@ -69,18 +83,17 @@ PROBE_DEADLINE = 60
 ACCOUNTS_VARIABLE = "AGW_CONTRACT_ACCOUNTS"
 """The script's environment variable naming the accounts to check, space separated: data, never source."""
 
-RELEASE = Check("release", Severity.FAIL, Command(("cat", "/etc/os-release"), deadline=PROBE_DEADLINE))
+RELEASE_PROBE = Command(("cat", "/etc/os-release"), deadline=PROBE_DEADLINE)
+"""The first request, before any row: with no recognized Debian release the rows mean nothing."""
 
 # sd_booted()'s own test.
-SYSTEMD = Check(
+SYSTEMD = ScriptCheck(
     "systemd", Severity.FAIL, '[ -d /run/systemd/system ] || problem systemd "the system was not booted with systemd"'
 )
 
-SUDO = Check("sudo", Severity.FAIL, Command(("id", "-u"), elevated=True, deadline=PROBE_DEADLINE))
-
 # What the transport and its callers run: install (hardening), tar (backup),
 # setsid and nohup (the detached wrapper) and flock (the file lock).
-BASE_TOOLS = Check(
+BASE_TOOLS = ScriptCheck(
     "base-tools",
     Severity.FAIL,
     """\
@@ -92,10 +105,12 @@ done
 """,
 )
 
-# One line per account, so a long list never overflows one detail. An empty
-# passwd shell is /bin/sh, as login and sshd read it; an account with no
-# passwd entry is reported like any other.
-LOGIN_SHELLS = Check(
+NO_PASSWD_ENTRY = "no-passwd-entry"
+
+# One line per account, so a long list never overflows one detail: the account,
+# followed by NO_PASSWD_ENTRY when it has none. An empty passwd shell is
+# /bin/sh, as login and sshd read it.
+LOGIN_SHELLS = ScriptCheck(
     "login-shells",
     Severity.WARN,
     f"""\
@@ -105,8 +120,10 @@ for agw_account in ${ACCOUNTS_VARIABLE}; do
     agw_shell=${{agw_entry##*:}}
     agw_shell=${{agw_shell:-/bin/sh}}
     case ${{agw_shell##*/}} in sh|dash|bash|zsh) continue ;; esac
+    problem login-shells "$agw_account"
+  else
+    problem login-shells "$agw_account {NO_PASSWD_ENTRY}"
   fi
-  problem login-shells "$agw_account"
 done
 set +f
 """,
@@ -118,7 +135,7 @@ set +f
 # sshd PAM stack loads pam_env.so with user_readenv=1 (Debian 12 does, 13 does
 # not); only that file is read, not what it includes. /etc/default/locale is
 # left out on purpose: every VM sets it and agw-launch sets the locale itself.
-PAM_ENV = Check(
+PAM_ENV = ScriptCheck(
     "pam-env",
     Severity.WARN,
     r"""agw_pam_files=
@@ -131,29 +148,22 @@ grep -qsE '^[^#]*pam_env\.so[^#]*user_readenv=1' /etc/pam.d/sshd &&
 """,
 )
 
-CHECKS = (RELEASE, SYSTEMD, SUDO, BASE_TOOLS, LOGIN_SHELLS, PAM_ENV)
-"""The contract, in report order."""
+SUDO = RequestCheck("sudo", Severity.FAIL, Command(("id", "-u"), elevated=True, deadline=PROBE_DEADLINE))
 
-SCRIPT_ROWS = tuple(check for check in CHECKS if isinstance(check.probe, str))
+SCRIPT_ROWS = (SYSTEMD, BASE_TOOLS, LOGIN_SHELLS, PAM_ENV)
 
-LINE_PREFIX = "AGW-CHECK "
+CHECKS: tuple[Check, ...] = (*SCRIPT_ROWS, SUDO)
+"""The contract's rows, in request and report order: the script's rows, then the elevated check."""
+
+LINE = re.compile(r"AGW-CHECK(\s+)(\S+)(.*)", re.DOTALL)
 END_LINE = "AGW-CHECK-END"
-
-
-def _fragment(check: Check) -> str:
-    assert isinstance(check.probe, str)
-    return check.probe
-
 
 BASE_SCRIPT = (
     'problem() { printf \'AGW-CHECK %s %s\\n\' "$1" "$2"; }\n'
-    + "".join(_fragment(check) + "\n" for check in SCRIPT_ROWS)
+    + "".join(check.fragment + "\n" for check in SCRIPT_ROWS)
     + f"printf '{END_LINE}\\n'\n"
 )
 """The one unelevated script: a line for each problem, then one closing line. It never exits non-zero."""
-
-BASE_SCRIPT_INCOMPLETE = Check("base-script", Severity.FAIL, BASE_SCRIPT)
-"""Not a row: the one failure reported, instead of any script row, when the script did not run to its end."""
 
 DETAIL = re.compile(r"[A-Za-z0-9_ ./:~$-]{0,80}")
 """What a detail from the guest may hold to be shown."""
@@ -166,18 +176,28 @@ _SUDO_REFUSED = (NotDelivered(NotDeliveredReason.LAUNCHER_FAILED), NotDelivered(
 
 @dataclass(frozen=True)
 class Finding:
-    """A problem one check found. ``details`` holds one entry per thing it named, in the order reported."""
+    """A problem one row found. ``details`` holds one entry per thing it named, in the order reported."""
 
     check: Check
     details: tuple[str, ...]
 
 
 @dataclass(frozen=True)
+class ScriptIncomplete:
+    """The base script did not run to its end: one failure in place of every script row, naming its exit status."""
+
+    status: int
+
+
+Problem = Finding | ScriptIncomplete
+
+
+@dataclass(frozen=True)
 class BaseReport:
-    """The release and every finding of the base checks, with the accounts the checks covered."""
+    """The release and every problem the base checks found, with the accounts the checks covered."""
 
     release: DebianRelease
-    findings: tuple[Finding, ...]
+    findings: tuple[Problem, ...]
     accounts: Mapping[str, Identity]
 
 
@@ -188,15 +208,14 @@ def observe_release(access: VMAccess, *, expected: DebianRelease | None) -> Debi
     ``vm confirm-release`` runs alone. An unrecognized or mismatched release
     raises its ``StateError``, and nothing else is asked of the VM.
     """
-    assert isinstance(RELEASE.probe, Command)
-    result = access.run(RELEASE.probe, check=True)
+    result = access.run(RELEASE_PROBE, check=True)
     return verify_os_release(result.stdout.decode("utf-8", errors="replace"), expected=expected)
 
 
 def check_base(
     access: VMAccess, *, expected_release: DebianRelease | None, admin: str, agents: Sequence[Agent]
 ) -> BaseReport:
-    """Run the base checks, release first, and report every finding.
+    """Observe the release, then run the rows, and report every problem in table order.
 
     ``admin`` and ``agents`` are the accounts whose login shells are checked:
     the admin's Linux user name and each agent on the VM.
@@ -210,38 +229,41 @@ def check_base(
     sudo = _sudo_finding(access)
     if sudo is not None:
         findings.append(sudo)
-    order = (BASE_SCRIPT_INCOMPLETE, *CHECKS)
-    findings.sort(key=lambda finding: order.index(finding.check))
     return BaseReport(release, tuple(findings), accounts)
 
 
-def parse_script_output(stdout: bytes, *, status: int, accounts: Collection[str]) -> tuple[Finding, ...]:
-    """The findings in the base script's output, in table order.
+def parse_script_output(stdout: bytes, *, status: int, accounts: Collection[str]) -> tuple[Problem, ...]:
+    """The problems in the base script's output, in table order.
 
-    Boundary: the output comes from the guest. Only a line for a
-    script-probed row counts, and repeated lines for a row aggregate into one
-    finding. A detail outside :data:`DETAIL` still reports its row, as
-    :data:`DETAIL_NOT_SHOWN`, so a malformed line never hides a problem. A
-    ``login-shells`` detail must be one of ``accounts``, so a name the guest
-    invents is dropped. Without the closing line the probe did not complete:
-    the one finding is :data:`BASE_SCRIPT_INCOMPLETE`, naming the exit status
-    and no stream text.
+    Boundary: the output comes from the guest. A line counts only when its id
+    is a script row's, and repeated lines for a row aggregate into one
+    finding. A ``login-shells`` line counts only when its detail is one this
+    parser expects, an account in ``accounts`` alone or followed by
+    :data:`NO_PASSWD_ENTRY`; anything else is dropped, so the guest cannot
+    invent an account. For the other rows, a line that is malformed (a
+    separator other than one space, or a detail outside :data:`DETAIL`) still
+    reports its row, as :data:`DETAIL_NOT_SHOWN`, so it never hides a problem.
+    Without the closing line the script did not complete: the one problem is
+    :class:`ScriptIncomplete`, naming the exit status and no stream text.
     """
     lines = [line.removesuffix("\r") for line in stdout.decode("utf-8", errors="replace").split("\n")]
     if END_LINE not in lines:
-        return (Finding(BASE_SCRIPT_INCOMPLETE, (f"exit status {status}",)),)
+        return (ScriptIncomplete(status),)
     rows = {check.id: check for check in SCRIPT_ROWS}
+    expected_accounts = {*accounts, *(f"{account} {NO_PASSWD_ENTRY}" for account in accounts)}
     reported: dict[str, list[str]] = {}
     for line in lines:
-        if not line.startswith(LINE_PREFIX):
+        match = LINE.fullmatch(line)
+        if match is None or match[2] not in rows:
             continue
-        check_id, _, detail = line.removeprefix(LINE_PREFIX).partition(" ")
-        if check_id not in rows:
-            continue
-        if not DETAIL.fullmatch(detail):
+        separator, check_id, rest = match.groups()
+        well_formed = separator == " " and (rest == "" or rest.startswith(" "))
+        detail = rest.removeprefix(" ")
+        if check_id == LOGIN_SHELLS.id:
+            if not well_formed or detail not in expected_accounts:
+                continue
+        elif not well_formed or not DETAIL.fullmatch(detail):
             detail = DETAIL_NOT_SHOWN
-        elif check_id == LOGIN_SHELLS.id and detail not in accounts:
-            continue
         details = reported.setdefault(check_id, [])
         if detail not in details:
             details.append(detail)
@@ -256,8 +278,7 @@ def _sudo_finding(access: VMAccess) -> Finding | None:
     ``sudo``, an elevated 127); both are this row's failure. Any other
     outcome that is not a completion raises its typed error.
     """
-    assert isinstance(SUDO.probe, Command)
-    result = access.run(SUDO.probe)
+    result = access.run(SUDO.request)
     completion = result.completion
     if not isinstance(completion, Completed) and completion not in _SUDO_REFUSED:
         result.require_completed(access.vm_name)
@@ -273,57 +294,68 @@ def enforce(report: BaseReport, vm_name: str) -> None:
     base script that did not complete, which points at the operation log and
     ``agw vm verify-connection`` instead.
     """
-    failures: list[Finding] = []
-    for finding in report.findings:
-        if finding.check.severity is Severity.WARN:
-            for warning in _warnings(finding, report, vm_name):
+    failures: list[str] = []
+    incomplete = False
+    for problem in report.findings:
+        if isinstance(problem, ScriptIncomplete):
+            incomplete = True
+            failures.append(f"the checks did not complete (exit status {problem.status})")
+        elif problem.check.severity is Severity.WARN:
+            for warning in _warnings(problem, report, vm_name):
                 output.warn(warning)
         else:
-            failures.append(finding)
+            failures.append(f"{problem.check.id}: {', '.join(problem.details)}")
     if not failures:
         return
-    listed = "; ".join(f"{finding.check.id}: {', '.join(finding.details)}" for finding in failures)
     hints = []
-    if any(finding.check is BASE_SCRIPT_INCOMPLETE for finding in failures):
-        hints.append(
-            f"The checks did not run to their end; see the operation log, and run 'agw vm verify-connection {vm_name}'."
-        )
-    if any(finding.check is not BASE_SCRIPT_INCOMPLETE for finding in failures):
+    if incomplete:
+        hints.append(f"See the operation log, and run 'agw vm verify-connection {vm_name}'.")
+    if len(failures) > int(incomplete):
         hints.append(f"Initialization cannot repair this: run 'agw vm delete {vm_name}', then create the VM again.")
     raise StateError(
-        f"VM '{vm_name}' does not meet the Agentworks VM contract: {listed}",
+        f"VM '{vm_name}' does not meet the Agentworks VM contract: {'; '.join(failures)}",
         entity_kind="vm",
         entity_name=vm_name,
         hint=" ".join(hints),
     )
 
 
+def shell_fix_command(identity: Identity, vm_name: str) -> tuple[str, ...]:
+    """The command that sets an account's login shell from its template: agent reinit, or vm reinit for the admin."""
+    if isinstance(identity, Agent):
+        return ("agw", "agent", "reinit", identity.name)
+    return ("agw", "vm", "reinit", vm_name)
+
+
 def _warnings(finding: Finding, report: BaseReport, vm_name: str) -> Iterator[str]:
     if finding.check is LOGIN_SHELLS:
-        for account in finding.details:
-            yield _login_shell_warning(report.accounts.get(account), account, vm_name)
-    elif finding.check is PAM_ENV:
-        yield (
-            f"VM '{vm_name}' has pam_env settings in {', '.join(_files(finding.details))}. "
-            "Agentworks does not apply pam_env settings to the commands it runs."
-        )
-    else:
-        yield f"VM '{vm_name}': {finding.check.id}: {', '.join(finding.details)}"
+        for detail in finding.details:
+            account, _, no_entry = detail.partition(" ")
+            yield _login_shell_warning(report.accounts[account], account, vm_name, missing=bool(no_entry))
+        return
+    assert finding.check is PAM_ENV, "every warning row has its own wording"
+    yield (
+        f"VM '{vm_name}' has pam_env settings in {', '.join(_files(finding.details))}. "
+        "Agentworks does not apply pam_env settings to the commands it runs."
+    )
 
 
-def _login_shell_warning(identity: Identity | None, account: str, vm_name: str) -> str:
-    unsupported = "has a login shell Agentworks does not support (it supports sh, dash, bash and zsh)"
-    if isinstance(identity, Agent):
-        return (
-            f"On VM '{vm_name}', agent '{identity.name}' (account '{account}') {unsupported}. "
-            f"'agw agent reinit {identity.name}' sets it from the agent's template."
-        )
-    if isinstance(identity, Admin):
-        return (
-            f"On VM '{vm_name}', the admin account '{account}' {unsupported}. "
-            f"'agw vm reinit {vm_name}' sets it from the admin template."
-        )
-    return f"On VM '{vm_name}', an account {unsupported}: {DETAIL_NOT_SHOWN}."
+def _login_shell_warning(identity: Identity, account: str, vm_name: str, *, missing: bool) -> str:
+    who = (
+        f"agent '{identity.name}' (account '{account}')"
+        if isinstance(identity, Agent)
+        else f"the admin account '{account}'"
+    )
+    problem = (
+        "has no passwd entry"
+        if missing
+        else "has a login shell Agentworks does not support (it supports sh, dash, bash and zsh)"
+    )
+    if missing and not isinstance(identity, Agent):
+        # The connection authenticated as the admin, so its entry exists but the guest's lookup failed.
+        return f"On VM '{vm_name}', {who} {problem}."
+    fix = shlex.join(shell_fix_command(identity, vm_name))
+    return f"On VM '{vm_name}', {who} {problem}. '{fix}' sets it up from its template."
 
 
 def _files(details: Sequence[str]) -> Iterator[str]:

@@ -477,16 +477,21 @@ one per row. It names the outcome and no stream text: the script's exit status (
 completed, so it has one), and points at the operation log and `agw vm verify-connection NAME`. No
 error holds a stream (D13).
 
-`BaseReport` holds `release` and `findings`; `Finding` holds `check` and `detail`.
-`enforce(report, vm_name)` prints each WARN with `output.warn` and raises `StateError` listing every
-FAIL, with the recreation hint (the probe-incomplete FAIL carries its own pointer, the operation log
-and `verify-connection`, instead, because recreation is not what it asks for). It is the only
-function that prints. For each account the `login-shells` row names, `enforce` renders a separate
-warning: `agw agent reinit NAME` for an agent, looked up from the `Agent(name, linux_user)` it was
-given (`access.py`; `agw agent reinit` applies the template shell through the admin,
-`agents/initializer.py:160`), and `agw vm reinit NAME` for the admin, whose shell the admin step
-sets (`driver.py:675`). Both are warnings, so neither blocks a reinit that is the cure; a tcsh admin
-whose stage 0 happens to parse is still alerted.
+`BaseReport` holds `release`, `findings` and `accounts` (each checked Linux account's `Admin` or
+`Agent` identity, which `enforce` uses to name the command that fixes a shell); `Finding` holds
+`check` and `details`, one entry per thing reported, so repeated ids aggregate into one finding. A
+missing `AGW-CHECK-END` is not a row's finding but a `ScriptIncomplete(status)` in the same list. In
+code the release is `RELEASE_PROBE`, the first request rather than a row (a failure raises, so it is
+never a finding), and a row is a `ScriptCheck` (with its fragment) or a `RequestCheck` (with its
+request), listed in request order. `enforce(report, vm_name)` prints each WARN with `output.warn`
+and raises `StateError` listing every FAIL, with the recreation hint (the probe-incomplete FAIL
+carries its own pointer, the operation log and `verify-connection`, instead, because recreation is
+not what it asks for). It is the only function that prints. For each account the `login-shells` row
+names, `enforce` renders a separate warning: `agw agent reinit NAME` for an agent, looked up from
+the `Agent(name, linux_user)` it was given (`access.py`; `agw agent reinit` applies the template
+shell through the admin, `agents/initializer.py:160`), and `agw vm reinit NAME` for the admin, whose
+shell the admin step sets (`driver.py:675`). Both are warnings, so neither blocks a reinit that is
+the cure; a tcsh admin whose stage 0 happens to parse is still alerted.
 
 **`pam-env`.** `PAM_ENV_PROBE` and `parse_pam_env_probe` (`pam_env.py:26-52`) move into the row. The
 fragment collects the file names and calls `problem pam-env` once with them. The home-file condition

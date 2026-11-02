@@ -24,15 +24,17 @@ from agentworks.execution.results import (
 )
 from agentworks.vms import contract
 from agentworks.vms.contract import (
-    BASE_SCRIPT_INCOMPLETE,
     BASE_TOOLS,
     DETAIL_NOT_SHOWN,
     LOGIN_SHELLS,
+    NO_PASSWD_ENTRY,
     PAM_ENV,
     SUDO,
     SYSTEMD,
     BaseReport,
     Finding,
+    Problem,
+    ScriptIncomplete,
     parse_script_output,
 )
 from tests.vm_access_support import Admin, Agent, RecordingVMAccess
@@ -49,7 +51,7 @@ ACCOUNTS = ("agentworks", "agt-worker")
 WORKER = Agent("worker", "agt-worker")
 
 
-def parse(stdout: bytes, *, status: int = 0, accounts: tuple[str, ...] = ACCOUNTS) -> tuple[Finding, ...]:
+def parse(stdout: bytes, *, status: int = 0, accounts: tuple[str, ...] = ACCOUNTS) -> tuple[Problem, ...]:
     return parse_script_output(stdout, status=status, accounts=accounts)
 
 
@@ -103,22 +105,38 @@ def test_repeated_lines_for_a_row_aggregate_into_one_finding() -> None:
     assert parse(stdout + END) == (Finding(LOGIN_SHELLS, ("agentworks", "agt-worker")),)
 
 
-def test_an_account_the_guest_invents_is_dropped() -> None:
-    stdout = b"AGW-CHECK login-shells root\nAGW-CHECK login-shells agt-worker\n" + END
+def test_a_login_shells_line_counts_only_for_an_account_passed_in() -> None:
+    stdout = (
+        b"AGW-CHECK login-shells root\n"  # invented
+        b"AGW-CHECK login-shells agt-worker\n"
+        b"AGW-CHECK login-shells agentworks no-passwd-entry\n"
+        b"AGW-CHECK login-shells agentworks something-else\n"
+        b"AGW-CHECK login-shells \x1b[31magt-worker\n"
+        b"AGW-CHECK  login-shells agentworks\n"
+    )
 
-    assert parse(stdout) == (Finding(LOGIN_SHELLS, ("agt-worker",)),)
+    assert parse(stdout + END) == (Finding(LOGIN_SHELLS, ("agt-worker", f"agentworks {NO_PASSWD_ENTRY}")),)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [b"AGW-CHECK  systemd x", b"AGW-CHECK\tsystemd x", b"AGW-CHECK systemd\tx", b"AGW-CHECK systemd\x0bx"],
+    ids=["double-space", "tab-before-id", "tab-after-id", "vertical-tab"],
+)
+def test_a_known_id_with_a_malformed_separator_still_reports_its_row(line: bytes) -> None:
+    assert parse(line + b"\n" + END) == (Finding(SYSTEMD, (DETAIL_NOT_SHOWN,)),)
 
 
 def test_a_missing_end_is_one_failure_naming_the_status_and_no_stream_text() -> None:
     stdout = b"AGW-CHECK systemd the system was not booted with systemd\nAGW-CHECK pam-env /etc/environment\n"
 
-    assert parse(stdout, status=2) == (Finding(BASE_SCRIPT_INCOMPLETE, ("exit status 2",)),)
+    assert parse(stdout, status=2) == (ScriptIncomplete(2),)
 
 
 def test_findings_come_in_table_order() -> None:
     stdout = b"AGW-CHECK pam-env /etc/environment\nAGW-CHECK systemd x\n" + END
 
-    assert [finding.check for finding in parse(stdout)] == [SYSTEMD, PAM_ENV]
+    assert [getattr(problem, "check", None) for problem in parse(stdout)] == [SYSTEMD, PAM_ENV]
 
 
 # -- The requests --------------------------------------------------------------------------
@@ -146,7 +164,7 @@ def test_check_base_asks_for_the_release_first_then_the_script_then_sudo() -> No
     assert isinstance(script, Script)
     assert not script.elevated
     assert script.env == {contract.ACCOUNTS_VARIABLE: "agentworks agt-worker"}
-    assert sudo == SUDO.probe
+    assert sudo == SUDO.request
     assert report.release is DebianRelease.TRIXIE
     assert report.findings == ()
 
@@ -222,7 +240,7 @@ def test_a_failure_raises() -> None:
 
 def test_a_probe_that_did_not_complete_raises() -> None:
     with pytest.raises(StateError):
-        contract.enforce(report(Finding(BASE_SCRIPT_INCOMPLETE, ("exit status 2",))), "box")
+        contract.enforce(report(ScriptIncomplete(2)), "box")
 
 
 def test_a_warning_only_report_warns_and_does_not_raise(captured_output: Any) -> None:
@@ -233,12 +251,27 @@ def test_a_warning_only_report_warns_and_does_not_raise(captured_output: Any) ->
     assert len(captured_output.warnings) == 3
 
 
-def test_an_agents_shell_warning_names_agent_reinit_and_the_admins_names_vm_reinit(captured_output: Any) -> None:
-    contract.enforce(report(Finding(LOGIN_SHELLS, ("agentworks", "agt-worker"))), "box")
+def test_each_shell_warning_is_routed_to_the_accounts_own_identity(
+    monkeypatch: pytest.MonkeyPatch, captured_output: Any
+) -> None:
+    asked: list[object] = []
+    fix = contract.shell_fix_command
 
-    admin, agent = captured_output.warnings
-    assert "agw vm reinit box" in admin
-    assert "agw agent reinit worker" in agent
+    def _recording(identity: object, vm_name: str) -> tuple[str, ...]:
+        asked.append(identity)
+        return fix(identity, vm_name)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(contract, "shell_fix_command", _recording)
+
+    contract.enforce(report(Finding(LOGIN_SHELLS, ("agentworks", f"agt-worker {NO_PASSWD_ENTRY}"))), "box")
+
+    assert asked == [Admin(), WORKER]
+    assert len(captured_output.warnings) == 2
+
+
+def test_the_shell_fix_is_agent_reinit_for_an_agent_and_vm_reinit_for_the_admin() -> None:
+    assert contract.shell_fix_command(WORKER, "box") == ("agw", "agent", "reinit", "worker")
+    assert contract.shell_fix_command(Admin(), "box") == ("agw", "vm", "reinit", "box")
 
 
 # -- The fragments, run for real by a local shell ------------------------------------------
@@ -251,7 +284,7 @@ posix_only = pytest.mark.skipif(sys.platform == "win32", reason="the script is f
 
 def run_script(
     shell: str, *, home: Path, accounts: str = "", path: str | None = None, script: str = contract.BASE_SCRIPT
-) -> tuple[Finding, ...]:
+) -> tuple[Problem, ...]:
     env = {"HOME": str(home), "PATH": path or os.environ["PATH"], contract.ACCOUNTS_VARIABLE: accounts}
     completed = subprocess.run(
         [shutil.which(shell) or shell, "-c", script], env=env, cwd=home, capture_output=True, check=False, timeout=30
@@ -260,8 +293,8 @@ def run_script(
     return parse_script_output(completed.stdout, status=completed.returncode, accounts=accounts.split())
 
 
-def finding(findings: tuple[Finding, ...], row: contract.Check) -> Finding | None:
-    return next((found for found in findings if found.check is row), None)
+def finding(findings: tuple[Problem, ...], row: contract.Check) -> Finding | None:
+    return next((found for found in findings if isinstance(found, Finding) and found.check is row), None)
 
 
 @posix_only
@@ -289,7 +322,8 @@ def test_login_shells_reports_an_unsupported_shell_and_an_account_with_no_entry(
 
     found = finding(run_script(shell, home=tmp_path, accounts="root agw-no-such-account"), LOGIN_SHELLS)
 
-    expected = ("agw-no-such-account",) if root_supported else ("root", "agw-no-such-account")
+    missing = f"agw-no-such-account {NO_PASSWD_ENTRY}"
+    expected = (missing,) if root_supported else ("root", missing)
     assert found == Finding(LOGIN_SHELLS, expected)
 
 
@@ -301,7 +335,7 @@ def test_an_account_name_is_never_globbed(shell: str, tmp_path: Path) -> None:
 
     found = finding(run_script(shell, home=tmp_path, accounts="agw-*"), LOGIN_SHELLS)
 
-    assert found == Finding(LOGIN_SHELLS, (DETAIL_NOT_SHOWN,))
+    assert found == Finding(LOGIN_SHELLS, (f"agw-* {NO_PASSWD_ENTRY}",))
 
 
 # pam-env: only the home entry is asserted, since the two system files are the host's own
