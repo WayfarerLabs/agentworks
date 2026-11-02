@@ -9,10 +9,15 @@ from typing import TYPE_CHECKING, Literal
 
 from agentworks import output
 from agentworks.artifacts.model import ALLOWED_DEFERRALS, ArtifactInputs
-from agentworks.artifacts.state import CapturedArtifacts, declaration_digest, read_captures
+from agentworks.artifacts.state import (
+    CapturedArtifacts,
+    UnsupportedArtifactCaptureVersionError,
+    declaration_digest,
+    read_captures,
+)
 from agentworks.errors import ConfigError, StateError
 from agentworks.harness_setup.inputs import SetupInputs
-from agentworks.harness_setup.state import read_native_setup
+from agentworks.harness_setup.state import UnsupportedNativeSetupVersionError, read_native_setup
 from agentworks.secrets.orchestration import SecretTarget
 
 if TYPE_CHECKING:
@@ -37,6 +42,11 @@ class ArtifactOwnerView:
     reason: str = ""
     record: SetupRecord | None = None
     prepared: ArtifactInputs | None = None
+    repair_hint: str | None = None
+
+    @property
+    def diagnostic(self) -> str:
+        return " ".join(value for value in (self.reason, self.repair_hint) if value)
 
 
 @dataclass(frozen=True)
@@ -58,6 +68,7 @@ def inspect_owner_artifacts(
     captured = None
     record = None
     reason = ""
+    repair_hint = None
     capture_status: CaptureStatus = "current"
     try:
         captured = inputs.artifact_snapshot or read_captures(db, inputs.kind, inputs.name).get(inputs.component)
@@ -66,6 +77,8 @@ def inspect_owner_artifacts(
             capture_status, reason = "missing", "Artifact bundles have not been captured for this owner."
         elif captured is not None and captured.declaration != desired:
             capture_status, reason = "stale", "Captured artifacts do not match the owner's current bundle declarations."
+    except UnsupportedArtifactCaptureVersionError as error:
+        capture_status, reason, repair_hint = "unavailable", str(error), error.hint
     except (ConfigError, StateError, KeyError):
         capture_status, reason = "unavailable", "The owner's artifact declarations or captured state are unavailable."
     prepared = ArtifactInputs(local=captured.inputs if captured is not None else None, deferred=inherited)
@@ -79,14 +92,17 @@ def inspect_owner_artifacts(
                 ),
                 None,
             )
-        except StateError:
+        except StateError as error:
             return ArtifactOwnerView(
                 inputs,
                 captured,
                 capture_status,
                 "unavailable",
-                "The owner's integration state is unavailable.",
+                str(error)
+                if isinstance(error, UnsupportedNativeSetupVersionError)
+                else "The owner's integration state is unavailable.",
                 prepared=prepared,
+                repair_hint=error.hint if isinstance(error, UnsupportedNativeSetupVersionError) else None,
             )
     block = inputs.activations.get(integration_name) if integration_name is not None else None
     if inputs.component == "session" and integration_name is not None and block is None:
@@ -101,23 +117,44 @@ def inspect_owner_artifacts(
             )
         return ArtifactOwnerView(inputs, captured, capture_status, "inactive", record=record)
     if capture_status != "current":
-        return ArtifactOwnerView(inputs, captured, capture_status, capture_status, reason, record, prepared)
+        return ArtifactOwnerView(
+            inputs, captured, capture_status, capture_status, reason, record, prepared, repair_hint=repair_hint
+        )
     if integration_name is None:
         return ArtifactOwnerView(inputs, captured, capture_status, "current", prepared=prepared)
     if block is None:
-        if record is not None and record.artifact_files:
+        if record is not None and (record.artifact_files or record.claims or record.pending_cleanup):
             return ArtifactOwnerView(
                 inputs,
                 captured,
                 capture_status,
                 "retirement",
-                "The removed activation still owns artifact files; finish its cleanup first.",
+                "The removed activation retains native setup or artifact cleanup evidence.",
                 record,
                 prepared,
             )
         return ArtifactOwnerView(inputs, captured, capture_status, "inactive", record=record, prepared=prepared)
-    # Plugin/settings-only evidence keeps its existing required/recommended
-    # readiness behavior. There is no artifact result to reuse in this case.
+    if record is not None and (not record.complete or record.pending_cleanup or record.skipped):
+        reason = (
+            "The activated facet still has native setup or artifact cleanup pending."
+            if record.pending_cleanup
+            else "The activated facet's previous setup did not complete all declared entries."
+        )
+        if record.skipped:
+            reason += " Skipped destinations: " + _brief(
+                tuple(f"{item.path}: {item.reason}" for item in record.skipped)
+            )
+        return ArtifactOwnerView(
+            inputs,
+            captured,
+            capture_status,
+            "incomplete",
+            reason,
+            record,
+            prepared,
+        )
+    # An optional native-only facet needs no fabricated artifact result, but its
+    # incomplete native setup above remains actionable even without artifact inputs.
     if not prepared and (record is None or not (record.artifact_files or record.artifact_inputs)):
         return ArtifactOwnerView(inputs, captured, capture_status, "current", record=record, prepared=prepared)
     if record is None or record.artifact_inputs is None:
@@ -127,21 +164,6 @@ def inspect_owner_artifacts(
             capture_status,
             "missing",
             "The activated facet has no recorded artifact handling result.",
-            record,
-            prepared,
-        )
-    if not record.complete or record.pending_cleanup:
-        reason = (
-            "The activated facet still has artifact cleanup pending."
-            if record.pending_cleanup
-            else "The activated facet's previous setup did not complete all declared entries."
-        )
-        return ArtifactOwnerView(
-            inputs,
-            captured,
-            capture_status,
-            "incomplete",
-            reason,
             record,
             prepared,
         )
@@ -397,6 +419,8 @@ def session_inherited_inputs(
 
 
 def _remediation(view: ArtifactOwnerView) -> str:
+    if view.repair_hint is not None:
+        return view.repair_hint
     if view.owner.component == "workspace":
         return f"Recreate workspace '{view.owner.name}' to apply changed setup; workspace reinit is not supported."
     if view.owner.component == "agent":

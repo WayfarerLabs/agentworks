@@ -25,7 +25,7 @@ from agentworks.artifacts.model import (
     ArtifactType,
 )
 from agentworks.artifacts.native.common import NativeSessionArtifacts, native_home, validate_ancestor_names
-from agentworks.artifacts.native.probe import probe_native
+from agentworks.artifacts.native.probe import NativeArtifactConflictError, probe_native
 from agentworks.artifacts.native.shell import shell_artifacts
 from agentworks.artifacts.publication import validate_application
 from agentworks.artifacts.session import validate_session_application
@@ -259,7 +259,7 @@ def test_native_name_collision_does_not_silently_shadow_another_scope():
     item = artifact(ArtifactType.AGENT)
     other = replace(item, origin=ArtifactOrigin("agent", "agent", "alice", bundle="another", entry="review"))
     earlier = claude.outer_artifacts(received(other), "/home/alice/.claude")
-    with pytest.raises(ConfigError):
+    with pytest.raises(NativeArtifactConflictError):
         claude.session_artifacts(
             enabled_workarounds=enabled(claude.session_artifacts),
             context=context(item, ancestors=tuple(owned(file) for file in earlier.files)),
@@ -1006,7 +1006,7 @@ def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, m
         if any(file.native_identity == "skill:review" for file in files):
             raise NativeArtifactConflictError("fixture competing skill", ("skill:review",), hint="fixture repair")
 
-    filtered = defer_setup_conflicts(plan, invocation, "session", check)
+    filtered = defer_setup_conflicts(plan, invocation, check)
     result = publish_artifacts(target, filtered.files, current, lambda files: None, roots=(str(target.home),))
     assert incomplete and filtered.deferred[0].input_id == bad.identity
     assert competing.read_text() == "operator content"
@@ -1026,7 +1026,7 @@ def test_new_carrier_cannot_choose_one_of_competing_ancestor_origins(render, mat
         *claude.outer_artifacts(received(second), "/workspace/.claude").files,
     )
     selected = first if matching_owner == "user" else second
-    with pytest.raises(ConfigError):
+    with pytest.raises(NativeArtifactConflictError):
         render(
             context=context(selected, ancestors=tuple(owned(file) for file in earlier)),
             configured=None,

@@ -412,7 +412,7 @@ def test_skipped_section_is_inspectable_without_being_handled_or_deferred(db: Da
     write_native_setup(db, "agent", "agent", state.model_copy(update={"records": (record,)}), operation="fixture")
     result = inspect_artifacts(db, fixture.registry, agent_name="agent")
     integration = result.owners[-1].integrations[0]
-    assert integration.status == "current"
+    assert integration.status == "incomplete"
     assert item.identity not in integration.recorded_handled
     assert not integration.recorded_deferred
     assert integration.recorded_skipped == (skipped,)

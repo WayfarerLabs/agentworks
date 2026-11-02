@@ -116,7 +116,7 @@ from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     defer_setup_conflicts,
     native_home,
-    probe_session_delivery,
+    prepare_session_delivery,
     render_setup_artifacts,
     validate_discovery_paths,
     validate_native_command,
@@ -465,16 +465,11 @@ class CodexIntegration(HarnessIntegration):
         return super().config_for(facet)
 
     def vm_init(self, invocation: VMSetupInvocation) -> ArtifactApplication:
-        plan = (
-            ArtifactApplication()
-            if self.retiring
-            else render_setup_artifacts(invocation, "user", lambda inputs: vm_artifacts(inputs))
-        )
+        plan = ArtifactApplication() if self.retiring else render_setup_artifacts(invocation, vm_artifacts)
         if plan.files:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
-                "user",
                 lambda files: probe_native(
                     invocation.runner, tool="codex", environment=invocation.environment, files=files, vm_only=True
                 ),
@@ -502,7 +497,6 @@ class CodexIntegration(HarnessIntegration):
             if self.retiring
             else render_setup_artifacts(
                 invocation,
-                "session",
                 lambda inputs: outer_artifacts(
                     inputs,
                     skills_root=f"{invocation.home}/.agents/skills",
@@ -524,7 +518,6 @@ class CodexIntegration(HarnessIntegration):
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
-                "session",
                 lambda files: probe_native(
                     invocation.runner,
                     tool="codex",
@@ -543,7 +536,6 @@ class CodexIntegration(HarnessIntegration):
             if self.retiring
             else render_setup_artifacts(
                 invocation,
-                "session",
                 lambda inputs: outer_artifacts(
                     inputs,
                     skills_root=f"{invocation.root}/.agents/skills",
@@ -561,7 +553,6 @@ class CodexIntegration(HarnessIntegration):
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
-                "session",
                 lambda files: probe_native(
                     invocation.runner,
                     tool="codex",
@@ -619,20 +610,19 @@ class CodexIntegration(HarnessIntegration):
         asymmetry to apologize for: a fresh launch resumes nothing, while its
         effective workload config may provide initial input.
         """
-        self._artifact_plan = session_artifacts(
-            self._session_binding.artifact_context,
-            configured=self.config.developer_instructions,
-            extra_args=self.config.extra_args,
-            enabled_workarounds=self.config.enabled_workarounds,
-        )
         artifact_context = self._session_binding.artifact_context
         runner = ctx.admin_target() if self._admin else ctx.agent_target()
-        native_root = probe_session_delivery(
+        self._artifact_plan, native_root = prepare_session_delivery(
             runner,
             tool="codex",
             integration=self.name,
             context=artifact_context,
-            plan=self._artifact_plan,
+            render=lambda prepared: session_artifacts(
+                prepared,
+                configured=self.config.developer_instructions,
+                extra_args=self.config.extra_args,
+                enabled_workarounds=self.config.enabled_workarounds,
+            ),
             workspace=self._workspace_path,
         )
         if artifact_context is not None and native_root is not None:

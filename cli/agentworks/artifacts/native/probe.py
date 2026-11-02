@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 
 class NativeArtifactConflictError(StateError):
-    """Native names that setup can defer without suppressing independent artifacts."""
+    """Native names that setup can defer or sessions can leave unhandled."""
 
     def __init__(self, message: str, identities: tuple[str, ...], *, hint: str) -> None:
         super().__init__(message, hint=hint)

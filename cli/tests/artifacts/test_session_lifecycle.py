@@ -597,3 +597,43 @@ def test_upstream_placement_readiness_is_reported_without_blocking_restart(lifec
     lifecycle.restart()
     assert warnings and "kill" in lifecycle.events and "tmux_create" in lifecycle.events
     assert read_native_setup(lifecycle.db, "session", "s1").records[0].complete
+
+
+@pytest.mark.parametrize(
+    "tool,integration,workaround",
+    [
+        ("claude", "claude-code", "session-prompt"),
+        ("codex", "codex", "session-developer-instructions"),
+        ("grok", "grok-build", "session-rules"),
+    ],
+)
+def test_real_native_probe_failure_preserves_existing_runtime_before_teardown(
+    lifecycle, monkeypatch, tool, integration, workaround
+):
+    from importlib import import_module
+    from unittest.mock import Mock
+
+    from agentworks.artifacts.native import probe as native
+    from agentworks.errors import ExternalError
+
+    lifecycle.restart()
+    previous = lifecycle.db.get_session("s1")
+    files = [(path, path.read_bytes()) for path in lifecycle.files()]
+    lifecycle.template.harness_integration = integration
+    lifecycle.template.harness_integration_config = {"enabled_workarounds": [workaround]}
+    module = import_module(f"agentworks.plugins.{tool}.harness_integration")
+    monkeypatch.setattr(module, "require_commands", lambda *args, **kwargs: None)
+    observed = Mock(wraps=native.probe_native)
+    monkeypatch.setattr(native, "probe_native", observed)
+    lifecycle.events.clear()
+
+    # The isolated transport's login shell rejects -lic, producing a real failed
+    # guest discovery process rather than a fabricated exception or inventory.
+    with pytest.raises(ExternalError):
+        lifecycle.restart()
+    assert observed.called
+    current = lifecycle.db.get_session("s1")
+    assert current is not None and previous is not None
+    assert (current.session_uuid, current.run_id, current.pid) == (previous.session_uuid, previous.run_id, previous.pid)
+    assert [(path, path.read_bytes()) for path, _ in files] == files
+    assert "kill" not in lifecycle.events and "tmux_create" not in lifecycle.events

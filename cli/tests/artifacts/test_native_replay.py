@@ -38,7 +38,6 @@ def test_inactive_facet_replays_known_persona_without_reusing_old_policy_paths(
     from agentworks.artifacts.application import ArtifactApplication, SessionArtifactContext
     from agentworks.artifacts.declarations import AgentArtifactSpec
     from agentworks.artifacts.model import ArtifactGroup, ArtifactInputs, ArtifactOwner
-    from agentworks.artifacts.native.probe import NativeArtifactConflictError
     from agentworks.artifacts.routing import session_artifacts
     from agentworks.artifacts.state import capture_owner, write_capture
     from agentworks.capabilities.base import RunContext
@@ -190,25 +189,28 @@ def test_inactive_facet_replays_known_persona_without_reusing_old_policy_paths(
     monkeypatch.setattr(integration, "_resume_or_launch", lambda *args, **kwargs: "fixture-launch")
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.output.warn", warnings.append)
+    result = integration.start(
+        RunContext(admin_target=SimpleNamespace(run=run)), intent=HarnessLaunchIntent.RESUME_OR_NEW
+    )
+    assert result.command == "fixture-launch"
+    assert warnings
     if prior_state == "competing":
-        with pytest.raises(NativeArtifactConflictError):
-            integration.start(
-                RunContext(admin_target=SimpleNamespace(run=run)), intent=HarnessLaunchIntent.RESUME_OR_NEW
-            )
-    else:
-        result = integration.start(
-            RunContext(admin_target=SimpleNamespace(run=run)), intent=HarnessLaunchIntent.RESUME_OR_NEW
-        )
-        assert result.command == "fixture-launch"
-        assert warnings
+        assert inputs.local is not None
+        assert {item.input_id for item in result.artifacts.deferred} == {
+            item.identity for item in inputs.items() if item.identity != persona.identity
+        }
+        assert any(persona.origin_identity in file.origins for file in result.artifacts.files)
     proposed = integration._artifact_plan.application.files
-    assert requests and set(requests[0]["entries"]) == {
+    selected_request = next(
+        request for request in reversed(requests) if set(request["paths"]) == {file.path for file in proposed}
+    )
+    assert set(selected_request["entries"]) == {
         file.path for file in (*earlier.files, *proposed) if file.native_identity
     }
-    assert set(requests[0]["paths"]) == {file.path for file in proposed}
-    assert set(requests[0]["identities"]) == {file.native_identity for file in proposed if file.native_identity}
-    assert not any(file.path in requests[0]["proposed"] for file in earlier.files)
-    assert not any(file.path in requests[0]["paths"] for file in unrelated_files)
+    assert set(selected_request["paths"]) == {file.path for file in proposed}
+    assert set(selected_request["identities"]) == {file.native_identity for file in proposed if file.native_identity}
+    assert not any(file.path in selected_request["proposed"] for file in earlier.files)
+    assert not any(file.path in selected_request["paths"] for file in unrelated_files)
 
 
 def test_recognition_hint_cannot_acknowledge_a_mismatched_proposed_entry():

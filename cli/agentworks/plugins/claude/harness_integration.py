@@ -40,7 +40,7 @@ from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     defer_setup_conflicts,
     native_home,
-    probe_session_delivery,
+    prepare_session_delivery,
     render_setup_artifacts,
     validate_discovery_paths,
     validate_native_command,
@@ -214,7 +214,6 @@ class ClaudeCodeIntegration(HarnessIntegration):
             if self.retiring
             else render_setup_artifacts(
                 invocation,
-                "user",
                 lambda inputs: outer_artifacts(
                     inputs, "/etc/claude-code/.claude", instructions_path="/etc/claude-code/CLAUDE.md"
                 ),
@@ -224,7 +223,6 @@ class ClaudeCodeIntegration(HarnessIntegration):
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
-                "user",
                 lambda files: probe_native(
                     invocation.runner, tool="claude", environment=invocation.environment, files=files, vm_only=True
                 ),
@@ -250,7 +248,6 @@ class ClaudeCodeIntegration(HarnessIntegration):
             if self.retiring
             else render_setup_artifacts(
                 invocation,
-                "session",
                 lambda inputs: outer_artifacts(
                     inputs,
                     root or native_home(invocation.home, invocation.environment, "CLAUDE_CONFIG_DIR", ".claude"),
@@ -268,7 +265,6 @@ class ClaudeCodeIntegration(HarnessIntegration):
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
-                "session",
                 lambda files: probe_native(
                     invocation.runner,
                     tool="claude",
@@ -286,7 +282,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
             ArtifactApplication()
             if self.retiring
             else render_setup_artifacts(
-                invocation, "session", lambda inputs: outer_artifacts(inputs, f"{invocation.root}/.claude")
+                invocation, lambda inputs: outer_artifacts(inputs, f"{invocation.root}/.claude")
             )
         )
         setup_workspace("claude", config, invocation)
@@ -294,7 +290,6 @@ class ClaudeCodeIntegration(HarnessIntegration):
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
-                "session",
                 lambda files: probe_native(
                     invocation.runner,
                     tool="claude",
@@ -355,20 +350,19 @@ class ClaudeCodeIntegration(HarnessIntegration):
         intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
     ) -> HarnessStart:
         """Choose the requested fresh, strict-resume, or fallback policy."""
-        self._artifact_plan = session_artifacts(
-            self._session_binding.artifact_context,
-            configured=self.config.append_system_prompt,
-            extra_args=self.config.extra_args,
-            enabled_workarounds=self.config.enabled_workarounds,
-        )
         artifact_context = self._session_binding.artifact_context
         runner = ctx.admin_target() if self._admin else ctx.agent_target()
-        native_root = probe_session_delivery(
+        self._artifact_plan, native_root = prepare_session_delivery(
             runner,
             tool="claude",
             integration=self.name,
             context=artifact_context,
-            plan=self._artifact_plan,
+            render=lambda prepared: session_artifacts(
+                prepared,
+                configured=self.config.append_system_prompt,
+                extra_args=self.config.extra_args,
+                enabled_workarounds=self.config.enabled_workarounds,
+            ),
             workspace=self._workspace_path,
         )
         if artifact_context is not None and native_root is not None:

@@ -257,7 +257,10 @@ def run_setup(
                 settled_paths = {file.path for file in application.files} | {item.path for item in publication.skipped}
                 pending_files = any(item.path not in settled_paths for item in owned)
                 current = current.model_copy(
-                    update={"complete": not pending_files and not incomplete, "pending_cleanup": pending_files}
+                    update={
+                        "complete": not pending_files and not incomplete and not publication.skipped,
+                        "pending_cleanup": pending_files,
+                    }
                 )
                 state = replace_setup_record(state, current)
             persist(state)

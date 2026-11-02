@@ -9,7 +9,7 @@ from agentworks import output
 from agentworks.artifacts.bundle import resolve_bundle
 from agentworks.errors import NotFoundError, StateError, ValidationError
 from agentworks.harness_setup.inputs import SetupInputs
-from agentworks.harness_setup.state import read_native_setup
+from agentworks.harness_setup.state import UnsupportedNativeSetupVersionError, read_native_setup
 from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 
@@ -251,6 +251,8 @@ def inspect_artifacts(
                     for record in read_native_setup(db, owner.kind, owner.name).records
                     if record.component == owner.component
                 )
+            except UnsupportedNativeSetupVersionError as error:
+                diagnostics[owner.component] = (" ".join(value for value in (str(error), error.hint) if value),)
             except StateError:
                 diagnostics[owner.component] = ("Native setup evidence is malformed or unavailable.",)
         if integration_name is not None:
@@ -289,7 +291,7 @@ def inspect_artifacts(
                     view.capture_status,
                     _artifact_metadata(registry, owner.artifacts, view),
                     tuple(integrations[owner.component]),
-                    diagnostics.get(owner.component, ()) + ((view.reason,) if view.reason else ()),
+                    diagnostics.get(owner.component, ()) + ((view.diagnostic,) if view.diagnostic else ()),
                 )
             )
         return ArtifactInspection(tuple(projected))
@@ -376,7 +378,7 @@ def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView
         name,
         name in owner.activations,
         view.status,
-        view.reason,
+        view.diagnostic,
         handled,
         deferred,
         placements,

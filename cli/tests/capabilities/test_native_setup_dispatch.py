@@ -399,7 +399,7 @@ def test_vm_publication_uses_root_and_records_skips_without_rerouting(db, facet_
     assert publish.call_args.kwargs["roots"] == ROOT_FILE_DIRECTORIES
     assert publish.call_args.kwargs["root"] is True
     record = state.records[0]
-    assert record.complete and not record.pending_cleanup
+    assert not record.complete and not record.pending_cleanup
     assert not record.artifact_files and not record.deferred
     assert record.skipped == (skip,)
     assert read_native_setup(db, inputs.kind, inputs.name).records[0].skipped == (skip,)
@@ -450,7 +450,7 @@ def test_malformed_obsolete_section_only_blocks_removal_of_entire_activation(db,
     inputs = replace(inputs, activations={"fixture": CapabilityConfig()} if activated else {})
     record = run_setup(db, Mock(), inputs, invocation, operation="fixture").records[0]
     assert record.artifact_files == (old,) and record.skipped == (skipped,)
-    assert record.complete == activated and record.pending_cleanup != activated
+    assert not record.complete and record.pending_cleanup != activated
 
 
 def test_partial_native_setup_preserves_incomplete_evidence_and_continues_publication(setup_case, monkeypatch):

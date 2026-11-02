@@ -16,7 +16,6 @@ from agentworks.capabilities.harness_integration.setup import (
     UserSetupInvocation,
     WorkspaceSetupInvocation,
 )
-from agentworks.errors import ConfigError
 from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
 from agentworks.plugins.codex.harness_integration import CodexIntegration
 from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
@@ -83,7 +82,7 @@ def test_new_session_delivery_keeps_cross_origin_names_strict(adapter, artifact_
     module = import_module(f"agentworks.plugins.{adapter}.artifacts")
     outer = artifact(artifact_type, owner="outer")
     local = artifact(artifact_type, owner="local")
-    with pytest.raises(ConfigError):
+    with pytest.raises(NativeArtifactConflictError):
         module.session_artifacts(
             context=context(outer, local),
             configured=None,
@@ -121,7 +120,7 @@ def test_deferring_a_renamed_existing_entry_exposes_its_other_native_collision(d
                 "fixture retained persona name", tuple(problem.identity for problem in problems), hint="fixture repair"
             )
 
-    result = defer_setup_conflicts(plan, invocation, "session", check)
+    result = defer_setup_conflicts(plan, invocation, check)
     assert {item.input_id for item in result.deferred} == {renamed.identity, competing.identity}
     assert {origin for file in result.files for origin in file.origins} == {independent.origin_identity}
     assert incomplete.called
