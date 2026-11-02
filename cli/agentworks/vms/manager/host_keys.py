@@ -45,6 +45,7 @@ class ImportStatus(StrEnum):
     MARKER = "trust marker present"
     CONFLICT = "conflicts with the stored key"
     NO_ADDRESS = "no tailnet address"
+    MALFORMED = "malformed host key, nothing recorded"
 
 
 @dataclass(frozen=True)
@@ -140,6 +141,10 @@ def _import_one(vm: VMRow, keygen: str, source: Path | None) -> HostKeyImport:
         return outcome(ImportStatus.ALREADY_CURRENT if set(matches.keys) <= stored else ImportStatus.CONFLICT)
     if not matches.keys:
         return outcome(ImportStatus.NO_MATCH)
+    # A record ssh-keygen would reject blocks every connection and is permanent,
+    # so a VM with any such key gets none and the others carry on.
+    if not all(trust.is_valid_key(*key) for key in matches.keys):
+        return outcome(ImportStatus.MALFORMED)
     trust.write_records(name, matches.keys)
     return outcome(ImportStatus.IMPORTED, len(matches.keys))
 

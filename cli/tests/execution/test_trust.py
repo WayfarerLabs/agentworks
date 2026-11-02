@@ -14,9 +14,10 @@ from agentworks.errors import ConfigError, StateError, ValidationError
 from agentworks.execution import trust
 from agentworks.execution.errors import TrustMissing
 from agentworks.execution.trust import HOST_TRUST, HostKey, TrustBinding, TrustMode
+from tests.ssh_fixtures import fake_host_key
 
-_KEY = HostKey("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
-_OTHER_KEY = HostKey("ssh-rsa", "AAAAB3NzaC1yc2EAAAADAQABAAABAQC7")
+_KEY = fake_host_key("ssh-ed25519")
+_OTHER_KEY = fake_host_key("ssh-rsa")
 
 needs_ssh = pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
 
@@ -222,6 +223,8 @@ def test_a_file_with_no_usable_line_is_no_record() -> None:
         HostKey("", "AAAA"),
         HostKey("ssh-ed25519", ""),
         HostKey("ssh-ed25519", "AAAA ssh-rsa BBBB"),
+        HostKey("ssh-ed25519", _KEY.blob[:-8]),  # truncated
+        HostKey("ssh-ed25519", _OTHER_KEY.blob),  # an RSA blob labelled ssh-ed25519
     ],
 )
 def test_a_malformed_key_is_refused_at_the_write_boundary_and_nothing_is_written(key: HostKey) -> None:

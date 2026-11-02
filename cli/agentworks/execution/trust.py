@@ -21,9 +21,12 @@ it, never the reverse.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import contextlib
 import os
 import re
+import struct
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -176,15 +179,40 @@ def stored_keys(vm_name: str) -> tuple[HostKey, ...]:
     keys: list[HostKey] = []
     for line in text.splitlines():
         fields = line.split()
-        if len(fields) >= 3 and fields[0] == alias and _is_key(fields[1], fields[2]):
+        if len(fields) >= 3 and fields[0] == alias and is_valid_key(fields[1], fields[2]):
             key = HostKey(fields[1], fields[2])
             if key not in keys:
                 keys.append(key)
     return tuple(keys)
 
 
-def _is_key(key_type: str, blob: str) -> bool:
-    return bool(_KEY_TYPE.fullmatch(key_type) and _KEY_BLOB.fullmatch(blob))
+def is_valid_key(key_type: str, blob: str) -> bool:
+    """Whether the fields could be a host key ``ssh-keygen -lf`` would read.
+
+    Boundary: a key arrives from a ``known_hosts`` file, ``ssh-keyscan`` output
+    or the store, so the check is on the blob itself: it must be base64, its
+    first SSH string must be the line's key type, and (except for certificates)
+    it must be nothing but whole SSH strings, which catches a truncated blob.
+    """
+    if not (_KEY_TYPE.fullmatch(key_type) and _KEY_BLOB.fullmatch(blob)):
+        return False
+    try:
+        raw = base64.b64decode(blob, validate=True)
+    except (binascii.Error, ValueError):
+        return False
+    offset, strings = 0, []
+    while offset < len(raw):
+        if offset + 4 > len(raw):
+            return False
+        (length,) = struct.unpack_from(">I", raw, offset)
+        end = offset + 4 + length
+        if end > len(raw):
+            return False
+        strings.append(raw[offset + 4 : end])
+        offset = end
+        if key_type.endswith("-cert-v01@openssh.com") and len(strings) == 1:
+            break  # the rest of a certificate is not a run of strings
+    return bool(strings) and strings[0] == key_type.encode("ascii")
 
 
 def has_record(vm_name: str) -> bool:
@@ -206,7 +234,7 @@ def write_records(vm_name: str, keys: Sequence[HostKey]) -> None:
     here rather than written.
     """
     for key in keys:
-        if not _is_key(key.key_type, key.blob):
+        if not is_valid_key(key.key_type, key.blob):
             raise ValidationError(
                 f"refusing to record a malformed host key for VM '{vm_name}'", entity_kind="vm", entity_name=vm_name
             )

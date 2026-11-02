@@ -4,7 +4,9 @@ matcher; what they pin is what the import does with the answer."""
 
 from __future__ import annotations
 
+import base64
 import shutil
+import struct
 import subprocess
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -16,6 +18,7 @@ from agentworks.cli import app
 from agentworks.errors import ConfigError, NotFoundError, StateError
 from agentworks.execution import trust
 from agentworks.execution.trust import HostKey
+from agentworks.vms.manager import host_keys
 from agentworks.vms.manager.host_keys import ImportStatus, import_host_keys, render_import
 
 if TYPE_CHECKING:
@@ -257,6 +260,62 @@ def test_vms_imported_before_a_later_failure_still_get_their_ssh_config_entries(
     assert trust.has_record("first")
     assert not trust.has_record("second")
     assert len(synced) == 1
+
+
+# -- Keys the store would refuse ------------------------------------------------------------
+
+
+def _blob(*strings: bytes) -> str:
+    return base64.b64encode(b"".join(struct.pack(">I", len(item)) + item for item in strings)).decode()
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        HostKey("ssh-ed25519", _blob(b"ssh-ed25519", bytes(32))[:-8]),  # truncated
+        HostKey("ssh-ed25519", _blob(b"ssh-rsa", bytes(32))),  # an RSA blob labelled ssh-ed25519
+        HostKey("ssh-ed25519", "not*base64"),
+        HostKey("ssh-ed25519", "AAAA"),
+    ],
+    ids=["truncated-blob", "mislabelled-type", "non-base64", "too-short"],
+)
+def test_a_malformed_key_is_reported_and_nothing_is_recorded_for_that_vm(
+    db: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, bad: HostKey
+) -> None:
+    _vm(db, "broken", "100.64.0.1")
+    source = tmp_path / "known_hosts"
+    source.write_text("")
+    monkeypatch.setattr(host_keys, "_matches", lambda keygen, src, address: host_keys._Matches((bad,), marker=False))
+
+    outcomes = _run(db, "broken", known_hosts=source)
+
+    assert outcomes["broken"].status is ImportStatus.MALFORMED
+    assert not trust.has_record("broken")
+    assert render_import(list(outcomes.values())) is False
+
+
+def test_all_continues_past_a_vm_with_a_malformed_key_and_fails_the_report(
+    db: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, keys: list[HostKey], synced: list[object]
+) -> None:
+    _vm(db, "broken", "100.64.0.1")
+    _vm(db, "good", "100.64.0.2")
+    source = tmp_path / "known_hosts"
+    source.write_text("")
+    bad = HostKey("ssh-ed25519", "not*base64")
+    monkeypatch.setattr(
+        host_keys,
+        "_matches",
+        lambda keygen, src, address: host_keys._Matches(
+            (bad,) if address == "100.64.0.1" else (keys[0],), marker=False
+        ),
+    )
+
+    outcomes = _run(db, all_vms=True, known_hosts=source)
+
+    assert outcomes["broken"].status is ImportStatus.MALFORMED
+    assert outcomes["good"].status is ImportStatus.IMPORTED
+    assert trust.stored_keys("good") == (keys[0],)
+    assert render_import(list(outcomes.values())) is False
 
 
 # -- Selection, sources and exit status --------------------------------------------------------

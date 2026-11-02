@@ -19,6 +19,7 @@ from agentworks.ssh_config import (
     ssh_host_alias,
     sync_ssh_config,
 )
+from tests.ssh_fixtures import fake_host_key
 
 
 def test_ssh_host_alias_default_prefix() -> None:
@@ -465,7 +466,7 @@ def test_store_options_appear_exactly_for_vms_with_a_record(tmp_path: Path, rebu
     db.get_setting.return_value = None
     db.list_vms.return_value = [_mock_vm("known", "100.64.0.1"), _mock_vm("fresh", "100.64.0.2")]
     db.list_agents.side_effect = lambda vm_name: [_mock_agent(f"agent-{vm_name}", "agt-claude", vm_name)]
-    trust.write_records("known", [trust.HostKey("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAA")])
+    trust.write_records("known", [fake_host_key()])
 
     if rebuild == "config_dir":
         _rebuild_config_dir(config, db)
@@ -505,7 +506,7 @@ def test_an_entry_gains_and_loses_the_store_options_with_the_record(tmp_path: Pa
     _rebuild_config_dir(config, db)
     assert "HostKeyAlias" not in conf.read_text()
 
-    trust.write_records("web", [trust.HostKey("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAA")])
+    trust.write_records("web", [fake_host_key()])
     _rebuild_config_dir(config, db)
     assert "HostKeyAlias agentworks-vm-web" in conf.read_text()
 
@@ -528,7 +529,7 @@ def test_the_installed_client_resolves_the_managed_entry_against_the_store(
     db.get_setting.return_value = None
     db.list_vms.return_value = [_mock_vm("known", "100.64.0.1")]
     db.list_agents.return_value = []
-    trust.write_records("known", [trust.HostKey("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAA")])
+    trust.write_records("known", [fake_host_key()])
     _rebuild_config_dir(config, db)
 
     # -G resolves the configuration and exits; it never connects.
@@ -562,7 +563,7 @@ def test_one_vms_store_problem_leaves_its_trust_lines_out_without_aborting_the_r
     db.get_setting.return_value = None
     db.list_vms.return_value = [_mock_vm("broken", "100.64.0.1"), _mock_vm("good", "100.64.0.2")]
     db.list_agents.return_value = []
-    key = trust.HostKey("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAA")
+    key = fake_host_key()
     trust.write_records("good", [key])
     trust.begin_enrollment("broken")
     trust.store_file("broken").mkdir()  # reading it raises
@@ -590,7 +591,7 @@ def test_a_store_path_ssh_would_expand_leaves_the_trust_lines_out_for_every_vm(
     db.list_agents.return_value = []
     monkeypatch.setattr(trust, "STORE_DIR", tmp_path / "100%")
     for name in ("one", "two"):
-        trust.write_records(name, [trust.HostKey("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAA")])
+        trust.write_records(name, [fake_host_key()])
 
     _rebuild_config_dir(config, db)
 

@@ -1050,10 +1050,9 @@ def seed_vm_trust(vm_name: str) -> None:
     """Give ``vm_name`` a host-key record in the (per-test) store, so VM-mode
     connections to it pass the missing-record check."""
     from agentworks.execution import trust
+    from tests.ssh_fixtures import fake_host_key
 
-    trust.write_records(
-        vm_name, [trust.HostKey("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAItestkeytestkeytestkeytestkeytestkeytestkey")]
-    )
+    trust.write_records(vm_name, [fake_host_key()])
 
 
 @pytest.fixture(autouse=True)
