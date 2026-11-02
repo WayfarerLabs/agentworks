@@ -248,8 +248,9 @@ the agent, as for every VM connection.
   `Permission denied (publickey` raises `ConnectivityError` whose hint names the provider console:
   recover logs in with the same key it would repair, so a cloud VM that refuses it needs the
   provider's own access (serial console, EC2 Instance Connect) or recreation. When the key is
-  encrypted and the agent does not hold it, `client.agent_load_hint` appends the passphrase hint,
-  the check `VMAccess.passphrase_hint` makes.
+  encrypted and the agent does not hold it, the hint leads with the passphrase hint from
+  `client.agent_load_hint`, the check `VMAccess.passphrase_hint` makes, since it is given only when
+  it is the likely cause.
 - `wait_until_answering(*, failure_hint)` probes with
   `root_script.run(self.run_as_root, "true", deadline=10)` up to six times, three seconds apart, and
   warns `failure_hint` before raising `ConnectivityError` when none completes: today's propagation

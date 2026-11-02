@@ -113,7 +113,7 @@ def test_a_host_key_failure_in_the_client_log_is_a_trust_mismatch(monkeypatch: p
 
 
 @pytest.mark.parametrize("load_hint", [None, "ssh-add the key"], ids=["key-loaded-or-plain", "key-not-loaded"])
-def test_a_refused_key_in_the_client_log_adds_the_agent_load_hint_when_there_is_one(
+def test_a_refused_key_in_the_client_log_leads_with_the_agent_load_hint_when_there_is_one(
     monkeypatch: pytest.MonkeyPatch, load_hint: str | None
 ) -> None:
     answering(monkeypatch, log_text="agw@203.0.113.7: Permission denied (publickey).\n", status=None)
@@ -124,7 +124,7 @@ def test_a_refused_key_in_the_client_log_adds_the_agent_load_hint_when_there_is_
 
     hint = caught.value.hint
     assert hint  # the provider console, always
-    assert hint.endswith("ssh-add the key") is (load_hint is not None)
+    assert hint.startswith("ssh-add the key") is (load_hint is not None)  # first: it fires only when likely
 
 
 # -- wait_until_answering ----------------------------------------------------------------

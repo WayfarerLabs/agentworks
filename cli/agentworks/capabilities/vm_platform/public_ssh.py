@@ -43,6 +43,11 @@ if TYPE_CHECKING:
 ROOT_COMMAND = "sudo -n /bin/bash -s"
 """The remote command: a constant every account shell Agentworks allows parses unchanged."""
 
+_PROVIDER_ACCESS_HINT = (
+    "Reach the VM through the provider's own access (its serial console, or EC2 Instance Connect) "
+    "to restore the admin's authorized key, or delete and recreate the VM."
+)
+
 PROBE_ATTEMPTS = 6
 PROBE_DEADLINE_SECONDS = 10
 PROBE_INTERVAL_SECONDS = 3
@@ -75,18 +80,15 @@ class PublicSSH:
             raise TrustMismatch(self._vm_name, ssh_process.tail_lines(text))
         if ssh_process.AUTH_FAILURE in text:
             # Recovery logs in with the key it would repair, so waiting or retrying cannot help,
-            # unless the key is encrypted and the agent does not hold it.
-            refused = ConnectivityError(
+            # unless the key is encrypted and the agent does not hold it. That hint comes first:
+            # it is given only when it is the likely cause.
+            load_hint = client.agent_load_hint(self._identity_file)
+            raise ConnectivityError(
                 f"VM '{self._vm_name}' refused the configured SSH key at its public address {self._destination.host}",
                 entity_kind="vm",
                 entity_name=self._vm_name,
-                hint=(
-                    "Reach the VM through the provider's own access (its serial console, or EC2 Instance Connect) "
-                    "to restore the admin's authorized key, or delete and recreate the VM."
-                ),
+                hint=" ".join(part for part in (load_hint, _PROVIDER_ACCESS_HINT) if part),
             )
-            refused.add_hint(client.agent_load_hint(self._identity_file))
-            raise refused
         return raw
 
     def wait_until_answering(self, *, failure_hint: str | None) -> None:
