@@ -14,7 +14,6 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.capabilities.vm_platform import ProvisionRequest
-from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError
 from agentworks.plugins.azure.config import (
@@ -175,7 +174,10 @@ class TestCreateProvisioningOutput:
         monkeypatch.setattr(AzureVMPlatform, "_compute_client", lambda self, az, ctx: fake_compute)
         monkeypatch.setattr(AzureVMPlatform, "_network_client", lambda self, az, ctx: fake_network)
         monkeypatch.setattr(AzureVMPlatform, "_vm_exists", lambda self, compute, rg, name: False)
-        monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", lambda self, auth_key, *, node: "100.64.0.5")
+        monkeypatch.setattr(
+            "agentworks.plugins.azure.platform.complete_cloud_bootstrap",
+            lambda run_as_root, auth_key, **kwargs: "100.64.0.5",
+        )
 
     @staticmethod
     def _request(*, cpus: int, memory: int, disk: int = 50, swap: int = 4) -> ProvisionRequest:
@@ -296,7 +298,10 @@ class TestCreateOSDiskClamp:
         monkeypatch.setattr(AzureVMPlatform, "_compute_client", lambda self, az, ctx: fake_compute)
         monkeypatch.setattr(AzureVMPlatform, "_network_client", lambda self, az, ctx: fake_network)
         monkeypatch.setattr(AzureVMPlatform, "_vm_exists", lambda self, compute, rg, name: False)
-        monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", lambda self, auth_key, *, node: "100.64.0.5")
+        monkeypatch.setattr(
+            "agentworks.plugins.azure.platform.complete_cloud_bootstrap",
+            lambda run_as_root, auth_key, **kwargs: "100.64.0.5",
+        )
         request = ProvisionRequest(
             vm_name="dev",
             debian_release=DebianRelease.TRIXIE,

@@ -36,7 +36,6 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
-from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConnectivityError
 from agentworks.plugins.azure.network import AzureError
@@ -117,10 +116,10 @@ def _interrupt_the_wait(monkeypatch: pytest.MonkeyPatch) -> KeyboardInterrupt:
     tests can assert the ORIGINAL interrupt is what propagates."""
     interrupt = KeyboardInterrupt("first")
 
-    def _raise(self: EphemeralTailscaleBootstrap, auth_key: str, *, node: str) -> None:
+    def _raise(run_as_root: object, auth_key: str, **kwargs: object) -> None:
         raise interrupt
 
-    monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", _raise)
+    monkeypatch.setattr("agentworks.plugins.azure.platform.complete_cloud_bootstrap", _raise)
     return interrupt
 
 

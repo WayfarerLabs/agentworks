@@ -32,7 +32,6 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
-from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, ConnectivityError
 from agentworks.plugins.azure import network as azure_network
@@ -78,7 +77,10 @@ def _stub_egress_detection(monkeypatch: pytest.MonkeyPatch) -> None:
     the failure branches."""
     monkeypatch.setattr(ssh_exposure, "_egress_ip_cache", None)
     monkeypatch.setattr(ssh_exposure, "detect_egress_ip", lambda: _DETECTED)
-    monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", lambda self, auth_key, *, node: "100.64.0.5")
+    monkeypatch.setattr(
+        "agentworks.plugins.azure.platform.complete_cloud_bootstrap",
+        lambda run_as_root, auth_key, **kwargs: "100.64.0.5",
+    )
 
 
 def _fail_detection(monkeypatch: pytest.MonkeyPatch) -> None:

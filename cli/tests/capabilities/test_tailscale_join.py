@@ -11,7 +11,7 @@ from agentworks.capabilities.vm_platform.tailscale_join import (
     ADDRESS_READS,
     JOIN_FRAGMENT,
     READINESS_PROBES,
-    EphemeralTailscaleBootstrap,
+    complete_cloud_bootstrap,
     join_tailscale,
     read_tailnet_address,
     settle_tailnet_address,
@@ -204,7 +204,7 @@ def test_a_failed_join_raises_once_without_the_key(answer: Answer, match: str) -
 def test_the_bootstrap_waits_joins_once_and_settles() -> None:
     guest = FakeGuest()
 
-    address = EphemeralTailscaleBootstrap(guest.run_as_root, readiness_command="ready").complete(KEY, node=NODE)
+    address = complete_cloud_bootstrap(guest.run_as_root, KEY, node=NODE, readiness_command="ready")
 
     assert address == ADDRESS
     assert guest.payloads == ["true", "ready", JOIN_FRAGMENT, READ]
@@ -225,7 +225,7 @@ def test_the_readiness_loop_retries_a_refused_key_and_any_probe_that_does_not_co
 
     guest = FakeGuest(respond)
 
-    EphemeralTailscaleBootstrap(guest.run_as_root).complete(KEY, node=NODE)
+    complete_cloud_bootstrap(guest.run_as_root, KEY, node=NODE)
 
     assert guest.count("true") == len(refusals) + 1
     assert guest.joins == 1
@@ -235,7 +235,7 @@ def test_readiness_stops_at_its_bound_without_sending_the_key() -> None:
     guest = FakeGuest(lambda payload, seen: Answer(raises=ConnectivityError("refused")))
 
     with pytest.raises(ProvisioningError, match="did not answer"):
-        EphemeralTailscaleBootstrap(guest.run_as_root).complete(KEY, node=NODE)
+        complete_cloud_bootstrap(guest.run_as_root, KEY, node=NODE)
 
     assert guest.payloads == ["true"] * READINESS_PROBES
 
@@ -244,7 +244,7 @@ def test_a_host_key_mismatch_ends_readiness_at_once() -> None:
     guest = FakeGuest(lambda payload, seen: Answer(raises=TrustMismatch("vm1")))
 
     with pytest.raises(TrustMismatch):
-        EphemeralTailscaleBootstrap(guest.run_as_root).complete(KEY, node=NODE)
+        complete_cloud_bootstrap(guest.run_as_root, KEY, node=NODE)
 
     assert guest.payloads == ["true"]
 
@@ -254,8 +254,8 @@ def test_a_failed_readiness_command_raises_before_the_join(answer: Answer) -> No
     guest = FakeGuest(lambda payload, seen: answer if payload == "ready" else Answer())
 
     with pytest.raises(ProvisioningError, match="the label did not complete"):
-        EphemeralTailscaleBootstrap(guest.run_as_root, readiness_command="ready", readiness_label="the label").complete(
-            KEY, node=NODE
+        complete_cloud_bootstrap(
+            guest.run_as_root, KEY, node=NODE, readiness_command="ready", readiness_label="the label"
         )
 
     assert guest.payloads == ["true", "ready"]
@@ -265,7 +265,7 @@ def test_exhausted_reads_after_the_join_log_out_without_joining_again() -> None:
     guest = reads_failing(Answer(status=None))
 
     with pytest.raises(ConnectivityError) as caught:
-        EphemeralTailscaleBootstrap(guest.run_as_root).complete(KEY, node=NODE)
+        complete_cloud_bootstrap(guest.run_as_root, KEY, node=NODE)
 
     assert guest.joins == 1
     assert guest.count(LOGOUT) == 1

@@ -574,7 +574,7 @@ and the operator-facing command banners that the rest of the codebase calls "pha
   `run_as_root`. GCE's startup wrapper checks a durable success marker before any mutation and is
   rejected when its exact UTF-8 value exceeds 256 KiB. After the payload installs Tailscale,
   `create()` joins through its own `run_as_root` with `tailscale_join.join_tailscale` (the clouds
-  through `EphemeralTailscaleBootstrap`, which first waits for the provider's bootstrap), the only
+  through `complete_cloud_bootstrap`, which first waits for the provider's bootstrap), the only
   script that carries the key. The key travels inside that script on the channel's stdin and reaches
   Tailscale through `--auth-key=file:/dev/stdin`, so it is in no argv on the workstation or the
   guest and absent from provider-retained configuration. `create()` then reads the address with
@@ -776,7 +776,7 @@ A new `Transport` subclass belongs under `cli/tests/transports/` alongside the p
 - `../base.py`: the `Capability` base and `RunContext`.
 - `bootstrap_script.py`, `cloud_init.py`, `skel.py`: shared create-time payload.
 - `tailscale_join.py`: the join, the address read and settle, and the clouds'
-  `EphemeralTailscaleBootstrap`, all over `run_as_root`.
+  `complete_cloud_bootstrap`, all over `run_as_root`.
 - `agentworks.vms.initializer`: the two-phase init driver (`bootstrap_vm` for Phase A provisioning
   state recording, the address check, and Tailscale SSH verification; `run_initialization` for Phase
   B initialization).

@@ -14,7 +14,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
 )
 from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform, PublicSSH
-from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
+from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import NotFoundError, StateError
 from agentworks.execution.trust import TrustBinding, TrustMode
@@ -649,8 +649,8 @@ class AzureVMPlatform(PublicAddressPlatform):
                 # a credential. Wait for it over the VM's root channel, then
                 # join once and settle the address.
                 target = PublicSSH(public_ip, admin_username, request.ssh_private_key, request.provisioning_trust)
-                tailnet_address = EphemeralTailscaleBootstrap(target.run_as_root).complete(
-                    tailscale_auth_key, node=request.hostname
+                tailnet_address = complete_cloud_bootstrap(
+                    target.run_as_root, tailscale_auth_key, node=request.hostname
                 )
                 prov_transport = SSHTransport(
                     host=public_ip,

@@ -35,7 +35,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
 )
 from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform, PublicSSH
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
-from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
+from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import AuthorizationError, ConfigError, NotFoundError, StateError, TokenRejectedError
@@ -576,8 +576,8 @@ class EC2Platform(PublicAddressPlatform):
             # credential. Wait for it over the VM's root channel, then join
             # once and settle the address.
             target = PublicSSH(public_ip, request.admin_username, request.ssh_private_key, request.provisioning_trust)
-            tailnet_address = EphemeralTailscaleBootstrap(target.run_as_root).complete(
-                request.tailscale_auth_key, node=request.hostname
+            tailnet_address = complete_cloud_bootstrap(
+                target.run_as_root, request.tailscale_auth_key, node=request.hostname
             )
             prov_transport = SSHTransport(
                 host=public_ip,

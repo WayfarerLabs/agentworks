@@ -137,56 +137,46 @@ def _log_out(run_as_root: Callable[[bytes, float], RawRun]) -> bool:
     return result.status == 0
 
 
-class EphemeralTailscaleBootstrap:
-    """Finish a cloud VM's key-free bootstrap: wait for it, join once, settle the address."""
+def complete_cloud_bootstrap(
+    run_as_root: Callable[[bytes, float], RawRun],
+    auth_key: str,
+    *,
+    node: str,
+    readiness_command: str = DEFAULT_READINESS_COMMAND,
+    readiness_label: str = DEFAULT_READINESS_LABEL,
+) -> str:
+    """Finish a cloud VM's key-free bootstrap: wait for it, join as ``node`` once, and return the settled address.
 
-    def __init__(
-        self,
-        run_as_root: Callable[[bytes, float], RawRun],
-        *,
-        readiness_command: str = DEFAULT_READINESS_COMMAND,
-        readiness_label: str = DEFAULT_READINESS_LABEL,
-    ) -> None:
-        self._run_as_root = run_as_root
-        self._readiness_command = readiness_command
-        self._readiness_label = readiness_label
+    A readiness failure raises before the key is sent, so the platform's
+    create rollback removes the partial VM with the key never used.
+    """
+    _wait_for_readiness(run_as_root, readiness_command, readiness_label)
+    join_tailscale(run_as_root, auth_key, node=node)
+    return settle_tailnet_address(run_as_root, node=node, rerun_hint=CREATE_RERUN_HINT)
 
-    def complete(self, auth_key: str, *, node: str) -> str:
-        """Wait for the provider's bootstrap, join as ``node`` once, and return its settled address.
 
-        A readiness failure raises before the key is sent, so the platform's
-        create rollback removes the partial VM with the key never used.
-        """
-        self._wait_for_readiness()
-        join_tailscale(self._run_as_root, auth_key, node=node)
-        return settle_tailnet_address(self._run_as_root, node=node, rerun_hint=CREATE_RERUN_HINT)
-
-    def _wait_for_readiness(self) -> None:
-        output.detail(f"Waiting for {self._readiness_label} bootstrap to complete (this may take several minutes)...")
-        failure: ConnectivityError | None = None
-        for attempt in range(READINESS_PROBES):
-            if attempt:
-                time.sleep(READINESS_PAUSE_SECONDS)
-            failure = None
-            try:
-                probe = root_script.run(self._run_as_root, "true", deadline=READINESS_PROBE_DEADLINE_SECONDS)
-            except ConnectivityError as error:
-                # A refused key included: a cloud's guest agent may install the key after sshd starts.
-                failure = error
-                continue
-            if probe.status == 0:
-                break
-        else:
-            raise ProvisioningError("the VM did not answer over SSH for create-time bootstrap") from failure
-
-        incomplete = ProvisioningError(
-            f"{self._readiness_label} did not complete successfully during create-time bootstrap"
-        )
+def _wait_for_readiness(run_as_root: Callable[[bytes, float], RawRun], command: str, label: str) -> None:
+    output.detail(f"Waiting for {label} bootstrap to complete (this may take several minutes)...")
+    failure: ConnectivityError | None = None
+    for attempt in range(READINESS_PROBES):
+        if attempt:
+            time.sleep(READINESS_PAUSE_SECONDS)
+        failure = None
         try:
-            result = root_script.run(
-                self._run_as_root, self._readiness_command, deadline=READINESS_COMMAND_DEADLINE_SECONDS
-            )
+            probe = root_script.run(run_as_root, "true", deadline=READINESS_PROBE_DEADLINE_SECONDS)
         except ConnectivityError as error:
-            raise incomplete from error
-        if result.status != 0:
-            raise incomplete
+            # A refused key included: a cloud's guest agent may install the key after sshd starts.
+            failure = error
+            continue
+        if probe.status == 0:
+            break
+    else:
+        raise ProvisioningError("the VM did not answer over SSH for create-time bootstrap") from failure
+
+    incomplete = ProvisioningError(f"{label} did not complete successfully during create-time bootstrap")
+    try:
+        result = root_script.run(run_as_root, command, deadline=READINESS_COMMAND_DEADLINE_SECONDS)
+    except ConnectivityError as error:
+        raise incomplete from error
+    if result.status != 0:
+        raise incomplete

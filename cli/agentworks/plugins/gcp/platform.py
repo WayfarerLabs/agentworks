@@ -17,7 +17,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
 )
 from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform, PublicSSH
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
-from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
+from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import AgentworksError, ConnectivityError, StateError
 from agentworks.execution.trust import TrustBinding, TrustMode
@@ -411,11 +411,13 @@ class GCEPlatform(PublicAddressPlatform):
             target = PublicSSH(external_ip, request.admin_username, request.ssh_private_key, request.provisioning_trust)
 
             request.progress.step("Wait for GCE startup marker and join Tailscale through the root channel")
-            tailnet_address = EphemeralTailscaleBootstrap(
+            tailnet_address = complete_cloud_bootstrap(
                 target.run_as_root,
+                request.tailscale_auth_key,
+                node=request.hostname,
                 readiness_command=GCE_READINESS_COMMAND,
                 readiness_label=GCE_READINESS_LABEL,
-            ).complete(request.tailscale_auth_key, node=request.hostname)
+            )
             transport = SSHTransport(
                 host=external_ip,
                 trust=request.provisioning_trust,

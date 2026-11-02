@@ -16,7 +16,6 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedProvisioningError
-from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import (
@@ -252,9 +251,8 @@ class TestCreate:
         this payload and reaches the VM only in the later join script."""
         rec = install_fakes(monkeypatch)
         monkeypatch.setattr(
-            EphemeralTailscaleBootstrap,
-            "complete",
-            lambda self, auth_key, *, node: "100.64.0.5",
+            "agentworks.plugins.aws.platform.complete_cloud_bootstrap",
+            lambda run_as_root, auth_key, **kwargs: "100.64.0.5",
         )
         rsa_key = "ssh-rsa " + ("A" * 716) + " agw@host"
         _platform().create(_request(tailscale="tskey-abc", ssh_key=rsa_key), RunContext(config=_config()))
@@ -348,9 +346,8 @@ class TestCreate:
     def test_tailscale_path_waits_for_bootstrap(self, monkeypatch: pytest.MonkeyPatch) -> None:
         install_fakes(monkeypatch)
         monkeypatch.setattr(
-            EphemeralTailscaleBootstrap,
-            "complete",
-            lambda self, auth_key, *, node: "100.64.0.5",
+            "agentworks.plugins.aws.platform.complete_cloud_bootstrap",
+            lambda run_as_root, auth_key, **kwargs: "100.64.0.5",
         )
         result = _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
         assert result.tailnet_address == "100.64.0.5"
@@ -381,9 +378,8 @@ class TestCreateRollback:
         leaking them past both rollback arms."""
         rec = install_fakes(monkeypatch)
         monkeypatch.setattr(
-            EphemeralTailscaleBootstrap,
-            "complete",
-            lambda self, auth_key, *, node: (_ for _ in ()).throw(OSError("ssh: command not found")),
+            "agentworks.plugins.aws.platform.complete_cloud_bootstrap",
+            lambda run_as_root, auth_key, **kwargs: (_ for _ in ()).throw(OSError("ssh: command not found")),
         )
         with pytest.raises(EC2Error):
             _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
@@ -398,9 +394,8 @@ class TestCreateRollback:
             Controls(terminate_errors=[client_error("InvalidInstanceID.NotFound", "propagating", "Terminate")]),
         )
         monkeypatch.setattr(
-            EphemeralTailscaleBootstrap,
-            "complete",
-            lambda self, auth_key, *, node: (_ for _ in ()).throw(OSError("bootstrap failed")),
+            "agentworks.plugins.aws.platform.complete_cloud_bootstrap",
+            lambda run_as_root, auth_key, **kwargs: (_ for _ in ()).throw(OSError("bootstrap failed")),
         )
 
         with pytest.raises(EC2Error):
@@ -413,9 +408,8 @@ class TestCreateRollback:
         not_found = client_error("InvalidInstanceID.NotFound", "propagating", "Terminate")
         rec = install_fakes(monkeypatch, Controls(terminate_errors=[not_found] * 6))
         monkeypatch.setattr(
-            EphemeralTailscaleBootstrap,
-            "complete",
-            lambda self, auth_key, *, node: (_ for _ in ()).throw(OSError("bootstrap failed")),
+            "agentworks.plugins.aws.platform.complete_cloud_bootstrap",
+            lambda run_as_root, auth_key, **kwargs: (_ for _ in ()).throw(OSError("bootstrap failed")),
         )
         platform = _platform()
 
