@@ -181,8 +181,8 @@ resolved client that cannot start raises `ConnectivityError` naming it, the prec
   arguments" holds on every channel.
 - WSL2 uses `--exec`, so root's login shell is not between `wsl.exe` and Bash. The program name is a
   literal today (`wsl2.py:247-248`, and `transports/wsl2.py:139`, which goes); this slice introduces
-  the constant `_WSL` in `wsl2.py`, used by `_wsl` and the two new calls, so the bare-name lookup
-  stays in one place (below).
+  the constant `_WSL` in `wsl2.py`, used by `_wsl` and the two new calls, and absolute on Windows
+  (below).
 - Proxmox: QGA runs commands as root (`plugins/proxmox/transport.py:3-4`). `input-data` keeps the
   65,536-character guard (`transport.py:24`). The largest script is the bootstrap, 14,359 bytes as
   generated at the baseline. A truncated QGA report raises (`plugins/proxmox/api.py:102-103`). At
@@ -342,9 +342,9 @@ the two legacy transports, and imports nothing legacy:
   `subprocess.run(shlex.split(command))` locally, or the host argv with `$SHELL -lc <command>`
   remotely, the login wrap that finds Homebrew's `limactl` (`transports/remote_lima.py:1-7`,
   `ssh.py:420-421`). It makes one attempt, as today: the remote branch passes `retries=1` or
-  `SSH_DEFAULT_RETRIES` (`lima.py:293`), which is 1 (`ssh.py:289`). It raises a module-private
-  `LimaCommandFailed(ExternalError)` where it raises `SSHError` today, and a command with input
-  exposes neither stream (`lima.py:303-311`).
+  `SSH_DEFAULT_RETRIES` (`lima.py:293`), which is 1 (`ssh.py:289`). It raises
+  `LimaCommandFailed(ExternalError)`, public in `lima_host.py` because `lima.py` catches it, where
+  it raises `SSHError` today, and a command with input exposes neither stream (`lima.py:303-311`).
 - `run_as_root(instance, script, deadline)` and `shell(instance) -> int` are the table's rows.
 - `upload`, `run_detached` and `kill_detached` serve the remote create (`lima.py:577-669`), the pair
   copied from `remote_exec.py:47-213` with only the branch its one caller takes
@@ -366,12 +366,13 @@ the detached run with `start`. `create` joins with
 
 `run_as_root` is the table's argv through `run_process`; `native_shell` is today's interactive argv
 (`transports/wsl2.py:137-142`) as the admin. Both use `_WSL`, the program constant this slice
-introduces for them and for `_wsl`, so the bare-name lookup D1 avoids for `ssh` (Windows searches
-the current directory) has one place to be fixed; that fix is filed for the WSL2 owner, with D1 as
-the model. `create` builds no `WSL2Transport` (`wsl2.py:765-775`);
-`run_wsl2_bootstrap(run_as_root, ...)` runs the key-free script with a 900-second deadline (today's,
-`wsl2_bootstrap.py:130-134`) and parses its markers from the result's stdout, then create joins and
-settles.
+introduces for them and for `_wsl`. On Windows it is `%SystemRoot%\System32\wsl.exe` (`C:\Windows`
+when `SystemRoot` is unset), so the process handed the auth key on stdin is never found by the
+bare-name lookup D1 avoids for `ssh` (Windows searches the current directory); elsewhere, where only
+tests build WSL2 argvs, it is the bare `wsl`. `create` builds no `WSL2Transport`
+(`wsl2.py:765-775`); `run_wsl2_bootstrap(run_as_root, ...)` runs the key-free script with a
+900-second deadline (today's, `wsl2_bootstrap.py:130-134`) and parses its markers from the result's
+stdout, then create joins and settles.
 
 Today's `setsid sudo -n /bin/bash FILE </dev/null` (`wsl2_bootstrap.py:131`) goes, for reasons that
 no longer apply: `setsid` was added because sudo's `use_pty` gave the bootstrap a terminal whose
@@ -393,18 +394,26 @@ override. `recovery_needs_guest_sshd = False`.
 
 ### AWS, Azure and GCP
 
-Each cloud keeps one private helper, `_public_ssh(vm, ctx, trust) -> PublicSSH`, holding today's
-live public-address read (`plugins/aws/platform.py:703-718`, `plugins/azure/platform.py:800-824`,
-`plugins/gcp/platform.py:580-597`). An empty address raises `StateError` with the platform's own
-console hint, where the factory raised it for every platform (`transports/__init__.py:215-228`,
-incident row I32). Then:
+The three clouds subclass one mixin, `PublicAddressPlatform(VMPlatform)` in `public_ssh.py`, which
+holds the root channel once. Each cloud supplies two things: `_public_address(vm, ctx) -> str`,
+today's live public-address read (`plugins/aws/platform.py:703-718`,
+`plugins/azure/platform.py:800-824`, `plugins/gcp/platform.py:580-597`), and the class attribute
+`public_address_hint`, its own console hint. The mixin's private context manager
+`_public_ssh(vm, ctx, binding)` opens `transient_route(vm, ctx, config=ctx.config)`, reads the
+address, and raises `StateError` with `public_address_hint` when it is empty, where the factory
+raised it for every platform (`transports/__init__.py:215-228`, incident row I32); GCP's read raises
+`GCEError` itself instead. It then builds `PublicSSH(address, admin, identity_file, binding)` with
+the identity file from `ctx.config.operator.ssh_private_key` (every operation's context carries the
+configuration), runs `wait_until_answering(failure_hint=probe_failure_hint)`, and yields it for as
+long as the route is open. Then:
 
 - `run_as_root`: `trust.require_record(vm.name)` first, so a VM with no record opens no firewall
-  rule, then inside `_transient_route`: `wait_until_answering(failure_hint=...)` and
-  `run_as_root(script, deadline)` under VM trust.
-- `read_host_keys`: inside the route and `trust.provisioning_binding(vm.name)` (`trust.py:281-299`),
-  `wait_until_answering`, then `root_script.read_host_keys(target.run_as_root)` under that
-  Unverified file. HLA D9's only post-provisioning use of Unverified.
+  rule, then `run_as_root(script, deadline)` inside `_public_ssh` under VM trust.
+- `read_host_keys`: a VM that has a record raises `StateError`, since its keys are read under that
+  record, never around it. Otherwise, inside `trust.provisioning_binding(vm.name)`
+  (`trust.py:281-299`) and `_public_ssh` under that binding,
+  `root_script.read_host_keys(target.run_as_root)` under that Unverified file. HLA D9's only
+  post-provisioning use of Unverified.
 - `native_shell`: inside the route, the probe, then `shell()`.
 - `create` builds
   `PublicSSH(public address, admin, request.ssh_private_key, request.provisioning_trust)` where it
@@ -682,7 +691,7 @@ workstations.
 | Vector                                                                                                                                                                                                                                                   | Lanes                               |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
 | W1 A payload that reads stdin gets end of file; a 16 KB script, larger than the bootstrap and under QGA's 65,536-character cap, runs whole                                                                                                               | L V                                 |
-| W2 A script cut short anywhere runs nothing, not even the start marker                                                                                                                                                                                   | L                                   |
+| W2 A script cut short anywhere before its closing brace runs nothing, not even the start marker                                                                                                                                                          | L                                   |
 | W3 The secret reaches the payload and not its children's environment; during a join, no `/proc/*/cmdline` on the guest holds the key, and the guest argv is `/bin/bash -s`                                                                               | L V                                 |
 | W4 With the trap, closing the channel mid-payload leaves it to finish: Bash and `/bin/echo` write after the close and the effect lands; the rekey script closed after its logout step still lands the join and the final restart; the outcome is unknown | L; V on Lima, Remote Lima and Azure |
 | W5 Status 0, 1 and 255 from the payload come back as themselves                                                                                                                                                                                          | L V                                 |

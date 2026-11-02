@@ -234,6 +234,12 @@ gains `auth_failed`; its last line becomes: host-key failure, else authenticatio
   `Unknown(CONNECTION)` today. An encrypted key the agent does not hold fails as
   `Permission denied (publickey)`, so that is now `AUTH_FAILED`, and the condition becomes
   `CONNECTION` or `AUTH_FAILED`.
+- The agent probe (`_assert_agent_access_works`, `agents/manager/access.py:44`) falls back to
+  running `true` as the admin on `CONNECTION` or `AUTH_FAILED`. An admin that completes means the
+  agent predates direct SSH (the reinit hint); an admin refused with `AUTH_FAILED` too means the
+  operator's key is the problem, so the probe raises the admin result's `require_completed`, the
+  key-refused `ExecutionIncomplete`, with the passphrase hint appended; anything else is an
+  unreachable VM.
 - Vector A1 (below) confirms the client log captures the token on 8.5, 9.x and Win32-OpenSSH.
 
 ## Reachability
