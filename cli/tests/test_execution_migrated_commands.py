@@ -131,6 +131,20 @@ def test_a_dropped_connection_with_an_unreachable_admin_means_the_vm_is_unreacha
     assert type(raised.value) is ConnectivityError
 
 
+def test_an_admin_refused_too_is_the_operators_key_with_its_passphrase_hint(
+    vm_access_recorder: AccessRecorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    refused = Result(Unknown(UnknownReason.AUTH_FAILED))
+    monkeypatch.setattr(VMAccess, "passphrase_hint", lambda self: "load the key")
+
+    with pytest.raises(ExecutionIncomplete) as raised:
+        probe(vm_access_recorder, refused, refused)
+
+    assert raised.value.result.completion == Unknown(UnknownReason.AUTH_FAILED)
+    assert raised.value.hint is not None
+    assert raised.value.hint.endswith("load the key")
+
+
 def test_an_unreachable_vm_carries_the_access_objects_passphrase_hint(
     vm_access_recorder: AccessRecorder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
