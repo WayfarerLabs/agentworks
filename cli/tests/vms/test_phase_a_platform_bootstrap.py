@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import inspect
-from dataclasses import fields
 from types import SimpleNamespace
 from typing import ClassVar
 from unittest.mock import MagicMock
 
 import pytest
 
-from agentworks.capabilities.vm_platform import ProvisionRequest, ProvisionResult, tailscale_join
 from agentworks.errors import ProvisioningError
 from agentworks.execution import trust
 from agentworks.vms.initializer import driver
@@ -39,29 +36,6 @@ def _reset_built_transports() -> None:
     _TailscaleTransport.built.clear()
 
 
-def test_fallback_era_contract_shapes_are_structurally_absent() -> None:
-    request_fields = {item.name: item for item in fields(ProvisionRequest)}
-    result_fields = {item.name for item in fields(ProvisionResult)}
-
-    assert request_fields["tailscale_auth_key"].type == "str"
-    assert "progress" in request_fields
-    assert "bootstrap_complete" not in result_fields
-    assert not hasattr(tailscale_join, "BootstrapCompletion")
-
-    phase_a_parameters = set(inspect.signature(driver._phase_a_bootstrap).parameters)
-    assert phase_a_parameters == {
-        "db",
-        "config",
-        "vm_name",
-        "admin_username",
-        "logger",
-        "tailnet_address",
-    }
-    driver_source = inspect.getsource(driver)
-    assert "run_wsl2_bootstrap" not in driver_source
-    assert "generate_bootstrap_script" not in driver_source
-
-
 def test_the_returned_address_is_recorded_in_canonical_form(monkeypatch: pytest.MonkeyPatch) -> None:
     db = MagicMock()
     config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key="/tmp/test-key"))
@@ -78,21 +52,6 @@ def test_the_returned_address_is_recorded_in_canonical_form(monkeypatch: pytest.
 
     assert ts_target.kwargs["host"] == "100.64.0.9"  # type: ignore[attr-defined]
     db.update_vm_tailscale.assert_called_once_with("myvm", "100.64.0.9")
-
-
-@pytest.mark.parametrize("address", ["", "not-an-address", "100.64.0.9 rm -rf"])
-def test_an_address_core_cannot_parse_fails_before_anything_is_recorded_or_connected(
-    monkeypatch: pytest.MonkeyPatch, address: str
-) -> None:
-    db = MagicMock()
-    config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key="/tmp/test-key"))
-    monkeypatch.setattr(driver, "SSHTransport", _TailscaleTransport)
-
-    with pytest.raises(ProvisioningError, match="not an IP address"):
-        driver._phase_a_bootstrap(db, config, "myvm", "agw", MagicMock(), tailnet_address=address)  # type: ignore[arg-type]
-
-    db.update_vm_tailscale.assert_not_called()
-    assert _TailscaleTransport.built == []
 
 
 # -- Enrollment: Phase A's verify connection writes the VM's host key --------

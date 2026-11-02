@@ -143,10 +143,6 @@ def bootstrap_vm(
     """
     home = f"/home/{admin_username}"
 
-    # Attach logger to the provisioning transport. ``ExecTransport`` declares
-    # ``logger`` on the ABC; the assignment is polymorphic.
-    exec_target.logger = logger
-
     transport = exec_target.describe()
 
     vm_row = db.get_vm(vm_name)

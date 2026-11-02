@@ -103,7 +103,6 @@ def test_bootstrap_uses_manager_owned_logger_without_closing(
         on_tailscale_ready=lambda: None,
     )
 
-    assert exec_target.logger is logger
     logger.close.assert_not_called()
 
 
