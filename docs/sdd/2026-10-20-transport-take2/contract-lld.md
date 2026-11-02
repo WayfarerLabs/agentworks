@@ -406,16 +406,18 @@ and failures. A reinit that finds a failure stops before Phase B.
 
 ## The VM contract
 
-`vms/contract.py` holds one table. A `Check` is `(id, severity, probe)`.
+`vms/contract.py` reads the release first, through its own request `RELEASE_PROBE`
+(`Command(("cat", "/etc/os-release"))`, judged by `debian.verify_os_release`), which raises rather
+than reporting a finding. It then holds one table in request order: the script rows (`ScriptCheck`),
+then the elevated request (`RequestCheck`).
 
 | Row            | Severity | How it is checked                                                                                  |
 | -------------- | -------- | -------------------------------------------------------------------------------------------------- |
-| `release`      | FAIL     | Own request: `Command(("cat", "/etc/os-release"))`, judged by `debian.verify_os_release`           |
 | `systemd`      | FAIL     | Script: `[ -d /run/systemd/system ]`, the test `sd_booted()` uses                                  |
-| `sudo`         | FAIL     | Own request: `Command(("id", "-u"), elevated=True)`, stdout `0`                                    |
 | `base-tools`   | FAIL     | Script: `command -v` of `install`, `flock`, `nohup`, `setsid` and `tar`                            |
 | `login-shells` | WARN     | Script: for the admin and each agent, the passwd shell's basename is `sh`, `dash`, `bash` or `zsh` |
 | `pam-env`      | WARN     | Script: the existing probe over `/etc/environment`, `pam_env.conf` and `~/.pam_environment`        |
+| `sudo`         | FAIL     | Own request: `Command(("id", "-u"), elevated=True)`, stdout `0`                                    |
 
 Every FAIL row means the VM cannot be repaired by initialization, so a failure names recreation
 (`agw vm delete NAME`, then create again) and the table carries no remedy field. The warnings carry
