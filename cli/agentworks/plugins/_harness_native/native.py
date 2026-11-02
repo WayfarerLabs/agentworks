@@ -169,11 +169,12 @@ def _owned(claim: NativeClaim | None, source: str | None) -> bool:
         return claim.source == source
     # Older claims included the mutable native version. Association ownership
     # survives native updates while retaining the full parent marketplace identity.
-    recorded = parse_settings(claim.source.encode(), format="json")
-    observed = parse_settings(source.encode(), format="json")
+    try:
+        recorded = parse_settings(claim.source.encode(), format="json")
+    except ConfigError:
+        return False
     recorded.pop("version", None)
-    observed.pop("version", None)
-    return identity(recorded) == identity(observed)
+    return identity(recorded) == source
 
 
 def _plugin_market(plugin: NativePlugin) -> str | None:
@@ -289,22 +290,28 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
         if root_exists and requested:
             available.update(cli.available())
         selectors = []
+        ambiguous: dict[str, list[str]] = {}
         for selector in requested:
             matches = [
                 item
                 for item in available
                 if item == selector or ("@" not in selector and item.split("@")[0] == selector)
             ]
+            if not matches:
+                raise ConfigError("requested plugin is absent in the native marketplaces")
             if len(matches) != 1:
-                raise ConfigError("requested plugin is absent or ambiguous in the native marketplaces")
+                ambiguous[selector] = matches
+                continue
             selectors.append(matches[0])
         if len(selectors) != len(set(selectors)):
             raise ConfigError("multiple plugin names resolve to the same native installation")
-        desired_names = {market.name for market in desired}
+        retained_plugins = {item for matches in ambiguous.values() for item in matches}
+        retained_markets = {item.rsplit("@", 1)[1] for item in retained_plugins}
+        desired_names = {market.name for market in desired} | retained_markets
         obsolete = tuple(
             claim
             for claim in native_claims
-            if claim.identifier not in (set(selectors) if claim.role == "plugin" else desired_names)
+            if claim.identifier not in (set(selectors) | retained_plugins if claim.role == "plugin" else desired_names)
         )
         _check_contributions(tool, plan, tuple(desired), tuple(selectors), obsolete)
         protected: set[tuple[str, str]] = set()
@@ -340,6 +347,9 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 blocked_plugins.add(identifier)
 
         def remove_plugin(claim: NativeClaim) -> bool:
+            if claim.identifier.rsplit("@", 1)[1] in blocked_markets:
+                skip("plugin", claim.identifier, "its marketplace could not be retired or replaced safely")
+                return False
             existing = by_plugin.get(claim.identifier)
             if existing is not None:
                 if not _owned(claim, existing.source):
@@ -360,6 +370,35 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
             removed.append(claim)
             return True
 
+        for selector, matches in ambiguous.items():
+            invocation.report_incomplete(
+                f"Skipped ambiguous plugin '{selector}'; select a qualified plugin@marketplace name."
+            )
+            protected.update(_native_key(tool, "plugin", item) for item in matches)
+        for name in retained_markets:
+            protected.add(_native_key(tool, "marketplace", name))
+
+        # Claude's user-scoped removal requires the current user declaration,
+        # even when list still reports a registration. Check before uninstalling
+        # any dependencies; never fall back to removal across all scopes.
+        retiring_markets = {claim.identifier for claim in obsolete if claim.role == "marketplace"}
+        replacing_markets = {
+            market.name
+            for market in desired
+            if market.name in by_market and by_market[market.name].source != market.source
+        }
+        for name in sorted(replacing_markets & retained_markets):
+            skip("marketplace", name, "replacement would affect an ambiguous plugin selection")
+        if tool == "claude":
+            declarations = _table(initial_document, "extraKnownMarketplaces")
+            for name in sorted((retiring_markets | replacing_markets) & by_market.keys()):
+                if name not in declarations:
+                    skip(
+                        "marketplace",
+                        name,
+                        "user-scoped removal requires restoring its extraKnownMarketplaces user declaration first",
+                    )
+
         if sources or requested:
             files.directory(root, create=True)
         # Retirement is entry-local: preserve unsafe associations and their claims,
@@ -369,6 +408,8 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 remove_plugin(claim)
         for claim in obsolete:
             if claim.role != "marketplace":
+                continue
+            if claim.identifier in blocked_markets:
                 continue
             existing = by_market.get(claim.identifier)
             if existing is not None:
@@ -387,10 +428,18 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
             removed.append(claim)
 
         for market in desired:
+            if market.name in blocked_markets:
+                continue
             existing_market = by_market.get(market.name)
             if existing_market is not None and existing_market.source != market.source:
                 if not _owned(prior.get(("marketplace", market.name)), existing_market.source):
-                    skip("marketplace", market.name, "the existing unowned source differs from the declaration")
+                    skip(
+                        "marketplace",
+                        market.name,
+                        "its full source cannot be observed"
+                        if existing_market.source is None
+                        else "the existing unowned source differs from the declaration",
+                    )
                     continue
                 dependents = tuple(
                     item for item in cli.plugins(cli.markets()) if item.identifier.endswith("@" + market.name)

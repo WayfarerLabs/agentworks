@@ -223,6 +223,11 @@ class NativeCLI:
                     if any(key in declaration and declaration[key] != value for key, value in native_source.items()):
                         raise ValueError
                 else:
+                    if source.get("source") in ("git", "github") and name not in configured:
+                        # List output omits sparse paths, so without a current
+                        # declaration it cannot establish the full association.
+                        result.append(NativeMarket(name, None))
+                        continue
                     declared_source = _object(declaration.get("source", source))
                     # Claude's list output omits sparse paths. Its native user
                     # declaration still contributes them to the full identity.

@@ -51,3 +51,17 @@ def test_codex_inventory_preserves_unknown_sources_and_complete_registered_ident
 
     plugins["installed"][-1]["version"] = "4"
     assert cli.plugins(observed)[-1].source == installed[-1].source
+
+
+@pytest.mark.parametrize(
+    "source",
+    [{"source": "git", "url": "https://fixture.invalid/market.git"}, {"source": "github", "repo": "fixture/market"}],
+)
+def test_claude_list_without_user_declaration_cannot_prove_complete_git_identity(source, monkeypatch):
+    files = InventoryFiles()
+    monkeypatch.setattr(files, "read", lambda path: b"{}")
+    cli = NativeCLI("claude", cast(NativeFiles, files), home="/user", config_root="/user/.claude")
+    monkeypatch.setattr(cli, "command", lambda args, **kwargs: [{"name": "market", **source, "ref": "release"}])
+    observed = cli.markets()
+    assert len(observed) == 1 and observed[0].name == "market"
+    assert observed[0].source is None
