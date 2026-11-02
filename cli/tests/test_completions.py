@@ -328,7 +328,8 @@ print -r -- __READY__
                         output += os.read(master, 65536)
                 assert b"__READY__" in output
                 os.write(master, line.encode() + b"\t")
-                deadline = time.monotonic() + 1
+                # Generous: CI runs this beside other workers, and the wait ends as soon as zsh responds.
+                deadline = time.monotonic() + 5
                 while not (group_capture.exists() or topic_capture.exists()) and time.monotonic() < deadline:
                     time.sleep(0.02)
             finally:
