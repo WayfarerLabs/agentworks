@@ -172,10 +172,12 @@ The "Phase A will retry IP discovery without the auth key" warnings (`tailscale_
 **Lima keeps today's order.** The read follows the restart-sentinel `limactl restart`
 (`lima.py:434-454`) as now, and relies on the retry.
 
-**WSL2 and Proxmox transports with `sudo=True`.** Both transports already ran `tailscale ip -4` with
-`sudo=True` as Phase A's fallback on every platform (`driver.py:401`), so the call is not new to
-them; the one WSL2 `setsid sudo -n ... </dev/null` workaround is specific to the long bootstrap
-script (`wsl2_bootstrap.py:131`). The WSL2 and Proxmox live cells cover it.
+**WSL2 and Proxmox transports with `sudo=True`.** `WSL2Transport` already runs `sudo=True` commands
+after the bootstrap (`wsl2_bootstrap.py:79`, `:140`, which `transports/wsl2.py:69-70` wraps as
+`sudo -n bash -c`); the one `setsid sudo -n ... </dev/null` workaround is specific to the long
+bootstrap script (`:131`). Proxmox's guest agent runs commands as root, so `sudo=True` costs nothing
+there. (`driver.py:399-401`'s fallback never ran on these two platforms, which return an address
+from the script, so it is no evidence.) The WSL2 and Proxmox live cells cover it.
 
 **Interaction with create.** Core no longer reads the address at all. The attestation block
 (`lifecycle.py:599-626`) and the `tailscale ip -4` fallback (`driver.py:399-401`) are deleted.
@@ -345,12 +347,16 @@ Any `Exception` in steps 1 to 5's span takes the existing arm: provisioning `FAI
 **Status and interrupts.** `COMPLETE` is now written after the contract passes, not before the first
 connection (`driver.py:396-404`). An interrupt that lands before then finds the row `IN_PROGRESS`;
 the `except BaseException` arm (`driver.py:193-211`) secures the VM as today and now also marks the
-row `FAILED`. A VM that was never attested is retained as failed, as D9 and incident row I26
-require, and the ordinary-command gates block only a `FAILED` row
+row `FAILED` unless `COMPLETE` has been written (it is entered only after step 1 sets `IN_PROGRESS`,
+so a `PENDING` row cannot reach it). A VM that was never attested is retained as failed, as D9 and
+incident row I26 require, and the ordinary-command gates block only a `FAILED` row
 (`vms/manager/_helpers.py:229-236`), so an unattested VM stays out of them. `lifecycle.py` prints
-the delete wording for it (as the attestation interrupt arm does today, `lifecycle.py:611-617`: the
-VM exists but was not verified; run `agw vm delete`) rather than `_warn_init_cancel`'s reinit
-advice, by reading the row's status. An interrupt after step 5 leaves `COMPLETE` and takes
+the delete wording whenever provisioning is not `COMPLETE`, not only when it is `FAILED`, because
+reinit refuses any such row (`lifecycle.py:813`) and the `PENDING` window includes the hold entered
+before `bootstrap_vm` (`lifecycle.py:643`); its cancel handler also marks that `PENDING` row
+`FAILED`, so the gates cover it too. The wording is the attestation interrupt arm's today
+(`lifecycle.py:611-617`: the VM exists but was not verified; run `agw vm delete`), not
+`_warn_init_cancel`'s reinit advice. An interrupt after step 5 leaves `COMPLETE` and takes
 `_warn_init_cancel`. A post-ready wait that raises (`HOST_KEY`, `AUTH_FAILED`, anything else the
 table raises) is outside the span like the wait itself and propagates out of `bootstrap_vm` to
 `_raise_init_failure`: the row stays `COMPLETE`, the VM was attested seconds earlier, and the
@@ -394,16 +400,15 @@ and failures. A reinit that finds a failure stops before Phase B.
 | `release`      | FAIL     | Own request: `Command(("cat", "/etc/os-release"))`, judged by `debian.verify_os_release`           |
 | `systemd`      | FAIL     | Script: `[ -d /run/systemd/system ]`, the test `sd_booted()` uses                                  |
 | `sudo`         | FAIL     | Own request: `Command(("id", "-u"), elevated=True)`, stdout `0`                                    |
-| `base-tools`   | FAIL     | Script: `command -v` of `install`, `flock`, `setsid` and `tar`                                     |
+| `base-tools`   | FAIL     | Script: `command -v` of `install`, `flock`, `nohup`, `setsid` and `tar`                            |
 | `login-shells` | WARN     | Script: for the admin and each agent, the passwd shell's basename is `sh`, `dash`, `bash` or `zsh` |
 | `pam-env`      | WARN     | Script: the existing probe over `/etc/environment`, `pam_env.conf` and `~/.pam_environment`        |
 
 Every FAIL row means the VM cannot be repaired by initialization, so a failure names recreation
 (`agw vm delete NAME`, then create again) and the table carries no remedy field. The warnings carry
-their own commands. The list of `base-tools` follows what the transport and slices 5 to 7 call
-(`install` at `vms/hardening.py:182`, `tar` at `vms/backup.py:342`, `setsid` and `nohup` for
-detached work, `flock` for the file lock); it is reconciled against the callers when the row is
-written.
+their own commands. The `base-tools` list is what the transport and slices 5 to 7 call: `install`
+(`vms/hardening.py:182`), `tar` (`vms/backup.py:342`), `setsid` and `nohup` (the detached wrapper,
+HLA D7) and `flock` (the file lock, HLA D6).
 
 Not rows, and why:
 
@@ -443,23 +448,29 @@ AGW-CHECK-END
 ```
 
 Severity comes from the table, never from the guest. The prelude is one function,
-`problem ID DETAIL`, and each fragment calls it; the script never exits non-zero. Several names in a
-detail are separated by a space, because the detail allowlist has no comma. **The parser is a
-boundary** (the output comes from the guest; D3): it accepts only `AGW-CHECK` lines whose id is a
-script-probed row. A known id with a detail outside `[A-Za-z0-9_ ./:~$-]{0,80}` still reports its
-row, with the detail replaced by "(detail not shown)", so a malformed line can never hide a problem.
-`login-shells` names accounts, and the parser keeps only names from the set it passed in; a name the
-guest invents is dropped, and an account with no passwd entry is reported by name like any other
-problem. A missing `AGW-CHECK-END` means the probe did not complete: the report is one FAIL for the
-probe instead of one per row. It names the outcome and no stream text: the script's exit status (the
-request completed, so it has one), and points at the operation log and
-`agw vm verify-connection NAME`. No error holds a stream (D13).
+`problem ID DETAIL`, and each fragment calls it; the script never exits non-zero. A row that names
+several things in one line (`base-tools`, `pam-env`) separates them with a space, because the detail
+allowlist has no comma. A row that names accounts (`login-shells`) prints one line per account, and
+repeated ids aggregate into one row: Agent Linux users are `agt-<name>` and can be 32 characters
+(`agents/manager/_common.py:37-42`), so three of them would overflow one 80-character detail and
+degrade to "(detail not shown)". **The parser is a boundary** (the output comes from the guest; D3):
+it accepts only `AGW-CHECK` lines whose id is a script-probed row. A known id with a detail outside
+`[A-Za-z0-9_ ./:~$-]{0,80}` still reports its row, with the detail replaced by "(detail not shown)",
+so a malformed line can never hide a problem. For `login-shells` each line's detail is one account,
+and the parser keeps only accounts from the set it passed in; a name the guest invents is dropped,
+and an account with no passwd entry is reported by name like any other problem. A missing
+`AGW-CHECK-END` means the probe did not complete: the report is one FAIL for the probe instead of
+one per row. It names the outcome and no stream text: the script's exit status (the request
+completed, so it has one), and points at the operation log and `agw vm verify-connection NAME`. No
+error holds a stream (D13).
 
 `BaseReport` holds `release` and `findings`; `Finding` holds `check` and `detail`.
 `enforce(report, vm_name)` prints each WARN with `output.warn` and raises `StateError` listing every
-FAIL, with the recreation hint. It is the only function that prints. A `login-shells` warning names
-`agw agent reinit NAME` for an agent, looked up from the `Agent(name, linux_user)` it was given
-(`access.py`; `agw agent reinit` applies the template shell through the admin,
+FAIL, with the recreation hint (the probe-incomplete FAIL carries its own pointer, the operation log
+and `verify-connection`, instead, because recreation is not what it asks for). It is the only
+function that prints. For each account the `login-shells` row names, `enforce` renders a separate
+warning: `agw agent reinit NAME` for an agent, looked up from the `Agent(name, linux_user)` it was
+given (`access.py`; `agw agent reinit` applies the template shell through the admin,
 `agents/initializer.py:160`), and `agw vm reinit NAME` for the admin, whose shell the admin step
 sets (`driver.py:675`). Both are warnings, so neither blocks a reinit that is the cure; a tcsh admin
 whose stage 0 happens to parse is still alerted.
@@ -547,11 +558,11 @@ for the old shape is refused at load rather than failing after the VM exists. Th
 number in the same PR. The sites: the kind descriptor (`vm_platform/kinds.py:135`), the six
 implementations (`lima.py:169`, `wsl2.py:498`, and `contract_version` in the AWS, Azure, GCP and
 Proxmox platforms, `plugins/aws/platform.py:104`, `azure/platform.py:83`, `gcp/platform.py:182`,
-`proxmox/platform.py:124`), the test that asserts it (`tests/test_wsl2_create_interrupt.py:140`) and
-any vm-platform fake that declares it. Every "version 1" mention for this kind becomes "version 2":
-`kinds.py:62`, `capabilities/vm_platform/README.md:200` and `:301`, `capabilities/README.md:732`,
-`plugins/README.md:206`, and ADR 0025's "internal version-1 vm-platform capability" (`:27`, amended
-in its status block, below).
+`proxmox/platform.py:124`), the tests that assert it (`tests/test_wsl2_create_interrupt.py:140`,
+`tests/plugins/test_gcp.py:89`) and any vm-platform fake that declares it. Every "version 1" mention
+for this kind becomes "version 2": `kinds.py:62`, `capabilities/vm_platform/README.md:200` and
+`:301`, `capabilities/README.md:732`, `plugins/README.md:206`, and ADR 0025's "internal version-1
+vm-platform capability" (`:27`, amended in its status block, below).
 
 ## Tests
 
@@ -597,9 +608,10 @@ None restates the implementation or our prose.
   written before the error is raised; the label is the latest step.
 - **Existing tests that change.**
   - `tests/conftest.py`'s `verified_debian_release` fixture (`:78-84`) patches
-    `lifecycle.probe_debian_release`; it and its users (`tests/vms/test_create_vm_dispatch.py:111`,
-    `:393`, and the module-level `pytestmark` at `tests/vms/test_create_reinit_orchestrated.py:34`)
-    move to faking `bootstrap_vm`'s result.
+    `lifecycle.probe_debian_release`; its two module-level `pytestmark` users
+    (`tests/vms/test_create_vm_dispatch.py:35`, `tests/vms/test_create_reinit_orchestrated.py:34`)
+    move to faking `bootstrap_vm`'s result, and `test_create_vm_dispatch.py:111` and `:393` patch
+    `lifecycle.probe_debian_release` directly and do the same.
   - `tests/vms/test_phase_a_platform_bootstrap.py` (`:68` rediscovery, `:108` returned address,
     `:147` enrollment, `:160` no key) is rewritten against `phase_a` and the required address.
   - The Phase A tests in `tests/vms/test_bootstrap_vm_hooks.py` (`:85`, `:109`, `:144`, `:161`,
@@ -630,10 +642,11 @@ operator's disposition):
 - Create on every platform shows python3 installed at provisioning (the first `true` completes), the
   required `tailnet_address`, the first connection enrolling and the release attested first; a
   Windows workstation among the clouds.
-- **A fresh, never-initialized VM for E1 to E4**, on Debian 12 and Debian 13: the tester sends
-  `SIGINT` to `agw vm create` as soon as "Provisioning complete." prints and before Phase B's first
-  step. The row is `COMPLETE` with initialization pending (the interrupt is after step 5), so the VM
-  has run only Phase A. The vectors then run with `AGW_CONFORMANCE_VM` before `agw vm reinit`.
+- **A fresh, never-initialized VM for E1, E2, E4 and E6**, on Debian 12 and Debian 13: the tester
+  sends `SIGINT` to `agw vm create` as soon as "Provisioning complete." prints and before Phase B's
+  first step. The row is `COMPLETE` with initialization pending (the interrupt is after step 5), so
+  the VM has run only Phase A. The vectors then run with `AGW_CONFORMANCE_VM` before
+  `agw vm reinit`.
 - **A forced failure of the address read** on one cloud, one Lima and one WSL2 or Proxmox, from a
   throwaway branch whose `parse_tailnet_address` rejects every value (not shipped): the node is
   logged out (or named when the logout also fails), create fails with the backend rolled back, and
@@ -655,8 +668,8 @@ The entry points this slice moves are `create_vm`, `reinit_vm`, `bootstrap_vm`, 
 redact SSH logs before first write, `93aca2cfb` verify created release in core, `eefaa2c5e` clean up
 provisioning artifacts, `3bff603ce` log cleanup boundaries, `7307e2f60` make platform bootstrap
 complete or raise, `2841cb9fa` guarantee Python for native guest helpers), ADR 0025 and the
-bootstrap-fallback-removal and debian-release-transition SDDs. It adds these rows to the plan's
-inventory (I21 is the last row today):
+bootstrap-fallback-removal and debian-release-transition SDDs. It adds these rows to the HLA's
+incident inventory (`hla.md:748-778`; I21 is the last row today):
 
 | Row | Behavior                                                                                                                                                                                                     | Re-proved in |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------ |
@@ -733,25 +746,38 @@ implementation, for the owners to apply:
   `AUTH_FAILED`), and owns neither the exhaustion warning nor the proceed-anyway decision.
 - **HLA D9.** Enroll mode covers a polled first contact, up to 17 connections (sixteen attempts and
   the confirming probe), not one connection. `accept-new` still records a key only when none is
-  known. Enrollment is reached through the distinct factory `execution.enrollment_access`.
+  known. Enrollment is reached through the distinct factory `execution.enrollment_access`. The
+  "first connection runs the base contract check" sentence (`hla.md:489-490`) is withdrawn: the
+  first connection is the polled `true` probe in Enroll mode, and the contract runs on the VM-mode
+  connections after it.
 - **HLA D10.**
   - Remove "Tailscale up at the recorded address" from the base list (the connection proves it);
     `login-shells` is a warning for the admin and every agent, not a failure.
   - Drop the initialized checks and "Initialized checks run at the end of Phase B"; a failed install
     already fails Phase B.
   - The table is `(id, severity, probe)`; every FAIL names recreation. The release remains the first
-    contract request after the first connection.
+    contract request, but "base checks run on core's first connection" (`hla.md:535`) becomes "on
+    the VM-mode connections that follow the enrolling first connection".
 - **HLA D11 (`tailnet_address` row).** The validation happens in the shared settle helper inside the
   platform's rollback window and again in Phase A, not in the value object. All six platforms read
   the address and log out over the transport they hold through `settle_tailnet_address`; the
   key-bearing script only joins and `parse_bootstrap_output` no longer requires an address.
-- **HLA D13.**
+- **HLA D13** (`hla.md:674-684`; the brief's `:658-659` is the error table, not this).
+  - `oplog.py` only formats: `format_record`, with `SSHLogger.record` writing it. It no longer
+    "lands with its `LOG_DIR` constant" and is not "the per-operation log" itself.
   - The record's label is the caller's `SSHLogger` step heading.
   - `LOG_DIR`, its readers and the test patch sites do not move in slice 3 (slice 8, with
     `SSHLogger`'s deletion); "the readers move to the new constant in slice 3" is withdrawn.
   - "The request's secret values" are the set registered at the log's construction, as `SSHLogger`
     does; per-request marking has no consumer yet.
   - The sensitive-stdin rule is implemented with `Bytes(sensitive=)` in slice 5.
+- **HLA Migration and Incident inventory.**
+  - Slice 3 (`hla.md:719-726`): remove "the initialized checks land too"; replace "`oplog.py` lands
+    with its `LOG_DIR` constant and the readers that move to it" with `format_record` and
+    `SSHLogger.record`, with `LOG_DIR` and its readers moving in slice 8; note `ProvisionResult` and
+    the `contract_version` bump (1 to 2) in this slice.
+  - The incident inventory (`hla.md:748-778`, not the plan) gains rows I22 to I28 as the Incident
+    audit above lists them, each re-proved in slice 3.
 - **Plan slice 3.**
   - Remove the `observation` option, the initialized checks and "the old `LOG_DIR` readers
     (`doctor_state.py`, `lifecycle.py`, `_helpers.py`, `power.py`, `vm logs`) and their test patch
@@ -760,8 +786,9 @@ implementation, for the owners to apply:
     joining the static check; the `release.py` split and deleting `probe_debian_release`;
     `parse_tailnet_address`, `settle_tailnet_address` and the `parse_bootstrap_output` change;
     narrowing the provisioning trust file's lifetime; the `contract_version` bump to 2; `COMPLETE`
-    written after the contract passes and `FAILED` on a Phase A interrupt; incident rows I22 to I28;
-    the test and vector lists above.
+    written after the contract passes and `FAILED` on a Phase A interrupt; the test and vector lists
+    above. Withdraw the test "each diagnosis names reinit or recreation" (`plan.md:221`): every FAIL
+    names recreation, so it asserts nothing.
   - Add: slice 3 does not merge without slice 4, with no stopgap hint wording in between.
   - Slice 4 deletes the legacy `TailscaleWait` and `wait_for_reconnect` with their last callers.
   - Slice 5 adds the operation log's handling of a sensitive stdin and the `observation` option.
@@ -770,9 +797,10 @@ implementation, for the owners to apply:
 - **execution-lld.md.** The classifier table gains `AUTH_FAILED` (a 255 with no start marker whose
   client log holds an authentication failure and no host-key failure); the error table's
   `ExecutionIncomplete` and the passphrase hint gain the new reason; `PermissionDenied` lands;
-  `VMAccess` takes an identity; "Left to the first consumer" is resolved for `elevated`, Enroll,
-  `reachability` and the operation log, and `observation` moves to slice 5; the use_pty note is
-  answered above.
+  `VMAccess` takes an identity, a trust mode and a log (the access-object section,
+  `execution-lld.md:160-165`, says its trust is always VM and Enroll "arrives with slice 3"); "Left
+  to the first consumer" is resolved for `elevated`, Enroll, `reachability` and the operation log,
+  and `observation` moves to slice 5; the use_pty note is answered above.
 - **trust-lld.md.** "Clouds before enrollment" and the test that the provisioning file "survives
   into core's post-create use" are obsolete: the file is scoped to `create`. Phase A's enrollment
   step list is replaced by the sequence above, and "Enroll mode is reachable only from create" is
