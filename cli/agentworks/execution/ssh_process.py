@@ -13,6 +13,7 @@ import enum
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from ipaddress import IPv6Address
@@ -21,6 +22,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
 from agentworks.execution import trust
+from agentworks.execution.client import install_guidance
 from agentworks.execution.envelope import classify
 from agentworks.execution.errors import ClientUnsupported
 from agentworks.execution.results import Completion, Result, Unknown
@@ -269,7 +271,9 @@ def spawn(
             list(argv), stdin=stdin, stdout=stdout, stderr=stderr, bufsize=bufsize, env=child_environment()
         )
     except OSError as error:
-        raise ClientUnsupported(f"the OpenSSH client could not be started: {error.strerror or error}") from error
+        reason = error.strerror or error
+        guidance = install_guidance(windows=sys.platform == "win32")
+        raise ClientUnsupported(f"the OpenSSH client could not be started: {reason}\n{guidance}") from error
 
 
 def exit_status(returncode: int) -> int:
