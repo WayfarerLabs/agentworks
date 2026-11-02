@@ -31,17 +31,14 @@ PAM_ENV_FILES = ("/etc/environment", "/etc/security/pam_env.conf", "~/.pam_envir
 
 # One line per file that holds anything other than comments and blank lines.
 # The home file counts only when an uncommented line of the sshd PAM stack
-# loads pam_env.so with user_readenv=1 before any trailing comment. It always exits 0: an absent or
-# unreadable file simply prints nothing.
+# loads pam_env.so with user_readenv=1 before any trailing comment. It always
+# exits 0: an absent or unreadable file simply prints nothing.
 PAM_ENV_PROBE = """\
 agw_has_settings() { [ -r "$2" ] && grep -qEv '^[[:space:]]*(#|$)' "$2" && printf '%s\\n' "$1"; }
 agw_has_settings /etc/environment /etc/environment
 agw_has_settings /etc/security/pam_env.conf /etc/security/pam_env.conf
-agw_reads_home_env() {
-  [ -r /etc/pam.d/sshd ] &&
-    grep -qE '^[[:space:]]*[^#[:space:]][^#]*pam_env\\.so[^#]*user_readenv=1' /etc/pam.d/sshd
-}
-agw_reads_home_env && agw_has_settings '~/.pam_environment' "$HOME/.pam_environment"
+grep -qsE '^[^#]*pam_env\\.so[^#]*user_readenv=1' /etc/pam.d/sshd &&
+  agw_has_settings '~/.pam_environment' "$HOME/.pam_environment"
 true
 """
 
