@@ -43,6 +43,10 @@ class _InvalidQGAExecStatus(ProxmoxAPIError):
     """A QGA exec-status response violates the provider contract."""
 
 
+class _TruncatedQGAOutput(_InvalidQGAExecStatus):
+    """A QGA exec-status reports the command exited but cut its output short."""
+
+
 def _invalid_qga_exec_status(reason: str, *, node: str, vmid: int, pid: int) -> _InvalidQGAExecStatus:
     return _InvalidQGAExecStatus(
         f"Proxmox guest-agent exec-status for VMID {vmid} on node '{node}' (PID {pid}) {reason}"
@@ -100,7 +104,9 @@ def _validate_qga_exec_status(
     if type(out_truncated) is not bool or type(err_truncated) is not bool:
         raise _invalid_qga_exec_status("has invalid truncation fields", node=node, vmid=vmid, pid=pid)
     if out_truncated or err_truncated:
-        raise _invalid_qga_exec_status("reports truncated output", node=node, vmid=vmid, pid=pid)
+        raise _TruncatedQGAOutput(
+            f"Proxmox guest-agent exec-status for VMID {vmid} on node '{node}' (PID {pid}) reports truncated output"
+        )
     return normalized
 
 

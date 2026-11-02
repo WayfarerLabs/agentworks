@@ -6,10 +6,10 @@ from typing import Any
 
 import pytest
 
-from agentworks.errors import ConnectivityError
+from agentworks.errors import ConnectivityError, TokenRejectedError
 from agentworks.execution.root_script import RawRun
 from agentworks.plugins.proxmox import guest_agent
-from agentworks.plugins.proxmox.api import ProxmoxAPIError
+from agentworks.plugins.proxmox.api import ProxmoxAPIError, _TruncatedQGAOutput
 
 SCRIPT = b"{\nAGW_SECRET=tskey-auth-private\n(\ntrue\n)\n}\n"
 
@@ -99,3 +99,26 @@ def test_a_script_over_qgas_input_limit_is_refused_before_dispatch() -> None:
         guest_agent.run_as_root(api, "pve1", 101, b"x" * (guest_agent.INPUT_DATA_LIMIT + 1), 60)  # type: ignore[arg-type]
 
     assert api.execs == []
+
+
+def _rejected(code: int) -> ProxmoxAPIError:
+    error = ProxmoxAPIError(f"Proxmox API POST failed ({code}): {SCRIPT.decode()}")
+    error.code = code
+    return error
+
+
+@pytest.mark.parametrize("code", [401, 403])
+def test_a_rejected_token_is_its_own_error_without_the_script(code: int) -> None:
+    with pytest.raises(TokenRejectedError) as caught:
+        run(FakeAPI([], dispatch=_rejected(code)))
+
+    assert "tskey-auth-private" not in str(caught.value)
+    assert caught.value.__context__ is None
+
+
+def test_a_truncated_report_is_a_script_that_exited() -> None:
+    with pytest.raises(ConnectivityError) as caught:
+        run(FakeAPI([_TruncatedQGAOutput("exec-status reports truncated output")]))
+
+    assert "tskey-auth-private" not in str(caught.value)
+    assert caught.value.__context__ is None
