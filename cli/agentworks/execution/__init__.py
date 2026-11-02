@@ -15,17 +15,23 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution.access import Identity, VMAccess
     from agentworks.execution.client import SSHClient
+    from agentworks.execution.requests import RunRequest
+    from agentworks.execution.results import Result
 
 
-def vm_access(vm: VMRow, config: Config, identity: Identity) -> VMAccess:
+def vm_access(
+    vm: VMRow, config: Config, identity: Identity, *, log: Callable[[RunRequest, Result], None] | None = None
+) -> VMAccess:
     """The passive access object for ``identity`` on ``vm`` (see ``access.vm_access``)."""
     from agentworks.execution.access import vm_access as build
 
-    return build(vm, config, identity)
+    return build(vm, config, identity, log=log)
 
 
 def resolve_ssh() -> SSHClient:

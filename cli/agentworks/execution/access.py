@@ -25,7 +25,7 @@ from agentworks.execution.results import Completed, NotDelivered, NotDeliveredRe
 from agentworks.execution.trust import TrustBinding, TrustMode
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Callable, Iterator, Sequence
     from pathlib import Path
     from typing import BinaryIO
 
@@ -55,7 +55,12 @@ Identity = Admin | Agent
 
 
 class VMAccess:
-    """Run, stream, attach and forward as one identity on one VM."""
+    """Run, stream, attach and forward as one identity on one VM.
+
+    ``log`` is an operation log's record callable (``SSHLogger.record``),
+    which ``run`` calls once per request. ``stream``, ``attach`` and
+    ``forward`` serve operator commands that keep no log.
+    """
 
     def __init__(
         self,
@@ -65,12 +70,14 @@ class VMAccess:
         user: str,
         identity_file: Path,
         port: int = 22,
+        log: Callable[[RunRequest, Result], None] | None = None,
     ) -> None:
         self.vm_name = vm_name
         self._host = host
         self._user = user
         self._identity_file = identity_file
         self._port = port
+        self._log = log
 
     # -- Operations ------------------------------------------------------------
 
@@ -80,11 +87,15 @@ class VMAccess:
         The client closes ssh's stdin right after the request. Each stream is
         read up to one pump constant (1 MiB); more is ``Unknown(OUTPUT_LIMIT)``.
         With ``check`` a result that is not ``Completed(0)`` raises its typed error.
+        The access's operation log, when it has one, records the request
+        before anything raises for its outcome, so a failure is logged too.
         """
         stdout, stderr = pump.Capture(), pump.Capture()
         with self._passphrase_hint_on_connection_failure():
             result = self._execute(request, stdin=None, on_stdout=stdout, on_stderr=stderr)
             result = Result(result.completion, bytes(stdout.data), bytes(stderr.data), result.client_log_tail)
+            if self._log is not None:
+                self._log(request, result)
             if check and result.require_completed(self.vm_name) != 0:
                 assert isinstance(result.completion, Completed)
                 raise CommandFailed(self.vm_name, result.completion.status, result)
@@ -285,7 +296,9 @@ def _flush_unless_reader_left(stream: BinaryIO) -> None:
                 os.close(null)
 
 
-def vm_access(vm: VMRow, config: Config, identity: Identity) -> VMAccess:
+def vm_access(
+    vm: VMRow, config: Config, identity: Identity, *, log: Callable[[RunRequest, Result], None] | None = None
+) -> VMAccess:
     """The access object for ``identity`` on ``vm``. Passive: it copies names and paths and nothing else."""
     user = vm.admin_username if isinstance(identity, Admin) else identity.linux_user
     return VMAccess(
@@ -293,4 +306,5 @@ def vm_access(vm: VMRow, config: Config, identity: Identity) -> VMAccess:
         host=vm.tailscale_host,
         user=user,
         identity_file=config.operator.ssh_private_key,
+        log=log,
     )

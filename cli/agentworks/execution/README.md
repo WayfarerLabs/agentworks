@@ -37,6 +37,13 @@ for `attach`). Each takes `env` and `cwd` (absolute; `None` is the home director
 `Script` also take `deadline` (seconds of local waiting; it never claims the guest command stopped).
 `vm exec` sends a `Script` under the identity's default shell, with several arguments shell-joined.
 
+`vm_access(..., log=)` takes an operation log's record callable, `SSHLogger.record` today, which
+`run` calls once per request before raising for its outcome, so failures are logged. The block is
+`oplog.format_record`'s: the step label, the request's shape (the argv, or a script's shell and
+login flag, with the working directory, the environment's names and the deadline), the completion,
+both streams and ssh's diagnostics. No environment value or script source reaches the formatter;
+the logger redacts the secrets registered when it was constructed, at its one sink.
+
 ## What a request becomes
 
 Every connection runs the same constant command, `python3 -I -S -c '<stage 0>'` (`ssh_process.py`).

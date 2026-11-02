@@ -225,3 +225,65 @@ def test_close_redacts_secrets_from_traceback(
     text = logger.path.read_text()
     assert secret not in text
     assert "[REDACTED]" in text
+
+
+# -- The record of an agentworks.execution request -------------------------------------
+
+
+def test_record_redacts_a_registered_secret_in_the_argv_the_streams_and_the_diagnostics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import shlex
+
+    from agentworks.execution.requests import Command
+    from agentworks.execution.results import Completed, Result
+
+    secret = "tskey-auth with space"
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+
+    logger.record(
+        Command(("tailscale", "up", f"--auth-key={secret}")),
+        Result(Completed(1), f"out {secret}".encode(), shlex.quote(secret).encode(), f"ssh: {secret}"),
+    )
+
+    text = logger.path.read_text()
+    assert secret not in text
+    assert shlex.quote(secret) not in text
+    assert text.count("[REDACTED]") == 4
+
+
+def test_record_labels_a_request_with_the_latest_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.execution.requests import Command
+    from agentworks.execution.results import Completed, Result
+
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    logger = SSHLogger("vm1", "test-op")
+
+    logger.step("first-step")
+    logger.step("second-step")
+    logger.record(Command(("true",)), Result(Completed(0)))
+
+    (record_line,) = [line for line in logger.path.read_text().splitlines() if "request (" in line]
+    assert "second-step" in record_line
+    assert "first-step" not in record_line
+
+
+def test_a_failed_request_is_recorded_before_its_error_is_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.execution.access import VMAccess
+    from agentworks.execution.errors import ExecutionIncomplete
+    from agentworks.execution.requests import Command
+    from agentworks.execution.results import Result, Unknown, UnknownReason
+
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    logger = SSHLogger("vm1", "test-op")
+    access = VMAccess(vm_name="vm1", host="100.64.0.9", user="agw", identity_file=tmp_path / "key", log=logger.record)
+    monkeypatch.setattr(VMAccess, "_execute", lambda self, *a, **k: Result(Unknown(UnknownReason.DEADLINE)))
+    monkeypatch.setattr(VMAccess, "passphrase_hint", lambda self: None)
+
+    with pytest.raises(ExecutionIncomplete):
+        access.run(Command(("true",)), check=True)
+
+    assert [line for line in logger.path.read_text().splitlines() if "request (" in line] != []
