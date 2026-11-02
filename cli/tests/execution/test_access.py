@@ -15,7 +15,7 @@ import pytest
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, ssh_process, trust
-from agentworks.execution.access import Admin, Agent, VMAccess, vm_access
+from agentworks.execution.access import Admin, Agent, VMAccess, stream_to_operator, vm_access
 from agentworks.execution.client import SSHClient
 from agentworks.execution.errors import (
     ClientUnsupported,
@@ -516,3 +516,79 @@ def test_output_that_arrives_after_the_reader_left_does_not_fail_at_interpreter_
 
     assert writer.returncode == 0
     assert stderr == b""
+
+
+# The operator's stdout is a non-blocking pipe whose reader has stalled, so bytes stay held in the
+# stream's buffer and the closing flush cannot write them; the stream's own failure must still be
+# what the caller sees. The child leaves through os._exit so its own shutdown never flushes.
+MASKED_FAILURE = """
+import os, sys
+from agentworks.execution.access import stream_to_operator
+
+os.set_blocking(1, False)
+
+class Access:
+    def stream(self, request, *, stdin, stdout, stderr):
+        try:
+            stdout.write(b"x" * 1_000_000)
+        except BlockingIOError:
+            pass
+        raise LookupError("the stream's own failure")
+
+try:
+    stream_to_operator(Access(), None)
+except BaseException as error:
+    os.write(2, type(error).__name__.encode())
+os._exit(0)
+"""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs a non-blocking POSIX pipe")
+def test_a_failure_while_streaming_is_not_masked_by_the_closing_flush() -> None:
+    writer = subprocess.Popen(
+        [sys.executable, "-I", "-c", MASKED_FAILURE],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
+    )
+    assert writer.stdout is not None and writer.stderr is not None
+    try:
+        writer.wait(timeout=30)  # stdout is never read: the reader stays stalled
+        stderr = writer.stderr.read()
+    finally:
+        writer.kill()
+        writer.stdout.close()
+        writer.stderr.close()
+
+    assert stderr == b"LookupError"
+
+
+class _Buffer(io.BytesIO):
+    """An operator stream's binary buffer whose flush is recorded and can fail."""
+
+    def __init__(self, failure: OSError | None = None) -> None:
+        super().__init__()
+        self.failure = failure
+        self.flushes = 0
+
+    def flush(self) -> None:
+        self.flushes += 1
+        if self.failure is not None:
+            raise self.failure
+
+
+def test_with_nothing_in_flight_the_closing_flush_tries_both_streams_then_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = OSError(5, "Input/output error")
+    stdout, stderr = _Buffer(failure), _Buffer()
+    monkeypatch.setattr(sys, "stdout", SimpleNamespace(flush=lambda: None, buffer=stdout))
+    monkeypatch.setattr(sys, "stderr", SimpleNamespace(flush=lambda: None, buffer=stderr))
+    monkeypatch.setattr(sys, "stdin", None)
+    access = SimpleNamespace(stream=lambda request, **streams: 0)
+
+    with pytest.raises(OSError) as caught:
+        stream_to_operator(access, Command(("true",)))  # type: ignore[arg-type]
+
+    assert caught.value is failure
+    assert stderr.flushes == 1

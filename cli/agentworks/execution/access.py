@@ -253,31 +253,37 @@ def stream_to_operator(access: VMAccess, request: RunRequest) -> int:
     sys.stderr.flush()
     stdin = None if sys.stdin is None else getattr(sys.stdin.buffer, "raw", sys.stdin.buffer)
     try:
-        return access.stream(request, stdin=stdin, stdout=sys.stdout.buffer, stderr=sys.stderr.buffer)
+        status = access.stream(request, stdin=stdin, stdout=sys.stdout.buffer, stderr=sys.stderr.buffer)
     finally:
-        _flush_unless_reader_left(sys.stdout.buffer)
-        _flush_unless_reader_left(sys.stderr.buffer)
+        # Both streams are always attempted, and nothing is raised here, so a failure in flight wins.
+        failures = [_flush_or_point_at_null_device(stream) for stream in (sys.stdout.buffer, sys.stderr.buffer)]
+    for failure in failures:
+        if failure is not None:
+            raise failure
+    return status
 
 
-def _flush_unless_reader_left(stream: BinaryIO) -> None:
-    """Flush ``stream``, or, when its reader has left, point its descriptor at the null device.
+def _flush_or_point_at_null_device(stream: BinaryIO) -> OSError | None:
+    """Flush ``stream``, pointing its descriptor at the null device if its reader has left.
 
-    Bytes that could not be flushed to a departed reader (``| head``) stay in
-    the stream's buffer and would fail again at interpreter shutdown, turning
-    the exit status into 120 with a traceback; the null device gives shutdown
-    somewhere to write them.
+    Bytes that could not be flushed to a departed reader (``| head``) stay
+    in the stream's buffer and would fail again at interpreter shutdown,
+    turning the exit status into 120 with a traceback; the null device gives
+    shutdown somewhere to write them. Any other flush failure is returned for
+    the caller to raise, not raised.
     """
     try:
         stream.flush()
     except OSError as error:
         if not pump.reader_left(error):
-            raise
+            return error
         with contextlib.suppress(OSError, ValueError):
             null = os.open(os.devnull, os.O_WRONLY)
             try:
                 os.dup2(null, stream.fileno())
             finally:
                 os.close(null)
+    return None
 
 
 def vm_access(vm: VMRow, config: Config, identity: Identity) -> VMAccess:
