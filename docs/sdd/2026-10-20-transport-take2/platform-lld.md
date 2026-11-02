@@ -1,6 +1,6 @@
 # Transport Take 2: Platform Low-Level Design (Slice 4)
 
-- Status: Draft for the private review loop.
+- Status: Draft, revised after the private project and complexity reviews of `bfd38ce93`.
 - Date: 2026-11-01
 - Architecture: [hla.md](./hla.md) D2 (host policy), D9 (re-establishment), D11 (second half), D13,
   D14; requirements: R1, R2, R4, R7, R8, R10, R11
@@ -22,35 +22,38 @@ frames the script with D4's markers, reads the status from the markers alone, an
 secret a script may need inside the script text, never in an argument. The same wrapper and the same
 per-platform primitive also carry provisioning's join, address read and logout, so the six platforms
 lose their legacy transports in one move. `vm start` and the activation gate only wait for the VM to
-answer over SSH; `agw vm recover` is the one place a rejoin happens.
+answer over SSH; `agw vm recover` runs one repair script, which joins Tailscale only when the node
+needs a login, then the address settle create uses, then one wait.
 
 **Operator direction applied.** Where detecting and alerting is enough, no mechanism: a
-never-enrolled cloud VM is not logged out at delete (Open question 1), a missing Tailscale is
-reported rather than installed, and a broken sshd is restarted, not rebuilt. Every type below has a
-caller in this slice; what this LLD cuts from the HLA's slice 4 surface is under Amendments.
+never-enrolled cloud VM is not logged out at delete, a missing Tailscale is reported rather than
+installed, and a broken sshd is restarted, not rebuilt. Every type below has a caller in this slice.
 
 **Out of this slice.** Phase B stays legacy until slice 6. `vm delete`'s session teardown keeps its
 legacy `transport()` until slice 7 (`vms/manager/power.py:282-305`). `LOG_DIR` stays until slice 8.
 `transports/__init__.py`, `transports/base.py` and `transports/ssh.py` keep their legacy callers
 until slice 8; this slice deletes only what it leaves with no caller.
 
+**In-PR order.** The root runners and `root_script.py` land before slice 3's address settle, so
+slice 3's `settle_on_transport` and its callback form are never written (Amendments).
+
 ## Module layout
 
-| Module                                                            | Contents after this slice                                                                                                            |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `execution/root_script.py` (new)                                  | `RawRun`, `RootRunner`, `RootScriptResult`, `run(root, payload, *, deadline, secret=None)`, `run_process(argv, script, *, deadline)` |
-| `execution/pump.py`, `ssh_process.py`                             | `PipeSession(nonce=None)` passes streams through; `HostPolicy` and `build_host_argv`; `spawn` names the program it failed to start   |
-| `execution/trust.py`                                              | `HOST_KEYS_SCRIPT`, `read_host_keys(root)`, `fingerprint(key)`                                                                       |
-| `execution/errors.py`                                             | `FeatureUnavailable`; `VMNotReady` and `TrustMissing` hints name `agw vm recover`                                                    |
-| `capabilities/vm_platform/base.py`                                | The surface below                                                                                                                    |
-| `capabilities/vm_platform/public_ssh.py` (new)                    | `PublicSSH`: the clouds' SSH to a public address                                                                                     |
-| `capabilities/vm_platform/lima_host.py` (new)                     | `LimaHost`: limactl locally or on the placement host, its root runner and shell, Remote Lima's detached create                       |
-| `capabilities/vm_platform/tailscale_join.py`                      | `join_tailscale`, `settle_tailnet_address`, `EphemeralTailscaleBootstrap`, all over a `RootRunner`                                   |
-| `capabilities/vm_platform/wsl2.py`, `wsl2_bootstrap.py`           | The `wsl.exe` root runner and shell; the key-free bootstrap run through it                                                           |
-| `plugins/proxmox/guest_agent.py` (new)                            | `run_root`: QGA exec of `/bin/bash -s` with `input-data`, polled to the deadline                                                     |
-| `vms/recovery.py` (new)                                           | `run_recovery` and core's four scripts: access repair, rejoin, rekey, logout                                                         |
-| `vms/manager/recover.py` (new)                                    | `recover_vm`, the `agw vm recover` service                                                                                           |
-| `vms/manager/tailscale.py`, `power.py`, `exec.py`, `vms/nodes.py` | `_await_tailnet`; start, rekey and delete on recovery; `vm shell --platform` on `native_shell`; the gate's wait                      |
+| Module                                                            | Contents after this slice                                                                                            |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `execution/root_script.py` (new)                                  | `RawRun`, `RootScriptResult`, `run`, `run_process`, `read_host_keys`                                                 |
+| `execution/pump.py`, `ssh_process.py`                             | `PipeSession(nonce=None)`; `build_host_argv`; `spawn`'s error for a program other than OpenSSH                       |
+| `execution/trust.py`                                              | `fingerprint(key)`                                                                                                   |
+| `execution/errors.py`                                             | `FeatureUnavailable`; the `VMNotReady` and `TrustMissing` hints name `agw vm recover`                                |
+| `capabilities/vm_platform/base.py`                                | The surface below                                                                                                    |
+| `capabilities/vm_platform/public_ssh.py` (new)                    | `PublicSSH`: the clouds' SSH to a public address, under the VM policy                                                |
+| `capabilities/vm_platform/lima_host.py` (new)                     | `LimaHost`: limactl locally or on the placement host, its `run_as_root` and shell, Remote Lima's detached create     |
+| `capabilities/vm_platform/tailscale_join.py`                      | `JOIN_FRAGMENT`, `join_tailscale`, `settle_tailnet_address`, `EphemeralTailscaleBootstrap`, all over a `run_as_root` |
+| `capabilities/vm_platform/wsl2.py`, `wsl2_bootstrap.py`           | The `wsl.exe` `run_as_root` and shell; the key-free bootstrap run through it                                         |
+| `plugins/proxmox/guest_agent.py` (new)                            | `run_as_root`: QGA exec of `/bin/bash -s` with `input-data`, polled to the deadline                                  |
+| `vms/recovery.py` (new)                                           | Core's three scripts and one function each: `repair`, `rekey`, `logout`                                              |
+| `vms/manager/recover.py` (new)                                    | `recover_vm`, the `agw vm recover` service                                                                           |
+| `vms/manager/tailscale.py`, `power.py`, `exec.py`, `vms/nodes.py` | `_await_tailnet`; rekey and delete on the scripts; `vm shell --platform` on `native_shell`; the gate's wait          |
 
 Deletions are listed under Independence and in each section.
 
@@ -63,12 +66,12 @@ class RawRun:            # frozen; both fields repr=False
     stdout: bytes
     stderr: bytes
 
-RootRunner = Callable[[bytes, float], RawRun]   # (script, deadline in seconds), positional
-
 VMPlatform.run_as_root(vm, ctx, script: bytes, deadline: float) -> RawRun   # abstract
 ```
 
-The contract a platform author follows, in full:
+Every helper that takes the callable names its parameter `run_as_root`, of type
+`Callable[[bytes, float], RawRun]`; there is no second name for it. The contract a platform author
+follows, in full:
 
 - Run `/bin/bash -s` as root through the platform's channel, write `script` to its stdin, close it,
   and return everything the channel printed on each stream when it ends or `deadline` seconds pass.
@@ -77,27 +80,23 @@ The contract a platform author follows, in full:
   for one, because no channel's status is trusted (WSL passes raw wait statuses through, per the
   salvage message, and an ssh 255 cannot be told from a guest 255).
 - Treat `script` as sensitive: it never reaches an argument, a log, an exception or a file.
-- Raise an `AgentworksError` (usually `ConnectivityError`) when the channel cannot be started or the
-  provider call fails. Core treats a raise like an unknown outcome and never dispatches again.
+- Raise an `AgentworksError` when the channel cannot be started or the provider call fails. Core
+  treats a raise like an unknown outcome and never dispatches again.
 
 The script and any secret travel together on stdin, so R7's "finite sensitive stdin" is the script
-itself. A separate stdin argument is not needed: the one secret any core script uses, the Tailscale
-auth key, is embedded by the wrapper below. This merges the HLA's `script` and `stdin` parameters
-(Amendments).
-
-`/bin/bash` rather than `/bin/sh` because WSL2's and Proxmox's bootstrap, which this slice moves
-onto the same primitive, is a Bash script (`set -euo pipefail`, `bootstrap_script.py:62`), and
-Debian's dash has no `pipefail`. Bash is Essential on Debian.
+itself, and the HLA's separate `stdin` parameter goes. `/bin/bash` rather than `/bin/sh` because
+WSL2's and Proxmox's bootstrap, which this slice moves onto the same primitive, is a Bash script
+(`set -euo pipefail`, `bootstrap_script.py:62`), and Debian's dash has no `pipefail`. Bash is
+Essential on Debian, and every channel below runs it.
 
 ### The wrapper and its result
 
-`root_script.run(root, payload, *, deadline, secret=None) -> RootScriptResult` builds the bytes,
-calls `root(script, deadline)` once, and reads the result:
+`root_script.run(run_as_root, payload, *, deadline, secret=None, log=None) -> RootScriptResult`
+builds the bytes, calls `run_as_root(script, deadline)` once, and reads the result:
 
 ```text
 {
 exec </dev/null
-trap '' HUP PIPE
 AGW_SECRET='<secret, shell-quoted>'            # only when secret is given
 printf '\036<nonce> start\n'; printf '\036<nonce> start\n' >&2
 (
@@ -105,30 +104,26 @@ printf '\036<nonce> start\n'; printf '\036<nonce> start\n' >&2
 )
 s=$?
 printf '\036<nonce> end\n'; printf '\036<nonce> exit %d\n' "$s" >&2
-exit 0
 }
 ```
 
-Each line has a measured reason (Debian 12's `/bin/bash` 5.2.15 and `/bin/dash` 0.5.12, with a local
-pipe standing in for the channel; vectors W1 to W5 repeat them):
+Measured with Debian 12's `/bin/bash` 5.2.15, a local pipe standing in for the channel (vectors W1
+to W3 repeat it on every channel):
 
-- **One brace group.** The shell parses the whole group before running any of it, so a payload
-  command that reads stdin gets end of file from `exec </dev/null`, not script bytes. A truncated
-  script, as a startup file that reads stdin would leave, is a syntax error and runs nothing, not
-  even the start marker.
-- **`exit 0` inside the group.** dash reads ahead and ran bytes appended after the group; the `exit`
-  stops both shells there.
-- **`trap '' HUP PIPE`.** With the channel's read ends closed mid-payload, the payload died of
-  `SIGPIPE` and its effect did not happen; with the trap it ran to its end. This replaces the
-  `nohup ... &` that delete's logout uses today because "logout was disrupting the network stack and
-  thus not completing" on Azure (`21bb259f9`, `vms/manager/tailscale.py:177-181`), and it keeps the
-  logout's status observable when the channel survives. Children inherit the ignored dispositions,
-  which core's scripts tolerate (no pipelines).
+- **One brace group.** Bash parses the whole group before running any of it, so a payload command
+  that reads stdin gets end of file from `exec </dev/null`, not script bytes. A truncated script, as
+  a startup file that reads stdin would leave, is a syntax error and runs nothing, not even the
+  start marker. Bash did not read past the group (dash did, which is one more reason the channels
+  run Bash).
 - **`AGW_SECRET` unexported.** The payload's subshell sees it and its child processes' environment
-  does not (measured), so it reaches a program only where a script passes it as an argument:
-  `tailscale up --auth-key "$AGW_SECRET"`, exactly today's guest-side exposure
-  (`tailscale_join.py:15-17`, `lima.py:478-479`). The value is validated line-safe first
-  (`require_line_safe_secret`), then `shlex.quote`d.
+  does not, so it reaches a program only where a script hands it over. The one script that does is
+  the join, which pipes it from the `printf` builtin into `tailscale up --auth-key=file:/dev/stdin`,
+  so the key is in no process's argv on the guest either. Tailscale reads a `file:` value with
+  `os.ReadFile` and trims it (`resolveValueFromFile` in `cmd/tailscale/cli/up.go`, added in
+  `b822b5c79`, 2021-09-29); provisioning installs a current Tailscale. Today the guest `tailscale`
+  process holds the key in its argv (`tailscale_join.py:15-17`, `lima.py:478-479`), which any
+  account on the VM, an agent included, can read from `/proc/*/cmdline`; vector W3 proves the
+  change. The value is validated line-safe first (`require_line_safe_secret`), then `shlex.quote`d.
 - **Markers.** D4's grammar and a fresh `envelope.new_nonce()`, so `envelope.StreamFilter` reads
   them. The payload is core's own code, so the nonce in the script text needs no secrecy.
 
@@ -137,176 +132,235 @@ class RootScriptResult:        # frozen
     status: int | None         # the payload's status; None when it cannot be established
     stdout: bytes              # payload bytes between the markers, secret redacted (repr=False)
     stderr: bytes
-    channel_tail: str          # last 20 lines of stderr before the start marker, sanitized, redacted
+    channel_tail: str          # what the channel printed before the start marker, sanitized, redacted
 ```
 
 `status` is `N` only when stdout closes with `end` and stderr with `exit N`; anything else, a
-deadline, an output limit or a raise included, leaves no status (a raise propagates). The pre-marker
-stderr is where ssh, sudo, `limactl` and `wsl.exe` put their own complaints, so `channel_tail` is
-what an error shows for an unknown outcome; it is passed through `ssh_process.tail_lines`
-(`execution/ssh_process.py:231-240`) and has the secret replaced by `[REDACTED]`, as are both
-streams. Recovery writes no operation log: nothing in this path holds an `SSHLogger` (incident row
-I31).
+deadline, an output limit or a raise included, leaves no status (a raise propagates). `channel_tail`
+is the last 20 lines of stderr before the start marker; when neither stream has a start marker,
+stdout's bytes are included too, because `wsl.exe` can print its own errors there. NUL bytes are
+dropped before decoding, as `_wsl` does for `wsl.exe`'s UTF-16LE
+(`capabilities/vm_platform/wsl2.py:239-253`), and the text goes through `ssh_process.tail_lines`
+(`ssh_process.py:231-240`). The secret is replaced by `[REDACTED]` in every field.
+
+**The operation log.** `log` is slice 3's callable, `Callable[[RunRequest, Result], None]`, and
+`root_script.run` records through it so `format_record` writes the block: the request is
+`Script(payload, Shell.BASH)`, whose source `format_record` never writes, and the result is an
+execution `Result` carrying the redacted streams, `channel_tail` as its diagnostics tail, and
+`Completed(status)`, `Unknown(TRUNCATED)` after a start marker or `Unknown(CONNECTION)` without one.
+The script's stderr reason (`sshd -t`'s output included) therefore lands in the log. Redaction holds
+at both ends: `root_script.run` replaces the secret before the record exists, and the logger the
+command passes is constructed with the auth key in its redaction set before its first write, as
+slice 3 requires of every operation log (incident row I28). The commands below say who passes a log.
 
 ### The channels
 
-Four channels are local processes and share `root_script.run_process(argv, script, *, deadline)`,
-built on the pump rather than a second process loop. `PipeSession` (`execution/pump.py:163-219`)
-accepts `nonce=None`, passing both streams through unfiltered, so a session ends when the process
-exits and its pipes go quiet, at end of file, at the deadline, or when a stream passes its 1 MiB
-`Capture` (`pump.py:37`, `:255-276`). A descendant holding a pipe never stalls it, and a deadline or
-limit kills the process, leaving the outcome unknown. `ssh_process.spawn` (`ssh_process.py:259-272`)
-stays the one place a process starts; its `ClientUnsupported` message names `argv[0]` instead of
-assuming OpenSSH.
+Four channels are local processes and share `root_script.run_process(argv, script, deadline)`, built
+on the pump rather than a second process loop. `PipeSession` (`execution/pump.py:163-219`) accepts
+`nonce=None`, passing both streams through unfiltered, so a session ends when the process exits and
+its pipes go quiet, at end of file, at the deadline, or when a stream passes its 1 MiB `Capture`
+(`pump.py:37`, `:255-276`). A descendant holding a pipe never stalls it, and a deadline or limit
+kills the process, leaving the outcome unknown. `ssh_process.spawn` (`ssh_process.py:259-272`) stays
+the one place a process starts. Its `ClientUnsupported` stays OpenSSH-only: a program other than the
+resolved client that cannot start raises `ConnectivityError` naming it, the precedent
+`_ensure_limactl` set for a missing local tool (`lima.py:327-344`).
 
-| Platform    | `argv` (stdin is the script)                                                                           | Bounds                                   | Needs guest sshd | Native shell                                 |
-| ----------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------- | ---------------- | -------------------------------------------- |
-| Lima, local | `limactl shell <instance> sudo -n /bin/bash -s`                                                        | `run_process`                            | yes              | `limactl shell <instance>`                   |
-| Remote Lima | host policy `ssh -T <host> '$SHELL -lc "limactl shell <instance> sudo -n /bin/bash -s"'`               | `run_process`                            | yes              | host policy `ssh -t`, `limactl shell` inside |
-| WSL2        | `wsl --distribution <distro> --user root -- /bin/bash -s`                                              | `run_process`                            | no               | `wsl --distribution <distro> --user <admin>` |
-| Proxmox     | QGA `exec` of `/bin/bash -s` with `input-data`, then `exec-status` every 2 s                           | polling stops at the deadline; QGA's cap | no               | none (Proxmox web console)                   |
-| Clouds      | `PublicSSH`: host policy `ssh -T -l <admin> <public address> 'sudo -n /bin/bash -s'`, inside the route | `run_process`                            | yes              | host policy `ssh -t`, inside the route       |
+| Platform    | `argv` (stdin is the script)                                                                | Bounds                                   | Needs guest sshd | Native shell                                 |
+| ----------- | ------------------------------------------------------------------------------------------- | ---------------------------------------- | ---------------- | -------------------------------------------- |
+| Lima, local | `limactl shell <instance> sudo -n /bin/bash -s`                                             | `run_process`                            | yes              | `limactl shell <instance>`                   |
+| Remote Lima | host argv, `ssh -T <host> '$SHELL -lc "limactl shell <instance> sudo -n /bin/bash -s"'`     | `run_process`                            | yes              | host argv `ssh -t`, `limactl shell` inside   |
+| WSL2        | `wsl --distribution <distro> --user root --exec /bin/bash -s`                               | `run_process`                            | no               | `wsl --distribution <distro> --user <admin>` |
+| Proxmox     | QGA `exec` of `/bin/bash -s` with `input-data`, then `exec-status` every 2 s                | polling stops at the deadline; QGA's cap | no               | none (Proxmox web console)                   |
+| Clouds      | VM policy argv, `ssh -T -l <admin> <public address> 'sudo -n /bin/bash -s'`, inside a route | `run_process`                            | yes              | VM policy `ssh -t`, inside a route           |
 
 - Every channel already carries stdin byte-exact in production: Lima's join over `limactl shell`
   (`lima.py:120`, `:490-493`), WSL2's and Proxmox's `input_text` (`transports/wsl2.py:90-95`,
   `plugins/proxmox/transport.py:74-80`), and the clouds' join over `SSHTransport`
-  (`tailscale_join.py:43-48`).
-- No argv carries request data, so D2's "script content out of arguments" holds on every channel,
-  the cloud one the plan names included.
+  (`tailscale_join.py:43-48`). No argv carries request data, so D2's "script content out of
+  arguments" holds on every channel.
+- WSL2 uses `--exec`, so root's login shell is not between `wsl.exe` and Bash; the program is
+  `_wsl`'s constant (`wsl2.py:247-248`), so its bare-name lookup stays in one place (below).
 - Proxmox: QGA runs commands as root (`plugins/proxmox/transport.py:3-4`). `input-data` keeps the
-  existing 65,536-character guard (`transport.py:24`), well above the largest script here (the
-  bootstrap, 14,359 bytes measured from `generate_bootstrap_script`). A truncated QGA report raises
-  (`plugins/proxmox/api.py:102-103`). At the deadline the result is empty, hence unknown.
+  65,536-character guard (`transport.py:24`). The largest script is the bootstrap, 14,359 bytes as
+  generated at the baseline. A truncated QGA report raises (`plugins/proxmox/api.py:102-103`). At
+  the deadline the result is empty, hence unknown.
+
+### A channel that drops
+
+`trap '' HUP PIPE` is not in the wrapper; it is set only by the two scripts whose own commands can
+take the network away, logout and rekey (below). Measured locally: with the channel's read ends
+closed mid-payload, a payload that then wrote died of `SIGPIPE` and its effect never happened; with
+the trap it ran to its end. Each of those two scripts also captures every command's output
+(`out=$(tailscale logout 2>&1)`) and prints it after the step, so no external program, Tailscale's
+Go binary included, ever writes to a channel that may be gone; only the Bash builtin `printf` does,
+and it gets `EPIPE` instead of a signal. This replaces the `nohup ... &` delete uses today because
+"logout was disrupting the network stack and thus not completing" on Azure (`21bb259f9`,
+`vms/manager/tailscale.py:177-181`), and keeps the logout's status observable when the channel
+survives. Other scripts keep default dispositions: the bootstrap's `curl | sh`
+(`bootstrap_script.py:232`) relies on them.
+
+What holds depends on the channel (incident row I30):
+
+- **SSH channels** (Lima's `limactl shell`, Remote Lima, the clouds): the guarantee above, vector
+  W4.
+- **QGA**: there is no connection to drop; the guest agent runs the process to its end whatever the
+  API client does, and a lost status poll is an unknown outcome.
+- **WSL2**: the channel is local, so it ends early only at the deadline or an operator interrupt.
+  When `wsl.exe` exits, systemd's `KillUserProcesses` reaped a backgrounded bootstrap (`1ae933a88`),
+  so the payload may be killed rather than finish; vector W7 records which. The scripts that need
+  the guarantee do not depend on it here, since nothing on WSL2 drops a channel.
 
 ## The host policy and `public_ssh.py`
 
-`ssh_process` gains the HLA's second policy, for a platform's own SSH to a host or a public address.
-It honors operator configuration (ruled 2026-10-23), so
-`build_host_argv(client, policy, host, user, mode, remote_command)` omits `-F none` and takes:
+**The host policy serves Remote Lima only.**
+`ssh_process.build_host_argv(client, host, mode, remote_command)` builds the placement host's argv:
+no `-F none`, since a host connection honors operator configuration (ruled 2026-10-23);
+`trust.ssh_options(HOST_TRUST)` (`execution/trust.py:314-344`); `ConnectTimeout=30` and the VM
+policy's keepalives; `BatchMode=yes` in pipe mode only, since today's interactive hop allows prompts
+(`transports/remote_lima.py:135-142`); `-T` with a remote command or `-t` for the shell
+(`ArgvMode.PIPE`, `TERMINAL`); and the host after `--`. The resolved client is required, so Remote
+Lima from Windows gets D1's resolution. There is no policy type: the trust is fixed and there is no
+identity. The host string is operator-authored, so `LimaSshPlacement.host` (`lima.py:145`) refuses
+whitespace and control characters at the config boundary.
 
-```text
-class HostPolicy:                         # frozen
-    identity_file: Path | None            # the clouds pass operator.ssh_private_key; Remote Lima None
-    trust: TrustBinding | HostTrust       # HOST_TRUST for Remote Lima; VM or UNVERIFIED for a cloud
-```
+**The clouds use the VM policy.** `PublicSSH(host, user, identity_file, trust)` builds its argv with
+`build_argv` (`ssh_process.py:100-192`) from `VMPolicy(identity_file, trust)`,
+`Destination(host, user)`, `ArgvMode.PIPE`, the remote command `sudo -n /bin/bash -s` and the client
+log, with `trust` the VM binding or an Unverified provisioning binding. `-F none` already keeps
+agent and X11 forwarding off and connection sharing out, so no unverified master can be reused, and
+`Destination` validates the provider-reported address and the admin name. FRD R8 lets a
+public-address connection honor operator configuration (`frd.md:507-509`) but does not require it.
+The price: an operator's `ssh_config` stanza for a cloud address (a `ProxyJump` for a network that
+blocks port 22, say) stops applying to recovery and provisioning, and an encrypted key must be in
+the agent, as for every VM connection.
 
-- **Options.** `trust.ssh_options(policy.trust)` (`execution/trust.py:314-344`); with an identity,
-  `IdentityFile` and `IdentitiesOnly=yes`; `ConnectTimeout=30` and the VM policy's keepalives;
-  `ForwardAgent=no` and `ForwardX11=no`, because an Unverified peer must not be handed the
-  operator's agent or display whatever their configuration says; `BatchMode=yes` in pipe mode only,
-  since today's interactive Remote Lima hop allows prompts (`transports/remote_lima.py:135-142`).
-- **Modes.** `-T` with a remote command, or `-t` for a native shell (`ArgvMode.PIPE` and
-  `TERMINAL`).
-- **Destination.** Operator-authored (the Remote Lima `host`, which may be `user@host`) or
-  provider-reported (a public address), passed whole after `--`. It is refused if it contains
-  whitespace or a control character. `user` is `-l` when given.
-- The resolved client is required, as for the VM policy, so Remote Lima from Windows gets D1's
-  resolution too.
-
-`PublicSSH(host, user, identity_file, trust)` is the clouds' channel, used by their provisioning,
-recovery, key read and shell:
-
-- `run_as_root(script, deadline) -> RawRun` is `run_process` over the pipe argv, remote command
-  `sudo -n /bin/bash -s`, a constant that the admin's login shell (one of the four D4 allows) parses
-  unchanged.
+- `run_as_root(script, deadline) -> RawRun` is `run_process` over that argv. The remote command is a
+  constant that the admin's login shell (one of the four D4 allows) parses unchanged. After the run,
+  the client log's `Host key verification failed` raises `TrustMismatch`, and its
+  `Permission denied (publickey` raises `ConnectivityError` whose hint names the provider console:
+  recover logs in with the same key it would repair, so a cloud VM that refuses it needs the
+  provider's own access (serial console, EC2 Instance Connect) or recreation.
 - `wait_until_answering(*, failure_hint)` probes with
   `root_script.run(self.run_as_root, "true", deadline=10)` up to six times, three seconds apart, and
   warns `failure_hint` before raising `ConnectivityError` when none completes: today's propagation
-  wait after a fresh firewall allow (`transports/__init__.py:230-244`, incident row I17).
-  Re-dispatching `true` is a read-only observation, so the retry is allowed.
-- `read_host_keys()` is `trust.read_host_keys(self.run_as_root)`.
-- `shell() -> int` runs the terminal argv with inherited stdio and returns its status.
+  wait after a fresh firewall allow (`transports/__init__.py:230-244`, incident row I17). `true`
+  reads nothing, so retrying it is allowed.
+- `shell() -> int` runs the `TERMINAL` argv with no remote command (a login shell) and returns its
+  status.
 
 ## The platform surface
 
 Changes to `capabilities/vm_platform/base.py`, under `contract_version` 2 (slice 3's bump):
 
-| Member                                                      | After this slice                                                                                                                                                                          |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run_as_root(vm, ctx, script, deadline)`                    | New, abstract, and in the descriptor's `required_operations` (`capabilities/vm_platform/kinds.py:138`)                                                                                    |
-| `recovery_needs_guest_sshd: ClassVar[bool]`                 | New, annotation only, in `required_attributes` (`kinds.py:140`), so registration refuses a platform that does not declare it (`capabilities/conformance.py:152`)                          |
-| `read_host_keys(vm, ctx) -> tuple[HostKey, ...]`            | New with a default, `trust.read_host_keys(partial(self.run_as_root, vm, ctx))`. The clouds override it. No provider fingerprints (Open question 3), so the existing `HostKey` is the type |
-| `native_shell(vm, ctx) -> int`                              | New. The default raises `FeatureUnavailable`; a platform offers a shell by overriding it, and core checks `type(platform).native_shell is VMPlatform.native_shell` before the boundary    |
-| `native_shell_unavailable_hint`                             | Kept, as guidance text only (Proxmox's console pointer, `plugins/proxmox/platform.py:154-158`); it no longer declares anything                                                            |
-| `native_transport`, `transient_route`, `probe_failure_hint` | Deleted (`base.py:335`, `:408`, `:203`). The clouds keep their route as a private `_transient_route(vm, ctx)` reading `ctx.config`, and their hint as a module constant                   |
-| `ProvisionRequest.ssh_private_key`                          | `Path`, not `Path \| None`: create always passes `config.operator.ssh_private_key` (`vms/manager/lifecycle.py:510`), a required `Path` (`config/models.py:29`)                            |
+| Member                                                      | After this slice                                                                                                                                                         |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `run_as_root(vm, ctx, script, deadline)`                    | New, abstract, and in the descriptor's `required_operations` (`capabilities/vm_platform/kinds.py:138`)                                                                   |
+| `recovery_needs_guest_sshd: ClassVar[bool]`                 | New, annotation only, in `required_attributes` (`kinds.py:140`); the generic mechanism refuses a platform without it (`capabilities/conformance.py:152`)                 |
+| `read_host_keys(vm, ctx) -> tuple[HostKey, ...]`            | New with a default, `root_script.read_host_keys(partial(self.run_as_root, vm, ctx))`; the clouds override it                                                             |
+| `native_shell(vm, ctx) -> int`                              | New. The default raises `FeatureUnavailable`; a platform offers a shell by overriding it, and core checks `type(platform).native_shell is VMPlatform.native_shell` first |
+| `native_shell_unavailable_hint`                             | Kept, as guidance text only (Proxmox's console pointer, `plugins/proxmox/platform.py:154-158`)                                                                           |
+| `native_transport`, `transient_route`, `probe_failure_hint` | Deleted (`base.py:335`, `:408`, `:203`). The clouds keep a private `_transient_route(vm, ctx)` reading `ctx.config`, and their hint as a module constant                 |
+| `ProvisionRequest.ssh_private_key`                          | `Path`, not `Path \| None`: create always passes `config.operator.ssh_private_key` (`vms/manager/lifecycle.py:510`), a required `Path` (`config/models.py:29`)           |
 
 The docstrings that present the route as a public hook (`:355-375`, `:377-406`, `:433-460`) are
-rewritten to match. `trust.read_host_keys(root)` runs `cat /etc/ssh/ssh_host_*_key.pub` (30 s) and
-keeps each line `trust.is_valid_key` accepts (`trust.py:189`), since guest output is a boundary; an
-unknown or non-zero outcome, or no valid key, raises. `trust.fingerprint(key)` is OpenSSH's
-`SHA256:` form.
+rewritten to match. `root_script.read_host_keys(run_as_root)` runs `cat /etc/ssh/ssh_host_*_key.pub`
+(30 s) and keeps each line `trust.is_valid_key` accepts (`trust.py:189`), since guest output is a
+boundary; an unknown or non-zero outcome, or no valid key, raises. It lives in `root_script.py`
+rather than `trust.py` because `trust` sits below `ssh_process`, which the pump imports
+(`ssh_process.py:23`), so `root_script` imports `trust` and never the reverse. `trust.fingerprint`
+is OpenSSH's `SHA256:` form.
 
 ## Platforms' private access and provisioning
 
 ### `tailscale_join.py`
 
-Today it takes an `ExecTransport` and raises `SSHError` (`tailscale_join.py:10`, `:13`). Every
-platform now has a root runner, so it takes one, and slice 3's two settle forms (a callback form for
-Lima and `settle_on_transport`) collapse into one:
+Today it takes an `ExecTransport` and raises `SSHError` (`tailscale_join.py:10`, `:13`). It now
+takes a `run_as_root`:
 
-- `join_tailscale(root, auth_key) -> None` runs `tailscale up --auth-key "$AGW_SECRET"` once with
-  the key as the wrapper's secret and a 30-second deadline, as today (`tailscale_join.py:84`). A
-  non-zero status raises `ProvisioningError`; an unknown one raises naming the node for the admin
-  console, since it may have joined. Neither retries (I24).
-- `settle_tailnet_address(root, *, node) -> str` keeps slice 3's behavior: up to six
+- `JOIN_FRAGMENT` is the one join command,
+  `printf '%s\n' "$AGW_SECRET" | tailscale up --auth-key=file:/dev/stdin`, used by `join_tailscale`
+  and by recover's repair script, so create and recover join the same way.
+- `join_tailscale(run_as_root, auth_key)` runs it once with a 30-second deadline, as today
+  (`tailscale_join.py:84`). A non-zero status raises `ProvisioningError`; an unknown one raises
+  naming the node for the admin console, since it may have joined. Neither retries (I24).
+- `settle_tailnet_address(run_as_root, *, node) -> str` keeps slice 3's behavior: up to six
   `tailscale ip -4` reads two seconds apart, each parsed by `parse_tailnet_address`, then one
-  `tailscale logout` and `ProvisioningError` when they run out.
-- `EphemeralTailscaleBootstrap(root, ...)` keeps its readiness wait (`:87-104`: 30 polls of `true`
-  ten seconds apart, then the readiness command with 600 seconds), then the join, then the settle.
-- `TAILSCALE_JOIN_STDIN_COMMAND` is deleted: the key no longer needs a `read` on the guest.
+  `tailscale logout` and an error when they run out.
+- `EphemeralTailscaleBootstrap(run_as_root, ...)` keeps its readiness wait (`:87-104`), then joins
+  and settles. `TAILSCALE_JOIN_STDIN_COMMAND` is deleted.
 
 **The bootstrap script loses its key.** WSL2 and Proxmox are the last two platforms that generate
 the bootstrap with the key inside it (`capabilities/vm_platform/wsl2_bootstrap.py:62-69`,
 `plugins/proxmox/platform.py:401-408`) and stage it in a guest file that must be removed and
 verified (`wsl2_bootstrap.py:71-151`, `plugins/proxmox/platform.py:566-624`). Both now run the
-key-free script through their root runner and then call `join_tailscale`, like Lima and the clouds.
+key-free script through `run_as_root` and then call `join_tailscale`, like Lima and the clouds.
 `generate_bootstrap_script` loses its `tailscale_auth_key` parameter and step 7
-(`bootstrap_script.py:236-247`), so no generated script can hold the key: I10 holds by construction
-on every platform, and the staging files go.
+(`bootstrap_script.py:236-247`), so no generated script can hold the key: I10 holds by construction,
+and the staging files go.
+
+**The bootstrap's output against the 1 MiB capture.** Its package steps run `apt-get -qq`
+(`bootstrap_script.py:114-117`) and every other step prints one marker line. No create log exists
+under this account's `~/.config/agentworks/logs` (`ssh.py:89`), and other accounts' logs on this
+machine are not this lane's to read, so the size is unmeasured. The WSL2 and Proxmox create cells
+record it; if it passes 256 KiB, the bootstrap's `apt-get` lines send stdout to `/dev/null`, as
+WSL2's own package step does (`wsl2.py:682`), keeping stderr.
 
 ### Lima and Remote Lima
 
 `lima_host.LimaHost` replaces `_run_lima` (`lima.py:270-311`), `_host_transport` (`:557-568`) and
 the two legacy transports, and imports nothing legacy:
 
-- `run(command, *, input=None, check=True, timeout=None) -> HostResult(status, stdout)` is today's
-  `_run_lima`: `subprocess.run(shlex.split(command))` locally, or the host-policy pipe argv with
-  `$SHELL -lc <command>` remotely, the login wrap that finds Homebrew's `limactl`
-  (`transports/remote_lima.py:1-7`, `ssh.py:420-421`). It raises a module-private
-  `LimaCommandFailed(ExternalError)` where it raises `SSHError` today, with the same rule that a
-  command with input exposes neither stream (`lima.py:303-311`).
-- `root_runner(instance) -> RootRunner` and `shell(instance) -> int` are the table's rows.
+- `run(command, *, input=None, check=True, timeout=None) -> str` is today's `_run_lima`:
+  `subprocess.run(shlex.split(command))` locally, or the host argv with `$SHELL -lc <command>`
+  remotely, the login wrap that finds Homebrew's `limactl` (`transports/remote_lima.py:1-7`,
+  `ssh.py:420-421`). It makes one attempt, as today: the remote branch passes `retries=1` or
+  `SSH_DEFAULT_RETRIES` (`lima.py:293`), which is 1 (`ssh.py:289`). It raises a module-private
+  `LimaCommandFailed(ExternalError)` where it raises `SSHError` today, and a command with input
+  exposes neither stream (`lima.py:303-311`).
+- `run_as_root(instance, script, deadline)` and `shell(instance) -> int` are the table's rows.
 - `upload`, `run_detached` and `kill_detached` serve the remote create (`lima.py:577-669`), the pair
   copied from `remote_exec.py:47-213` with only the branch its one caller takes
   (`reuse_completed=False`, `quiet=True`, unelevated, `lima.py:623-631`). Its output goes to
   `request.progress` instead of a second `SSHLogger` (`lima.py:607-644`), so the create's own log
   holds it.
 
-`create` joins with `join_tailscale(host.root_runner(instance), key)` instead of its own stdin
-command (`lima.py:471-493`); the restart-sentinel probe and the cloud-init log read stay `run`
-commands. `native_transport` (`:799-808`) and `_transport_for` (`:535-539`) are deleted.
+The remote create keeps its private staging directory (`lima.py:671-691`). Piping the template to
+`limactl create -` would need `create` to be quick, and it is not: `createAction` calls
+`instance.Prepare` (`cmd/limactl/start.go`), which downloads the base image when it is absent
+(`fileutils.DownloadFile` in `pkg/instance/start.go`, Lima's main branch), so the create belongs in
+the detached run with `start`. `create` joins with
+`join_tailscale(partial(host.run_as_root, instance), key)` instead of its own stdin command
+(`lima.py:471-493`); the restart-sentinel probe and the cloud-init log read stay `run` commands.
+`native_transport` (`:799-808`) and `_transport_for` (`:535-539`) are deleted.
 `recovery_needs_guest_sshd = True`: `limactl shell` is SSH to the guest's sshd with Lima's own key.
 
 ### WSL2
 
-The root runner is the table's `wsl.exe` argv through `run_process`; `native_shell` is today's
-interactive argv (`transports/wsl2.py:137-142`) as the admin. `create` builds no `WSL2Transport`
-(`wsl2.py:765-775`); `run_wsl2_bootstrap(root, ...)` runs the key-free script with a 900-second
-deadline (today's, `wsl2_bootstrap.py:130-134`) and parses its markers from the result's stdout,
-then create joins and settles. The `setsid` and `</dev/null` wrapping of the staged run has no
-remaining job: there is no file, and the wrapper gives the payload a null stdin.
+`run_as_root` is the table's argv through `run_process`; `native_shell` is today's interactive argv
+(`transports/wsl2.py:137-142`) as the admin. Both use `_wsl`'s program constant, so the bare-name
+lookup D1 avoids for `ssh` (Windows searches the current directory) has one place to be fixed; that
+fix is filed for the WSL2 owner, with D1 as the model. `create` builds no `WSL2Transport`
+(`wsl2.py:765-775`); `run_wsl2_bootstrap(run_as_root, ...)` runs the key-free script with a
+900-second deadline (today's, `wsl2_bootstrap.py:130-134`) and parses its markers from the result's
+stdout, then create joins and settles.
+
+Today's `setsid sudo -n /bin/bash FILE </dev/null` (`wsl2_bootstrap.py:131`) goes, for reasons that
+no longer apply: `setsid` was added because sudo's `use_pty` gave the bootstrap a terminal whose
+foreground group was sudo's monitor, so `dpkg`'s triggers stopped apt with `SIGTTIN` (`1ae933a88`).
+The new argv runs as root through `--user root`, with no sudo and so no `use_pty`, and `wsl.exe`'s
+stdin has been a pipe since `3b8a73624`. Incident row I34 holds this, with vector W7.
 `recovery_needs_guest_sshd = False`.
 
 ### Proxmox
 
-`guest_agent.run_root(api, node, vmid, script, deadline) -> RawRun` is written fresh from the
+`guest_agent.run_as_root(api, node, vmid, script, deadline) -> RawRun` is written fresh from the
 dispatch-and-poll half of `plugins/proxmox/transport.py:51-137`: one `guest_agent_exec` of
 `["/bin/bash", "-s"]` with `input-data`, then `guest_agent_exec_status` every two seconds until it
 reports exit or the deadline passes. Dispatch and status failures raise `ConnectivityError` with no
-stdin in the message (`transport.py:69-123`). `create` runs the bootstrap and the join through it,
-deleting `_run_bootstrap_via_agent` (`platform.py:566-636`); `native_transport` (`:488-502`) and
-`transport.py` go. No `native_shell` override. `recovery_needs_guest_sshd = False`.
+stdin in the message (`transport.py:69-123`). `create` runs the bootstrap through it with today's
+600-second deadline (`platform.py:600`), then joins, deleting `_run_bootstrap_via_agent`
+(`platform.py:566-636`); `native_transport` (`:488-502`) and `transport.py` go. No `native_shell`
+override. `recovery_needs_guest_sshd = False`.
 
 ### AWS, Azure and GCP
 
@@ -320,42 +374,47 @@ incident row I32). Then:
   rule, then inside `_transient_route`: `wait_until_answering(failure_hint=...)` and
   `run_as_root(script, deadline)` under VM trust.
 - `read_host_keys`: inside the route and `trust.provisioning_binding(vm.name)` (`trust.py:281-299`),
-  `wait_until_answering` and `read_host_keys()` under that Unverified file. HLA D9's only
-  post-provisioning use of Unverified.
+  `wait_until_answering`, then `root_script.read_host_keys(target.run_as_root)` under that
+  Unverified file. HLA D9's only post-provisioning use of Unverified.
 - `native_shell`: inside the route, the probe, then `shell()`.
 - `create` builds
   `PublicSSH(public address, admin, request.ssh_private_key, request.provisioning_trust)` where it
   builds an `SSHTransport` (`aws/platform.py:573-582`, `azure/platform.py:643-652`,
   `gcp/platform.py:411-423`) and hands `EphemeralTailscaleBootstrap` its `run_as_root`.
 
+Every cloud `run_as_root` opens and closes its own route on purpose, so no firewall allow outlives
+one script, at the cost of a provider round trip and a probe per call. Recover pays one route for
+the key read when the record is missing, one for the repair, and one per settle read (normally one).
 `recovery_needs_guest_sshd = True`. Unverified provisioning before enrollment is unchanged
 (trust-lld, "Trust modes and options").
 
 ## Core's recovery scripts
 
-`vms/recovery.py` holds `run_recovery(platform, vm, ctx, payload, *, deadline, secret=None)`, which
-is `root_script.run(partial(platform.run_as_root, vm, ctx), ...)`, and these payloads (Bash,
-`set -eu`):
+`vms/recovery.py` holds three payloads (Bash, `set -eu`), each with one function that calls
+`root_script.run(partial(platform.run_as_root, vm, ctx), ...)`. A script that fails writes one
+reason line to stderr and exits 1; it uses no other status, so nothing collides with `systemctl`'s
+own statuses.
 
-| Script        | What it does                                                                                                                                                                                                                                                                                                                                                     | Deadline | Secret   |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | -------- |
-| Access repair | Exit 3 if the admin account is missing; append the configured public key to the admin's `authorized_keys` unless the exact line is there, with today's modes (`bootstrap_script.py:143-155`); install python3 when `command -v` finds none; and when `REPAIR_SSHD=1`, `systemctl unmask`, `enable` and `restart ssh.service`, exiting 4 first if `sshd -t` fails | 600 s    | none     |
-| Rejoin        | Exit 3 if `tailscale` is missing; `tailscale up --auth-key "$AGW_SECRET"`; print `tailscale ip -4`                                                                                                                                                                                                                                                               | 60 s     | auth key |
-| Rekey         | Today's sequence (`vms/manager/power.py:499-521`): restart `tailscaled`, logout, join, restart, each followed by 15 s, then print `tailscale ip -4`                                                                                                                                                                                                              | 180 s    | auth key |
-| Logout        | `tailscale logout`                                                                                                                                                                                                                                                                                                                                               | 30 s     | none     |
+| Script | What it does, in order                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Deadline | Secret   |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | -------- |
+| Repair | Fail if the admin account is missing. Append the configured public key to the admin's `authorized_keys` unless the exact line is there, with today's modes (`bootstrap_script.py:143-155`). Unless `dpkg -s python3` succeeds, `apt-get update` and `DEBIAN_FRONTEND=noninteractive apt-get install -y python3`. When `REPAIR_SSHD=1`, fail if `sshd -t` fails, then `systemctl unmask`, `enable` and `restart ssh.service`. Read `BackendState` from `tailscale status --json` with python3: `Running` does nothing, `NeedsLogin` runs `JOIN_FRAGMENT` and prints `joined`, anything else fails naming the state | 600 s    | auth key |
+| Rekey  | `trap '' HUP PIPE`; today's sequence (`vms/manager/power.py:499-518`), each command's output captured and printed after it: restart `tailscaled`, logout, `JOIN_FRAGMENT`, restart, each followed by 15 s                                                                                                                                                                                                                                                                                                                                                                                                         | 180 s    | auth key |
+| Logout | `trap '' HUP PIPE`; `out=$(tailscale logout 2>&1)`, then print it and exit with its status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 30 s     | none     |
 
+- `dpkg -s python3` covers both of agw-launch's `VMNotReady` causes: Debian's `python3` package
+  depends on its standard library, so a VM with only `python3-minimal`, the `STDLIB_MISSING` case
+  (execution-lld, "agw-launch"), fails the check like a VM with no python3.
 - `REPAIR_SSHD` is `0` or `1` from `not platform.recovery_needs_guest_sshd`, the attribute's first
   caller: where the channel is sshd, a broken sshd means the channel failed and nothing could run.
+- The `BackendState` check is unmeasured. Vector W9 proves that a node removed in the admin console,
+  and one whose ephemeral key expired, read `NeedsLogin`, and that a healthy one reads `Running`.
 - The public key is `prepare_configured_ssh_identity(...).public_text`
   (`vms/applied_state.py:156-170`), already parsed as one key line.
 - Not carried over: rejoin's `curl | sh` install (`vms/initializer/credentials.py:61-65`), since
-  provisioning always installs Tailscale and its absence is now exit 3; regenerating host keys,
-  which would silently change trust; and the HLA's "reload sshd on every platform", which nothing
-  needs, since no script edits sshd's configuration. A missing `openssh-server` fails `sshd -t`, so
-  recover stops with the repair-or-recreate message.
+  provisioning always installs Tailscale and its absence now fails with a reason; regenerating host
+  keys, which would silently change trust; and the HLA's "reload sshd on every platform", since no
+  script edits sshd's configuration.
 - No script leaves a background child, so `run_process` returns when the channel exits.
-- The rejoin and rekey stdout's first line goes through `parse_tailnet_address` (slice 3), replacing
-  the two `IPv4Address` checks (`credentials.py:89-96`, `power.py:520-527`).
 
 ## Commands
 
@@ -390,73 +449,92 @@ with the hint `Run 'agw vm recover x'.`; the wait's own raises (`TrustMismatch`,
 fails after starting it; the VM is left running, so the same command run again goes straight to the
 native shell. This is accepted rather than given a second gate.
 
+**What the ruling costs ephemeral-key VMs.** `README.md:238-240` and ADR 0003 (`:36-37`) promise
+that ephemeral keys are supported with an automatic rejoin on start. Without it, a VM whose
+ephemeral node was removed while it was offline fails `vm start` with the recover hint, after the
+full wait of about four minutes. `agw vm recover` then rejoins it in one step: its repair script
+sees `NeedsLogin` and joins at once, with no wait before the join. Nothing new detects the case; the
+start failure is the signal. Collateral lists the README and ADR 0003 updates.
+
 ### `agw vm recover <name>`
 
 `vms/manager/recover.py`, wired in `cli/commands/vm.py` as `vm rekey` is. In order:
 
-1. `_require_vm`, `_guard_failed_vm(vm, allow_failed_init=True)` (a failed init is often what sends
-   an operator here), `verify_tailscale_available()`.
+1. `_require_vm`; `_guard_failed_vm(vm, allow_failed_init=True)`, which still refuses a VM whose
+   provisioning failed (`vms/manager/_helpers.py:229-235`): a create retained as failed before
+   enrolling is deleted and recreated, not recovered. Then `verify_tailscale_available()`.
 2. The boundary, as rekey builds it (`power.py:421-441`): the VM-template node with the live VM
-   node, one preflight and one resolve, so the auth key resolves up front with the site's secrets
-   (Open question 4).
-3. A status check: anything but `RUNNING` raises `StateError` naming `agw vm start NAME` (Open
-   question 5). Then everything below runs inside `vm_node.hold_active()`.
-4. **Trust.** With no store record: `platform.read_host_keys`, print each key's type and fingerprint
-   with a line saying to compare them with the VM's console (a cloud's serial console or system
-   log), `output.confirm` defaulting to no, then `trust.write_records` and `sync_ssh_config`. A
-   refusal writes nothing and stops.
-5. **Access repair.** Status 0 continues. Exit 3 or 4 stops with that cause; any other status shows
-   the script's stderr tail; an unknown outcome shows `channel_tail`.
-6. **Verify.** With an address, `reachability.wait(vm_access(...), wording=VERIFY)`; `True`
-   finishes.
-7. **Rejoin**, otherwise: record the parsed address (`db.update_vm_tailscale`), `sync_ssh_config`,
-   then `reachability.wait(..., wording=RECONNECT)`.
+   node, one preflight and one resolve, so the auth key resolves up front with the site's secrets.
+3. The power state, read as rekey does (`power.py:458`). `STOPPED` or `DEALLOCATED` raises
+   `StateError` naming `agw vm start NAME`, which starts the VM before its own wait fails. `UNKNOWN`
+   raises a separate `StateError`: the platform could not report the VM's state, so check it in the
+   provider or with `agw vm describe NAME`.
+4. The operation log, from a factory in `vms/manager/_helpers.py` (a legacy file, which owns
+   `LOG_DIR`'s other uses) that constructs an `SSHLogger` for the `recover` stem with the auth key
+   in its redaction set. `recover.py` types it with slice 3's small log Protocol (contract-lld,
+   "Independence"), so it imports nothing legacy.
+5. Inside `vm_node.hold_active()`, **trust**: with no store record, `platform.read_host_keys`, each
+   key's type and fingerprint printed with a line saying to compare them with the VM's console (a
+   cloud's serial console or system log), `output.confirm` defaulting to no, then
+   `trust.write_records` and `sync_ssh_config`. A refusal writes nothing and stops.
+6. **Repair**, one script with the auth key and the log. A failed or unknown outcome stops recover.
+7. **Address**: `settle_tailnet_address`, the six-read settle create uses; record the address when
+   it changed and `sync_ssh_config`.
+8. **One wait**: `reachability.wait` with `RECONNECT` wording when the repair printed `joined`, else
+   `VERIFY`. `False` raises `ConnectivityError`: the VM was repaired but does not answer over SSH at
+   ADDRESS; the hint is to check tailnet sharing and ACLs, then recreate the VM (R7).
 
-Wherever recover stops for a failed or unknown recovery step, the message adds, when
-`recovery_needs_guest_sshd` is true, that this platform's recovery goes through the VM's SSH server,
-and the hint is R7's: repair the machine through the provider console or recreate it.
+When the repair fails or its outcome is unknown, the message names the script and its status (or
+"unknown") and points at `agw vm logs NAME`; on a platform whose recovery goes through sshd it adds
+that a broken SSH server there needs the provider console or recreation.
 
 ### `vm rekey`
 
-The boundary and the running check stay (`power.py:401-464`). The native transport and the per-step
-commands (`:480-528`) become one `run_recovery(REKEY, secret=key, deadline=180)` under the existing
-gate. Status 0 with a parsed address records it, syncs the SSH config and writes the `rekey` event
-as today (`:532-534`), then `wait_for_share` and
-`reachability.wait(vm_access(updated row), wording=RECONNECT)`, which replaces retargeting a legacy
-transport in place (`:544-550`). A non-zero status raises `StateError` with the stderr tail; unknown
-raises `ConnectivityError` naming `agw vm recover`, since the new address was never read. The
-per-step progress lines become one line before the call ("about a minute").
+The boundary and the running check stay (`power.py:401-464`), and rekey gains an operation log built
+the same way (the `rekey` stem). The native transport and the per-step commands (`:480-528`) become
+the rekey script under the existing gate, then `settle_tailnet_address`, which replaces today's own
+`tailscale ip -4` read (`:520-527`). Then, as today, the address is recorded, the SSH config synced
+and the `rekey` event written (`:532-534`), then `wait_for_share` and `reachability.wait` on the
+updated row with `RECONNECT`, replacing the in-place repointing of a legacy transport (`:544-550`).
+
+- A failed or unknown script raises naming the script, its status and the log, with the hint
+  `agw vm recover NAME`.
+- A final wait that returns `False` keeps today's outcome, a warning and exit 0 (`:552-556`), since
+  the new address is recorded; the warning names tailnet sharing and `agw vm recover NAME`.
+- The per-step progress lines become one line before the call ("about a minute").
 
 ### `vm delete`'s logout
 
 Inside the existing best-effort hold (`power.py:278-310`), `_tailscale_logout` becomes
-`run_recovery(LOGOUT, deadline=30)`, and the result is reported as R7 states, never checked over
-SSH:
+`recovery.logout(...)` with no log, and the result is reported as R7 states, never checked over SSH:
 
 - status 0: "Tailscale node HOSTNAME logged out";
 - non-zero: a warning with the status and the admin-console removal pointer naming `vm.hostname`;
 - unknown, or a raise: a warning that the logout could not be confirmed, with the same pointer;
 - `TrustMissing` (a cloud VM with no record, raised before any route opens): a warning that the node
-  was not logged out because the VM's host key was never recorded, naming the node. This is Open
-  question 1's answer.
+  was not logged out because the VM's host key was never recorded, naming the node. Delete never
+  logs out under Unverified trust: an impostor could report a logout that never happened, and slice
+  3's in-create logout covers the window inside `create`.
 
 The logout moves into its own `try` after the session teardown's, so a teardown failure (its legacy
 transport raises `TrustMissing` too) no longer skips a logout that a native channel could do.
 `UserAbort` still propagates from both (`:307-308`), and the backend delete still follows regardless
-(I33). "Logging out of Tailscale..." prints before the call and the result after, so a cloud's route
-lines fall between them in the order things happened, which is what #350 fixed (`ebb2e6fdf`).
+(I33). "Logging out of Tailscale..." prints before the call and the result after it. For a cloud,
+the route-close line therefore comes before the result, where #350 (`ebb2e6fdf`) put the result
+inside the route window; that order is accepted, since the result is now known only when the call
+returns.
 
 ### `vm shell --platform`
 
-`shell_vm` (`vms/manager/exec.py:119-129`, `:163-178`) checks for the override right after resolving
-the site, before the boundary, and raises `FeatureUnavailable` with the platform's hint when there
-is none. Otherwise, inside `gated_vm_platform_recovery_boundary` with no environment targets, it
-runs `platform.native_shell(vm, ops_ctx)` under `guarded_terminal`, sets `clean_exit` on a zero
-status, and after the guard prints the 255 notice (I6) in a form that does not claim the cause: "the
+`shell_vm` (`vms/manager/exec.py:119-129`, `:163-178`) refuses `--workspace` with `--platform`
+before anything else, with the hint to `cd` inside the shell. It checks for the override right after
+resolving the site, before the boundary, and raises `FeatureUnavailable` with the platform's hint
+when there is none. Otherwise, inside `gated_vm_platform_recovery_boundary` with no environment
+targets, it runs `platform.native_shell(vm, ops_ctx)` under `guarded_terminal`, sets `clean_exit` on
+a zero status, and after the guard prints the 255 notice (I6) without claiming the cause: "the
 native shell ended with status 255 (the connection may have dropped); terminal restored". The
 environment is not composed and its secrets are not resolved (R7: the native shell does not seed
-it), and `--workspace` with `--platform` is refused before anything else (Open question 2).
-`platform_shell.py` is deleted.
+it). `platform_shell.py` is deleted.
 
 ## Retiring the lazy repair-secret protocol
 
@@ -474,20 +552,27 @@ The rejoin was the protocol's only user, so it goes whole:
 
 ## Error mapping
 
-| Situation                                              | Error                                                             | Hint or effect                                                                |
-| ------------------------------------------------------ | ----------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| No native shell on the platform                        | `FeatureUnavailable` (`StateError`, new in `execution/errors.py`) | The platform's `native_shell_unavailable_hint`, else the provider's console   |
-| Start or gate: no answer after the wait, or no address | `ConnectivityError`                                               | `agw vm recover NAME`                                                         |
-| Recover on a VM that is not running                    | `StateError`                                                      | `agw vm start NAME`                                                           |
-| Recovery step: non-zero status                         | `StateError`, with the stderr tail                                | Repair or recreate (R7)                                                       |
-| Recovery step: unknown, or the platform raised         | `ConnectivityError`, with `channel_tail`, or the raise            | The sshd note where it applies; never re-dispatched                           |
-| Provisioning join or bootstrap: not status 0           | `ProvisioningError`, inside the platform's rollback               | An unknown join names the node                                                |
-| A cloud VM with no store record                        | `TrustMissing` from `run_as_root`, before the route               | Recover re-establishes; delete warns naming the node                          |
-| `python3` missing                                      | `VMNotReady`                                                      | Now `agw vm recover NAME`, replacing the slice 2 reinit hint (`errors.py:77`) |
-| No store record                                        | `TrustMissing`                                                    | Import, or `agw vm recover NAME` (`errors.py:37-40`)                          |
+Slice 3's D13 ruling holds: no message, `repr` or hint holds a stream. A script's reason is in the
+operation log, and the error names the script, its status and `agw vm logs NAME`.
 
-No error holds the script, the secret or a stream that was not redacted; `RootScriptResult`'s
-streams and tail are redacted before anything can quote them.
+| Situation                                              | Error                                                             | Hint or effect                                                     |
+| ------------------------------------------------------ | ----------------------------------------------------------------- | ------------------------------------------------------------------ |
+| No native shell on the platform                        | `FeatureUnavailable` (`StateError`, new in `execution/errors.py`) | The platform's `native_shell_unavailable_hint`, else its console   |
+| `--platform` with `--workspace`                        | `ValidationError`                                                 | `cd` inside the shell                                              |
+| Start or gate: no answer after the wait, or no address | `ConnectivityError`                                               | `agw vm recover NAME`                                              |
+| Recover: VM stopped / power state unknown              | `StateError`, two wordings                                        | `agw vm start NAME` / check the provider or `agw vm describe NAME` |
+| Repair or rekey: non-zero status                       | `StateError` naming the script and status                         | The log; repair or recreate (R7) / recover                         |
+| Repair or rekey: unknown, or the platform raised       | `ConnectivityError`, or the raise                                 | The log, the sshd note where it applies; never re-dispatched       |
+| Recover: no answer after the repair                    | `ConnectivityError`                                               | Tailnet sharing and ACLs, then recreate                            |
+| Cloud: the VM refuses the key at its public address    | `ConnectivityError` from `PublicSSH`                              | The provider console, or recreate                                  |
+| A cloud VM with no store record                        | `TrustMissing` from `run_as_root`, before the route               | Recover re-establishes; delete warns naming the node               |
+| Provisioning join or bootstrap: not status 0           | `ProvisioningError`, inside the platform's rollback               | An unknown join names the node                                     |
+| `python3` missing, or without its standard library     | `VMNotReady`                                                      | Now `agw vm recover NAME` (`execution/errors.py:77`)               |
+| No store record                                        | `TrustMissing`                                                    | Import, or `agw vm recover NAME` (`errors.py:37-40`)               |
+| `limactl` or `wsl.exe` cannot start                    | `ConnectivityError` naming the program                            | Install it                                                         |
+
+`TrustMissing`'s hint keeps "delete and recreate a VM whose create never enrolled", because recover
+refuses a provisioning-failed VM (step 1).
 
 ## Independence
 
@@ -505,221 +590,222 @@ streams and tail are redacted before anything can quote them.
   (`tests/test_execution_import_boundary.py:24`): the four plugin `platform.py` files,
   `plugins/proxmox/guest_agent.py`, `vms/manager/recover.py`, `vms/manager/tailscale.py`,
   `vms/nodes.py`, `orchestration/activation.py` and `vms/initializer/credentials.py`. `power.py`
-  cannot (`LOG_DIR`, the session teardown), nor can `_scope.py` (`SSHLogger`, `:29-30`); both call
-  new code, which R10 allows.
+  cannot (`LOG_DIR`, the session teardown), nor can `_scope.py` (`SSHLogger`, `:29-30`) or
+  `_helpers.py`; all three call new code, which R10 allows.
 - **Deleted with no caller left.** `transports/lima.py`, `remote_lima.py`, `wsl2.py` and
   `_shared.py` (their only users are the platforms and `transports/__init__.py`'s exports), the
-  `native_transport` factory, `plugins/proxmox/transport.py`, and their tests. Slice 8's list loses
-  the Proxmox module.
+  `native_transport` factory, `plugins/proxmox/transport.py`, `vms/manager/platform_shell.py`, and
+  their tests. Slice 8's list loses the Proxmox module.
 
 ## Tests
 
-None restates our prose or the implementation.
+None restates our prose or the implementation. Registration of `recovery_needs_guest_sshd` gets no
+test of its own: the generic required-attribute check (`conformance.py:152`) covers every attribute.
 
 **Unit.**
 
 - **The wrapper.** `root_script.run` over fabricated `RawRun`s: both closing markers give the status
   (including 255); a missing `end`, a missing trailer, a malformed trailer or no start marker give
-  `None`; bytes outside the markers never reach `stdout` or `stderr`; the secret is absent from both
-  streams, `channel_tail`, `repr` and any raised error; the bytes passed to the runner hold the
-  payload and the secret, and the runner is called exactly once even when the result is unknown or
-  it raises.
+  `None`; bytes outside the markers never reach `stdout` or `stderr`; NUL-interleaved pre-marker
+  stdout reads as text in `channel_tail`; the secret is absent from every field, `repr`, any raised
+  error and the logged record; the runner is called exactly once even when the result is unknown or
+  it raises; the log receives one record per call.
 - **`run_process`** against a local `/bin/bash -s`: the deadline returns at the deadline with the
   process reaped; a 2 MiB writer stops at the limit; a background child holding stdout does not
-  stall it; `ClientUnsupported` names a program that is missing.
-- **Host policy.** `ssh -G` against the installed client with an operator configuration that sets
-  `ForwardAgent yes`, `ForwardX11 yes` and `RequestTTY force`: the pins win and the configuration's
-  other settings still apply; a destination with whitespace is refused.
-- **Platform surface.** Registration refuses a vm-platform class without `recovery_needs_guest_sshd`
-  (the existing `required_attributes` mechanism; this replaces the plan's "each platform declares
-  sshd dependence", which would restate six constants); `read_host_keys`' default goes through
-  `run_as_root`; `trust.read_host_keys` drops malformed lines and refuses an empty result.
+  stall it; a missing program raises `ConnectivityError`, not `ClientUnsupported`.
+- **Argv.** `ssh -G` against the installed client: `PublicSSH`'s argv ignores an operator
+  configuration that sets `ForwardAgent yes`, `ControlMaster auto` and `RequestTTY force`; the host
+  argv still honors one; `LimaSshPlacement` refuses a host with whitespace.
+- **Platform surface.** `read_host_keys`' default goes through `run_as_root`; the parser drops
+  malformed lines and refuses an empty result.
 - **Provisioning (I10).** Each of the six creates, with its channel faked at `run_process`,
   `ssh_process.spawn` or the QGA client: the auth key appears in no argv, no progress-sink call, no
-  exception's message, `repr` or chain, and no file write, and appears in exactly one root-runner
-  `script` (the join's). The join runs once when the address reads fail, and once when it is
-  unknown. This extends `tests/test_cloud_bootstrap_secret_boundaries.py`.
+  exception's message, `repr` or chain, and no file write, and appears in exactly one `run_as_root`
+  script, the join's. The join runs once when the address reads fail, and once when it is unknown.
+  This extends `tests/test_cloud_bootstrap_secret_boundaries.py`.
 - **Commands** (fakes for the platform, the database and `VMAccess`):
   - start and the gate, on a VM that does not answer: the recover hint, no auth key resolved, no
-    recovery script dispatched;
-  - recover: keys written only after confirmation, then the SSH config synced; exits 3 and 4 stop;
-    no rejoin when the VM answers after repair, exactly one when it does not; a stopped VM refused
-    before any script;
-  - rekey: one script and the address recorded; an unknown outcome names recover;
+    script dispatched;
+  - recover: keys written only after confirmation, then the SSH config synced; a failed repair stops
+    before the settle; `joined` selects the reconnect wording; stopped and unknown power states
+    refused with their two wordings before any script; a provisioning-failed VM refused;
+  - rekey: one script, then the settle, the address recorded; a failed script names recover; a
+    `False` wait warns and exits 0;
   - delete: each logout outcome reported with no `VMAccess` call after it; `TrustMissing` warns
     naming the node; the backend delete runs in every case, a teardown failure included;
   - `vm shell --platform`: Proxmox refuses before the boundary resolves anything; `--workspace` is
     refused; a 255 prints the notice after the guard.
-- **Retired protocol.** The batch gate refuses a name outside the union (the existing test of the
-  undeclared-name refusal stays, without its repair exception).
 
 **Conformance vectors** for the channel, added to the execution LLD's list. **L** runs
 `run_process(["/bin/bash", "-s"], ...)` locally on every Linux CI host, and under `sudo -n` where
 the runner grants it; **V** runs through each platform's real `run_as_root` from the tester's
 workstations.
 
-| Vector                                                                                                       | Lanes |
-| ------------------------------------------------------------------------------------------------------------ | ----- |
-| W1 A payload that reads stdin gets end of file; a 200 KiB script runs whole                                  | L V   |
-| W2 A script cut short anywhere runs nothing, not even the start marker                                       | L     |
-| W3 Bytes after the group never run                                                                           | L     |
-| W4 The secret reaches the payload, not its children's environment, and the guest argv is `/bin/bash -s`      | L V   |
-| W5 Closing the channel mid-payload leaves the payload to finish its effect, and the outcome reads unknown    | L V   |
-| W6 Status 0, 1 and 255 from the payload come back as themselves; the channel's own status is never consulted | L V   |
-| W7 A Debian 12 and 13 guest runs each core script to status 0 (access repair with python3 absent)            | V     |
+| Vector                                                                                                                                                                             | Lanes                               |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| W1 A payload that reads stdin gets end of file; a 16 KB script, larger than the bootstrap and under QGA's 65,536-character cap, runs whole                                         | L V                                 |
+| W2 A script cut short anywhere runs nothing, not even the start marker                                                                                                             | L                                   |
+| W3 The secret reaches the payload and not its children's environment; during a join, no `/proc/*/cmdline` on the guest holds the key, and the guest argv is `/bin/bash -s`         | L V                                 |
+| W4 With the logout script's trap, closing the channel mid-payload leaves it to finish: Bash and `/bin/echo` write after the close, the effect lands, the outcome is unknown        | L; V on Lima, Remote Lima and Azure |
+| W5 Status 0, 1 and 255 from the payload come back as themselves                                                                                                                    | L V                                 |
+| W6 Each core script runs to status 0 on a Debian 12 and 13 guest, the repair with python3 absent and with only `python3-minimal`                                                   | V                                   |
+| W7 WSL2: the payload has no controlling terminal (`! { tty -s </dev/tty; } 2>/dev/null`); a root startup file does not run under `--exec`; killing `wsl.exe` mid-payload, recorded | V on WSL2                           |
+| W8 WSL2: a missing distro's `wsl.exe` error reads as text in `channel_tail`                                                                                                        | V on WSL2                           |
+| W9 `BackendState` reads `NeedsLogin` for a node removed in the admin console and for an expired ephemeral key, and `Running` for a healthy node                                    | V                                   |
 
-W5's V cell is a delete and a rekey on Azure, the platform where the drop was seen (`21bb259f9`).
+**Existing tests that change**, including:
 
-**Existing tests that change.** The `native_transport` fakes (`tests/test_vm_shell_platform.py`,
-`test_wsl2_keepalive.py`, `plugins/_fixtures.py`, `vms/test_tailscale_logout_wording.py`) and the
-hint and route uses move to the new members; the staging tests
-(`plugins/test_proxmox_bootstrap_staging.py`, `vms/test_bootstrap_file_lifecycle.py`) give way to
-the root-runner bootstrap tests; the deleted modules' tests go; `test_bootstrap_script.py` loses its
-key cases; every vm-platform fake implements `run_as_root` and declares `recovery_needs_guest_sshd`.
+- the `native_transport` fakes and the hint and route uses: `tests/test_vm_shell_platform.py`,
+  `test_wsl2_keepalive.py`, `plugins/_fixtures.py`, `vms/test_tailscale_logout_wording.py`;
+- the legacy transports' tests: `transports/test_sensitive_stdin.py`,
+  `transports/test_factories.py`, `plugins/test_proxmox_transport.py`,
+  `transports/test_{lima,remote_lima,wsl2}.py`;
+- the creates and the join: the three `*_create_interrupt.py`, `test_tailscale_stdin_join.py`,
+  `test_bootstrap_script.py`'s key cases, and the staging tests
+  (`plugins/test_proxmox_bootstrap_staging.py`, `vms/test_bootstrap_file_lifecycle.py`), replaced by
+  the `run_as_root` bootstrap tests;
+- the start and gate paths: `test_ensure_tailscale_wording.py`, `test_delete_vm_gating.py`,
+  `test_vm_nodes.py`, and the `_GateSecrets` and batch-gate tests;
+- every vm-platform fake, which implements `run_as_root` and declares `recovery_needs_guest_sshd`.
 
 ## Live evidence
 
 The plan's cells, with what each shows (R11). Every platform from at least one workstation, Windows
-among the clouds and against WSL2, and Remote Lima from macOS and Windows (the host policy on
-Win32-OpenSSH):
+among the clouds and against WSL2, and Remote Lima from macOS and Windows:
 
-- create on every platform: the key-free bootstrap on WSL2 and Proxmox, the join over the root
-  runner, and on one cloud the admin console showing the key used once (I10, I24);
+- create on every platform: the key-free bootstrap on WSL2 and Proxmox with its output size
+  recorded, the join over `run_as_root`, and on one cloud the admin console showing the key used
+  once (I10, I24);
 - rekey, delete's logout and `vm recover` on every platform, and delete of a cloud VM with no
   record;
-- `vm start` after the node is removed in the admin console: the recover hint, then recover rejoins;
+- `vm start` after the node is removed in the admin console, and after an ephemeral key's node
+  expired: the recover hint, then recover joins at once;
 - a broken sshd on WSL2 and on Proxmox (`ssh.service` masked and stopped), repaired by recover;
 - a lost store record on one cloud and on Remote Lima, re-established against the console;
 - a pre-python3 VM (WSL2's root filesystem) recovered, then reinitialized;
 - `vm shell --platform` wherever it exists, and Proxmox's refusal;
-- vectors W1 and W4 to W7 on each platform's channel.
+- the V cells of vectors W1 and W3 to W9.
 
 ## Incident audit
 
 The entry points this slice moves are the native transport factory, each platform's create and
 native access, `vm start`, the gate's auto-start, rekey, delete's logout, `vm shell --platform` and
 the batch gate. The audit read their history, including `21bb259f9` (logout under nohup on Azure),
-`fae1d7dd2` and `cdd7a0045` (the rekey sequence), `ebb2e6fdf` (#350, logout transcript order),
-`aa8a5540f` (#251, start wording), `102adcff5` (the batch late-resolve guard) and `caca2709f`
-(key-free provider payloads). Rows I10, I17 and I18 are already slice 4's. New rows for the HLA
-inventory:
+`fae1d7dd2` and `cdd7a0045` (the rekey sequence), `1ae933a88` (WSL2's synchronous, terminal-free
+bootstrap), `3b8a73624` (closed stdin on local transports), `ebb2e6fdf` (#350), `aa8a5540f` (#251),
+`102adcff5` (the batch late-resolve guard) and `caca2709f` (key-free provider payloads). Rows I10,
+I17 and I18 are already slice 4's. New rows for the HLA inventory:
 
 | Row | Behavior                                                                                                                                                                                                 | Re-proved in |
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
 | I29 | Rekey restarts `tailscaled` before the logout and after the join, with 15-second pauses, because a stale daemon hangs the logout and a rekeyed node can be unreachable (`cdd7a0045`, `power.py:489-518`) | 4            |
-| I30 | A logout or rekey whose channel drops mid-command still finishes on the guest (`21bb259f9`, `fae1d7dd2`; `tailscale.py:177-181`)                                                                         | 4            |
-| I31 | A rejoin or rekey key never reaches an operation log (`tailscale.py:108-118`)                                                                                                                            | 4            |
+| I30 | Over an SSH channel, a logout or rekey whose channel drops mid-command still finishes on the guest (`21bb259f9`, `fae1d7dd2`; `tailscale.py:177-181`)                                                    | 4            |
+| I31 | A Tailscale key never reaches an operation log in clear; today the rejoin refuses any logger (`tailscale.py:108-118`), now the logger registers the key before its first write                           | 4            |
 | I32 | A cloud VM whose provider reports no public address fails with a typed error naming the console, not a connection to an empty host (#118; `transports/__init__.py:215-228`)                              | 4            |
 | I33 | A failing logout never skips the backend delete, and an operator abort still keeps the row (#329; `power.py:268-310`)                                                                                    | 4            |
+| I34 | WSL2's bootstrap runs with no controlling terminal, so `dpkg` cannot stop apt with `SIGTTIN` (`1ae933a88`; `wsl2_bootstrap.py:131`)                                                                      | 4            |
 
 Re-proofs: I10 by the provisioning test and create cells; I17 by `wait_until_answering`'s tests and
-the Azure cells; I18 and I33 by the delete tests; I29 by the rekey cells; I30 by vector W5; I31
-structurally, since the package guard keeps `SSHLogger` out of `root_script.py` and
-`vms/recovery.py`; I32 by the clouds' tests. #251's wording is I15's, re-proved for start; #350's
-order changes shape as described under delete; `102adcff5`'s guard becomes the plain union refusal.
+the Azure cells; I18 and I33 by the delete tests; I29 by the rekey cells; I30 by vector W4; I31 by
+the wrapper test and the logger's construction-time set; I32 by the clouds' tests; I34 by vector W7.
+
+The wording of #251 is I15's, re-proved for start; #350's order changes as stated under delete
+
+`102adcff5`'s guard becomes the plain union refusal.
 
 ## Collateral
 
-- **ADR amendments** (status blocks): ADR 0003's "automatic rejoin on start" (`:36-37`) and ADR
-  0019's conditional late acquisition of the rejoin key (`:102-106`) no longer hold; both get an
-  "Amended" paragraph.
+- **ADRs** (status blocks): ADR 0003's ephemeral-key bullet promises "automatic rejoin on start"
+  (`docs/adrs/0003-use-tailscale-for-vm-networking.md:36-37`) and its firewall bullet names
+  native-transport sessions (`:34-35`), and ADR 0019 keeps the rejoin key's conditional late
+  acquisition (`:102-106`); both get an "Amended" paragraph.
 - **Platform author documentation:** `capabilities/vm_platform/README.md` and `plugins/README.md`
-  state the run_as_root contract once, with the other members; the kind's prose (`kinds.py:53-77`)
+  state the `run_as_root` contract once, with the other members; the kind's prose (`kinds.py:53-77`)
   and the `TopicProse` that describes a native transport (`lima.py:173-189`,
   `plugins/proxmox/platform.py:128-153`) follow.
 - **Command reference** (`cli/command-reference.md`): a `vm recover` section and table row;
   `vm start` no longer rejoins; `vm rekey`; `vm shell --platform` (`:753-769`) without the
-  `--workspace` combination and the native transport wording; the reinit paragraph that sends a lost
+  `--workspace` combination or the native transport wording; the reinit paragraph that sends a lost
   key to `vm shell --platform` (`:700`) and the exec paragraph that names reinit for python3
   (`:743`), both now `agw vm recover`.
+- **READMEs:** `README.md:229-241` (provisioning's native transport; "re-joins on `vm start`" and
+  the ephemeral-key promise); `cli/README.md:581` (restore a lost key with `vm recover`);
+  `cli/agentworks/execution/README.md` (`root_script`, the host argv, `FeatureUnavailable`).
+- **Sample config:** `cli/agentworks/sample-config.toml:170-172` loses the lazy Tailscale repair
+  sentence.
 - **Completions** (`completions/spec.py:225-231`): `("vm.recover", "name"): "vms"`.
 - **Guides:** `docs/guides/proxmox.md:201-205` (no start-time rejoin); the troubleshooting topic
-  (`guide/guide-content/troubleshooting.md:34-41`), naming recover; an operator section on recovery
-  beside the Tailscale concept topic's rekey; `docs/guides/resources.md:805-808` and
-  `orchestration/README.md:97-98` (no lazy exception); `docs/guides/upgrading-to-0.20.md`.
+  (`guide/guide-content/troubleshooting.md:31-42`), naming recover for python3 and Tailscale repair;
+  an operator section on recovery beside the Tailscale concept topic's rekey;
+  `docs/guides/resources.md:805-808` and `orchestration/README.md:97-98` (no lazy exception);
+  `docs/guides/upgrading-to-0.20.md`.
 - **Reviewer persona:** `.rulesync/subagents/agentworks-reviewer.md:191-194` loses the sanctioned
   conditional-repair exception; regenerate with rulesync.
-- **`cli/agentworks/execution/README.md`:** `root_script`, the host policy, `FeatureUnavailable`.
-- **Comments:** `vms/manager/inspect.py:382-388` names `_ensure_tailscale` and `_tailscale_logout`.
+- **Docstrings and comments:** `transports/__init__.py:1-21`, `transports/base.py:3-9`,
+  `transports/ssh.py:87`, `vms/initializer/credentials.py:1`, `vms/manager/inspect.py:382-388`.
 - **The commit** carries `BREAKING CHANGE:` footers (`CONTRIBUTING.md:69`) for the platform
-  contract, `vm start` no longer rejoining, and `--platform --workspace`.
+  contract, `vm start` no longer rejoining (ephemeral keys included), and the
+  `--platform --workspace` refusal.
 
 ## Open questions
 
-1. **Delete's logout of a never-enrolled cloud VM under Unverified trust.** Recommendation: no.
-   Delete detects the missing record (`TrustMissing` from the cloud's `run_as_root`, before any
-   firewall change) and warns naming the node for the admin console. Evidence:
-   - The logout carries no secret, and publickey authentication binds its signature to the session,
-     so an impostor at the address gains nothing, but it could report a logout that never happened.
-   - R8 never widens trust silently, and D9 keeps Unverified to provisioning and the confirmed key
-     read; a delete-only exception is a second trust branch in every cloud's `run_as_root`.
-   - The window is narrow: slice 3 logs out over the still-pinned provisioning channel when the
-     address reads fail inside `create` (contract-lld, "One mechanism for all six platforms"). What
-     remains is a Phase A failure after `create` returned, retained `FAILED`, whose node goes
-     offline with the instance and is named by the warning.
-   - Only the clouds are affected; the other channels do not use the store.
-2. **`vm shell --platform --workspace`.** Today it `cd`s into the workspace and is documented
-   (`command-reference.md:753-756`). `native_shell(vm, ctx)` takes no directory, and R7 keeps the
-   native shell out of the operation's setup. Recommendation: refuse the combination, with release
-   notes; the native shell is a repair hatch.
-3. **Provider-side host-key fingerprints.** Recommendation: none in this slice. R7 requires only the
-   operator's confirmation. EC2 console output, Azure boot diagnostics and GCE guest attributes or
-   serial output may carry fingerprints, but whether each does for these images, and for how long
-   after first boot, is unmeasured, and GCE's needs metadata Agentworks does not set. The prompt
-   says to compare with the console; a later effort can add a source with a measured one.
-4. **The rejoin key in recover's boundary.** Resolving it only when a rejoin turns out to be needed
-   would bring back late resolution after a mutation, the protocol this slice deletes.
-   Recommendation: resolve it up front with the site's secrets, as rekey does; an unused key is not
-   spent.
-5. **Recover on a stopped VM.** Recommendation: refuse, naming `agw vm start`, which starts the VM
-   before its wait fails. Starting it inside recover would add power-state handling to the one
-   command meant to be simple to reason about.
-6. **`wsl.exe` by bare name.** Every WSL2 call runs `wsl` through `PATH` (the `_wsl` helper,
-   `capabilities/vm_platform/wsl2.py:239-248`, and the keepalive, `:410`), which on Windows also
-   searches the current directory, D1's hazard for `ssh`. This slice adds two more such calls.
-   Recommendation: file it for the WSL2 owner with D1 as the model; resolving it here would change a
-   shared helper outside this slice's contract.
+1. **The ephemeral-key cost** (under `vm start`). The lead is raising it with the operator.
+2. **Settle's logout inside recover and rekey.** `settle_tailnet_address` logs the node out when its
+   six reads fail, which protects a fresh create from an orphaned node. Recover and rekey inherit
+   it, so a VM whose address cannot be read ends logged out. Recommendation: keep it, since such a
+   node is unusable and the next `agw vm recover` sees `NeedsLogin` and joins; the error says so.
 
 ## Amendments
 
 For the lead to apply. Each points at the section above that holds the detail.
 
 - **HLA Components.** Add `execution/root_script.py` and `capabilities/vm_platform/lima_host.py`;
-  `vms/recovery.py` holds `run_recovery` and the scripts, and `vm recover` is
-  `vms/manager/recover.py` (Module layout).
-- **HLA D2.** The host policy's options, modes and destination (The host policy).
+  `vms/recovery.py` holds the three scripts, and `vm recover` is `vms/manager/recover.py`.
+  `RecoveryResult` is `RootScriptResult` throughout the HLA and plan.
+- **HLA D2.** The host policy is for a platform's own SSH to its host, Remote Lima's, and drops "or
+  to a VM's public address"; it is `build_host_argv` with fixed `HOST_TRUST`. The clouds' public
+  address uses the VM policy, at the price stated under The host policy.
 - **HLA D9, Re-establishment.** `read_host_keys` returns `tuple[HostKey, ...]` from a base-class
-  default, not core's override detection; the script and parser are in `trust.py`; the clouds read
-  under a `provisioning_binding` file; no provider fingerprints (Open question 3).
+  default; the script and parser are in `root_script.py`; the clouds read under a
+  `provisioning_binding` file; no provider fingerprints. Line 506's "From PR B, re-establishment
+  (below) is its recovery path" for a create retained as failed becomes delete and recreate.
 - **HLA D11.**
   - Table: `run_as_root(vm, ctx, script, deadline) -> RawRun` with no separate stdin, running
     `/bin/bash -s`; `RawRun` has no status; `native_shell_unavailable_hint` stays as guidance;
     `run_as_root` and `recovery_needs_guest_sshd` are descriptor requirements;
     `ProvisionRequest.ssh_private_key` is `Path`.
-  - Prose: the wrapper is in `execution/root_script.py`, is shared with provisioning, ignores
-    `SIGHUP` and `SIGPIPE` and embeds the auth key; the cloud channel's remote command is the
-    constant `sudo -n /bin/bash -s`; access repair loses "reloads sshd on every platform" and
-    "prints the public host keys" and repairs sshd by unmask, enable, configuration test and
-    restart; rejoin no longer installs Tailscale; recover refuses a VM that is not running and
-    resolves the key in its boundary; delete does not log out a cloud VM with no record and names
-    the node; the per-platform table takes The channels' rows.
+  - Prose: the wrapper is shared with provisioning and embeds the auth key, which reaches Tailscale
+    through `--auth-key=file:/dev/stdin`; only logout and rekey ignore `SIGHUP` and `SIGPIPE`; the
+    cloud channel is the VM policy with the constant `sudo -n /bin/bash -s`; scripts fail with exit
+    1 and a reason, which reaches the operation log, never an error. Rejoin is no longer its own
+    script: the repair joins only on `NeedsLogin`, installs python3 when `dpkg -s python3` fails,
+    repairs sshd by unmask, enable, configuration test and restart, and loses "reloads sshd on every
+    platform" and "prints the public host keys"; recover then settles and waits once. Recover
+    refuses a VM that is not running and resolves the key in its boundary; delete does not log out a
+    cloud VM with no record and names the node. The per-platform table takes The channels' rows.
 - **HLA D13.** `FeatureUnavailable` lands with `vm shell --platform`.
 - **HLA D14.** The guard imports `public_ssh` and `vms.recovery` explicitly; the plugins join the
   static check instead.
-- **HLA Migration, slice 4.** WSL2 and Proxmox run a key-free bootstrap through the root runner, and
+- **HLA Migration, slice 4.** WSL2 and Proxmox run a key-free bootstrap through `run_as_root`, and
   the legacy platform transports and `plugins/proxmox/transport.py` are deleted.
-- **HLA Incident inventory** gains I29 to I33; **ADR amendments** gains 0003 and 0019 in slice 4.
-- **Plan slice 4.** Link this LLD. Add `root_script.py`, `lima_host.py` and `FeatureUnavailable` to
-  the implementation items; replace the "each platform declares sshd dependence" test with the
-  registration refusal and add this LLD's tests and vectors W1 to W7; add the deletions under
+- **HLA Incident inventory** gains I29 to I34. **ADR amendments** gains 0003 and 0019 in slice 4,
+  and "ADR 0003 needs no change" (`hla.md:855-856`) is replaced: ADR 0003 promises a rejoin on
+  start.
+- **Plan slice 4.** Link this LLD. Add `root_script.py`, `lima_host.py`, `FeatureUnavailable` and
+  the recover and rekey operation logs to the implementation items; drop the "each platform declares
+  sshd dependence" test and add this LLD's tests and vectors W1 to W9; add the deletions under
   Independence, `Resolver.resolve_late_repair`, the bootstrap generator's key parameter and step 7,
   `TAILSCALE_JOIN_STDIN_COMMAND` and the staging files, and drop `native_shell_unavailable_hint`
   from them; add the Collateral items and Live evidence cells the plan does not list.
 - **Plan slice 8.** `agentworks.plugins.proxmox.transport` is gone already.
-- **contract-lld.md** (same PR). `settle_tailnet_address(root, *, node)` replaces the callback form
-  and `settle_on_transport`; bootstrap step 7 is deleted rather than shortened.
-- **trust-lld.md.** Delete's warning for a cloud VM with no record names the node and opens no
-  route; re-establishment is this LLD's.
-- **execution-lld.md.** The host policy and `FeatureUnavailable` land here; `PipeSession` accepts
-  `nonce=None`; `spawn`'s refusal names the program.
-- **FRD.** None: R7's "finite sensitive stdin" is the script that carries the key.
+- **contract-lld.md** (same PR). `settle_tailnet_address(run_as_root, *, node)` replaces the
+  callback form and `settle_on_transport`, and the root runners land first, so neither is written;
+  the per-platform "Join / Settled with" table, the "WSL2 and Proxmox transports with `sudo=True`"
+  paragraph and "the auth-key transport of the first join ... is not touched" (Scope) go; bootstrap
+  step 7 is deleted rather than shortened.
+- **trust-lld.md.** Lines 171-172: a create that fails before enrolling stays delete and recreate
+  from PR B too. Delete's warning for a cloud VM with no record names the node and opens no route.
+- **execution-lld.md.** The host argv and `FeatureUnavailable` land here; `PipeSession` accepts
+  `nonce=None`; `spawn` raises `ConnectivityError` for a program other than OpenSSH.
+- **FRD.** None: R7's "finite sensitive stdin" is the script that carries the key, and R8 lets a
+  public-address connection honor operator configuration without requiring it.
