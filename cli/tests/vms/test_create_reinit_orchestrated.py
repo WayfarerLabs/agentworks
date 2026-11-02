@@ -1317,6 +1317,7 @@ def test_reinit_checks_the_admin_and_every_agent_on_the_vm(
     assert isinstance(script, Script)
     assert script.env[ACCOUNTS_VARIABLE].split() == ["agentworks", "agt-worker"]
     assert [identity for _vm, identity in _contract_passes.built] == [Admin()]
+    assert _contract_passes.enrolled == []  # reinit never enrolls a host key
 
 
 @pytest.mark.parametrize("admin_template", ["", "work"])
