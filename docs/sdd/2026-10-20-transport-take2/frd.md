@@ -301,6 +301,19 @@ script source stays out of logs, the operator chose:]
 
 > Sensitive qualifies all three (Recommended)
 
+### 2026-11-01, latest
+
+[Asked whether each slice should move its own commands onto the new code as it lands, or whether
+everything should be built in parallel, unused, and switched over in one go at the end, the operator
+chose:]
+
+> Per slice (Recommended)
+
+[Asked how to handle a VM created with an ephemeral Tailscale auth key whose node expired while it
+was stopped, which under the `vm start` ruling no longer rejoins on start, the operator chose:]
+
+> Document it (Recommended)
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.
