@@ -77,3 +77,15 @@ def test_verify_os_release_validates_the_expected_release() -> None:
     with pytest.raises(StateError) as caught:
         verify_os_release(text, expected=DebianRelease.BOOKWORM)
     assert caught.value.entity_kind == "debian-release"
+
+
+def test_a_guest_value_reaches_the_error_only_as_a_plain_token() -> None:
+    hostile = "\x1b]0;owned\x07 $(id) " + "x" * 100
+    text = f'ID=debian\nVERSION_ID="{hostile}"\nVERSION_CODENAME=trixie\n'
+
+    with pytest.raises(StateError) as caught:
+        parse_os_release(text)
+
+    assert hostile not in str(caught.value)
+    assert "\x1b" not in str(caught.value)
+    assert "ID=debian" in str(caught.value)

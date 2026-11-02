@@ -8,6 +8,7 @@ of "current".
 
 from __future__ import annotations
 
+import re
 import shlex
 from dataclasses import dataclass
 from enum import StrEnum
@@ -162,8 +163,19 @@ def verify_os_release(
     return observed
 
 
+_SHOWN_VALUE = re.compile(r"[A-Za-z0-9._+~-]{1,40}")
+"""What a guest's ``os-release`` value may hold to reach an error and the event that records it."""
+
+
+def _shown(value: str | None) -> str:
+    if value is None:
+        return "<missing>"
+    return value if _SHOWN_VALUE.fullmatch(value) else "<not shown>"
+
+
 def _observation_error(fields: dict[str, str], reason: str) -> StateError:
-    observed = ", ".join(f"{key}={fields.get(key, '<missing>')}" for key in ("ID", "VERSION_ID", "VERSION_CODENAME"))
+    # The values come from the guest: only a plain token is quoted back.
+    observed = ", ".join(f"{key}={_shown(fields.get(key))}" for key in ("ID", "VERSION_ID", "VERSION_CODENAME"))
     return StateError(
         f"guest os-release {reason}: {observed}",
         entity_kind="debian-release",
