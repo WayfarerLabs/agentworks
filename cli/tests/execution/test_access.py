@@ -199,6 +199,16 @@ def test_the_error_kinds_decide_who_handles_them() -> None:
     assert issubclass(CommandFailed, ExternalError)
 
 
+def test_a_refused_handover_does_not_get_the_working_directory_hint() -> None:
+    refusal = result(NotDelivered(NotDeliveredReason.REFUSED, "handover"))
+
+    handover = RequestRefused("box", "handover", refusal).hint
+    working_directory = RequestRefused("box", "cwd", refusal).hint
+
+    assert handover is not None
+    assert handover != working_directory
+
+
 def test_a_vm_without_python_points_at_reinit() -> None:
     error = VMNotReady("box", NotDeliveredReason.PYTHON_MISSING)
 

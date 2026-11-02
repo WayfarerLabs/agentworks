@@ -115,11 +115,16 @@ class RequestRefused(StateError):
         self.vm_name = vm_name
         self.code = code
         self.result = result
+        hint = (
+            "No shell started, so running the shell command again is safe."
+            if code == "handover"
+            else "Fix the working directory or the command."
+        )
         super().__init__(
             _with_tail(f"VM '{vm_name}' refused the request: {describe_refusal(code)}", result.client_log_tail),
             entity_kind="vm",
             entity_name=vm_name,
-            hint="Fix the working directory or the command.",
+            hint=hint,
         )
 
 
