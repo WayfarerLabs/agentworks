@@ -13,9 +13,15 @@ from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
 )
+from agentworks.capabilities.vm_platform.public_ssh import (
+    PublicSSH,
+    operator_identity_file,
+    require_public_address,
+)
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import NotFoundError, StateError
+from agentworks.execution import root_script, trust
 from agentworks.execution.trust import TrustBinding, TrustMode
 from agentworks.plugins.azure.auth import (
     _build_ambient_credential,
@@ -64,6 +70,8 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.root_script import RawRun
+    from agentworks.execution.trust import HostKey
     from agentworks.transports import Transport
 
 
@@ -121,6 +129,9 @@ class AzureVMPlatform(VMPlatform):
         "split tunnel, proxy, CGNAT), add your address(es) to "
         "operator.ssh_allow_cidrs in your agentworks config."
     )
+
+    # The root channel is SSH as the admin to the public address.
+    recovery_needs_guest_sshd: ClassVar[bool] = True
 
     def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
         super().__init__(owner_name, config)
@@ -797,25 +808,10 @@ class AzureVMPlatform(VMPlatform):
         *,
         config: Config | None = None,
     ) -> Transport:
-        rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
-        compute = self._compute_client(az_cfg, ctx)
-        network = self._network_client(az_cfg, ctx)
-        try:
-            vm_info = compute.virtual_machines.get(
-                rg,
-                name,
-                expand="instanceView",
-            )
-        except Exception as exc:
-            raise wrap_azure_error(exc) from exc
-
-        # Walk NICs to find the public IP, read live off the NIC (never
-        # persisted). The IP is permanent for the VM's lifetime and
-        # transient_route heals absence on enter, so an empty string here
-        # is a genuinely defensive corner; it propagates to
-        # ``SSHTransport(host="")`` which the transports.native_transport
-        # factory catches with a typed StateError.
-        public_ip = get_vm_public_ip(network, vm_info)
+        # An empty string is a genuinely defensive corner (see _public_address);
+        # it propagates to ``SSHTransport(host="")``, which the
+        # transports.native_transport factory catches with a typed StateError.
+        public_ip = self._public_address(vm, ctx)
 
         # Include identity file if config is available (needed for SSH auth
         # via public IP, e.g., during Tailscale logout on delete).
@@ -829,6 +825,60 @@ class AzureVMPlatform(VMPlatform):
             user=vm.admin_username,
             identity_file=identity_file,
         )
+
+    def _public_address(self, vm: VMRow, ctx: RunContext) -> str:
+        """The VM's public IP, read live off its NIC (never persisted), or ``""`` when it has none.
+
+        The IP is permanent for the VM's lifetime and ``transient_route``
+        heals its absence on enter, so an empty result is a defensive corner.
+        """
+        rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
+        compute = self._compute_client(az_cfg, ctx)
+        network = self._network_client(az_cfg, ctx)
+        try:
+            vm_info = compute.virtual_machines.get(
+                rg,
+                name,
+                expand="instanceView",
+            )
+        except Exception as exc:
+            raise wrap_azure_error(exc) from exc
+        return get_vm_public_ip(network, vm_info)
+
+    def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
+        """Run ``script`` as root over SSH to the public address, inside this call's own NSG allow.
+
+        A VM with no host-key record raises ``TrustMissing`` before any allow
+        opens, and no allow outlives the one script.
+        """
+        trust.require_record(vm.name)
+        with self.transient_route(vm, ctx, config=ctx.config):
+            target = self._public_ssh(vm, ctx, TrustBinding(TrustMode.VM, vm.name))
+            target.wait_until_answering(failure_hint=self.probe_failure_hint)
+            return target.run_as_root(script, deadline)
+
+    def read_host_keys(self, vm: VMRow, ctx: RunContext) -> tuple[HostKey, ...]:
+        """The VM's host keys, read at its public address under an Unverified provisioning file.
+
+        The VM has no usable record here, so nothing can be verified; the
+        caller shows the fingerprints for the operator to compare with the
+        VM's serial console or boot diagnostics before anything is recorded.
+        """
+        with self.transient_route(vm, ctx, config=ctx.config), trust.provisioning_binding(vm.name) as binding:
+            target = self._public_ssh(vm, ctx, binding)
+            target.wait_until_answering(failure_hint=self.probe_failure_hint)
+            return root_script.read_host_keys(target.run_as_root)
+
+    def _public_ssh(self, vm: VMRow, ctx: RunContext, binding: TrustBinding) -> PublicSSH:
+        address = require_public_address(
+            self._public_address(vm, ctx),
+            vm.name,
+            hint=(
+                "Check the VM's network configuration in the Azure portal (its NIC's public IP and the NSG's "
+                "transient SSH allow), or use the serial console (Connect > Serial console on the VM resource page)."
+            ),
+        )
+        return PublicSSH(address, vm.admin_username, operator_identity_file(ctx, vm.name), binding)
 
     def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:
         """Close provisioning access now that Tailscale is up.
