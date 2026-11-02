@@ -353,14 +353,14 @@ incident row I26 require, and the ordinary-command gates block only a `FAILED` r
 (`vms/manager/_helpers.py:229-236`), so an unattested VM stays out of them. `lifecycle.py` prints
 the delete wording whenever provisioning is not `COMPLETE`, not only when it is `FAILED`, because
 reinit refuses any such row (`lifecycle.py:813`) and the `PENDING` window includes the hold entered
-before `bootstrap_vm` (`lifecycle.py:643`); its cancel handler also marks that `PENDING` row
-`FAILED`, so the gates cover it too. The wording is the attestation interrupt arm's today
-(`lifecycle.py:611-617`: the VM exists but was not verified; run `agw vm delete`), not
-`_warn_init_cancel`'s reinit advice. An interrupt after step 5 leaves `COMPLETE` and takes
-`_warn_init_cancel`. A post-ready wait that raises (`HOST_KEY`, `AUTH_FAILED`, anything else the
-table raises) is outside the span like the wait itself and propagates out of `bootstrap_vm` to
-`_raise_init_failure`: the row stays `COMPLETE`, the VM was attested seconds earlier, and the
-operator is told to `vm reinit`.
+before `bootstrap_vm` (`lifecycle.py:643`). That cancel handler (`lifecycle.py:657-663`) only warns
+today; it now also marks a row that is not `COMPLETE` as `FAILED`, so the gates cover the `PENDING`
+window too. The wording is the attestation interrupt arm's today (`lifecycle.py:611-617`: the VM
+exists but was not verified; run `agw vm delete`), not `_warn_init_cancel`'s reinit advice. An
+interrupt after step 5 leaves `COMPLETE` and takes `_warn_init_cancel`. A post-ready wait that
+raises (`HOST_KEY`, `AUTH_FAILED`, anything else the table raises) is outside the span like the wait
+itself and propagates out of `bootstrap_vm` to `_raise_init_failure`: the row stays `COMPLETE`, the
+VM was attested seconds earlier, and the operator is told to `vm reinit`.
 
 **Enroll covers more than one connection.** The first-contact wait can make up to 17 connections
 (sixteen attempts and the confirming probe), all in Enroll mode. `accept-new` records a key only
