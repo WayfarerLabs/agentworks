@@ -734,3 +734,18 @@ Independent native commands can discard incomplete outer placeholders, so assert
 native normalization while rejecting a fabricated source and verifying plugin/registration/claim
 retention. Production code neither parses cache history nor restores a guessed declaration.
 Integrated validation and narrow reviews of this final predicate correction follow before handoff.
+
+Final predicate-correction validation is complete at source head `6e2d13a`: **10,449 tests passed,
+11 skipped** in the complete local CI selection. Full static checks (926 Ruff files, 890 mypy
+files), file lint, locked-SDD and package builds pass. Website checks again passed 160 Python and
+103 Node cases with both site bases deterministic. The unchanged Typer-isolation and Rulesync gates
+also passed earlier in this round. Required CI is green for source head `6e2d13a`; the exact final
+checkpoint head is linked from the PR handoff.
+
+All three private lanes re-reviewed the final two predicates and associated tests clean. Complexity
+checks passed seven inventory cases; correctness independently passed 27 real-native cases,
+including absent, empty and update-only declarations with actual ref/sparse preservation and
+pre-removal dependent retention. The final documentation checkpoint is reviewed separately before
+publication. This supersedes the earlier interim validation status while preserving its historical
+counts and the late finding. The operator policy answer and the remaining actual-scope acceptance
+matrix are still open; no lockfile or merge intent is claimed.
