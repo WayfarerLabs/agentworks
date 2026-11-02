@@ -348,7 +348,7 @@ class GCEPlatform(PublicAddressPlatform):
         allow_attempt = FirewallInsertAttempt.create(names.allow_rule)
         instance_attempt = InstanceInsertAttempt.create(names.backend_name)
         instance_possible = False
-        transport: Transport | None = None
+        tailnet_address: str | None = None
         ordinary_failure: Exception | None = None
         operator_interrupt: KeyboardInterrupt | None = None
 
@@ -420,12 +420,6 @@ class GCEPlatform(PublicAddressPlatform):
                 readiness_command=GCE_READINESS_COMMAND,
                 readiness_label=GCE_READINESS_LABEL,
             )
-            transport = SSHTransport(
-                host=external_ip,
-                trust=request.provisioning_trust,
-                user=request.admin_username,
-                identity_file=request.ssh_private_key,
-            )
             request.progress.output("GCE credential-free bootstrap and Tailscale join completed")
         except KeyboardInterrupt as primary:
             operator_interrupt = primary
@@ -452,8 +446,8 @@ class GCEPlatform(PublicAddressPlatform):
                 deny_ownership=deny_attempt.ownership,
             )
 
-        if transport is None:  # pragma: no cover - both failure arms re-raise
-            raise AssertionError("successful GCE create has no native transport")
+        if tailnet_address is None:  # pragma: no cover - both failure arms re-raise
+            raise AssertionError("successful GCE create has no tailnet address")
         metadata = {
             "project_id": self.config.project_id,
             "zone": self.config.zone,
@@ -473,7 +467,6 @@ class GCEPlatform(PublicAddressPlatform):
         if network.subnet_url is not None:
             metadata["subnet_url"] = network.subnet_url
         return ProvisionResult(
-            native_transport=transport,
             platform_metadata=metadata,
             tailnet_address=tailnet_address,
         )

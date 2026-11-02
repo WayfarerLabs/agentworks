@@ -821,7 +821,6 @@ class WSL2Platform(VMPlatform):
                 tailnet_address = settle_tailnet_address(
                     run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT
                 )
-                native_transport = WSL2Transport(distro_name=distro_name, user=admin_username)
             except Exception:
                 # WSL2's error convention holds: the RuntimeErrors from
                 # _wsl / _powershell propagate unwrapped; the only new
@@ -835,7 +834,6 @@ class WSL2Platform(VMPlatform):
 
         output.detail(f"WSL2 VM '{vm_name}' provisioned.")
         return ProvisionResult(
-            native_transport=native_transport,
             platform_metadata={"distro_name": distro_name},
             tailnet_address=tailnet_address,
         )

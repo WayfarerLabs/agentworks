@@ -411,13 +411,6 @@ class ProxmoxPlatform(VMPlatform):
                 tailnet_address = settle_tailnet_address(
                     run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT
                 )
-
-                target = ProxmoxExecTransport(
-                    self._api(ctx),
-                    node=node,
-                    vmid=newid,
-                    admin_username=request.admin_username,
-                )
             except Exception:
                 # Re-raised unwrapped after rollback: the manager preserves
                 # typed configuration/state failures and maps other backend
@@ -431,7 +424,6 @@ class ProxmoxPlatform(VMPlatform):
             raise
 
         return ProvisionResult(
-            native_transport=target,
             platform_metadata={"vmid": str(newid), "node": node},
             tailnet_address=tailnet_address,
         )

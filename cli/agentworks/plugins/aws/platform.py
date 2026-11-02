@@ -456,7 +456,6 @@ class EC2Platform(PublicAddressPlatform):
 
         security_group_id: str | None = None
         instance_id: str | None = None
-        prov_transport: Transport | None = None
         bootstrap_ssh_open = False
 
         def _metadata(*, incomplete: bool) -> dict[str, str]:
@@ -581,12 +580,6 @@ class EC2Platform(PublicAddressPlatform):
             tailnet_address = complete_cloud_bootstrap(
                 target.run_as_root, request.tailscale_auth_key, node=request.hostname
             )
-            prov_transport = SSHTransport(
-                host=public_ip,
-                trust=request.provisioning_trust,
-                user=request.admin_username,
-                identity_file=request.ssh_private_key,
-            )
         except KeyboardInterrupt:
             output.warn(
                 f"Interrupted: cleaning up partial AWS resources for '{backend_name}', "
@@ -601,12 +594,9 @@ class EC2Platform(PublicAddressPlatform):
                 raise
             raise wrap_ec2_error(exc) from exc
 
-        # Reached only when the guarded region completed (both except arms
-        # re-raise), so the transport was built.
-        assert prov_transport is not None
+        # Reached only when the guarded region completed: both except arms re-raise.
         metadata = _metadata(incomplete=False)
         return ProvisionResult(
-            native_transport=prov_transport,
             platform_metadata=metadata,
             tailnet_address=tailnet_address,
         )

@@ -104,7 +104,6 @@ def test_create_vm_request_shape_and_row(
         captured_platform.append(self)
         captured_request.append(request)
         return ProvisionResult(
-            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "dvm"},
             tailnet_address="100.64.0.7",
         )
@@ -270,7 +269,6 @@ def test_create_vm_metadata_failure_retains_owner_and_reports_once(
         LimaPlatform,
         "create",
         lambda *args, **kwargs: ProvisionResult(
-            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "metadata-fail"},
             tailnet_address="100.64.0.7",
         ),
@@ -386,7 +384,6 @@ def test_create_vm_attests_the_core_release_and_retains_an_unattested_vm_failed(
     ) -> ProvisionResult:
         request.debian_release = DebianRelease.BOOKWORM
         return ProvisionResult(
-            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "unverified"},
             tailnet_address="100.64.0.7",
         )
@@ -435,7 +432,6 @@ def test_create_vm_logger_close_failure_retains_owner_and_reports_once(
         LimaPlatform,
         "create",
         lambda *args, **kwargs: ProvisionResult(
-            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "close-fail"},
             tailnet_address="100.64.0.7",
         ),
@@ -489,7 +485,6 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
     def _fake_create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
         captured.append(request)
         return ProvisionResult(
-            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "wvm"},
             tailnet_address="100.64.0.9",
         )
@@ -653,7 +648,6 @@ def test_create_vm_composes_r11_hostname_with_slug(
     def _fake_create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
         captured.append(request)
         return ProvisionResult(
-            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "team-a-svm"},
             tailnet_address="100.64.0.8",
         )

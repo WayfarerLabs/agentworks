@@ -38,7 +38,6 @@ from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
 from tests._proxmox_fakes import CLONE_UPID, NEWID, PROXMOX_CONFIG, START_UPID, TEMPLATE_VMID, FakeProxmoxAPI
 from tests._root_channel_fakes import Answer, FakeGuest
 from tests.conftest import provisioning_trust_for_tests
@@ -491,22 +490,6 @@ class TestPlainFailure:
 
         for op in ("clone_vm", "stop_vm", "delete_vm", "stop_task"):
             assert op not in fake.ops()
-
-
-class TestProvisionResultTransport:
-    """The transport a successful ``create`` hands back (#345): a
-    QGA execution channel bound to the created VM."""
-
-    def test_provisioning_transport_targets_the_guest(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        platform, _fake = _platform_with_fake(monkeypatch)
-
-        result = platform.create(_request(tailscale=False), RunContext())
-
-        target = result.native_transport
-        assert isinstance(target, ProxmoxExecTransport)
-        assert target.node == "pve1"
-        assert target.vmid == NEWID
-        assert target.admin_username == "agentworks"
 
 
 class TestDeleteOpUnchanged:

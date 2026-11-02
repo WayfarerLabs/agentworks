@@ -654,12 +654,6 @@ class AzureVMPlatform(PublicAddressPlatform):
                 tailnet_address = complete_cloud_bootstrap(
                     target.run_as_root, tailscale_auth_key, node=request.hostname
                 )
-                prov_transport = SSHTransport(
-                    host=public_ip,
-                    trust=request.provisioning_trust,
-                    user=admin_username,
-                    identity_file=request.ssh_private_key,
-                )
             except Exception as exc:
                 output.detail("Cleaning up resources...")
                 # The teardown captures a VM-delete failure rather than
@@ -682,7 +676,6 @@ class AzureVMPlatform(PublicAddressPlatform):
 
         metadata = {"resource_id": resource_id} if resource_id else {}
         return ProvisionResult(
-            native_transport=prov_transport,
             platform_metadata=metadata,
             tailnet_address=tailnet_address,
         )

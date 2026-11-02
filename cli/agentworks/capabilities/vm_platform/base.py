@@ -108,15 +108,14 @@ class ProvisionResult:
 
     ``tailnet_address`` is the joined node's address, read over the
     platform's root channel with ``tailscale_join.settle_tailnet_address``;
-    core validates it again before recording it. ``native_transport`` is
-    the channel core's release attestation and Phase A still use.
-    ``platform_metadata`` is the opaque dict written verbatim to
+    core validates it again before recording it, and reaches the VM over SSH
+    there for everything after create. ``platform_metadata`` is the opaque
+    dict written verbatim to
     ``vms.platform_metadata``; the owning platform is its only reader.
     Keys are absent when there is nothing to record, never empty
     strings.
     """
 
-    native_transport: ExecTransport
     tailnet_address: str
     platform_metadata: dict[str, str] = field(default_factory=dict)
 
@@ -313,11 +312,11 @@ class VMPlatform(Capability):
           ``RetainedProvisioningError`` with the identifiers needed by its
           ``delete`` op. Core persists them and retains the failed VM row.
         - Return ``ProvisionResult`` with the required ``tailnet_address``
-          the settle read, ``platform_metadata`` capturing whatever
+          the settle read and ``platform_metadata`` capturing whatever
           identifiers subsequent ops need, without relying on live
-          configuration (e.g. proxmox records the node alongside the vmid),
-          and a transport through which core can attest the live Debian
-          release.
+          configuration (e.g. proxmox records the node alongside the vmid).
+          Core reaches the VM over SSH at that address from then on, and
+          attests the live Debian release there itself.
         """
 
     @idempotent_op
@@ -438,7 +437,7 @@ class VMPlatform(Capability):
         inbound exposure. The asymmetry vs. :meth:`transient_route` is
         genuine: the bootstrap ingress opens inside :meth:`create`
         (cloud-init needs inbound SSH) and closes at an async
-        Tailscale-ready point inside ``bootstrap_vm`` (Phase A),
+        Tailscale-ready point inside Phase A (``phase_a.bootstrap``),
         neither of which is an ExitStack-shaped lifecycle.
 
         ``ctx`` is the op-start :class:`RunContext` (see
@@ -450,10 +449,10 @@ class VMPlatform(Capability):
 
     def secure_failed_vm(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
         """Hook called when a created VM is kept after Phase A fails: core
-        refused the returned ``tailnet_address``, post-create Tailscale
-        verification died (the row is marked FAILED in either case), or the
-        operator interrupted verification (the row keeps its in-flight
-        status), and the VM is kept for debugging rather than rolled back.
+        refused the returned ``tailnet_address``, the first contact or the VM
+        contract failed, or the operator interrupted Phase A (the row is
+        marked FAILED in every case), and the VM is kept for debugging rather
+        than rolled back.
 
         Create-time bootstrap failures never reach this hook. They raise from
         :meth:`create` while the platform's backend rollback window is open.

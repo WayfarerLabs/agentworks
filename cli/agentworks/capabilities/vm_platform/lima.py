@@ -445,8 +445,6 @@ class LimaPlatform(VMPlatform):
             join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
             output.detail("Retrieving Tailscale IP...")
             tailnet_address = settle_tailnet_address(run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT)
-
-            transport = self._transport_for(instance_name)
         except KeyboardInterrupt:
             self._rollback_create_on_interrupt(instance_name)
             raise
@@ -456,7 +454,6 @@ class LimaPlatform(VMPlatform):
             raise
 
         return ProvisionResult(
-            native_transport=transport,
             platform_metadata={"instance_name": instance_name},
             tailnet_address=tailnet_address,
         )

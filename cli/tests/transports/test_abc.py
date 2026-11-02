@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import (
     ExecTransport,
@@ -23,7 +22,6 @@ from agentworks.transports import (
     Transport,
     WSL2Transport,
 )
-from tests.native_exec_support import ExecutionOnlyTransport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -63,15 +61,6 @@ def test_exec_transport_is_the_narrow_abstract_base() -> None:
     }
     assert methods == EXEC_REQUIRED_METHODS
     assert issubclass(Transport, ExecTransport)
-
-
-def test_provision_result_accepts_execution_only_transport() -> None:
-    target = ExecutionOnlyTransport()
-
-    result = ProvisionResult(native_transport=target, tailnet_address="100.64.0.9")
-
-    assert result.native_transport is target
-    assert not isinstance(target, Transport)
 
 
 def test_abc_surface_is_complete() -> None:

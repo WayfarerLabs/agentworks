@@ -270,8 +270,7 @@ def test_create_admin_spec_credential_joins_graph_and_logger_redactions(
     def _create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
         events.append("create")
         assert request.progress is loggers[0]
-        return ProvisionResult(  # type: ignore[arg-type]
-            native_transport=SimpleNamespace(),
+        return ProvisionResult(
             tailnet_address="100.64.0.7",
         )
 
@@ -428,7 +427,6 @@ def test_successful_create_propagates_fresh_logger_close_interrupt(
         LimaPlatform,
         "create",
         lambda self, request, ctx: ProvisionResult(  # noqa: ARG005
-            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             tailnet_address="100.64.0.7",
         ),
     )
@@ -616,7 +614,6 @@ def test_create_init_failure_keeps_the_row(
 
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(
-            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={},
             tailnet_address="100.64.0.7",
         )
@@ -652,7 +649,6 @@ def test_create_phase_a_failure_maps_to_provisioning_error(
 
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(
-            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={},
             tailnet_address="100.64.0.7",
         )
@@ -707,7 +703,6 @@ def test_create_retains_a_vm_failed_whenever_phase_a_did_not_complete(
         LimaPlatform,
         "create",
         lambda self, request, ctx: ProvisionResult(  # noqa: ARG005
-            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={},
             tailnet_address="100.64.0.7",
         ),
@@ -741,7 +736,6 @@ def test_an_interrupt_after_phase_a_completed_leaves_the_vm_complete(
         LimaPlatform,
         "create",
         lambda self, request, ctx: ProvisionResult(  # noqa: ARG005
-            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={},
             tailnet_address="100.64.0.7",
         ),
@@ -780,7 +774,7 @@ def _stub_create_with_trust_probes(
         seen["row_at_create"] = db.get_vm(request.vm_name) is not None
         seen["record_at_create"] = trust.has_record(request.vm_name)
         seen["file_at_create"] = binding.provisioning_file.is_file()
-        return ProvisionResult(native_transport=SimpleNamespace(), platform_metadata={}, tailnet_address="100.64.0.7")  # type: ignore[arg-type]
+        return ProvisionResult(platform_metadata={}, tailnet_address="100.64.0.7")
 
     def _bootstrap(
         db_: Database, config_: object, vm_name: str, *a: object, **k: object
@@ -884,7 +878,6 @@ def test_create_phase_a_sync_failure_is_non_fatal(
 
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(
-            native_transport=SimpleNamespace(describe=lambda: "lima:vm", logger=None),  # type: ignore[arg-type]
             platform_metadata={},
             tailnet_address="100.64.0.7",
         )
@@ -933,7 +926,6 @@ def test_create_provisioning_section_has_explicit_closing_body_line(
 
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(
-            native_transport=SimpleNamespace(describe=lambda: "lima:vm", logger=None),  # type: ignore[arg-type]
             platform_metadata={},
             tailnet_address="100.64.0.7",
         )
