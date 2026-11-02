@@ -125,7 +125,8 @@ a VM connection.
       on Windows the passphrase hint names the absolute path, and the agent check lists keys with
       `ssh-add -L` rather than signing, and only for a `.pub` that holds a type and blob. Test the
       `=` rule under zsh itself, whatever the runner's login shell, and keep one copy each of the
-      SSH wire reader (`ssh_identity`) and the rule for a departed reader (`pump.reader_left`).
+      SSH wire reader (`ssh_identity`) and the rule for a departed reader (`pump.reader_left`). Run
+      import's `ssh-keygen` from beside the resolved client, as `ssh-add` is, never from `PATH`.
 - [x] Alert where PR A drops a behavior an operator may rely on (operator, 2026-11-01): warn at
       reinit when `/etc/environment`, `/etc/security/pam_env.conf` or the admin's
       `~/.pam_environment` holds settings, and when a VM connection fails before the start marker
