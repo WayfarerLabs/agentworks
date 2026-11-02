@@ -57,6 +57,8 @@ def confirm_vm_release(
     from ._helpers import _require_vm
     from .boundary import gated_vm_boundary
 
+    # Before any database read or gate: an unsupported client refuses first.
+    execution.resolve_ssh()
     vm = _require_vm(db, name)
     registry = load_request_registry(config, live_database=db)
     with gated_vm_boundary(db, config, registry, vm, interaction=interaction):

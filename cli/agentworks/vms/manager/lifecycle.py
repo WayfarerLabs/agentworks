@@ -275,6 +275,10 @@ def create_vm(
     resolved_memory = vm_tmpl.memory
     resolved_disk = vm_tmpl.disk
     _mgr.verify_tailscale_available()
+    # Phase A reaches the new VM through agentworks.execution: an unsupported
+    # client refuses here, before the platform builds a VM or the join spends
+    # the auth key.
+    execution.resolve_ssh()
     from agentworks.capabilities.base import OperationScope, ScopeLevel
     from agentworks.git_credentials.nodes import git_credential_node
     from agentworks.orchestration.readiness import preflight_all
@@ -882,6 +886,9 @@ def reinit_vm(
     _mgr.require_vm_ssh_boundary(db, config, vm, allow_not_recorded=True)
 
     _mgr.verify_tailscale_available()
+    # The base checks run through agentworks.execution: an unsupported client
+    # refuses before the gate, a secret or the platform is touched.
+    execution.resolve_ssh()
     cred_nodes = tuple(git_credential_node(registry, cred_name) for cred_name in admin.git_credentials)
 
     # The reinit graph: the live VM (whose row's site field is its edge

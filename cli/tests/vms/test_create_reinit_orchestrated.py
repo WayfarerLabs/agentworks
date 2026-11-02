@@ -1375,3 +1375,27 @@ def test_reinit_refuses_an_operator_stopped_vm_at_the_gate(
     with pytest.raises(StateError, match="manually stopped") as exc:
         vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
     assert "agw vm start rvm" in (exc.value.hint or "")
+
+
+def test_an_unsupported_client_refuses_reinit_before_any_gate_secret_or_platform(
+    make_config, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.execution.errors import ClientUnsupported
+    from agentworks.secrets.resolver import Resolver
+
+    _seed_provisioned_vm(db)
+
+    def _unsupported() -> object:
+        raise ClientUnsupported("no supported OpenSSH client")
+
+    monkeypatch.setattr("agentworks.execution.resolve_ssh", _unsupported)
+    monkeypatch.setattr(
+        "agentworks.orchestration.activation.activation_gate", lambda *a, **k: pytest.fail("the gate opened")
+    )
+    monkeypatch.setattr(Resolver, "resolve", lambda self: pytest.fail("a secret was resolved"))
+    monkeypatch.setattr(LimaPlatform, "status", lambda *a, **k: pytest.fail("the platform was reached"))
+    monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: pytest.fail("initialization ran"))
+
+    with pytest.raises(ClientUnsupported):
+        vm_manager.reinit_vm(db, make_config(), "rvm", interaction=TtyInteractionPolicy.REFUSE)

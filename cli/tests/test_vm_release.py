@@ -262,3 +262,27 @@ def test_confirm_release_decline_preserves_recorded_state(
     assert vm is not None
     assert vm.debian_release is DebianRelease.BOOKWORM
     assert vm.init_status == InitStatus.COMPLETE.value
+
+
+def test_an_unsupported_client_refuses_confirm_release_before_the_gate(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.execution.errors import ClientUnsupported
+
+    db.insert_vm("box", site="lima-local", hostname="box")
+
+    def _unsupported() -> object:
+        raise ClientUnsupported("no supported OpenSSH client")
+
+    monkeypatch.setattr("agentworks.execution.resolve_ssh", _unsupported)
+    monkeypatch.setattr(
+        "agentworks.bootstrap.load_request_registry", lambda *a, **k: pytest.fail("the registry was loaded")
+    )
+    monkeypatch.setattr(
+        "agentworks.vms.manager.boundary.gated_vm_boundary", lambda *a, **k: pytest.fail("the gate opened")
+    )
+
+    with pytest.raises(ClientUnsupported):
+        confirm_vm_release(db, make_config(), "box", yes=True, interaction=TtyInteractionPolicy.REFUSE)

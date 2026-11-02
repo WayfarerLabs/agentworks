@@ -830,3 +830,24 @@ def test_proxmox_missing_create_release_fails_before_resolve_and_runup(
     assert caught.value.entity_name == "proxmox"
     assert resolve_counter == []
     assert db.get_vm("missing-release") is None
+
+
+def test_an_unsupported_client_refuses_create_before_any_platform_secret_or_row(
+    db: Database, make_config, monkeypatch: pytest.MonkeyPatch, captured_output: object
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.execution.errors import ClientUnsupported
+    from agentworks.secrets.resolver import Resolver
+
+    def _unsupported() -> object:
+        raise ClientUnsupported("no supported OpenSSH client")
+
+    monkeypatch.setattr("agentworks.execution.resolve_ssh", _unsupported)
+    for method in ("runup", "create"):
+        monkeypatch.setattr(LimaPlatform, method, lambda *a, **k: pytest.fail("the platform was reached"))
+    monkeypatch.setattr(Resolver, "resolve", lambda self: pytest.fail("a secret was resolved"))
+
+    with pytest.raises(ClientUnsupported):
+        vm_manager.create_vm(db, make_config(), name="noclient", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("noclient") is None

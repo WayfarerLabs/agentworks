@@ -90,14 +90,21 @@ store as well, and your own `ssh` never writes to it.
 `vm create` records the VM's key on its first connection, over the tailnet, and writes it to the
 store only. Your `~/.ssh/known_hosts` is no longer touched. `vm delete` removes the record.
 
-## Connecting for `exec`, `shell` and `port-forward`
+## Connecting through the new layer
 
-`agw vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection` and `vm port-forward`
-now run through a new connection layer that sends each request to the VM over the OpenSSH client's
-standard input instead of on the `ssh` command line. `vm shell --platform` keeps its platform-native
-path and needs none of what follows. Everything else keeps its current path for now.
+`agw vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection`, `vm port-forward`,
+`vm create`, `vm reinit` and `vm confirm-release` now reach the VM through a new connection layer
+that sends each request over the OpenSSH client's standard input instead of on the `ssh` command
+line. For `vm create` that is everything after the platform has created the VM and joined it to the
+tailnet; for `vm reinit`, its checks of the VM (see
+[Create, reinit and the VM contract](#create-reinit-and-the-vm-contract)). `vm shell --platform`
+keeps its platform-native path and needs none of what follows. Everything else keeps its current
+path for now.
 
-### What the six commands need
+### What these commands need
+
+Each of them checks the client first, so an unsupported one is refused before `vm create` builds a
+VM or spends a Tailscale auth key.
 
 - **OpenSSH 8.5 or newer on the workstation.** Agentworks uses the first `ssh` on your `PATH`
   (ignoring empty and relative `PATH` entries) and checks its version once per run. A missing or
@@ -122,14 +129,14 @@ path and needs none of what follows. Everything else keeps its current path for 
 
 ### What behaves differently
 
-- **No ssh configuration is read.** These commands run `ssh -F none`, so `~/.ssh/config` and the
-  system configuration do not apply to them. An `IdentityAgent` set only in `~/.ssh/config`
-  (1Password, Secretive) is ignored; the agent named by `SSH_AUTH_SOCK` serves the key. Every
-  connection runs in batch mode, so ssh never prompts for a key's passphrase: an encrypted key has
-  to be loaded in that agent first. A VM that refuses the configured key is reported as such, and
-  nothing ran on it. When a connection fails or the key is refused, and the configured key is
-  passphrase-protected, the error's hint mentions `ssh-add`; `vm port-forward` shows ssh's own log
-  instead.
+- **No ssh configuration is read.** These commands run `ssh -F none` (for `vm create` and
+  `vm reinit`, the connections the new layer makes), so `~/.ssh/config` and the system configuration
+  do not apply to them. An `IdentityAgent` set only in `~/.ssh/config` (1Password, Secretive) is
+  ignored; the agent named by `SSH_AUTH_SOCK` serves the key. Every connection runs in batch mode,
+  so ssh never prompts for a key's passphrase: an encrypted key has to be loaded in that agent
+  first. A VM that refuses the configured key is reported as such, and nothing ran on it. When a
+  connection fails or the key is refused, and the configured key is passphrase-protected, the
+  error's hint mentions `ssh-add`; `vm port-forward` shows ssh's own log instead.
 - **Exit statuses.** `vm exec` and `agent exec` still run the command line under the account shell,
   so a command that cannot start exits 127 or 126 with the shell's message, as before. A missing
   workspace directory exits 125 with one line from `agw`. A command that exits 255 is no longer
