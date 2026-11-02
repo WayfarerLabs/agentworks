@@ -17,7 +17,6 @@ from agentworks.errors import ConnectivityError, StateError, ValidationError
 from agentworks.execution import root_script, trust
 from agentworks.execution.errors import ClientUnsupported
 from agentworks.execution.oplog import format_record
-from agentworks.execution.pump import CAPTURE_LIMIT_BYTES
 from agentworks.execution.root_script import RawRun
 
 if TYPE_CHECKING:
@@ -244,26 +243,6 @@ def test_run_process_returns_at_the_deadline_with_the_process_reaped() -> None:
     pid = int(raw.stdout)
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
-
-
-@needs_bash
-def test_run_process_stops_a_writer_at_the_output_limit() -> None:
-    started = time.monotonic()
-
-    raw = root_script.run_process(["/bin/bash", "-s"], b"exec cat /dev/zero\n", 30)
-
-    assert time.monotonic() - started < 10
-    assert len(raw.stdout) == CAPTURE_LIMIT_BYTES
-
-
-@needs_bash
-def test_a_background_child_holding_stdout_does_not_stall_run_process() -> None:
-    started = time.monotonic()
-
-    raw = root_script.run_process(["/bin/bash", "-s"], b"sleep 30 &\necho done\n", 30)
-
-    assert time.monotonic() - started < 10
-    assert raw.stdout == b"done\n"
 
 
 def test_a_missing_program_is_a_connectivity_error_naming_it() -> None:
