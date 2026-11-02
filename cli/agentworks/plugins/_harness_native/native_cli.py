@@ -229,8 +229,8 @@ class NativeCLI:
                         result.append(NativeMarket(name, None))
                         continue
                     declared_source = _object(declaration.get("source", source))
-                    # Claude's list output omits sparse paths. Its native user
-                    # declaration still contributes them to the full identity.
+                    # Recover optional source fields omitted by list output from
+                    # the current native user declaration for the full identity.
                     for key in ("ref", "sparsePaths"):
                         if key in declared_source and key not in source:
                             source[key] = declared_source[key]

@@ -347,7 +347,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 blocked_plugins.add(identifier)
 
         def remove_plugin(claim: NativeClaim) -> bool:
-            if claim.identifier.rsplit("@", 1)[1] in blocked_markets:
+            if claim.identifier.rpartition("@")[2] in blocked_markets:
                 skip("plugin", claim.identifier, "its marketplace could not be retired or replaced safely")
                 return False
             existing = by_plugin.get(claim.identifier)
@@ -504,6 +504,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 continue
             changed = existing_plugin is None or not existing_plugin.enabled
             if existing_plugin is None or not existing_plugin.enabled:
+                action = "Installed" if existing_plugin is None else "Re-enabled"
                 cli.install(selector)
                 existing_plugin = next(
                     (
@@ -520,7 +521,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                     or _plugin_market(existing_plugin) != parent_market.source
                 ):
                     raise StateError("native user plugin installation could not be confirmed")
-                output.info(f"Installed native plugin '{selector}' via {tool}.")
+                output.info(f"{action} native plugin '{selector}' via {tool}.")
             elif existing_plugin.source is None:
                 skip("plugin", selector, "its installation source cannot be observed")
                 continue
