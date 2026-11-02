@@ -49,11 +49,12 @@ returns canned outcomes without ssh.
   configured admin with the operator's real database and host-key store:
 
   ```console
-  AGW_CONFORMANCE_VM=my-vm uv run pytest -n 0 tests/execution/conformance/test_live_vectors.py -m integration
+  AGW_CONFORMANCE_VM=my-vm uv run pytest tests/execution/conformance/test_live_vectors.py -m integration
   ```
 
-  Run it serially (`-n 0`). Under xdist the guest's sshd drops connections past Debian's default
-  `MaxStartups 10`, and different vectors fail on each run.
+  The lane runs on one xdist worker (`xdist_group`): Debian's sshd default, `MaxStartups 10:30:100`,
+  starts dropping unauthenticated connections at random past 10, so parallel vectors would fail
+  unpredictably.
 
   It creates and removes only `/tmp/agw-conformance-*` and `/tmp/agw-handover-*` on the guest. Run
   it from each workstation the evidence matrix names; Windows is where binary stdin and early exit

@@ -199,7 +199,8 @@ def passphrase_hint(identity_file: Path) -> str | None:
     ``~`` form when it needs no quoting (a quoted ``~`` does not expand),
     otherwise the absolute path, single-quoted on POSIX. On Windows it is always
     the absolute path in double quotes, since neither cmd nor PowerShell expands
-    the ``~`` form for ssh-add.
+    the ``~`` form for ssh-add; cmd still expands ``%NAME%`` and PowerShell
+    ``$name`` inside them, which no one quoting avoids in both.
     """
     if not identity_is_passphrase_protected(identity_file):
         return None

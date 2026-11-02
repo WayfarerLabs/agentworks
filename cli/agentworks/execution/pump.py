@@ -183,7 +183,9 @@ class PipeSession:
     still reports its status. ssh does not end the channel for a departed
     stderr, and the status travels on stderr, so :meth:`pump` returns
     :attr:`StopReason.STDERR_CONSUMER_LEFT` once stdout has nothing held for a
-    slow consumer, and ending the session kills the client.
+    slow consumer and the trailer has not already arrived (with it in hand,
+    stdout is pumped to its end and the status stands), and ending the session
+    kills the client.
     :attr:`stdout_abandoned` and :attr:`stderr_abandoned` say which left. A sink
     that raises ``BlockingIOError`` is waited on: the session stops reading that
     stream until the sink has taken what it was offered, so output is never
