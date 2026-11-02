@@ -392,7 +392,7 @@ def _phase_a_bootstrap(
         tailscale_ip = parse_tailnet_address(tailnet_address)
     except ValueError:
         raise ProvisioningError(
-            "the vm-platform returned a tailnet address that is not an IP address",
+            "the vm-platform returned a tailnet address that is not an assignable IPv4 address",
             entity_kind="vm",
             entity_name=vm_name,
         ) from None

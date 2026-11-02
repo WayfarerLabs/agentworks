@@ -397,7 +397,6 @@ class ProxmoxPlatform(VMPlatform):
 
                 # 8. Run the bootstrap, join and read the address through the
                 # guest agent, the VM's root channel
-                output.detail("Running bootstrap via guest agent...")
                 run_as_root = functools.partial(guest_agent.run_as_root, self._api(ctx), node, newid)
                 run_bootstrap(
                     run_as_root,

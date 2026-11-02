@@ -142,7 +142,9 @@ def parse_tailnet_address(text: object) -> str:
         or address.is_link_local
         or address.is_reserved
     ):
-        raise ValueError("a tailnet address cannot be a special-purpose address")
+        raise ValueError(
+            "a tailnet address cannot be a loopback, unspecified, multicast, link-local or reserved address"
+        )
     return str(address)
 
 

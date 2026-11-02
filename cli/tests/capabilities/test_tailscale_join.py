@@ -228,13 +228,26 @@ def test_the_readiness_loop_retries_a_refused_key_and_any_probe_that_does_not_co
     assert guest.joins == 1
 
 
-def test_readiness_stops_at_its_bound_without_sending_the_key() -> None:
-    guest = FakeGuest(lambda payload, seen: Answer(raises=ConnectivityError("refused")))
+def test_readiness_stops_at_its_bound_without_sending_the_key_and_keeps_the_refusal_hint() -> None:
+    refused = ConnectivityError("VM 'vm1' refused the configured SSH key", hint="Load the key into the agent.")
+    guest = FakeGuest(lambda payload, seen: Answer(raises=refused))
 
-    with pytest.raises(ProvisioningError):
+    with pytest.raises(ProvisioningError) as caught:
         complete_cloud_bootstrap(guest.run_as_root, KEY, node=NODE)
 
     assert guest.payloads == ["true"] * READINESS_PROBES
+    assert caught.value.hint == refused.hint
+
+
+def test_a_readiness_command_whose_channel_fails_keeps_the_channel_hint() -> None:
+    dropped = ConnectivityError("the channel dropped", hint="Check the route.")
+    guest = FakeGuest(lambda payload, seen: Answer(raises=dropped) if payload == "ready" else Answer())
+
+    with pytest.raises(ProvisioningError) as caught:
+        complete_cloud_bootstrap(guest.run_as_root, KEY, node=NODE, readiness_command="ready")
+
+    assert caught.value.hint == dropped.hint
+    assert guest.joins == 0
 
 
 def test_a_host_key_mismatch_ends_readiness_at_once() -> None:

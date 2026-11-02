@@ -309,9 +309,10 @@ takes a `run_as_root`:
   logout: on exhaustion it runs one `tailscale logout` (30 s) and raises `ConnectivityError` from
   the read's error. When the logout returned status 0, the message says so and the hint is
   `rerun_hint`; otherwise the hint names the node for removal in the admin console. Create passes
-  `CREATE_RERUN_HINT`, which says the partial VM was removed and that a single-use key spent by the
-  join needs replacing first, and rekey passes `agw vm recover NAME`: a node whose address cannot be
-  read is unusable, and the next recover's repair reads `NeedsLogin` and rejoins it.
+  `CREATE_RERUN_HINT`, which says the join spent the auth key, so a single-use key needs replacing
+  before the create runs again (the rollback reports for itself whether the backend was removed),
+  and rekey passes `agw vm recover NAME`: a node whose address cannot be read is unusable, and the
+  next recover's repair reads `NeedsLogin` and rejoins it.
 - `ConnectivityError` rather than slice 3's `ProvisioningError`, because it is true for all three
   callers (the VM did not report an address over its root channel). Create still reports a
   `ProvisioningError`: the manager wraps any untyped failure of `create` in one
@@ -324,9 +325,12 @@ takes a `run_as_root`:
   retries every probe that does not end with status 0, a raised `ConnectivityError` included, within
   that bound, so `PublicSSH`'s `Permission denied (publickey` refusal is retried during create. That
   covers a guest agent that writes the key after sshd starts, as GCP's may (an inference, not
-  measured). Then the readiness command runs once (600 s), and the bootstrap joins and settles.
-  `TAILSCALE_JOIN_STDIN_COMMAND` and the transport join leave `tailscale_join.py`; they stay in
-  `vms/initializer/credentials.py` only for rekey and `vm start`'s rejoin, and go with them.
+  measured). When the probes are exhausted, the `ProvisioningError` carries the last refusal's hint
+  (an encrypted key not loaded in the agent gets `agent_load_hint`), and a readiness command whose
+  channel raises keeps that error's hint too. Then the readiness command runs once (600 s), and the
+  bootstrap joins and settles. `TAILSCALE_JOIN_STDIN_COMMAND` and the transport join leave
+  `tailscale_join.py`; they stay in `vms/initializer/credentials.py` only for rekey and `vm start`'s
+  rejoin, and go with them.
 
 **The bootstrap script loses its key.** WSL2 and Proxmox are the last two platforms that generate
 the bootstrap with the key inside it (`capabilities/vm_platform/wsl2_bootstrap.py:62-69`,

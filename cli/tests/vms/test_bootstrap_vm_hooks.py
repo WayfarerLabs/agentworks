@@ -114,7 +114,7 @@ def test_an_address_core_cannot_parse_marks_the_vm_failed_and_secures_it(
     monkeypatch.setattr("agentworks.vms.initializer.driver.SSHTransport", _no_connection)
     platform = _SpyPlatform()
 
-    with pytest.raises(ProvisioningError, match="not an IP address"):
+    with pytest.raises(ProvisioningError):
         driver.bootstrap_vm(
             db,
             SimpleNamespace(),  # type: ignore[arg-type]

@@ -396,7 +396,7 @@ def create_vm(
             if not tailscale_auth_key.strip():
                 # An empty key would leave the guest's join waiting for an interactive login.
                 raise ValidationError(
-                    f"secret {vm_tmpl.tailscale_auth_key!r} is empty, so it cannot be used for "
+                    f"secret {vm_tmpl.tailscale_auth_key!r} is empty or blank, so it cannot be used for "
                     f"{LineOrientedSecretUse.TAILSCALE.value}",
                     entity_kind="secret",
                     entity_name=vm_tmpl.tailscale_auth_key,

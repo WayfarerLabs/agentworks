@@ -38,11 +38,11 @@ READINESS_PAUSE_SECONDS = 10
 READINESS_PROBE_DEADLINE_SECONDS = 10
 READINESS_COMMAND_DEADLINE_SECONDS = 600
 
-CREATE_RERUN_HINT = (
-    "The partial VM was removed, so the create can be run again. The join spent the auth key: "
-    "a single-use key needs a fresh one first."
-)
-"""The settle's guidance after a create's node was logged out: the backend was rolled back too."""
+CREATE_RERUN_HINT = "The join spent the auth key: replace a single-use key before running the create again."
+"""The settle's guidance after a create's node was logged out.
+
+The platform's rollback reports for itself whether the backend was removed.
+"""
 
 DEFAULT_READINESS_COMMAND = "cloud-init status --wait"
 DEFAULT_READINESS_LABEL = "cloud-init"
@@ -101,7 +101,7 @@ def read_tailnet_address(run_as_root: Callable[[bytes, float], RawRun], *, node:
         try:
             address = parse_tailnet_address(result.stdout.decode("utf-8", errors="replace"))
         except ValueError:
-            reason = "the VM reported a value that is not an IP address"
+            reason = "the VM reported a value that is not an assignable IPv4 address"
             continue
         output.detail(f"Tailscale IP: {address}")
         return address
@@ -174,12 +174,16 @@ def _wait_for_readiness(run_as_root: Callable[[bytes, float], RawRun], command: 
         if probe.status == 0:
             break
     else:
-        raise ProvisioningError("the VM did not answer over SSH for create-time bootstrap") from failure
+        # A refused key's hint (load an encrypted key into the agent) is the operator's next step.
+        raise ProvisioningError(
+            "the VM did not answer over SSH for create-time bootstrap",
+            hint=failure.hint if failure else None,
+        ) from failure
 
-    incomplete = ProvisioningError(f"{label} did not complete successfully during create-time bootstrap")
+    incomplete = f"{label} did not complete successfully during create-time bootstrap"
     try:
         result = root_script.run(run_as_root, command, deadline=READINESS_COMMAND_DEADLINE_SECONDS)
     except ConnectivityError as error:
-        raise incomplete from error
+        raise ProvisioningError(incomplete, hint=error.hint) from error
     if result.status != 0:
-        raise incomplete
+        raise ProvisioningError(incomplete)

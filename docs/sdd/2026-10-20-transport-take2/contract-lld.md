@@ -144,13 +144,15 @@ and short.
 s) once and raises `ConnectivityError` from the read's error: if the logout returned status 0, the
 message says so and the error's hint is `rerun_hint`; otherwise the hint names `node` (the VM's
 hostname, `request.hostname`) for removal in the Tailscale admin console. Create passes
-`CREATE_RERUN_HINT`: the partial VM was removed, so create can be run again, and the join spent the
-key, so a single-use key needs replacing first. Slice 4's rekey settles with `agw vm recover NAME`
-as its hint, and recover settles only after its repair joined, reading the address alone otherwise,
-so a flaky channel never logs out a working node. `ConnectivityError` is true for every caller, and
-create still reports a `ProvisioningError`, since the manager wraps any untyped failure of `create`
-in one (`lifecycle.py:578-584`). The manager's wrapper and the AWS and Azure create arms' error
-wrappers keep the wrapped `AgentworksError`'s hint, so the guidance survives the wrapping.
+`CREATE_RERUN_HINT`: the join spent the auth key, so a single-use key needs replacing before the
+create runs again. Whether the backend was removed is the platform rollback's to report, since a
+best-effort rollback warns and re-raises this error when its cleanup fails. Slice 4's rekey settles
+with `agw vm recover NAME` as its hint, and recover settles only after its repair joined, reading
+the address alone otherwise, so a flaky channel never logs out a working node. `ConnectivityError`
+is true for every caller, and create still reports a `ProvisioningError`, since the manager wraps
+any untyped failure of `create` in one (`lifecycle.py:578-584`). The manager's wrapper and the AWS
+and Azure create arms' error wrappers keep the wrapped `AgentworksError`'s hint, so the guidance
+survives the wrapping.
 
 An empty or whitespace-only auth key never reaches a platform: create refuses it at its boundary,
 beside the line-safety check (`lifecycle.py:389`), since `tailscale up` given an empty key would
@@ -607,11 +609,12 @@ None restates the implementation or our prose.
   `TrustMismatch` propagating from the first read; the read never logging out; the settle's
   exhaustion running the logout exactly once and raising `ConnectivityError`, whose hint is
   `rerun_hint` after a successful logout and names the node after a failed one; and the join having
-  run exactly once in every case (the fake counting it). The address parser refuses IPv6 and every
-  special-purpose IPv4 range; create refuses an empty or whitespace-only key before any platform
-  work; a wrapped create failure keeps its hint; Lima sends no key when its restart fails.
-  `parse_bootstrap_steps` reads a script that printed no address. Each platform's `create` returns a
-  parseable `tailnet_address` and none returns a transport.
+  run exactly once in every case (the fake counting it). The address parser refuses IPv6 and
+  loopback, unspecified, multicast, link-local and reserved IPv4 addresses; create refuses an empty
+  or whitespace-only key before any platform work; a wrapped create failure keeps its hint; Lima
+  sends no key when its restart fails. `parse_bootstrap_steps` reads a script that printed no
+  address. Each platform's `create` returns a parseable `tailnet_address` and none returns a
+  transport.
 - **Requests.** `PermissionDenied` for an agent-bound access with an elevated request, before
   `resolve_ssh` and with nothing spawned; `classify` and `outcome` for `AUTH_FAILED` (the row after
   `HOST_KEY`, and a 255 whose log holds neither token stays `CONNECTION`); the passphrase hint
