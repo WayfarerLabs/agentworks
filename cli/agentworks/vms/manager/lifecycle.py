@@ -38,6 +38,7 @@ from agentworks.errors import (
     StateError,
     TokenRejectedError,
     UserAbort,
+    ValidationError,
 )
 from agentworks.execution import trust
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
@@ -391,6 +392,15 @@ def create_vm(
                 use=LineOrientedSecretUse.TAILSCALE,
                 secret_name=vm_tmpl.tailscale_auth_key,
             )
+            if not tailscale_auth_key.strip():
+                # An empty key would leave the guest's join waiting for an interactive login.
+                raise ValidationError(
+                    f"secret {vm_tmpl.tailscale_auth_key!r} is empty, so it cannot be used for "
+                    f"{LineOrientedSecretUse.TAILSCALE.value}",
+                    entity_kind="secret",
+                    entity_name=vm_tmpl.tailscale_auth_key,
+                    hint="Set the secret to a Tailscale auth key.",
+                )
             from agentworks.git_credentials import (
                 credential_redactions,
                 credential_requests,

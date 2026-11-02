@@ -16,7 +16,7 @@ from agentworks.capabilities.vm_platform.tailscale_join import (
     read_tailnet_address,
     settle_tailnet_address,
 )
-from agentworks.errors import ConnectivityError, ProvisioningError, ValidationError
+from agentworks.errors import ConnectivityError, ProvisioningError
 from agentworks.execution.errors import TrustMismatch
 from tests._root_channel_fakes import ADDRESS, Answer, FakeGuest
 
@@ -253,13 +253,3 @@ def test_exhausted_reads_after_the_join_log_out_without_joining_again() -> None:
     assert guest.joins == 1
     assert guest.count(LOGOUT) == 1
     assert_key_free(caught.value)
-
-
-@pytest.mark.parametrize("key", ["tskey\nsecond", "tskey\rsecond", "tskey\0second"])
-def test_a_key_that_is_not_line_safe_is_refused_before_anything_runs(key: str) -> None:
-    guest = FakeGuest()
-
-    with pytest.raises(ValidationError):
-        EphemeralTailscaleBootstrap(guest.run_as_root).complete(key, node=NODE)
-
-    assert guest.scripts == []

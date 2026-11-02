@@ -720,15 +720,18 @@ def test_slug_resolution_precedes_secrets_and_insert(
     assert db.get_vm("ovm") is None  # insert happens after the resolve
 
 
-def test_create_rejects_multiline_tailscale_key_before_runup_db_or_platform(
+@pytest.mark.parametrize(
+    "auth_key", ["tskey-prefix\r\ntskey-suffix\r\n", "", " \t "], ids=["multiline", "empty", "whitespace"]
+)
+def test_create_rejects_an_unusable_tailscale_key_before_runup_db_or_platform(
     db: Database,
     make_config,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
+    auth_key: str,
 ) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
-    auth_key = "tskey-prefix\r\ntskey-suffix\r\n"
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", auth_key)
     monkeypatch.setattr(
         LimaPlatform,
@@ -745,7 +748,7 @@ def test_create_rejects_multiline_tailscale_key_before_runup_db_or_platform(
         vm_manager.create_vm(db, make_config(), name="unsafe-ts", interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_vm("unsafe-ts") is None
-    assert auth_key not in repr((caught.value.args, vars(caught.value)))
+    assert not auth_key.strip() or auth_key not in repr((caught.value.args, vars(caught.value)))
 
 
 def test_r11_hostname_and_vnet_bound_by_construction() -> None:

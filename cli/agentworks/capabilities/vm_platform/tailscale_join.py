@@ -19,7 +19,6 @@ from agentworks import output
 from agentworks.capabilities.vm_platform.base import parse_tailnet_address
 from agentworks.errors import ConnectivityError, ProvisioningError
 from agentworks.execution import root_script
-from agentworks.secrets.line_safety import LineOrientedSecretUse, require_line_safe_secret
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -155,11 +154,9 @@ class EphemeralTailscaleBootstrap:
     def complete(self, auth_key: str, *, node: str) -> str:
         """Wait for the provider's bootstrap, join as ``node`` once, and return its settled address.
 
-        The key is refused before anything runs if it is not line-safe, and a
-        readiness failure raises before it is sent, so the platform's create
-        rollback removes the partial VM with the key never used.
+        A readiness failure raises before the key is sent, so the platform's
+        create rollback removes the partial VM with the key never used.
         """
-        auth_key = require_line_safe_secret(auth_key, use=LineOrientedSecretUse.TAILSCALE)
         self._wait_for_readiness()
         join_tailscale(self._run_as_root, auth_key, node=node)
         return settle_tailnet_address(self._run_as_root, node=node, rerun_hint=CREATE_RERUN_HINT)
