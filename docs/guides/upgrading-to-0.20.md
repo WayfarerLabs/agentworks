@@ -61,13 +61,13 @@ imported until it can, so recreate it.
 Commands that act on a VM refuse it; commands that only describe or list VMs report the missing
 record for that VM and carry on. Every command that reaches a VM over SSH refuses a VM with no
 record, before it starts the VM, resolves a secret or changes anything, and prints a hint that names
-the import; the exception is `vm shell --platform` on a cloud VM (AWS, Azure, GCP), which resolves
-credentials and opens its temporary network rule first and then refuses. That covers `vm shell`,
-`vm exec`, `vm reinit`, `vm backup`, `vm port-forward`, `vm start`, `vm rekey`, and the workspace,
-agent, session and console commands, including the start of a stopped VM that any of them would
-trigger. `vm start` and `vm rekey` check first so they never boot the VM or spend a Tailscale auth
-key. `vm describe`, `session describe` and the status listings that span several VMs warn that the
-VM has no record, leave out what they would have read over SSH, and carry on.
+the import. That covers `vm shell`, `vm exec`, `vm reinit`, `vm backup`, `vm port-forward`,
+`vm start`, `vm rekey`, and the workspace, agent, session and console commands, including the start
+of a stopped VM that any of them would trigger. `vm start` and `vm rekey` check first so they never
+boot the VM or spend a Tailscale auth key. The exception is `vm shell --platform` on a cloud VM
+(AWS, Azure, GCP), which resolves credentials and opens its temporary network rule first and then
+refuses. `vm describe`, `session describe` and the status listings that span several VMs warn that
+the VM has no record, leave out what they would have read over SSH, and carry on.
 
 `vm delete` still works without a record, because deleting is what you do with a broken VM. It
 cannot reach a cloud VM (AWS, Azure, GCP) to log its node out of Tailscale, though, so that step is
