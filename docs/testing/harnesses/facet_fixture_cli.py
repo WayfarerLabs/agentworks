@@ -92,13 +92,13 @@ def main() -> None:
             dict(os.environ),
         )
 
+    # Transport credentials and PATH belong to the test session. Only HOME is selected here.
+    os.environ["HOME"] = str(home)
     import agentworks
 
     if not Path(agentworks.__file__).resolve().is_relative_to(root / "agentworks"):
         parser.error("selected interpreter imports agentworks outside the selected CLI tree")
 
-    # Transport credentials and PATH belong to the test session. Only HOME is selected here.
-    os.environ["HOME"] = str(home)
     _install_fixtures()
     from agentworks.cli import main as cli_main
 

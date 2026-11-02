@@ -20,6 +20,8 @@ def test_fixture_publication_schema_and_cli_validation_are_process_local(tmp_pat
     cli_dir = Path(__file__).parents[1].resolve()
     launcher = cli_dir.parent / "docs" / "testing" / "harnesses" / "facet_fixture_cli.py"
     home = tmp_path / "home"
+    inherited_home = tmp_path / "inherited-home"
+    inherited_home.mkdir()
     config_dir = home / ".config" / "agentworks"
     config_dir.mkdir(parents=True)
     settings = '[plugins]\nsystem = ["facet-test-fixtures"]'
@@ -32,7 +34,7 @@ def test_fixture_publication_schema_and_cli_validation_are_process_local(tmp_pat
         "agent-template", "facet-test-unsupported", {"harness_integrations": {"facet-test-unsupported": {}}}
     )
     config_path = write_cfg(config_dir, manifest, unsupported, settings=settings)
-    environment = {**os.environ, "AGW_CLI_DIR": str(cli_dir), "HOME": str(home), "NO_COLOR": "1"}
+    environment = {**os.environ, "AGW_CLI_DIR": str(cli_dir), "NO_COLOR": "1"}
 
     def run(*arguments: str, fixture: bool = True) -> subprocess.CompletedProcess[str]:
         entry = (
@@ -43,7 +45,7 @@ def test_fixture_publication_schema_and_cli_validation_are_process_local(tmp_pat
         return subprocess.run(
             [sys.executable, *entry, *arguments],
             cwd=tmp_path,
-            env=environment,
+            env={**environment, "HOME": str(inherited_home if fixture else home)},
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
