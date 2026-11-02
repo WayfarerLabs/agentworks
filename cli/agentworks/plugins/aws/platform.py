@@ -154,7 +154,7 @@ class EC2Platform(PublicAddressPlatform):
         "agentworks config."
     )
 
-    public_address_hint: ClassVar[str] = (
+    public_address_hint = (
         "A stopped EC2 instance has no public IP: start it, or check the instance in the EC2 console "
         "(the EC2 serial console reaches it without one)."
     )

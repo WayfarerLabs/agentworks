@@ -18,7 +18,7 @@ import tempfile
 from dataclasses import dataclass
 from ipaddress import IPv6Address
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from agentworks.errors import ConnectivityError, ValidationError
 from agentworks.execution import trust
@@ -197,7 +197,12 @@ def build_argv(
     return argv
 
 
-def build_host_argv(client: SSHClient, host: str, mode: ArgvMode, remote_command: str | None = None) -> list[str]:
+def build_host_argv(
+    client: SSHClient,
+    host: str,
+    mode: Literal[ArgvMode.PIPE, ArgvMode.TERMINAL],
+    remote_command: str | None = None,
+) -> list[str]:
     """The argv for a platform's own connection to its host (Remote Lima's), under the host policy.
 
     Unlike a VM connection it honors the operator's SSH configuration (no

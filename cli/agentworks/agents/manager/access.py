@@ -77,9 +77,7 @@ def _assert_agent_access_works(access: VMAccess, admin: VMAccess, agent: AgentRo
         try:
             fallback.require_completed(admin.vm_name)
         except ExecutionIncomplete as error:
-            hint = admin.passphrase_hint()
-            if hint is not None:
-                error.hint = f"{error.hint} {hint}" if error.hint else hint
+            error.add_hint(admin.passphrase_hint())
             raise
     raise ConnectivityError(
         f"direct SSH probe to agent '{agent.name}' failed: VM '{agent.vm_name}' is unreachable",

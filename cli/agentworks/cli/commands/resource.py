@@ -370,10 +370,9 @@ def resource_edit(
         if found.location is None:
             if found.unreadable:
                 files = ", ".join(format_host_path(p) for p in found.unreadable)
-                exc.hint = (
-                    f"{exc.hint + ' ' if exc.hint else ''}Also: {files} "
-                    f"failed to parse and could not be searched; edit "
-                    f"the file directly if the resource lives there."
+                exc.add_hint(
+                    f"Also: {files} failed to parse and could not be searched; "
+                    "edit the file directly if the resource lives there."
                 )
             raise
         output.warn(f"config is currently failing validation ({exc}); opening the declaring manifest anyway")

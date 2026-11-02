@@ -30,6 +30,8 @@ def test_the_script_reaches_bash_as_root_on_stdin_with_no_login_shell(monkeypatc
     ((argv, sent, _deadline),) = calls
     assert sent == script
     assert not any("tskey-private" in argument for argument in argv)
+    assert argv[argv.index("--user") + 1] == "root"
+    assert argv[-3:] == ["--exec", "/bin/bash", "-s"]
 
 
 @pytest.mark.parametrize(

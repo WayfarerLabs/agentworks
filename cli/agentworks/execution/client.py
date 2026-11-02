@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agentworks import ssh_identity
 from agentworks.execution.errors import ClientUnsupported
 
 if TYPE_CHECKING:
@@ -171,6 +172,20 @@ def identity_is_loaded(ssh: SSHClient, identity_file: Path) -> bool:
         return False
     listed = probe.stdout.decode("utf-8", errors="replace").splitlines()
     return any(line.split()[:2] == wanted for line in listed)
+
+
+def agent_load_hint(identity_file: Path) -> str | None:
+    """How to load ``identity_file`` into the SSH agent, or ``None`` unless that is the likely fix.
+
+    ssh runs in batch mode, so an encrypted key the agent does not hold is
+    refused like any other. There is no hint for an unencrypted key or one the
+    agent already lists. This reads the key file and may run ``ssh-add``, so
+    callers ask only after a connection or authentication failure.
+    """
+    hint = ssh_identity.passphrase_hint(identity_file)
+    if hint is None or identity_is_loaded(resolve_ssh(), identity_file):
+        return None
+    return hint
 
 
 @functools.cache

@@ -185,8 +185,9 @@ resolved client that cannot start raises `ConnectivityError` naming it, the prec
   (below).
 - Proxmox: QGA runs commands as root (`plugins/proxmox/transport.py:3-4`). `input-data` keeps the
   65,536-character guard (`transport.py:24`). The largest script is the bootstrap, 14,359 bytes as
-  generated at the baseline. A truncated QGA report raises (`plugins/proxmox/api.py:102-103`). At
-  the deadline the result is empty, hence unknown.
+  generated at the baseline. A truncated QGA report raises `_TruncatedQGAOutput`
+  (`plugins/proxmox/api.py`), which the channel reports as a script that exited with its output cut
+  short. At the deadline the result is empty, hence unknown.
 
 ### A channel that drops
 
@@ -246,7 +247,10 @@ the agent, as for every VM connection.
   the client log's `Host key verification failed` raises `TrustMismatch`, and its
   `Permission denied (publickey` raises `ConnectivityError` whose hint names the provider console:
   recover logs in with the same key it would repair, so a cloud VM that refuses it needs the
-  provider's own access (serial console, EC2 Instance Connect) or recreation.
+  provider's own access (serial console, EC2 Instance Connect) or recreation. When the key is
+  encrypted and the agent does not hold it, the hint leads with the passphrase hint from
+  `client.agent_load_hint`, the check `VMAccess.passphrase_hint` makes, since it is given only when
+  it is the likely cause.
 - `wait_until_answering(*, failure_hint)` probes with
   `root_script.run(self.run_as_root, "true", deadline=10)` up to six times, three seconds apart, and
   warns `failure_hint` before raising `ConnectivityError` when none completes: today's propagation
@@ -350,7 +354,10 @@ the two legacy transports, and imports nothing legacy:
   copied from `remote_exec.py:47-213` with only the branch its one caller takes
   (`reuse_completed=False`, `quiet=True`, unelevated, `lima.py:623-631`). Its output goes to
   `request.progress` instead of a second `SSHLogger` (`lima.py:607-644`), so the create's own log
-  holds it.
+  holds it. Every check the poll and its closing reads make treats ssh's 255 as unanswered, whatever
+  it printed, since none of them exits 255 by itself: the poll asks again at its next interval
+  within the timeout, warning once that the host is not answering, and each read is asked up to six
+  times.
 
 The remote create keeps its private staging directory (`lima.py:671-691`). Piping the template to
 `limactl create -` would need `create` to be quick, and it is not: `createAction` calls
@@ -387,25 +394,30 @@ stdin has been a pipe since `3b8a73624`. Incident row I34 holds this, with vecto
 dispatch-and-poll half of `plugins/proxmox/transport.py:51-137`: one `guest_agent_exec` of
 `["/bin/bash", "-s"]` with `input-data`, then `guest_agent_exec_status` every two seconds until it
 reports exit or the deadline passes. Dispatch and status failures raise `ConnectivityError` with no
-stdin in the message (`transport.py:69-123`). `create` runs the bootstrap through it with today's
-600-second deadline (`platform.py:600`), then joins, deleting `_run_bootstrap_via_agent`
-(`platform.py:566-636`); `native_transport` (`:488-502`) and `transport.py` go. No `native_shell`
-override. `recovery_needs_guest_sshd = False`.
+stdin in the message (`transport.py:69-123`), except an HTTP 401 or 403, which raises
+`TokenRejectedError`; a status failure of either kind says the script may still be running. A
+`_TruncatedQGAOutput` report raises `ConnectivityError` saying the script exited with its output cut
+short. No failure chains the API error, whose request quotes the script. `create` runs the bootstrap
+through it with today's 600-second deadline (`platform.py:600`), then joins, deleting
+`_run_bootstrap_via_agent` (`platform.py:566-636`); `native_transport` (`:488-502`) and
+`transport.py` go. No `native_shell` override. `recovery_needs_guest_sshd = False`.
 
 ### AWS, Azure and GCP
 
-The three clouds subclass one mixin, `PublicAddressPlatform(VMPlatform)` in `public_ssh.py`, which
-holds the root channel once. Each cloud supplies two things: `_public_address(vm, ctx) -> str`,
-today's live public-address read (`plugins/aws/platform.py:703-718`,
-`plugins/azure/platform.py:800-824`, `plugins/gcp/platform.py:580-597`), and the class attribute
-`public_address_hint`, its own console hint. The mixin's private context manager
-`_public_ssh(vm, ctx, binding)` opens `transient_route(vm, ctx, config=ctx.config)`, reads the
-address, and raises `StateError` with `public_address_hint` when it is empty, where the factory
-raised it for every platform (`transports/__init__.py:215-228`, incident row I32); GCP's read raises
-`GCEError` itself instead. It then builds `PublicSSH(address, admin, identity_file, binding)` with
-the identity file from `ctx.config.operator.ssh_private_key` (every operation's context carries the
-configuration), runs `wait_until_answering(failure_hint=probe_failure_hint)`, and yields it for as
-long as the route is open. Then:
+The three clouds subclass one shared base, `PublicAddressPlatform(VMPlatform)` in `public_ssh.py`,
+which holds the root channel once. Each cloud supplies two things:
+`_public_address(vm, ctx) -> str`, today's live public-address read
+(`plugins/aws/platform.py:703-718`, `plugins/azure/platform.py:800-824`,
+`plugins/gcp/platform.py:580-597`), and `public_address_hint`, its own console hint, an abstract
+property each cloud sets as a class attribute, so registration refuses a cloud without it. The
+base's private context manager `_public_ssh(vm, ctx, binding)` opens
+`transient_route(vm, ctx, config=ctx.config)`, reads the address, and raises `StateError` with
+`public_address_hint` when it is empty, where the factory raised it for every platform
+(`transports/__init__.py:215-228`, incident row I32); GCP's read raises `GCEError` itself instead.
+It then builds `PublicSSH(address, admin, identity_file, binding)` with the identity file from
+`ctx.config.operator.ssh_private_key` (every operation's context carries the configuration), runs
+`wait_until_answering(failure_hint=probe_failure_hint)`, and yields it for as long as the route is
+open. Then:
 
 - `run_as_root`: `trust.require_record(vm.name)` first, so a VM with no record opens no firewall
   rule, then `run_as_root(script, deadline)` inside `_public_ssh` under VM trust.

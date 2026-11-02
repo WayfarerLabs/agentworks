@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Literal
 
 import pytest
 
@@ -302,7 +303,7 @@ def test_stage0_is_one_short_line_that_no_account_shell_rewrites() -> None:
 # -- The host policy -------------------------------------------------------------------
 
 
-def host_argv(mode: ArgvMode = ArgvMode.PIPE) -> list[str]:
+def host_argv(mode: Literal[ArgvMode.PIPE, ArgvMode.TERMINAL] = ArgvMode.PIPE) -> list[str]:
     return ssh_process.build_host_argv(SSHClient(SSH or "/usr/bin/ssh", (9, 2)), "me@gpu-box", mode, "limactl list")
 
 

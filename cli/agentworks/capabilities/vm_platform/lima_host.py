@@ -32,8 +32,8 @@ _DETACHED_POLL_SECONDS = 3
 _DETACHED_QUIET_SECONDS = 300
 _DETACHED_READ_ATTEMPTS = 6
 _DETACHED_READ_RETRY_SECONDS = 5
-# ssh's own status for a connection that failed; a remote command's 255 is indistinguishable,
-# and none of the detached checks below prints nothing and exits 255 by itself.
+# ssh's own status for a connection that failed. A remote command's 255 is indistinguishable,
+# and none of the detached checks below exits 255 by itself.
 _SSH_CONNECTION_FAILED = 255
 
 # Writes the PID, runs the command, then writes its status. The brace group
@@ -155,7 +155,16 @@ class LimaHost:
         """Wait for the status file, warning on a long silence and killing the command at ``timeout``."""
         started = last_output = time.monotonic()
         size = 0
-        warned_quiet = False
+        warned_quiet = warned_unanswered = False
+
+        def ask(command: str) -> _Completed | None:
+            nonlocal warned_unanswered
+            answer = self._ask(command)
+            if answer is None and not warned_unanswered:
+                output.warn(f"the placement host '{self.host}' is not answering; still polling")
+                warned_unanswered = True
+            return answer
+
         while True:
             time.sleep(_DETACHED_POLL_SECONDS)
             if time.monotonic() - started > timeout:
@@ -165,15 +174,15 @@ class LimaHost:
                 return
             # The host may be briefly unreachable: an unanswered check is asked again at the next
             # poll, within the timeout, while the wrapper keeps running there.
-            written = self._ask(f"wc -c < {files.output} 2>/dev/null")
+            written = ask(f"wc -c < {files.output} 2>/dev/null")
             if written is not None and written.stdout.strip().isdigit() and int(written.stdout) > size:
                 size, last_output, warned_quiet = int(written.stdout), time.monotonic(), False
-            finished = self._ask(f"test -f {files.status}")
+            finished = ask(f"test -f {files.status}")
             if finished is None:
                 continue
             if finished.returncode == 0:
                 return
-            alive = self._ask(f"ps -p $(cat {files.pid}) > /dev/null 2>&1")
+            alive = ask(f"ps -p $(cat {files.pid}) > /dev/null 2>&1")
             if alive is None:
                 continue
             if alive.returncode != 0:
@@ -193,9 +202,13 @@ class LimaHost:
         return None
 
     def _ask(self, command: str) -> _Completed | None:
-        """``command``'s result, or ``None`` when the host did not answer: ssh's 255 with no output."""
+        """``command``'s result, or ``None`` when the host did not answer: ssh's 255.
+
+        Any output is ignored, so a login banner cannot make a dropped
+        connection read as an answer.
+        """
         completed = self._execute(command, input=None, timeout=None)
-        if completed.returncode == _SSH_CONNECTION_FAILED and not completed.stdout:
+        if completed.returncode == _SSH_CONNECTION_FAILED:
             return None
         return completed
 

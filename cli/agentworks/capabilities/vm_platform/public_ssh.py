@@ -27,7 +27,7 @@ import agentworks.execution as execution
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import ConnectivityError, StateError
-from agentworks.execution import root_script, ssh_process, trust
+from agentworks.execution import client, root_script, ssh_process, trust
 from agentworks.execution.errors import TrustMismatch
 from agentworks.execution.trust import TrustBinding, TrustMode
 
@@ -43,6 +43,11 @@ if TYPE_CHECKING:
 ROOT_COMMAND = "sudo -n /bin/bash -s"
 """The remote command: a constant every account shell Agentworks allows parses unchanged."""
 
+_PROVIDER_ACCESS_HINT = (
+    "Reach the VM through the provider's own access (its serial console, or EC2 Instance Connect) "
+    "to restore the admin's authorized key, or delete and recreate the VM."
+)
+
 PROBE_ATTEMPTS = 6
 PROBE_DEADLINE_SECONDS = 10
 PROBE_INTERVAL_SECONDS = 3
@@ -55,6 +60,7 @@ class PublicSSH:
         # Destination validates the provider-reported address and the admin name.
         self._destination = ssh_process.Destination(host, user)
         self._policy = ssh_process.VMPolicy(identity_file, trust)
+        self._identity_file = identity_file
         self._vm_name = trust.vm_name
 
     def run_as_root(self, script: bytes, deadline: float) -> RawRun:
@@ -73,15 +79,15 @@ class PublicSSH:
         if ssh_process.HOST_KEY_FAILURE in text:
             raise TrustMismatch(self._vm_name, ssh_process.tail_lines(text))
         if ssh_process.AUTH_FAILURE in text:
-            # Recovery logs in with the key it would repair, so waiting or retrying cannot help.
+            # Recovery logs in with the key it would repair, so waiting or retrying cannot help,
+            # unless the key is encrypted and the agent does not hold it. That hint comes first:
+            # it is given only when it is the likely cause.
+            load_hint = client.agent_load_hint(self._identity_file)
             raise ConnectivityError(
                 f"VM '{self._vm_name}' refused the configured SSH key at its public address {self._destination.host}",
                 entity_kind="vm",
                 entity_name=self._vm_name,
-                hint=(
-                    "Reach the VM through the provider's own access (its serial console, or EC2 Instance Connect) "
-                    "to restore the admin's authorized key, or delete and recreate the VM."
-                ),
+                hint=" ".join(part for part in (load_hint, _PROVIDER_ACCESS_HINT) if part),
             )
         return raw
 
@@ -120,8 +126,14 @@ class PublicAddressPlatform(VMPlatform):
 
     recovery_needs_guest_sshd: ClassVar[bool] = True
 
-    public_address_hint: ClassVar[str]
-    """Where to look when the provider reports no public address: the platform's console."""
+    @property
+    @abstractmethod
+    def public_address_hint(self) -> str:
+        """Where to look when the provider reports no public address: the platform's console.
+
+        Abstract, so registration refuses a cloud that leaves it out; a
+        subclass supplies it as a class attribute.
+        """
 
     @abstractmethod
     def _public_address(self, vm: VMRow, ctx: RunContext) -> str:

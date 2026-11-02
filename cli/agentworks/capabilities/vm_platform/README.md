@@ -202,7 +202,8 @@ and DB migration.
   platform's own channel, independent of the VM's Tailscale state, with `script` on its stdin and
   nowhere else, **MUST** run it once, and **MUST** return both streams without a status. Its
   docstring in `base.py` is the full contract. The clouds inherit theirs from
-  `public_ssh.PublicAddressPlatform`, supplying only how to read the live public address.
+  `public_ssh.PublicAddressPlatform`, supplying only how to read the live public address and the
+  console hint for a VM without one.
 - `read_host_keys(vm, ctx)` has a default over `run_as_root`; the clouds' base reads under an
   Unverified provisioning file and refuses a VM that already has a record.
 - `recovery_needs_guest_sshd` **MUST** be declared (no default): `True` when the root channel goes
