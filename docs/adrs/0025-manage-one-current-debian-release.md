@@ -9,8 +9,12 @@ Accepted
 Supersedes [ADR 0002](0002-use-debian-as-the-vm-base-image.md).
 
 Amended: the internal vm-platform capability that carries the release (Decision) is now contract
-version 2, under which a platform's create also returns the VM's required tailnet address (see the
-[transport take 2 SDD](../sdd/2026-10-20-transport-take2/)).
+version 2, under which a platform's create returns the VM's required tailnet address and no
+transport. Core observes the release over SSH at that address, as the first check of the VM contract
+right after its first connection, instead of probing a transport the platform returns, and it still
+persists only its own observation (see the
+[transport take 2 SDD](../sdd/2026-10-20-transport-take2/)). The decision, the registry, the
+recording and the absence of an operator bypass stand.
 
 ## Context
 

@@ -736,9 +736,8 @@ class EC2Platform(PublicAddressPlatform):
         """Fail closed after kept post-create verification failure.
 
         Mirrors :meth:`post_tailscale_ready`, which only fires on success: a VM
-        whose Tailscale SSH verification died (marked FAILED) or was interrupted
-        during verification (row status untouched by the abort) is kept for
-        debugging, and this hook revokes exactly the bootstrap allow's tuples so
+        whose Phase A failed or was interrupted (marked FAILED either way) is
+        kept for debugging, and this hook revokes exactly the bootstrap allow's tuples so
         it defaults to zero inbound exposure. Create-time bootstrap failures roll
         back inside :meth:`create` and never reach this hook. Debugging and
         recovery stay possible: ``vm shell --platform`` and ``vm delete`` poke a

@@ -206,22 +206,22 @@ class ExampleCloudPlatform(VMPlatform):
 For vm-platform contract version 2, `create()` receives a concrete core-selected Debian release, a
 required Tailscale auth key, and a value-free bootstrap-progress sink in `ProvisionRequest`. The
 platform resolves the release through a local artifact map before mutation, with no default or
-fallback. It must finish the Tailscale join and return a transport through which core probes
-`/etc/os-release`. Core persists its own observation rather than trusting a platform result field. A
-missing code-owned map entry says that Agentworks is out of date; an operator-owned catalog miss
-names the exact vm-site field. Every platform also implements
+fallback. A missing code-owned map entry says that Agentworks is out of date; an operator-owned
+catalog miss names the exact vm-site field. Every platform also implements
 `run_as_root(vm, ctx, script, deadline) -> RawRun` and declares `recovery_needs_guest_sshd`; the
 vm-platform README states that contract. `create()` joins Tailscale and reads the node's address
 over that channel with the `tailscale_join` helpers, and returns the address as the required
-`tailnet_address`, which core validates again before recording it.
+`tailnet_address`, with no transport. Core validates the address again before recording it, then
+reaches the VM over SSH there: its first connection enrolls the host key, and the VM contract
+follows, with `/etc/os-release` first. Core persists its own observation rather than trusting a
+platform result field.
 
 An operator-owned release catalog also overrides the pure `validate_create_release(release)` hook.
 Core calls it with the concrete selection before resolving secrets or running authenticated platform
 readiness, while `create()` repeats the lookup before mutation. Do not turn that operation-specific
 requirement into load-time rejection when the same site can still operate existing VMs. When the
-artifact is operator owned, core applies the same returned-transport probe after platform creation.
-A mismatch retains an addressable failed VM for explicit deletion. The verification has no operator
-bypass.
+artifact is operator owned, core applies the same release check after platform creation. A mismatch
+retains an addressable failed VM for explicit deletion. The verification has no operator bypass.
 
 A site then writes `platform: {name: example-cloud, region: us-west-2}`, and `api_token` resolves to
 the `example-cloud-token` secret because the field was omitted. An OMITTED reference field and an

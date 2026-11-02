@@ -260,8 +260,8 @@ are local); Azure, EC2, GCE, and Proxmox use it:
   the bootstrap ingress opens inside `create()` (cloud-init needs inbound SSH from the operator),
   and neither that nor this closing point is context-manager-shaped.
 - `secure_failed_vm(vm, ctx) -> None` (default no-op). Same contract as `post_tailscale_ready`, for
-  the paths where a completed create is kept after Phase A Tailscale SSH verification fails (row
-  marked FAILED) or the operator interrupts verification (row status untouched); the success-only
+  the paths where a completed create is kept after Phase A fails (first contact, enrollment or the
+  VM contract) or the operator interrupts it, both of which mark the row FAILED; the success-only
   hook never fired on either. Create-time bootstrap failure stays inside the platform rollback
   window and never reaches this hook. Azure and GCE delete the owned fixed-name bootstrap allow and
   EC2 revokes the recorded bootstrap tuples, so the VM defaults to zero inbound exposure; debugging
@@ -269,10 +269,10 @@ are local); Azure, EC2, GCE, and Proxmox use it:
   (not firewall-gated).
 
 The two closing hooks and `transient_route` take `ctx` because opening or closing the firewall route
-(an Azure NSG rule, an EC2 security-group rule) is a backend call; the caller (Phase A's
-`bootstrap_vm` for the two closing hooks, the transports factory for `transient_route`) passes the
-create/op's own scoped context, whose secrets are already resolved before Phase A begins, so even
-the interrupt path never resolves a secret for the first time.
+(an Azure NSG rule, an EC2 security-group rule) is a backend call; the caller (Phase A,
+`phase_a.bootstrap`, for the two closing hooks, the transports factory for `transient_route`) passes
+the create/op's own scoped context, whose secrets are already resolved before Phase A begins, so
+even the interrupt path never resolves a secret for the first time.
 
 Callers must pass the context their composition root already built for the platform's ops
 (`gated_vm_boundary` and `_live_vm_boundary` in `agentworks.vms.manager.boundary` both hand one out;
@@ -315,15 +315,15 @@ same `ProvisionRequest`, including the concrete core-selected `debian_release`, 
 Tailscale auth key, and a required value-free bootstrap-progress sink. The platform resolves the
 release through its local artifact map before backend mutation. A missing code-owned mapping names
 the out-of-date Agentworks build; a missing operator-owned mapping names the exact vm-site field.
-Neither has a fallback. A successful `ProvisionResult` carries the native transport, the required
-`tailnet_address`, and `platform_metadata`. Core treats the result as a runtime conformance
-boundary: after persisting the metadata, it probes the returned transport and persists only that
-live observation, and Phase A validates the address again before recording it. This is not a
-security sandbox for in-process plugin code. The metadata is written verbatim to
-`vms.platform_metadata` and read back only by the owning platform (Lima stores `instance_name`, WSL2
-`distro_name`, Azure `resource_id`, Proxmox `vmid` + `node`, EC2 `instance_id` +
-`security_group_id` + `region` + `backend_name` + `account_id` as its provider-identity subset, and
-never the public IP, which it reads live).
+Neither has a fallback. A successful `ProvisionResult` carries the required `tailnet_address` and
+`platform_metadata`, and no transport. Core treats the result as a runtime conformance boundary:
+after persisting the metadata, Phase A validates the address again before recording it, reaches the
+VM over SSH there, and observes the live release as the VM contract's first check, persisting only
+that observation. This is not a security sandbox for in-process plugin code. The metadata is written
+verbatim to `vms.platform_metadata` and read back only by the owning platform (Lima stores
+`instance_name`, WSL2 `distro_name`, Azure `resource_id`, Proxmox `vmid` + `node`, EC2
+`instance_id` + `security_group_id` + `region` + `backend_name` + `account_id` as its
+provider-identity subset, and never the public IP, which it reads live).
 
 Before the create boundary resolves secrets, the pending VM node calls
 `validate_create_release(release)` with that same concrete core selection. The hook is pure and
@@ -333,8 +333,8 @@ mapping again before mutation. This timing does not make the current artifact a 
 requirement, so a legacy site can still load for operations on existing VMs.
 
 An operator-owned artifact is also untrusted until the live guest proves what it contains. Core
-applies the same returned-transport probe regardless of who owns the artifact map. A mismatch leaves
-the backend identity addressable for explicit deletion. Do not add a configuration bypass for this
+applies the same release check regardless of who owns the artifact map. A mismatch leaves the
+backend identity addressable for explicit deletion. Do not add a configuration bypass for this
 check.
 
 Add a platform-specific **input** by adding a field to `ProvisionRequest`, not by changing the
@@ -583,10 +583,13 @@ and the operator-facing command banners that the rest of the codebase calls "pha
   it out later. `create()` returns only after bootstrap succeeds, Tailscale joins and the address is
   read, or it raises after rolling back partial backend resources. **This stage runs once, at
   create.**
-- **Phase A** receives the returned `tailnet_address` and the provisioning transport. It validates
-  the address, records it and the provisioning state, verifies Tailscale SSH, closes temporary
-  provisioning access, and syncs SSH config. It never receives the Tailscale key, generates a
-  bootstrap script, or reads the address itself.
+- **Phase A** (`agentworks.vms.initializer.phase_a`) receives the returned `tailnet_address`. It
+  validates and records the address, makes the first contact over SSH there in Enroll mode (the only
+  connections that may record the VM's host key), and runs the VM contract's base checks, release
+  first; provisioning is complete only once they pass. Then it closes temporary provisioning access
+  and syncs SSH config. It never receives the Tailscale key, generates a bootstrap script, or reads
+  the address itself. A failure or an interrupt before the contract passes leaves the VM failed,
+  with delete guidance.
 - **Initialization** is `run_initialization` (`agentworks.vms.initializer`) plus VM hardening
   (`agentworks.vms.hardening`), run over a `Transport` against the created VM. It is
   platform-agnostic. **It is re-runnable and is exactly what `agw vm reinit` re-runs.** The Phase A
@@ -733,8 +736,8 @@ YAML block scalar, remote shell). Two traps that have already occurred:
 5. Only the transport and lifecycle hooks required by the backend override their defaults.
 6. An operator-owned release catalog overrides `validate_create_release(release)` with a pure
    lookup, while `create()` resolves `request.debian_release` again before mutation, completes
-   Tailscale bootstrap, and returns a transport through which core verifies and records the live
-   release. Use `bootstrap_script.py` / `cloud_init.py` for the create-time payload instead of a
+   Tailscale bootstrap, and returns the address at which core verifies and records the live release
+   over SSH. Use `bootstrap_script.py` / `cloud_init.py` for the create-time payload instead of a
    platform-specific reinvention. Join with `tailscale_join.join_tailscale` over `run_as_root`, and
    return the address `settle_tailnet_address` reads over the same channel, inside the create's
    rollback window so an address that cannot be read rolls the backend back.
@@ -777,9 +780,10 @@ A new `Transport` subclass belongs under `cli/tests/transports/` alongside the p
 - `bootstrap_script.py`, `cloud_init.py`, `skel.py`: shared create-time payload.
 - `tailscale_join.py`: the join, the address read and settle, and the clouds'
   `complete_cloud_bootstrap`, all over `run_as_root`.
-- `agentworks.vms.initializer`: the two-phase init driver (`bootstrap_vm` for Phase A provisioning
-  state recording, the address check, and Tailscale SSH verification; `run_initialization` for Phase
-  B initialization).
+- `agentworks.vms.initializer`: the two-phase init driver (`bootstrap_vm`, which runs `phase_a` for
+  the address check, first contact and the VM contract; `run_initialization` for Phase B
+  initialization).
+- `agentworks.vms.contract`: the VM contract's base checks, which Phase A and reinit run.
 - `agentworks.vms.hardening`: the hardening steps, and the model for idempotent reconciliation that
   reaches existing VMs via `reinit`.
 - `agentworks.vms.sites`: how a `vm-site` binds a platform to config.

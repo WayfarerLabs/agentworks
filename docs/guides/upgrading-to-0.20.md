@@ -110,11 +110,13 @@ path and needs none of what follows. Everything else keeps its current path for 
   8.1, so install the Win32-OpenSSH MSI from <https://github.com/PowerShell/Win32-OpenSSH/releases>.
 - **`python3` on the VM.** Every request starts a small Python program on the VM. A VM without
   `python3`, or with one that lacks its standard library, is reported as unable to run Agentworks
-  requests. Run `agw vm reinit NAME`, which still works on such a VM and installs it.
+  requests. New VMs get it at provisioning. `vm reinit` and `vm confirm-release` now connect the
+  same way (see below), so they cannot run on such a VM either.
 - **A supported login shell for the admin and every agent.** The admin and agent template `shell`
   fields now accept only `sh`, `dash`, `bash` and `zsh`; a path such as `/usr/bin/zsh` is read as
   its basename. Any other shell, such as `fish` or `tcsh`, is a configuration error that names the
-  field and the allowed values. Accounts that already exist are not checked yet. A stored agent
+  field and the allowed values. `vm reinit` warns about an existing admin or agent account whose
+  login shell is another one, naming the command that sets it from its template. A stored agent
   instance spec that names another shell, such as `{"shell": "/bin/fish"}`, now reads as
   `instance-spec-malformed`; replace it with `agw agent reinit NAME --spec JSON`.
 
@@ -124,7 +126,8 @@ path and needs none of what follows. Everything else keeps its current path for 
   system configuration do not apply to them. An `IdentityAgent` set only in `~/.ssh/config`
   (1Password, Secretive) is ignored; the agent named by `SSH_AUTH_SOCK` serves the key. Every
   connection runs in batch mode, so ssh never prompts for a key's passphrase: an encrypted key has
-  to be loaded in that agent first. When a connection fails and the configured key is
+  to be loaded in that agent first. A VM that refuses the configured key is reported as such, and
+  nothing ran on it. When a connection fails or the key is refused, and the configured key is
   passphrase-protected, the error's hint mentions `ssh-add`; `vm port-forward` shows ssh's own log
   instead.
 - **Exit statuses.** `vm exec` and `agent exec` still run the command line under the account shell,
@@ -160,3 +163,21 @@ path and needs none of what follows. Everything else keeps its current path for 
 - **`vm port-forward` exits 0 when you stop it** with Ctrl-C or `SIGTERM`, exits non-zero when a
   forward cannot be set up (a busy local port, for example) instead of running with nothing
   forwarded.
+
+## Create, reinit and the VM contract
+
+`vm create`, `vm reinit` and `vm confirm-release` reach the VM through the same connection layer.
+
+- **Create** installs `python3` while it provisions the VM, then connects over SSH at the VM's
+  tailnet address. The first connection records the host key, and the VM contract's base checks
+  follow: the Debian release first, then systemd, passwordless `sudo` for the admin, and the tools
+  Agentworks runs (`install`, `flock`, `nohup`, `setsid`, `tar`). Provisioning is complete only once
+  they pass. A VM that fails them, or whose create is interrupted before then, is kept in a failed
+  state; delete it with `agw vm delete NAME`.
+- **Reinit** starts with the same checks on the VM as it is. A live release that differs from the
+  recorded one refuses first, as before. A failed check stops reinit before it changes anything and
+  names recreation. The pam_env settings and an unsupported login shell only warn.
+- **The operation log** records each of these requests by its shape: the command's arguments, or a
+  script's shell, with the working directory, the names of its environment variables and its
+  deadline. A script's text and an environment variable's value are not written. Commands still on
+  the old path log as before.

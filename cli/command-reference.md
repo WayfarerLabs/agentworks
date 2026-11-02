@@ -687,6 +687,13 @@ the node for removal in the Tailscale admin console when it did not. The join ha
 by then, so before running create again, replace a single-use key with a fresh one; a reusable key
 works as is.
 
+Agentworks then reaches the VM over SSH at that address. Its first connection records the VM's host
+key, and the VM contract's base checks follow on verified connections: the Debian release first,
+then systemd, passwordless `sudo` for the admin, and the base tools Agentworks runs (`install`,
+`flock`, `nohup`, `setsid`, `tar`). The VM's provisioning is complete only once they pass. If any of
+this fails, or create is interrupted before it completes, the VM is kept in a failed state with its
+temporary provisioning access closed, and `agw vm delete <name>` removes it.
+
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
 alphanumeric plus dash, no leading/trailing dash): a short identifier for this Agentworks
 installation, used to namespace VM hostnames and backend-side names (`{slug}-{vm-name}`) so installs
@@ -696,10 +703,18 @@ ask again. Non-interactive runs never prompt (a later interactive create still a
 
 `vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
 Changes to config (new packages, different install commands, etc.) are picked up automatically. It
-consumes both stored VM and admin instance specs but cannot change or clear either one. It warns,
-without failing, when `/etc/environment`, `/etc/security/pam_env.conf` or the admin's
-`~/.pam_environment` (only where sshd reads it, as on Debian 12) holds settings, because Agentworks
-does not apply pam_env settings to the commands it runs.
+consumes both stored VM and admin instance specs but cannot change or clear either one.
+
+Reinit starts with the VM contract's base checks, before it changes anything. A live Debian release
+that differs from the recorded one refuses first, naming `vm confirm-release`. A VM without systemd,
+without passwordless `sudo` for the admin, or missing a base tool fails the contract: initialization
+cannot repair it, so the error lists every failure and names recreation. Two findings only warn:
+pam_env settings in `/etc/environment`, `/etc/security/pam_env.conf` or the admin's
+`~/.pam_environment` (only where sshd reads it, as on Debian 12), because Agentworks does not apply
+pam_env settings to the commands it runs; and an admin or agent account whose login shell is not
+`sh`, `dash`, `bash` or `zsh`, naming `agw vm reinit <vm>` for the admin and
+`agw agent reinit <agent>` for an agent. The checks run through Agentworks' SSH path, so a VM
+without `python3` cannot be reinitialized.
 
 VMs created before SSH lifecycle-evidence tracking have no synthesized identity evidence. Ordinary
 canonical SSH commands refuse that unknown state until one successful `agw vm reinit <name>` proves
@@ -709,9 +724,10 @@ restore the configured public key, and rerun reinit. A platform-native transport
 on the configured key, so use provider-native recovery tooling or recreate the VM if it cannot
 connect.
 
-`vm confirm-release` reads `/etc/os-release` through the named VM's canonical live transport and
-shows the recorded and live Debian releases. A changed or previously unknown value requires a
-default-negative confirmation unless `--yes`/`-y` is supplied. On consent, Agentworks atomically
+`vm confirm-release` reads `/etc/os-release` over SSH at the VM's tailnet address, through the same
+path as `vm exec` (so the VM needs `python3`), and shows the recorded and live Debian releases. It
+runs only that read, not the rest of the VM contract. A changed or previously unknown value requires
+a default-negative confirmation unless `--yes`/`-y` is supplied. On consent, Agentworks atomically
 records the recognized live release and marks initialization pending. The command does not run
 `vm reinit`; run that separately to converge release-aware resources. A matching observation only
 refreshes its timestamp and leaves initialization state unchanged. See
