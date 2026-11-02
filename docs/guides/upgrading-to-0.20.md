@@ -18,8 +18,9 @@ agw vm import-host-keys --all
 
 For each VM, the command asks OpenSSH's own `ssh-keygen -F` which keys `~/.ssh/known_hosts` holds
 for the VM's tailnet address, and copies them into that VM's record. Your `known_hosts` is only
-read. Pass `--known-hosts PATH` to read a different file, for example one copied from another
-workstation.
+read. It runs the `ssh-keygen` installed beside the OpenSSH client Agentworks connects with, so it
+needs the same supported client (OpenSSH 8.5 or newer) that connecting does. Pass
+`--known-hosts PATH` to read a different file, for example one copied from another workstation.
 
 Each VM gets one line in the report:
 
@@ -146,11 +147,12 @@ path and needs none of what follows. Everything else keeps its current path for 
   warning appears only when you run `vm reinit`.
 - **`vm exec` takes its `PATH` from the fixed one.** `vm exec VM prog arg...` and
   `vm exec VM 'one argument'` are, as before, shell command lines run by the admin's default shell
-  without login startup, so builtins, shell functions and a leading `NAME=value` work; only a word
-  starting with `=` is quoted, so zsh no longer expands it to a path. What changes is where `PATH`
-  comes from: sshd's `PATH` plus `pam_env` before, the fixed `PATH` above now, so additions made
-  only in profile files are not applied; use `vm exec VM bash -lc '...'` to get them. `agent exec`
-  still runs in the agent's login shell.
+  without login startup, so builtins, shell functions and a leading `NAME=value` work; the one
+  change in quoting is that a word starting with `=` is always quoted (in `agent exec` too), so zsh
+  no longer expands it to a path. What changes is where `PATH` comes from: sshd's `PATH` plus
+  `pam_env` before, the fixed `PATH` above now, so additions made only in profile files are not
+  applied; use `vm exec VM bash -lc '...'` to get them. `agent exec` still runs in the agent's login
+  shell.
 - **Large environment values are refused up front.** One `NAME=VALUE` environment string over
   131,071 bytes is refused before anything runs, because Linux cannot execute it.
 - **`vm shell` and `agent shell` without `--workspace` no longer print the message of the day or the

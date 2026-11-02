@@ -112,25 +112,49 @@ def resolve(*, windows: bool, environ: Mapping[str, str]) -> SSHClient:
     raise ClientUnsupported(f"no supported OpenSSH client:\n{tried}\n{_INSTALL_GUIDANCE[windows]}")
 
 
-def identity_is_loaded(ssh: SSHClient, identity_file: Path) -> bool:
-    """Whether the SSH agent can sign with ``identity_file``, by ``ssh-add -T`` on its public key.
+def tool_beside_ssh(ssh: SSHClient, name: str) -> Path:
+    """The OpenSSH program ``name`` (``ssh-add``, ``ssh-keygen``) from the resolved client's directory.
 
-    ``-T`` exits 0 when the agent holds the key and 1 when it does not, without
-    contacting the VM. Only the ``ssh-add`` beside the resolved client runs:
-    ``PATH`` can name a relative or current-directory program. A security key
-    (``sk-*``) is never probed, since ``-T`` signs and would ask for a touch.
-    ``False`` when it cannot be asked (no ``.pub`` file, no ``ssh-add``, it did
+    It is never looked up on ``PATH``, for the reasons the client itself is
+    not: ``PATH`` can name a relative or current-directory program, and on
+    Windows it commonly finds Git for Windows' MSYS build. Raises
+    :class:`ClientUnsupported` naming the expected path when no executable
+    file is there.
+    """
+    tool = Path(ssh.path).with_name(f"{name}.exe" if sys.platform == "win32" else name)
+    if not (tool.is_file() and os.access(tool, os.X_OK)):
+        raise ClientUnsupported(f"no executable {name} beside the OpenSSH client: expected {tool}")
+    return tool
+
+
+def identity_is_loaded(ssh: SSHClient, identity_file: Path) -> bool:
+    """Whether the SSH agent lists the key whose public half is ``<identity_file>.pub``.
+
+    ``ssh-add -L`` lists the agent's public keys without signing, so it never
+    prompts a confirm-required or per-signature agent, and it does not contact
+    the VM. It exits 1 for an agent with no keys and 2 for no agent; both mean
+    not loaded. The key counts as loaded when a listed line's type and base64
+    blob equal the ``.pub`` file's. Only the ``ssh-add`` beside the resolved
+    client runs (:func:`tool_beside_ssh`). ``False`` when it cannot be asked
+    (no ``.pub`` file or one without a type and blob, no ``ssh-add``, it did
     not run): the caller then keeps its conditional hint.
     """
     public_key = Path(f"{identity_file}.pub")
-    ssh_add = Path(ssh.path).with_name("ssh-add.exe" if sys.platform == "win32" else "ssh-add")
-    if not (ssh_add.is_file() and os.access(ssh_add, os.X_OK) and public_key.is_file()):
+    try:
+        ssh_add = tool_beside_ssh(ssh, "ssh-add")
+    except ClientUnsupported:
+        return False
+    if not public_key.is_file():
         return False
     try:
-        if public_key.read_text(encoding="utf-8", errors="replace").lstrip().startswith("sk-"):
-            return False
+        wanted = public_key.read_text(encoding="utf-8", errors="replace").split()[:2]
+    except OSError:
+        return False
+    if len(wanted) != 2:
+        return False
+    try:
         probe = subprocess.run(
-            [str(ssh_add), "-T", "--", str(public_key)],
+            [str(ssh_add), "-L"],
             stdin=subprocess.DEVNULL,
             capture_output=True,
             timeout=_SSH_ADD_PROBE_SECONDS,
@@ -138,7 +162,10 @@ def identity_is_loaded(ssh: SSHClient, identity_file: Path) -> bool:
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return probe.returncode == 0
+    if probe.returncode != 0:
+        return False
+    listed = probe.stdout.decode("utf-8", errors="replace").splitlines()
+    return any(line.split()[:2] == wanted for line in listed)
 
 
 @functools.cache

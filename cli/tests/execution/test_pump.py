@@ -301,6 +301,32 @@ def test_stdout_held_for_a_slow_consumer_is_delivered_before_a_stderr_departure_
     assert b"".join(delivered) == b"hello"
 
 
+def test_a_stderr_status_already_in_hand_survives_the_stderr_consumer_leaving() -> None:
+    """The failing stderr chunk carries ``exit 5`` while stdout's end marker waits behind a slow consumer."""
+    started = time.monotonic()
+
+    def slow_stdout(payload: bytes) -> None:
+        if time.monotonic() - started < 0.5:
+            raise BlockingIOError(11, "would block", 0)
+
+    def gone_stderr(payload: bytes) -> None:
+        raise BrokenPipeError
+
+    script = (
+        "start(); out.write(b'hello'); out.flush(); time.sleep(.2)\n"
+        "err.write(b'e' + P + b'exit 5\\n'); err.flush(); time.sleep(.1)\n"
+        "out.write(P + b'end\\n'); out.flush()\n"
+    )
+    session = leaving_session(script, stdout=slow_stdout, stderr=gone_stderr)
+    with session:
+        reason = session.pump()
+        session.end()
+
+    assert reason is StopReason.DONE
+    assert session.stderr_abandoned
+    assert completion_of(session) == Completed(5)
+
+
 def test_a_stdout_pipe_whose_reader_closed_is_the_consumer_leaving() -> None:
     # CPython raises BrokenPipeError for this on POSIX and OSError(EINVAL) on Windows.
     reader, writer = os.pipe()

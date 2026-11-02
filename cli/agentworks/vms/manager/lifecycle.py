@@ -440,9 +440,10 @@ def create_vm(
             log.mark_realized(pending_vm)
 
             # Reset the host-key store file now that the name is ours, so a
-            # reused name never inherits a key. Phase A's first connection
-            # writes the VM's key into it; nothing writes it before then, so
-            # the unwinds below need no store cleanup.
+            # reused name never inherits a key: it is left empty and private,
+            # and Phase A's first connection writes the VM's key into it.
+            # Nothing else writes it before then, so the unwinds below need no
+            # store cleanup.
             try:
                 trust.begin_enrollment(vm_name)
             except BaseException:

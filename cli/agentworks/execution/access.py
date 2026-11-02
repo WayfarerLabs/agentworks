@@ -10,11 +10,10 @@ nothing dispatched: resolve the client, encode the request, build the options
 from __future__ import annotations
 
 import contextlib
-import errno
 import os
 import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from agentworks import ssh_identity
 from agentworks.errors import StateError
@@ -37,14 +36,6 @@ if TYPE_CHECKING:
 
 SIGPIPE_STATUS = 128 + 13
 """What ``stream`` reports when a consumer left and the guest reported no status: a writer killed by ``SIGPIPE``."""
-
-
-class OutputStream(Protocol):
-    """What ``stream`` needs of an operator stream: a binary file's ``write`` and ``flush``."""
-
-    def write(self, data: bytes, /) -> int: ...
-
-    def flush(self) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -99,7 +90,7 @@ class VMAccess:
                 raise CommandFailed(self.vm_name, result.completion.status, result)
             return result
 
-    def stream(self, request: RunRequest, *, stdin: BinaryIO | None, stdout: OutputStream, stderr: OutputStream) -> int:
+    def stream(self, request: RunRequest, *, stdin: BinaryIO | None, stdout: BinaryIO, stderr: BinaryIO) -> int:
         """Run ``request`` with live output and return the guest's status.
 
         ``stdin`` is copied to the guest until end of file; pass the raw
@@ -112,7 +103,7 @@ class VMAccess:
         a completion raises.
         """
 
-        def deliver(sink: OutputStream) -> pump.Sink:
+        def deliver(sink: BinaryIO) -> pump.Sink:
             def write(payload: bytes) -> None:
                 sink.write(payload)  # a full non-blocking pipe raises BlockingIOError(characters_written)
                 try:
@@ -261,50 +252,30 @@ def stream_to_operator(access: VMAccess, request: RunRequest) -> int:
     sys.stdout.flush()
     sys.stderr.flush()
     stdin = None if sys.stdin is None else getattr(sys.stdin.buffer, "raw", sys.stdin.buffer)
-    return access.stream(
-        request, stdin=stdin, stdout=_OperatorStream(sys.stdout.buffer), stderr=_OperatorStream(sys.stderr.buffer)
-    )
+    try:
+        return access.stream(request, stdin=stdin, stdout=sys.stdout.buffer, stderr=sys.stderr.buffer)
+    finally:
+        _flush_unless_reader_left(sys.stdout.buffer)
+        _flush_unless_reader_left(sys.stderr.buffer)
 
 
-class _OperatorStream:
-    """One of the process's binary streams, which stops failing once its reader has left.
+def _flush_unless_reader_left(stream: BinaryIO) -> None:
+    """Flush ``stream``, or, when its reader has left, point its descriptor at the null device.
 
-    When the reader leaves (``| head``), bytes that could not be flushed stay in
-    the stream's buffer and fail again at interpreter shutdown, turning the exit
-    status into 120 with a traceback. Pointing the descriptor at the null device
-    at the first failure gives shutdown somewhere to write them.
+    Bytes that could not be flushed to a departed reader (``| head``) stay in
+    the stream's buffer and would fail again at interpreter shutdown, turning
+    the exit status into 120 with a traceback; the null device gives shutdown
+    somewhere to write them.
     """
-
-    def __init__(self, stream: BinaryIO) -> None:
-        self._stream = stream
-
-    def write(self, data: bytes, /) -> int:
-        with self._reader_leaving():
-            return self._stream.write(data)
-
-    def flush(self) -> None:
-        with self._reader_leaving():
-            self._stream.flush()
-
-    @contextlib.contextmanager
-    def _reader_leaving(self) -> Iterator[None]:
-        try:
-            yield
-        except (BrokenPipeError, ConnectionResetError):
-            self._point_at_null_device()
+    try:
+        stream.flush()
+    except OSError as error:
+        if not pump.reader_left(error):
             raise
-        except OSError as error:
-            # CPython reports a pipe whose reader closed as EINVAL on Windows.
-            if sys.platform == "win32" and error.errno == errno.EINVAL:
-                self._point_at_null_device()
-            raise
-
-    def _point_at_null_device(self) -> None:
         with contextlib.suppress(OSError, ValueError):
-            descriptor = self._stream.fileno()
             null = os.open(os.devnull, os.O_WRONLY)
             try:
-                os.dup2(null, descriptor)
+                os.dup2(null, stream.fileno())
             finally:
                 os.close(null)
 

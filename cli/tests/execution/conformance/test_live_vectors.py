@@ -22,7 +22,8 @@ from tests.execution.conformance.vectors import Vector, vectors_for
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-pytestmark = pytest.mark.integration
+# One worker: the guest's sshd drops unauthenticated connections past Debian's MaxStartups 10:30:100.
+pytestmark = [pytest.mark.integration, pytest.mark.xdist_group("live-vectors")]
 
 # The suite isolates the database and the host-key store for every test; this lane
 # needs the operator's real ones, captured before any fixture replaces them.

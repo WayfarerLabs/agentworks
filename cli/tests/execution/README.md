@@ -17,6 +17,8 @@ returns canned outcomes without ssh.
 
 - `test_envelope.py`: every byte but NUL survives the envelope, each refusal, the kernel size
   limits.
+- `test_requests.py`: a word starting with `=` reaches zsh literally, whatever the runner's login
+  shell.
 - `test_stream_filters.py`: the stream filters under every split and interleaving, the classifier
   row by row, the refusal-to-status table.
 - `test_ssh_process.py`: the client argv, and `ssh -G` against the installed client.
@@ -51,6 +53,10 @@ returns canned outcomes without ssh.
   ```console
   AGW_CONFORMANCE_VM=my-vm uv run pytest tests/execution/conformance/test_live_vectors.py -m integration
   ```
+
+  The lane runs on one xdist worker (`xdist_group`): Debian's sshd default, `MaxStartups 10:30:100`,
+  starts dropping unauthenticated connections at random past 10, so parallel vectors would fail
+  unpredictably.
 
   It creates and removes only `/tmp/agw-conformance-*` and `/tmp/agw-handover-*` on the guest. Run
   it from each workstation the evidence matrix names; Windows is where binary stdin and early exit

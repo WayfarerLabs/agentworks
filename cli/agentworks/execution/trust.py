@@ -26,7 +26,6 @@ import binascii
 import contextlib
 import os
 import re
-import struct
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -34,6 +33,7 @@ from enum import StrEnum
 from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, NamedTuple
 
+from agentworks import ssh_identity
 from agentworks.atomic_write import atomic_write_text
 from agentworks.config.validation import CONFIG_DIR
 from agentworks.errors import ConfigError, StateError, ValidationError
@@ -190,9 +190,8 @@ def is_valid_key(key_type: str, blob: str) -> bool:
     """Whether the fields could be a host key ``ssh-keygen -lf`` would read.
 
     Boundary: a key arrives from a ``known_hosts`` file, ``ssh-keyscan`` output
-    or the store, so the check is on the blob itself: it must be base64, its
-    first SSH string must be the line's key type, and (except for certificates)
-    it must be nothing but whole SSH strings, which catches a truncated blob.
+    or the store, so the check is on the blob itself: it must be base64 and
+    decode to a complete public-key blob of the line's key type.
     """
     if not (_KEY_TYPE.fullmatch(key_type) and _KEY_BLOB.fullmatch(blob)):
         return False
@@ -200,19 +199,7 @@ def is_valid_key(key_type: str, blob: str) -> bool:
         raw = base64.b64decode(blob, validate=True)
     except (binascii.Error, ValueError):
         return False
-    offset, strings = 0, []
-    while offset < len(raw):
-        if offset + 4 > len(raw):
-            return False
-        (length,) = struct.unpack_from(">I", raw, offset)
-        end = offset + 4 + length
-        if end > len(raw):
-            return False
-        strings.append(raw[offset + 4 : end])
-        offset = end
-        if key_type.endswith("-cert-v01@openssh.com") and len(strings) == 1:
-            break  # the rest of a certificate is not a run of strings
-    return bool(strings) and strings[0] == key_type.encode("ascii")
+    return ssh_identity.is_public_key_blob(raw, key_type)
 
 
 def has_record(vm_name: str) -> bool:

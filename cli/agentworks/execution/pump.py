@@ -69,10 +69,21 @@ Sink = Callable[[bytes], None]
 
 A sink that cannot take them yet raises ``BlockingIOError`` with
 ``characters_written`` set to what it did take; the pump holds the rest and
-offers it again (an empty remainder asks the sink to finish, say a flush).
-``BrokenPipeError`` and ``ConnectionResetError`` mean the consumer has gone
-(on Windows so does ``OSError(EINVAL)``); any other ``OSError`` propagates.
+offers it again (an empty remainder asks the sink to finish, say a flush). An
+error for which :func:`reader_left` holds means the consumer has gone; any
+other ``OSError`` propagates.
 """
+
+
+def reader_left(error: OSError) -> bool:
+    """Whether a failed write or flush means the reader at the other end has gone (``| head``).
+
+    That is ``BrokenPipeError`` or ``ConnectionResetError``, and on Windows
+    ``EINVAL``, which is how CPython reports a pipe whose reader closed there.
+    """
+    if isinstance(error, (BrokenPipeError, ConnectionResetError)):
+        return True
+    return sys.platform == "win32" and error.errno == errno.EINVAL
 
 
 class OutputLimitExceeded(Exception):
@@ -175,7 +186,7 @@ class PipeSession:
 
     A write that fails to the client's stdin is the consumer ending early, not a
     failure: the session stops sending and keeps reading. A sink that raises
-    ``BrokenPipeError`` or ``ConnectionResetError`` is the consumer of that
+    an error for which :func:`reader_left` holds is the consumer of that
     stream leaving. The session closes its read end of that stream of the
     client's, so ssh sees ``EPIPE`` as it did when it held the operator's
     streams. A departed stdout makes ssh close the channel when the guest next
@@ -183,7 +194,9 @@ class PipeSession:
     still reports its status. ssh does not end the channel for a departed
     stderr, and the status travels on stderr, so :meth:`pump` returns
     :attr:`StopReason.STDERR_CONSUMER_LEFT` once stdout has nothing held for a
-    slow consumer, and ending the session kills the client.
+    slow consumer and the trailer has not already arrived (with it in hand,
+    stdout is pumped to its end and the status stands), and ending the session
+    kills the client.
     :attr:`stdout_abandoned` and :attr:`stderr_abandoned` say which left. A sink
     that raises ``BlockingIOError`` is waited on: the session stops reading that
     stream until the sink has taken what it was offered, so output is never
@@ -260,7 +273,7 @@ class PipeSession:
                 return StopReason.DONE
             if self.stdout_abandoned and self.stderr.done and not waiting:
                 return StopReason.DONE
-            if self.stderr_abandoned and not waiting:
+            if self.stderr_abandoned and not waiting and self.stderr.closing is None:
                 return StopReason.STDERR_CONSUMER_LEFT
             if stop is not None and stop():
                 return StopReason.CONDITION
@@ -326,20 +339,15 @@ class PipeSession:
             self._sinks[which](payload)
         except BlockingIOError as error:
             self._pending[which] = payload[getattr(error, "characters_written", 0) :]
-        except (BrokenPipeError, ConnectionResetError):
-            self._consumer_left(which)
         except OSError as error:
-            # CPython reports a pipe whose reader closed as EINVAL on Windows.
-            if sys.platform != "win32" or error.errno != errno.EINVAL:
+            if not reader_left(error):
                 raise
-            self._consumer_left(which)
+            self._abandon(which)
 
-    def _consumer_left(self, which: str) -> None:
-        """Stop delivering ``which`` and close the client's read end of it, so ssh sees ``EPIPE``."""
-        self._sinks[which] = _discard
+    def _abandon(self, which: str) -> None:
+        """Stop reading ``which`` and close the client's read end of it, so ssh sees ``EPIPE``."""
         self._abandoned.add(which)
         self._eof[which] = True
-        self._pending[which] = None
         proc = self._proc
         assert proc is not None
         pipe = proc.stdout if which == "out" else proc.stderr
@@ -415,7 +423,3 @@ class PipeSession:
             if proc.poll() is None:
                 proc.kill()
             proc.wait(timeout=_REAP_SECONDS)
-
-
-def _discard(_payload: bytes) -> None:
-    return None

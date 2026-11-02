@@ -6,13 +6,9 @@ arguments that look like options (``ls -la``, ``tail -f /path``). The
 trade-off is that an agentworks flag (e.g. ``--workspace``) placed
 after the VM / agent positional ends up in the passthrough argv rather
 than being consumed by Click. The VM would then be asked to run a
-program named ``--workspace`` (several arguments: not found, status
-127), or, for one argument, a shell line that begins with it, which the
-shell (zsh and bash both do this) parses as further shell options,
-producing cryptic errors:
-
-- zsh: ``no such option: workspace ws1 pwd``
-- bash: ``--: invalid option`` (with the usage screen)
+program named ``--workspace`` (the command line runs as a script file,
+so the shell reports it as not found, status 127), which is a cryptic
+way to learn that the flag was misplaced.
 
 The conventional escape hatch is the ``--`` end-of-options separator:
 ``agw vm exec box -- free -m`` runs ``free -m`` even though ``-m`` (and,

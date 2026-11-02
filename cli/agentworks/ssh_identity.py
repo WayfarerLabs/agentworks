@@ -1,8 +1,8 @@
 """Bounded, public-only SSH identity parsing.
 
-This leaf derives the fingerprint OpenSSH exposes for a public key. It never
-decrypts private material, consults a sibling public-key file, or invokes an
-external program.
+This leaf derives the fingerprint OpenSSH exposes for a public key and checks
+that a public-key blob is whole. It never decrypts private material, consults
+a sibling public-key file, or invokes an external program.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ _OPENSSH_MAGIC = b"openssh-key-v1\x00"
 _OPENSSH_BEGIN = b"-----BEGIN OPENSSH PRIVATE KEY-----"
 _OPENSSH_END = b"-----END OPENSSH PRIVATE KEY-----"
 _OPENSSH_UNENCRYPTED_CIPHER = b"none"
+_CERTIFICATE_SUFFIX = "-cert-v01@openssh.com"
 _PKCS8_ENCRYPTED_BEGIN = b"-----BEGIN ENCRYPTED PRIVATE KEY-----"
 _LEGACY_ENCRYPTED_HEADER = b"Proc-Type: 4,ENCRYPTED"
 _ASCII_WHITESPACE = b" \t\r\n\v\f"
@@ -75,6 +76,26 @@ def fingerprint_public_blob(blob: bytes) -> str:
     digest = hashlib.sha256(blob).digest()
     encoded = base64.standard_b64encode(digest).decode("ascii").rstrip("=")
     return f"SHA256:{encoded}"
+
+
+def is_public_key_blob(blob: bytes, key_type: str) -> bool:
+    """Whether ``blob`` is a complete public-key blob of ``key_type``.
+
+    Its first SSH string must be the key type, and a plain key must be nothing
+    but whole SSH strings after it, which catches a truncated blob. Only a
+    certificate's type is read: the rest of a certificate is not a run of
+    strings.
+    """
+    reader = _SSHReader(blob)
+    try:
+        if reader.read_string("key type").decode("ascii") != key_type:
+            return False
+        if not key_type.endswith(_CERTIFICATE_SUFFIX):
+            while not reader.exhausted:
+                reader.skip_string("key field")
+    except (SSHIdentityReadError, UnicodeDecodeError):
+        return False
+    return True
 
 
 def parse_public_ssh_identity(text: str) -> VerifiedSSHIdentity:
@@ -197,8 +218,10 @@ def passphrase_hint(identity_file: Path) -> str | None:
     has other causes too, such as a stopped VM or a dropped network. The path in
     the suggested command is one a shell reads back as exactly that path: the
     ``~`` form when it needs no quoting (a quoted ``~`` does not expand),
-    otherwise the absolute path, single-quoted on POSIX and double-quoted on
-    Windows.
+    otherwise the absolute path, single-quoted on POSIX. On Windows it is always
+    the absolute path in double quotes, since neither cmd nor PowerShell expands
+    the ``~`` form for ssh-add; cmd still expands ``%NAME%`` and PowerShell
+    ``$name`` inside them, which no one quoting avoids in both.
     """
     if not identity_is_passphrase_protected(identity_file):
         return None
@@ -207,14 +230,17 @@ def passphrase_hint(identity_file: Path) -> str | None:
 
 
 def _typed_path(identity_file: Path, shown: str) -> str:
-    if shown.startswith("~/") and shlex.quote(shown[2:]) == shown[2:]:
+    if not _on_windows() and shown.startswith("~/") and shlex.quote(shown[2:]) == shown[2:]:
         return shown
     absolute = str(identity_file.absolute())
-    if os.name != "nt":
+    if not _on_windows():
         return shlex.quote(absolute)
-    if not any(character.isspace() for character in shown):
-        return shown
-    return f'"{absolute}"'  # a Windows file name cannot contain a double quote
+    # cmd and PowerShell do not expand ~ for ssh-add, and a Windows file name cannot contain a double quote.
+    return f'"{absolute}"'
+
+
+def _on_windows() -> bool:
+    return os.name == "nt"
 
 
 def _decode_openssh_envelope(contents: bytes) -> bytes:

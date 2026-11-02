@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import base64
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 from pathlib import Path, PureWindowsPath
@@ -266,6 +268,15 @@ def test_a_malformed_key_is_refused_at_the_write_boundary_and_nothing_is_written
         trust.write_records("web", [_OTHER_KEY, key])
 
     assert trust.store_file("web").read_bytes() == before
+
+
+def test_a_certificate_blob_is_checked_only_as_far_as_its_type() -> None:
+    # After its key, a certificate holds fixed-width integers (serial, type), which are not SSH strings.
+    cert_type = "ssh-ed25519-cert-v01@openssh.com"
+    fields = (cert_type.encode("ascii"), b"n" * 32, b"k" * 32)
+    blob = b"".join(struct.pack(">I", len(field)) + field for field in fields) + struct.pack(">QI", 1, 2)
+
+    assert trust.is_valid_key(cert_type, base64.b64encode(blob).decode("ascii"))
 
 
 def test_begin_enrollment_resets_a_stale_record_and_creates_the_directory() -> None:

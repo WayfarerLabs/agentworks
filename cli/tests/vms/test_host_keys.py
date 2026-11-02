@@ -8,22 +8,25 @@ import base64
 import shutil
 import struct
 import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
 from typer.testing import CliRunner
 
+from agentworks import execution
 from agentworks.cli import app
 from agentworks.errors import ConfigError, NotFoundError, StateError
 from agentworks.execution import trust
+from agentworks.execution.client import SSHClient
+from agentworks.execution.errors import ClientUnsupported
 from agentworks.execution.trust import HostKey
 from agentworks.vms.manager import host_keys
 from agentworks.vms.manager.host_keys import ImportStatus, import_host_keys, render_import
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from agentworks.db import Database
 
 pytestmark = [
@@ -33,6 +36,17 @@ pytestmark = [
         reason="the import matches with the installed OpenSSH's ssh-keygen",
     ),
 ]
+
+
+@pytest.fixture(autouse=True)
+def installed_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Resolve the client to the installed ``ssh-keygen``'s directory, whatever the version there.
+
+    These tests are about the import, not the resolver.
+    """
+    keygen = shutil.which("ssh-keygen")
+    assert keygen is not None
+    monkeypatch.setattr(execution, "resolve_ssh", lambda: SSHClient(str(Path(keygen).with_name("ssh")), (9, 9)))
 
 
 @pytest.fixture(scope="module")
@@ -316,6 +330,52 @@ def test_all_continues_past_a_vm_with_a_malformed_key_and_fails_the_report(
     assert outcomes["good"].status is ImportStatus.IMPORTED
     assert trust.stored_keys("good") == (keys[0],)
     assert render_import(list(outcomes.values())) is False
+
+
+# -- Which ssh-keygen runs -----------------------------------------------------------------------
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake ssh-keygen is a POSIX script")
+def test_the_ssh_keygen_beside_the_client_runs_and_one_on_path_never_does(
+    db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_keygen(directory: Path) -> Path:
+        directory.mkdir()
+        calls = directory / "calls"
+        tool = directory / "ssh-keygen"
+        tool.write_text(f'#!/bin/sh\necho "$@" >> {calls}\nexit 1\n')  # exit 1: no match
+        tool.chmod(0o755)
+        return calls
+
+    beside, on_path = fake_keygen(tmp_path / "client"), fake_keygen(tmp_path / "onpath")
+    monkeypatch.setattr(execution, "resolve_ssh", lambda: SSHClient(str(tmp_path / "client" / "ssh"), (9, 9)))
+    monkeypatch.setenv("PATH", str(tmp_path / "onpath"))
+    _vm(db, "web", "100.64.0.1")
+    source = tmp_path / "known_hosts"
+    source.write_text("")
+
+    outcomes = _run(db, "web", known_hosts=source)
+
+    assert _status(outcomes, "web") is ImportStatus.NO_MATCH
+    assert beside.read_text().split() == ["-F", "100.64.0.1", "-f", str(source)]
+    assert not on_path.exists()
+
+
+def test_without_an_ssh_keygen_beside_the_client_import_fails_naming_where_it_looked(
+    db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The installed ssh-keygen stays on PATH, and is not used.
+    monkeypatch.setattr(execution, "resolve_ssh", lambda: SSHClient(str(tmp_path / "bare" / "ssh"), (9, 9)))
+    _vm(db, "web", "100.64.0.1")
+    source = tmp_path / "known_hosts"
+    source.write_text("")
+
+    with pytest.raises(ClientUnsupported) as caught:
+        _run(db, "web", known_hosts=source)
+
+    expected = tmp_path / "bare" / ("ssh-keygen.exe" if sys.platform == "win32" else "ssh-keygen")
+    assert str(expected) in str(caught.value)
+    assert not trust.has_record("web")
 
 
 # -- Selection, sources and exit status --------------------------------------------------------
