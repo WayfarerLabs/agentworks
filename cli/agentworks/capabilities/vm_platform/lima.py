@@ -378,7 +378,7 @@ class LimaPlatform(VMPlatform):
 
         # Rollback: spans every step from the first backend mutation
         # (limactl create) through the post-start steps (restart
-        # sentinel, Tailscale IP). The caller's unwind deletes only the
+        # sentinel, Tailscale join and address). The caller's unwind deletes only the
         # DB row on failure OR interrupt, so an instance left behind
         # here would be orphaned with nothing to target it (#340; the
         # azure precedent is #338). Everything before this try mutates
@@ -391,10 +391,6 @@ class LimaPlatform(VMPlatform):
                 self._create_local(instance_name, rendered)
 
             output.detail(f"Lima VM '{instance_name}' created.")
-
-            run_as_root = functools.partial(self._host.run_as_root, instance_name)
-            output.detail("Joining Tailscale...")
-            join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
 
             # Some bootstrap steps (currently the Apple-vz SVE mask, see
             # bootstrap_script) only take effect after a reboot, and rebooting
@@ -414,8 +410,11 @@ class LimaPlatform(VMPlatform):
                 output.detail(f"A bootstrap step needs a reboot; restarting '{instance_name}'...")
                 self._host.run(f"limactl restart {instance_name}")
 
-            # The read follows any restart, and its retries cover the guest
-            # coming back up.
+            # The join follows any restart, so nothing but the address read
+            # sits between the join and the settle that logs a failed one out.
+            run_as_root = functools.partial(self._host.run_as_root, instance_name)
+            output.detail("Joining Tailscale...")
+            join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
             output.detail("Retrieving Tailscale IP...")
             tailnet_address = settle_tailnet_address(run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT)
 

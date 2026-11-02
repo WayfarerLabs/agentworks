@@ -232,3 +232,29 @@ def test_an_address_that_cannot_be_read_logs_the_node_out_and_removes_the_instan
     assert guest.joins == 1
     assert guest.count("tailscale logout") == 1
     assert "limactl delete --force myvm" in ran
+
+
+def test_a_failed_restart_rolls_back_before_the_key_is_sent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The join follows the restart, so a restart failure leaves no joined node behind."""
+    ran: list[str] = []
+    guest = install_at_run_process(monkeypatch, FakeGuest())
+    monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
+    monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
+    monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, lima_yaml: None)
+    monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
+
+    def _fake_run(self: LimaHost, command: str, **kwargs: object) -> str:
+        ran.append(command)
+        if REBOOT_SENTINEL_PATH in command:
+            return f"{_REBOOT_PENDING_MARKER}\n"
+        if command.startswith("limactl restart"):
+            raise LimaCommandFailed("restart failed")
+        return ""
+
+    monkeypatch.setattr(LimaHost, "run", _fake_run)
+
+    with pytest.raises(LimaCommandFailed):
+        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
+
+    assert guest.scripts == []
+    assert "limactl delete --force myvm" in ran
