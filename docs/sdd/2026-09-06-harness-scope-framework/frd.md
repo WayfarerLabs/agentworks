@@ -277,9 +277,12 @@ through the saga lead.
   in-process integration code is governed by trust, review, and disclosure.
 - **Native setup ownership is conventional and review-enforced:** claim the smallest practical
   ownership unit; adopt content identical to the declaration with a recorded and reported ownership
-  claim. Preserve and report differing unowned content, scoped to the affected entry while other
-  setup continues. R15 authorizes only the explicitly selected settings destination and policy;
-  record applied state so reinit converges; secrets never enter persisted state.
+  claim. Native association matching uses the tool's reported full source identity, including
+  optional refs, rather than independent historical cache provenance. Mutable installed versions do
+  not alter association ownership. Adopted entries become managed and eligible for safe cleanup when
+  no longer declared. Preserve and report differing unowned content, scoped to the affected entry
+  while other setup continues. R15 authorizes only the explicitly selected settings destination and
+  policy; record applied state so reinit converges; secrets never enter persisted state.
 - **Artifacts are entirely deferred.** No placeholder artifact APIs, formats, storage, or
   installation mechanisms land with facets. Rulesync reuse is a question for the future artifact
   effort.
@@ -600,3 +603,16 @@ whole owning initialization or suppress independent setup. Record partial comple
 Actual failures of the running facet, including malformed declarations, failed native operations,
 transport errors and persistence failures, retain their error behavior. The R10 explicit
 required/recommended prerequisite API and R3 unsupported-activation errors remain.
+
+## Operator ruling: native association identity, 2026-11-02
+
+The operator selected the simple native-association model after discussing tools whose current
+registration can differ from the historical source of their cached files: "keep it simple. If the
+operator has installed the plugin via a different path, we should just notice, warn, and move on."
+Use the complete native-reported association as the identity, including marketplace refs and other
+source options. Preserve and warn about differing unowned associations without suppressing
+independent setup. Matching declared associations may be adopted with recorded and reported
+ownership and normal safe-cleanup rights. Do not add independent cache-origin verification,
+installation-intent tracking or a provenance store. Native version updates do not change the stable
+owned association. This clarifies R9's comparison boundary without weakening safe native readback,
+settings authorization or malformed-input error handling.

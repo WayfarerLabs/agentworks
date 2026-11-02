@@ -93,6 +93,12 @@ the reason when one exists. Filter disabled inputs before applying delivery-spec
 compatibility probes. Keep unsafe paths, conflicting ownership, malformed results and invalid
 configuration as errors. Do not turn an optional artifact into a blanket version requirement.
 
+Native-name collisions that prevent an input from being represented become terminal session
+deferrals. Rerender the remaining inputs so rejected content and carrier arguments are both absent,
+then validate that remaining delivery. A namespace that resolves the collision may permit handling
+at the receiving facet; an earlier deferral is not a permanent refusal. Hard failures in input,
+transport or private filesystem publication remain errors of the running facet.
+
 Generated literal argv values must use `quote_literal_argv` so artifact text is not interpreted as
 Agentworks template substitutions. Native conversation IDs remain integration-owned.
 
@@ -369,12 +375,15 @@ Setup invocations carry prior claims and a callback for the complete remaining c
 confirmed ownership change. Report an entry skipped because of differing unowned content through
 `report_incomplete(reason)` and continue independent work. Core reports the owning resource and
 integration, and retains incomplete evidence without failing the whole initialization. Matching
-native entries can be adopted only after observing their full identity and source; adoption is
-recorded and reported. Core persists completion and cleanup evidence in the owning instance-state
-slice; it does not infer native ownership from filenames. Removed activations are invoked with
-absent config for retirement, and failed retirement retains evidence for retry. See
-[native harness setup](../../../../docs/guides/native-harness-setup.md) for the shipped cleanup
-rules and the [instance-state contract](../../db/README.md) for persistence and inspection.
+native entries can be adopted after observing their full native-reported association and source;
+adoption is recorded and reported and makes the entry eligible for safe managed cleanup. Installed
+versions are mutable observation metadata, not ownership identity. This does not verify historical
+cache origin or add installation-intent tracking. Core persists completion and cleanup evidence in
+the owning instance-state slice; it does not infer native ownership from filenames. Removed
+activations are invoked with absent config for retirement, and failed retirement retains evidence
+for retry. See [native harness setup](../../../../docs/guides/native-harness-setup.md) for the
+shipped cleanup rules and the [instance-state contract](../../db/README.md) for persistence and
+inspection.
 
 #### Config: Facet Selection
 

@@ -281,7 +281,10 @@ the generated section. Whole-file publication adopts matching bytes and executab
 and reporting ownership. Differing unowned or manually changed destinations are retained and
 recorded as skipped; one conflicting skill member skips the whole skill to avoid mixed package
 contents. Independent artifacts continue. Both forms use guarded paths and the same state/checkpoint
-lifecycle.
+lifecycle. An active setup with unresolved skips remains incomplete without manufacturing a new
+deferral or cleanup obligation. That status and the recorded skip reasons are reported at
+descendants without blocking them. Adopted matching files are managed and may be removed by safe
+retirement.
 
 Application output groups confirmed inputs by artifact type rather than counting package members.
 Each line lists all names for up to three items, or the first two followed by `...`. Deferrals use
@@ -394,19 +397,23 @@ The session integration returns its launch decision, deferred result and concret
 publications. This is its application plan; core performs transport/persistence mechanics without
 choosing native filenames or interpreting artifact contents.
 
-Validate capture, ancestor freshness, native compatibility, collisions and final deferrals before
-tearing down an existing workload. On create, compute the prospective identity for the launch
-decision, then persist the session row before publishing owned files, fitting the existing rollback
-boundary. On restart, stage files under the new run directory so preflight or publication failure
-does not overwrite files used by the old workload. Only after preparation succeeds does core stop
-the old runtime and launch the new one. Record confirmed publication before launch and retain enough
-ownership evidence to clean up a failed start idempotently.
+Capture local inputs, report ancestor freshness and validate remaining native delivery before
+tearing down an existing workload. Identifiable native-name conflicts become terminal unhandled
+inputs; rerender files and launch arguments without them and revalidate the remaining carriers.
+Malformed inputs, failed transport/probes and unsafe private-file publication remain errors. On
+create, compute the prospective identity for the launch decision, then persist the session row
+before publishing owned files, fitting the existing rollback boundary. On restart, stage files under
+the new run directory so preflight or publication failure does not overwrite files used by the old
+workload. Only after preparation succeeds does core stop the old runtime and launch the new one.
+Record confirmed publication before launch and retain enough ownership evidence to clean up a failed
+start idempotently.
 
 Retire the previous run's owned files after it is no longer using them. Session deletion and failed
-creation clean only the directories belonging to that session/run. Reusing a session name cannot
-adopt another UUID's files. Disabling a workaround uses the same retirement path on the next managed
-launch. Unsupported native resume remains separate from optional artifact delivery; unhandled inputs
-warn and cannot be recorded as delivered.
+creation clean owned files and explicit skill package roots; empty session/run directories can
+remain without artifact content. Do not infer ownership of parent directories. Reusing a session
+name cannot adopt another UUID's files. Disabling a workaround uses the same retirement path on the
+next managed launch. Unsupported native resume remains separate from optional artifact delivery;
+unhandled inputs warn and cannot be recorded as delivered.
 
 ## Conservative session workarounds
 
@@ -557,10 +564,11 @@ Worked cases the HLA and subsequent tests share:
 8. **Native shadowing.** The actual user and workspace each supply a `foobar` skill. Their groups
    stay distinct through core routing. If the harness would select only the workspace definition,
    new delivery needs faithful, distinct native identities or an explicit unresolved outcome. Setup
-   can defer an affected entry; a session rejects a new conflicting carrier. If both placements
-   already exist, launch reports the conflict and continues. File existence never proves both
-   contributions are delivered. Native entries at supported discovery locations participate in the
-   check without making existing ancestor-only problems a prerequisite.
+   can defer an affected entry; a session leaves a still-conflicting input unhandled and warns,
+   without emitting its files or carrier arguments. A faithful native namespace can resolve it. If
+   both placements already exist, launch reports the conflict and continues. File existence never
+   proves both contributions are delivered. Native entries at supported discovery locations
+   participate in the check without making existing ancestor-only problems a prerequisite.
 
 ## Implementation boundaries and review gates
 

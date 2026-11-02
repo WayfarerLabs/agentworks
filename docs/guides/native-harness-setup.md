@@ -91,11 +91,19 @@ registration or user plugin whose observable identity and source match the reque
 recorded and reported, including after an interrupted setup. Differing unowned entries or ambiguous
 native drift are preserved and reported individually. Independent entries and later integrations
 continue, and the affected integration's setup record remains incomplete until retry succeeds.
+Adoption makes the matching entry managed: removing its declaration can remove it under the normal
+safe-cleanup rules. Confirmed registrations, installs, removals and replacements report progress.
 Descendant session launches still proceed and can repeat the incomplete-setup warning until the
 owning setup resolves the retained conflict. Resolve a conflicting association with the native CLI
 before retrying its owning setup. Unrelated built-in or remote entries whose source cannot be
 established are preserved; Agentworks cannot claim or remove those entries without observable source
 identity.
+
+Matching uses the native tool's reported association, including the full marketplace source and any
+ref or sparse-path options. Agentworks does not authenticate the historical origin of cached plugin
+files. An installed version can change through the native tool without changing the owned plugin
+association. A differing unowned source or association is preserved with a warning; resolve that
+native conflict before retrying setup. No installation-intent journal is maintained.
 
 Removing desired associations removes owned plugins before owned marketplaces. The integration
 refuses marketplace cleanup when it would affect an unowned or project plugin. Claude's native

@@ -566,7 +566,7 @@ independent corrections proceed without inventing ownership or an intent-state p
 after this round until the operator resolves it.
 
 - [x] Complete the independent accepted corrections and their focused regression checks.
-- [ ] Resolve the Codex provenance decision through authenticated operator direction and complete
+- [x] Resolve the Codex provenance decision through authenticated operator direction and complete
       the resulting correction within its agreed boundary.
 - [ ] Run the three private review lanes and required gates on the corrected exact head; publish the
       complete handoff with the appropriate draft/ready signal.
@@ -593,3 +593,43 @@ the complete correction handoff remains pending the Codex decision.
 
 Codex provenance remains unresolved under the operator question above. These are independent code
 and local CLI results, not live VM acceptance or whole-PR readiness. Neither SDD is locked.
+
+## Facet independence feedback, round 2 of 3, 2026-11-02
+
+The operator resolved the held native-provenance question: use the native tool's reported full
+association, preserve and warn about differing unowned associations, and add no historical cache
+verification or installation-intent tracking. This supersedes round 1's pending-source notes.
+Matching adopted entries become managed and may be safely retired when no longer declared. Native
+version changes do not change the owned association.
+
+The second authorized batch includes the unresolved source thread, the later live integration
+reports and saga reading, and Muntz's checkpoint review. The preceding handoff's reporting window
+elapsed before this round began. PR 862 stays draft with `review-requested` removed during work. The
+seven live findings are addressed within the existing contract; own malformed/config/process/
+transport and unsafe publication failures remain hard. There is no error-aggregation or directory
+ownership engine. Empty session/run directories may remain after owned-file retirement.
+
+- [x] Record the authenticated native-association ruling and make full marketplace identity,
+      version-stable ownership and safe settings-overlay behavior converge with confirmed reports.
+- [x] Make remaining native-name conflicts terminally unhandled, rerender complete session files and
+      argv, and preserve genuinely non-conflicting native namespaces and own-session errors.
+- [x] Report native-only incomplete or retired setup, leave skipped setup incomplete, preserve
+      compatible-version repair guidance, and remove duplicated setup route arguments.
+- [x] Add bounded file/section retirement and update reports, accurate executable-intent
+      diagnostics, guest-index privacy and artifact ownership counts; keep provenance in workstation
+      inspection.
+- [x] Supply a bounded fixture launcher through existing registration and the real CLI for the
+      separate prerequisite/unsupported-facet live acceptance cases, without a product plugin
+      loader.
+- [ ] Complete all three private review lanes and integrated gates, then publish the exact head
+      ready with the retained acceptance matrix and no checkpoint label.
+- [ ] Assess that ready handoff's full feedback batch. One authorized public fix round remains.
+- [ ] Audit final-head live evidence, close every retained requirement, promote remaining durable
+      content and add both locks. No unit or fixture result alone closes a real-VM obligation.
+
+Native fixture validation observed Claude Code 2.1.316 and Codex 0.166.0. The focused native slice
+passed 104 tests. The flow slice passed 1,143 tests with four skips, including actual adapter/guest
+probes and real-manager failures preserving the existing run before teardown. The fixture-tooling
+slice passed its fresh-process CLI checks and full branch suite, with real VM execution explicitly
+unperformed. These are slice-level results, not final integrated or live acceptance claims; final
+private reviews, gates and the next ready handoff remain pending.

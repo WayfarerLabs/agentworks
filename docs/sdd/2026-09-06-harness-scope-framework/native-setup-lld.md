@@ -155,20 +155,25 @@ effective document first, compare its plugin/marketplace declarations with expli
 inconsistency and reconcile matching declarations once. Query native installed state before claiming
 ownership. Adopt an unclaimed registration only when its native source equals the declaration. For
 an installed user plugin, compare its observed marketplace identity with the selected parent, then
-retain the full observed identity, including its version, in the claim. Record and report adoption;
-retries can therefore heal mutation-before-checkpoint interruption without provisional claims.
-Differing unowned entries are skipped individually and reported through the invocation's incomplete
-callback. Core leaves `complete=False` while allowing independent native entries, artifact
-publication and later integrations to proceed. A settings mapping must preserve skipped native
-associations, including under replace policies. Query again after every command before recording its
-actual result. A command's success alone does not establish scope or identity.
+retain the stable association identity in the claim. Native installed-version changes do not change
+ownership; older claims that included a version remain readable. Record and report adoption; retries
+can therefore heal mutation-before-checkpoint interruption without provisional claims. Differing
+unowned entries are skipped individually and reported through the invocation's incomplete callback.
+Core leaves `complete=False` while allowing independent native entries, artifact publication and
+later integrations to proceed. A settings mapping must preserve skipped native associations,
+including under replace policies. Query again after every command before recording its actual
+result. A command's success alone does not establish scope or identity.
 
 Isolated local fixtures pin concrete native query payload fields, removal behavior and
 command/settings ordering; see [native research](prior-art-research.md). Commands resolve the
 executable and login PATH once under the actual user before switching to an isolated native home for
 source discovery. Prepared env remains authoritative. Marketplace source comparison includes
-optional identity fields, and source reuse compares the source location, never its classifier or
-ref. User-scoped plugin setup only is in scope. Workspace facets publish project settings only.
+optional identity fields. A simple location fast path is valid only when no additional source fields
+need resolution; otherwise isolated native discovery establishes the requested full identity. The
+native-reported association is authoritative, without independent cache-origin verification. A
+settings overlay can materialize an authorized association key missing from the native document
+after inventory confirmed the association. User-scoped plugin setup only is in scope. Workspace
+facets publish project settings only.
 
 ## Readiness
 

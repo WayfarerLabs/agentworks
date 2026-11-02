@@ -576,8 +576,12 @@ native conditions as well as this record, with severity chosen by the consuming 
 Reconciliation compares desired setup with prior applied ownership and the live destination. Native
 plugin and marketplace changes remove obsolete owned resources wherever safe removal is supported,
 leave matching resources alone, and report drift or unowned conflicts. Settings mappings follow
-their explicit overwrite/merge policy and retain their document on removal. Do not infer ownership
-from current config, a matching filename, or matching bytes. Persist the non-secret identifiers and
+their explicit overwrite/merge policy and retain their document on removal. A declaration alone,
+matching filename or matching bytes does not establish native association ownership. Compare the
+tool's full reported marketplace source and stable plugin association; a mutable installed version
+is not ownership identity. Matching pre-existing associations may be adopted, recorded and reported,
+which makes them eligible for safe later cleanup. Historical cache-origin verification and
+installation-intent tracking are outside this boundary. Persist the non-secret identifiers and
 removal facts needed after a plugin entry or whole activation disappears.
 
 Removed activations still reconcile: core invokes the same facet method with absent desired config
@@ -599,9 +603,10 @@ can leave unrecorded native residue. Retry adopts an entry whose observed native
 match the declaration, records its confirmed claim, and reports adoption. Differing unowned entries
 are preserved and reported individually while independent setup continues. Setup invocations can
 report incomplete entry application without aborting their other work; core retains an incomplete
-setup record until a later retry converges. Actual transport, native-operation and persistence
-failures remain errors. Unknown versions retain their evidence, malformed known records yield safe
-errors, and partial replacement preserves unrelated keys and integrations.
+setup record until a later retry converges. Confirmed native registrations, installs, removals and
+replacements report progress. Actual transport, native-operation and persistence failures remain
+errors. Unknown versions retain their evidence, malformed known records yield safe errors, and
+partial replacement preserves unrelated keys and integrations.
 
 For a new workspace, buffer applied facts until creation commits and unwind partial native setup
 through the existing failed-create path. Existing database backup/restore and VM backup exports must

@@ -177,10 +177,13 @@ Cleanup is deliberately bounded. Settings mappings retain their native document 
 have no separate ownership claims; they do not restore overwritten values. Native plugins and
 marketplaces are removed only when their recorded identity still proves ownership, without affecting
 unowned or project dependencies. Matching pre-existing entries are adopted after native identity and
-source verification, with a recorded claim and adoption report. Differing unowned entries are
-preserved and reported individually while other setup continues. See
-[native harness setup](native-harness-setup.md) for collision and retirement behavior, and
-[migrating Claude setup](migrating-claude-setup.md) for old declarations and stored overlays.
+source verification against the native tool's reported association, with a recorded claim and
+adoption report. Adoption makes a matching pre-existing entry managed and permits safe removal when
+it is no longer declared. Mutable native plugin versions do not change association ownership;
+historical cache origin is not verified. Differing unowned entries are preserved and reported
+individually while other setup continues. See [native harness setup](native-harness-setup.md) for
+collision and retirement behavior, and [migrating Claude setup](migrating-claude-setup.md) for old
+declarations and stored overlays.
 
 Setup and parent deletion share a VM-family mutation guard. Parent deletion uses the existing core
 lifecycle and clears setup records in its database transaction; it does not first uninstall native

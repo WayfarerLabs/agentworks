@@ -362,11 +362,15 @@ already applied ancestor contributions, including existing native entries that c
 artifacts. Use faithful aggregation, non-conflicting placement or a supported native namespace;
 otherwise diagnose the affected contribution with its competing origins and native identity without
 claiming delivery. During setup, defer conflicting native entries individually while independent
-entries continue; new session delivery must not introduce native shadowing. A successful file write
-or same-scope replacement rule does not authorize cross-scope native shadowing. Perform checks using
-the actual owners available at that lifecycle stage; the session validates new delivery against the
-joined user and workspace context without making outer scopes inspect descendants. Conflicts solely
-between already-placed ancestor artifacts are reported without blocking launch.
+entries continue; new session delivery must not introduce native shadowing. A collision that remains
+at the session makes the affected inputs terminally unhandled with a warning, while independent
+delivery and launch continue. Rerender the remaining inputs so rejected content is absent from both
+files and launch arguments. A receiving facet can handle an earlier deferral through a genuinely
+non-conflicting native namespace; deferral does not preserve a permanent refusal. A successful file
+write or same-scope replacement rule does not authorize cross-scope native shadowing. Perform checks
+using the actual owners available at that lifecycle stage; the session validates new delivery
+against the joined user and workspace context without making outer scopes inspect descendants.
+Conflicts solely between already-placed ancestor artifacts are reported without blocking launch.
 
 **R6. Give hints an appropriate representation.** Integrations may aggregate small hints into a
 native rule or include them in launch context when supported. Prefer one clearly named
@@ -393,9 +397,10 @@ removing an activation or deleting an owning resource has an explicit outcome fo
 provisioned artifacts. Remove owned effects where safe; retain and diagnose ambiguous or unowned
 content. Content identical to the declaration is adopted with recorded and reported ownership;
 differing unowned content is skipped and reported per entry while other setup continues. Preserve
-recoverable progress after failure through the existing instance-state facility. Avoid a new
-universal reconciliation engine or restoring the predecessor's rejected per-key settings ownership
-ledger.
+the incomplete state of an active setup with unresolved skips. Adoption makes matching pre-existing
+files managed and eligible for safe cleanup when their declaration is removed. Preserve recoverable
+progress after failure through the existing instance-state facility. Avoid a new universal
+reconciliation engine or restoring the predecessor's rejected per-key settings ownership ledger.
 
 **R9. Explain unresolved delivery.** Diagnostics identify the selected integration, original owner,
 artifact and the reason it remains unhandled. Final-session inputs are optional: warn when an input

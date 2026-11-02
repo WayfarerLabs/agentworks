@@ -307,9 +307,11 @@ reads native metadata names, including Codex configuration registrations, rather
 filenames are names. Conflicts identify the native name and competing paths. During setup,
 conflicting artifacts are deferred individually to the next supported facet while independent
 artifacts continue. Ordinary safe retirement removes prior owned placements no longer in that plan;
-modified or unowned files remain protected. A newly requested session carrier that would shadow
-another contribution is an error. Problems solely in existing ancestor placement warn and do not
-block session launch.
+modified or unowned files remain protected. If session delivery still has a native-name conflict,
+the affected inputs are reported as unhandled and excluded from both files and launch arguments;
+independent delivery and launch continue. A non-conflicting native namespace can allow a later facet
+to handle a previously deferred input. Problems solely in existing ancestor placement also warn
+without blocking launch.
 
 Inventory covers selected skill/persona types, with at most 512 directory entries, YAML headers up
 to 32 KiB each and 1 MiB combined, and an Agentworks rendered-TOML budget for Codex personas of 32
@@ -338,10 +340,18 @@ managed run uses a new directory; reusable session names do not reuse another se
 Native harness session delivery is disabled by default; shell publishes its private files directly.
 Inputs left unhandled, including deferrals from ancestors, produce warnings with their original
 owner, type, name and reason. They do not prevent launch and are not reported as successfully
-delivered. Invalid input, unsafe publication and conflicts introduced by new session delivery remain
-errors. A differing whole file in the prospective session directory is preserved and refuses the new
-run before teardown of an existing runtime. Differing unowned file content during setup is preserved
-and recorded as a skip.
+delivered. Malformed input, transport failures and unsafe publication remain errors. A differing
+whole file in the prospective session directory is preserved and refuses the new run before teardown
+of an existing runtime. Differing unowned file content during setup is preserved and recorded as a
+skip, leaving that setup incomplete. Incomplete native-only facets are also reported; neither case
+creates a blanket descendant launch prerequisite.
+
+Adopting matching artifact files makes them managed and eligible for safe cleanup when removed from
+the declaration. Confirmed file and generated-section removals and updates report bounded summaries.
+Cleanup retires owned files and explicit skill package roots. Empty session/run directories can
+remain; they grant no ownership over their parents and do not retain artifact content. Shell's guest
+index retains applicability and revision metadata without workstation acquisition paths; workstation
+inspection still shows source provenance.
 
 This delivery includes declared bundles and harness handling. Core hint emission, features, hooks,
 and MCP artifacts are later work.

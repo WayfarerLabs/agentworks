@@ -238,13 +238,23 @@ accepts `session-prompt`, `session-skill-plugin`, and `session-agent-definitions
 skills have no workaround. These names opt into the existing carriers in the table above. Hooks,
 automatic fallbacks and release-by-release compatibility tables are not part of this correction.
 
-Raw carrier conflicts are checked for enabled new session delivery. Ancestor-only discovery problems
-are reported rather than enforced as session prerequisites. Disabled session inputs do not introduce
-restrictions on native launch arguments. Outer native placement and its safety/ownership checks
-remain in place. Core emits final unhandled warnings after full output validation and stores the
-deferrals so inspection does not claim success. Known domain failures retain their error type and
-focused remediation through the agent lifecycle; version/configuration refusals are not recast as
-unexplained SSH failures.
+Native-name conflicts in enabled session delivery leave the identified inputs terminally unhandled.
+The shared session pipeline rerenders complete files and arguments for the remaining inputs and
+repeats validation; removing one proposal can expose another collision with retained native content.
+A supported namespace can resolve an earlier setup collision. Malformed inputs, invalid native
+responses, transport failures and unsafe filesystem publication remain hard errors. Raw argument
+override conflicts are still checked for enabled new session delivery. Ancestor-only discovery
+problems are reported rather than enforced as session prerequisites. Disabled session inputs do not
+introduce restrictions on native launch arguments. Outer native placement and its safety/ownership
+checks remain in place. Core emits final unhandled warnings after full output validation and stores
+the deferrals so inspection does not claim success. Known domain failures retain their error type
+and focused remediation through the agent lifecycle; version/configuration refusals are not recast
+as unexplained SSH failures.
+
+An ancestor-only check still returns its native root for discovery-path diagnostics. A missing
+ancestor-only target produces an advisory warning; a missing target needed for new delivery remains
+an error. Mixed new/ancestor delivery uses a separate read-only advisory query, preserving strict
+checks over new paths without turning ancestor policy into a launch prerequisite.
 
 Native argv and the fully quoted returned command each have a conservative 32 KiB UTF-8 limit,
 leaving room for launcher wrapping below the operating system's per-argument limit. Oversized text
