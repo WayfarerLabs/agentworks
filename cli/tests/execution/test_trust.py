@@ -247,7 +247,8 @@ def test_begin_enrollment_resets_a_stale_record_and_creates_the_directory() -> N
     if sys.platform != "win32":
         assert stat.S_IMODE(trust.STORE_DIR.stat().st_mode) == 0o700
     assert not trust.has_record("web")
-    assert not trust.store_file("web").exists()
+    if sys.platform != "win32":
+        assert stat.S_IMODE(trust.store_file("web").stat().st_mode) == 0o600
 
 
 def test_remove_deletes_the_record_and_tolerates_none() -> None:
@@ -336,6 +337,7 @@ def test_an_unusable_store_directory_is_a_state_error_for_every_writer(unusable_
 
 def test_an_unreadable_record_is_a_state_error() -> None:
     trust.begin_enrollment("web")
+    trust.remove("web")
     trust.store_file("web").mkdir()
 
     with pytest.raises(StateError):

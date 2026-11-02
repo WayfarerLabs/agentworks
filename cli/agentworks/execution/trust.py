@@ -252,12 +252,16 @@ def begin_enrollment(vm_name: str) -> None:
     """Reset the VM's record so a reused name never inherits a key.
 
     Creates the store directory, which OpenSSH will not create for a custom
-    ``UserKnownHostsFile``: under ``accept-new`` a failed write only warns.
+    ``UserKnownHostsFile``: under ``accept-new`` a failed write only warns. The
+    file is left empty and private for the enrolling connection to fill.
     """
     path = store_file(vm_name)
     _ensure_store_dir()
     try:
         path.unlink(missing_ok=True)
+        # ssh appends to an existing file and keeps its mode, so the record the
+        # first connection writes is as private as one ``write_records`` makes.
+        path.touch(mode=0o600)
     except OSError as e:
         raise _store_error("reset the host-key store", path, e, vm_name) from e
 

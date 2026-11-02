@@ -566,6 +566,7 @@ def test_one_vms_store_problem_leaves_its_trust_lines_out_without_aborting_the_r
     key = fake_host_key()
     trust.write_records("good", [key])
     trust.begin_enrollment("broken")
+    trust.remove("broken")
     trust.store_file("broken").mkdir()  # reading it raises
 
     _rebuild_config_dir(config, db)
