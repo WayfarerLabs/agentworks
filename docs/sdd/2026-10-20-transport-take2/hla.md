@@ -1,6 +1,6 @@
 # Transport Take 2: High-Level Architecture
 
-- Status: Draft for review. Nothing here is implemented.
+- Status: Slices 1 and 2 implemented in PR A (#863); slices 3 to 8 not started.
 - Date: 2026-10-31
 - Requirements: [frd.md](./frd.md)
 - Plan: [plan.md](./plan.md)

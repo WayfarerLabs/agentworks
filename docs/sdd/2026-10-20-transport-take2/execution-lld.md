@@ -1,6 +1,6 @@
 # Transport Take 2: Execution Core Low-Level Design (Slice 2)
 
-- Status: Reviewed; not yet implemented.
+- Status: Implemented in PR A (#863); live evidence in progress.
 - Date: 2026-11-01
 - Architecture: [hla.md](./hla.md) D1 to D5, D8, D12 to D14; requirements: R2 to R5, R8 to R11
 - Plan: [plan.md](./plan.md), slice 2, delivered in PR A with slice 1
@@ -112,13 +112,13 @@ parsed `(major, minor)`. Every spawn takes the `SSHClient`, so no caller can lau
 The slice 2 subset of D5. Strings are `str`. `Shell` is a `StrEnum` of `sh`, `bash` and
 `user_default`. `AccountShell` is `Literal["sh", "dash", "bash", "zsh"]`, the template field type.
 
-| Type         | Fields                                                               | First consumer                                        |
-| ------------ | -------------------------------------------------------------------- | ----------------------------------------------------- |
-| `Command`    | `argv: tuple[str, ...]`                                              | `vm exec` with several arguments, `verify-connection` |
-| `Script`     | `source: str`, `shell: Shell`, `login: bool = False`                 | `vm exec` with one argument, `agent exec` (login)     |
-| `LoginShell` | none                                                                 | `vm shell`, `agent shell`                             |
-| Common       | `env: Mapping[str, str] = {}`, `cwd: str \| None`                    | all                                                   |
-| Bounded      | `deadline: float \| None` (seconds), through `BoundedRequestOptions` | `Command`, `Script`                                   |
+| Type         | Fields                                                               | First consumer                  |
+| ------------ | -------------------------------------------------------------------- | ------------------------------- |
+| `Command`    | `argv: tuple[str, ...]`                                              | `verify-connection`             |
+| `Script`     | `source: str`, `shell: Shell`, `login: bool = False`                 | `vm exec`, `agent exec` (login) |
+| `LoginShell` | none                                                                 | `vm shell`, `agent shell`       |
+| Common       | `env: Mapping[str, str] = {}`, `cwd: str \| None`                    | all                             |
+| Bounded      | `deadline: float \| None` (seconds), through `BoundedRequestOptions` | `Command`, `Script`             |
 
 `LoginShell` is the identity's default shell as an interactive login shell. A `Script` with an empty
 source would run `shell -l -i FILE` on an empty file and exit, and a name that says "shell session"
@@ -260,8 +260,12 @@ against a local shell.
   `BufferedReader.read1` aborts the interpreter at exit (`_enter_buffered_busy`, status 134,
   reproduced on Python 3.11; the CLI's floor is 3.12, where the subprocess test covers it). A caller
   with no stdin passes `None` and the pipe closes right after the request. The thread outlives the
-  call blocked in a read; `stream` is the last thing a command does. A write that fails after the
-  start marker is the consumer ending early, not a failure.
+  call blocked in a read; `stream` is the last thing a command does. A stdout consumer that leaves
+  (`| head`, quitting `less`) ends the request as it did when ssh held the operator's stdout: the
+  client closes its read end of ssh's stdout, so ssh gets `EPIPE` and closes the channel and the
+  payload's next write takes `SIGPIPE`. `stream` returns 141, the status of a writer killed by
+  `SIGPIPE`, without waiting for the trailer. A stderr consumer that leaves only stops that stream's
+  delivery.
 - **Binary stdio.** Callers pass `sys.stdout.buffer` and `sys.stderr.buffer` (the text layer's
   `newline="\n"` at `cli/_entry.py:38` does not apply), after flushing the text layer (I2).
   `stream_to_operator(access, request)` in `access.py` is that wiring, flush, raw stdin and binary
@@ -531,14 +535,14 @@ All six keep their guards, workspace and secret resolution and the gate. Each ca
 first and builds `access = execution.vm_access(vm, config, Admin() or Agent(agent))`, called through
 the package attribute so one patch reaches every manager.
 
-| Command                                       | Request and call                                                                                                                                                                                                    |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vm exec` (`exec.py:182`)                     | One argument: `Script(arg, Shell.USER_DEFAULT)`. Several: `Command(tuple(args))`. `cwd=ws.workspace_path`, `env=compose_env(...)`. `access.stream(...)` with `sys.stdin.buffer.raw` and the process's binary output |
-| `agent exec` (`access.py:134`)                | `Script(source, Shell.USER_DEFAULT, login=True)`, with `source` the one argument or `shlex.join(args)`, as `$SHELL -lc` does today                                                                                  |
-| `vm shell` (`exec.py:35`)                     | `LoginShell(cwd, env)` and `access.attach`                                                                                                                                                                          |
-| `agent shell` (`access.py:34`)                | The same with the agent's access, after the agent probe                                                                                                                                                             |
-| `vm verify-connection` (`verification.py:28`) | `run(Command(("true",), deadline=10), check=True)`. The message keeps "via ssh" (the kind is now the constant `ssh`)                                                                                                |
-| `vm port-forward` (`tailscale.py:73`)         | Port parsing and guards as today, then `access.forward(...)` and the signal handling above                                                                                                                          |
+| Command                                       | Request and call                                                                                                                                                                                                                                                                                                                                               |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vm exec` (`exec.py:182`)                     | One argument: `Script(arg, Shell.USER_DEFAULT)`. Several: `Script(shlex.join(args), Shell.USER_DEFAULT)`, as today (`vms/manager/exec.py:271` on `main`), so builtins such as `command -v` and shell functions keep working. `cwd=ws.workspace_path`, `env=compose_env(...)`. `access.stream(...)` with `sys.stdin.buffer.raw` and the process's binary output |
+| `agent exec` (`access.py:134`)                | `Script(source, Shell.USER_DEFAULT, login=True)`, with `source` the one argument or `shlex.join(args)`, as `$SHELL -lc` does today                                                                                                                                                                                                                             |
+| `vm shell` (`exec.py:35`)                     | `LoginShell(cwd, env)` and `access.attach`                                                                                                                                                                                                                                                                                                                     |
+| `agent shell` (`access.py:34`)                | The same with the agent's access, after the agent probe                                                                                                                                                                                                                                                                                                        |
+| `vm verify-connection` (`verification.py:28`) | `run(Command(("true",), deadline=10), check=True)`. The message keeps "via ssh" (the kind is now the constant `ssh`)                                                                                                                                                                                                                                           |
+| `vm port-forward` (`tailscale.py:73`)         | Port parsing and guards as today, then `access.forward(...)` and the signal handling above                                                                                                                                                                                                                                                                     |
 
 - **Splits for the static check.** `exec.py` keeps its shared preamble (guards, workspace, gate
   choice, environment) and both `exec_vm` and `shell_vm`. Only the legacy-touching part of the
@@ -561,10 +565,9 @@ the package attribute so one patch reaches every manager.
   - A VM without `python3` is `VMNotReady`, not a shell error.
   - The guest sees a fixed `PATH`, `LANG=C.UTF-8`, `SHLVL=1` and no `SSH_CLIENT` or
     `SSH_CONNECTION`.
-  - A literal `vm exec` command no longer inherits the account shell's startup. A command that
-    cannot start, such as `vm exec VM nosuchcmd`, exits 127 with one line from agw instead of the
-    shell's message, and `vm exec VM ./script-without-shebang` exits 126, since there is no shell
-    `ENOEXEC` fallback. A missing workspace directory exits 125 with one line.
+  - `vm exec` still runs its command line under the account shell without login startup, as before,
+    so builtins and shell functions keep working. A missing workspace directory exits 125 with one
+    line.
   - An argument or `NAME=VALUE` environment string over 131,071 bytes is refused up front.
   - `IdentityAgent` set only in `~/.ssh/config` (1Password, Secretive) is ignored by the six
     commands, since no configuration is read; the agent named by `SSH_AUTH_SOCK` serves the key.
