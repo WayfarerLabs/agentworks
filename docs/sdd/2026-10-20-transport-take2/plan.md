@@ -116,10 +116,11 @@ a VM connection.
       Keep `vm exec`'s single-argument form as a shell command line, sent as a `Script` under the
       identity's default shell, and several arguments as a literal argv, as today
       (`vms/manager/exec.py:271`).
-- [ ] Restore `vm exec`'s several-argument form to today's behavior, the arguments shell-joined and
-      run under the identity's default shell (`vms/manager/exec.py:271` on `main`), which the box
-      above wrongly described as a literal argv; end a `stream` whose stdout consumer leaves, as ssh
-      did.
+- [ ] Restore `vm exec`'s several-argument form to today's behavior, each argument quoted and run
+      under the identity's default shell (`vms/manager/exec.py:271` on `main`), which the box above
+      wrongly described as a literal argv. Give a departed stdout or stderr consumer ssh's
+      semantics: close that stream, keep pumping until the channel ends, and report the guest's
+      status when its trailer arrives (execution LLD, the pump).
 - [x] Alert where PR A drops a behavior an operator may rely on (operator, 2026-11-01): warn at
       reinit when `/etc/environment`, `/etc/security/pam_env.conf` or the admin's
       `~/.pam_environment` holds settings, and when a VM connection fails before the start marker
@@ -240,7 +241,7 @@ first operation there is the base contract check.
   - the host policy;
   - the recovery scripts;
   - `vm recover`;
-    - each cloud's provider-side host-key fingerprint source;
+  - each cloud's provider-side host-key fingerprint source;
   - whether delete may log out a cloud VM that never enrolled a host key (a create that failed after
     the join) under Unverified trust, since the logout carries no secret;
   - `RawRun`, and how each channel bounds its output and its wait by the deadline.

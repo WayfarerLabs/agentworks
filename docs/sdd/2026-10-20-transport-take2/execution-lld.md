@@ -260,12 +260,15 @@ against a local shell.
   `BufferedReader.read1` aborts the interpreter at exit (`_enter_buffered_busy`, status 134,
   reproduced on Python 3.11; the CLI's floor is 3.12, where the subprocess test covers it). A caller
   with no stdin passes `None` and the pipe closes right after the request. The thread outlives the
-  call blocked in a read; `stream` is the last thing a command does. A stdout consumer that leaves
-  (`| head`, quitting `less`) ends the request as it did when ssh held the operator's stdout: the
-  client closes its read end of ssh's stdout, so ssh gets `EPIPE` and closes the channel and the
-  payload's next write takes `SIGPIPE`. `stream` returns 141, the status of a writer killed by
-  `SIGPIPE`, without waiting for the trailer. A stderr consumer that leaves only stops that stream's
-  delivery.
+  call blocked in a read; `stream` is the last thing a command does. A consumer that leaves
+  (`| head`, quitting `less`, either stream) gets the semantics ssh gave it when ssh held the
+  operator's streams. The client closes its read end of that stream of ssh's, so ssh sees `EPIPE`,
+  and keeps pumping the other stream until the channel ends: a writer that keeps writing takes
+  `SIGPIPE` and the channel closes, while a quiet payload runs to its end. When stdout was abandoned
+  and the stderr trailer still arrives, the result is the guest's own `Completed(N)`; otherwise it
+  is `Unknown(CONSUMER_LEFT)`, which `stream` alone reports as 141, the status of a writer killed by
+  `SIGPIPE`. agw then flushes nothing more to the departed stream, pointing it at the null device so
+  interpreter shutdown cannot fail on it.
 - **Binary stdio.** Callers pass `sys.stdout.buffer` and `sys.stderr.buffer` (the text layer's
   `newline="\n"` at `cli/_entry.py:38` does not apply), after flushing the text layer (I2).
   `stream_to_operator(access, request)` in `access.py` is that wiring, flush, raw stdin and binary
@@ -425,6 +428,8 @@ The classifier combines both filters with ssh's own exit status:
 | Evidence                                                          | Completion                                                                                                      |
 | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `end` on stdout and `exit N` on stderr                            | `Completed(N)`; ssh's own status is ignored                                                                     |
+| stdout abandoned by a departed consumer, `exit N` on stderr       | `Completed(N)`                                                                                                  |
+| A departed consumer and no trailer                                | `Unknown(CONSUMER_LEFT)`; `stream` reports 141                                                                  |
 | `end` on stdout and `refused CODE` on stderr                      | `NotDelivered(REFUSED, CODE)`                                                                                   |
 | No start marker, ssh exit 127                                     | `NotDelivered(PYTHON_MISSING)`                                                                                  |
 | No start marker, ssh exit `STDLIB_MISSING_STATUS`                 | `NotDelivered(STDLIB_MISSING)`                                                                                  |
@@ -568,7 +573,8 @@ the package attribute so one patch reaches every manager.
   - `vm exec` still runs its command line under the account shell without login startup, as before,
     so builtins and shell functions keep working. A missing workspace directory exits 125 with one
     line.
-  - An argument or `NAME=VALUE` environment string over 131,071 bytes is refused up front.
+  - A `NAME=VALUE` environment string over 131,071 bytes is refused up front; `vm exec`'s command
+    line travels in the script source, which has no such limit.
   - `IdentityAgent` set only in `~/.ssh/config` (1Password, Secretive) is ignored by the six
     commands, since no configuration is read; the agent named by `SSH_AUTH_SOCK` serves the key.
   - `vm shell` and `agent shell` without `--workspace` lose the message of the day and last-login
