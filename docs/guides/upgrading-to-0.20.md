@@ -18,8 +18,9 @@ agw vm import-host-keys --all
 
 For each VM, the command asks OpenSSH's own `ssh-keygen -F` which keys `~/.ssh/known_hosts` holds
 for the VM's tailnet address, and copies them into that VM's record. Your `known_hosts` is only
-read. Pass `--known-hosts PATH` to read a different file, for example one copied from another
-workstation.
+read. It runs the `ssh-keygen` installed beside the OpenSSH client Agentworks connects with, so it
+needs the same supported client (OpenSSH 8.5 or newer) that connecting does. Pass
+`--known-hosts PATH` to read a different file, for example one copied from another workstation.
 
 Each VM gets one line in the report:
 

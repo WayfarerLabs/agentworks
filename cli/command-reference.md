@@ -783,9 +783,11 @@ without a record, but on a cloud VM it cannot then log the node out of Tailscale
 into the store. It asks OpenSSH's own `ssh-keygen -F` which keys `~/.ssh/known_hosts` (or the file
 named by `--known-hosts`) holds for each VM's tailnet address, so the answer is exactly what `ssh`
 would have trusted: wildcards, negation, comma lists, hashed entries and bracketed ports all behave
-as OpenSSH defines them. The source file is only read. A VM that already has a record is never
-changed; the report says `already current` or `conflicts with the stored key`. A matching
-`@cert-authority` or `@revoked` line blocks the import for that VM (`trust marker present`).
+as OpenSSH defines them. It runs the `ssh-keygen` beside the OpenSSH client agw connects with, never
+one found on `PATH`, so it needs that supported client. The source file is only read. A VM that
+already has a record is never changed; the report says `already current` or
+`conflicts with the stored key`. A matching `@cert-authority` or `@revoked` line blocks the import
+for that VM (`trust marker present`).
 
 Each VM gets one report line: `imported (N keys)`, `already current`, `no matching entry`,
 `trust marker present`, `conflicts with the stored key`, or `no tailnet address`. The command exits

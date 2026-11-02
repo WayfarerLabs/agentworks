@@ -12,16 +12,16 @@ left alone.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agentworks import output
+from agentworks import execution, output
 from agentworks.errors import ConfigError, ExternalError
 from agentworks.execution import trust
+from agentworks.execution.client import tool_beside_ssh
 from agentworks.execution.trust import HostKey
 from agentworks.path_rendering import format_host_path
 
@@ -72,13 +72,14 @@ def default_known_hosts() -> Path:
 
 
 def locate_ssh_keygen() -> str:
-    found = shutil.which("ssh-keygen")
-    if found is None:
-        raise ExternalError(
-            "ssh-keygen was not found",
-            hint="Install the OpenSSH client so 'ssh-keygen' is on PATH.",
-        )
-    return found
+    """The ``ssh-keygen`` beside the resolved OpenSSH client, never one on ``PATH``.
+
+    Import therefore needs a supported client (8.5 or newer), which costs
+    nothing: a record is only useful to a client that can connect. Raises
+    ``ClientUnsupported`` without one, or when no ``ssh-keygen`` sits
+    beside it.
+    """
+    return str(tool_beside_ssh(execution.resolve_ssh(), "ssh-keygen"))
 
 
 @dataclass(frozen=True)
