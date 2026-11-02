@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -252,6 +253,7 @@ def _operations(access: VMAccess) -> dict[str, Any]:
 def connection_fails(supported_client: SSHClient, monkeypatch: pytest.MonkeyPatch) -> Callable[[object], None]:
     """Make every operation fail as the given completion, the way the real layers do."""
     seed_vm_trust("box")
+    monkeypatch.setattr(client, "identity_is_loaded", lambda ssh, identity_file: False)
 
     def fail_with(completion: object) -> None:
         monkeypatch.setattr(VMAccess, "_execute", lambda self, *a, **k: result(completion))
@@ -317,3 +319,89 @@ def test_the_key_is_read_only_after_a_failure(
     access.stream(Command(("true",)), stdin=None, stdout=None, stderr=None)  # type: ignore[arg-type]
 
     assert reads == []
+
+
+# -- Asking the SSH agent -------------------------------------------------------------------
+
+
+@pytest.fixture
+def fake_ssh_add(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Put a tiny ``ssh-add`` that records its arguments and exits with a chosen status."""
+    if sys.platform == "win32":
+        pytest.skip("the fake ssh-add is a POSIX script")
+
+    def install(directory: Path, status: int) -> Path:
+        directory.mkdir(exist_ok=True)
+        tool = directory / "ssh-add"
+        calls = directory / "ssh-add-calls"
+        tool.write_text(f'#!/bin/sh\necho "$@" >> {calls}\nexit {status}\n')
+        tool.chmod(0o755)
+        return calls
+
+    return install
+
+
+def agent_key(tmp_path: Path, *, with_public: bool = True) -> Path:
+    key = tmp_path / "id-aes256-ctr"
+    write_test_ssh_keypair(key, cipher=b"aes256-ctr")
+    if not with_public:
+        key.with_name(f"{key.name}.pub").unlink()
+    return key
+
+
+@pytest.mark.parametrize(("status", "loaded"), [(0, True), (1, False), (2, False)])
+def test_the_agent_holds_the_key_when_ssh_add_beside_the_client_succeeds(
+    fake_ssh_add, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: int, loaded: bool
+) -> None:
+    calls = fake_ssh_add(tmp_path / "bin", status)
+    monkeypatch.setenv("PATH", str(tmp_path / "elsewhere"))
+    key = agent_key(tmp_path)
+
+    assert client.identity_is_loaded(SSHClient(str(tmp_path / "bin" / "ssh"), (9, 2)), key) is loaded
+    assert calls.read_text().split() == ["-T", f"{key}.pub"]
+
+
+def test_ssh_add_is_found_on_path_when_none_sits_beside_the_client(
+    fake_ssh_add, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake_ssh_add(tmp_path / "onpath", 0)
+    monkeypatch.setenv("PATH", str(tmp_path / "onpath"))
+
+    assert client.identity_is_loaded(SSHClient(str(tmp_path / "nowhere" / "ssh"), (9, 2)), agent_key(tmp_path))
+
+
+def test_the_agent_is_not_asked_without_a_public_key_or_an_ssh_add(
+    fake_ssh_add, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = fake_ssh_add(tmp_path / "bin", 0)
+    ssh = SSHClient(str(tmp_path / "bin" / "ssh"), (9, 2))
+
+    assert client.identity_is_loaded(ssh, agent_key(tmp_path, with_public=False)) is False
+    assert not calls.exists()
+
+    (tmp_path / "bin" / "ssh-add").unlink()
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    assert client.identity_is_loaded(ssh, agent_key(tmp_path)) is False
+
+
+def test_a_key_the_agent_holds_gets_no_hint_and_one_it_lacks_does(
+    fake_ssh_add, supported_client: SSHClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(client, "resolve_ssh", lambda: SSHClient(str(tmp_path / "bin" / "ssh"), (9, 2)))
+    key = agent_key(tmp_path)
+    access = vm_access(vm(), config(key), Admin())
+
+    fake_ssh_add(tmp_path / "bin", 0)
+    assert access.passphrase_hint() is None
+    fake_ssh_add(tmp_path / "bin", 1)
+    assert access.passphrase_hint() is not None
+
+
+def test_an_unencrypted_key_never_asks_the_agent(fake_ssh_add, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls = fake_ssh_add(tmp_path / "bin", 1)
+    monkeypatch.setattr(client, "resolve_ssh", lambda: SSHClient(str(tmp_path / "bin" / "ssh"), (9, 2)))
+    key = tmp_path / "id-none"
+    write_test_ssh_keypair(key)
+
+    assert vm_access(vm(), config(key), Admin()).passphrase_hint() is None
+    assert not calls.exists()

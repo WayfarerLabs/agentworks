@@ -12,6 +12,7 @@ from __future__ import annotations
 import functools
 import os
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -109,6 +110,33 @@ def resolve(*, windows: bool, environ: Mapping[str, str]) -> SSHClient:
         refusals.append(f"  {path}: {verdict}")
     tried = "\n".join(refusals) if refusals else "  no OpenSSH client was found"
     raise ClientUnsupported(f"no supported OpenSSH client:\n{tried}\n{_INSTALL_GUIDANCE[windows]}")
+
+
+def identity_is_loaded(ssh: SSHClient, identity_file: Path) -> bool:
+    """Whether the SSH agent can sign with ``identity_file``, by ``ssh-add -T`` on its public key.
+
+    ``-T`` exits 0 when the agent holds the key and 1 when it does not, without
+    contacting the VM. ``ssh-add`` comes from beside the resolved client, else
+    from ``PATH``. ``False`` when it cannot be asked (no ``.pub`` file, no
+    ``ssh-add``, it did not run): the caller then keeps its conditional hint.
+    """
+    public_key = Path(f"{identity_file}.pub")
+    suffix = ".exe" if sys.platform == "win32" else ""
+    beside = Path(ssh.path).with_name(f"ssh-add{suffix}")
+    ssh_add = str(beside) if beside.is_file() else shutil.which("ssh-add")
+    if ssh_add is None or not public_key.is_file():
+        return False
+    try:
+        probe = subprocess.run(
+            [ssh_add, "-T", str(public_key)],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=_VERSION_PROBE_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return probe.returncode == 0
 
 
 @functools.cache

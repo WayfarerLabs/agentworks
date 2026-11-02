@@ -160,13 +160,17 @@ class VMAccess:
             return forwarding.run_forward(argv, vm_name=self.vm_name, log=log)
 
     def passphrase_hint(self) -> str | None:
-        """How to load the operator's key into the SSH agent, or ``None`` unless it is passphrase-protected.
+        """How to load the operator's key into the SSH agent, or ``None`` unless that is the likely fix.
 
         ssh runs in batch mode, so an encrypted key that is not loaded in the
-        agent fails as a plain connection failure. This reads the key file, so
-        callers ask only after such a failure.
+        agent fails as a plain connection failure. There is no hint for a key
+        the agent already holds. This reads the key file and may run
+        ``ssh-add``, so callers ask only after a connection failure.
         """
-        return ssh_identity.passphrase_hint(self._identity_file)
+        hint = ssh_identity.passphrase_hint(self._identity_file)
+        if hint is None or client.identity_is_loaded(client.resolve_ssh(), self._identity_file):
+            return None
+        return hint
 
     # -- Internals -------------------------------------------------------------
 

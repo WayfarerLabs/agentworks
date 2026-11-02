@@ -358,13 +358,26 @@ def test_the_envelope_cipher_decides_whether_a_key_is_passphrase_protected(
 
 
 @pytest.mark.parametrize(
+    ("contents", "protected"),
+    [
+        (b"-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,00\n\nAA==\n", True),
+        (b"-----BEGIN RSA PRIVATE KEY-----\nAA==\n-----END RSA PRIVATE KEY-----\n", False),
+        (b"-----BEGIN ENCRYPTED PRIVATE KEY-----\nAA==\n-----END ENCRYPTED PRIVATE KEY-----\n", True),
+        (b"-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----\n", False),
+    ],
+    ids=["encrypted-pem", "plain-pem", "encrypted-pkcs8", "plain-pkcs8"],
+)
+def test_legacy_pem_and_pkcs8_keys_report_their_encryption(tmp_path: Path, contents: bytes, protected: bool) -> None:
+    assert identity_is_passphrase_protected(_write(tmp_path / "id", contents)) is protected
+
+
+@pytest.mark.parametrize(
     "contents",
     [
-        b"-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n-----END RSA PRIVATE KEY-----\n",
         _OPENSSH_BEGIN + b"\n!!!not base64!!!\n" + _OPENSSH_END + b"\n",
         _OPENSSH_BEGIN + b"\n" + base64.b64encode(_OPENSSH_MAGIC + b"\x00\x00") + b"\n" + _OPENSSH_END + b"\n",
     ],
-    ids=["legacy-rsa", "bad-base64", "truncated-envelope"],
+    ids=["bad-base64", "truncated-envelope"],
 )
 def test_an_unparsable_identity_is_not_passphrase_protected(tmp_path: Path, contents: bytes) -> None:
     assert identity_is_passphrase_protected(_write(tmp_path / "id", contents)) is False
@@ -381,3 +394,13 @@ def test_the_hint_exists_only_for_a_passphrase_protected_key(tmp_path: Path) -> 
     assert passphrase_hint(protected) is not None
     assert passphrase_hint(plain) is None
     assert passphrase_hint(tmp_path / "absent") is None
+
+
+def test_a_path_with_whitespace_is_given_to_the_command_as_a_quoted_absolute_path(tmp_path: Path) -> None:
+    spaced = tmp_path / "my keys"
+    spaced.mkdir()
+    key = _write(spaced / "id", _native_armor(_native_envelope(cipher=b"aes256-ctr")))
+    plain = _write(tmp_path / "id", _native_armor(_native_envelope(cipher=b"aes256-ctr")))
+
+    assert (passphrase_hint(key) or "").endswith(f'"{key.absolute()}"')
+    assert not (passphrase_hint(plain) or "").endswith('"')
