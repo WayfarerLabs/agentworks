@@ -61,6 +61,7 @@ def include_native_setup(
             "complete": record.complete,
             "pending_cleanup": record.pending_cleanup,
             "claim_count": len(record.claims),
+            "artifact_file_count": len(record.artifact_files),
         }
         for record in native.records
     ]

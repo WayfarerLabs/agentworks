@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from agentworks.artifacts.application import OwnedArtifactFile
 from agentworks.db import AppliedStateKey, VersionedPayload
 from agentworks.doctor import Status
 from agentworks.doctor_state import check_database
@@ -40,6 +41,9 @@ def test_native_applied_state_is_inspected_without_io_or_payload_values(db, make
                         complete=mode == "complete",
                         pending_cleanup=mode == "pending",
                         claims=(NativeClaim(role="settings", identifier="settings", destination="/private/path"),),
+                        artifact_files=(
+                            OwnedArtifactFile(path="/private/artifact-file", sha256="b" * 64, origins=("c" * 64,)),
+                        ),
                     ),
                 )
             ),
@@ -65,7 +69,14 @@ def test_native_applied_state_is_inspected_without_io_or_payload_values(db, make
     fact = next(item for item in state.lifecycle_evidence if item.key == AppliedStateKey.HARNESS_NATIVE_SETUP.value)
     data = json.dumps(instance_state_data(state))
     assert "config-value-sentinel" not in data and "/private/path" not in data
+    assert "/private/artifact-file" not in data
     assert fact.status == ("recorded" if mode in ("complete", "pending") else "unavailable")
+    if mode in ("complete", "pending"):
+        assert fact.value is not None
+        summaries = fact.value["integrations"]
+        assert isinstance(summaries, list) and isinstance(summaries[0], dict)
+        assert summaries[0]["claim_count"] == 1
+        assert summaries[0]["artifact_file_count"] == 1
     if mode == "future":
         assert state.unconsumed_records
     group = check_database(config)
