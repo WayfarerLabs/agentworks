@@ -283,9 +283,13 @@ takes a `run_as_root`:
 - `join_tailscale(run_as_root, auth_key)` runs it once with a 30-second deadline, as today
   (`tailscale_join.py:84`). A non-zero status raises `ProvisioningError`; an unknown one raises
   naming the node for the admin console, since it may have joined. Neither retries (I24).
-- `settle_tailnet_address(run_as_root, *, node) -> str` keeps slice 3's behavior: up to six
-  `tailscale ip -4` reads two seconds apart, each parsed by `parse_tailnet_address`, then one
-  `tailscale logout` and an error when they run out.
+- `settle_tailnet_address(run_as_root, *, node, rerun_hint) -> str` keeps slice 3's behavior: up to
+  six `tailscale ip -4` reads two seconds apart, each parsed by `parse_tailnet_address`, then one
+  `tailscale logout` and a `ProvisioningError` when they run out. `rerun_hint` is the caller's next
+  step after a successful logout, where slice 3's message says create can be run again: create
+  passes that, and recover and rekey pass `agw vm recover NAME`. They inherit the logout on purpose,
+  because a node whose address cannot be read is unusable, and the next recover's repair reads
+  `NeedsLogin` and rejoins it.
 - `EphemeralTailscaleBootstrap(run_as_root, ...)` keeps its readiness wait (`:87-104`), then joins
   and settles. `TAILSCALE_JOIN_STDIN_COMMAND` is deleted.
 
@@ -449,12 +453,12 @@ with the hint `Run 'agw vm recover x'.`; the wait's own raises (`TrustMismatch`,
 fails after starting it; the VM is left running, so the same command run again goes straight to the
 native shell. This is accepted rather than given a second gate.
 
-**What the ruling costs ephemeral-key VMs.** `README.md:238-240` and ADR 0003 (`:36-37`) promise
-that ephemeral keys are supported with an automatic rejoin on start. Without it, a VM whose
+**Ephemeral-key VMs** (operator ruling: document it). `README.md:238-240` and ADR 0003 (`:36-37`)
+promise that ephemeral keys are supported with an automatic rejoin on start. Without it, a VM whose
 ephemeral node was removed while it was offline fails `vm start` with the recover hint, after the
 full wait of about four minutes. `agw vm recover` then rejoins it in one step: its repair script
 sees `NeedsLogin` and joins at once, with no wait before the join. Nothing new detects the case; the
-start failure is the signal. Collateral lists the README and ADR 0003 updates.
+start failure is the signal. The README and ADR 0003 are updated to say so (Collateral).
 
 ### `agw vm recover <name>`
 
@@ -478,8 +482,8 @@ start failure is the signal. Collateral lists the README and ADR 0003 updates.
    cloud's serial console or system log), `output.confirm` defaulting to no, then
    `trust.write_records` and `sync_ssh_config`. A refusal writes nothing and stops.
 6. **Repair**, one script with the auth key and the log. A failed or unknown outcome stops recover.
-7. **Address**: `settle_tailnet_address`, the six-read settle create uses; record the address when
-   it changed and `sync_ssh_config`.
+7. **Address**: `settle_tailnet_address`, the six-read settle create uses, with recover as its rerun
+   hint; record the address when it changed and `sync_ssh_config`.
 8. **One wait**: `reachability.wait` with `RECONNECT` wording when the repair printed `joined`, else
    `VERIFY`. `False` raises `ConnectivityError`: the VM was repaired but does not answer over SSH at
    ADDRESS; the hint is to check tailnet sharing and ACLs, then recreate the VM (R7).
@@ -497,6 +501,8 @@ the rekey script under the existing gate, then `settle_tailnet_address`, which r
 and the `rekey` event written (`:532-534`), then `wait_for_share` and `reachability.wait` on the
 updated row with `RECONNECT`, replacing the in-place repointing of a legacy transport (`:544-550`).
 
+- When the settle's reads run out, the node is logged out and the error names `agw vm recover NAME`,
+  which rejoins it.
 - A failed or unknown script raises naming the script, its status and the log, with the hint
   `agw vm recover NAME`.
 - A final wait that returns `False` keeps today's outcome, a warning and exit 0 (`:552-556`), since
@@ -715,10 +721,12 @@ The wording of #251 is I15's, re-proved for start; #350's order changes as state
 
 ## Collateral
 
-- **ADRs** (status blocks): ADR 0003's ephemeral-key bullet promises "automatic rejoin on start"
-  (`docs/adrs/0003-use-tailscale-for-vm-networking.md:36-37`) and its firewall bullet names
-  native-transport sessions (`:34-35`), and ADR 0019 keeps the rejoin key's conditional late
-  acquisition (`:102-106`); both get an "Amended" paragraph.
+- **ADRs** (status blocks): ADR 0003's firewall bullet names native-transport sessions
+  (`docs/adrs/0003-use-tailscale-for-vm-networking.md:34-35`), and its ephemeral-key bullet's
+  "automatic rejoin on start" (`:36-37`) becomes: ephemeral keys stay supported; a VM whose node was
+  removed while offline fails `vm start` with the recover hint, and `agw vm recover` rejoins it. ADR
+  0019 keeps the rejoin key's conditional late acquisition (`:102-106`). Both get an "Amended"
+  paragraph.
 - **Platform author documentation:** `capabilities/vm_platform/README.md` and `plugins/README.md`
   state the `run_as_root` contract once, with the other members; the kind's prose (`kinds.py:53-77`)
   and the `TopicProse` that describes a native transport (`lima.py:173-189`,
@@ -728,9 +736,10 @@ The wording of #251 is I15's, re-proved for start; #350's order changes as state
   `--workspace` combination or the native transport wording; the reinit paragraph that sends a lost
   key to `vm shell --platform` (`:700`) and the exec paragraph that names reinit for python3
   (`:743`), both now `agw vm recover`.
-- **READMEs:** `README.md:229-241` (provisioning's native transport; "re-joins on `vm start`" and
-  the ephemeral-key promise); `cli/README.md:581` (restore a lost key with `vm recover`);
-  `cli/agentworks/execution/README.md` (`root_script`, the host argv, `FeatureUnavailable`).
+- **READMEs:** `README.md:229-241` (provisioning's native transport; "re-joins on `vm start`" goes,
+  and the ephemeral-key sentence says what ADR 0003's amendment says); `cli/README.md:581` (restore
+  a lost key with `vm recover`); `cli/agentworks/execution/README.md` (`root_script`, the host argv,
+  `FeatureUnavailable`).
 - **Sample config:** `cli/agentworks/sample-config.toml:170-172` loses the lazy Tailscale repair
   sentence.
 - **Completions** (`completions/spec.py:225-231`): `("vm.recover", "name"): "vms"`.
@@ -746,14 +755,6 @@ The wording of #251 is I15's, re-proved for start; #350's order changes as state
 - **The commit** carries `BREAKING CHANGE:` footers (`CONTRIBUTING.md:69`) for the platform
   contract, `vm start` no longer rejoining (ephemeral keys included), and the
   `--platform --workspace` refusal.
-
-## Open questions
-
-1. **The ephemeral-key cost** (under `vm start`). The lead is raising it with the operator.
-2. **Settle's logout inside recover and rekey.** `settle_tailnet_address` logs the node out when its
-   six reads fail, which protects a fresh create from an orphaned node. Recover and rekey inherit
-   it, so a VM whose address cannot be read ends logged out. Recommendation: keep it, since such a
-   node is unusable and the next `agw vm recover` sees `NeedsLogin` and joins; the error says so.
 
 ## Amendments
 
@@ -798,11 +799,13 @@ For the lead to apply. Each points at the section above that holds the detail.
   `TAILSCALE_JOIN_STDIN_COMMAND` and the staging files, and drop `native_shell_unavailable_hint`
   from them; add the Collateral items and Live evidence cells the plan does not list.
 - **Plan slice 8.** `agentworks.plugins.proxmox.transport` is gone already.
-- **contract-lld.md** (same PR). `settle_tailnet_address(run_as_root, *, node)` replaces the
-  callback form and `settle_on_transport`, and the root runners land first, so neither is written;
-  the per-platform "Join / Settled with" table, the "WSL2 and Proxmox transports with `sudo=True`"
-  paragraph and "the auth-key transport of the first join ... is not touched" (Scope) go; bootstrap
-  step 7 is deleted rather than shortened.
+- **contract-lld.md** (same PR). `settle_tailnet_address(run_as_root, *, node, rerun_hint)` replaces
+  the callback form and `settle_on_transport`, and the root runners land first, so neither is
+  written; the per-platform "Join / Settled with" table, the "WSL2 and Proxmox transports with
+  `sudo=True`" paragraph and "the auth-key transport of the first join ... is not touched" (Scope)
+  go; bootstrap step 7 is deleted rather than shortened. After a successful exhaustion logout, the
+  message gives the caller's `rerun_hint` where it says create can be run again (recover and rekey
+  also settle).
 - **trust-lld.md.** Lines 171-172: a create that fails before enrolling stays delete and recreate
   from PR B too. Delete's warning for a cloud VM with no record names the node and opens no route.
 - **execution-lld.md.** The host argv and `FeatureUnavailable` land here; `PipeSession` accepts
