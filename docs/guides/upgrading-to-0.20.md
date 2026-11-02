@@ -147,10 +147,10 @@ path and needs none of what follows. Everything else keeps its current path for 
 - **`vm exec` takes its `PATH` from the fixed one.** `vm exec VM prog arg...` and
   `vm exec VM 'one argument'` are, as before, shell command lines run by the admin's default shell
   without login startup, so builtins, shell functions and a leading `NAME=value` work; only a word
-  starting with `=` is quoted, so zsh no longer expands it to a path. What changes is where `PATH`
-  comes from: sshd's `PATH` plus `pam_env` before, the fixed `PATH` above now, so additions made
-  only in profile files are not applied; use `vm exec VM bash -lc '...'` to get them. `agent exec`
-  still runs in the agent's login shell.
+  starting with `=` is quoted (in `agent exec` too), so zsh no longer expands it to a path. What
+  changes is where `PATH` comes from: sshd's `PATH` plus `pam_env` before, the fixed `PATH` above
+  now, so additions made only in profile files are not applied; use `vm exec VM bash -lc '...'` to
+  get them. `agent exec` still runs in the agent's login shell.
 - **Large environment values are refused up front.** One `NAME=VALUE` environment string over
   131,071 bytes is refused before anything runs, because Linux cannot execute it.
 - **`vm shell` and `agent shell` without `--workspace` no longer print the message of the day or the
