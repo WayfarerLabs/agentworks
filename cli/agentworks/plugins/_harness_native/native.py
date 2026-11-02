@@ -24,7 +24,7 @@ from agentworks.capabilities.harness_integration.settings import (
 from agentworks.errors import ConfigError, StateError
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.native_files import NativeFiles, native_path
-from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeMarket, NativePlugin, NativeTool
+from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeMarket, NativePlugin, NativeTool, identity
 
 if TYPE_CHECKING:
     from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
@@ -64,10 +64,12 @@ def _market_fields(market: NativeMarket) -> SettingsObject:
     return parse_settings(market.source.encode(), format="json")
 
 
-def _market_location(tool: NativeTool, market: NativeMarket) -> SettingsValue:
+def _simple_market_location(tool: NativeTool, market: NativeMarket) -> SettingsValue:
+    # Optional refs and sparse paths need isolated native discovery to establish
+    # the full requested identity; a location alone cannot establish a match.
     fields = _market_fields(market)
     if tool == "codex":
-        return fields.get("source")
+        return fields.get("source") if set(fields) == {"source_type", "source"} else None
     source = fields.get("source")
     if not isinstance(source, dict):
         return None
@@ -75,7 +77,7 @@ def _market_location(tool: NativeTool, market: NativeMarket) -> SettingsValue:
     if not isinstance(kind, str):
         return None
     location_key = {"directory": "path", "github": "repo", "git": "url", "url": "url"}.get(kind)
-    return source.get(location_key) if location_key else None
+    return source.get(location_key) if location_key and set(source) == {"source", location_key} else None
 
 
 def _overlay_fields(existing: SettingsValue, desired: SettingsValue) -> SettingsValue:
@@ -161,7 +163,17 @@ def setup_workspace(
 
 
 def _owned(claim: NativeClaim | None, source: str | None) -> bool:
-    return claim is not None and source is not None and claim.source == source
+    if claim is None or claim.source is None or source is None:
+        return False
+    if claim.role != "plugin":
+        return claim.source == source
+    # Older claims included the mutable native version. Association ownership
+    # survives native updates while retaining the full parent marketplace identity.
+    recorded = parse_settings(claim.source.encode(), format="json")
+    observed = parse_settings(source.encode(), format="json")
+    recorded.pop("version", None)
+    observed.pop("version", None)
+    return identity(recorded) == identity(observed)
 
 
 def _plugin_market(plugin: NativePlugin) -> str | None:
@@ -261,7 +273,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 (
                     market
                     for market in markets
-                    if market.source is not None and source == _market_location(tool, market)
+                    if market.source is not None and source == _simple_market_location(tool, market)
                 ),
                 None,
             )
@@ -313,7 +325,10 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
 
         def skip(role: str, identifier: str, reason: str) -> None:
             protected.add(_native_key(tool, role, identifier))
-            invocation.report_incomplete(f"Retained {role} '{identifier}': {reason}.")
+            invocation.report_incomplete(
+                f"Retained {role} '{identifier}': {reason}. "
+                "Resolve the conflicting native association before reinitializing its owning setup."
+            )
             if role == "marketplace":
                 blocked_markets.add(identifier)
                 protected.update(
@@ -335,6 +350,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 if any(item.identifier == claim.identifier and item.scope == "user" for item in observed):
                     raise StateError("native plugin removal could not be confirmed")
                 by_plugin.pop(claim.identifier, None)
+                output.info(f"Removed native plugin '{claim.identifier}' via {tool}.")
             else:
                 key, name = _native_key(tool, "plugin", claim.identifier)
                 if name in _table(initial_document, key):
@@ -366,6 +382,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 if any(item.name == claim.identifier for item in cli.markets()):
                     raise StateError("native marketplace removal could not be confirmed")
                 by_market.pop(claim.identifier, None)
+                output.info(f"Removed native marketplace '{claim.identifier}' via {tool}.")
             checkpoint(None, "marketplace", claim.identifier)
             removed.append(claim)
 
@@ -391,6 +408,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                     cli.remove_market(market.name)
                     if any(item.name == market.name for item in cli.markets()):
                         raise StateError("native marketplace removal could not be confirmed")
+                    output.info(f"Removed native marketplace '{market.name}' via {tool}.")
                     checkpoint(None, "marketplace", market.name)
                     by_market.pop(market.name, None)
                     existing_market = None
@@ -403,6 +421,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 if observed_market is None or observed_market.source != market.source:
                     raise StateError("native marketplace registration identity could not be confirmed")
                 by_market[market.name] = observed_market
+                output.info(f"Registered native marketplace '{market.name}' via {tool}.")
             elif market.source is None:
                 skip("marketplace", market.name, "its source cannot be observed")
                 continue
@@ -452,16 +471,16 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                     or _plugin_market(existing_plugin) != parent_market.source
                 ):
                     raise StateError("native user plugin installation could not be confirmed")
+                output.info(f"Installed native plugin '{selector}' via {tool}.")
             elif existing_plugin.source is None:
                 skip("plugin", selector, "its installation source cannot be observed")
                 continue
             adopted = NativeClaim(role="plugin", identifier=selector, destination=root, source=existing_plugin.source)
-            if prior.get(("plugin", selector)) != adopted and selector in by_plugin:
+            if not _owned(previous_plugin_claim, existing_plugin.source) and selector in by_plugin:
                 output.info(f"Adopting matching native plugin '{selector}' via {tool}.")
             checkpoint(adopted, "plugin", selector, force=changed)
         if plan is not None:
             current = files.read(destination)
-            current_document = {} if current is None else parse_settings(current, format=_format(tool))
             overlays: tuple[tuple[tuple[str, str], SettingsValue], ...] = tuple(
                 (_native_key(tool, "marketplace", market.name), _market_fields(market))
                 for market in desired
@@ -471,9 +490,6 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 for selector in selectors
                 if selector not in blocked_plugins
             )
-            for (key, name), _value in overlays:
-                if name not in _table(current_document, key):
-                    raise StateError("native plugin settings association could not be confirmed")
             plan.publish(
                 files,
                 destination,

@@ -1,6 +1,6 @@
 """Native plugin observations and commands, with no raw output in logs.
 
-Payloads and scope behavior were measured with Codex 0.153.4 and Claude 2.1.263.
+Payloads and scope behavior were measured with Codex 0.166.0 and Claude 2.1.316.
 Provider additions are tolerated; the identity fields used below must remain
 well formed. Source references are declared non-secret configuration.
 """
@@ -223,9 +223,15 @@ class NativeCLI:
                     if any(key in declaration and declaration[key] != value for key, value in native_source.items()):
                         raise ValueError
                 else:
-                    native_source = {"source": declaration.get("source", source)}
-                    if native_source["source"] != source:
+                    declared_source = _object(declaration.get("source", source))
+                    # Claude's list output omits sparse paths. Its native user
+                    # declaration still contributes them to the full identity.
+                    for key in ("ref", "sparsePaths"):
+                        if key in declared_source and key not in source:
+                            source[key] = declared_source[key]
+                    if declared_source != source:
                         raise ValueError
+                    native_source = {"source": source}
                 result.append(NativeMarket(name, identity(native_source)))
             if len({market.name for market in result}) != len(result):
                 raise ValueError
@@ -248,7 +254,7 @@ class NativeCLI:
                     raise ValueError
                 market = by_name.get(market_name)
                 source = (
-                    identity({"marketplace": market.source, "version": _text(entry["version"])})
+                    identity({"marketplace": market.source})
                     if market is not None and market.source is not None
                     else None
                 )

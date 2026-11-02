@@ -169,19 +169,27 @@ def test_settings_only_replace_repairs_invalid_document_and_retirement_retains_i
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
 def test_actual_native_lifecycle_and_checkpointed_idempotency(
-    transport: LocalFixtureTransport, tool: NativeTool
+    transport: LocalFixtureTransport, tool: NativeTool, monkeypatch
 ) -> None:
     market = market_fixture(transport, tool)
+    reports: list[str] = []
+    monkeypatch.setattr("agentworks.plugins._harness_native.native.output.info", reports.append)
     claims: list[tuple[NativeClaim, ...]] = []
     config = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"])
     setup_user(tool, config, invocation(transport, claims))
     assert [claim.role for claim in claims[-1]] == ["marketplace", "plugin"]
+    assert len(reports) == 2
+    assert "fixture-market" in reports[0] and "one@fixture-market" in reports[1]
+    assert all(tool in report and str(market) not in report for report in reports)
     current = claims[-1]
     checkpoint_count = len(claims)
     setup_user(tool, config, invocation(transport, claims, prior=record(current, tool)))
     assert len(claims) == checkpoint_count
+    assert len(reports) == 2
     setup_user(tool, None, invocation(transport, claims, prior=record(current, tool)))
     assert claims[-1] == ()
+    assert len(reports) == 4
+    assert "one@fixture-market" in reports[2] and "fixture-market" in reports[3]
     assert not list((transport.root / "tmp").iterdir())
 
 
