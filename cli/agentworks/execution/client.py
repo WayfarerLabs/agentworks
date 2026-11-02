@@ -121,8 +121,9 @@ def identity_is_loaded(ssh: SSHClient, identity_file: Path) -> bool:
     not loaded. The key counts as loaded when a listed line's type and base64
     blob equal the ``.pub`` file's. Only the ``ssh-add`` beside the resolved
     client runs: ``PATH`` can name a relative or current-directory program.
-    ``False`` when it cannot be asked (no ``.pub`` file, no ``ssh-add``, it did
-    not run): the caller then keeps its conditional hint.
+    ``False`` when it cannot be asked (no ``.pub`` file or one without a type
+    and blob, no ``ssh-add``, it did not run): the caller then keeps its
+    conditional hint.
     """
     public_key = Path(f"{identity_file}.pub")
     ssh_add = Path(ssh.path).with_name("ssh-add.exe" if sys.platform == "win32" else "ssh-add")
@@ -130,6 +131,11 @@ def identity_is_loaded(ssh: SSHClient, identity_file: Path) -> bool:
         return False
     try:
         wanted = public_key.read_text(encoding="utf-8", errors="replace").split()[:2]
+    except OSError:
+        return False
+    if len(wanted) != 2:
+        return False
+    try:
         probe = subprocess.run(
             [str(ssh_add), "-L"],
             stdin=subprocess.DEVNULL,
@@ -139,7 +145,7 @@ def identity_is_loaded(ssh: SSHClient, identity_file: Path) -> bool:
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
-    if probe.returncode != 0 or len(wanted) != 2:
+    if probe.returncode != 0:
         return False
     listed = probe.stdout.decode("utf-8", errors="replace").splitlines()
     return any(line.split()[:2] == wanted for line in listed)

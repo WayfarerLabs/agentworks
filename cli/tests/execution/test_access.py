@@ -427,6 +427,19 @@ def test_the_agent_is_not_asked_without_a_public_key_or_an_ssh_add(
     assert client.identity_is_loaded(ssh, agent_key(tmp_path)) is False
 
 
+def test_an_empty_public_key_gets_the_hint_without_asking_the_agent(
+    fake_ssh_add, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(client, "resolve_ssh", lambda: SSHClient(str(tmp_path / "bin" / "ssh"), (9, 2)))
+    key = agent_key(tmp_path)
+    key.with_name(f"{key.name}.pub").write_text("")
+    # A blank listed line splits to the same nothing an empty .pub does.
+    calls = fake_ssh_add(tmp_path / "bin", 0, "\n" + listing_with_the_key())
+
+    assert vm_access(vm(), config(key), Admin()).passphrase_hint() is not None
+    assert not calls.exists()
+
+
 def test_a_key_the_agent_holds_gets_no_hint_and_one_it_lacks_does(
     fake_ssh_add, supported_client: SSHClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
