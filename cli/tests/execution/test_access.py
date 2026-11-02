@@ -370,16 +370,27 @@ def test_the_agent_holds_the_key_when_ssh_add_beside_the_client_succeeds(
     key = agent_key(tmp_path)
 
     assert client.identity_is_loaded(SSHClient(str(tmp_path / "bin" / "ssh"), (9, 2)), key) is loaded
-    assert calls.read_text().split() == ["-T", f"{key}.pub"]
+    assert calls.read_text().split() == ["-T", "--", f"{key}.pub"]
 
 
-def test_ssh_add_is_found_on_path_when_none_sits_beside_the_client(
-    fake_ssh_add, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    fake_ssh_add(tmp_path / "onpath", 0)
+def test_an_ssh_add_on_path_is_never_run(fake_ssh_add, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # PATH can name a relative or current-directory program; only the ssh-add beside the client runs.
+    calls = fake_ssh_add(tmp_path / "onpath", 0)
     monkeypatch.setenv("PATH", str(tmp_path / "onpath"))
 
-    assert client.identity_is_loaded(SSHClient(str(tmp_path / "nowhere" / "ssh"), (9, 2)), agent_key(tmp_path))
+    assert client.identity_is_loaded(SSHClient(str(tmp_path / "nowhere" / "ssh"), (9, 2)), agent_key(tmp_path)) is False
+    assert not calls.exists()
+
+
+def test_a_security_key_is_not_asked_because_the_probe_would_sign(
+    fake_ssh_add, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = fake_ssh_add(tmp_path / "bin", 0)
+    key = agent_key(tmp_path)
+    Path(f"{key}.pub").write_text("sk-ssh-ed25519@openssh.com AAAA test\n")
+
+    assert client.identity_is_loaded(SSHClient(str(tmp_path / "bin" / "ssh"), (9, 2)), key) is False
+    assert not calls.exists()
 
 
 def test_the_agent_is_not_asked_without_a_public_key_or_an_ssh_add(
@@ -392,7 +403,6 @@ def test_the_agent_is_not_asked_without_a_public_key_or_an_ssh_add(
     assert not calls.exists()
 
     (tmp_path / "bin" / "ssh-add").unlink()
-    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
     assert client.identity_is_loaded(ssh, agent_key(tmp_path)) is False
 
 

@@ -12,7 +12,6 @@ from __future__ import annotations
 import functools
 import os
 import re
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -29,6 +28,7 @@ MINIMUM_VERSION = (8, 5)
 
 _BANNER = re.compile(rb"\AOpenSSH_(for_Windows_)?(\d+)\.(\d+)(?:p\d+)?(?:[,\s]|$)")
 _VERSION_PROBE_SECONDS = 10
+_SSH_ADD_PROBE_SECONDS = 3
 
 _INSTALL_GUIDANCE = {
     True: (
@@ -116,22 +116,24 @@ def identity_is_loaded(ssh: SSHClient, identity_file: Path) -> bool:
     """Whether the SSH agent can sign with ``identity_file``, by ``ssh-add -T`` on its public key.
 
     ``-T`` exits 0 when the agent holds the key and 1 when it does not, without
-    contacting the VM. ``ssh-add`` comes from beside the resolved client, else
-    from ``PATH``. ``False`` when it cannot be asked (no ``.pub`` file, no
-    ``ssh-add``, it did not run): the caller then keeps its conditional hint.
+    contacting the VM. Only the ``ssh-add`` beside the resolved client runs:
+    ``PATH`` can name a relative or current-directory program. A security key
+    (``sk-*``) is never probed, since ``-T`` signs and would ask for a touch.
+    ``False`` when it cannot be asked (no ``.pub`` file, no ``ssh-add``, it did
+    not run): the caller then keeps its conditional hint.
     """
     public_key = Path(f"{identity_file}.pub")
-    suffix = ".exe" if sys.platform == "win32" else ""
-    beside = Path(ssh.path).with_name(f"ssh-add{suffix}")
-    ssh_add = str(beside) if beside.is_file() else shutil.which("ssh-add")
-    if ssh_add is None or not public_key.is_file():
+    ssh_add = Path(ssh.path).with_name("ssh-add.exe" if sys.platform == "win32" else "ssh-add")
+    if not (ssh_add.is_file() and os.access(ssh_add, os.X_OK) and public_key.is_file()):
         return False
     try:
+        if public_key.read_text(encoding="utf-8", errors="replace").lstrip().startswith("sk-"):
+            return False
         probe = subprocess.run(
-            [ssh_add, "-T", str(public_key)],
+            [str(ssh_add), "-T", "--", str(public_key)],
             stdin=subprocess.DEVNULL,
             capture_output=True,
-            timeout=_VERSION_PROBE_SECONDS,
+            timeout=_SSH_ADD_PROBE_SECONDS,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):

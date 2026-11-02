@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import shlex
 import shutil
 import struct
 import subprocess
@@ -396,11 +397,14 @@ def test_the_hint_exists_only_for_a_passphrase_protected_key(tmp_path: Path) -> 
     assert passphrase_hint(tmp_path / "absent") is None
 
 
-def test_a_path_with_whitespace_is_given_to_the_command_as_a_quoted_absolute_path(tmp_path: Path) -> None:
-    spaced = tmp_path / "my keys"
-    spaced.mkdir()
-    key = _write(spaced / "id", _native_armor(_native_envelope(cipher=b"aes256-ctr")))
-    plain = _write(tmp_path / "id", _native_armor(_native_envelope(cipher=b"aes256-ctr")))
+@pytest.mark.skipif(os.name == "nt", reason="the POSIX shell reads the suggested command")
+@pytest.mark.parametrize("directory", ["plain", "my keys", 'a b$(echo PWN)"q', "it's"])
+def test_the_suggested_path_is_read_back_by_a_shell_as_exactly_the_key_path(tmp_path: Path, directory: str) -> None:
+    folder = tmp_path / directory
+    folder.mkdir()
+    key = _write(folder / "id", _native_armor(_native_envelope(cipher=b"aes256-ctr")))
 
-    assert (passphrase_hint(key) or "").endswith(f'"{key.absolute()}"')
-    assert not (passphrase_hint(plain) or "").endswith('"')
+    hint = passphrase_hint(key)
+
+    assert hint is not None
+    assert shlex.split(hint.rsplit("ssh-add ", 1)[1]) == [str(key.absolute())]

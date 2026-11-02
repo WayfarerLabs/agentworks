@@ -12,6 +12,7 @@ import binascii
 import contextlib
 import hashlib
 import os
+import shlex
 import stat
 import struct
 from dataclasses import dataclass
@@ -193,15 +194,27 @@ def passphrase_hint(identity_file: Path) -> str | None:
 
     Only a passphrase-protected key gets one: ssh runs in batch mode and cannot
     ask for the passphrase. It reads conditionally because a connection failure
-    has other causes too, such as a stopped VM or a dropped network. A path with
-    whitespace is given to the command as a double-quoted absolute path, since a
-    quoted ``~`` does not expand.
+    has other causes too, such as a stopped VM or a dropped network. The path in
+    the suggested command is one a shell reads back as exactly that path: the
+    ``~`` form when it needs no quoting (a quoted ``~`` does not expand),
+    otherwise the absolute path, single-quoted on POSIX and double-quoted on
+    Windows. A Windows path that cannot be double-quoted goes on its own line.
     """
     if not identity_is_passphrase_protected(identity_file):
         return None
-    key = format_host_path(identity_file)
-    typed = f'"{identity_file.absolute()}"' if any(character.isspace() for character in key) else key
-    return f"If {key} is not loaded in your SSH agent, load it with: ssh-add {typed}"
+    shown = format_host_path(identity_file)
+    return f"If {shown} is not loaded in your SSH agent, load it with: ssh-add {_typed_path(identity_file, shown)}"
+
+
+def _typed_path(identity_file: Path, shown: str) -> str:
+    if shown.startswith("~/") and shlex.quote(shown[2:]) == shown[2:]:
+        return shown
+    absolute = str(identity_file.absolute())
+    if os.name != "nt":
+        return shlex.quote(absolute)
+    if not any(character.isspace() for character in shown):
+        return shown
+    return f'"{absolute}"' if '"' not in absolute else f"\n{absolute}"
 
 
 def _decode_openssh_envelope(contents: bytes) -> bytes:
