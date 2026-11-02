@@ -337,7 +337,8 @@ def test_ephemeral_tailscale_join_failure_cleans_up_without_key_in_error(
             RunContext(),
         )
 
-    assert guest.payloads == [JOIN_FRAGMENT]
+    assert guest.payloads[-1] == JOIN_FRAGMENT
+    assert guest.joins == 1
     assert _deletes(ran) == ["limactl delete --force myvm"]
     _assert_secret_absent_from_exception_graph(caught.value, secret)
     assert secret not in repr((ran, guest.argvs))

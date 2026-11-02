@@ -25,12 +25,13 @@ from agentworks.capabilities.vm_platform.bootstrap_script import (
 from agentworks.capabilities.vm_platform.lima import (
     _REBOOT_CLEAR_MARKER,
     _REBOOT_PENDING_MARKER,
+    _TAILSCALED_WAIT_PAYLOAD,
     LimaPlatform,
 )
 from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed, LimaHost
 from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConnectivityError
+from agentworks.errors import ConnectivityError, ProvisioningError
 from tests._root_channel_fakes import ADDRESS, Answer, FakeGuest, answer_by_payload, install_at_run_process
 from tests.conftest import provisioning_trust_for_tests
 
@@ -198,8 +199,8 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
 
     # The key reaches the guest only in the join's script, on the root channel's stdin.
     assert secret not in repr(calls)
-    assert [secret.encode() in script for script in guest.scripts] == [True, False]
-    assert guest.payloads == [JOIN_FRAGMENT, "tailscale ip -4"]
+    assert [secret.encode() in script for script in guest.scripts] == [False, True, False]
+    assert guest.payloads == [_TAILSCALED_WAIT_PAYLOAD, JOIN_FRAGMENT, "tailscale ip -4"]
     assert not any(secret in arg for argv in guest.argvs for arg in argv)
 
 
@@ -257,4 +258,30 @@ def test_a_failed_restart_rolls_back_before_the_key_is_sent(monkeypatch: pytest.
         LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
 
     assert guest.scripts == []
+    assert "limactl delete --force myvm" in ran
+
+
+def test_a_tailscaled_that_never_becomes_active_rolls_back_before_the_key_is_sent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ran: list[str] = []
+    guest = install_at_run_process(
+        monkeypatch, FakeGuest(answer_by_payload(answers={_TAILSCALED_WAIT_PAYLOAD: Answer(status=1)}))
+    )
+    monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
+    monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
+    monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, lima_yaml: None)
+    monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
+
+    def _fake_run(self: LimaHost, command: str, **kwargs: object) -> str:
+        ran.append(command)
+        return f"{_REBOOT_CLEAR_MARKER}\n" if REBOOT_SENTINEL_PATH in command else ""
+
+    monkeypatch.setattr(LimaHost, "run", _fake_run)
+
+    with pytest.raises(ProvisioningError):
+        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
+
+    assert guest.payloads == [_TAILSCALED_WAIT_PAYLOAD]
+    assert b"AGW_SECRET" not in guest.scripts[0]
     assert "limactl delete --force myvm" in ran

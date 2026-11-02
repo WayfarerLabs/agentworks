@@ -38,6 +38,7 @@ from agentworks.capabilities.vm_platform.tailscale_join import (
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConnectivityError, ProvisioningError, StateError
+from agentworks.execution import root_script
 from agentworks.execution.errors import ClientUnsupported
 from agentworks.naming import NAME_RE
 from agentworks.schema import AgwModel, NonEmptyStr
@@ -45,6 +46,8 @@ from agentworks.topics import TopicProse
 from agentworks.transports import LimaTransport, RemoteLimaTransport
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform.base import BootstrapProgress
     from agentworks.config import Config
@@ -118,6 +121,28 @@ provision:
     script: |
 {provision_script}
 """
+
+
+_TAILSCALED_WAIT_SECONDS = 60
+_TAILSCALED_WAIT_PAYLOAD = (
+    f"for _ in $(seq {_TAILSCALED_WAIT_SECONDS}); do "
+    "systemctl is-active --quiet tailscaled && exit 0; sleep 1; done; exit 1"
+)
+
+
+def _wait_for_tailscaled(run_as_root: Callable[[bytes, float], RawRun], instance_name: str) -> None:
+    """Wait for ``tailscaled`` to be active before the key is sent, or raise ``ProvisioningError``.
+
+    ``limactl start`` and ``limactl restart`` return once the guest's sshd
+    answers, not once ``tailscaled`` is up, and a join sent too early fails
+    with the key already spent. The wait carries no key.
+    """
+    result = root_script.run(run_as_root, _TAILSCALED_WAIT_PAYLOAD, deadline=_TAILSCALED_WAIT_SECONDS + 10)
+    if result.status != 0:
+        raise ProvisioningError(
+            f"tailscaled did not become active on Lima instance '{instance_name}' within "
+            f"{_TAILSCALED_WAIT_SECONDS} seconds; the Tailscale auth key was not sent"
+        )
 
 
 # Local and SSH placement use different transports, readiness rules, and
@@ -415,6 +440,7 @@ class LimaPlatform(VMPlatform):
             # The join follows any restart, so nothing but the address read
             # sits between the join and the settle that logs a failed one out.
             run_as_root = functools.partial(self._host.run_as_root, instance_name)
+            _wait_for_tailscaled(run_as_root, instance_name)
             output.detail("Joining Tailscale...")
             join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
             output.detail("Retrieving Tailscale IP...")

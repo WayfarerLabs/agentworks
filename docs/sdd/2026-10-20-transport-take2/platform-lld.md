@@ -381,10 +381,14 @@ The remote create keeps its private staging directory (`lima.py:671-691`). Pipin
 the detached run with `start`. `create` joins with
 `join_tailscale(partial(host.run_as_root, instance), key, node=...)` instead of its own stdin
 command (`lima.py:471-493`), after the restart-sentinel probe and any `limactl restart`, so only the
-address read sits between the join and the settle that logs a failed one out. The probe and the
-cloud-init log read stay `run` commands. `native_transport` (`:799-808`) and `_transport_for`
-(`:535-539`) are deleted. `recovery_needs_guest_sshd = True`: `limactl shell` is SSH to the guest's
-sshd with Lima's own key.
+address read sits between the join and the settle that logs a failed one out. Before the join, one
+key-free root script waits up to 60 seconds for `systemctl is-active --quiet tailscaled`, since
+`limactl start` and `restart` return once sshd answers, not once `tailscaled` is up; if it never
+becomes active, create raises `ProvisioningError` inside the rollback with the key unsent. Only Lima
+waits: the clouds' readiness loop already covers it, and WSL2 and Proxmox join right after their own
+bootstrap installed and started `tailscaled`. The probe and the cloud-init log read stay `run`
+commands. `native_transport` (`:799-808`) and `_transport_for` (`:535-539`) are deleted.
+`recovery_needs_guest_sshd = True`: `limactl shell` is SSH to the guest's sshd with Lima's own key.
 
 ### WSL2
 
@@ -752,6 +756,8 @@ among the clouds and against WSL2, and Remote Lima from macOS and Windows:
 - create on every platform: the key-free bootstrap on WSL2 and Proxmox with its output size
   recorded, the join over `run_as_root`, and on one cloud the admin console showing the key used
   once (I10, I24);
+- a Lima create on an Apple Virtualization host, where the SVE mask's restart runs: the join
+  succeeds the first time, after the `tailscaled` wait;
 - rekey, delete's logout and `vm recover` on every platform, and delete of a cloud VM with no
   record;
 - `vm start` after the node is removed in the admin console, and after an ephemeral key's node
