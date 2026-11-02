@@ -424,3 +424,24 @@ def test_a_key_under_the_home_directory_is_suggested_in_its_tilde_form(
     suggested = hint.rsplit("ssh-add ", 1)[1]
     assert suggested.startswith("~")  # unquoted, so the shell expands it
     assert os.path.expanduser(suggested) == str(key)
+
+
+@pytest.mark.parametrize("directory", ["plain", "my keys"])
+@pytest.mark.parametrize("under_home", [False, True])
+def test_on_windows_the_suggested_path_is_always_the_absolute_path_in_double_quotes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, directory: str, under_home: bool
+) -> None:
+    # cmd and PowerShell do not expand ~ for ssh-add, so even a home-relative key gets its absolute path.
+    from agentworks import ssh_identity
+
+    monkeypatch.setattr(ssh_identity, "_on_windows", lambda: True)
+    if under_home:
+        monkeypatch.setenv("HOME", str(tmp_path))
+    folder = tmp_path / directory
+    folder.mkdir()
+    key = _write(folder / "id", _native_armor(_native_envelope(cipher=b"aes256-ctr")))
+
+    hint = passphrase_hint(key)
+
+    assert hint is not None
+    assert hint.endswith(f'ssh-add "{key.absolute()}"')

@@ -197,8 +197,9 @@ def passphrase_hint(identity_file: Path) -> str | None:
     has other causes too, such as a stopped VM or a dropped network. The path in
     the suggested command is one a shell reads back as exactly that path: the
     ``~`` form when it needs no quoting (a quoted ``~`` does not expand),
-    otherwise the absolute path, single-quoted on POSIX and double-quoted on
-    Windows.
+    otherwise the absolute path, single-quoted on POSIX. On Windows it is always
+    the absolute path in double quotes, since neither cmd nor PowerShell expands
+    the ``~`` form for ssh-add.
     """
     if not identity_is_passphrase_protected(identity_file):
         return None
@@ -207,14 +208,17 @@ def passphrase_hint(identity_file: Path) -> str | None:
 
 
 def _typed_path(identity_file: Path, shown: str) -> str:
-    if shown.startswith("~/") and shlex.quote(shown[2:]) == shown[2:]:
+    if not _on_windows() and shown.startswith("~/") and shlex.quote(shown[2:]) == shown[2:]:
         return shown
     absolute = str(identity_file.absolute())
-    if os.name != "nt":
+    if not _on_windows():
         return shlex.quote(absolute)
-    if not any(character.isspace() for character in shown):
-        return shown
-    return f'"{absolute}"'  # a Windows file name cannot contain a double quote
+    # cmd and PowerShell do not expand ~ for ssh-add, and a Windows file name cannot contain a double quote.
+    return f'"{absolute}"'
+
+
+def _on_windows() -> bool:
+    return os.name == "nt"
 
 
 def _decode_openssh_envelope(contents: bytes) -> bytes:
