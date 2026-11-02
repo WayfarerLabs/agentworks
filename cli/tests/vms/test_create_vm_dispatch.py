@@ -119,7 +119,7 @@ def test_create_vm_request_shape_and_row(
         return ProvisionResult(
             native_transport=native_transport,  # type: ignore[arg-type]
             platform_metadata={"instance_name": "dvm"},
-            tailscale_ip="100.64.0.7",
+            tailnet_address="100.64.0.7",
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
@@ -281,7 +281,7 @@ def test_create_vm_metadata_failure_retains_owner_and_reports_once(
         lambda *args, **kwargs: ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "metadata-fail"},
-            tailscale_ip="100.64.0.7",
+            tailnet_address="100.64.0.7",
         ),
     )
     monkeypatch.setattr(
@@ -375,7 +375,7 @@ def test_create_vm_core_release_attestation_uses_core_release_and_retains_failed
         return ProvisionResult(
             native_transport=native_transport,  # type: ignore[arg-type]
             platform_metadata={"instance_name": "unverified"},
-            tailscale_ip="100.64.0.7",
+            tailnet_address="100.64.0.7",
         )
 
     monkeypatch.setattr(
@@ -445,7 +445,7 @@ def test_create_vm_logger_close_failure_retains_owner_and_reports_once(
         lambda *args, **kwargs: ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "close-fail"},
-            tailscale_ip="100.64.0.7",
+            tailnet_address="100.64.0.7",
         ),
     )
     monkeypatch.setattr(
@@ -499,7 +499,7 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "wvm"},
-            tailscale_ip="100.64.0.9",
+            tailnet_address="100.64.0.9",
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
@@ -663,7 +663,7 @@ def test_create_vm_composes_r11_hostname_with_slug(
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "team-a-svm"},
-            tailscale_ip="100.64.0.8",
+            tailnet_address="100.64.0.8",
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)

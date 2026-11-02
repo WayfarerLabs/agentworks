@@ -417,7 +417,7 @@ class LimaPlatform(VMPlatform):
             # The read follows any restart, and its retries cover the guest
             # coming back up.
             output.detail("Retrieving Tailscale IP...")
-            tailscale_ip = settle_tailnet_address(run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT)
+            tailnet_address = settle_tailnet_address(run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT)
 
             transport = self._transport_for(instance_name)
         except KeyboardInterrupt:
@@ -431,7 +431,7 @@ class LimaPlatform(VMPlatform):
         return ProvisionResult(
             native_transport=transport,
             platform_metadata={"instance_name": instance_name},
-            tailscale_ip=tailscale_ip,
+            tailnet_address=tailnet_address,
         )
 
     def _restart_sentinel_present(self, instance_name: str) -> bool:

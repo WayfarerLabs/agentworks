@@ -187,7 +187,7 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
         RunContext(),
     )
 
-    assert result.tailscale_ip == ADDRESS
+    assert result.tailnet_address == ADDRESS
     assert submitted and len(submitted) == 1
     submitted_yaml = submitted[0]
     persisted_config = cast("dict[str, Any]", yaml.safe_load(submitted_yaml))

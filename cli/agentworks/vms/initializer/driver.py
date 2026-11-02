@@ -3,7 +3,7 @@ transport) and Phase B (setup, over Tailscale SSH,
 non-fatal-on-failure).
 
 Phase A is provisioning: after the platform completes create-time bootstrap,
-``bootstrap_vm`` records the returned or rediscovered Tailscale IP, verifies
+``bootstrap_vm`` validates and records the returned Tailscale address, verifies
 Tailscale SSH, and syncs SSH config for a freshly provisioned VM. It returns
 the Tailscale transport and home for Phase B. Phase B is
 initialization: ``run_initialization`` runs it, both after ``bootstrap_vm``
@@ -23,6 +23,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.capabilities.vm_platform.base import parse_tailnet_address
 from agentworks.db import InitStatus, ProvisioningStatus
 from agentworks.env import ResourceContext, vm_stable_identity_env
 from agentworks.errors import ProvisioningError
@@ -101,16 +102,16 @@ def bootstrap_vm(
     logger: SSHLogger,
     *,
     admin_username: str,
-    tailscale_ip: str | None = None,
+    tailnet_address: str,
     on_tailscale_ready: Callable[[], None] | None = None,
 ) -> tuple[Transport, str]:
     """Run Phase A provisioning state recording and connectivity verification.
 
-    Runs over the provisioning transport after platform-owned bootstrap:
-    optional Tailscale IP rediscovery, Tailscale-SSH verification, the
+    Runs after platform-owned bootstrap: validating and recording the
+    platform's ``tailnet_address``, Tailscale-SSH verification, the
     post-Tailscale-ready hook plus reconnect wait, and finally the SSH-config
     sync before the caller's explicit provisioning-complete line. Only the
-    IP discovery or verification is fatal to provisioning: a failure there means the VM is
+    address check or the verification is fatal to provisioning: a failure there means the VM is
     unreachable, so it marks provisioning ``failed``, records the
     ``provisioning_failed`` event, secures the kept VM via the platform's
     best-effort ``secure_failed_vm`` hook (Azure deletes its ephemeral
@@ -150,7 +151,7 @@ def bootstrap_vm(
 
     vm_row = db.get_vm(vm_name)
     assert vm_row is not None, "create_vm inserts the row before init"
-    # The fatal span is only IP discovery and Tailscale SSH verification. A
+    # The fatal span is only the address check and Tailscale SSH verification. A
     # failure means the VM is unreachable, so it is marked provisioning ``failed`` and
     # routed to delete. The connectivity cleanup and the SSH-config sync below
     # sit OUTSIDE this span deliberately: they cannot make an already-bootstrapped
@@ -162,10 +163,9 @@ def bootstrap_vm(
             db,
             config,
             vm_name,
-            exec_target,
             admin_username,
             logger,
-            tailscale_ip=tailscale_ip,
+            tailnet_address=tailnet_address,
         )
         db.insert_vm_event(
             vm_name,
@@ -378,27 +378,31 @@ def _phase_a_bootstrap(
     db: Database,
     config: Config,
     vm_name: str,
-    exec_target: ExecTransport,
     admin_username: str,
     logger: SSHLogger,
     *,
-    tailscale_ip: str | None = None,
+    tailnet_address: str,
 ) -> Transport:
     """Phase A: record platform bootstrap and verify Tailscale SSH.
 
-    ``VMPlatform.create`` already completed bootstrap. If it could not
-    discover the joined node's IP, repeat only ``tailscale ip -4`` over the
-    returned provisioning transport. No bootstrap input or credential reaches
-    this function.
+    ``VMPlatform.create`` already completed bootstrap and returned the
+    node's address. The platform is a plugin boundary, so the address is
+    validated again before it is recorded. No bootstrap input or credential
+    reaches this function.
 
     Returns the Tailscale ``Transport`` for Phase B.
     """
+    try:
+        tailscale_ip = parse_tailnet_address(tailnet_address)
+    except ValueError:
+        raise ProvisioningError(
+            "the vm-platform returned a tailnet address that is not an IP address",
+            entity_kind="vm",
+            entity_name=vm_name,
+        ) from None
     db.update_vm_provisioning_status(vm_name, ProvisioningStatus.IN_PROGRESS)
 
     logger.step("Bootstrap (platform)")
-    if not tailscale_ip:
-        logger.output("Tailscale joined; retrying IP discovery")
-        tailscale_ip = exec_target.run("tailscale ip -4", sudo=True).stdout.strip()
     logger.output(f"Tailscale IP: {tailscale_ip}")
     db.update_vm_tailscale(vm_name, tailscale_ip)
     db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)

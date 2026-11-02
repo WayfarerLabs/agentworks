@@ -106,6 +106,10 @@ class ProvisionRequest:
 class ProvisionResult:
     """What a platform returns from ``create()``.
 
+    ``tailnet_address`` is the joined node's address, read over the
+    platform's root channel with ``tailscale_join.settle_tailnet_address``;
+    core validates it again before recording it. ``native_transport`` is
+    the channel core's release attestation and Phase A still use.
     ``platform_metadata`` is the opaque dict written verbatim to
     ``vms.platform_metadata``; the owning platform is its only reader.
     Keys are absent when there is nothing to record, never empty
@@ -113,8 +117,8 @@ class ProvisionResult:
     """
 
     native_transport: ExecTransport
+    tailnet_address: str
     platform_metadata: dict[str, str] = field(default_factory=dict)
-    tailscale_ip: str | None = None
 
 
 def parse_tailnet_address(text: object) -> str:

@@ -68,7 +68,7 @@ def test_exec_transport_is_the_narrow_abstract_base() -> None:
 def test_provision_result_accepts_execution_only_transport() -> None:
     target = ExecutionOnlyTransport()
 
-    result = ProvisionResult(native_transport=target)
+    result = ProvisionResult(native_transport=target, tailnet_address="100.64.0.9")
 
     assert result.native_transport is target
     assert not isinstance(target, Transport)

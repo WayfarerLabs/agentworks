@@ -649,7 +649,7 @@ class AzureVMPlatform(PublicAddressPlatform):
                 # a credential. Wait for it over the VM's root channel, then
                 # join once and settle the address.
                 target = PublicSSH(public_ip, admin_username, request.ssh_private_key, request.provisioning_trust)
-                tailscale_ip = EphemeralTailscaleBootstrap(target.run_as_root).complete(
+                tailnet_address = EphemeralTailscaleBootstrap(target.run_as_root).complete(
                     tailscale_auth_key, node=request.hostname
                 )
                 prov_transport = SSHTransport(
@@ -682,7 +682,7 @@ class AzureVMPlatform(PublicAddressPlatform):
         return ProvisionResult(
             native_transport=prov_transport,
             platform_metadata=metadata,
-            tailscale_ip=tailscale_ip,
+            tailnet_address=tailnet_address,
         )
 
     @staticmethod

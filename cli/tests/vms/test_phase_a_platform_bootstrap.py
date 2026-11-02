@@ -11,7 +11,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentworks.capabilities.vm_platform import ProvisionRequest, ProvisionResult, tailscale_join
-from agentworks.db import ProvisioningStatus
 from agentworks.errors import ProvisioningError
 from agentworks.execution import trust
 from agentworks.vms.initializer import driver
@@ -54,77 +53,46 @@ def test_fallback_era_contract_shapes_are_structurally_absent() -> None:
         "db",
         "config",
         "vm_name",
-        "exec_target",
         "admin_username",
         "logger",
-        "tailscale_ip",
+        "tailnet_address",
     }
     driver_source = inspect.getsource(driver)
     assert "run_wsl2_bootstrap" not in driver_source
     assert "generate_bootstrap_script" not in driver_source
 
 
-@pytest.mark.parametrize("discovery_failure", [None, KeyboardInterrupt("stop")], ids=("success", "interrupt"))
-def test_missing_platform_ip_runs_only_ip_discovery(
-    monkeypatch: pytest.MonkeyPatch,
-    discovery_failure: BaseException | None,
-) -> None:
+def test_the_returned_address_is_recorded_in_canonical_form(monkeypatch: pytest.MonkeyPatch) -> None:
     db = MagicMock()
-    logger = MagicMock()
-    exec_target = MagicMock()
-    if discovery_failure is None:
-        exec_target.run.return_value = SimpleNamespace(stdout="100.64.0.8\n")
-    else:
-        exec_target.run.side_effect = discovery_failure
-    config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key="/tmp/test-key"))
-    monkeypatch.setattr(driver, "SSHTransport", _TailscaleTransport)
-
-    def call() -> _TailscaleTransport:
-        return driver._phase_a_bootstrap(
-            db,
-            config,
-            "myvm",
-            exec_target,
-            "agw",
-            logger,
-            tailscale_ip=None,
-        )  # type: ignore[return-value]
-
-    if discovery_failure is None:
-        ts_target = call()
-        assert ts_target.kwargs["host"] == "100.64.0.8"
-        verify = _TailscaleTransport.built[0]
-        assert verify.commands == [("echo ok", {"timeout": 15})]
-        db.update_vm_tailscale.assert_called_once_with("myvm", "100.64.0.8")
-        db.update_vm_provisioning_status.assert_any_call("myvm", ProvisioningStatus.COMPLETE)
-    else:
-        with pytest.raises(type(discovery_failure)) as caught:
-            call()
-        assert caught.value is discovery_failure
-
-    exec_target.run.assert_called_once_with("tailscale ip -4", sudo=True)
-
-
-def test_returned_platform_ip_skips_provisioning_transport(monkeypatch: pytest.MonkeyPatch) -> None:
-    db = MagicMock()
-    logger = MagicMock()
-    exec_target = MagicMock()
     config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key="/tmp/test-key"))
     monkeypatch.setattr(driver, "SSHTransport", _TailscaleTransport)
 
     ts_target = driver._phase_a_bootstrap(
         db,
-        config,
+        config,  # type: ignore[arg-type]
         "myvm",
-        exec_target,
         "agw",
-        logger,
-        tailscale_ip="100.64.0.9",
+        MagicMock(),
+        tailnet_address=" 100.64.0.9\n",
     )
 
-    exec_target.run.assert_not_called()
     assert ts_target.kwargs["host"] == "100.64.0.9"  # type: ignore[attr-defined]
     db.update_vm_tailscale.assert_called_once_with("myvm", "100.64.0.9")
+
+
+@pytest.mark.parametrize("address", ["", "not-an-address", "100.64.0.9 rm -rf"])
+def test_an_address_core_cannot_parse_fails_before_anything_is_recorded_or_connected(
+    monkeypatch: pytest.MonkeyPatch, address: str
+) -> None:
+    db = MagicMock()
+    config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key="/tmp/test-key"))
+    monkeypatch.setattr(driver, "SSHTransport", _TailscaleTransport)
+
+    with pytest.raises(ProvisioningError, match="not an IP address"):
+        driver._phase_a_bootstrap(db, config, "myvm", "agw", MagicMock(), tailnet_address=address)  # type: ignore[arg-type]
+
+    db.update_vm_tailscale.assert_not_called()
+    assert _TailscaleTransport.built == []
 
 
 # -- Enrollment: Phase A's verify connection writes the VM's host key --------
@@ -137,10 +105,9 @@ def _phase_a(monkeypatch: pytest.MonkeyPatch, *, transport: type = _TailscaleTra
         MagicMock(),
         config,  # type: ignore[arg-type]
         "myvm",
-        MagicMock(),
         "agw",
         MagicMock(),
-        tailscale_ip="100.64.0.9",
+        tailnet_address="100.64.0.9",
     )
 
 

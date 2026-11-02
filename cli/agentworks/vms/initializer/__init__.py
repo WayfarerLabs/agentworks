@@ -6,7 +6,7 @@ Two phases:
   B. Initialization (over Tailscale SSH): packages, install commands, git credentials,
      dotfiles. Repeatable via `vm reinit`. Tracked via init_status.
 
-Phase A IP discovery and Tailscale SSH verification are fatal: if they fail,
+Phase A's address check and Tailscale SSH verification are fatal: if they fail,
 the VM is unreachable and useless. Post-ready cleanup and SSH-config sync are
 non-fatal: failures produce warnings and continue into Phase B.
 Phase B steps are non-fatal: failures produce warnings and a 'partial' status.

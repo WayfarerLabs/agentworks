@@ -651,7 +651,7 @@ def create_vm(
                     platform_ctx,
                     logger,
                     admin_username=resolved_admin_username,
-                    tailscale_ip=result.tailscale_ip,
+                    tailnet_address=result.tailnet_address,
                     on_tailscale_ready=_on_tailscale_ready,
                 )
                 output.info("Provisioning complete.")

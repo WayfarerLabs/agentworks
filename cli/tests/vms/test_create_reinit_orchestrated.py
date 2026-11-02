@@ -259,7 +259,7 @@ def test_create_admin_spec_credential_joins_graph_and_logger_redactions(
         assert request.progress is loggers[0]
         return ProvisionResult(  # type: ignore[arg-type]
             native_transport=SimpleNamespace(),
-            tailscale_ip="100.64.0.7",
+            tailnet_address="100.64.0.7",
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _create)
@@ -416,7 +416,7 @@ def test_successful_create_propagates_fresh_logger_close_interrupt(
         "create",
         lambda self, request, ctx: ProvisionResult(  # noqa: ARG005
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
-            tailscale_ip="100.64.0.7",
+            tailnet_address="100.64.0.7",
         ),
     )
     monkeypatch.setattr(
@@ -605,7 +605,7 @@ def test_create_init_failure_keeps_the_row(
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={},
-            tailscale_ip="100.64.0.7",
+            tailnet_address="100.64.0.7",
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
@@ -645,7 +645,7 @@ def test_create_phase_a_failure_maps_to_provisioning_error(
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={},
-            tailscale_ip="100.64.0.7",
+            tailnet_address="100.64.0.7",
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
@@ -690,7 +690,7 @@ def _stub_create_with_trust_probes(
         seen["row_at_create"] = db.get_vm(request.vm_name) is not None
         seen["record_at_create"] = trust.has_record(request.vm_name)
         seen["file_at_create"] = binding.provisioning_file.is_file()
-        return ProvisionResult(native_transport=SimpleNamespace(), platform_metadata={}, tailscale_ip="100.64.0.7")  # type: ignore[arg-type]
+        return ProvisionResult(native_transport=SimpleNamespace(), platform_metadata={}, tailnet_address="100.64.0.7")  # type: ignore[arg-type]
 
     def _bootstrap(db_: Database, config_: object, vm_name: str, *a: object, **k: object) -> tuple[object, str]:
         # Core keeps using the create-time transport here (release probe,
@@ -795,7 +795,7 @@ def test_create_phase_a_sync_failure_is_non_fatal(
         return ProvisionResult(
             native_transport=SimpleNamespace(describe=lambda: "lima:vm", logger=None),  # type: ignore[arg-type]
             platform_metadata={},
-            tailscale_ip="100.64.0.7",
+            tailnet_address="100.64.0.7",
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
@@ -852,7 +852,7 @@ def test_create_provisioning_section_has_explicit_closing_body_line(
         return ProvisionResult(
             native_transport=SimpleNamespace(describe=lambda: "lima:vm", logger=None),  # type: ignore[arg-type]
             platform_metadata={},
-            tailscale_ip="100.64.0.7",
+            tailnet_address="100.64.0.7",
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)

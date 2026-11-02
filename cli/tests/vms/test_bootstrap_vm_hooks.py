@@ -24,11 +24,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.ssh import SSHResult
-from agentworks.transports import SSHTransport
+from agentworks.db import ProvisioningStatus
+from agentworks.errors import ProvisioningError
 from agentworks.vms.initializer import driver
-from tests.conftest import ssh_enrolls_on_first_use
-from tests.native_exec_support import ExecCall, ExecutionOnlyTransport
+from tests.native_exec_support import ExecutionOnlyTransport
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -78,6 +77,7 @@ def _call_bootstrap(db: Database, platform: _SpyPlatform, on_ready: Any) -> tupl
         RunContext(),
         logger,  # type: ignore[arg-type]
         admin_username="agentworks",
+        tailnet_address="100.64.0.8",
         on_tailscale_ready=on_ready,
     )
 
@@ -99,6 +99,7 @@ def test_bootstrap_uses_manager_owned_logger_without_closing(
         RunContext(),
         logger,  # type: ignore[arg-type]
         admin_username="admin",
+        tailnet_address="100.64.0.8",
         on_tailscale_ready=lambda: None,
     )
 
@@ -106,39 +107,36 @@ def test_bootstrap_uses_manager_owned_logger_without_closing(
     logger.close.assert_not_called()
 
 
-def test_phase_a_accepts_execution_only_transport(
-    db: Database,
-    monkeypatch: pytest.MonkeyPatch,
+def test_an_address_core_cannot_parse_marks_the_vm_failed_and_secures_it(
+    db: Database, monkeypatch: pytest.MonkeyPatch, _hermetic_driver: None
 ) -> None:
-    """Create-time IP discovery requires no interactive or file surface."""
+    """Core's own check of the platform's address runs inside the fail-closed span, before any connection."""
     db.insert_vm("hookvm", site="stub", hostname="hookvm")
+    monkeypatch.setattr("agentworks.vms.initializer.driver.SSHTransport", _no_connection)
+    platform = _SpyPlatform()
 
-    def result_for(call: ExecCall) -> SSHResult:
-        assert call.command == "tailscale ip -4"
-        return SSHResult(returncode=0, stdout="100.64.0.8\n", stderr="")
+    with pytest.raises(ProvisioningError, match="not an IP address"):
+        driver.bootstrap_vm(
+            db,
+            SimpleNamespace(),  # type: ignore[arg-type]
+            "hookvm",
+            _stub_exec_target(),
+            platform,  # type: ignore[arg-type]
+            RunContext(),
+            SimpleNamespace(display_path="~/hookvm-vm-create.log"),  # type: ignore[arg-type]
+            admin_username="agentworks",
+            tailnet_address="203.0.113.7.attacker",
+        )
 
-    target = ExecutionOnlyTransport(result_for)
+    row = db.get_vm("hookvm")
+    assert row is not None
+    assert row.provisioning_status == ProvisioningStatus.FAILED.value
+    assert row.tailscale_host is None
+    assert platform.secured == ["hookvm"]
 
-    def _connect(self: SSHTransport, *_args: object, **_kwargs: object) -> SSHResult:
-        ssh_enrolls_on_first_use(self.trust)
-        return SSHResult(returncode=0, stdout="ok\n", stderr="")
 
-    monkeypatch.setattr("agentworks.transports.ssh.SSHTransport.run", _connect)
-    logger = MagicMock()
-    config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key=None))
-
-    result = driver._phase_a_bootstrap(
-        db,
-        config,  # type: ignore[arg-type]
-        "hookvm",
-        target,
-        "agentworks",
-        logger,
-    )
-
-    assert isinstance(result, SSHTransport)
-    assert result.host == "100.64.0.8"
-    assert [call.command for call in target.calls] == ["tailscale ip -4"]
+def _no_connection(**kwargs: object) -> None:
+    raise AssertionError("no connection is made to an address core refused")
 
 
 def test_success_path_fires_on_tailscale_ready(

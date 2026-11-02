@@ -249,7 +249,7 @@ class TestCreate:
         """The user-data is gzipped (cloud-init decompresses natively) and stays
         under EC2's 16 KiB raw cap even with an RSA-4096-sized key on the
         Tailscale path (the largest payload). The resolved key is absent from
-        this payload and crosses the later stdin boundary instead."""
+        this payload and reaches the VM only in the later join script."""
         rec = install_fakes(monkeypatch)
         monkeypatch.setattr(
             EphemeralTailscaleBootstrap,
@@ -353,7 +353,7 @@ class TestCreate:
             lambda self, auth_key, *, node: "100.64.0.5",
         )
         result = _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
-        assert result.tailscale_ip == "100.64.0.5"
+        assert result.tailnet_address == "100.64.0.5"
 
 
 class TestCreateRollback:

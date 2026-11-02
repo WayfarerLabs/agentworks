@@ -455,7 +455,6 @@ class EC2Platform(PublicAddressPlatform):
         security_group_id: str | None = None
         instance_id: str | None = None
         prov_transport: Transport | None = None
-        tailscale_ip: str | None = None
         bootstrap_ssh_open = False
 
         def _metadata(*, incomplete: bool) -> dict[str, str]:
@@ -577,7 +576,7 @@ class EC2Platform(PublicAddressPlatform):
             # credential. Wait for it over the VM's root channel, then join
             # once and settle the address.
             target = PublicSSH(public_ip, request.admin_username, request.ssh_private_key, request.provisioning_trust)
-            tailscale_ip = EphemeralTailscaleBootstrap(target.run_as_root).complete(
+            tailnet_address = EphemeralTailscaleBootstrap(target.run_as_root).complete(
                 request.tailscale_auth_key, node=request.hostname
             )
             prov_transport = SSHTransport(
@@ -607,7 +606,7 @@ class EC2Platform(PublicAddressPlatform):
         return ProvisionResult(
             native_transport=prov_transport,
             platform_metadata=metadata,
-            tailscale_ip=tailscale_ip,
+            tailnet_address=tailnet_address,
         )
 
     def start(self, vm: VMRow, ctx: RunContext) -> None:

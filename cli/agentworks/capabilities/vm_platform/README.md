@@ -314,16 +314,15 @@ same `ProvisionRequest`, including the concrete core-selected `debian_release`, 
 Tailscale auth key, and a required value-free bootstrap-progress sink. The platform resolves the
 release through its local artifact map before backend mutation. A missing code-owned mapping names
 the out-of-date Agentworks build; a missing operator-owned mapping names the exact vm-site field.
-Neither has a fallback. A successful `ProvisionResult` carries the native transport, an optional
-Tailscale IP, and `platform_metadata`. Core treats the result as a runtime conformance boundary:
-after persisting the metadata, it probes the returned transport and persists only that live
-observation. This is not a security sandbox for in-process plugin code. The metadata is written
-verbatim to `vms.platform_metadata` and read back only by the owning platform (Lima stores
-`instance_name`, WSL2 `distro_name`, Azure `resource_id`, Proxmox `vmid` + `node`, EC2
-`instance_id` + `security_group_id` + `region` + `backend_name` + `account_id` as its
-provider-identity subset, and never the public IP, which it reads live). An omitted IP means
-discovery failed after a successful join, not that bootstrap is incomplete. Phase A retries only
-`tailscale ip -4` before it records the address and verifies Tailscale SSH.
+Neither has a fallback. A successful `ProvisionResult` carries the native transport, the required
+`tailnet_address`, and `platform_metadata`. Core treats the result as a runtime conformance
+boundary: after persisting the metadata, it probes the returned transport and persists only that
+live observation, and Phase A validates the address again before recording it. This is not a
+security sandbox for in-process plugin code. The metadata is written verbatim to
+`vms.platform_metadata` and read back only by the owning platform (Lima stores `instance_name`, WSL2
+`distro_name`, Azure `resource_id`, Proxmox `vmid` + `node`, EC2 `instance_id` +
+`security_group_id` + `region` + `backend_name` + `account_id` as its provider-identity subset, and
+never the public IP, which it reads live).
 
 Before the create boundary resolves secrets, the pending VM node calls
 `validate_create_release(release)` with that same concrete core selection. The hook is pure and
@@ -570,24 +569,23 @@ and the operator-facing command banners that the rest of the codebase calls "pha
   creation time to get the VM reachable over Tailscale. The shared payload is `bootstrap_script.py`
   (admin user, packages, SSH key, swap, hostname, the Apple-vz SVE grub mask, Tailscale). Lima
   instance YAML, Azure `custom_data`, EC2 `UserData`, and GCE `Instance.metadata` retain
-  credential-free forms of that payload. GCE's startup wrapper checks a durable success marker
-  before any mutation and is rejected when its exact UTF-8 value exceeds 256 KiB. After the payload
-  installs Tailscale, `create()` sends the resolved key through one fixed guest command on the
-  provisioning transport's stdin. The value is absent from provider-retained configuration and
-  host-side argv; the guest `tailscale` process necessarily receives its `--auth-key` argument
-  transiently. Delivery is byte-exact, so the guest `read -r` binds exactly the resolved value: the
-  stdin pipe runs in byte mode because a text-mode pipe rewrites LF to the host's line ending and
-  would append a carriage return to the key on Windows (see `agentworks/subprocess_io.py`). Proxmox
-  runs the key-bearing bootstrap from a private guest-agent staging file inside `create()`. WSL2
-  runs its generated bootstrap from private local and guest staging inside `create()`. Each staging
-  file receives one verified removal attempt. `create()` returns only after bootstrap succeeds and
-  Tailscale joins, or it raises after rolling back partial backend resources. **This stage runs
-  once, at create.**
-- **Phase A** receives only the returned optional Tailscale IP and the provisioning transport. If
-  the platform could not discover an IP after joining, Phase A runs only `tailscale ip -4` over that
-  transport. It then records the IP and provisioning state, verifies Tailscale SSH, closes temporary
-  provisioning access, and syncs SSH config. It never receives the Tailscale key as a bootstrap
-  input, generates a bootstrap script, or touches bootstrap staging.
+  credential-free forms of that payload; WSL2 and Proxmox run the same key-free script through
+  `run_as_root`. GCE's startup wrapper checks a durable success marker before any mutation and is
+  rejected when its exact UTF-8 value exceeds 256 KiB. After the payload installs Tailscale,
+  `create()` joins through its own `run_as_root` with `tailscale_join.join_tailscale` (the clouds
+  through `EphemeralTailscaleBootstrap`, which first waits for the provider's bootstrap), the only
+  script that carries the key. The key travels inside that script on the channel's stdin and reaches
+  Tailscale through `--auth-key=file:/dev/stdin`, so it is in no argv on the workstation or the
+  guest and absent from provider-retained configuration. `create()` then reads the address with
+  `settle_tailnet_address`, which retries a failed read and, when the reads are exhausted, logs the
+  node out over the same channel and raises: core never enrolled its host key, so nothing could log
+  it out later. `create()` returns only after bootstrap succeeds, Tailscale joins and the address is
+  read, or it raises after rolling back partial backend resources. **This stage runs once, at
+  create.**
+- **Phase A** receives the returned `tailnet_address` and the provisioning transport. It validates
+  the address, records it and the provisioning state, verifies Tailscale SSH, closes temporary
+  provisioning access, and syncs SSH config. It never receives the Tailscale key, generates a
+  bootstrap script, or reads the address itself.
 - **Initialization** is `run_initialization` (`agentworks.vms.initializer`) plus VM hardening
   (`agentworks.vms.hardening`), run over a `Transport` against the created VM. It is
   platform-agnostic. **It is re-runnable and is exactly what `agw vm reinit` re-runs.** The Phase A
@@ -600,11 +598,12 @@ the key and its value-free progress surface in the request. This is separate fro
 secrets delivered through `ctx.secret(name)`. The manager owns and closes the same logger exactly
 once after platform bootstrap, Phase A, and initialization.
 
-A platform-native configuration that the provider retains must never contain the resolved key. The
-six final-inspection surfaces are Lima instance YAML, WSL2 and Proxmox bootstrap staging, Azure
-`OSProfile.custom_data`, EC2 `RunInstances.UserData`, and GCE `Instance.metadata`. The
-provider-faithful test inspects that final submitted or staged surface and, for temporary staging,
-verifies removal.
+A platform-native configuration that the provider retains must never contain the resolved key, and
+no generated bootstrap can: the generator takes no key. The provider-faithful test
+(`cli/tests/test_create_auth_key_boundaries.py`) runs each of the six creates with its root channel
+faked and inspects the retained surfaces (Lima instance YAML, Azure `OSProfile.custom_data`, EC2
+`RunInstances.UserData`, GCE `Instance.metadata`), every argv, the progress sink and the errors: the
+key appears in exactly one root script, the join's.
 
 The seam between the two stages is the source of the most important gotcha below.
 
@@ -735,9 +734,9 @@ YAML block scalar, remote shell). Two traps that have already occurred:
    lookup, while `create()` resolves `request.debian_release` again before mutation, completes
    Tailscale bootstrap, and returns a transport through which core verifies and records the live
    release. Use `bootstrap_script.py` / `cloud_init.py` for the create-time payload instead of a
-   platform-specific reinvention. Keep any provider-retained payload credential-free and deliver the
-   resolved key through the platform's ephemeral mechanism. Return an optional IP only after a
-   successful join; Phase A owns IP-only rediscovery and Tailscale SSH verification.
+   platform-specific reinvention. Join with `tailscale_join.join_tailscale` over `run_as_root`, and
+   return the address `settle_tailnet_address` reads over the same channel, inside the create's
+   rollback window so an address that cannot be read rolls the backend back.
 7. Dispatch, idempotency, and, where applicable, template-render tests belong under
    `cli/tests/vms/`; the next section lists the existing references.
 8. The implementation is checked against the preceding platform-development considerations before it
@@ -775,9 +774,11 @@ A new `Transport` subclass belongs under `cli/tests/transports/` alongside the p
 - `base.py`: the `VMPlatform` ABC, `ProvisionRequest`, `ProvisionResult`.
 - `../base.py`: the `Capability` base and `RunContext`.
 - `bootstrap_script.py`, `cloud_init.py`, `skel.py`: shared create-time payload.
+- `tailscale_join.py`: the join, the address read and settle, and the clouds'
+  `EphemeralTailscaleBootstrap`, all over `run_as_root`.
 - `agentworks.vms.initializer`: the two-phase init driver (`bootstrap_vm` for Phase A provisioning
-  state recording, optional IP-only rediscovery, and Tailscale SSH verification;
-  `run_initialization` for Phase B initialization).
+  state recording, the address check, and Tailscale SSH verification; `run_initialization` for Phase
+  B initialization).
 - `agentworks.vms.hardening`: the hardening steps, and the model for idempotent reconciliation that
   reaches existing VMs via `reinit`.
 - `agentworks.vms.sites`: how a `vm-site` binds a platform to config.

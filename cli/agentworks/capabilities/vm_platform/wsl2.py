@@ -542,9 +542,9 @@ class WSL2Platform(VMPlatform):
         running on. It takes no configuration beyond selecting it: the built-in `wsl2`
         site is all most hosts need.
 
-        Creation runs the generated bootstrap through private local and distro staging,
-        removes both staging files, and returns only after Tailscale reports an IP. A
-        bootstrap failure rolls the new distribution back before it propagates.
+        Creation runs the generated bootstrap as root through `wsl.exe`, joins Tailscale
+        the same way, and returns only after the distribution reports its Tailscale
+        address. A failure rolls the new distribution back before it propagates.
 
         It is supported only on Windows, and reports not-ready everywhere else.
         """,
@@ -812,7 +812,9 @@ class WSL2Platform(VMPlatform):
                     progress=request.progress,
                 )
                 join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
-                tailscale_ip = settle_tailnet_address(run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT)
+                tailnet_address = settle_tailnet_address(
+                    run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT
+                )
                 native_transport = WSL2Transport(distro_name=distro_name, user=admin_username)
             except Exception:
                 # WSL2's error convention holds: the RuntimeErrors from
@@ -829,7 +831,7 @@ class WSL2Platform(VMPlatform):
         return ProvisionResult(
             native_transport=native_transport,
             platform_metadata={"distro_name": distro_name},
-            tailscale_ip=tailscale_ip,
+            tailnet_address=tailnet_address,
         )
 
     def _cleanup_partial_create(self, distro_name: str) -> None:

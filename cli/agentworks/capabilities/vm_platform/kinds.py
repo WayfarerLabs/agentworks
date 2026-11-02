@@ -61,12 +61,12 @@ class _VMPlatformKind:
 
         Contract version 1 receives core's concrete current Debian release, resolves it
         to a platform-owned artifact, and fails before backend mutation when the mapping is
-        missing. A platform completes its Tailscale join before returning transport and backend identity,
-        reports bootstrap through the manager-owned progress sink, and rolls back partial
-        backend state before propagating failure. Core verifies the returned
-        transport before persisting the observed release. A successful result may omit only
-        the Tailscale IP; the VM domain then retries IP discovery and verifies Tailscale SSH
-        without replaying bootstrap.
+        missing. A platform joins Tailscale and reads the node's address through its own
+        root channel before returning the address, transport and backend identity, reports
+        bootstrap through the manager-owned progress sink, and rolls back partial backend
+        state before propagating failure; a node whose address cannot be read is logged
+        out and the create fails. Core validates the address, then verifies the returned
+        transport before persisting the observed release.
 
         Platforms are code, not config: a vm-site selects one by writing its name inside
         `spec.platform`, and the keys allowed beside that name are the platform's own,

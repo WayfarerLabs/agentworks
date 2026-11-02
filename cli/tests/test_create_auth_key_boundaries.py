@@ -229,7 +229,7 @@ def test_the_key_reaches_only_the_join_script(
 
     result = create.run(req)
 
-    assert result.tailscale_ip == "100.64.0.9"
+    assert result.tailnet_address == "100.64.0.9"
     assert create.guest.joins == 1
     assert create.guest.payloads[-2:] == [JOIN_FRAGMENT, READ]
     assert_key_only_in_the_join(create, req, tmp_path, captured_output)

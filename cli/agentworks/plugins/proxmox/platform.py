@@ -402,7 +402,9 @@ class ProxmoxPlatform(VMPlatform):
                 run_as_root = functools.partial(guest_agent.run_as_root, self._api(ctx), node, newid)
                 self._run_bootstrap(run_as_root, request)
                 join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
-                tailscale_ip = settle_tailnet_address(run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT)
+                tailnet_address = settle_tailnet_address(
+                    run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT
+                )
 
                 target = ProxmoxExecTransport(
                     self._api(ctx),
@@ -425,7 +427,7 @@ class ProxmoxPlatform(VMPlatform):
         return ProvisionResult(
             native_transport=target,
             platform_metadata={"vmid": str(newid), "node": node},
-            tailscale_ip=tailscale_ip,
+            tailnet_address=tailnet_address,
         )
 
     def _name_exists(self, node: str, backend_name: str, ctx: RunContext) -> bool:

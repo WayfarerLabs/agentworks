@@ -385,7 +385,7 @@ def test_full_create_retains_secret_free_request_and_joins_once(
     assert [b"AGW_SECRET=" in script for script in guest.scripts] == [False, False, True, False]
     assert guest.payloads == ["true", GCE_READINESS_COMMAND, JOIN_FRAGMENT, "tailscale ip -4"]
     assert all(_TAILSCALE_SENTINEL not in arg for argv in guest.argvs for arg in argv)
-    assert result.tailscale_ip == "100.64.0.9"
+    assert result.tailnet_address == "100.64.0.9"
     assert "203.0.113.19" not in repr(result.platform_metadata)
     assert result.platform_metadata["allow_source_ranges"] == "198.18.0.7/32"
     assert _TAILSCALE_SENTINEL not in repr(progress.mock_calls)

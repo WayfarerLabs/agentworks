@@ -349,7 +349,6 @@ class GCEPlatform(PublicAddressPlatform):
         instance_attempt = InstanceInsertAttempt.create(names.backend_name)
         instance_possible = False
         transport: Transport | None = None
-        tailscale_ip: str | None = None
         ordinary_failure: Exception | None = None
         operator_interrupt: KeyboardInterrupt | None = None
 
@@ -414,7 +413,7 @@ class GCEPlatform(PublicAddressPlatform):
             target = PublicSSH(external_ip, request.admin_username, request.ssh_private_key, request.provisioning_trust)
 
             request.progress.step("Wait for GCE startup marker and join Tailscale through the root channel")
-            tailscale_ip = EphemeralTailscaleBootstrap(
+            tailnet_address = EphemeralTailscaleBootstrap(
                 target.run_as_root,
                 readiness_command=GCE_READINESS_COMMAND,
                 readiness_label=GCE_READINESS_LABEL,
@@ -474,7 +473,7 @@ class GCEPlatform(PublicAddressPlatform):
         return ProvisionResult(
             native_transport=transport,
             platform_metadata=metadata,
-            tailscale_ip=tailscale_ip,
+            tailnet_address=tailnet_address,
         )
 
     def start(self, vm: VMRow, ctx: RunContext) -> None:
