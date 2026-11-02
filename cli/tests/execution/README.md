@@ -32,6 +32,8 @@ returns canned outcomes without ssh.
 - `test_oplog.py`: the operation log record holds a request's shape and never its secrets.
 - `test_root_script.py`: the root-script wrapper over fabricated channel output (the status rule,
   the secret in no field, one dispatch), `read_host_keys`, and `run_process` against a local Bash.
+- `test_run_process.py`: `run_process` over Python children (the deadline, the output limit, a
+  background child, end of file). Marked `windows`, since WSL2's root channel runs only there.
 - `legacy_modules.py`: the six legacy module names, shared by the conftest blocker, the fresh
   interpreter guard and the static import check.
 
