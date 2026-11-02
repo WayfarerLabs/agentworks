@@ -43,7 +43,9 @@ where its VM policy's `-F none` makes them load-bearing. The option sets below t
 `none` values: before 8.5 a `none` is read as a file name relative to the working directory, so a
 file planted there could add a trusted key, which R8 forbids. They name the null device instead,
 which every version accepts, and that holds for scp, whose own `ssh` reads the same options.
-`ssh-keygen`, which import needs, is the one on `PATH`.
+`ssh-keygen`, which import needs, is the one beside the resolved client and never one on `PATH`, the
+rule `ssh-add` follows too (`client.tool_beside_ssh`), so import needs a supported client; a record
+is only useful to a client that can connect.
 
 ## Store paths and alias
 
