@@ -8,7 +8,7 @@ import pytest
 
 from agentworks.artifacts.application import ArtifactSkip
 from agentworks.artifacts.inspection import _integration_metadata
-from agentworks.artifacts.routing import _remediation, inspect_owner_artifacts
+from agentworks.artifacts.routing import inspect_owner_artifacts, owner_remediation
 from agentworks.artifacts.state import UnsupportedArtifactCaptureVersionError, read_captures
 from agentworks.db import AppliedStateKey, VersionedPayload
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState
@@ -97,11 +97,11 @@ def test_native_only_entry_diagnostics_reach_session_and_both_inspection_outputs
     assert view.status == "incomplete" and view.record == record
     warning = " ".join(call.args[0] for call in warnings.call_args_list)
     assert reasons[0] in warning and "agent/agent" in warning
-    assert _remediation(view) in warning
+    assert owner_remediation(view) in warning
     inspected = inspect_artifacts(db, fixture.registry, agent_name="agent")
     metadata = inspected.owners[-1].integrations[0]
     assert metadata.recorded_incomplete_reasons == reasons
-    assert _remediation(view) in metadata.reason
+    assert owner_remediation(view) in metadata.reason
     encoded = inspection_data(inspected)
     decoded = json.loads(json.dumps(encoded))
     assert decoded["owners"][-1]["integrations"][0]["recorded_incomplete_reasons"] == list(reasons)
@@ -131,7 +131,7 @@ def test_unsupported_ancestor_evidence_preserves_domain_version_repair(db, monke
     view = inspect_owner_artifacts(db, fixture.registry, fixture.owners["vm"], "shell")
     metadata = _integration_metadata(fixture.owners["vm"], "shell", view)
     assert view.status == "unavailable"
-    assert view.repair_hint == _remediation(view) == canonical.value.hint
+    assert view.repair_hint == owner_remediation(view) == canonical.value.hint
     assert metadata.reason == view.diagnostic
     assert {item.origin.component for item in result.inputs.items()} == {"agent", "workspace"}
     assert warnings.called

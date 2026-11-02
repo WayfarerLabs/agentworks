@@ -290,7 +290,7 @@ def report_ancestor(view: ArtifactOwnerView, integration_name: str) -> None:
         owner = view.owner
         output.warn(
             f"Setup via {integration_name} at {owner.component}/{owner.name}: {view.reason} "
-            f"{_remediation(view)} Continuing with available captured routes and existing placement."
+            f"{owner_remediation(view)} Continuing with available captured routes and existing placement."
         )
 
 
@@ -420,12 +420,12 @@ def session_inherited_inputs(
                 output.warn(
                     f"Artifact routes via {integration_name} at {view.owner.component}/{view.owner.name} "
                     f"have no readable source in this owner graph: {_brief(unresolved)}. "
-                    f"{_remediation(view)} Unknown content was omitted."
+                    f"{owner_remediation(view)} Unknown content was omitted."
                 )
     return result
 
 
-def _remediation(view: ArtifactOwnerView) -> str:
+def owner_remediation(view: ArtifactOwnerView) -> str:
     if view.repair_hint is not None:
         return view.repair_hint
     conflict = (
@@ -445,7 +445,9 @@ def _remediation(view: ArtifactOwnerView) -> str:
 
 def _require(view: ArtifactOwnerView) -> ArtifactOwnerView:
     if view.status not in ("current", "inactive"):
-        raise StateError(view.reason, entity_kind=view.owner.kind, entity_name=view.owner.name, hint=_remediation(view))
+        raise StateError(
+            view.reason, entity_kind=view.owner.kind, entity_name=view.owner.name, hint=owner_remediation(view)
+        )
     return view
 
 

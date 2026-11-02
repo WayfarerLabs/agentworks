@@ -706,7 +706,7 @@ def test_empty_replacement_capture_keeps_deferral_history_stale_and_reports_unre
     repairs: list[SetupInputs] = []
     monkeypatch.setattr(output, "warn", warnings.append)
     monkeypatch.setattr(
-        "agentworks.artifacts.routing._remediation", lambda view: repairs.append(view.owner) or "fixture repair"
+        "agentworks.artifacts.routing.owner_remediation", lambda view: repairs.append(view.owner) or "fixture repair"
     )
 
     result = session_inherited_inputs(*views, integration_name="shell", report=True)

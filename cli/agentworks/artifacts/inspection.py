@@ -345,7 +345,7 @@ def _artifact_metadata(
 
 
 def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView) -> IntegrationMetadata:
-    from agentworks.artifacts.routing import _remediation, available_deferred_inputs, inactive_destination
+    from agentworks.artifacts.routing import available_deferred_inputs, inactive_destination, owner_remediation
 
     destination = (
         inactive_destination(owner.facet) if name not in owner.activations and owner.component != "session" else None
@@ -379,7 +379,9 @@ def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView
         name,
         name in owner.activations,
         view.status,
-        f"{view.diagnostic} {_remediation(view)}" if view.status in ("incomplete", "retirement") else view.diagnostic,
+        f"{view.diagnostic} {owner_remediation(view)}"
+        if view.status in ("incomplete", "retirement")
+        else view.diagnostic,
         handled,
         deferred,
         placements,
