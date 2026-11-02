@@ -186,49 +186,79 @@ pass the static check, and the package's tests pass with the legacy modules bloc
 
 ## Slice 3: First contact and the VM contract (HLA D10, D11 first half; PR B)
 
-- [ ] Write `contract-lld.md`. It covers:
+- [x] Write [`contract-lld.md`](./contract-lld.md). It covers:
   - the check table and diagnoses;
   - the provisioning bootstrap additions;
   - `tailnet_address`;
   - Phase A on `VMAccess`;
-  - `reachability`, including how its polling meets Debian 13 sshd's `PerSourcePenalties`, which
-    drops every connection from a client after repeated authentication failures;
-  - the operation log.
+  - `reachability`, including how it ends a wait at an authentication failure instead of polling it
+    into Debian 13 sshd's `PerSourcePenalties`;
+  - the operation log record;
+  - the vm-platform `contract_version` bump.
 - [ ] Add python3 to `PROVISIONING_PACKAGES`, which every platform's bootstrap already installs
       (`lima.py:391`, `wsl2_bootstrap.py:65`, and the AWS, Azure, GCP and Proxmox platforms).
-- [ ] Make `ProvisionResult.tailnet_address` required on every platform, with each platform retrying
-      the address read after a successful join so the key is never sent twice, and logging the node
-      out over the provisioning channel when the reads are exhausted (HLA D11), and delete
-      `ProvisionResult.native_transport` and Phase A's native `tailscale ip -4` fallback.
-- [ ] Move Phase A and release probing (`vms/manager/release.py`) onto `VMAccess`: the first
-      connection in Enroll mode, then the base checks (including Debian attestation), then
-      `reachability.wait` after `post_tailscale_ready`. Hand Phase B a legacy target as today.
-- [ ] Implement `reachability.py` and the `observation` request option it polls with.
-- [ ] Implement `oplog.py` with Phase A as its first writer: the `LOG_DIR` constant, `OperationLog`
-      and its redaction, and move the old `LOG_DIR` readers (`doctor_state.py`,
-      `vms/manager/lifecycle.py`, `vms/manager/_helpers.py`, `vms/manager/power.py`, `vm logs`) and
-      their test patch sites to it.
-- [ ] Add elevation, with its conformance vectors, for Phase A, its first consumer, including agent
-      elevation refused before dispatch and an elevated attach refused, and prove an elevated
-      request on a fresh, never-initialized Debian 12 and 13 VM.
-- [ ] Add `vms/contract.py`. Run the base checks first at reinit and the initialized checks at the
-      end of Phase B, moving slice 2's reinit pam_env warning into the base checks. Add
-      `vms/contract.py` to the package guard (HLA D14).
+- [ ] Make `ProvisionResult.tailnet_address` required on every platform, and delete
+      `ProvisionResult.native_transport` and Phase A's native `tailscale ip -4` fallback:
+  - all six platforms settle the address through one shared helper, `settle_tailnet_address`, over
+    the provisioning transport they hold, retrying so the key is never sent twice and logging the
+    node out over that transport when the reads are exhausted (HLA D11);
+  - the key-bearing bootstrap script only joins, and `parse_bootstrap_output` stops requiring an
+    address;
+  - `parse_tailnet_address` validates each read and core validates the value again before recording
+    it;
+  - the provisioning trust file's lifetime narrows to the platform's `create` call.
+- [ ] Bump the vm-platform `contract_version` to 2 once, here, with slice 4 landing under the same
+      number in the same PR: the kind descriptor, the six platforms, the tests that assert it and
+      every "version 1" mention of this kind.
+- [ ] Add `UnknownReason.AUTH_FAILED` and its classifier row, typed from
+      `Permission denied     (publickey` in the client log, and widen the passphrase hint to
+      `CONNECTION` or `AUTH_FAILED`.
+- [ ] Implement `reachability.py`: `wait(access, *, wording)` polls a fixed `true` probe, polls only
+      `CONNECTION`, `TRUNCATED` and `DEADLINE`, and raises every other outcome at once.
+- [ ] Move Phase A and release probing onto `VMAccess`:
+  - Phase A gets its own module, `vms/initializer/phase_a.py`, holding the fail-closed span and the
+    sequence: record the address, first contact in Enroll mode through
+    `execution.enrollment_access`, the enrollment post-condition, then the base checks including
+    Debian attestation, then `reachability.wait` after `post_tailscale_ready`. `driver.bootstrap_vm`
+    stays as the thin caller that hands Phase B a legacy target as today;
+  - `COMPLETE` is written after the contract passes, and an interrupt before then marks the VM
+    `FAILED` with delete guidance;
+  - `vms/manager/release.py` splits into `contract.observe_release` and `reconcile_release`,
+    `vm confirm-release` runs on `VMAccess`, and `probe_debian_release` is deleted;
+  - `vms/contract.py`, `vms/initializer/phase_a.py` and `vms/manager/release.py` join the static
+    legacy-import check.
+- [ ] Implement the operation log record: `oplog.format_record`, `VMAccess`'s optional `log`
+      callable and `SSHLogger.record`, with redaction left at the logger's one sink. `LOG_DIR`, its
+      readers and `SSHLogger` stay until slice 8.
+- [ ] Add elevation, with its conformance vectors (E1, E2, E4 and E6), for the contract's sudo
+      check, its first consumer: `elevated` on `BoundedRequestOptions`, `stage0_command(elevated=)`,
+      and `PermissionDenied` for an agent-bound access, derived from the access's identity. An
+      elevated attach is excluded by the types. Prove an elevated request on a fresh,
+      never-initialized Debian 12 and 13 VM.
+- [ ] Add `vms/contract.py`: the `(id, severity, probe)` table, the script protocol and its parser,
+      `observe_release`, `check_base` and `enforce`. Run the base checks first at reinit, moving
+      slice 2's reinit pam_env warning into them, and add `vms/contract.py` to the package guard
+      (HLA D14).
 - [ ] Amend ADR 0025.
 - [ ] Tests:
-  - a VM failing a base check is not reported ready;
-  - each diagnosis names reinit or recreation;
+  - a VM failing a base check is not reported ready, and a warning-only report does not fail;
   - a platform that cannot report the address logs the node out over its provisioning channel and
     fails create, without a second join, and names the node when the logout fails;
-  - a VM with pam_env settings gets a warning naming the file and still passes the contract.
+  - a VM with pam_env settings gets a warning naming the file and still passes the contract;
+  - Phase A marks the VM `FAILED` and secures it on a failure or an interrupt before the contract
+    passes, and leaves `COMPLETE` once it has;
+  - `reachability.wait` stops at the first authentication failure.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
-      issues and fix history), and add incident inventory rows before deleting anything.
-- [ ] Collateral: platform author documentation for `tailnet_address`, and the command reference for
-      create and reinit diagnoses.
+      issues and fix history); rows I22 to I28 are in the HLA inventory.
+- [ ] Collateral: platform author documentation for `tailnet_address` and contract version 2, and
+      the command reference for create and reinit diagnoses.
 - [ ] Live evidence: create and reinit on every platform from at least one workstation each.
 
-Definition of done: core's work on a new VM starts over SSH at the reported address, and core's
-first operation there is the base contract check.
+Slice 3 does not merge without slice 4: between them a VM without python3 cannot be reinitialized
+and the `VMNotReady` hint is circular, and no stopgap wording is added in between.
+
+Definition of done: core's work on a new VM starts over SSH at the reported address, its first
+connection enrolls the host key, and the base contract check follows, release first.
 
 ## Slice 4: Recovery and the platform surface (HLA D11 second half; PR B)
 
@@ -266,6 +296,8 @@ first operation there is the base contract check.
       reconnect, and fail with a hint naming `agw vm recover` when it does not, as the operator
       ruled on 2026-10-31 and 2026-11-01. Both waits use `reachability.wait`. Delete `vm start`'s
       rejoin and its conditional auth-key read (`vms/manager/power.py:83-112`).
+- [ ] Delete the legacy `TailscaleWait` and `wait_for_reconnect` (`transports/__init__.py:248`,
+      `:279`) with their last callers, which move to `reachability.wait` in this slice.
 - [ ] Add `agw vm recover <vm>`: host-key re-establishment first when the record is missing, then
       access repair (installing python3 when it is missing), rejoin and SSH verification. Repoint
       `VMNotReady` and `TrustMissing` guidance at it.
@@ -309,6 +341,8 @@ no platform's private access imports a legacy module.
   - cleanup.
 - [ ] Implement `PythonProgram`, `files.py` and the file program, finite stdin for `run` with
       `Bytes(data, sensitive=)`, and `RunContext.admin_access()` and `agent_access()`.
+- [ ] Make the operation log keep the streams of a request with a sensitive stdin out entirely (HLA
+      D13), now that `Bytes(data, sensitive=)` gives it a first caller.
 - [ ] Migrate:
   - artifact publication and session artifacts;
   - native probing;
@@ -356,6 +390,9 @@ Definition of done: create and reinit run entirely on the new transport.
 ## Slice 7: Workspaces, sessions and backup (HLA D7; PR C)
 
 - [ ] Implement `detached.py`, and the `FromFile` and `ToFile` input and sink.
+- [ ] Add the `observation` request option (a caller's declaration that a request only reads, so it
+      may be dispatched again after `NotDelivered` or `Unknown`) with its first callers,
+      `detached.observe` and the sessions' status probes (HLA D5).
 - [ ] Migrate:
   - workspace backends, rehome and repair;
   - workspace copy, using `run` over an opaque tar stream;
@@ -397,6 +434,11 @@ Definition of done: no workspace, session or backup module imports a legacy modu
 - [ ] Audit the legacy modules this slice deletes for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows for anything not yet recorded.
 - [ ] Confirm that every incident inventory row has recorded evidence.
+- [ ] Move `LOG_DIR` and the operation log's readers (`doctor_state.py`, `vms/manager/lifecycle.py`,
+      `vms/manager/_helpers.py`, `vms/manager/power.py`, `vm logs`) and their test patch sites to
+      `execution/oplog.py` as `SSHLogger` is deleted, matching log files by the exact
+      `<vm>-<timestamp>-<stem>.log` shape so VM `dev` never matches VM `dev-2`'s logs, and update
+      the `LOG_DIR` mention in the `transports/ssh.py` docstring.
 - [ ] Delete the six legacy modules with their tests:
   - `agentworks.transports`
   - `agentworks.ssh`

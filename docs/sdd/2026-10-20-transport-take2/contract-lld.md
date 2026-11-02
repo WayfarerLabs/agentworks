@@ -346,7 +346,7 @@ Any `Exception` in steps 1 to 5's span takes the existing arm: provisioning `FAI
 
 **Status and interrupts.** `COMPLETE` is now written after the contract passes, not before the first
 connection (`driver.py:396-404`). An interrupt that lands before then finds the row `IN_PROGRESS`;
-the `except BaseException` arm (`driver.py:193-211`) secures the VM as today and now also marks the
+the `except BaseException` arm (`driver.py:193-210`) secures the VM as today and now also marks the
 row `FAILED` unless `COMPLETE` has been written (it is entered only after step 1 sets `IN_PROGRESS`,
 so a `PENDING` row cannot reach it). A VM that was never attested is retained as failed, as D9 and
 incident row I26 require, and the ordinary-command gates block only a `FAILED` row
@@ -388,7 +388,7 @@ contract.enforce(report, name)
 ```
 
 (`db.list_agents` is `db/database.py:642`.) Release drift refuses before other findings are shown
-(it names `vm confirm-release`, `release.py:30-36`), then the legacy release warning, then warnings
+(it names `vm confirm-release`, `release.py:28-35`), then the legacy release warning, then warnings
 and failures. A reinit that finds a failure stops before Phase B.
 
 ## The VM contract
@@ -673,12 +673,12 @@ incident inventory (`hla.md:748-778`; I21 is the last row today):
 
 | Row | Behavior                                                                                                                                                                                                     | Re-proved in |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------ |
-| I22 | An operator interrupt during Phase A still closes the kept VM's provisioning access before it propagates (`driver.py:193-211`)                                                                               | 3            |
+| I22 | An operator interrupt during Phase A still closes the kept VM's provisioning access before it propagates (`driver.py:193-210`)                                                                               | 3            |
 | I23 | A first connection that left no key makes create fail where the cause is known (`driver.py:438-445`)                                                                                                         | 3            |
 | I24 | The auth key is joined exactly once: a failed address read never causes a second join, and now logs the node out (`tailscale_join.py:65-71`, `7307e2f60`)                                                    | 3            |
 | I25 | The platform's availability hold spans Phase A and Phase B (WSL2 idle shutdown) (`lifecycle.py:643`)                                                                                                         | 3            |
 | I26 | A release the guest reports is attested by core, never taken from the platform; an unattested or mismatched VM is retained failed with delete guidance, never recorded (`93aca2cfb`, `lifecycle.py:599-626`) | 3            |
-| I27 | Ordinary operations refuse live release drift; adoption is the explicit `confirm-release` (`release.py:30-36`)                                                                                               | 3            |
+| I27 | Ordinary operations refuse live release drift; adoption is the explicit `confirm-release` (`release.py:28-35`)                                                                                               | 3            |
 | I28 | A log's redaction set is complete before its first write, and no secret is retained in raw or shell-quoted form (`a38e49489`, `ssh.py:127-137`)                                                              | 3            |
 
 I22 and I26 are re-proved by the Phase A interrupt and failure tests; I25 is the WSL2 create with
@@ -728,8 +728,10 @@ None.
 
 ## Amendments
 
-The other SDD files are not edited by this slice's design. They need these changes before
-implementation, for the owners to apply:
+These changes were folded into `hla.md`, `plan.md`, `execution-lld.md` and `trust-lld.md`, which now
+describe the result; the list is kept as the record of what changed. One correction was made in the
+fold: the `observation` option lands in slice 7, where `detached.observe` and the sessions' status
+probes (its first callers) are, not slice 5 as the first draft of this list said.
 
 - **HLA D3.** The envelope does not hold the elevation choice; elevation is the `sudo -n` prefix of
   the stage 0 command (D4 already says so). Remove it from the envelope's field list.
@@ -739,7 +741,7 @@ implementation, for the owners to apply:
   `BoundedRequestOptions`, not `LoginShell`), with no runtime refusal and no test of the types.
 - **HLA D5.** `observation` is not in the vocabulary in slice 3; the "Common options" row and the
   "Retries" paragraph describe it as landing with its first caller. `VMAccess` never retries, and
-  the one retry loop in slice 3 is `reachability.wait`, polling a fixed probe. Slice 5 adds the
+  the one retry loop in slice 3 is `reachability.wait`, polling a fixed probe. Slice 7 adds the
   option when `detached.observe` needs it.
 - **HLA D8.** `reachability.wait(access, *, wording)` returns `bool`, polls a fixed probe, polls
   only `CONNECTION`, `TRUNCATED` and `DEADLINE`, raises everything else at once (including
@@ -791,7 +793,8 @@ implementation, for the owners to apply:
     names recreation, so it asserts nothing.
   - Add: slice 3 does not merge without slice 4, with no stopgap hint wording in between.
   - Slice 4 deletes the legacy `TailscaleWait` and `wait_for_reconnect` with their last callers.
-  - Slice 5 adds the operation log's handling of a sensitive stdin and the `observation` option.
+  - Slice 5 adds the operation log's handling of a sensitive stdin; slice 7 adds the `observation`
+    option.
   - Slice 8 moves `LOG_DIR` and the reader consolidation, and edits the `transports/ssh.py:8`
     docstring.
 - **execution-lld.md.** The classifier table gains `AUTH_FAILED` (a 255 with no start marker whose
@@ -800,7 +803,7 @@ implementation, for the owners to apply:
   `VMAccess` takes an identity, a trust mode and a log (the access-object section,
   `execution-lld.md:160-165`, says its trust is always VM and Enroll "arrives with slice 3"); "Left
   to the first consumer" is resolved for `elevated`, Enroll, `reachability` and the operation log,
-  and `observation` moves to slice 5; the use_pty note is answered above.
+  and `observation` moves to slice 7; the use_pty note is answered above.
 - **trust-lld.md.** "Clouds before enrollment" and the test that the provisioning file "survives
   into core's post-create use" are obsolete: the file is scoped to `create`. Phase A's enrollment
   step list is replaced by the sequence above, and "Enroll mode is reachable only from create" is

@@ -25,16 +25,19 @@ slice 2 consumer uses these, so they are specified only where a later slice's co
 them:
 
 - `elevated` (the `sudo -n` prefix) with `PermissionDenied`, and the base checks that use them
-  (slice 3). Slice 3 must settle one interaction: a sudoers `use_pty` default would turn descriptors
-  1 and 2 into a pty, which agw-launch's stream check (below) refuses;
-- `observation` and retry, with `reachability` (slice 3);
-- the operation log, `oplog.py` with `LOG_DIR` and `OperationLog` (slice 3, with create's Phase A,
-  its first writer). Slice 2 leaves `ssh.LOG_DIR` and its readers alone;
+  (slice 3, [contract-lld.md](./contract-lld.md)). A sudoers `use_pty` default has no effect when
+  sudo has no terminal, and every elevated request is `ssh -T`, so the stream check (below) is not
+  turned against a pty;
+- `reachability` (slice 3, polling a fixed probe) and the `observation` option with the retry it
+  permits (slice 7, with `detached.observe`);
+- the operation log: `oplog.format_record` and `SSHLogger.record` (slice 3, with create's Phase A,
+  its first caller). `ssh.LOG_DIR`, its readers and `SSHLogger` stay until slice 8;
 - `PythonProgram`, `Script.interactive` and `FeatureUnavailable` (slice 4 and later). Measured for
   that slice: `dash -i FILE` prints a prompt to stderr per line it reads from the file, so an
   interactive script needs the HLA's startup shell that execs the interpreter, not `-i FILE`;
 - stdin and output sinks beyond the operator's stdin for `stream` (slice 5 and later), the Enroll
-  trust mode (slice 3), the host policy (slice 4) and `attach`'s `clear_screen_on_exit` (slice 7).
+  trust mode (slice 3, `enrollment_access`), the host policy (slice 4) and `attach`'s
+  `clear_screen_on_exit` (slice 7).
 
 ## Module layout
 
@@ -133,7 +136,7 @@ by the error table below; `run(check=True)` is that plus `CommandFailed` for a n
 ```text
 Completed(status)
 NotDelivered(reason)   PYTHON_MISSING | STDLIB_MISSING | LAUNCHER_FAILED | REFUSED(code)
-Unknown(reason)        CONNECTION | HOST_KEY | TRUNCATED | DEADLINE | OUTPUT_LIMIT
+Unknown(reason)        CONNECTION | HOST_KEY | AUTH_FAILED | TRUNCATED | DEADLINE | OUTPUT_LIMIT
 ```
 
 - **`access.run(request, *, check=False) -> Result`.** The client closes ssh's stdin right after the
@@ -160,9 +163,12 @@ Unknown(reason)        CONNECTION | HOST_KEY | TRUNCATED | DEADLINE | OUTPUT_LIM
 `execution.vm_access(vm, config, identity) -> VMAccess`, with `identity` either `Admin()` or
 `Agent(name, linux_user)`. Construction copies the VM name, its tailnet address, the SSH user
 (`admin_username` or the agent's `linux_user`) and the identity file path, and nothing else (R9): no
-key is read, no trust file is opened and nothing is spawned. Its trust is always
-`TrustBinding(TrustMode.VM, vm.name)`; Enroll arrives with slice 3. The operations are `run`,
-`stream`, `attach` and `forward`.
+key is read, no trust file is opened and nothing is spawned. It also holds the identity, which
+refuses an elevated request from an agent before dispatch (`PermissionDenied`), and an optional
+`log` callable that `run` calls with each request and its result. Its trust is
+`TrustBinding(TrustMode.VM, vm.name)`, except the access that `execution.enrollment_access` builds
+for create's first contact, which is Enroll. The operations are `run`, `stream`, `attach` and
+`forward`.
 
 Each operation runs in this order, so everything before the spawn raises with nothing dispatched:
 `resolve_ssh()` (`ClientUnsupported`), encode the request (`ValidationError`), build the options
@@ -232,7 +238,8 @@ as `-o` (the proof's list at `connection.py:109-153`, cut to what `-F none` leav
   quotes request bytes. The terminal half keeps ssh's diagnostics on the operator's terminal, as
   today. A live cell confirms that `Host key verification failed` and the authentication and
   connection errors land in the file on 8.5, 9.x and Win32-OpenSSH. The client reads this log, to
-  type `Host key verification failed` and to show its last 20 lines in errors.
+  type `Host key verification failed` and `Permission denied (publickey` and to show its last 20
+  lines in errors.
 
 `build_argv` takes the client log path and a `verbose` flag. `verbose` replaces `-E` with `-v` and
 is accepted only for a forward, since in a pipe mode ssh's debug lines would reach the guest's
@@ -427,18 +434,18 @@ for `cwd` and `handover`. The shell convention is 127 not found and 126 found bu
 
 The classifier combines both filters with ssh's own exit status:
 
-| Evidence                                                          | Completion                                                                                                      |
-| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `end` on stdout and `exit N` on stderr                            | `Completed(N)`; ssh's own status is ignored                                                                     |
-| stdout abandoned by a departed consumer, `exit N` on stderr       | `Completed(N)`                                                                                                  |
-| A departed consumer and no trailer                                | `Unknown(CONSUMER_LEFT)`; `stream` reports 141                                                                  |
-| `end` on stdout and `refused CODE` on stderr                      | `NotDelivered(REFUSED, CODE)`                                                                                   |
-| No start marker, ssh exit 127                                     | `NotDelivered(PYTHON_MISSING)`                                                                                  |
-| No start marker, ssh exit `STDLIB_MISSING_STATUS`                 | `NotDelivered(STDLIB_MISSING)`                                                                                  |
-| No start marker, ssh exit 0 to 254 otherwise                      | `NotDelivered(LAUNCHER_FAILED)`                                                                                 |
-| No start marker, ssh exit 255, a signal, or a status above 255    | `Unknown(CONNECTION)`, or `Unknown(HOST_KEY)` when the client log holds `Host key verification failed` on a 255 |
-| A start marker, but no `end` or no trailer at exit or end of file | `Unknown(TRUNCATED)`                                                                                            |
-| Deadline reached, or a stream over the pump constant              | `Unknown(DEADLINE)`, `Unknown(OUTPUT_LIMIT)`                                                                    |
+| Evidence                                                          | Completion                                                                                                                                                                                                         |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `end` on stdout and `exit N` on stderr                            | `Completed(N)`; ssh's own status is ignored                                                                                                                                                                        |
+| stdout abandoned by a departed consumer, `exit N` on stderr       | `Completed(N)`                                                                                                                                                                                                     |
+| A departed consumer and no trailer                                | `Unknown(CONSUMER_LEFT)`; `stream` reports 141                                                                                                                                                                     |
+| `end` on stdout and `refused CODE` on stderr                      | `NotDelivered(REFUSED, CODE)`                                                                                                                                                                                      |
+| No start marker, ssh exit 127                                     | `NotDelivered(PYTHON_MISSING)`                                                                                                                                                                                     |
+| No start marker, ssh exit `STDLIB_MISSING_STATUS`                 | `NotDelivered(STDLIB_MISSING)`                                                                                                                                                                                     |
+| No start marker, ssh exit 0 to 254 otherwise                      | `NotDelivered(LAUNCHER_FAILED)`                                                                                                                                                                                    |
+| No start marker, ssh exit 255, a signal, or a status above 255    | `Unknown(CONNECTION)`; `Unknown(HOST_KEY)` when the client log holds `Host key verification failed` on a 255; `Unknown(AUTH_FAILED)` when it holds `Permission denied (publickey` on a 255 and no host-key failure |
+| A start marker, but no `end` or no trailer at exit or end of file | `Unknown(TRUNCATED)`                                                                                                                                                                                               |
+| Deadline reached, or a stream over the pump constant              | `Unknown(DEADLINE)`, `Unknown(OUTPUT_LIMIT)`                                                                                                                                                                       |
 
 - **Ending the client.** Once both streams are done the client closes ssh's stdin, waits up to one
   second for a natural exit and kills it. It never waits for end of file or on a timer, so a
@@ -521,20 +528,20 @@ above and waits for the client, polling `Popen.wait(timeout=0.2)` so Ctrl-C is d
 
 ## Errors
 
-| Error                 | Kind                | Raised for                                                                                              | PR A hint                                                                   |
-| --------------------- | ------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `ClientUnsupported`   | `ConfigError`       | No acceptable OpenSSH, or the resolved client fails to start                                            | The install guidance in the message                                         |
-| `VMNotReady`          | `StateError`        | `NotDelivered(PYTHON_MISSING)` (an unelevated 127) and `NotDelivered(STDLIB_MISSING)`                   | `agw vm reinit <vm>`, whose Phase A still runs without python3              |
-| `TrustMismatch`       | `StateError`        | `Unknown(HOST_KEY)`, and the forward's token                                                            | Verify the new key, remove the store file, `import-host-keys --known-hosts` |
-| `RequestRefused`      | `StateError`        | `NotDelivered(REFUSED)` under `run` and `attach`; names the code                                        | Fix the working directory or the command                                    |
-| `ExecutionIncomplete` | `ConnectivityError` | Any other `NotDelivered` or `Unknown`; carries the `Result`, names which, and shows the client log tail | A `NotDelivered` command did not start; an `Unknown` one may have run       |
-| `CommandFailed`       | `ExternalError`     | `check=True` with a non-zero status; message has the status, never stream text                          | none                                                                        |
+| Error                 | Kind                 | Raised for                                                                                                                                                                                   | PR A hint                                                                   |
+| --------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `ClientUnsupported`   | `ConfigError`        | No acceptable OpenSSH, or the resolved client fails to start                                                                                                                                 | The install guidance in the message                                         |
+| `VMNotReady`          | `StateError`         | `NotDelivered(PYTHON_MISSING)` (an unelevated 127) and `NotDelivered(STDLIB_MISSING)`                                                                                                        | `agw vm reinit <vm>`, whose Phase A still runs without python3              |
+| `TrustMismatch`       | `StateError`         | `Unknown(HOST_KEY)`, and the forward's token                                                                                                                                                 | Verify the new key, remove the store file, `import-host-keys --known-hosts` |
+| `RequestRefused`      | `StateError`         | `NotDelivered(REFUSED)` under `run` and `attach`; names the code                                                                                                                             | Fix the working directory or the command                                    |
+| `ExecutionIncomplete` | `ConnectivityError`  | Any other `NotDelivered` or `Unknown`; carries the `Result`, names which, and shows the client log tail. An `AUTH_FAILED` says the VM did not accept the configured key and that nothing ran | A `NotDelivered` command did not start; an `Unknown` one may have run       |
+| `PermissionDenied`    | `AuthorizationError` | An elevated request on an agent-bound access, before dispatch; names the VM and account, never the request                                                                                   | none                                                                        |
+| `CommandFailed`       | `ExternalError`      | `check=True` with a non-zero status; message has the status, never stream text                                                                                                               | none                                                                        |
 
 Errors may show the client log's tail. `TrustMismatch`'s hint names the manual path, since import
 never rewrites an existing record (`trust-lld.md`) and recovery re-establishes only a missing one
-(HLA D4). `TrustMissing` already exists (`errors.py`). `PermissionDenied` and `FeatureUnavailable`
-land with their first consumers. No error message, `repr` or hint holds a stream, an environment
-value or script text.
+(HLA D4). `TrustMissing` already exists (`errors.py`). `FeatureUnavailable` lands with its first
+consumer. No error message, `repr` or hint holds a stream, an environment value or script text.
 
 ## The migrated commands
 
@@ -586,7 +593,8 @@ the package attribute so one patch reaches every manager.
   - An encrypted key the default agent does not hold can no longer prompt for its passphrase on
     `vm shell` and `agent shell`, since every connection runs with `BatchMode=yes`. Accepted on
     2026-11-01; a connection that fails before the start marker with a passphrase-protected key
-    hints at the agent (HLA D2).
+    hints at the agent (HLA D2), whether the failure reads as a plain connection failure or as an
+    authentication failure.
   - `/etc/environment` and other `pam_env` variables no longer reach the payload, which gets only
     the rebuilt environment. Accepted on 2026-11-01; reinit warns when a VM has pam_env settings
     (HLA D10).
