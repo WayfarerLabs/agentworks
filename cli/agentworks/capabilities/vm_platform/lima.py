@@ -187,9 +187,11 @@ class LimaPlatform(VMPlatform):
         runs `limactl` on that host over SSH, so the VMs live on a shared box and
         only the local OpenSSH client is needed here.
 
-        Creation retains a credential-free provision script, then sends the required
-        Tailscale key through one fixed guest command on stdin. It returns only after
-        the join succeeds, or raises after removing the partial instance.
+        Creation retains a credential-free provision script, then joins Tailscale through
+        `limactl shell` as root, with the auth key only on the join script's stdin, and
+        reads the VM's Tailscale address the same way. It returns only after the address
+        is read, or raises after removing the partial instance; an address that cannot be
+        read logs the node out first.
 
         Local sites need `limactl` installed here and report not-ready without it.
         Remote sites need `ssh` installed locally.

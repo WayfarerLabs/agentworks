@@ -103,8 +103,10 @@ class AzureVMPlatform(PublicAddressPlatform):
         site: a rejected client secret then fails the command rather than falling back.
 
         Azure retains a credential-free bootstrap payload. After cloud-init is ready,
-        creation sends the required Tailscale key through one fixed SSH command on stdin
-        and returns only after join succeeds. Failure rolls the new Azure resources back.
+        creation joins Tailscale over SSH to the public address as root, with the auth key
+        only on the join script's stdin, and returns only after it reads the VM's Tailscale
+        address; an address that cannot be read logs the node out. Failure rolls the new
+        Azure resources back.
 
         Ships as the opt-in `azure` system plugin, so a site stays not-ready until
         `[plugins] system` lists it.

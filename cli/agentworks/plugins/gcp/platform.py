@@ -194,9 +194,11 @@ class GCEPlatform(PublicAddressPlatform):
         owned priority-1 all-ingress deny remains for the VM lifetime.
 
         The startup metadata is credential-free. Agentworks waits for its
-        durable success marker, then sends the Tailscale auth key once through
-        fixed-command stdin. The external IPv4 remains attached for outbound
-        access but is read live and never persisted.
+        durable success marker, then joins Tailscale once over SSH as root, with
+        the auth key only on the join script's stdin, and reads the VM's
+        Tailscale address; an address that cannot be read logs the node out and
+        fails the create. The external IPv4 remains attached for outbound access
+        but is read live and never persisted.
 
         A definitive zonal instance-capacity failure names the selected zone.
         Retry later or select another compatible zone. A global capacity

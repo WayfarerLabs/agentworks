@@ -133,10 +133,12 @@ class EC2Platform(PublicAddressPlatform):
         refuses a different account, and confirms the recorded security group's
         ownership before terminating the instance.
 
-        EC2 retains credential-free UserData. After cloud-init is ready, creation sends
-        the required Tailscale key through one fixed SSH command on stdin and returns
-        only after join succeeds. Failure terminates the new instance and security group;
-        an unconfirmed cleanup retains an addressable failed VM row.
+        EC2 retains credential-free UserData. After cloud-init is ready, creation joins
+        Tailscale over SSH to the public address as root, with the auth key only on the
+        join script's stdin, and returns only after it reads the VM's Tailscale address;
+        an address that cannot be read logs the node out. Failure terminates the new
+        instance and security group; an unconfirmed cleanup retains an addressable failed
+        VM row.
 
         Ships as the opt-in `aws` system plugin, so a site stays not-ready until
         `[plugins] system` lists it.

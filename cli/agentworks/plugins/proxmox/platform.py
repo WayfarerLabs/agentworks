@@ -137,11 +137,12 @@ class ProxmoxPlatform(VMPlatform):
         bootstrap and recovery. Interactive native shell remains unavailable; use the
         Proxmox web UI's serial console for manual access.
 
-        Creation passes the required Tailscale key through a private guest-agent staging
-        file and verifies removal of that file before returning the QGA execution transport.
-        Core checks the live Debian release through the returned transport. A bootstrap
-        failure rolls the cloned VM back; a later core mismatch retains an addressable failed
-        VM for explicit deletion.
+        Creation runs the bootstrap, the Tailscale join and the address read as root through
+        QEMU Guest Agent, with the auth key only on the join script's stdin. An address
+        that cannot be read logs the node out. Core checks the live Debian release through
+        the returned QGA execution transport. A bootstrap, join or address failure rolls the
+        cloned VM back; a later core mismatch retains an addressable failed VM for explicit
+        deletion.
 
         Ships as the opt-in `proxmox` system plugin, so a site stays not-ready until
         `[plugins] system` lists it.

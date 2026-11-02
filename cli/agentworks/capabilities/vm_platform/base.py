@@ -295,9 +295,12 @@ class VMPlatform(Capability):
           the exact backend identifier in ``platform_metadata`` so every
           later operation targets the created resource.
         - Create the resource(s).
-        - Complete create-time bootstrap, including the Tailscale join, before
-          returning. A successful join may return without an IP when discovery
-          failed; the manager retries only ``tailscale ip -4`` in that case.
+        - Complete create-time bootstrap, then join Tailscale once with
+          ``tailscale_join.join_tailscale`` (the clouds through
+          ``complete_cloud_bootstrap``) and read the node's address with
+          ``settle_tailnet_address`` over :meth:`run_as_root`, all inside the
+          rollback window: an address that cannot be read logs the node out
+          and fails create like any other step.
         - Roll back partial backend state before letting a failure OR
           an operator interrupt (``KeyboardInterrupt``) propagate: the
           caller's unwind deletes only the DB row, so any backend
@@ -307,11 +310,12 @@ class VMPlatform(Capability):
           If a platform cannot confirm that rollback completed, it raises
           ``RetainedProvisioningError`` with the identifiers needed by its
           ``delete`` op. Core persists them and retains the failed VM row.
-        - Return ``ProvisionResult`` with ``platform_metadata``
-          capturing whatever identifiers subsequent ops need, without
-          relying on live configuration (e.g. proxmox records the node
-          alongside the vmid), and a transport through which core can attest
-          the live Debian release.
+        - Return ``ProvisionResult`` with the required ``tailnet_address``
+          the settle read, ``platform_metadata`` capturing whatever
+          identifiers subsequent ops need, without relying on live
+          configuration (e.g. proxmox records the node alongside the vmid),
+          and a transport through which core can attest the live Debian
+          release.
         """
 
     @idempotent_op
@@ -443,9 +447,10 @@ class VMPlatform(Capability):
         """
 
     def secure_failed_vm(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
-        """Hook called when a created VM is kept after Phase A fails:
-        post-create Tailscale verification died (the row is marked FAILED) or
-        the operator interrupted verification (the row keeps its in-flight
+        """Hook called when a created VM is kept after Phase A fails: core
+        refused the returned ``tailnet_address``, post-create Tailscale
+        verification died (the row is marked FAILED in either case), or the
+        operator interrupted verification (the row keeps its in-flight
         status), and the VM is kept for debugging rather than rolled back.
 
         Create-time bootstrap failures never reach this hook. They raise from
