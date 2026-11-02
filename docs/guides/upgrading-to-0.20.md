@@ -44,22 +44,30 @@ When `known_hosts` has no entry for a VM, bring it in with a file you have check
 3. Compare the file's fingerprints (`ssh-keygen -lf FILE`) with the ones you read in step 1.
 4. Run `agw vm import-host-keys NAME --known-hosts FILE`.
 
-The scanned file is trusted as given, so do not skip the comparison.
+The scanned file is trusted as given, so do not skip the comparison. Each line's host field must be
+the VM's tailnet address, which is what `ssh-keyscan` prints when you scan that address. A stopped
+VM has to be started with the platform's own tools first. On Windows PowerShell 5.1, `>` writes
+UTF-16, which `ssh-keygen` cannot read, so write the file with
+`ssh-keyscan ADDRESS | Out-File -Encoding ascii FILE`.
 
 A VM whose creation failed before its first connection has no record either. Delete it with
-`agw vm delete NAME` and create it again.
+`agw vm delete NAME` and create it again. A cloud VM whose create failed after it joined Tailscale
+but before its key was recorded has no record, and deleting it cannot log its node out of Tailscale,
+so remove the node in the Tailscale admin console. A VM that cannot rejoin Tailscale cannot be
+imported until it can, so recreate it.
 
 ## What fails until the import runs
 
 Commands that act on a VM refuse it; commands that only describe or list VMs report the missing
 record for that VM and carry on. Every command that reaches a VM over SSH refuses a VM with no
 record, before it starts the VM, resolves a secret or changes anything, and prints a hint that names
-the import. That covers `vm shell`, `vm exec`, `vm reinit`, `vm backup`, `vm port-forward`,
-`vm start`, `vm rekey`, and the workspace, agent, session and console commands, including the start
-of a stopped VM that any of them would trigger. `vm start` and `vm rekey` check first so they never
-boot the VM or spend a Tailscale auth key. `vm describe`, `session describe` and the status listings
-that span several VMs warn that the VM has no record, leave out what they would have read over SSH,
-and carry on.
+the import; the exception is `vm shell --platform` on a cloud VM (AWS, Azure, GCP), which resolves
+credentials and opens its temporary network rule first and then refuses. That covers `vm shell`,
+`vm exec`, `vm reinit`, `vm backup`, `vm port-forward`, `vm start`, `vm rekey`, and the workspace,
+agent, session and console commands, including the start of a stopped VM that any of them would
+trigger. `vm start` and `vm rekey` check first so they never boot the VM or spend a Tailscale auth
+key. `vm describe`, `session describe` and the status listings that span several VMs warn that the
+VM has no record, leave out what they would have read over SSH, and carry on.
 
 `vm delete` still works without a record, because deleting is what you do with a broken VM. It
 cannot reach a cloud VM (AWS, Azure, GCP) to log its node out of Tailscale, though, so that step is
