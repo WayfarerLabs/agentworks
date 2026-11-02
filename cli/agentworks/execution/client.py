@@ -150,13 +150,10 @@ def identity_is_loaded(ssh: SSHClient, identity_file: Path) -> bool:
     public_key = Path(f"{identity_file}.pub")
     try:
         ssh_add = tool_beside_ssh(ssh, "ssh-add")
-    except ClientUnsupported:
-        return False
-    if not public_key.is_file():
-        return False
-    try:
+        if not public_key.is_file():  # a FIFO there would block the read
+            return False
         wanted = public_key.read_text(encoding="utf-8", errors="replace").split()[:2]
-    except OSError:
+    except (ClientUnsupported, OSError):
         return False
     if len(wanted) != 2:
         return False
