@@ -18,9 +18,15 @@ from agentworks.execution.pump import CAPTURE_LIMIT_BYTES
 
 pytestmark = pytest.mark.windows
 
+# The base interpreter, not the venv's. On Windows a venv's Scripts\python.exe
+# is a launcher that runs the base interpreter as its own child: it keeps the
+# stdio handles open and kills that child when it exits, so a test of streams
+# closing or of a lingering background child would measure the launcher.
+_PYTHON = getattr(sys, "_base_executable", sys.executable)
+
 
 def child(program: str) -> list[str]:
-    return [sys.executable, "-c", program]
+    return [_PYTHON, "-c", program]
 
 
 def test_the_deadline_returns_with_what_the_child_printed() -> None:
