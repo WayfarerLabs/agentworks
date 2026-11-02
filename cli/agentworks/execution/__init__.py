@@ -1,6 +1,7 @@
 """Everything core does on a managed VM after provisioning.
 
-Callers build an access object with :func:`vm_access` and call its ``run``,
+Callers build an access object with :func:`vm_access` (or, for create's
+first contact only, :func:`enrollment_access`) and call its ``run``,
 ``stream``, ``attach`` and ``forward``; requests and results are in
 ``agentworks.execution.requests`` and ``results``. The functions here import
 their modules on first use: ``trust`` pulls in ``config``, about 250 ms, which
@@ -32,6 +33,15 @@ def vm_access(
     from agentworks.execution.access import vm_access as build
 
     return build(vm, config, identity, log=log)
+
+
+def enrollment_access(
+    vm: VMRow, config: Config, *, log: Callable[[RunRequest, Result], None] | None = None
+) -> VMAccess:
+    """The admin's Enroll-mode access for create's first contact (see ``access.enrollment_access``)."""
+    from agentworks.execution.access import enrollment_access as build
+
+    return build(vm, config, log=log)
 
 
 def resolve_ssh() -> SSHClient:

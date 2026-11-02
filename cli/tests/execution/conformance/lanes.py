@@ -31,7 +31,7 @@ import pytest
 
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, ssh_process, trust
-from agentworks.execution.access import VMAccess
+from agentworks.execution.access import Admin, VMAccess
 from agentworks.execution.client import SSHClient
 from agentworks.execution.requests import Command, RunRequest, Script, Shell
 from agentworks.execution.results import Completed, Result
@@ -209,6 +209,14 @@ def unavailable(message: str) -> NoReturn:
     pytest.skip(message)
 
 
+def sudo_granted() -> bool:
+    """Whether this machine's user may run ``sudo -n`` without a password."""
+    sudo = shutil.which("sudo")
+    if sudo is None:
+        return False
+    return subprocess.run([sudo, "-n", "true"], capture_output=True, check=False).returncode == 0
+
+
 def require_shell(name: str) -> str:
     """The shell's path; a missing one fails on CI and skips elsewhere."""
     found = find_shell(name)
@@ -255,6 +263,7 @@ class LocalLane(LocalFilesystem):
             vm_name="local",
             host="127.0.0.1",
             user=getpass.getuser(),
+            identity=Admin(),
             identity_file=Path("/nonexistent/identity"),
         )
         monkeypatch.setattr(client, "resolve_ssh", lambda: SSHClient("/nonexistent/ssh", (9, 9)))
@@ -401,6 +410,7 @@ class SSHDLane(LocalFilesystem):
             vm_name=vm_name,
             host="127.0.0.1",
             user=getpass.getuser(),
+            identity=Admin(),
             identity_file=server.client_key,
             port=server.port,
         )
@@ -410,6 +420,7 @@ class SSHDLane(LocalFilesystem):
             vm_name=self.vm_name,
             host="127.0.0.1",
             user=getpass.getuser(),
+            identity=Admin(),
             identity_file=identity_file,
             port=self.server.port,
         )
@@ -435,6 +446,7 @@ class LiveLane(Lane):
             vm_name=self.vm.name,
             host=self.vm.tailscale_host,
             user=self.vm.admin_username,
+            identity=Admin(),
             identity_file=identity_file,
         )
 

@@ -62,10 +62,14 @@ class BoundedRequestOptions(RequestOptions):
     """The options of a request that runs to a result, which a deadline can bound.
 
     ``deadline`` bounds the local wait in seconds; it never claims the guest
-    command stopped.
+    command stopped. ``elevated`` runs the whole operation as root under
+    ``sudo -n``: it is the prefix of the connection's first-stage command, not
+    part of the request message, and an agent-bound access refuses it. A
+    :class:`LoginShell` has neither, so an elevated attach cannot be written.
     """
 
     deadline: float | None = None
+    elevated: bool = False
 
 
 @dataclass(frozen=True)

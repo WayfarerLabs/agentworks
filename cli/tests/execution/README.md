@@ -67,6 +67,10 @@ returns canned outcomes without ssh.
   it from each workstation the evidence matrix names; Windows is where binary stdin and early exit
   matter most. The lane is not part of the default run.
 
+The elevation vectors (E1, E2 and E6) run on L and V. On L they need the runner's passwordless
+`sudo -n`, skipping without it locally and failing without it when `CI` is set; E4, the
+distribution's default sudoers on a fresh VM, is V only.
+
 `conformance/test_attach_terminal.py` and `conformance/test_forward.py` cover what happens around
 the terminal half and a forward, on the same lanes.
 

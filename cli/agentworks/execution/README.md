@@ -37,6 +37,16 @@ for `attach`). Each takes `env` and `cwd` (absolute; `None` is the home director
 `Script` also take `deadline` (seconds of local waiting; it never claims the guest command stopped).
 `vm exec` sends a `Script` under the identity's default shell, with several arguments shell-joined.
 
+`Command` and `Script` also take `elevated`, which runs the whole operation as root under `sudo -n`:
+it is the prefix of the constant first-stage command (below), not part of the request message, and
+the launcher rebuilds the payload's environment from root's passwd entry. An agent-bound access
+refuses an elevated request with `PermissionDenied` before anything resolves, and the guest's
+`sudo -n` is the second layer. `LoginShell` has no such option, so an attach never elevates.
+
+`execution.enrollment_access(vm, config, log=)` is the admin's access in Enroll mode, which may
+record a new host key. Create's first contact is its only caller; every other access verifies
+against the store.
+
 `vm_access(..., log=)` takes an operation log's record callable, `SSHLogger.record` today, which
 `run` calls once per request before raising for its outcome, so failures are logged. The block is
 `oplog.format_record`'s: the step label, the request's shape (the argv, or a script's shell and
@@ -46,14 +56,14 @@ logger redacts the secrets registered when it was constructed, at its one sink.
 
 ## What a request becomes
 
-Every connection runs the same constant command, `python3 -I -S -c '<stage 0>'` (`ssh_process.py`).
-Stage 0 is a one-line program that reads the launcher's source from stdin with exact-length reads
-and runs it. Its reader is recursive, so a pathological drip of tiny reads fails safely, as not
-delivered, instead of running. The launcher, `agw_launch.py`, reads the request, resets what the
-payload inherits, runs the payload as a child and reports completion. The client writes three things
-to ssh's stdin in order: the launcher source, the JSON envelope (`envelope.py`), and the caller's
-input untouched. A frame is ten ASCII digits then that many bytes, so the payload's stdin starts at
-the caller's first byte.
+Every connection runs the same constant command, `python3 -I -S -c '<stage 0>'` (`ssh_process.py`),
+behind `sudo -n` for an elevated request. Stage 0 is a one-line program that reads the launcher's
+source from stdin with exact-length reads and runs it. Its reader is recursive, so a pathological
+drip of tiny reads fails safely, as not delivered, instead of running. The launcher,
+`agw_launch.py`, reads the request, resets what the payload inherits, runs the payload as a child
+and reports completion. The client writes three things to ssh's stdin in order: the launcher source,
+the JSON envelope (`envelope.py`), and the caller's input untouched. A frame is ten ASCII digits
+then that many bytes, so the payload's stdin starts at the caller's first byte.
 
 The guest's account shell may print or export before stage 0 runs. The launcher brackets the
 payload's output with marker lines (`0x1E`, a per-request nonce, a word, a newline), and the client

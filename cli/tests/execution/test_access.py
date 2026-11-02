@@ -15,12 +15,13 @@ import pytest
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, ssh_process, trust
-from agentworks.execution.access import Admin, Agent, VMAccess, stream_to_operator, vm_access
+from agentworks.execution.access import Admin, Agent, VMAccess, enrollment_access, stream_to_operator, vm_access
 from agentworks.execution.client import SSHClient
 from agentworks.execution.errors import (
     ClientUnsupported,
     CommandFailed,
     ExecutionIncomplete,
+    PermissionDenied,
     RequestRefused,
     TrustMismatch,
     TrustMissing,
@@ -160,6 +161,79 @@ def test_attach_builds_every_argv_before_it_spawns(
     assert no_spawn == []
 
 
+# -- Elevation and trust mode ----------------------------------------------------------
+
+
+def test_an_agent_access_refuses_an_elevated_request_before_anything_resolves(
+    monkeypatch: pytest.MonkeyPatch, no_spawn: list[object], tmp_path: Path
+) -> None:
+    resolved: list[bool] = []
+
+    def resolve() -> SSHClient:
+        resolved.append(True)
+        raise ClientUnsupported("stop here")
+
+    monkeypatch.setattr(client, "resolve_ssh", resolve)
+    agent = vm_access(vm(), config(tmp_path / "key"), Agent("worker", "agent-worker"))
+    elevated = Command(("id", "-u"), elevated=True)
+
+    with pytest.raises(PermissionDenied):
+        agent.run(elevated)
+    with pytest.raises(PermissionDenied):
+        agent.stream(elevated, stdin=None, stdout=io.BytesIO(), stderr=io.BytesIO())  # type: ignore[arg-type]
+    assert resolved == []
+    assert no_spawn == []
+
+    # The same request from the admin, and an unelevated one from the agent, go on to dispatch.
+    for access, request in ((vm_access(vm(), config(tmp_path / "key"), Admin()), elevated), (agent, Command(("id",)))):
+        with pytest.raises(ClientUnsupported):
+            access.run(request)
+    assert resolved == [True, True]
+
+
+def _remote_command_and_trust(
+    monkeypatch: pytest.MonkeyPatch, access: VMAccess, request: Command
+) -> tuple[str, object]:
+    seen: list[tuple[str, object]] = []
+
+    def record(
+        client_: SSHClient, policy: ssh_process.VMPolicy, destination: object, mode: object, command: str, **kw: object
+    ):
+        seen.append((command, policy.trust.mode))
+        raise ClientUnsupported("stop here")
+
+    monkeypatch.setattr(ssh_process, "build_argv", record)
+    with pytest.raises(ClientUnsupported):
+        access.run(request)
+    return seen[0]
+
+
+def test_an_elevated_request_runs_stage0_under_sudo_n(
+    supported_client: SSHClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seed_vm_trust("box")
+    access = vm_access(vm(), config(tmp_path / "key"), Admin())
+
+    elevated, _ = _remote_command_and_trust(monkeypatch, access, Command(("id", "-u"), elevated=True))
+    plain, _ = _remote_command_and_trust(monkeypatch, access, Command(("id", "-u")))
+
+    assert elevated == f"sudo -n {plain}"
+    assert not plain.startswith("sudo")
+
+
+def test_only_the_enrollment_access_connects_in_enroll_mode(
+    supported_client: SSHClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seed_vm_trust("box")
+    request = Command(("true",))
+
+    _, enrolling = _remote_command_and_trust(monkeypatch, enrollment_access(vm(), config(tmp_path / "key")), request)
+    _, ordinary = _remote_command_and_trust(monkeypatch, vm_access(vm(), config(tmp_path / "key"), Admin()), request)
+
+    assert enrolling is trust.TrustMode.ENROLL
+    assert ordinary is trust.TrustMode.VM
+
+
 # -- Typed outcomes ----------------------------------------------------------------------
 
 
@@ -192,7 +266,7 @@ def test_a_completion_returns_its_status_whatever_it_is() -> None:
 
 
 def test_the_error_kinds_decide_who_handles_them() -> None:
-    from agentworks.errors import ConfigError, ConnectivityError, ExternalError
+    from agentworks.errors import AuthorizationError, ConfigError, ConnectivityError, ExternalError
 
     assert issubclass(VMNotReady, StateError)
     assert issubclass(TrustMismatch, StateError)
@@ -200,6 +274,7 @@ def test_the_error_kinds_decide_who_handles_them() -> None:
     assert issubclass(ClientUnsupported, ConfigError)
     assert issubclass(ExecutionIncomplete, ConnectivityError)
     assert issubclass(CommandFailed, ExternalError)
+    assert issubclass(PermissionDenied, AuthorizationError)
 
 
 def test_a_refused_handover_does_not_get_the_working_directory_hint() -> None:

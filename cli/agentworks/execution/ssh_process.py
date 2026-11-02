@@ -66,13 +66,19 @@ _HOST = re.compile(r"[A-Za-z0-9_:][A-Za-z0-9_.:-]*")
 _USER = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*\$?")
 
 
-def stage0_command(handover_socket: str | None = None, *, python: str = DEFAULT_PYTHON) -> str:
+def stage0_command(handover_socket: str | None = None, *, python: str = DEFAULT_PYTHON, elevated: bool = False) -> str:
     """The remote command: ``python3 -I -S -c '<stage 0>'``, plus the socket path for a handover.
 
     ``-I`` ignores Python's environment variables and the user site directory,
-    and ``-S`` skips site packages, so no Python startup applies.
+    and ``-S`` skips site packages, so no Python startup applies. ``elevated``
+    puts ``sudo -n`` in front, so the whole operation runs as root; the
+    launcher rebuilds the payload's environment from root's passwd entry, so
+    nothing has to survive ``sudo``'s ``env_reset``. Only a pipe request
+    elevates: the attach path never passes it.
     """
     command = f"{python} -I -S -c '{STAGE0_PROGRAM}'"
+    if elevated:
+        command = f"sudo -n {command}"
     return command if handover_socket is None else f"{command} {handover_socket}"
 
 

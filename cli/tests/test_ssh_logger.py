@@ -272,14 +272,21 @@ def test_record_labels_a_request_with_the_latest_step(tmp_path: Path, monkeypatc
 def test_a_failed_request_is_recorded_before_its_error_is_raised(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from agentworks.execution.access import VMAccess
+    from agentworks.execution.access import Admin, VMAccess
     from agentworks.execution.errors import ExecutionIncomplete
     from agentworks.execution.requests import Command
     from agentworks.execution.results import Result, Unknown, UnknownReason
 
     monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
     logger = SSHLogger("vm1", "test-op")
-    access = VMAccess(vm_name="vm1", host="100.64.0.9", user="agw", identity_file=tmp_path / "key", log=logger.record)
+    access = VMAccess(
+        vm_name="vm1",
+        host="100.64.0.9",
+        user="agw",
+        identity=Admin(),
+        identity_file=tmp_path / "key",
+        log=logger.record,
+    )
     monkeypatch.setattr(VMAccess, "_execute", lambda self, *a, **k: Result(Unknown(UnknownReason.DEADLINE)))
     monkeypatch.setattr(VMAccess, "passphrase_hint", lambda self: None)
 

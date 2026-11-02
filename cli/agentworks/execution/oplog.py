@@ -24,8 +24,9 @@ def format_record(request: RunRequest, result: Result, *, label: str) -> str:
     """The block for one request: its label and shape, the completion, both streams and ssh's diagnostics.
 
     ``label`` is the caller's step heading. The shape is the argv for a
-    :class:`Command`, and the shell and login flag for a ``Script``, then the
-    working directory, the environment's names and the deadline.
+    :class:`Command`, and the shell and login flag for a ``Script``, then
+    whether it was elevated, the working directory, the environment's names
+    and the deadline.
     """
     lines = [f"request ({label}): {_shape(request)}", f"outcome: {_completion(result.completion)}"]
     for name, data in (("stdout", result.stdout), ("stderr", result.stderr)):
@@ -43,6 +44,7 @@ def _shape(request: RunRequest) -> str:
         what = f"script ({request.shell.value}{', login' if request.login else ''})"
     parts = [
         what,
+        *(["elevated"] if request.elevated else []),
         f"cwd {request.cwd or 'home'}",
         f"env [{', '.join(sorted(request.env))}]",
         "no deadline" if request.deadline is None else f"deadline {request.deadline:g}s",

@@ -3,8 +3,9 @@
 ``vm_access`` copies names and paths and resolves nothing (R9): no key is read,
 no trust file is opened and nothing is spawned until an operation runs. Each
 operation then runs in one order, so everything before the spawn raises with
-nothing dispatched: resolve the client, encode the request, build the options
-(which reads the trust record), spawn, pump, classify.
+nothing dispatched: refuse an agent's elevated request, resolve the client,
+encode the request, build the options (which reads the trust record), spawn,
+pump, classify.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from agentworks.errors import StateError
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, forwarding, pump, ssh_process
 from agentworks.execution.agw_launch import refusal_status
-from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, describe_refusal
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, PermissionDenied, describe_refusal
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.execution.trust import TrustBinding, TrustMode
 
@@ -56,9 +57,13 @@ Identity = Admin | Agent
 class VMAccess:
     """Run, stream, attach and forward as one identity on one VM.
 
-    ``log`` is an operation log's record callable (``SSHLogger.record``),
-    which ``run`` calls once per request. ``stream``, ``attach`` and
-    ``forward`` serve operator commands that keep no log.
+    ``identity`` is the account the access was built for, with no default,
+    so a directly constructed access chooses; ``run`` and ``stream`` refuse an
+    elevated request on an agent-bound one. ``trust_mode`` is ``VM`` except for
+    the access :func:`enrollment_access` builds. ``log`` is an operation log's
+    record callable (``SSHLogger.record``), which ``run`` calls once per
+    request. ``stream``, ``attach`` and ``forward`` serve operator commands that
+    keep no log.
     """
 
     def __init__(
@@ -67,11 +72,15 @@ class VMAccess:
         vm_name: str,
         host: str | None,
         user: str,
+        identity: Identity,
         identity_file: Path,
         port: int = 22,
+        trust_mode: TrustMode = TrustMode.VM,
         log: Callable[[RunRequest, Result], None] | None = None,
     ) -> None:
         self.vm_name = vm_name
+        self.identity = identity
+        self.trust_mode = trust_mode
         self._host = host
         self._user = user
         self._identity_file = identity_file
@@ -202,7 +211,7 @@ class VMAccess:
             raise
 
     def _policy(self) -> ssh_process.VMPolicy:
-        return ssh_process.VMPolicy(self._identity_file, TrustBinding(TrustMode.VM, self.vm_name))
+        return ssh_process.VMPolicy(self._identity_file, TrustBinding(self.trust_mode, self.vm_name))
 
     def _destination(self) -> ssh_process.Destination:
         # The first use of a persisted value: a VM with no address is a state
@@ -224,13 +233,21 @@ class VMAccess:
         on_stdout: pump.Sink,
         on_stderr: pump.Sink,
     ) -> Result:
+        # R3: an agent never gains administrative authority, whatever the guest's sudoers says.
+        if request.elevated and isinstance(self.identity, Agent):
+            raise PermissionDenied(self.vm_name, self._user)
         ssh = client.resolve_ssh()
         nonce = envelope.new_nonce()
         wire = envelope.message(request, nonce=nonce)
         policy, destination = self._policy(), self._destination()
         with ssh_process.client_log() as log:
             argv = ssh_process.build_argv(
-                ssh, policy, destination, ssh_process.ArgvMode.PIPE, ssh_process.stage0_command(), client_log=log
+                ssh,
+                policy,
+                destination,
+                ssh_process.ArgvMode.PIPE,
+                ssh_process.stage0_command(elevated=request.elevated),
+                client_log=log,
             )
             with pump.PipeSession(
                 argv,
@@ -301,6 +318,29 @@ def vm_access(
         vm_name=vm.name,
         host=vm.tailscale_host,
         user=user,
+        identity=identity,
         identity_file=config.operator.ssh_private_key,
+        log=log,
+    )
+
+
+def enrollment_access(
+    vm: VMRow, config: Config, *, log: Callable[[RunRequest, Result], None] | None = None
+) -> VMAccess:
+    """The admin's access in Enroll mode: the only access that may record a new host key.
+
+    Create's first contact is its only caller. Every connection it makes runs
+    under ``accept-new`` against the VM's freshly reset store file, so the
+    first one that reaches sshd records the key and the rest verify against
+    it. Like :func:`vm_access` it copies the row's address at construction, so
+    pass a row read after the address was recorded.
+    """
+    return VMAccess(
+        vm_name=vm.name,
+        host=vm.tailscale_host,
+        user=vm.admin_username,
+        identity=Admin(),
+        identity_file=config.operator.ssh_private_key,
+        trust_mode=TrustMode.ENROLL,
         log=log,
     )

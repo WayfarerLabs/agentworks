@@ -49,9 +49,9 @@ class RecordingVMAccess(VMAccess):
             vm_name=vm_name,
             host="100.64.0.9",
             user="agentworks" if isinstance(identity, Admin) else identity.linux_user,
+            identity=identity,
             identity_file=Path("/nonexistent/key"),
         )
-        self.identity = identity
         self.calls = calls
         self.run_outcomes: list[Result | BaseException] = []
         self.stream_status: int | BaseException = 0
@@ -92,11 +92,13 @@ class AccessRecorder:
     def __init__(self) -> None:
         self.calls: list[Call] = []
         self.built: list[tuple[str, Identity]] = []
+        self.logs: list[Any] = []
         self.client = SSHClient("/usr/bin/ssh", (9, 2))
         self._accesses: dict[Identity, RecordingVMAccess] = {}
 
-    def vm_access(self, vm: Any, config: Any, identity: Identity) -> RecordingVMAccess:
+    def vm_access(self, vm: Any, config: Any, identity: Identity, *, log: Any = None) -> RecordingVMAccess:
         self.built.append((vm.name, identity))
+        self.logs.append(log)
         return self.access(identity, vm_name=vm.name)
 
     def access(self, identity: Identity | None = None, *, vm_name: str = "box") -> RecordingVMAccess:

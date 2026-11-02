@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ConfigError, ConnectivityError, ExternalError, StateError
+from agentworks.errors import AuthorizationError, ConfigError, ConnectivityError, ExternalError, StateError
 
 if TYPE_CHECKING:
     from agentworks.execution.results import NotDeliveredReason, Result
@@ -38,6 +38,26 @@ class TrustMissing(StateError):
                 f"Run 'agw vm import-host-keys {vm_name}' (see its --help for --known-hosts), "
                 "or delete and recreate a VM whose create never enrolled."
             ),
+        )
+
+
+class PermissionDenied(AuthorizationError):
+    """An agent-bound access was asked for an elevated request, which an agent never gets.
+
+    Raised before anything is resolved or spawned. Names the VM and the
+    account, never the request. The guest's ``sudo -n`` is the second layer,
+    so an agent placed in a sudo group by hand still gains nothing through
+    Agentworks.
+    """
+
+    def __init__(self, vm_name: str, account: str) -> None:
+        self.vm_name = vm_name
+        self.account = account
+        super().__init__(
+            f"an elevated request was refused for agent account '{account}' on VM '{vm_name}': "
+            "agents never run as root through Agentworks",
+            entity_kind="vm",
+            entity_name=vm_name,
         )
 
 
