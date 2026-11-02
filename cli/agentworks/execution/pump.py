@@ -182,11 +182,12 @@ class PipeSession:
     writes, and the session keeps pumping stderr until then, so a quiet payload
     still reports its status. ssh does not end the channel for a departed
     stderr, and the status travels on stderr, so :meth:`pump` returns
-    :attr:`StopReason.STDERR_CONSUMER_LEFT` at once and ending the session kills
-    the client. :attr:`stdout_abandoned` and :attr:`stderr_abandoned` say which
-    left. A sink that raises ``BlockingIOError`` is waited on: the session stops
-    reading that stream until the sink has taken what it was offered, so output
-    is never dropped. Any other ``OSError`` from a sink propagates.
+    :attr:`StopReason.STDERR_CONSUMER_LEFT` once stdout has nothing held for a
+    slow consumer, and ending the session kills the client.
+    :attr:`stdout_abandoned` and :attr:`stderr_abandoned` say which left. A sink
+    that raises ``BlockingIOError`` is waited on: the session stops reading that
+    stream until the sink has taken what it was offered, so output is never
+    dropped. Any other ``OSError`` from a sink propagates.
     """
 
     def __init__(
@@ -259,7 +260,7 @@ class PipeSession:
                 return StopReason.DONE
             if self.stdout_abandoned and self.stderr.done and not waiting:
                 return StopReason.DONE
-            if self.stderr_abandoned:
+            if self.stderr_abandoned and not waiting:
                 return StopReason.STDERR_CONSUMER_LEFT
             if stop is not None and stop():
                 return StopReason.CONDITION

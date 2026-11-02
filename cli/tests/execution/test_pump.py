@@ -280,6 +280,27 @@ def test_a_stderr_consumer_that_leaves_ends_the_request_because_the_status_canno
     assert_reaped(session)
 
 
+def test_stdout_held_for_a_slow_consumer_is_delivered_before_a_stderr_departure_ends_the_request() -> None:
+    delivered: list[bytes] = []
+    started = time.monotonic()
+
+    def slow_stdout(payload: bytes) -> None:
+        if time.monotonic() - started < 0.4:
+            raise BlockingIOError(11, "would block", 0)
+        delivered.append(payload)
+
+    def gone_stderr(payload: bytes) -> None:
+        raise BrokenPipeError
+
+    script = "start(); out.write(b'hello'); out.flush(); err.write(b'x'); err.flush(); time.sleep(30)"
+    session = leaving_session(script, stdout=slow_stdout, stderr=gone_stderr)
+    with session:
+        assert session.pump() is StopReason.STDERR_CONSUMER_LEFT
+        session.end()
+
+    assert b"".join(delivered) == b"hello"
+
+
 def test_a_stdout_pipe_whose_reader_closed_is_the_consumer_leaving() -> None:
     # CPython raises BrokenPipeError for this on POSIX and OSError(EINVAL) on Windows.
     reader, writer = os.pipe()
