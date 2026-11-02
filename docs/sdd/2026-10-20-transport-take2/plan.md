@@ -118,15 +118,17 @@ a VM connection.
       quoted, as today (`vms/manager/exec.py:271`).
 - [x] Restore `vm exec`'s several-argument form to today's behavior, shell-joined (a word starting
       with `=` always quoted) and run under the identity's default shell (`vms/manager/exec.py:271`
-      on `main`), which the box above first described, wrongly, as a literal argv. Give a departed
-      stdout consumer ssh's semantics (close it, keep pumping until the channel ends, report the
-      guest's status when its trailer arrives) and end the request when a stderr consumer leaves,
-      after delivering held stdout and keeping a trailer already in hand (execution LLD, the pump);
-      on Windows the passphrase hint names the absolute path, and the agent check lists keys with
-      `ssh-add -L` rather than signing, and only for a `.pub` that holds a type and blob. Test the
-      `=` rule under zsh itself, whatever the runner's login shell, and keep one copy each of the
-      SSH wire reader (`ssh_identity`) and the rule for a departed consumer (`pump.consumer_left`). Run
-      import's `ssh-keygen` from beside the resolved client, as `ssh-add` is, never from `PATH`.
+      on `main`). Give a departed stdout consumer ssh's semantics (close it, keep pumping until the
+      channel ends, report the guest's status when its trailer arrives) and end the request when a
+      stderr consumer leaves, after delivering held stdout and keeping a trailer already in hand
+      (execution LLD, the pump); on Windows the passphrase hint names the absolute path, and the
+      agent check lists keys with `ssh-add -L` rather than signing, and only for a `.pub` that holds
+      a type and blob. Test the `=` rule under zsh itself, whatever the runner's login shell, and
+      keep one copy each of the SSH wire reader (`ssh_identity`) and the rule for a departed
+      consumer (`pump.consumer_left`).
+- [x] Run host-key import's `ssh-keygen` from beside the resolved client, as `ssh-add` is, never
+      from `PATH`, so import needs a supported client; say so in the command reference and the 0.20
+      upgrade guide.
 - [x] Alert where PR A drops a behavior an operator may rely on (operator, 2026-11-01): warn at
       reinit when `/etc/environment`, `/etc/security/pam_env.conf` or the admin's
       `~/.pam_environment` holds settings, and when a VM connection fails before the start marker
