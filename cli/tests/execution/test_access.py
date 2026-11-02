@@ -373,6 +373,18 @@ def test_the_agent_holds_the_key_when_ssh_add_beside_the_client_succeeds(
     assert calls.read_text().split() == ["-T", "--", f"{key}.pub"]
 
 
+def test_an_ssh_add_that_is_not_executable_is_never_run(
+    fake_ssh_add, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = fake_ssh_add(tmp_path / "bin", 0)
+    (tmp_path / "bin" / "ssh-add").chmod(0o644)
+    # The spawn's own PermissionError would also give False, so watch for the attempt itself.
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("an ssh-add that cannot run was started"))
+
+    assert client.identity_is_loaded(SSHClient(str(tmp_path / "bin" / "ssh"), (9, 2)), agent_key(tmp_path)) is False
+    assert not calls.exists()
+
+
 def test_an_ssh_add_on_path_is_never_run(fake_ssh_add, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # PATH can name a relative or current-directory program; only the ssh-add beside the client runs.
     calls = fake_ssh_add(tmp_path / "onpath", 0)

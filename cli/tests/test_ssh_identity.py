@@ -408,3 +408,19 @@ def test_the_suggested_path_is_read_back_by_a_shell_as_exactly_the_key_path(tmp_
 
     assert hint is not None
     assert shlex.split(hint.rsplit("ssh-add ", 1)[1]) == [str(key.absolute())]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the POSIX shell expands the ~")
+def test_a_key_under_the_home_directory_is_suggested_in_its_tilde_form(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / ".ssh").mkdir()
+    key = _write(tmp_path / ".ssh" / "id", _native_armor(_native_envelope(cipher=b"aes256-ctr")))
+
+    hint = passphrase_hint(key)
+
+    assert hint is not None
+    suggested = hint.rsplit("ssh-add ", 1)[1]
+    assert suggested.startswith("~")  # unquoted, so the shell expands it
+    assert os.path.expanduser(suggested) == str(key)

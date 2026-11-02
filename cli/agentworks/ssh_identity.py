@@ -198,7 +198,7 @@ def passphrase_hint(identity_file: Path) -> str | None:
     the suggested command is one a shell reads back as exactly that path: the
     ``~`` form when it needs no quoting (a quoted ``~`` does not expand),
     otherwise the absolute path, single-quoted on POSIX and double-quoted on
-    Windows. A Windows path that cannot be double-quoted goes on its own line.
+    Windows.
     """
     if not identity_is_passphrase_protected(identity_file):
         return None
@@ -214,7 +214,7 @@ def _typed_path(identity_file: Path, shown: str) -> str:
         return shlex.quote(absolute)
     if not any(character.isspace() for character in shown):
         return shown
-    return f'"{absolute}"' if '"' not in absolute else f"\n{absolute}"
+    return f'"{absolute}"'  # a Windows file name cannot contain a double quote
 
 
 def _decode_openssh_envelope(contents: bytes) -> bytes:

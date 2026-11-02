@@ -216,19 +216,25 @@ def test_a_truncated_or_mislabelled_stored_key_is_not_a_record() -> None:
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="needs a symbolic link")
-def test_enrollment_never_follows_a_link_planted_at_the_store_path(tmp_path: Path) -> None:
-    trust.begin_enrollment("web")
+def test_a_link_planted_between_the_unlink_and_the_create_is_refused_not_followed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     victim = tmp_path / "victim"
     victim.write_text("keep")
-    real = trust.store_file("web")
-    real.unlink()
-    real.symlink_to(victim)
+    store = trust.store_file("web")
+    real_unlink = Path.unlink
 
-    trust.begin_enrollment("web")  # unlinks the planted link, then creates a fresh private file
+    def unlink_then_plant(self: Path, missing_ok: bool = False) -> None:
+        real_unlink(self, missing_ok=missing_ok)
+        if self == store:
+            self.symlink_to(victim)
+
+    monkeypatch.setattr(Path, "unlink", unlink_then_plant)
+
+    with pytest.raises(StateError):
+        trust.begin_enrollment("web")
 
     assert victim.read_text() == "keep"
-    assert not real.is_symlink()
-    assert stat.S_IMODE(real.stat().st_mode) == 0o600
 
 
 def test_a_file_with_no_usable_line_is_no_record() -> None:
