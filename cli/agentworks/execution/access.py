@@ -78,6 +78,8 @@ class VMAccess:
         trust_mode: TrustMode = TrustMode.VM,
         log: Callable[[RunRequest, Result], None] | None = None,
     ) -> None:
+        if isinstance(identity, Agent) and user != identity.linux_user:
+            raise ValueError("an agent-bound access connects as the agent's Linux user")
         self.vm_name = vm_name
         self.identity = identity
         self.trust_mode = trust_mode
@@ -233,8 +235,8 @@ class VMAccess:
         on_stdout: pump.Sink,
         on_stderr: pump.Sink,
     ) -> Result:
-        # R3: an agent never gains administrative authority, whatever the guest's sudoers says.
-        if request.elevated and isinstance(self.identity, Agent):
+        # R3: only the admin elevates, whatever the guest's sudoers says.
+        if request.elevated and not isinstance(self.identity, Admin):
             raise PermissionDenied(self.vm_name, self._user)
         ssh = client.resolve_ssh()
         nonce = envelope.new_nonce()

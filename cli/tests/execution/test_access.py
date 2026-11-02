@@ -191,6 +191,17 @@ def test_an_agent_access_refuses_an_elevated_request_before_anything_resolves(
     assert resolved == [True, True]
 
 
+def test_an_agent_access_must_connect_as_the_agents_own_user(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        VMAccess(
+            vm_name="box",
+            host="100.64.0.9",
+            user="agentworks",
+            identity=Agent("worker", "agent-worker"),
+            identity_file=tmp_path / "key",
+        )
+
+
 def _remote_command_and_trust(
     monkeypatch: pytest.MonkeyPatch, access: VMAccess, request: Command
 ) -> tuple[str, object]:
