@@ -171,8 +171,8 @@ including under replace policies. Query again after every command before recordi
 result. A command's success alone does not establish scope or identity.
 
 Claude git/GitHub inventory without its user settings declaration has unobservable full source
-identity. Preserve it and protect its settings association. Preflight scoped removability before
-retiring any marketplace dependents: an absent user declaration retains both marketplace and
+identity. Preserve it and protect its settings association. Check that scoped removal is available
+before retiring any marketplace dependents: an absent user declaration retains both marketplace and
 plugins, without broadening removal to all scopes or guessing replacement settings. An ambiguous
 unqualified plugin selection reports qualification advice and retains its prior associations;
 nonexistent selections remain invalid configuration.

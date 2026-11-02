@@ -665,15 +665,15 @@ report confirms the original seven fixes and #840/#841, but finds two missing-Cl
 paths that still need correction. Its gates passed with 10,401 tests and 11 skips; that evidence
 belongs to the ready head, not the correction still under development.
 
-- [ ] Preserve unobservable Claude git/GitHub source associations during mapping, and preflight
+- [x] Preserve unobservable Claude git/GitHub source associations during mapping, and preflight
       user-scoped removal before touching marketplace dependents.
-- [ ] Make native plugin ambiguity entry-local without retiring unresolved prior associations;
+- [x] Make native plugin ambiguity entry-local without retiring unresolved prior associations;
       handle malformed driver claim sources conservatively and retain legacy version support.
-- [ ] Persist current-attempt incomplete reasons in the existing versioned setup record and expose
+- [x] Persist current-attempt incomplete reasons in the existing versioned setup record and expose
       entry-specific repair diagnostics without new ownership or history mechanisms.
-- [ ] Strengthen missing-target coverage, remove redundant first-party identity-format checks,
+- [x] Strengthen missing-target coverage, remove redundant first-party identity-format checks,
       retain retry-progress guards and fix temporary-path-sensitive carrier assertions.
-- [ ] Align permanent guidance, bounded progress messages and current plan status with the fixes.
+- [x] Align permanent guidance, bounded progress messages and current plan status with the fixes.
 - [ ] Resolve the own-failure policy question through authenticated operator direction; retain
       today's fail-fast pipeline until that direction arrives. `awaiting-direction` tracks this
       ambiguity, not a second request for the already-authorized FRD amendments.
@@ -691,8 +691,8 @@ error. No error-aggregation mechanism is being added without that decision.
 The latest live run used Linux and remote Lima/Debian 13, two 2-CPU/4-GiB VMs, Claude Code 2.1.316
 and Codex 0.166.0, with local sources and no model calls. It independently verified VM/backend/SSH
 cleanup, leaving only offline tailnet records for the operator. It does not close the outstanding
-prerequisite/unsupported-facet fixture, real interruption, admin artifact, Git capture, powercycle,
+prerequisite/unsupported-facet fixture, real interruption, admin artifact, Git capture, power cycle,
 resume-only, Grok launch or Claude workaround obligations. Workspace matching/conflict and project
-settings cases can use repository-preseeded files during ordinary create; the verified call order
-and controlled fixture are recorded in `6572186080`. No workspace reinit or workspace plugin support
-is implied. Both locks remain pending.
+settings cases can use files supplied by repository checkout during ordinary create; the verified
+call order and controlled fixture are recorded in `6572186080`. No workspace reinit or workspace
+plugin support is implied. Both locks remain pending.
