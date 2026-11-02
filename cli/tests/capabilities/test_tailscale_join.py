@@ -60,13 +60,30 @@ def assert_key_free(error: BaseException) -> None:
 # -- parse_tailnet_address ---------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("text", "expected"), [(" 100.64.0.9\n", "100.64.0.9"), ("fd7a::0001", "fd7a::1")])
-def test_an_address_parses_to_its_canonical_text(text: str, expected: str) -> None:
-    assert parse_tailnet_address(text) == expected
+@pytest.mark.parametrize("text", [" 100.64.0.9\n", "10.20.30.40"])
+def test_an_ipv4_address_parses_to_its_canonical_text(text: str) -> None:
+    assert parse_tailnet_address(text) == text.strip()
 
 
-@pytest.mark.parametrize("value", ["", "not-an-address", "100.64.0.9\n100.64.0.10", 1684275209, None])
-def test_anything_but_one_address_is_refused(value: object) -> None:
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "not-an-address",
+        "100.64.0.9\n100.64.0.10",
+        "100.64.0.9 rm -rf",
+        1684275209,
+        None,
+        "fd7a:115c:a1e0::1",  # IPv6: the read is tailscale ip -4
+        "fe80::1%x y",  # a scoped IPv6 address with a space in its scope
+        "127.0.0.1",  # loopback
+        "0.0.0.0",  # unspecified
+        "224.0.0.1",  # multicast
+        "169.254.10.1",  # link-local
+        "240.0.0.1",  # reserved
+    ],
+)
+def test_anything_but_one_assignable_ipv4_address_is_refused(value: object) -> None:
     with pytest.raises(ValueError):
         parse_tailnet_address(value)
 

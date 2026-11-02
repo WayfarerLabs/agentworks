@@ -127,12 +127,23 @@ def parse_tailnet_address(text: object) -> str:
     Validates at two boundaries: each address read over a platform's root
     channel (guest output), and the address a platform returns in
     :class:`ProvisionResult` before core records it (a plugin's value). The
-    check is that the text parses as an IP address; no range is assumed, so a
-    self-hosted tailnet with another prefix still parses.
+    address is the node's IPv4 one (what ``tailscale ip -4`` prints), and an
+    address no tailnet assigns (loopback, unspecified, multicast, link-local
+    or reserved) is refused. No tailnet range is assumed, so a self-hosted
+    tailnet with another prefix still parses.
     """
     if not isinstance(text, str):
         raise ValueError("a tailnet address must be text")
-    return str(ipaddress.ip_address(text.strip()))
+    address = ipaddress.IPv4Address(text.strip())
+    if (
+        address.is_loopback
+        or address.is_unspecified
+        or address.is_multicast
+        or address.is_link_local
+        or address.is_reserved
+    ):
+        raise ValueError("a tailnet address cannot be a special-purpose address")
+    return str(address)
 
 
 class RetainedProvisioningError(ProvisioningError):
