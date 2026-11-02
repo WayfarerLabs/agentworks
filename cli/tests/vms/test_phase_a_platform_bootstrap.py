@@ -10,8 +10,10 @@ from agentworks.db import ProvisioningStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
 from agentworks.execution import reachability, trust
+from agentworks.execution.errors import TrustMismatch
 from agentworks.execution.requests import Command, Script
 from agentworks.execution.results import Result, Unknown, UnknownReason
+from agentworks.vms.manager import _guard_failed_vm
 from tests.vm_access_support import Admin
 from tests.vms.phase_a_support import (
     ADDRESS,
@@ -122,7 +124,7 @@ def test_a_failed_release_check_records_no_release(phase: PhaseAHarness) -> None
 
 
 @pytest.mark.parametrize("request_index", [0, 1, 2, 3], ids=["first-contact", "release", "script", "sudo"])
-def test_an_interrupt_before_the_contract_passes_marks_failed_and_secures(
+def test_an_interrupt_before_the_contract_passes_secures_and_leaves_the_vm_gated(
     phase: PhaseAHarness, request_index: int
 ) -> None:
     if request_index == 0:
@@ -135,8 +137,11 @@ def test_an_interrupt_before_the_contract_passes_marks_failed_and_secures(
     with pytest.raises(KeyboardInterrupt):
         phase.bootstrap()
 
-    assert phase.row().provisioning_status == ProvisioningStatus.FAILED.value
+    row = phase.row()
+    assert row.provisioning_status != ProvisioningStatus.COMPLETE.value
     assert phase.platform.secured == [VM]
+    with pytest.raises(StateError):
+        _guard_failed_vm(row)
 
 
 def test_an_interrupt_after_complete_leaves_the_vm_complete(phase: PhaseAHarness) -> None:
@@ -169,3 +174,59 @@ def test_the_post_ready_wait_is_on_the_vm_mode_access_and_never_enrolls(phase: P
     assert phase.recorder.operations[-1] == ("admin", "run")
     assert phase.recorder.requests("run")[-1] == reachability.PROBE
     assert phase.recorder.enrolled == [VM]
+
+
+def test_a_post_ready_wait_that_raises_leaves_the_vm_complete_and_unsecured(phase: PhaseAHarness) -> None:
+    """The VM was attested seconds earlier: the raise propagates, and create maps it to reinit advice."""
+    phase.admin.run_outcomes = [*contract_outcomes(), Result(Unknown(UnknownReason.HOST_KEY))]
+
+    with pytest.raises(TrustMismatch):
+        phase.bootstrap(on_tailscale_ready=lambda: None)
+
+    assert phase.row().provisioning_status == ProvisioningStatus.COMPLETE.value
+    assert phase.platform.secured == []
+
+
+def test_a_failing_write_in_the_failure_arm_neither_replaces_the_failure_nor_skips_securing(
+    phase: PhaseAHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    phase.admin.run_outcomes = contract_outcomes(script=b"AGW-CHECK systemd x\nAGW-CHECK-END\n")
+    write = phase.db.update_vm_provisioning_status
+
+    def _refuse_failed(name: str, status: ProvisioningStatus) -> None:
+        if status is ProvisioningStatus.FAILED:
+            raise RuntimeError("database is locked")
+        write(name, status)
+
+    monkeypatch.setattr(phase.db, "update_vm_provisioning_status", _refuse_failed)
+
+    with pytest.raises(StateError):
+        phase.bootstrap()
+
+    assert phase.platform.secured == [VM]
+
+
+def test_a_secure_hook_failure_does_not_mask_the_phase_a_failure(phase: PhaseAHarness) -> None:
+    """secure_failed_vm is best-effort: its failure warns and the original Phase A error still propagates."""
+    phase.admin.run_outcomes = contract_outcomes(script=b"AGW-CHECK systemd x\nAGW-CHECK-END\n")
+    phase.platform.secure_error = RuntimeError("hook exploded")
+
+    with pytest.raises(StateError):
+        phase.bootstrap()
+
+
+def test_a_secure_hook_failure_does_not_mask_the_interrupt(phase: PhaseAHarness) -> None:
+    phase.enrollment.run_outcomes = [KeyboardInterrupt()]
+    phase.platform.secure_error = RuntimeError("hook exploded")
+
+    with pytest.raises(KeyboardInterrupt):
+        phase.bootstrap()
+
+
+def test_the_post_ready_hook_fires_after_the_contract_and_never_secures(phase: PhaseAHarness) -> None:
+    fired: list[str] = []
+
+    phase.bootstrap(on_tailscale_ready=lambda: fired.append(phase.row().provisioning_status))
+
+    assert fired == [ProvisioningStatus.COMPLETE.value]
+    assert phase.platform.secured == []

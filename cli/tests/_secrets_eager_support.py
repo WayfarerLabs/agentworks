@@ -65,8 +65,8 @@ def _seed_basic_db(tmp_path: Path) -> Database:
     """VM + workspace seeded; no agent. Enough for an admin-mode session."""
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, provisioning_status) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
     )
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "

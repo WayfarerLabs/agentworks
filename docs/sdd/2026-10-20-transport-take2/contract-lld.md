@@ -360,18 +360,20 @@ connection (`driver.py:396-404`). An interrupt that lands before then finds the 
 the `except BaseException` arm (`driver.py:193-210`) secures the VM as today and now also marks the
 row `FAILED` unless `COMPLETE` has been written (it is entered only after step 1 sets `IN_PROGRESS`,
 so a `PENDING` row cannot reach it). A VM that was never attested is retained as failed, as D9 and
-incident row I26 require, and the ordinary-command gates block only a `FAILED` row
-(`vms/manager/_helpers.py:229-236`), so an unattested VM stays out of them. `lifecycle.py` prints
-the delete wording whenever provisioning is not `COMPLETE`, not only when it is `FAILED`, because
-reinit refuses any such row (`lifecycle.py:813`) and the `PENDING` window includes the hold entered
-before `bootstrap_vm` (`lifecycle.py:643`). That cancel handler (`lifecycle.py:657-663`) only warns
-today; it now also marks a row that is not `COMPLETE` as `FAILED`, so the gates cover the `PENDING`
-window too. The wording is the attestation interrupt arm's today (`lifecycle.py:611-617`: the VM
-exists but was not verified; run `agw vm delete`), not `_warn_init_cancel`'s reinit advice. An
-interrupt after step 5 leaves `COMPLETE` and takes `_warn_init_cancel`. A post-ready wait that
-raises (`HOST_KEY`, `AUTH_FAILED`, anything else the table raises) is outside the span like the wait
-itself and propagates out of `bootstrap_vm` to `_raise_init_failure`: the row stays `COMPLETE`, the
-VM was attested seconds earlier, and the operator is told to `vm reinit`.
+incident row I26 require. The ordinary-command gate (`_guard_failed_vm`, `vms/manager/_helpers.py`)
+refuses every row whose provisioning is not `COMPLETE`, naming `vm delete`, so an unattested VM
+stays out of them, including one a hard kill (`SIGTERM`, `SIGKILL`) left `IN_PROGRESS` with no arm
+run. `lifecycle.py` prints the delete wording whenever provisioning is not `COMPLETE`, not only when
+it is `FAILED`, because reinit refuses any such row (`lifecycle.py:813`) and the `PENDING` window
+includes the hold entered before `bootstrap_vm` (`lifecycle.py:643`). That cancel handler
+(`lifecycle.py:657-663`) only warns today; it now also marks a row that is not `COMPLETE` as
+`FAILED`, so the gates cover the `PENDING` window too. The wording is the attestation interrupt
+arm's today (`lifecycle.py:611-617`: the VM exists but was not verified; run `agw vm delete`), not
+`_warn_init_cancel`'s reinit advice. An interrupt after step 5 leaves `COMPLETE` and takes
+`_warn_init_cancel`. A post-ready wait that raises (`HOST_KEY`, `AUTH_FAILED`, anything else the
+table raises) is outside the span like the wait itself and propagates out of `bootstrap_vm` to
+`_raise_init_failure`: the row stays `COMPLETE`, the VM was attested seconds earlier, and the
+operator is told to `vm reinit`.
 
 **Enroll covers more than one connection.** The first-contact wait can make up to 17 connections
 (sixteen attempts and the confirming probe), all in Enroll mode. `accept-new` records a key only

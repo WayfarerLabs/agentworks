@@ -91,32 +91,14 @@ def _warn_init_cancel(vm_name: str) -> None:
     )
 
 
-def _fail_unattested(db: Database, vm_name: str) -> bool:
-    """Mark a VM whose provisioning never completed as failed, and say whether it was one.
-
-    Phase A writes ``complete`` only once the VM contract passed, and the
-    ordinary-command gates block a ``failed`` row, so a VM interrupted or
-    failed before then is retained as failed whatever window it was in,
-    the availability hold before Phase A included. Best effort: the original
-    failure or interrupt keeps propagating.
-    """
-    try:
-        vm = db.get_vm(vm_name)
-        if vm is None or vm.provisioning_status == ProvisioningStatus.COMPLETE.value:
-            return False
-        db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
-    except Exception as error:
-        output.warn(f"could not mark VM '{vm_name}' failed: {error}")
-    return True
-
-
 def _raise_init_failure(db: Database, vm_name: str, cause: Exception) -> NoReturn:
     """Map a non-cancellation failure in either init phase to its outcome.
 
-    A VM whose provisioning is not ``complete`` (it never passed Phase A, and
-    reinit refuses such a row) raises a ``ProvisioningError`` with delete
-    guidance; otherwise the VM provisioned but a later step failed, so it
-    raises an ``ExternalError`` (the VM may still be usable, reinit guidance). Both carry the ``Details:`` pointer to
+    A VM whose provisioning is not ``complete`` (it never passed Phase A, so
+    reinit and every ordinary command refuse it) raises a
+    ``ProvisioningError`` with delete guidance; otherwise the VM provisioned
+    but a later step failed, so it raises an ``ExternalError`` (the VM may
+    still be usable, reinit guidance). Both carry the ``Details:`` pointer to
     the most recent ``vm-create`` log when one exists. Shared by Phase A and
     Phase B so both fail identically.
     """
@@ -133,7 +115,7 @@ def _raise_init_failure(db: Database, vm_name: str, cause: Exception) -> NoRetur
             f"provisioning failed: {cause}{log_hint}",
             entity_kind="vm",
             entity_name=vm_name,
-            hint=f"VM '{vm_name}' is in a failed state. Use 'vm delete {vm_name}' to clean up.",
+            hint=f"VM '{vm_name}' did not complete provisioning. Use 'vm delete {vm_name}' to clean up.",
         ) from cause
     raise ExternalError(
         f"initialization failed: {cause}{log_hint}",
@@ -670,7 +652,11 @@ def create_vm(
                 # An operator abort must never downgrade to a
                 # Provisioning/External error; re-raise as itself after the
                 # recovery-guidance warning.
-                if _fail_unattested(db, vm_name):
+                # Phase A writes complete only once the VM contract passed, and every
+                # ordinary command refuses a VM that is not complete, so the status
+                # chooses the guidance and nothing needs marking here.
+                row = db.get_vm(vm_name)
+                if row is None or row.provisioning_status != ProvisioningStatus.COMPLETE.value:
                     output.warn(
                         f"VM '{vm_name}' exists but was not verified; run 'agw vm delete {vm_name}' to remove it."
                     )
@@ -679,7 +665,6 @@ def create_vm(
                 render_overlay_outcome(overlay_outcome)
                 raise
             except Exception as e:
-                _fail_unattested(db, vm_name)
                 render_overlay_outcome(overlay_outcome)
                 _raise_init_failure(db, vm_name, e)
 

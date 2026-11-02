@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import VersionedPayload, VMStatus
+from agentworks.db import ProvisioningStatus, VersionedPayload, VMStatus
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution.access import Admin
 from agentworks.execution.trust import HOST_TRUST
@@ -51,6 +51,7 @@ def _env_secret(monkeypatch: pytest.MonkeyPatch) -> None:
 def _seed_vm(db: Database) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
     seed_vm_trust("box")
 
 
@@ -625,6 +626,7 @@ def test_shell_no_tailscale_fails_before_any_resolve(
 
     config = make_config()
     db.insert_vm("box", site="proxmox", hostname="box")  # no tailscale host
+    db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
     _no_gate(monkeypatch)
 
     with pytest.raises(StateError, match="no Tailscale IP"):

@@ -261,12 +261,12 @@ are local); Azure, EC2, GCE, and Proxmox use it:
   and neither that nor this closing point is context-manager-shaped.
 - `secure_failed_vm(vm, ctx) -> None` (default no-op). Same contract as `post_tailscale_ready`, for
   the paths where a completed create is kept after Phase A fails (first contact, enrollment or the
-  VM contract) or the operator interrupts it, both of which mark the row FAILED; the success-only
-  hook never fired on either. Create-time bootstrap failure stays inside the platform rollback
-  window and never reaches this hook. Azure and GCE delete the owned fixed-name bootstrap allow and
-  EC2 revokes the recorded bootstrap tuples, so the VM defaults to zero inbound exposure; debugging
-  survives via `vm shell --platform` (a fresh per-operation allow) and the platform's serial console
-  (not firewall-gated).
+  VM contract, which marks the row FAILED) or the operator interrupts it (the row stays incomplete);
+  the success-only hook never fired on either. Create-time bootstrap failure stays inside the
+  platform rollback window and never reaches this hook. Azure and GCE delete the owned fixed-name
+  bootstrap allow and EC2 revokes the recorded bootstrap tuples, so the VM defaults to zero inbound
+  exposure; debugging survives via `vm shell --platform` (a fresh per-operation allow) and the
+  platform's serial console (not firewall-gated).
 
 The two closing hooks and `transient_route` take `ctx` because opening or closing the firewall route
 (an Azure NSG rule, an EC2 security-group rule) is a backend call; the caller (Phase A,
@@ -588,8 +588,8 @@ and the operator-facing command banners that the rest of the codebase calls "pha
   connections that may record the VM's host key), and runs the VM contract's base checks, release
   first; provisioning is complete only once they pass. Then it closes temporary provisioning access
   and syncs SSH config. It never receives the Tailscale key, generates a bootstrap script, or reads
-  the address itself. A failure or an interrupt before the contract passes leaves the VM failed,
-  with delete guidance.
+  the address itself. A failure before the contract passes leaves the VM failed, and an interrupt
+  leaves it incomplete; every ordinary command refuses either, and the guidance names delete.
 - **Initialization** is `run_initialization` (`agentworks.vms.initializer`) plus VM hardening
   (`agentworks.vms.hardening`), run over a `Transport` against the created VM. It is
   platform-agnostic. **It is re-runnable and is exactly what `agw vm reinit` re-runs.** The Phase A

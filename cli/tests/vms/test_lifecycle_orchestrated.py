@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from agentworks.db import VMStatus
+from agentworks.db import ProvisioningStatus, VMStatus
 from agentworks.execution import trust
 from agentworks.execution.errors import TrustMissing
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 def _seed_vm(db: Database, *, operator_stopped: bool = False) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
     seed_vm_trust("box")
     if operator_stopped:
         db.set_operator_stopped("box", True)

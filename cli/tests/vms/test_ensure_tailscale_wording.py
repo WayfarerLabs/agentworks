@@ -24,7 +24,7 @@ import pytest
 
 from agentworks import output
 from agentworks.capabilities.base import RunContext
-from agentworks.db import VMStatus
+from agentworks.db import ProvisioningStatus, VMStatus
 from agentworks.errors import StateError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -56,6 +56,7 @@ class _AuthKeys:
 def _seed_vm(db: Database) -> VMRow:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
     seed_vm_trust("box")
     vm = db.get_vm("box")
     assert vm is not None

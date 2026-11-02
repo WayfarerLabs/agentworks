@@ -21,7 +21,7 @@ from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
 from agentworks.db import VersionedPayload, VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConfigError, ExternalError, StateError, UserAbort, ValidationError
+from agentworks.errors import ConfigError, ExternalError, ProvisioningError, StateError, UserAbort, ValidationError
 from agentworks.execution.requests import Script
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result
 from agentworks.output import Role
@@ -682,11 +682,11 @@ def test_create_phase_a_failure_maps_to_provisioning_error(
     [
         (KeyboardInterrupt(), KeyboardInterrupt),
         (UserAbort("stop"), UserAbort),
-        (RuntimeError("hold failed"), ExternalError),
+        (RuntimeError("hold failed"), ProvisioningError),
     ],
     ids=["interrupt", "user-abort", "failure"],
 )
-def test_create_retains_a_vm_failed_whenever_phase_a_did_not_complete(
+def test_create_keeps_a_vm_whose_phase_a_did_not_complete_out_of_every_command(
     make_config,
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
@@ -695,7 +695,7 @@ def test_create_retains_a_vm_failed_whenever_phase_a_did_not_complete(
     raised: type[BaseException],
 ) -> None:
     """The availability hold is entered before Phase A, with the row still pending: a VM stopped
-    there was never attested, so it is retained failed, out of the ordinary commands' gates."""
+    there was never attested, so it is kept for delete and every ordinary command refuses it."""
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.db import ProvisioningStatus
 
@@ -719,11 +719,41 @@ def test_create_retains_a_vm_failed_whenever_phase_a_did_not_complete(
     with pytest.raises(raised) as caught:
         vm_manager.create_vm(db, make_config(), name="hvm", interaction=TtyInteractionPolicy.REFUSE)
 
+    assert isinstance(caught.value, raised)
     row = db.get_vm("hvm")
     assert row is not None
-    assert row.provisioning_status == ProvisioningStatus.FAILED.value
-    if isinstance(caught.value, ExternalError):
-        assert "vm delete hvm" in (caught.value.hint or "")
+    assert row.provisioning_status != ProvisioningStatus.COMPLETE.value
+    with pytest.raises(StateError):
+        vm_manager._guard_failed_vm(row)
+
+
+def test_a_failure_after_phase_a_completed_maps_to_reinit_advice(
+    make_config, db: Database, monkeypatch: pytest.MonkeyPatch, captured_output
+) -> None:
+    """A post-ready wait that raises comes after COMPLETE: an initialization failure, not a provisioning one."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.db import ProvisioningStatus
+
+    monkeypatch.setattr(
+        LimaPlatform,
+        "create",
+        lambda self, request, ctx: ProvisionResult(platform_metadata={}, tailnet_address="100.64.0.7"),  # noqa: ARG005
+    )
+    monkeypatch.setattr(LimaPlatform, "vm_active", _noop_hold)
+
+    def _completed_then_raises(*args: object, **kwargs: object) -> None:
+        _completed_phase_a(*args, **kwargs)  # type: ignore[arg-type]
+        raise RuntimeError("the VM stopped answering after the post-ready hook")
+
+    monkeypatch.setattr(vm_manager, "bootstrap_vm", _completed_then_raises)
+
+    with pytest.raises(ExternalError) as caught:
+        vm_manager.create_vm(db, make_config(), name="rvm2", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert not isinstance(caught.value, ProvisioningError)
+    row = db.get_vm("rvm2")
+    assert row is not None
+    assert row.provisioning_status == ProvisioningStatus.COMPLETE.value
 
 
 def test_an_interrupt_after_phase_a_completed_leaves_the_vm_complete(

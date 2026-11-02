@@ -179,8 +179,9 @@ VM or spends a Tailscale auth key.
   tailnet address. The first connection records the host key, and the VM contract's base checks
   follow: the Debian release first, then systemd, passwordless `sudo` for the admin, and the tools
   Agentworks runs (`install`, `flock`, `nohup`, `setsid`, `tar`). Provisioning is complete only once
-  they pass. A VM that fails them, or whose create is interrupted before then, is kept in a failed
-  state; delete it with `agw vm delete NAME`.
+  they pass. A VM that fails them is kept in a failed state, and one whose create is interrupted or
+  killed before then is kept with its provisioning incomplete. Every other command refuses either;
+  delete it with `agw vm delete NAME`.
 - **Reinit** starts with the same checks on the VM as it is. A live release that differs from the
   recorded one refuses first, as before. A failed check stops reinit before it changes anything and
   names recreation. The pam_env settings and an unsupported login shell only warn.

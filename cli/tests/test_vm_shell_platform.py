@@ -44,7 +44,7 @@ def _seed_db(
     platform: str = "lima",
     tailscale_host: str | None = "100.64.0.5",
     init_status: str | None = None,
-    provisioning_status: str | None = None,
+    provisioning_status: str = "complete",
 ) -> Database:
     """VM row in a fresh sqlite db. Defaults paint a healthy Lima VM;
     override individual fields to exercise other-platform branches or
@@ -55,9 +55,8 @@ def _seed_db(
     if init_status is not None:
         cols.append("init_status")
         vals.append(init_status)
-    if provisioning_status is not None:
-        cols.append("provisioning_status")
-        vals.append(provisioning_status)
+    cols.append("provisioning_status")
+    vals.append(provisioning_status)
     placeholders = ", ".join(["?"] * len(cols))
     db._conn.execute(
         f"INSERT INTO vms ({', '.join(cols)}) VALUES ({placeholders})",
@@ -641,6 +640,36 @@ def test_shell_vm_still_raises_on_failed_provisioning(
     err = exc_info.value
     assert "failed provisioning" in str(err)
     assert "vm delete" in (err.hint or "")
+    db.close()
+
+
+@pytest.mark.parametrize("status", ["pending", "in_progress"])
+@pytest.mark.parametrize("allow_failed_init", [False, True])
+def test_a_vm_whose_provisioning_never_completed_is_refused(
+    tmp_path: Path, status: str, allow_failed_init: bool
+) -> None:
+    """A killed create can leave a row pending or in progress with no arm run: never attested, so gated."""
+    from agentworks.vms.manager import _guard_failed_vm
+
+    db = _seed_db(tmp_path, provisioning_status=status)
+    vm = db.get_vm("vm1")
+    assert vm is not None
+
+    with pytest.raises(StateError) as caught:
+        _guard_failed_vm(vm, allow_failed_init=allow_failed_init)
+
+    assert caught.value.entity_name == "vm1"
+    db.close()
+
+
+def test_a_completed_vm_passes_the_gate(tmp_path: Path) -> None:
+    from agentworks.vms.manager import _guard_failed_vm
+
+    db = _seed_db(tmp_path)
+    vm = db.get_vm("vm1")
+    assert vm is not None
+
+    _guard_failed_vm(vm)
     db.close()
 
 

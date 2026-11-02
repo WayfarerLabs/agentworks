@@ -450,9 +450,9 @@ class VMPlatform(Capability):
     def secure_failed_vm(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
         """Hook called when a created VM is kept after Phase A fails: core
         refused the returned ``tailnet_address``, the first contact or the VM
-        contract failed, or the operator interrupted Phase A (the row is
-        marked FAILED in every case), and the VM is kept for debugging rather
-        than rolled back.
+        contract failed (the row is marked FAILED), or the operator
+        interrupted Phase A (the row stays incomplete), and the VM is kept for
+        debugging rather than rolled back.
 
         Create-time bootstrap failures never reach this hook. They raise from
         :meth:`create` while the platform's backend rollback window is open.

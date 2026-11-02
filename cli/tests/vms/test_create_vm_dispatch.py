@@ -365,7 +365,7 @@ def test_create_vm_wraps_an_untyped_platform_failure_with_its_hint(
         pytest.param(UserAbort("stop"), id="user-abort"),
     ],
 )
-def test_create_vm_attests_the_core_release_and_retains_an_unattested_vm_failed(
+def test_create_vm_attests_the_core_release_and_keeps_an_unattested_vm_gated(
     db: Database,
     make_config,
     monkeypatch: pytest.MonkeyPatch,
@@ -373,7 +373,7 @@ def test_create_vm_attests_the_core_release_and_retains_an_unattested_vm_failed(
     failure: BaseException,
 ) -> None:
     """Phase A attests the release core asked for, whatever the platform did to the request, and a VM
-    whose Phase A did not complete is retained failed, addressable for delete, with no release recorded."""
+    whose Phase A did not complete is kept for delete, refused by every ordinary command, with no release recorded."""
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.db import InitStatus, ProvisioningStatus
 
@@ -410,9 +410,11 @@ def test_create_vm_attests_the_core_release_and_retains_an_unattested_vm_failed(
     row = db.get_vm("unverified")
     assert row is not None
     assert row.platform_metadata == {"instance_name": "unverified"}
-    assert row.provisioning_status == ProvisioningStatus.FAILED.value
+    assert row.provisioning_status != ProvisioningStatus.COMPLETE.value
     assert row.init_status == InitStatus.PENDING.value
     assert row.debian_release is None
+    with pytest.raises(StateError):
+        vm_manager._guard_failed_vm(row)
 
 
 def test_create_vm_logger_close_failure_retains_owner_and_reports_once(

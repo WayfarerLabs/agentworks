@@ -16,9 +16,10 @@ fail-closed span:
 Any failure in the span marks provisioning failed, records the
 ``provisioning_failed`` event, closes the kept VM's provisioning access
 (``secure_failed_vm``) and re-raises. An interrupt there closes that access
-too, and marks the row failed unless it is already complete, so a VM that was
-never attested is retained as failed. After the span come the platform's
-post-ready hook and a wait for the VM to answer again, both non-fatal.
+too and leaves the row as it found it: complete is written only once the
+contract passed, and every ordinary command refuses a VM that is not
+complete. After the span come the platform's post-ready hook and a wait for
+the VM to answer again.
 
 The log is typed as the small protocol below, never as ``SSHLogger``: this
 module imports nothing from the legacy transport stack.
@@ -117,27 +118,29 @@ def bootstrap(
             db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
             db.insert_vm_event(vm_name, "provisioning_complete", address)
     except Exception as error:
-        db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
-        db.insert_vm_event(vm_name, "provisioning_failed", str(error))
+        # Nothing here may replace the original failure or skip securing the VM.
+        try:
+            with db.transaction():
+                db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
+                db.insert_vm_event(vm_name, "provisioning_failed", str(error))
+        except Exception as mark_error:
+            output.warn(f"could not mark VM '{vm_name}' failed: {mark_error}")
         _secure(db, vm_name, platform, ctx, what="failed")
         output.warn(f"Log: {log.display_path}")
         raise
     except BaseException:
         # An operator interrupt escapes the arm above. The VM is kept, so its
-        # provisioning access still closes, and a VM that was never attested
-        # is marked failed. Nothing here may replace the interrupt.
-        try:
-            row = db.get_vm(vm_name)
-            if row is not None and row.provisioning_status != ProvisioningStatus.COMPLETE.value:
-                db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
-        except Exception as mark_error:
-            output.warn(f"could not mark the interrupted VM failed: {mark_error}")
+        # provisioning access still closes. Its row stays as the interrupt left
+        # it, never complete, which every ordinary command refuses.
         _secure(db, vm_name, platform, ctx, what="interrupted")
         raise
 
     # The platform closes its provisioning access (Azure deletes the bootstrap
     # SSH allow). A route change can unsettle the network briefly, so wait for
-    # the VM to answer again; neither step can make an attested VM unhealthy.
+    # the VM to answer again. The VM is attested and complete by now: a wait
+    # that runs out warns and proceeds, and one that raises (a changed host
+    # key, a refused key) propagates with the row still complete, which create
+    # reports as an initialization failure with reinit advice.
     if on_tailscale_ready is not None:
         try:
             on_tailscale_ready()

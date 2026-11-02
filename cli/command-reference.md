@@ -691,8 +691,10 @@ Agentworks then reaches the VM over SSH at that address. Its first connection re
 key, and the VM contract's base checks follow on verified connections: the Debian release first,
 then systemd, passwordless `sudo` for the admin, and the base tools Agentworks runs (`install`,
 `flock`, `nohup`, `setsid`, `tar`). The VM's provisioning is complete only once they pass. If any of
-this fails, or create is interrupted before it completes, the VM is kept in a failed state with its
-temporary provisioning access closed, and `agw vm delete <name>` removes it.
+this fails, the VM is kept in a failed state; if create is interrupted first, it is kept with its
+provisioning incomplete. Either way its temporary provisioning access is closed, every other VM
+command refuses it (as it does a VM a killed create left in progress), and `agw vm delete <name>`
+removes it.
 
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
 alphanumeric plus dash, no leading/trailing dash): a short identifier for this Agentworks
