@@ -118,11 +118,11 @@ a VM connection.
       quoted, as today (`vms/manager/exec.py:271`).
 - [x] Restore `vm exec`'s several-argument form to today's behavior, shell-joined (a word starting
       with `=` always quoted) and run under the identity's default shell (`vms/manager/exec.py:271`
-      on `main`), which the box above wrongly described as a literal argv. Give a departed stdout
-      consumer ssh's semantics (close it, keep pumping until the channel ends, report the guest's
-      status when its trailer arrives) and end the request when a stderr consumer leaves, after
-      delivering held stdout and keeping a trailer already in hand (execution LLD, the pump); on
-      Windows the passphrase hint names the absolute path, and the agent check lists keys with
+      on `main`), which the box above first described, wrongly, as a literal argv. Give a departed
+      stdout consumer ssh's semantics (close it, keep pumping until the channel ends, report the
+      guest's status when its trailer arrives) and end the request when a stderr consumer leaves,
+      after delivering held stdout and keeping a trailer already in hand (execution LLD, the pump);
+      on Windows the passphrase hint names the absolute path, and the agent check lists keys with
       `ssh-add -L` rather than signing, and only for a `.pub` that holds a type and blob. Test the
       `=` rule under zsh itself, whatever the runner's login shell, and keep one copy each of the
       SSH wire reader (`ssh_identity`) and the rule for a departed reader (`pump.reader_left`).
