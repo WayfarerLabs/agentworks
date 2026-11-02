@@ -244,7 +244,7 @@ def test_a_quiet_payload_whose_stdout_consumer_leaves_still_reports_its_own_stat
         "start(); out.write(b'hello'); out.flush(); time.sleep(.5)\n"
         "try:\n"
         "    out.write(P + b'end\\n'); out.flush()\n"
-        "except BrokenPipeError:\n"
+        "except OSError:  # BrokenPipeError on POSIX, EINVAL on Windows\n"
         "    pass\n"
         "err.write(P + b'exit 4\\n'); err.flush()\n"
     )
@@ -314,7 +314,7 @@ def test_a_stdout_pipe_whose_reader_closed_is_the_consumer_leaving() -> None:
         "start(); out.write(b'a'); out.flush(); time.sleep(.3)\n"
         "try:\n"
         "    out.write(P + b'end\\n'); out.flush()\n"
-        "except BrokenPipeError:\n"
+        "except OSError:  # BrokenPipeError on POSIX, EINVAL on Windows\n"
         "    pass\n"
         "err.write(P + b'exit 7\\n'); err.flush()\n"
     )
