@@ -27,7 +27,7 @@ import agentworks.execution as execution
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import ConnectivityError, StateError
-from agentworks.execution import root_script, ssh_process, trust
+from agentworks.execution import client, root_script, ssh_process, trust
 from agentworks.execution.errors import TrustMismatch
 from agentworks.execution.trust import TrustBinding, TrustMode
 
@@ -55,6 +55,7 @@ class PublicSSH:
         # Destination validates the provider-reported address and the admin name.
         self._destination = ssh_process.Destination(host, user)
         self._policy = ssh_process.VMPolicy(identity_file, trust)
+        self._identity_file = identity_file
         self._vm_name = trust.vm_name
 
     def run_as_root(self, script: bytes, deadline: float) -> RawRun:
@@ -73,8 +74,9 @@ class PublicSSH:
         if ssh_process.HOST_KEY_FAILURE in text:
             raise TrustMismatch(self._vm_name, ssh_process.tail_lines(text))
         if ssh_process.AUTH_FAILURE in text:
-            # Recovery logs in with the key it would repair, so waiting or retrying cannot help.
-            raise ConnectivityError(
+            # Recovery logs in with the key it would repair, so waiting or retrying cannot help,
+            # unless the key is encrypted and the agent does not hold it.
+            refused = ConnectivityError(
                 f"VM '{self._vm_name}' refused the configured SSH key at its public address {self._destination.host}",
                 entity_kind="vm",
                 entity_name=self._vm_name,
@@ -83,6 +85,8 @@ class PublicSSH:
                     "to restore the admin's authorized key, or delete and recreate the VM."
                 ),
             )
+            refused.add_hint(client.agent_load_hint(self._identity_file))
+            raise refused
         return raw
 
     def wait_until_answering(self, *, failure_hint: str | None) -> None:

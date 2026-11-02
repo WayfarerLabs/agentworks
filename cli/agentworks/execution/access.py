@@ -15,7 +15,6 @@ import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from agentworks import ssh_identity
 from agentworks.errors import StateError
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, forwarding, pump, ssh_process
@@ -182,17 +181,8 @@ class VMAccess:
             return forwarding.run_forward(argv, vm_name=self.vm_name, log=log)
 
     def passphrase_hint(self) -> str | None:
-        """How to load the operator's key into the SSH agent, or ``None`` unless that is the likely fix.
-
-        ssh runs in batch mode, so an encrypted key that is not loaded in the
-        agent fails as a plain connection failure. There is no hint for a key
-        the agent already holds. This reads the key file and may run
-        ``ssh-add``, so callers ask only after a connection failure.
-        """
-        hint = ssh_identity.passphrase_hint(self._identity_file)
-        if hint is None or client.identity_is_loaded(client.resolve_ssh(), self._identity_file):
-            return None
-        return hint
+        """:func:`client.agent_load_hint` for the operator's key; ask only after a connection failure."""
+        return client.agent_load_hint(self._identity_file)
 
     # -- Internals -------------------------------------------------------------
 
@@ -208,9 +198,7 @@ class VMAccess:
             yield
         except ExecutionIncomplete as error:
             if error.result.completion in (Unknown(UnknownReason.CONNECTION), Unknown(UnknownReason.AUTH_FAILED)):
-                hint = self.passphrase_hint()
-                if hint is not None:
-                    error.hint = f"{error.hint} {hint}" if error.hint else hint
+                error.add_hint(self.passphrase_hint())
             raise
 
     def _policy(self) -> ssh_process.VMPolicy:

@@ -17,7 +17,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import public_ssh
 from agentworks.capabilities.vm_platform.public_ssh import PublicSSH
 from agentworks.errors import ConnectivityError, StateError, ValidationError
-from agentworks.execution import root_script, trust
+from agentworks.execution import client, root_script, trust
 from agentworks.execution.client import SSHClient
 from agentworks.execution.errors import TrustMismatch, TrustMissing
 from agentworks.execution.root_script import RawRun
@@ -112,13 +112,19 @@ def test_a_host_key_failure_in_the_client_log_is_a_trust_mismatch(monkeypatch: p
         target().run_as_root(b"true\n", 5)
 
 
-def test_a_refused_key_in_the_client_log_names_the_provider_console(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("load_hint", [None, "ssh-add the key"], ids=["key-loaded-or-plain", "key-not-loaded"])
+def test_a_refused_key_in_the_client_log_adds_the_agent_load_hint_when_there_is_one(
+    monkeypatch: pytest.MonkeyPatch, load_hint: str | None
+) -> None:
     answering(monkeypatch, log_text="agw@203.0.113.7: Permission denied (publickey).\n", status=None)
+    monkeypatch.setattr(client, "agent_load_hint", lambda identity_file: load_hint)
 
     with pytest.raises(ConnectivityError) as caught:
         target().run_as_root(b"true\n", 5)
 
-    assert caught.value.hint
+    hint = caught.value.hint
+    assert hint  # the provider console, always
+    assert hint.endswith("ssh-add the key") is (load_hint is not None)
 
 
 # -- wait_until_answering ----------------------------------------------------------------
