@@ -12,8 +12,7 @@ from pydantic import Field, model_validator
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
-from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
-from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
+from agentworks.capabilities.vm_platform.bootstrap_script import run_bootstrap
 from agentworks.capabilities.vm_platform.debian_release import (
     operator_owned_release_value,
 )
@@ -25,7 +24,6 @@ from agentworks.capabilities.vm_platform.tailscale_join import (
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
-from agentworks.execution import root_script
 from agentworks.plugins.proxmox import guest_agent
 from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.plugins.proxmox.teardown import (
@@ -38,7 +36,7 @@ from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
 
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
@@ -400,7 +398,15 @@ class ProxmoxPlatform(VMPlatform):
                 # guest agent, the VM's root channel
                 output.detail("Running bootstrap via guest agent...")
                 run_as_root = functools.partial(guest_agent.run_as_root, self._api(ctx), node, newid)
-                self._run_bootstrap(run_as_root, request)
+                run_bootstrap(
+                    run_as_root,
+                    admin_username=request.admin_username,
+                    ssh_public_key=request.ssh_public_key,
+                    hostname=request.hostname,
+                    swap=request.swap_gib,
+                    deadline=BOOTSTRAP_DEADLINE_SECONDS,
+                    progress=request.progress,
+                )
                 join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
                 tailnet_address = settle_tailnet_address(
                     run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT
@@ -561,18 +567,3 @@ class ProxmoxPlatform(VMPlatform):
         # succeeded (or was tolerated), so this is the backend VM failing
         # to reach readiness during provisioning, not an API failure.
         raise ProvisioningError(f"Timed out waiting for guest agent IP on VMID {vmid}")
-
-    def _run_bootstrap(self, run_as_root: Callable[[bytes, float], RawRun], request: ProvisionRequest) -> None:
-        """Run the key-free bootstrap through the guest agent once, raising unless it exits 0."""
-        script = generate_bootstrap_script(
-            admin_username=request.admin_username,
-            ssh_public_key=request.ssh_public_key,
-            provisioning_packages=PROVISIONING_PACKAGES,
-            hostname=request.hostname,
-            swap=request.swap_gib,
-        )
-        result = root_script.run(run_as_root, script, deadline=BOOTSTRAP_DEADLINE_SECONDS)
-        if result.status is None:
-            raise ProvisioningError("the outcome of the Proxmox guest-agent bootstrap is unknown")
-        if result.status != 0:
-            raise ProvisioningError(f"Proxmox guest-agent bootstrap failed (exit {result.status})")

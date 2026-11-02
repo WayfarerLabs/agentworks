@@ -15,13 +15,13 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.bootstrap_script import run_bootstrap
 from agentworks.capabilities.vm_platform.debian_release import code_owned_release_value
 from agentworks.capabilities.vm_platform.tailscale_join import (
     CREATE_RERUN_HINT,
     join_tailscale,
     settle_tailnet_address,
 )
-from agentworks.capabilities.vm_platform.wsl2_bootstrap import run_wsl2_bootstrap
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import StateError
@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from agentworks.transports import Transport
 
 _STATUS_TIMEOUT_SECONDS = 10
+_BOOTSTRAP_DEADLINE_SECONDS = 900
 
 
 def wsl_program(*, windows: bool, environ: Mapping[str, str]) -> str:
@@ -802,13 +803,18 @@ class WSL2Platform(VMPlatform):
                 # so it stays inside the same distro rollback span, as do the
                 # join and the address read over the same root channel. The
                 # manager owns the progress sink and records the address later.
+                # The bootstrap runs synchronously: a detached run would be in
+                # its own systemd-logind session, where KillUserProcesses can
+                # reap it when the wsl.exe that started it exits.
+                output.info("Bootstrapping VM...")
                 run_as_root = functools.partial(_run_as_root, distro_name)
-                run_wsl2_bootstrap(
+                run_bootstrap(
                     run_as_root,
                     admin_username=admin_username,
                     ssh_public_key=request.ssh_public_key,
                     hostname=request.hostname,
-                    swap_gib=0,
+                    swap=0,
+                    deadline=_BOOTSTRAP_DEADLINE_SECONDS,
                     progress=request.progress,
                 )
                 join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)

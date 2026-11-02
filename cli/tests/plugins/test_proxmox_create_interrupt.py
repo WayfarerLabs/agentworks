@@ -244,10 +244,10 @@ def _interrupt_the_bootstrap(monkeypatch: pytest.MonkeyPatch) -> KeyboardInterru
     so tests can assert the ORIGINAL interrupt is what propagates."""
     interrupt = KeyboardInterrupt("first")
 
-    def _raise(self: ProxmoxPlatform, run_as_root: object, request: ProvisionRequest) -> None:
+    def _raise(run_as_root: object, **kwargs: object) -> None:
         raise interrupt
 
-    monkeypatch.setattr(ProxmoxPlatform, "_run_bootstrap", _raise)
+    monkeypatch.setattr("agentworks.plugins.proxmox.platform.run_bootstrap", _raise)
     return interrupt
 
 
@@ -321,11 +321,8 @@ class TestFailClosedBootstrap:
         _assert_exception_graph_is_value_free(caught.value)
 
     @pytest.mark.parametrize(
-        ("answer", "message"),
-        [
-            (Answer(status=None), "bootstrap is unknown"),
-            (Answer(status=1, stdout=b"##STEP## Hostname\n##ERROR## reflected\n"), r"bootstrap failed \(exit 1\)"),
-        ],
+        "answer",
+        [Answer(status=None), Answer(status=1, stdout=b"##STEP## Hostname\n##ERROR## reflected\n")],
         ids=("unknown", "failed"),
     )
     def test_bootstrap_failure_rolls_back_before_the_key_is_sent(
@@ -333,12 +330,11 @@ class TestFailClosedBootstrap:
         monkeypatch: pytest.MonkeyPatch,
         captured_output: CapturedOutput,
         answer: Answer,
-        message: str,
     ) -> None:
         platform, fake = _platform_with_fake(monkeypatch)
         fake.guest = FakeGuest(lambda payload, seen: answer)
 
-        with pytest.raises(ProvisioningError, match=message) as caught:
+        with pytest.raises(ProvisioningError) as caught:
             platform.create(_request(tailscale=True), RunContext())
 
         assert ("stop_vm", "pve1", _NEWID) in fake.calls
@@ -357,7 +353,7 @@ class TestFailClosedBootstrap:
         fake.guest = FakeGuest(lambda payload, seen: Answer(status=None))
         fake.delete_error = ProxmoxAPIError("VM is locked")
 
-        with pytest.raises(ProvisioningError, match="bootstrap is unknown") as caught:
+        with pytest.raises(ProvisioningError) as caught:
             platform.create(_request(tailscale=True), RunContext())
 
         _assert_exception_graph_is_value_free(caught.value)

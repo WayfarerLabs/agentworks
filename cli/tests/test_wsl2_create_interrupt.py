@@ -122,7 +122,7 @@ def _wire(
     monkeypatch.setattr(wsl2, "_powershell", _fake_powershell)
     monkeypatch.setattr(wsl2, "_download_debian_rootfs", lambda tarball, *, tag: None)
     monkeypatch.setattr(WSL2Platform, "_distro_exists", staticmethod(lambda name: False))
-    monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", lambda *args, **kwargs: None)
+    monkeypatch.setattr(wsl2, "run_bootstrap", lambda *args, **kwargs: None)
     calls.guest = install_at_run_process(monkeypatch, FakeGuest())
     return calls
 
@@ -137,7 +137,7 @@ def test_success_runs_primary_bootstrap_before_create_returns(monkeypatch: pytes
     calls = _wire(monkeypatch)
     request = _request()
     bootstrap = MagicMock(return_value=None)
-    monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", bootstrap)
+    monkeypatch.setattr(wsl2, "run_bootstrap", bootstrap)
 
     result = WSL2Platform("wsl2", {}).create(request, RunContext())
 
@@ -147,7 +147,8 @@ def test_success_runs_primary_bootstrap_before_create_returns(monkeypatch: pytes
         "admin_username": "agw",
         "ssh_public_key": "ssh-ed25519 AAAA test",
         "hostname": "vm1",
-        "swap_gib": 0,
+        "swap": 0,
+        "deadline": 900,
         "progress": request.progress,
     }
     # The join and the address read go through the root channel, after the bootstrap.
@@ -158,7 +159,7 @@ def test_success_runs_primary_bootstrap_before_create_returns(monkeypatch: pytes
 def test_primary_bootstrap_failure_cleans_up_and_reraises(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _wire(monkeypatch)
     failure = RuntimeError("bootstrap exploded")
-    monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", MagicMock(side_effect=failure))
+    monkeypatch.setattr(wsl2, "run_bootstrap", MagicMock(side_effect=failure))
 
     with pytest.raises(RuntimeError) as exc:
         WSL2Platform("wsl2", {}).create(_request(), RunContext())
@@ -191,7 +192,7 @@ def test_interrupt_during_primary_bootstrap_cleans_up_and_reraises_the_original(
     interrupt propagates for the caller's row unwind (identity pin)."""
     interrupt = KeyboardInterrupt("first")
     calls = _wire(monkeypatch)
-    monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", MagicMock(side_effect=interrupt))
+    monkeypatch.setattr(wsl2, "run_bootstrap", MagicMock(side_effect=interrupt))
 
     with pytest.raises(KeyboardInterrupt) as exc:
         WSL2Platform("wsl2", {}).create(_request(), RunContext())
@@ -210,7 +211,7 @@ def test_second_interrupt_abandons_cleanup_loudly(
     command, and the ORIGINAL interrupt still propagates."""
     interrupt = KeyboardInterrupt("first")
     calls = _wire(monkeypatch, errors={"--unregister": KeyboardInterrupt("second")})
-    monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", MagicMock(side_effect=interrupt))
+    monkeypatch.setattr(wsl2, "run_bootstrap", MagicMock(side_effect=interrupt))
 
     with pytest.raises(KeyboardInterrupt) as exc:
         WSL2Platform("wsl2", {}).create(_request(), RunContext())

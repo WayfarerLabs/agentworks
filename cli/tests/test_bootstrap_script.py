@@ -5,7 +5,7 @@ from __future__ import annotations
 from agentworks.capabilities.vm_platform.bootstrap_script import (
     REBOOT_SENTINEL_PATH,
     generate_bootstrap_script,
-    parse_bootstrap_output,
+    parse_bootstrap_steps,
 )
 from agentworks.execution import root_script
 from tests.conftest import requires_posix_shell
@@ -313,30 +313,20 @@ def test_generate_bootstrap_script_no_platform_specific_tailscale_config() -> No
     assert ">> /etc/default/tailscaled" not in script
 
 
-def test_parse_bootstrap_output_success() -> None:
-    """Parse output from a successful bootstrap."""
+def test_parse_bootstrap_steps_reads_each_step_and_its_markers() -> None:
     output = (
+        "noise before any step\n"
+        "##SUCCESS## orphaned\n"
         "##STEP## Hostname\n"
         "##SUCCESS## hostname set to vm1\n"
         "##STEP## Tailscale install\n"
-        "##SUCCESS## tailscale installed\n"
+        "##WARN## slow mirror\n"
+        "##ERROR## curl failed\n"
     )
 
-    result = parse_bootstrap_output(output, 0)
+    steps = parse_bootstrap_steps(output)
 
-    # No address is printed: the platform reads it after its own join.
-    assert result.ok
-    assert len(result.steps) == 2
-    assert result.steps[1].name == "Tailscale install"
-    assert result.steps[1].success_msg == "tailscale installed"
-
-
-def test_parse_bootstrap_output_failure() -> None:
-    """Parse output from a failed bootstrap."""
-    output = "##STEP## Tailscale install\n##ERROR## curl failed\n"
-
-    result = parse_bootstrap_output(output, 1)
-
-    assert not result.ok
-    assert len(result.steps) == 1
-    assert result.steps[0].error == "curl failed"
+    assert [(step.name, step.success_msg, step.warnings, step.error) for step in steps] == [
+        ("Hostname", "hostname set to vm1", [], None),
+        ("Tailscale install", None, ["slow mirror"], "curl failed"),
+    ]

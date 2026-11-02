@@ -23,7 +23,7 @@ from agentworks.capabilities.vm_platform.base import ProvisionRequest, Provision
 from agentworks.capabilities.vm_platform.bootstrap_script import (
     REBOOT_SENTINEL_PATH,
     generate_bootstrap_script,
-    parse_bootstrap_output,
+    parse_bootstrap_steps,
 )
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
@@ -532,8 +532,7 @@ class LimaPlatform(VMPlatform):
             progress.output(result.output)
             if result.exit_code != 0:
                 # Parse structured markers from provision script output if present
-                bootstrap = parse_bootstrap_output(result.output, result.exit_code)
-                for step in bootstrap.steps:
+                for step in parse_bootstrap_steps(result.output):
                     if step.error:
                         progress.log_error(f"Provision step '{step.name}': {step.error}")
                 progress.log_error(f"limactl failed (exit {result.exit_code})")
@@ -631,8 +630,7 @@ class LimaPlatform(VMPlatform):
                 check=False,
             )
             if log_output.strip():
-                bootstrap = parse_bootstrap_output(log_output, 1)
-                for step in bootstrap.steps:
+                for step in parse_bootstrap_steps(log_output):
                     if step.error:
                         output.warn(f"Provision error ({step.name}): {step.error}")
         except LimaCommandFailed:
