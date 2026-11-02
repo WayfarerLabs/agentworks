@@ -206,6 +206,31 @@ def test_only_well_formed_lines_under_the_vms_alias_count_as_a_record() -> None:
     assert trust.stored_keys("web") == (_KEY,)
 
 
+def test_a_truncated_or_mislabelled_stored_key_is_not_a_record() -> None:
+    trust.begin_enrollment("web")
+    trust.store_file("web").write_text(
+        f"agentworks-vm-web ssh-ed25519 {_KEY.blob[:-8]}\nagentworks-vm-web ssh-ed25519 {_OTHER_KEY.blob}\n"
+    )
+
+    assert not trust.has_record("web")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs a symbolic link")
+def test_enrollment_never_follows_a_link_planted_at_the_store_path(tmp_path: Path) -> None:
+    trust.begin_enrollment("web")
+    victim = tmp_path / "victim"
+    victim.write_text("keep")
+    real = trust.store_file("web")
+    real.unlink()
+    real.symlink_to(victim)
+
+    trust.begin_enrollment("web")  # unlinks the planted link, then creates a fresh private file
+
+    assert victim.read_text() == "keep"
+    assert not real.is_symlink()
+    assert stat.S_IMODE(real.stat().st_mode) == 0o600
+
+
 def test_a_file_with_no_usable_line_is_no_record() -> None:
     trust.begin_enrollment("web")
     trust.store_file("web").write_text("garbage\n")

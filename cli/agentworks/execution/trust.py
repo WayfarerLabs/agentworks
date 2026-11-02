@@ -261,7 +261,9 @@ def begin_enrollment(vm_name: str) -> None:
         path.unlink(missing_ok=True)
         # ssh appends to an existing file and keeps its mode, so the record the
         # first connection writes is as private as one ``write_records`` makes.
-        path.touch(mode=0o600)
+        # Exclusive and never through a link, so nothing planted after the unlink is reused.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+        os.close(os.open(path, flags, 0o600))
     except OSError as e:
         raise _store_error("reset the host-key store", path, e, vm_name) from e
 
