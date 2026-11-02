@@ -346,10 +346,8 @@ class PipeSession:
 
     def _abandon(self, which: str) -> None:
         """Stop reading ``which`` and close the client's read end of it, so ssh sees ``EPIPE``."""
-        self._sinks[which] = _discard
         self._abandoned.add(which)
         self._eof[which] = True
-        self._pending[which] = None
         proc = self._proc
         assert proc is not None
         pipe = proc.stdout if which == "out" else proc.stderr
@@ -425,7 +423,3 @@ class PipeSession:
             if proc.poll() is None:
                 proc.kill()
             proc.wait(timeout=_REAP_SECONDS)
-
-
-def _discard(_payload: bytes) -> None:
-    return None
