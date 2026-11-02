@@ -41,8 +41,8 @@ for `attach`). Each takes `env` and `cwd` (absolute; `None` is the home director
 `run` calls once per request before raising for its outcome, so failures are logged. The block is
 `oplog.format_record`'s: the step label, the request's shape (the argv, or a script's shell and
 login flag, with the working directory, the environment's names and the deadline), the completion,
-both streams and ssh's diagnostics. No environment value or script source reaches the formatter;
-the logger redacts the secrets registered when it was constructed, at its one sink.
+both streams and ssh's diagnostics. No environment value or script source reaches the formatter; the
+logger redacts the secrets registered when it was constructed, at its one sink.
 
 ## What a request becomes
 
@@ -79,13 +79,13 @@ Completion comes from the markers, never from ssh's exit status:
 repr or hint holds a stream, an environment value or script text; the only transcript an error may
 show is the last lines of ssh's own diagnostics, which the client keeps in a private log (`-E`)
 apart from the payload's output. On a connection or authentication failure, `VMAccess` reads the
-operator's key file once to decide whether to hint at `ssh-add`, and only then. `stream` reports a refusal the way a
-shell does: 127 for a missing command, 126 for any other `exec` failure, 125 for a working
-directory. A consumer that leaves (`| head`) gets what ssh gave it. For stdout the client closes its
-read end, so a writer takes `SIGPIPE`, while a quiet payload still runs to its end and `stream`
-reports its own status. A departed stderr ends the request once held stdout is delivered, since ssh
-does not end the channel for it, unless its trailer had already arrived; then stdout is read to its
-end and the guest's status stands. With no status to report, `stream` returns 141.
+operator's key file once to decide whether to hint at `ssh-add`, and only then. `stream` reports a
+refusal the way a shell does: 127 for a missing command, 126 for any other `exec` failure, 125 for a
+working directory. A consumer that leaves (`| head`) gets what ssh gave it. For stdout the client
+closes its read end, so a writer takes `SIGPIPE`, while a quiet payload still runs to its end and
+`stream` reports its own status. A departed stderr ends the request once held stdout is delivered,
+since ssh does not end the channel for it, unless its trailer had already arrived; then stdout is
+read to its end and the guest's status stands. With no status to report, `stream` returns 141.
 
 ## Client and policy
 
@@ -98,12 +98,13 @@ verdict.
 `ssh_process.py` builds the argv under `-F none`, so no operator or system configuration applies,
 with the explicit identity (`IdentitiesOnly`), `BatchMode`, publickey-only authentication, the VM's
 host-key trust options and keepalives on every connection. Its `spawn` is the only place a client is
-started; it also starts a platform's root channel (below), and a program other than the OpenSSH client
-that cannot start is a `ConnectivityError` naming it, not `ClientUnsupported`. `build_host_argv` is the
-one other policy, for a platform's own connection to its host (Remote Lima's placement host): it
-honors the operator's SSH configuration (no `-F none`), trusts the host through `HOST_TRUST`, and
-keeps the connect timeout and keepalives, with `BatchMode` only when piped. `pump.py` drives a started client through pipes: one thread over non-blocking pipes, with
-the operator's stdin reaching it through a daemon thread that reads the raw stream. A deadline or an
+started; it also starts a platform's root channel (below), and a program other than the OpenSSH
+client that cannot start is a `ConnectivityError` naming it, not `ClientUnsupported`.
+`build_host_argv` is the one other policy, for a platform's own connection to its host (Remote
+Lima's placement host): it honors the operator's SSH configuration (no `-F none`), trusts the host
+through `HOST_TRUST`, and keeps the connect timeout and keepalives, with `BatchMode` only when
+piped. `pump.py` drives a started client through pipes: one thread over non-blocking pipes, with the
+operator's stdin reaching it through a daemon thread that reads the raw stream. A deadline or an
 output limit kills the client at once. A sink that would block (the operator's own stdout is a
 non-blocking pipe) is waited on, never dropped.
 
@@ -123,15 +124,16 @@ bound for connecting and running the account's startup files; the 30 seconds abo
 ## Root scripts
 
 `root_script.py` is how core runs a script as root through a platform's own channel, which works
-without the VM's Tailscale state. A platform implements one primitive, `run_as_root(script,
-deadline) -> RawRun`: run `/bin/bash -s` as root with `script` on stdin and return both streams,
-with no status, because no channel's status is trusted. `root_script.run(run_as_root, payload, *,
-deadline, secret=None, log=None)` wraps the payload in one brace group that Bash parses whole before
-running (so a payload that reads stdin gets end of file, and a script cut short runs nothing), frames
-it with the execution markers, and returns a `RootScriptResult` whose `status` is the payload's only
-when both closing markers arrived. The one secret a script may need is an unexported shell variable,
-`AGW_SECRET`, in the script text: it is in no argument and no child's environment, and it is
-redacted from every field of the result and the log record.
+without the VM's Tailscale state. A platform implements one primitive,
+`run_as_root(script, deadline) -> RawRun`: run `/bin/bash -s` as root with `script` on stdin and
+return both streams, with no status, because no channel's status is trusted.
+`root_script.run(run_as_root, payload, *, deadline, secret=None, log=None)` wraps the payload in one
+brace group that Bash parses whole before running (so a payload that reads stdin gets end of file,
+and a script cut short runs nothing), frames it with the execution markers, and returns a
+`RootScriptResult` whose `status` is the payload's only when both closing markers arrived. The one
+secret a script may need is an unexported shell variable, `AGW_SECRET`, in the script text: it is in
+no argument and no child's environment, and it is redacted from every field of the result and the
+log record.
 
 `run_process(argv, script, deadline)` is `run_as_root` for a channel that is a local process
 (`limactl`, `wsl.exe`, `ssh`): the pump drives it with `nonce=None`, passing both streams through,

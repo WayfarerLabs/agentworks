@@ -208,10 +208,11 @@ and DB migration.
   it never reaches an argument, a log, an exception or a file. A channel that cannot start, or a
   provider call that fails, raises an `AgentworksError`; core treats it like an unknown outcome and
   never dispatches again. Lima runs `limactl shell <instance> sudo -n /bin/bash -s` (on the
-  placement host for Remote Lima), WSL2 `wsl --distribution <distro> --user root --exec /bin/bash
-  -s`, Proxmox a QEMU Guest Agent exec of `/bin/bash -s` with the script as its input, and the clouds
-  `sudo -n /bin/bash -s` over `PublicSSH` to the public address inside their transient route, with
-  the VM's host-key record required before any route opens.
+  placement host for Remote Lima), WSL2
+  `wsl --distribution <distro> --user root --exec /bin/bash -s`, Proxmox a QEMU Guest Agent exec of
+  `/bin/bash -s` with the script as its input, and the clouds `sudo -n /bin/bash -s` over
+  `PublicSSH` to the public address inside their transient route, with the VM's host-key record
+  required before any route opens.
 - `read_host_keys(vm, ctx) -> tuple[HostKey, ...]` has a default that reads
   `/etc/ssh/ssh_host_*_key.pub` through `run_as_root`. The clouds override it to read under an
   Unverified provisioning file, since a VM without a record cannot be verified.

@@ -211,8 +211,8 @@ fallback. It must finish the Tailscale join and return a transport through which
 missing code-owned map entry says that Agentworks is out of date; an operator-owned catalog miss
 names the exact vm-site field. A successful result may omit the Tailscale IP only when join
 succeeded but IP discovery did not; the manager then performs IP-only rediscovery and Tailscale SSH
-verification. Every platform also implements `run_as_root(vm, ctx, script, deadline) -> RawRun`
-and declares `recovery_needs_guest_sshd`; the vm-platform README states that contract.
+verification. Every platform also implements `run_as_root(vm, ctx, script, deadline) -> RawRun` and
+declares `recovery_needs_guest_sshd`; the vm-platform README states that contract.
 
 An operator-owned release catalog also overrides the pure `validate_create_release(release)` hook.
 Core calls it with the concrete selection before resolving secrets or running authenticated platform
