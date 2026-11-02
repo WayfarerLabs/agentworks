@@ -280,6 +280,7 @@ def classify(
     ssh_status: int | None,
     *,
     host_key_failed: bool = False,
+    auth_failed: bool = False,
     stdout_abandoned: bool = False,
     stderr_abandoned: bool = False,
 ) -> Completion:
@@ -288,6 +289,8 @@ def classify(
     ``ssh_status`` is ssh's own status when it exited by itself, and ``None``
     when it was still running or was killed (a signal's negative status is not
     evidence either). A deadline or an output limit is the caller's to report.
+    ``host_key_failed`` and ``auth_failed`` say what ssh's own log holds; they
+    type only ssh's 255 with no start marker, the host key first.
 
     An abandoned stream is one whose consumer left, so the client closed it
     unread. An abandoned stdout stands in for the ``end`` line; the stderr
@@ -312,4 +315,8 @@ def classify(
         return NotDelivered(NotDeliveredReason.STDLIB_MISSING)
     if ssh_status is not None and 0 <= ssh_status <= 254:
         return NotDelivered(NotDeliveredReason.LAUNCHER_FAILED)
-    return Unknown(UnknownReason.HOST_KEY if host_key_failed and ssh_status == 255 else UnknownReason.CONNECTION)
+    if ssh_status == 255 and host_key_failed:
+        return Unknown(UnknownReason.HOST_KEY)
+    if ssh_status == 255 and auth_failed:
+        return Unknown(UnknownReason.AUTH_FAILED)
+    return Unknown(UnknownReason.CONNECTION)

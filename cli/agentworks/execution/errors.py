@@ -151,7 +151,8 @@ class ExecutionIncomplete(ConnectivityError):
 
     Carries the whole ``Result`` and names which case it is, so that fact is
     held once. A ``NotDelivered`` command did not start; an ``Unknown`` one may
-    have run. ``attaching`` is for the parking connection of a terminal attach,
+    have run, except ``AUTH_FAILED``: the VM refused the key, so nothing ran.
+    ``attaching`` is for the parking connection of a terminal attach,
     where an unknown outcome still means no shell started: the message says so
     instead of that the command may have run.
     """
@@ -175,6 +176,9 @@ class ExecutionIncomplete(ConnectivityError):
         elif isinstance(completion, NotDelivered):
             summary = f"the command did not start on VM '{vm_name}' ({completion.reason.value})"
             hint = "The command did not start, so running it again is safe."
+        elif getattr(completion, "reason", None) is UnknownReason.AUTH_FAILED:
+            summary = f"VM '{vm_name}' did not accept the configured SSH key, so nothing ran"
+            hint = "Check that operator.ssh_private_key is the key authorized for this account on the VM."
         else:
             reason = getattr(completion, "reason", None)
             summary = f"the outcome of the command on VM '{vm_name}' is unknown ({getattr(reason, 'value', reason)})"

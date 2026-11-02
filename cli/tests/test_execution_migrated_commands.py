@@ -111,11 +111,12 @@ def test_the_probe_runs_a_bounded_true_as_the_agent(vm_access_recorder: AccessRe
     assert request.deadline is not None
 
 
-def test_a_dropped_connection_with_a_healthy_admin_means_the_agent_predates_the_rollout(
-    vm_access_recorder: AccessRecorder,
+@pytest.mark.parametrize("reason", [UnknownReason.CONNECTION, UnknownReason.AUTH_FAILED])
+def test_a_refused_or_dropped_connection_with_a_healthy_admin_means_the_agent_predates_the_rollout(
+    vm_access_recorder: AccessRecorder, reason: UnknownReason
 ) -> None:
     with pytest.raises(StateError) as raised:
-        probe(vm_access_recorder, Result(Unknown(UnknownReason.CONNECTION)), Result(Completed(0)))
+        probe(vm_access_recorder, Result(Unknown(reason)), Result(Completed(0)))
 
     assert type(raised.value) is StateError  # not VMNotReady or a trust error, which are its subclasses
     assert vm_access_recorder.operations == [("a1", "run"), ("admin", "run")]

@@ -185,11 +185,16 @@ class VMAccess:
 
     @contextlib.contextmanager
     def _passphrase_hint_on_connection_failure(self) -> Iterator[None]:
-        """Add :meth:`passphrase_hint` to a connection failure, reading the key only after one."""
+        """Add :meth:`passphrase_hint` to a connection or authentication failure, reading the key only after one.
+
+        An encrypted key the agent does not hold is refused like any other, so
+        it fails as ``AUTH_FAILED`` when ssh logs the refusal and as
+        ``CONNECTION`` when it does not.
+        """
         try:
             yield
         except ExecutionIncomplete as error:
-            if error.result.completion == Unknown(UnknownReason.CONNECTION):
+            if error.result.completion in (Unknown(UnknownReason.CONNECTION), Unknown(UnknownReason.AUTH_FAILED)):
                 hint = self.passphrase_hint()
                 if hint is not None:
                     error.hint = f"{error.hint} {hint}" if error.hint else hint

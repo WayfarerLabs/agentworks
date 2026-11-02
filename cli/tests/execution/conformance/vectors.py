@@ -11,6 +11,7 @@ import ast
 import io
 import os
 import subprocess
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -474,6 +475,19 @@ def memfd_that_cannot_be_created_is_not_delivered(lane: Lane) -> None:
     assert not account.exists(marker)
 
 
+def wrong_identity_is_an_authentication_failure(lane: Lane) -> None:
+    from tests.execution.conformance.lanes import generate_key
+
+    if isinstance(lane, LocalLane):
+        pytest.skip("the local lane has no sshd to refuse a key")
+    with tempfile.TemporaryDirectory(prefix="agw-conformance-key-") as directory:
+        stranger = lane.access_with_identity(generate_key(Path(directory) / "unauthorized"))
+
+        result = stranger.run(cmd("true"))
+
+    assert result.completion == Unknown(UnknownReason.AUTH_FAILED)  # A1
+
+
 # -- S only -----------------------------------------------------------------------------
 
 
@@ -687,6 +701,7 @@ def build() -> list[Vector]:
         Vector("handover-wait-expires", "LSV", handover_gives_up_after_its_wait),
         Vector("streams-left-non-blocking", "LSV", payload_leaves_the_shared_streams_non_blocking_and_full),
         Vector("host-key-mismatch", "S", host_key_mismatch_is_trust_mismatch),
+        Vector("wrong-identity-is-auth-failed", "SV", wrong_identity_is_an_authentication_failure),
     ]
     startup_exits = [
         Vector(

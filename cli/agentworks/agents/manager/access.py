@@ -46,10 +46,11 @@ def _assert_agent_access_works(access: VMAccess, admin: VMAccess, agent: AgentRo
     The direct-target-user-SSH rollout populates each agent's
     ``~/.ssh/authorized_keys`` with the operator's key set at agent create /
     reinit. An agent that existed before it has no such file, so ssh as the
-    agent is rejected (255). Run ``true`` as the agent; a ``Completed`` of any
-    status passes. Only an unknown connection failure is ambiguous, so only it
-    falls back to running ``true`` as the admin: if that completes, the VM is
-    fine and the agent is the problem (the reinit hint); otherwise the VM is
+    agent is rejected (255, typed ``AUTH_FAILED`` when ssh logs the refusal).
+    Run ``true`` as the agent; a ``Completed`` of any status passes. Only a
+    connection or authentication failure is ambiguous, so only they fall back
+    to running ``true`` as the admin: if that completes, the VM is fine and
+    the agent is the problem (the reinit hint); otherwise the VM is
     unreachable. Every other outcome (python3 missing, a host key mismatch, a
     refusal, a truncated run) is not about the rollout and raises as it is.
     """
@@ -57,7 +58,7 @@ def _assert_agent_access_works(access: VMAccess, admin: VMAccess, agent: AgentRo
     completion = result.completion
     if isinstance(completion, Completed):
         return
-    if not (isinstance(completion, Unknown) and completion.reason is UnknownReason.CONNECTION):
+    if completion not in (Unknown(UnknownReason.CONNECTION), Unknown(UnknownReason.AUTH_FAILED)):
         result.require_completed(access.vm_name)
         return
     fallback = admin.run(Command(("true",), deadline=_ADMIN_PROBE_DEADLINE_SECONDS))

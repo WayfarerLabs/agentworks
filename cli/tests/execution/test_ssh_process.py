@@ -9,14 +9,18 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from agentworks.errors import ConfigError, ValidationError
 from agentworks.execution import ssh_process, trust
 from agentworks.execution.client import SSHClient
+from agentworks.execution.envelope import StreamFilter, new_nonce
 from agentworks.execution.errors import TrustMissing
+from agentworks.execution.pump import StopReason
 from agentworks.execution.requests import Forward
+from agentworks.execution.results import Unknown, UnknownReason
 from agentworks.execution.ssh_process import ArgvMode, Destination, VMPolicy, build_argv, stage0_command
 from agentworks.execution.trust import TrustBinding, TrustMode
 from tests.conftest import seed_vm_trust
@@ -122,6 +126,32 @@ def test_the_client_log_is_read_from_its_end(tmp_path: Path) -> None:
     assert text.endswith("last line\n")
     assert "first" not in text
     assert ssh_process.client_log_text(tmp_path / "missing") == ""
+
+
+@pytest.mark.parametrize(
+    ("log_text", "expected"),
+    [
+        ("agentworks@100.64.0.9: Permission denied (publickey).\n", UnknownReason.AUTH_FAILED),
+        ("agentworks@100.64.0.9: Permission denied (publickey,password).\n", UnknownReason.AUTH_FAILED),
+        ("ssh: connect to host 100.64.0.9 port 22: Connection refused\n", UnknownReason.CONNECTION),
+    ],
+)
+def test_a_refused_key_in_the_client_log_is_an_authentication_failure(
+    tmp_path: Path, log_text: str, expected: UnknownReason
+) -> None:
+    log = tmp_path / "log"
+    log.write_text(log_text)
+    session = SimpleNamespace(
+        stdout=StreamFilter(new_nonce()),
+        stderr=StreamFilter(new_nonce()),
+        exit_status=255,
+        stdout_abandoned=False,
+        stderr_abandoned=False,
+    )
+
+    result = ssh_process.outcome(session, StopReason.EOF, log)  # type: ignore[arg-type]
+
+    assert result.completion == Unknown(expected)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="signal statuses are POSIX")

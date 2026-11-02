@@ -56,6 +56,9 @@ SERVER_ALIVE_COUNT_MAX = 4
 CLIENT_LOG_TAIL_LINES = 20
 CLIENT_LOG_READ_BYTES = 65_536
 HOST_KEY_FAILURE = "Host key verification failed"
+# What the client logs when the server refused every key it offered, whatever follows the
+# parenthesis (a server that also allows other methods lists them there).
+AUTH_FAILURE = "Permission denied (publickey"
 
 _HOST = re.compile(r"[A-Za-z0-9_:][A-Za-z0-9_.:-]*")
 _USER = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*\$?")
@@ -303,6 +306,7 @@ def outcome(session: PipeSession, stop: StopReason, log: Path) -> Result:
             session.stderr,
             session.exit_status,
             host_key_failed=HOST_KEY_FAILURE in text,
+            auth_failed=AUTH_FAILURE in text,
             stdout_abandoned=session.stdout_abandoned,
             stderr_abandoned=session.stderr_abandoned,
         )

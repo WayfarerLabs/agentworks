@@ -176,6 +176,7 @@ def result(completion: object, *, stdout: bytes = b"", log: str = "") -> Result:
         (NotDelivered(NotDeliveredReason.LAUNCHER_FAILED), ExecutionIncomplete),
         (Unknown(UnknownReason.HOST_KEY), TrustMismatch),
         (Unknown(UnknownReason.CONNECTION), ExecutionIncomplete),
+        (Unknown(UnknownReason.AUTH_FAILED), ExecutionIncomplete),
         (Unknown(UnknownReason.TRUNCATED), ExecutionIncomplete),
         (Unknown(UnknownReason.DEADLINE), ExecutionIncomplete),
         (Unknown(UnknownReason.OUTPUT_LIMIT), ExecutionIncomplete),
@@ -280,10 +281,11 @@ def connection_fails(supported_client: SSHClient, monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.parametrize("operation", ["run", "stream", "attach"])
+@pytest.mark.parametrize("reason", [UnknownReason.CONNECTION, UnknownReason.AUTH_FAILED])
 def test_a_connection_failure_with_an_encrypted_key_adds_to_the_hint(
-    connection_fails: Callable[[object], None], operation: str, tmp_path: Path
+    connection_fails: Callable[[object], None], operation: str, reason: UnknownReason, tmp_path: Path
 ) -> None:
-    connection_fails(Unknown(UnknownReason.CONNECTION))
+    connection_fails(Unknown(reason))
     hints = {}
     for cipher in (b"none", b"aes256-ctr"):
         access = vm_access(vm(), config(_key(tmp_path, cipher=cipher)), Admin())

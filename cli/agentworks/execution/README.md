@@ -63,14 +63,16 @@ Completion comes from the markers, never from ssh's exit status:
 - `NotDelivered(reason)`: the payload never started (`PYTHON_MISSING`, `STDLIB_MISSING`,
   `LAUNCHER_FAILED`, or `REFUSED` with the guest's refusal code).
 - `Unknown(reason)`: it may have run (`CONNECTION`, `HOST_KEY`, `TRUNCATED`, `DEADLINE`,
-  `OUTPUT_LIMIT`).
+  `OUTPUT_LIMIT`). `AUTH_FAILED` is the exception the evidence allows: ssh's 255 with no start
+  marker and `Permission denied (publickey` in its own log means the VM refused the configured key,
+  so nothing ran.
 
 `Result.require_completed` and `run(check=True)` turn the rest into typed errors (`errors.py`):
 `VMNotReady`, `TrustMismatch`, `RequestRefused`, `ExecutionIncomplete`, `CommandFailed`. No error,
 repr or hint holds a stream, an environment value or script text; the only transcript an error may
 show is the last lines of ssh's own diagnostics, which the client keeps in a private log (`-E`)
-apart from the payload's output. On a connection failure, `VMAccess` reads the operator's key file
-once to decide whether to hint at `ssh-add`, and only then. `stream` reports a refusal the way a
+apart from the payload's output. On a connection or authentication failure, `VMAccess` reads the
+operator's key file once to decide whether to hint at `ssh-add`, and only then. `stream` reports a refusal the way a
 shell does: 127 for a missing command, 126 for any other `exec` failure, 125 for a working
 directory. A consumer that leaves (`| head`) gets what ssh gave it. For stdout the client closes its
 read end, so a writer takes `SIGPIPE`, while a quiet payload still runs to its end and `stream`

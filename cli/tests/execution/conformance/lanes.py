@@ -40,6 +40,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
     from typing import NoReturn
 
+    from agentworks.db import VMRow
+
 SHELLS = ("sh", "dash", "bash", "zsh")
 STARTUP_TIMEOUT_SECONDS = 15
 
@@ -155,6 +157,10 @@ class Lane:
         rewritten = source.replace(old, new)
         assert rewritten != source
         self.monkeypatch.setattr(envelope, "launcher_source", lambda: rewritten)
+
+    def access_with_identity(self, identity_file: Path) -> VMAccess:
+        """The lane's access to the same account with another key, for a vector about the key itself."""
+        raise NotImplementedError
 
     def shorten_handover_wait(self, seconds: int = 1) -> None:
         """Send a launcher whose parked half gives up after ``seconds``, instead of 30."""
@@ -297,6 +303,13 @@ def find_sshd() -> str | None:
     )
 
 
+def generate_key(path: Path) -> Path:
+    """A fresh unencrypted ed25519 key at ``path``, from the ``ssh-keygen`` beside the resolved client."""
+    keygen = client.tool_beside_ssh(client.resolve_ssh(), "ssh-keygen")
+    subprocess.run([str(keygen), "-q", "-t", "ed25519", "-N", "", "-f", str(path)], check=True)
+    return path
+
+
 @dataclass(frozen=True)
 class SSHDServer:
     port: int
@@ -392,6 +405,15 @@ class SSHDLane(LocalFilesystem):
             port=server.port,
         )
 
+    def access_with_identity(self, identity_file: Path) -> VMAccess:
+        return VMAccess(
+            vm_name=self.vm_name,
+            host="127.0.0.1",
+            user=getpass.getuser(),
+            identity_file=identity_file,
+            port=self.server.port,
+        )
+
 
 # -- V ----------------------------------------------------------------------------------
 
@@ -402,11 +424,19 @@ class LiveLane(Lane):
     name = "V"
     workdir = "/tmp"
 
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, vm: object, access: VMAccess) -> None:
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, vm: VMRow, access: VMAccess) -> None:
         super().__init__(monkeypatch)
         self.vm = vm
         self.access = access
         self._created: list[str] = []
+
+    def access_with_identity(self, identity_file: Path) -> VMAccess:
+        return VMAccess(
+            vm_name=self.vm.name,
+            host=self.vm.tailscale_host,
+            user=self.vm.admin_username,
+            identity_file=identity_file,
+        )
 
     def _sh(self, source: str) -> Result:
         result = self.access.run(Script(source, Shell.SH, deadline=60))
