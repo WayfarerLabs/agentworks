@@ -8,6 +8,10 @@ Accepted
 
 Supersedes [ADR 0002](0002-use-debian-as-the-vm-base-image.md).
 
+Amended: the internal vm-platform capability that carries the release (Decision) is now contract
+version 2, under which a platform's create also returns the VM's required tailnet address (see the
+[transport take 2 SDD](../sdd/2026-10-20-transport-take2/)).
+
 ## Context
 
 ADR 0002 standardized every Agentworks VM on Debian 12 Bookworm. Standardizing on Debian remains the
