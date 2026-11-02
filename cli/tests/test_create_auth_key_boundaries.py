@@ -37,12 +37,10 @@ from agentworks.plugins.azure.platform import AzureVMPlatform
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from tests._aws_fakes import install_fakes as install_aws_fakes
 from tests._azure_platform_support import _install_fakes as install_azure_fakes
+from tests._gcp_platform_fakes import gce_ctx, gce_platform
+from tests._proxmox_fakes import NEWID, PROXMOX_CONFIG, FakeProxmoxAPI
 from tests._root_channel_fakes import Answer, FakeGuest, answer_by_payload, install_at_run_process
 from tests.conftest import provisioning_trust_for_tests
-from tests.plugins.gcp.test_platform import _ctx as gcp_ctx
-from tests.plugins.gcp.test_platform import _platform as gcp_platform
-from tests.plugins.test_proxmox_create_interrupt import _CONFIG as PROXMOX_CONFIG
-from tests.plugins.test_proxmox_create_interrupt import FakeProxmoxAPI
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -64,6 +62,8 @@ class Create:
     argvs: Callable[[], list[list[str]]]
     retained: Callable[[], str]
     """What the provider keeps of the create (user-data, a template), or ``""``."""
+    rolled_back: Callable[[], bool]
+    """Whether the create removed its backend VM."""
 
 
 @pytest.fixture(autouse=True)
@@ -114,6 +114,7 @@ def lima(monkeypatch: pytest.MonkeyPatch, guest: FakeGuest) -> Create:
         guest,
         lambda: guest.argvs + commands,
         lambda: "\n".join(templates),
+        lambda: any(command[0] == "limactl delete --force vm1" for command in commands),
     )
 
 
@@ -130,7 +131,13 @@ def wsl2_create(monkeypatch: pytest.MonkeyPatch, guest: FakeGuest) -> Create:
     monkeypatch.setattr(wsl2, "_download_debian_rootfs", lambda tarball, *, tag: None)
     monkeypatch.setattr(WSL2Platform, "_distro_exists", staticmethod(lambda name: False))
     platform = WSL2Platform("wsl2", {})
-    return Create(lambda req: platform.create(req, RunContext()), guest, lambda: guest.argvs + commands, str)
+    return Create(
+        lambda req: platform.create(req, RunContext()),
+        guest,
+        lambda: guest.argvs + commands,
+        str,
+        lambda: ["--unregister", "vm1"] in commands,
+    )
 
 
 def proxmox(monkeypatch: pytest.MonkeyPatch, guest: FakeGuest) -> Create:
@@ -143,6 +150,7 @@ def proxmox(monkeypatch: pytest.MonkeyPatch, guest: FakeGuest) -> Create:
         guest,
         lambda: [[repr(call)] for call in fake.calls],
         str,
+        lambda: ("delete_vm", "pve1", NEWID) in fake.calls,
     )
 
 
@@ -156,6 +164,7 @@ def aws(monkeypatch: pytest.MonkeyPatch, guest: FakeGuest) -> Create:
         guest,
         lambda: guest.argvs,
         lambda: gzip.decompress(recorder.kwargs_for("run_instances")["UserData"]).decode(),
+        lambda: "terminate_instances" in recorder.methods("ec2"),
     )
 
 
@@ -169,16 +178,28 @@ def azure(monkeypatch: pytest.MonkeyPatch, guest: FakeGuest) -> Create:
         [(_group, _name, final)] = fakes.compute.virtual_machines.created
         return base64.b64decode(final.os_profile.custom_data).decode()
 
-    return Create(lambda req: platform.create(req, RunContext()), guest, lambda: guest.argvs, retained)
+    return Create(
+        lambda req: platform.create(req, RunContext()),
+        guest,
+        lambda: guest.argvs,
+        retained,
+        lambda: fakes.compute.virtual_machines.deleted == [("rg1", "vm1")],
+    )
 
 
 def gcp(monkeypatch: pytest.MonkeyPatch, guest: FakeGuest) -> Create:
-    platform, cache = gcp_platform(monkeypatch, guest)
+    platform, cache = gce_platform(monkeypatch, guest)
 
     def retained() -> str:
         return "\n".join(repr(insert.instance_resource) for insert in cache.instances.insert_requests)
 
-    return Create(lambda req: platform.create(req, gcp_ctx()), guest, lambda: guest.argvs, retained)
+    return Create(
+        lambda req: platform.create(req, gce_ctx()),
+        guest,
+        lambda: guest.argvs,
+        retained,
+        lambda: cache.instances.resource is None,
+    )
 
 
 BUILDERS: dict[str, Callable[[pytest.MonkeyPatch, FakeGuest], Create]] = {
@@ -235,36 +256,33 @@ def test_the_key_reaches_only_the_join_script(
     assert_key_only_in_the_join(create, req, tmp_path, captured_output)
 
 
+@pytest.mark.parametrize(
+    ("failing", "last"),
+    [(READ, "tailscale logout"), (JOIN_FRAGMENT, JOIN_FRAGMENT)],
+    ids=["address-unread", "join-unknown"],
+)
 @pytest.mark.parametrize("name", PLATFORMS)
-def test_exhausted_address_reads_log_out_without_a_second_join(
-    name: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, captured_output: CapturedOutput
+def test_a_failed_join_or_address_rolls_back_without_a_second_join(
+    name: str,
+    failing: str,
+    last: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    captured_output: CapturedOutput,
 ) -> None:
-    create = BUILDERS[name](monkeypatch, FakeGuest(answer_by_payload(answers={READ: Answer(status=None)})))
+    create = BUILDERS[name](monkeypatch, FakeGuest(answer_by_payload(answers={failing: Answer(status=None)})))
     req = request()
 
     with pytest.raises(AgentworksError) as caught:
         create.run(req)
 
     assert create.guest.joins == 1
-    assert create.guest.count("tailscale logout") == 1
-    assert create.guest.payloads[-1] == "tailscale logout"
-    assert caught.value.hint == CREATE_RERUN_HINT  # through every platform's own error wrapping
-    assert_key_free(caught.value)
-    assert_key_only_in_the_join(create, req, tmp_path, captured_output)
-
-
-@pytest.mark.parametrize("name", PLATFORMS)
-def test_an_unknown_join_is_never_retried(
-    name: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, captured_output: CapturedOutput
-) -> None:
-    create = BUILDERS[name](monkeypatch, FakeGuest(answer_by_payload(answers={JOIN_FRAGMENT: Answer(status=None)})))
-    req = request()
-
-    with pytest.raises(AgentworksError) as caught:
-        create.run(req)
-
-    assert create.guest.joins == 1
-    assert create.guest.payloads[-1] == JOIN_FRAGMENT
-    assert "lab-vm1" in str(caught.value)
+    assert create.guest.payloads[-1] == last  # an exhausted read logs out once; an unknown join stops there
+    assert create.rolled_back()
+    # Each platform's own error wrapping keeps the guidance.
+    if failing == READ:
+        assert caught.value.hint == CREATE_RERUN_HINT
+    else:
+        assert "lab-vm1" in str(caught.value)
     assert_key_free(caught.value)
     assert_key_only_in_the_join(create, req, tmp_path, captured_output)
