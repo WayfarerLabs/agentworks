@@ -9,26 +9,36 @@ encrypted key must be loaded in the agent. The trust is the VM's store
 record, or an Unverified provisioning binding where a create or a host-key
 read has no record to verify against.
 
+:class:`PublicAddressPlatform` is the clouds' shared base: it implements
+``run_as_root`` and ``read_host_keys`` over one route-scoped connection,
+and each cloud supplies only how to read its live public address.
+
 This module imports nothing from the legacy transport stack.
 """
 
 from __future__ import annotations
 
+import contextlib
 import time
-from typing import TYPE_CHECKING
+from abc import abstractmethod
+from typing import TYPE_CHECKING, ClassVar
 
 import agentworks.execution as execution
 from agentworks import output
+from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import ConnectivityError, StateError
-from agentworks.execution import root_script, ssh_process
+from agentworks.execution import root_script, ssh_process, trust
 from agentworks.execution.errors import TrustMismatch
+from agentworks.execution.trust import TrustBinding, TrustMode
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from agentworks.capabilities.base import RunContext
+    from agentworks.db import VMRow
     from agentworks.execution.root_script import RawRun
-    from agentworks.execution.trust import TrustBinding
+    from agentworks.execution.trust import HostKey
 
 ROOT_COMMAND = "sudo -n /bin/bash -s"
 """The remote command: a constant every account shell Agentworks allows parses unchanged."""
@@ -36,25 +46,6 @@ ROOT_COMMAND = "sudo -n /bin/bash -s"
 PROBE_ATTEMPTS = 6
 PROBE_DEADLINE_SECONDS = 10
 PROBE_INTERVAL_SECONDS = 3
-
-
-class PublicKeyRefused(ConnectivityError):
-    """The VM refused the operator's key at its public address.
-
-    Recovery logs in with the same key it would repair, so such a VM needs the
-    provider's own access or recreation; waiting cannot change it.
-    """
-
-    def __init__(self, vm_name: str, host: str) -> None:
-        super().__init__(
-            f"VM '{vm_name}' refused the configured SSH key at its public address {host}",
-            entity_kind="vm",
-            entity_name=vm_name,
-            hint=(
-                "Reach the VM through the provider's own access (its serial console, or EC2 Instance Connect) "
-                "to restore the admin's authorized key, or delete and recreate the VM."
-            ),
-        )
 
 
 class PublicSSH:
@@ -82,7 +73,16 @@ class PublicSSH:
         if ssh_process.HOST_KEY_FAILURE in text:
             raise TrustMismatch(self._vm_name, ssh_process.tail_lines(text))
         if ssh_process.AUTH_FAILURE in text:
-            raise PublicKeyRefused(self._vm_name, self._destination.host)
+            # Recovery logs in with the key it would repair, so waiting or retrying cannot help.
+            raise ConnectivityError(
+                f"VM '{self._vm_name}' refused the configured SSH key at its public address {self._destination.host}",
+                entity_kind="vm",
+                entity_name=self._vm_name,
+                hint=(
+                    "Reach the VM through the provider's own access (its serial console, or EC2 Instance Connect) "
+                    "to restore the admin's authorized key, or delete and recreate the VM."
+                ),
+            )
         return raw
 
     def wait_until_answering(self, *, failure_hint: str | None) -> None:
@@ -109,24 +109,65 @@ class PublicSSH:
         )
 
 
-def operator_identity_file(ctx: RunContext, vm_name: str) -> Path:
-    """The operator's private key from the op context, which every native operation carries."""
-    if ctx.config is None:
-        raise StateError(
-            f"cannot reach VM '{vm_name}' at its public address: the operation carries no operator configuration",
-            entity_kind="vm",
-            entity_name=vm_name,
-        )
-    return ctx.config.operator.ssh_private_key
+class PublicAddressPlatform(VMPlatform):
+    """A cloud platform whose root channel is :class:`PublicSSH` to the VM's public address.
 
+    A subclass supplies :meth:`_public_address` and :attr:`public_address_hint`;
+    its ``transient_route`` opens the firewall allow each call needs, and its
+    ``probe_failure_hint`` explains an allow that does not match the
+    operator's egress.
+    """
 
-def require_public_address(address: str | None, vm_name: str, *, hint: str) -> str:
-    """The provider-reported address, or a ``StateError`` with the platform's console hint when it has none."""
-    if not address:
-        raise StateError(
-            f"VM '{vm_name}' has no public IP address",
-            entity_kind="vm",
-            entity_name=vm_name,
-            hint=hint,
-        )
-    return address
+    recovery_needs_guest_sshd: ClassVar[bool] = True
+
+    public_address_hint: ClassVar[str]
+    """Where to look when the provider reports no public address: the platform's console."""
+
+    @abstractmethod
+    def _public_address(self, vm: VMRow, ctx: RunContext) -> str:
+        """The VM's public address, read live from the provider, or ``""`` when it has none."""
+
+    def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
+        """Run ``script`` as root over SSH to the public address, inside this call's own route.
+
+        A VM with no host-key record raises ``TrustMissing`` before any route
+        opens, and no route outlives the one script.
+        """
+        trust.require_record(vm.name)
+        with self._public_ssh(vm, ctx, TrustBinding(TrustMode.VM, vm.name)) as target:
+            return target.run_as_root(script, deadline)
+
+    def read_host_keys(self, vm: VMRow, ctx: RunContext) -> tuple[HostKey, ...]:
+        """The host keys of a VM with no record, read at its public address under an Unverified file.
+
+        Nothing can be verified without a record, so the caller shows the
+        fingerprints for the operator to compare with the VM's console before
+        anything is recorded. A VM that has a record refuses: its keys are
+        read under that record, never around it.
+        """
+        if trust.has_record(vm.name):
+            raise StateError(
+                f"VM '{vm.name}' already has a recorded host key, so its keys are not read unverified",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        with trust.provisioning_binding(vm.name) as binding, self._public_ssh(vm, ctx, binding) as target:
+            return root_script.read_host_keys(target.run_as_root)
+
+    @contextlib.contextmanager
+    def _public_ssh(self, vm: VMRow, ctx: RunContext, binding: TrustBinding) -> Iterator[PublicSSH]:
+        """An answering :class:`PublicSSH` to the VM under ``binding``, for as long as the route is open."""
+        with self.transient_route(vm, ctx, config=ctx.config):
+            address = self._public_address(vm, ctx)
+            if not address:
+                raise StateError(
+                    f"VM '{vm.name}' has no public IP address",
+                    entity_kind="vm",
+                    entity_name=vm.name,
+                    hint=self.public_address_hint,
+                )
+            # Every operation's context is built with the operator's configuration.
+            assert ctx.config is not None
+            target = PublicSSH(address, vm.admin_username, ctx.config.operator.ssh_private_key, binding)
+            target.wait_until_answering(failure_hint=self.probe_failure_hint)
+            yield target

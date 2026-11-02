@@ -27,24 +27,18 @@ from agentworks.capabilities.vm_platform.base import (
     ProvisionRequest,
     ProvisionResult,
     RetainedProvisioningError,
-    VMPlatform,
 )
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
 )
-from agentworks.capabilities.vm_platform.public_ssh import (
-    PublicSSH,
-    operator_identity_file,
-    require_public_address,
-)
+from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import AuthorizationError, ConfigError, NotFoundError, StateError, TokenRejectedError
-from agentworks.execution import root_script, trust
 from agentworks.execution.trust import TrustBinding, TrustMode
 from agentworks.plugins.aws.auth import _build_access_key_session, _build_ambient_session
 from agentworks.plugins.aws.config import (
@@ -84,8 +78,6 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
-    from agentworks.execution.root_script import RawRun
-    from agentworks.execution.trust import HostKey
     from agentworks.transports import Transport
 
 
@@ -103,7 +95,7 @@ _DEBIAN_SSM_RELEASES: dict[DebianRelease, str] = {
 _MAX_USER_DATA_BYTES = 16384
 
 
-class EC2Platform(VMPlatform):
+class EC2Platform(PublicAddressPlatform):
     """Runs VMs on Amazon EC2 via the AWS Python SDK (boto3). Named ``aws-ec2``,
     not ``aws``: the capability is one specific AWS service, and other AWS
     services could plausibly back platforms of their own someday (the same
@@ -162,8 +154,10 @@ class EC2Platform(VMPlatform):
         "agentworks config."
     )
 
-    # The root channel is SSH as the admin to the public address.
-    recovery_needs_guest_sshd: ClassVar[bool] = True
+    public_address_hint: ClassVar[str] = (
+        "A stopped EC2 instance has no public IP: start it, or check the instance in the EC2 console "
+        "(the EC2 serial console reaches it without one)."
+    )
 
     def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
         super().__init__(owner_name, config)
@@ -716,7 +710,7 @@ class EC2Platform(VMPlatform):
         # is opened by transient_route, which the transports factory wraps
         # around this call; a stopped instance has no public IP, which
         # propagates to SSHTransport(host="") and the factory's typed StateError.
-        public_ip = self._public_ip(self._client("ec2", self._region_of(vm), ctx), self._instance_id(vm))
+        public_ip = self._public_address(vm, ctx)
 
         identity_file = None
         if config is not None:
@@ -728,42 +722,6 @@ class EC2Platform(VMPlatform):
             user=vm.admin_username,
             identity_file=identity_file,
         )
-
-    def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
-        """Run ``script`` as root over SSH to the live public address, inside this call's own scoped allow.
-
-        A VM with no host-key record raises ``TrustMissing`` before any allow
-        opens, and no allow outlives the one script.
-        """
-        trust.require_record(vm.name)
-        with self.transient_route(vm, ctx, config=ctx.config):
-            target = self._public_ssh(vm, ctx, TrustBinding(TrustMode.VM, vm.name))
-            target.wait_until_answering(failure_hint=self.probe_failure_hint)
-            return target.run_as_root(script, deadline)
-
-    def read_host_keys(self, vm: VMRow, ctx: RunContext) -> tuple[HostKey, ...]:
-        """The VM's host keys, read at its public address under an Unverified provisioning file.
-
-        The VM has no usable record here, so nothing can be verified; the
-        caller shows the fingerprints for the operator to compare with the
-        instance's console before anything is recorded.
-        """
-        with self.transient_route(vm, ctx, config=ctx.config), trust.provisioning_binding(vm.name) as binding:
-            target = self._public_ssh(vm, ctx, binding)
-            target.wait_until_answering(failure_hint=self.probe_failure_hint)
-            return root_script.read_host_keys(target.run_as_root)
-
-    def _public_ssh(self, vm: VMRow, ctx: RunContext, binding: TrustBinding) -> PublicSSH:
-        ec2 = self._client("ec2", self._region_of(vm), ctx)
-        address = require_public_address(
-            self._public_ip(ec2, self._instance_id(vm)),
-            vm.name,
-            hint=(
-                "A stopped EC2 instance has no public IP: start it, or check the instance in the EC2 console "
-                "(the EC2 serial console reaches it without one)."
-            ),
-        )
-        return PublicSSH(address, vm.admin_username, operator_identity_file(ctx, vm.name), binding)
 
     def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:
         """Close provisioning access now that Tailscale is up.
@@ -909,6 +867,9 @@ class EC2Platform(VMPlatform):
             return
         ec2 = self._client("ec2", self._region_of(vm), ctx)
         remove_ssh_allow(ec2, str(security_group_id), prefixes)
+
+    def _public_address(self, vm: VMRow, ctx: RunContext) -> str:
+        return self._public_ip(self._client("ec2", self._region_of(vm), ctx), self._instance_id(vm))
 
     def _public_ip(self, ec2: Any, instance_id: str) -> str:
         """The instance's live auto-assigned public IP (never cached)."""

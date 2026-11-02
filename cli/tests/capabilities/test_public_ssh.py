@@ -15,8 +15,8 @@ import pytest
 import agentworks.execution as execution
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import public_ssh
-from agentworks.capabilities.vm_platform.public_ssh import PublicKeyRefused, PublicSSH
-from agentworks.errors import ConnectivityError, StateError
+from agentworks.capabilities.vm_platform.public_ssh import PublicSSH
+from agentworks.errors import ConnectivityError, StateError, ValidationError
 from agentworks.execution import root_script, trust
 from agentworks.execution.client import SSHClient
 from agentworks.execution.errors import TrustMismatch, TrustMissing
@@ -98,7 +98,7 @@ def test_a_vm_with_no_record_raises_before_anything_spawns(monkeypatch: pytest.M
 
 @pytest.mark.parametrize("host", ["", "-oProxyCommand=x", "203.0.113.7 extra"])
 def test_a_provider_address_that_is_not_one_literal_host_is_refused(host: str) -> None:
-    with pytest.raises(Exception, match="SSH host"):
+    with pytest.raises(ValidationError):
         PublicSSH(host, "agw", Path("/k"), TrustBinding(TrustMode.VM, "box"))
 
 
@@ -115,10 +115,10 @@ def test_a_host_key_failure_in_the_client_log_is_a_trust_mismatch(monkeypatch: p
 def test_a_refused_key_in_the_client_log_names_the_provider_console(monkeypatch: pytest.MonkeyPatch) -> None:
     answering(monkeypatch, log_text="agw@203.0.113.7: Permission denied (publickey).\n", status=None)
 
-    with pytest.raises(PublicKeyRefused) as caught:
+    with pytest.raises(ConnectivityError) as caught:
         target().run_as_root(b"true\n", 5)
 
-    assert isinstance(caught.value, ConnectivityError)
+    assert caught.value.hint
 
 
 # -- wait_until_answering ----------------------------------------------------------------
@@ -148,7 +148,7 @@ def test_the_wait_warns_its_hint_and_raises_after_six_probes(
     ("log_text", "error"),
     [
         ("Host key verification failed.\n", TrustMismatch),
-        ("agw@203.0.113.7: Permission denied (publickey).\n", PublicKeyRefused),
+        ("agw@203.0.113.7: Permission denied (publickey).\n", ConnectivityError),
     ],
 )
 def test_the_wait_stops_at_once_where_waiting_cannot_help(
@@ -202,11 +202,7 @@ class _Cloud:
                 self.events.append("route-close")
 
         monkeypatch.setattr(cls, "transient_route", route)
-        if cls is EC2Platform:
-            monkeypatch.setattr(cls, "_client", lambda platform, *args: None)
-            monkeypatch.setattr(cls, "_public_ip", lambda platform, ec2, instance_id: address)
-        else:
-            monkeypatch.setattr(cls, "_public_address", lambda platform, vm, ctx: address)
+        monkeypatch.setattr(cls, "_public_address", lambda platform, vm, ctx: address)
         original = PublicSSH.__init__
 
         def recording_init(access: PublicSSH, host: str, user: str, identity: Path, binding: TrustBinding) -> None:
@@ -274,6 +270,22 @@ def test_a_cloud_reads_host_keys_under_an_unverified_file_that_is_gone_afterward
 
 
 @pytest.mark.parametrize("factory", CLOUDS, ids=["aws", "azure", "gcp"])
+def test_a_cloud_vm_with_a_record_refuses_an_unverified_host_key_read(
+    monkeypatch: pytest.MonkeyPatch, factory: Callable[[], Any]
+) -> None:
+    cloud = _Cloud(monkeypatch, factory, "203.0.113.7")
+    seed_vm_trust("box")
+    monkeypatch.setattr(root_script, "read_host_keys", lambda run_as_root: cloud._ran("read") or ())
+
+    with pytest.raises(StateError):
+        cloud.platform.read_host_keys(_vm(), _ctx())
+
+    assert cloud.events == []
+    assert cloud.bindings == []
+
+
+# GCP's address read raises GCEError itself for an instance with no external address.
+@pytest.mark.parametrize("factory", [_aws, _azure], ids=["aws", "azure"])
 def test_a_cloud_vm_with_no_public_address_is_a_state_error(
     monkeypatch: pytest.MonkeyPatch, factory: Callable[[], Any]
 ) -> None:

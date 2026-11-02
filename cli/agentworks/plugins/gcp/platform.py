@@ -9,22 +9,17 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
 )
-from agentworks.capabilities.vm_platform.public_ssh import (
-    PublicSSH,
-    operator_identity_file,
-    require_public_address,
-)
+from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import AgentworksError, ConnectivityError, StateError
-from agentworks.execution import root_script, trust
 from agentworks.execution.trust import TrustBinding, TrustMode
 from agentworks.plugins.gcp.auth import GcpClientCache
 from agentworks.plugins.gcp.bootstrap import (
@@ -88,8 +83,6 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
-    from agentworks.execution.root_script import RawRun
-    from agentworks.execution.trust import HostKey
     from agentworks.transports import Transport
 
 
@@ -184,7 +177,7 @@ class _VMIdentity:
         )
 
 
-class GCEPlatform(VMPlatform):
+class GCEPlatform(PublicAddressPlatform):
     """Runs VMs on Google Compute Engine with provider-ID-owned cleanup."""
 
     contract_version: ClassVar[int] = 1
@@ -229,8 +222,9 @@ class GCEPlatform(VMPlatform):
         "The transient GCE SSH allow is scoped to the detected public IP. "
         "Set operator.ssh_allow_cidrs when SSH exits through another VPN, proxy, or NAT address."
     )
-    # The root channel is SSH as the admin to the public address.
-    recovery_needs_guest_sshd: ClassVar[bool] = True
+    public_address_hint: ClassVar[str] = (
+        "Check the instance's external IP in the Google Cloud console, or use its serial console."
+    )
 
     def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
         super().__init__(owner_name, config)
@@ -598,7 +592,12 @@ class GCEPlatform(VMPlatform):
         )
 
     def _public_address(self, vm: VMRow, ctx: RunContext) -> str:
-        """The instance's live external IPv4, after checking it is still ours and on its recorded network."""
+        """The instance's live external IPv4, after checking it is still ours and on its recorded network.
+
+        Never empty: ``live_external_ipv4`` raises ``GCEError`` with its own hint
+        for an instance with no external address, so ``public_address_hint``
+        only covers the shared base's check.
+        """
         identity = _VMIdentity.from_row(vm)
         instances = self._clients.client("instances", ctx)
         current = self._owned_instance(instances, identity)
@@ -610,38 +609,6 @@ class GCEPlatform(VMPlatform):
             )
         verify_instance_network(current, network_url=identity.network_url, subnet_url=identity.subnet_url)
         return live_external_ipv4(current, access_config_name=identity.access_config_name)
-
-    def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
-        """Run ``script`` as root over SSH to the external address, inside this call's own firewall allow.
-
-        A VM with no host-key record raises ``TrustMissing`` before any allow
-        opens, and no allow outlives the one script.
-        """
-        trust.require_record(vm.name)
-        with self.transient_route(vm, ctx, config=ctx.config):
-            target = self._public_ssh(vm, ctx, TrustBinding(TrustMode.VM, vm.name))
-            target.wait_until_answering(failure_hint=self.probe_failure_hint)
-            return target.run_as_root(script, deadline)
-
-    def read_host_keys(self, vm: VMRow, ctx: RunContext) -> tuple[HostKey, ...]:
-        """The VM's host keys, read at its external address under an Unverified provisioning file.
-
-        The VM has no usable record here, so nothing can be verified; the
-        caller shows the fingerprints for the operator to compare with the
-        instance's serial console output before anything is recorded.
-        """
-        with self.transient_route(vm, ctx, config=ctx.config), trust.provisioning_binding(vm.name) as binding:
-            target = self._public_ssh(vm, ctx, binding)
-            target.wait_until_answering(failure_hint=self.probe_failure_hint)
-            return root_script.read_host_keys(target.run_as_root)
-
-    def _public_ssh(self, vm: VMRow, ctx: RunContext, binding: TrustBinding) -> PublicSSH:
-        address = require_public_address(
-            self._public_address(vm, ctx),
-            vm.name,
-            hint="Check the instance's external IP in the Google Cloud console, or use its serial console.",
-        )
-        return PublicSSH(address, vm.admin_username, operator_identity_file(ctx, vm.name), binding)
 
     def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:
         self._close_stable_allow(vm, ctx)
