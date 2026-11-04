@@ -162,8 +162,8 @@ Look for:
   unsafe?"
 - New behavior reachable only via `vm create` and not via `vm reinit`. Operators with long-lived VMs
   should not have to recreate them to pick up new declared state.
-- Code that conflates the two transports (uses platform-native transport for initialization, or uses
-  Tailscale SSH for provisioning before Tailscale is joined).
+- Code that conflates the two channels (uses a platform's own root channel, `run_as_root`, for
+  initialization, or uses Tailscale SSH for provisioning before Tailscale is joined).
 - Provisioning-time decisions being recorded as if they were declarative config (locking the VM into
   a shape that can't be changed later).
 

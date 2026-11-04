@@ -215,14 +215,14 @@ class _Cloud:
         cls = type(self.platform)
 
         @contextlib.contextmanager
-        def route(platform: object, vm: object, ctx: object, *, config: object = None) -> Iterator[None]:
+        def route(platform: object, vm: object, ctx: object) -> Iterator[None]:
             self.events.append("route-open")
             try:
                 yield
             finally:
                 self.events.append("route-close")
 
-        monkeypatch.setattr(cls, "transient_route", route)
+        monkeypatch.setattr(cls, "_transient_route", route)
         monkeypatch.setattr(cls, "_public_address", lambda platform, vm, ctx: address)
         original = PublicSSH.__init__
 

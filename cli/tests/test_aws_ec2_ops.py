@@ -634,7 +634,7 @@ class TestTransientRoute:
     def test_pokes_on_enter_and_removes_on_exit(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(monkeypatch)
         platform = _platform()
-        with platform.transient_route(_vm(), RunContext(), config=_config(["198.51.100.0/24"])):
+        with platform._transient_route(_vm(), RunContext(config=_config(["198.51.100.0/24"]))):
             assert _ec2(platform).ingress["sg-123"] == {_DETECTED_PREFIX: "sgr-1", "198.51.100.0/24": "sgr-2"}
         # Exit revoked exactly what it poked.
         assert _ec2(platform).ingress["sg-123"] == {}
@@ -662,7 +662,7 @@ class TestTransientRoute:
         rec = install_fakes(monkeypatch, controls)
         platform = _platform()
 
-        route = platform.transient_route(_vm(), RunContext(), config=_config(["198.51.100.0/24"]))
+        route = platform._transient_route(_vm(), RunContext(config=_config(["198.51.100.0/24"])))
         with pytest.raises(AuthorizationError), route:
             pass
 
@@ -703,7 +703,7 @@ class TestTransientRoute:
         rec = install_fakes(monkeypatch, Controls(dry_run_outcomes=[outcome]))
         platform = _platform()
 
-        route = platform.transient_route(_vm(), RunContext(), config=_config())
+        route = platform._transient_route(_vm(), RunContext(config=_config()))
         with pytest.raises(error_type), route:
             pass
 
@@ -713,7 +713,7 @@ class TestTransientRoute:
     def test_removes_on_body_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
         install_fakes(monkeypatch)
         platform = _platform()
-        with pytest.raises(RuntimeError), platform.transient_route(_vm(), RunContext(), config=_config()):
+        with pytest.raises(RuntimeError), platform._transient_route(_vm(), RunContext(config=_config())):
             raise RuntimeError("boom")
         assert _ec2(platform).ingress["sg-123"] == {}
 
@@ -732,7 +732,7 @@ class TestTransientRoute:
             return real_authorize(**kw)
 
         monkeypatch.setattr(_ec2(platform), "authorize_security_group_ingress", _authorize)
-        route = platform.transient_route(_vm(), RunContext(), config=_config(["198.51.100.0/24"]))
+        route = platform._transient_route(_vm(), RunContext(config=_config(["198.51.100.0/24"])))
         with pytest.raises(EC2Error), route:
             pass
         # The detected prefix that WAS authorized got revoked on the way out.
@@ -741,7 +741,7 @@ class TestTransientRoute:
     def test_requires_a_security_group_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
         install_fakes(monkeypatch)
         vm = SimpleNamespace(name="dev", admin_username="agw", platform_metadata={"instance_id": "i-123"})
-        route = _platform().transient_route(vm, RunContext(), config=_config())
+        route = _platform()._transient_route(vm, RunContext(config=_config()))
         with pytest.raises(StateError, match="security_group_id"), route:
             pass
 
@@ -874,11 +874,9 @@ class TestPowerOps:
     def test_display_backend_name_is_instance_at_region(self) -> None:
         assert _platform().display_backend_name(_vm()) == "i-123@us-east-1"  # type: ignore[arg-type]
 
-    def test_native_transport_reads_public_ip_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_the_public_address_is_read_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
         install_fakes(monkeypatch, Controls(instance_public_ip="203.0.113.55"))
-        transport = _platform().native_transport(_vm(), RunContext())  # type: ignore[arg-type]
-        assert transport is not None
-        assert getattr(transport, "host", None) == "203.0.113.55"
+        assert _platform()._public_address(_vm(), RunContext()) == "203.0.113.55"  # type: ignore[arg-type]
 
 
 class TestDelete:

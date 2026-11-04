@@ -509,9 +509,6 @@ class _StubPlatform:
 
         return VMStatus.RUNNING
 
-    def transient_route(self, vm: object, ctx: object, *, config: object | None = None) -> AbstractContextManager[None]:
-        return contextlib.nullcontext()
-
     def post_tailscale_ready(self, vm: object, ctx: object) -> None:
         return None
 

@@ -17,7 +17,6 @@ from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform
 from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import NotFoundError, StateError
-from agentworks.execution.trust import TrustBinding, TrustMode
 from agentworks.plugins.azure.auth import (
     _build_ambient_credential,
     _build_service_principal_credential,
@@ -53,7 +52,6 @@ from agentworks.plugins.azure.network import (
     wrap_azure_error,
 )
 from agentworks.topics import TopicProse
-from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -63,9 +61,7 @@ if TYPE_CHECKING:
     from azure.mgmt.resource.resources import ResourceManagementClient
 
     from agentworks.capabilities.base import RunContext
-    from agentworks.config import Config
     from agentworks.db import VMRow
-    from agentworks.transports import Transport
 
 
 class _HasSubscriptionId(Protocol):
@@ -113,12 +109,11 @@ class AzureVMPlatform(PublicAddressPlatform):
         """,
     )
 
-    # Warned by the transports factory when every reachability probe
-    # fails: the ephemeral NSG allow is scoped to the DETECTED egress
-    # IP, so an operator whose SSH traffic leaves through a different
-    # address (VPN split tunnel, proxy, CGNAT) gets a hole that does
-    # not match and every probe times out.
-    probe_failure_hint: ClassVar[str | None] = (
+    # The ephemeral NSG allow is scoped to the DETECTED egress IP, so an
+    # operator whose SSH traffic leaves through a different address (VPN
+    # split tunnel, proxy, CGNAT) gets a hole that does not match and every
+    # probe times out.
+    _probe_failure_hint = (
         "The transient Azure SSH allow is scoped to your detected "
         "public IP; if your SSH traffic egresses elsewhere (VPN "
         "split tunnel, proxy, CGNAT), add your address(es) to "
@@ -748,7 +743,7 @@ class AzureVMPlatform(PublicAddressPlatform):
     # The route-state helpers below are thin delegates into the network
     # module (which owns the mechanics and full docstrings). They stay
     # as methods because the platform object is the seam callers and
-    # tests compose against: transient_route and the hooks call them on
+    # tests compose against: _transient_route and the hooks call them on
     # self, and the shell-provisioner tests spy on them as attributes.
 
     def _ensure_public_ip(self, vm: VMRow, ctx: RunContext) -> None:
@@ -793,35 +788,10 @@ class AzureVMPlatform(PublicAddressPlatform):
         _rg, name, _cfg = _parse_resource_id(resource_id)
         return name
 
-    def native_transport(
-        self,
-        vm: VMRow,
-        ctx: RunContext,
-        *,
-        config: Config | None = None,
-    ) -> Transport:
-        # An empty string is a genuinely defensive corner (see _public_address);
-        # it propagates to ``SSHTransport(host="")``, which the
-        # transports.native_transport factory catches with a typed StateError.
-        public_ip = self._public_address(vm, ctx)
-
-        # Include identity file if config is available (needed for SSH auth
-        # via public IP, e.g., during Tailscale logout on delete).
-        identity_file = None
-        if config is not None:
-            identity_file = getattr(getattr(config, "operator", None), "ssh_private_key", None)
-
-        return SSHTransport(
-            host=public_ip,
-            trust=TrustBinding(TrustMode.VM, vm.name),
-            user=vm.admin_username,
-            identity_file=identity_file,
-        )
-
     def _public_address(self, vm: VMRow, ctx: RunContext) -> str:
         """The VM's public IP, read live off its NIC (never persisted), or ``""`` when it has none.
 
-        The IP is permanent for the VM's lifetime and ``transient_route``
+        The IP is permanent for the VM's lifetime and ``_transient_route``
         heals its absence on enter, so an empty result is a defensive corner.
         """
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
@@ -867,7 +837,7 @@ class AzureVMPlatform(PublicAddressPlatform):
         gate refuses the kept VM, ``vm shell --platform`` included, so
         debugging goes through the Azure serial console, which is not
         NSG-gated; ``vm delete``'s logout pokes a fresh
-        transient allow via :meth:`transient_route`.
+        transient allow via :meth:`_transient_route`.
 
         ``ctx`` is the create op's own scoped context, whose secrets
         were resolved before Phase A began, so even the interrupt path
@@ -879,7 +849,7 @@ class AzureVMPlatform(PublicAddressPlatform):
         self._remove_ssh_allow(vm, ctx, BOOTSTRAP_ALLOW_RULE_NAME)
 
     @contextlib.contextmanager
-    def transient_route(self, vm: VMRow, ctx: RunContext, *, config: Config | None = None) -> Iterator[None]:
+    def _transient_route(self, vm: VMRow, ctx: RunContext) -> Iterator[None]:
         """Open a scoped SSH route to the VM for the context's duration.
 
         Enter heals the public IP (:meth:`_ensure_public_ip`; legacy
@@ -887,28 +857,25 @@ class AzureVMPlatform(PublicAddressPlatform):
         (:meth:`_converge_nsg`; deny re-pin before any allow
         allocation), then pokes this operation's own nonce-named allow
         scoped to the operator's egress prefixes (widened by
-        ``config.operator.ssh_allow_cidrs``). The poke sits INSIDE the
+        ``ctx.config.operator.ssh_allow_cidrs``). The poke sits INSIDE the
         try and the finally removes exactly the poked rule by name on
         every unwind path, so concurrent native ops never cross-remove
         each other's allows; a poke that fails without returning a name
         has already cleaned up its own attempt, and a removal failure
         warns naming the rule and prefixes (both per the network
         module's ``poke_ssh_allow`` / ``remove_ssh_allow``, which carry
-        the full contracts). The
-        :func:`agentworks.transports.native_transport` factory wraps
-        this around the per-platform :meth:`native_transport` call so
-        the lifecycle stays polymorphic.
+        the full contracts).
 
-        ``ctx`` is the op-start context threaded from the factory (the
-        composition root's own): every NSG call below reads the SP
-        credential through it, with no ambient fallback.
+        ``ctx`` is the op-start context (the composition root's own):
+        every NSG call below reads the SP credential through it, with no
+        ambient fallback.
         """
         self._ensure_public_ip(vm, ctx)
         self._converge_nsg(vm, ctx)
         rule_name: str | None = None
         prefixes: list[str] | None = None
         try:
-            rule_name, prefixes = self._poke_ssh_allow(vm, ctx, config_allow_cidrs(config))
+            rule_name, prefixes = self._poke_ssh_allow(vm, ctx, config_allow_cidrs(ctx.config))
             yield
         finally:
             if rule_name is not None:

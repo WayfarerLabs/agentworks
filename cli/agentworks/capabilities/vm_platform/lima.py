@@ -43,18 +43,15 @@ from agentworks.execution.errors import ClientUnsupported
 from agentworks.naming import NAME_RE
 from agentworks.schema import AgwModel, NonEmptyStr
 from agentworks.topics import TopicProse
-from agentworks.transports import LimaTransport, RemoteLimaTransport
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform.base import BootstrapProgress
-    from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution.root_script import RawRun
     from agentworks.resources.graph import Readiness
-    from agentworks.transports import Transport
 
 # Markers the restart-sentinel probe echoes on stdout. The probe exits 0
 # either way, so an absent sentinel stays a normal result, not an exception.
@@ -498,12 +495,6 @@ class LimaPlatform(VMPlatform):
                 return True
         return False
 
-    def _transport_for(self, instance_name: str) -> Transport:
-        if self.is_remote:
-            assert self._remote_host is not None
-            return RemoteLimaTransport(vm_name=instance_name, vm_host_ssh=self._remote_host)
-        return LimaTransport(vm_name=instance_name)
-
     def _create_local(self, instance_name: str, lima_yaml: str) -> None:
         """Create and start a local Lima VM without persisting its template."""
         try:
@@ -711,17 +702,6 @@ class LimaPlatform(VMPlatform):
     def native_shell(self, vm: VMRow, ctx: RunContext) -> int:
         """An interactive ``limactl shell``, as Lima's own guest user, locally or through the placement host."""
         return self._host.shell(self._instance_name(vm))
-
-    def native_transport(
-        self,
-        vm: VMRow,
-        ctx: RunContext,
-        *,
-        config: Config | None = None,
-    ) -> Transport:
-        # ctx is unused: limactl (local or over the placement host SSH hop)
-        # needs no backend credential.
-        return self._transport_for(self._instance_name(vm))
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         instance_name = self._instance_name(vm)

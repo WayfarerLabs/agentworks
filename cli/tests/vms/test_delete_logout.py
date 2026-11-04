@@ -92,7 +92,7 @@ def test_a_never_enrolled_cloud_vm_is_not_logged_out_and_its_node_is_named(
 
     platform = EC2Platform("aws-site", {"region": "us-east-1", "auth": {"mode": "ambient"}})
     monkeypatch.setattr(
-        EC2Platform, "transient_route", lambda *a, **k: pytest.fail("a route opened for a never-enrolled VM")
+        EC2Platform, "_transient_route", lambda *a, **k: pytest.fail("a route opened for a never-enrolled VM")
     )
     monkeypatch.setattr(
         "agentworks.execution.root_script.run_process", lambda *a, **k: pytest.fail("a script was dispatched")

@@ -158,6 +158,10 @@ until it exits and its pipes go quiet, the deadline passes or a stream passes 1 
 `read_host_keys(run_as_root)` reads `/etc/ssh/ssh_host_*_key.pub` and keeps the lines
 `trust.is_valid_key` accepts; `trust.fingerprint` prints a key as OpenSSH's `SHA256:` form.
 
+A platform's interactive shell is not a root script: `VMPlatform.native_shell` runs it on the
+operator's terminal through `ssh_process.run_terminal`, and a platform that offers none is refused
+with `FeatureUnavailable` (`errors.py`) before the command's boundary resolves anything.
+
 ## Host-key trust
 
 `trust.py` owns the per-VM host-key store (`~/.config/agentworks/known_hosts/vm-<name>`, records
@@ -188,10 +192,11 @@ reference and the 0.20 upgrade guide.
 ## Independence
 
 Nothing in this package imports `agentworks.transports`, `agentworks.ssh`, `agentworks.remote_exec`,
-`agentworks.harness_setup.runner`, `agentworks.native_files` or
-`agentworks.plugins.proxmox.transport`. Three guards hold that: a fresh-interpreter test imports
-every submodule with them blocked (`tests/execution/test_independence.py`), a conftest blocks them
-for every test in `tests/execution/`, and a static check rejects any import of them in the files
-already migrated onto this package (`tests/test_execution_import_boundary.py`). A slice that
-migrates a file adds it to that list. The tests are described in
-[`tests/execution/README.md`](../../tests/execution/README.md).
+`agentworks.harness_setup.runner` or `agentworks.native_files`. Three guards hold that. A
+fresh-interpreter test (`tests/execution/test_independence.py`) imports every submodule with them
+blocked, and with them the modules outside the package that are built on it alone: `vms.contract`,
+`vms.recovery`, and `public_ssh`, which loads the `vm_platform` package. A conftest blocks them for
+every test in `tests/execution/`. A static check rejects any import of them, in a function body or
+under `TYPE_CHECKING` too, in the files already migrated onto this package
+(`tests/test_execution_import_boundary.py`); a slice that migrates a file adds it to that list. The
+tests are described in [`tests/execution/README.md`](../../tests/execution/README.md).

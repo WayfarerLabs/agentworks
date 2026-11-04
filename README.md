@@ -226,8 +226,8 @@ Agentworks standardizes on a small set of integrated tools rather than abstracti
 interchangeable alternatives.
 
 - **SSH** is the control plane after provisioning: initialization, agent and session management,
-  file transfer, and command execution. Provisioning uses the platform's native transport (Lima
-  shell, SSH over a scoped Azure, EC2, or GCE public route, WSL2 exec, or Proxmox guest agent). The
+  file transfer, and command execution. Provisioning uses the platform's own channel (Lima shell,
+  SSH over a scoped Azure, EC2, or GCE public route, WSL2 exec, or Proxmox guest agent). The
   operator's key (configured in `[operator]`) is deployed during provisioning and is the sole SSH
   authentication mechanism thereafter. Once Tailscale is joined, routine access goes over the
   tailnet, and `~/.ssh/config` entries are managed automatically so standard clients (scp, ssh, VS

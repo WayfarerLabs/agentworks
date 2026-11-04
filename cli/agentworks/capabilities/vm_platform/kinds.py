@@ -54,19 +54,19 @@ class _VMPlatformKind:
         A vm-platform knows how to create, start, stop, and delete VMs on one backend,
         and how to reach them over Tailscale SSH once they exist.
 
-        Every platform also provides native administrative command execution that works
-        independently of the VM's Tailscale state. Interactive native shell is optional;
-        Proxmox uses QEMU Guest Agent for execution and directs interactive access to its
-        provider console.
+        Every platform also runs core's root scripts through its own channel, which works
+        independently of the VM's Tailscale state; that is how recovery, rekey and the
+        logout at delete reach a VM. A native interactive shell is optional: Proxmox's QEMU
+        Guest Agent runs scripts but directs interactive access to its provider console.
 
         Contract version 2 receives core's concrete current Debian release, resolves it
         to a platform-owned artifact, and fails before backend mutation when the mapping is
         missing. A platform joins Tailscale and reads the node's address through its own
-        root channel before returning the address, transport and backend identity, reports
-        bootstrap through the manager-owned progress sink, and rolls back partial backend
-        state before propagating failure; a node whose address cannot be read is logged
-        out and the create fails. Core validates the address, then verifies the returned
-        transport before persisting the observed release.
+        root channel before returning the address and backend identity, reports bootstrap
+        through the manager-owned progress sink, and rolls back partial backend state
+        before propagating failure; a node whose address cannot be read is logged out and
+        the create fails. Core validates the address, then reaches the VM over SSH there
+        and checks its live release before persisting it.
 
         Platforms are code, not config: a vm-site selects one by writing its name inside
         `spec.platform`, and the keys allowed beside that name are the platform's own,

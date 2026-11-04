@@ -1,4 +1,4 @@
-"""The six legacy execution modules (R10, HLA D14), named once for every guard that blocks them."""
+"""The legacy execution modules (R10, HLA D14), named once for every guard that blocks them."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ LEGACY_MODULES = (
     "agentworks.remote_exec",
     "agentworks.harness_setup.runner",
     "agentworks.native_files",
-    "agentworks.plugins.proxmox.transport",
 )
 
 

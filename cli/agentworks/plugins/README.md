@@ -208,13 +208,15 @@ required Tailscale auth key, and a value-free bootstrap-progress sink in `Provis
 platform resolves the release through a local artifact map before mutation, with no default or
 fallback. A missing code-owned map entry says that Agentworks is out of date; an operator-owned
 catalog miss names the exact vm-site field. Every platform also implements
-`run_as_root(vm, ctx, script, deadline) -> RawRun` and declares `recovery_needs_guest_sshd`; the
-vm-platform README states that contract. `create()` joins Tailscale and reads the node's address
-over that channel with the `tailscale_join` helpers, and returns the address as the required
-`tailnet_address`, with no transport. Core validates the address again before recording it, then
-reaches the VM over SSH there: its first connection enrolls the host key, and the VM contract
-follows, with `/etc/os-release` first. Core persists its own observation rather than trusting a
-platform result field.
+`run_as_root(vm, ctx, script, deadline) -> RawRun` and declares `recovery_needs_guest_sshd`, and may
+override `native_shell` to offer `vm shell --platform`; the vm-platform README states that contract.
+A cloud whose root channel is SSH to a public address subclasses `public_ssh.PublicAddressPlatform`,
+as the AWS, Azure and GCP plugins do, and supplies its route. `create()` joins Tailscale and reads
+the node's address over that channel with the `tailscale_join` helpers, and returns the address as
+the required `tailnet_address`, with no transport. Core validates the address again before recording
+it, then reaches the VM over SSH there: its first connection enrolls the host key, and the VM
+contract follows, with `/etc/os-release` first. Core persists its own observation rather than
+trusting a platform result field.
 
 An operator-owned release catalog also overrides the pure `validate_create_release(release)` hook.
 Core calls it with the concrete selection before resolving secrets or running authenticated platform

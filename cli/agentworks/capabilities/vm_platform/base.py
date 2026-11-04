@@ -32,7 +32,6 @@ if TYPE_CHECKING:
     from agentworks.execution.errors import FeatureUnavailable
     from agentworks.execution.root_script import RawRun
     from agentworks.execution.trust import HostKey, TrustBinding
-    from agentworks.transports import ExecTransport
 
 
 class BootstrapProgress(Protocol):
@@ -232,15 +231,6 @@ class VMPlatform(Capability):
     # platform (a descriptor requirement), never defaulted here.
     recovery_needs_guest_sshd: ClassVar[bool]
 
-    # Operator guidance warned when every reachability probe of the
-    # native transport fails (the transports factory emits it just
-    # before the SSHError propagates). None means no extra guidance;
-    # platforms whose route setup can succeed while the transport still
-    # cannot connect override with prose naming the likely cause (azure:
-    # the ephemeral SSH allow is scoped to the DETECTED egress IP, which
-    # may not be where the operator's SSH traffic actually leaves).
-    probe_failure_hint: ClassVar[str | None] = None
-
     @property
     def site_name(self) -> str:
         """The bound site's name (the capability-generic ``owner_name``,
@@ -375,27 +365,6 @@ class VMPlatform(Capability):
         """
 
     @abstractmethod
-    def native_transport(self, vm: VMRow, ctx: RunContext, *, config: Config | None = None) -> ExecTransport:
-        """Build the required Tailscale-independent execution transport.
-
-        Callers reach this through the
-        :func:`agentworks.transports.native_transport` factory, which
-        wraps the call in :meth:`transient_route` and applies the
-        reachability probe.
-
-        ``ctx`` is the op-start :class:`RunContext`, exactly as the ops
-        receive it (see :meth:`create`): building a native transport is
-        backend work like any other, and a platform whose backend API
-        needs a credential reads it here via ``ctx.secret(name)``. Azure
-        needs it (its network/compute clients resolve the transient
-        public IP); lima and wsl2 accept and ignore it.
-
-        ``config`` carries OPERATOR settings (azure needs
-        ``config.operator.ssh_private_key`` for the public-IP path),
-        distinct from the bound ``platform_config``.
-        """
-
-    @abstractmethod
     def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
         """Run ``/bin/bash -s`` as root through the platform's own channel, with ``script`` on its stdin.
 
@@ -450,11 +419,11 @@ class VMPlatform(Capability):
         overrides to delete the ephemeral bootstrap SSH allow rule
         (scoped to the operator's egress prefixes; a permanent
         deny-all-inbound baseline remains), leaving the VM with zero
-        inbound exposure. The asymmetry vs. :meth:`transient_route` is
-        genuine: the bootstrap ingress opens inside :meth:`create`
-        (cloud-init needs inbound SSH) and closes at an async
-        Tailscale-ready point inside Phase A (``phase_a.bootstrap``),
-        neither of which is an ExitStack-shaped lifecycle.
+        inbound exposure. Unlike a cloud's route around each
+        :meth:`run_as_root` call, this ingress is not one scope: it
+        opens inside :meth:`create` (cloud-init needs inbound SSH) and
+        closes at an async Tailscale-ready point inside Phase A
+        (``phase_a.bootstrap``).
 
         ``ctx`` is the op-start :class:`RunContext` (see
         :meth:`create`): closing the ingress is a backend call and
@@ -495,31 +464,6 @@ class VMPlatform(Capability):
         ambient fallback.
         """
 
-    def transient_route(
-        self, vm: VMRow, ctx: RunContext, *, config: Config | None = None
-    ) -> AbstractContextManager[None]:
-        """Hold any platform-native transient network state while the
-        native transport is in use.
-
-        Default no-op (:func:`contextlib.nullcontext`) for platforms
-        whose native transport works without setup (lima, wsl2). Azure
-        overrides to open a scoped SSH route on enter (heal a missing
-        public IP, poke an ephemeral NSG allow scoped to the operator's
-        egress prefixes) and delete the allow on exit so the transient
-        state is bounded by the caller's :class:`contextlib.ExitStack`
-        scope.
-
-        ``ctx`` is the op-start :class:`RunContext` (see
-        :meth:`create`): opening and closing the route are backend calls
-        and read any credential they need from it, with no ambient
-        fallback when a service principal is configured. ``config``
-        carries OPERATOR settings, mirroring :meth:`native_transport`
-        and :meth:`vm_active` (azure reads
-        ``config.operator.ssh_allow_cidrs`` to widen the allow's scope),
-        distinct from the bound ``platform_config``.
-        """
-        return nullcontext()
-
     def vm_active(self, vm: VMRow, *, config: Config | None = None) -> AbstractContextManager[None]:
         """Hold the VM against the backend's own idle-shutdown mechanism
         for the duration of the context.
@@ -541,11 +485,10 @@ class VMPlatform(Capability):
         reserved operator settings, available to a platform whose hold
         needs them (none does today).
 
-        No ``ctx`` here, unlike :meth:`transient_route`: every hold that
-        exists is local (wsl2 runs ``wsl.exe``), so none makes a backend
-        call and none needs a credential. A platform whose hold does
-        (a cloud API "keep this instance awake") threads ``ctx`` in the
-        same way the transport hooks did.
+        No ``ctx`` here: every hold that exists is local (wsl2 runs
+        ``wsl.exe``), so none makes a backend call and none needs a
+        credential. A platform whose hold does (a cloud API "keep this
+        instance awake") would take ``ctx`` as the ops do.
         """
         return nullcontext()
 

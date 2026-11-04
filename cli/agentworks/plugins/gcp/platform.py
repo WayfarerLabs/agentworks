@@ -20,7 +20,6 @@ from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs,
 from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import AgentworksError, ConnectivityError, StateError
-from agentworks.execution.trust import TrustBinding, TrustMode
 from agentworks.plugins.gcp.auth import GcpClientCache
 from agentworks.plugins.gcp.bootstrap import (
     GCE_READINESS_COMMAND,
@@ -75,15 +74,12 @@ from agentworks.plugins.gcp.network import (
     resolve_network,
 )
 from agentworks.topics import TopicProse
-from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
     from agentworks.capabilities.base import RunContext
-    from agentworks.config import Config
     from agentworks.db import VMRow
-    from agentworks.transports import Transport
 
 
 _OPERATION_TIMEOUT_SECONDS = 300.0
@@ -220,7 +216,7 @@ class GCEPlatform(PublicAddressPlatform):
         `gcp-gce` vm-site becomes ready.
         """,
     )
-    probe_failure_hint: ClassVar[str | None] = (
+    _probe_failure_hint = (
         "The transient GCE SSH allow is scoped to the detected public IP. "
         "Set operator.ssh_allow_cidrs when SSH exits through another VPN, proxy, or NAT address."
     )
@@ -568,23 +564,6 @@ class GCEPlatform(PublicAddressPlatform):
         identity = _VMIdentity.from_row(vm)
         return f"{identity.instance_name}@{identity.zone}"
 
-    def native_transport(
-        self,
-        vm: VMRow,
-        ctx: RunContext,
-        *,
-        config: Config | None = None,
-    ) -> Transport:
-        identity_file = None
-        if config is not None:
-            identity_file = getattr(getattr(config, "operator", None), "ssh_private_key", None)
-        return SSHTransport(
-            host=self._public_address(vm, ctx),
-            trust=TrustBinding(TrustMode.VM, vm.name),
-            user=vm.admin_username,
-            identity_file=identity_file,
-        )
-
     def _public_address(self, vm: VMRow, ctx: RunContext) -> str:
         """The instance's live external IPv4, after checking it is still ours and on its recorded network.
 
@@ -611,7 +590,7 @@ class GCEPlatform(PublicAddressPlatform):
         self._close_stable_allow(vm, ctx)
 
     @contextlib.contextmanager
-    def transient_route(self, vm: VMRow, ctx: RunContext, *, config: Config | None = None) -> Iterator[None]:
+    def _transient_route(self, vm: VMRow, ctx: RunContext) -> Iterator[None]:
         identity = _VMIdentity.from_row(vm)
         instances = self._clients.client("instances", ctx)
         current = self._owned_instance(instances, identity)
@@ -626,7 +605,7 @@ class GCEPlatform(PublicAddressPlatform):
             network_url=identity.network_url,
         )
         require_classic_first(live_network, project_id=identity.project_id)
-        prefixes = operator_ssh_prefixes(config_allow_cidrs(config))
+        prefixes = operator_ssh_prefixes(config_allow_cidrs(ctx.config))
         firewalls = self._clients.client("firewalls", ctx)
         route_name = transient_route_name(vm.hostname)
         require_firewall_name_available(firewalls, project_id=identity.project_id, rule_name=route_name)

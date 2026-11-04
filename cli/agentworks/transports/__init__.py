@@ -1,57 +1,39 @@
-"""Polymorphic transports for reaching VMs.
+"""The legacy SSH transport to a VM over its tailnet address, for the callers not yet migrated.
 
-Three named factories plus one low-level helper:
+Two named factories plus one low-level helper:
 
-- :func:`transport` -- the canonical transport for a VM as the admin user
-  (Tailscale SSH). Used by every normal operator workflow.
-- :func:`agent_transport` -- the canonical transport as a named agent's
-  Linux user. Same mechanism as :func:`transport`, different SSH user.
-- :func:`native_transport` -- the platform-native transport
-  (``limactl shell``, ``wsl.exe``, cloud public-IP SSH, Proxmox QGA).
-  Used for bootstrap and recovery; full transports additionally support
-  the explicit ``vm shell --platform`` opt-in.
-- :func:`transport_for_user` -- low-level helper used by the named
-  factories. Direct use is reserved for the mid-create case where the
-  agent row doesn't exist yet (today's only direct caller is
-  ``agents/initializer.py``).
+- :func:`transport` -- the admin's transport to a VM (SSH to its tailnet
+  address).
+- :func:`agent_transport` -- the same as a named agent's Linux user.
+- :func:`transport_for_user` -- the helper both call. Direct use is
+  reserved for the mid-create case where the agent row doesn't exist yet
+  (today's only direct caller is ``agents/initializer.py``).
 
-The named factories never fall back. If the canonical transport is
-unavailable, the canonical factory raises -- it does NOT silently switch
-to the native transport.
+A platform's own channel is not a transport: core reaches it through
+``VMPlatform.run_as_root`` and ``native_shell``. Commands migrated onto
+``agentworks.execution`` use ``VMAccess`` instead of this module, which goes
+once the last caller moves.
 """
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
 from agentworks.execution.trust import TrustBinding, TrustMode
-from agentworks.transports.base import ExecTransport, Transport
-from agentworks.transports.lima import LimaTransport
-from agentworks.transports.remote_lima import RemoteLimaTransport
+from agentworks.transports.base import Transport
 from agentworks.transports.ssh import SSHTransport
-from agentworks.transports.wsl2 import WSL2Transport
 
 if TYPE_CHECKING:
-    import contextlib
-
-    from agentworks.capabilities.base import RunContext
-    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import AgentRow, VMRow
     from agentworks.ssh import SSHLogger
 
 
 __all__ = [
-    "ExecTransport",
-    "LimaTransport",
-    "RemoteLimaTransport",
     "SSHTransport",
     "Transport",
-    "WSL2Transport",
     "agent_transport",
-    "native_transport",
     "transport",
     "transport_for_user",
 ]
@@ -113,9 +95,7 @@ def transport(
 ) -> Transport:
     """Canonical admin transport for a VM (Tailscale SSH).
 
-    Used by every normal operator workflow. Raises :class:`StateError`
-    if the canonical transport is unavailable (no Tailscale host).
-    Never falls back to the platform-native transport.
+    Raises :class:`StateError` if the VM has no Tailscale host.
     """
     return transport_for_user(
         vm,
@@ -148,95 +128,3 @@ def agent_transport(
         default_timeout=default_timeout,
         logger=logger,
     )
-
-
-def native_transport(
-    vm: VMRow,
-    platform: VMPlatform,
-    config: Config,
-    *,
-    ctx: RunContext,
-    stack: contextlib.ExitStack,
-) -> ExecTransport:
-    """Platform-native transport for an existing VM.
-
-    Used for start-time Tailscale recovery, Tailscale rekey and logout,
-    and the explicit ``vm shell --platform`` opt-in. VM creation obtains
-    its initial transport separately from :meth:`VMPlatform.create`.
-
-    ``platform`` is the VM's bound platform, resolved at the caller's
-    composition root (the node factories via ``resolve_site``). ``stack``
-    bounds the lifetime of any transient network state the platform
-    needs (Azure pokes an ephemeral SSH allow scoped to the operator's
-    egress IP on enter, healing a missing public IP first, and deletes
-    the allow on exit): the platform's
-    :meth:`VMPlatform.transient_route` runs first; once that context is
-    held, the per-platform transport builder runs.
-
-    ``ctx`` is the op-start :class:`RunContext` both platform calls
-    receive: building the route and the transport is backend work, so a
-    platform whose backend API needs a credential (Azure with an
-    explicit service principal) reads it through ``ctx.secret``. Callers
-    pass the context their composition root already built for the
-    platform's ops, never a fresh empty one: the credential has to
-    arrive by delivery, not by hoping an earlier op in the same process
-    warmed a cache.
-
-    Surfaces a typed error if the transport resolves to an SSH target
-    with an empty host (Azure's defensive guard from PR #118).
-
-    Probes the resulting transport with ``echo ok`` and retries up to
-    six times with a 3-second sleep between attempts (total budget ~15s
-    of sleeps plus the per-attempt 10s timeout) so the Azure SDN has
-    time to apply a freshly-poked NSG allow (or a freshly-healed public
-    IP) before the first real command lands. Local transports (Lima,
-    WSL2) succeed on the first probe and skip the sleeps entirely. If
-    every probe fails, the platform's
-    :attr:`VMPlatform.probe_failure_hint` (azure: the allow was scoped
-    to the detected egress IP, see ``operator.ssh_allow_cidrs``) is
-    warned before the SSHError propagates.
-    """
-    from agentworks import output
-    from agentworks.ssh import SSHError
-
-    stack.enter_context(platform.transient_route(vm, ctx, config=config))
-    target = platform.native_transport(vm, ctx, config=config)
-
-    # Defensive: any SSH-backed native transport that returns an empty
-    # host gets the same typed-error treatment. Azure is today's only
-    # such case (host="" when the NIC unexpectedly has no public IP); a
-    # future SSH-backed platform would inherit the guard. After
-    # transient_route this shouldn't happen on Azure (enter heals a
-    # missing public IP before yielding). If it does, surface clearly
-    # rather than letting downstream calls hang on an empty hostname.
-    if isinstance(target, SSHTransport) and not target.host:
-        raise StateError(
-            f"Native transport on platform '{platform.name}' resolved to an "
-            f"SSH target with no host. VM '{vm.name}' may not be reachable.",
-            entity_kind="vm",
-            entity_name=vm.name,
-            hint=(
-                "For Azure: the VM's NIC has no public IP and the heal may "
-                "have silently failed; check the Azure portal for the VM's "
-                "network configuration (including the NSG's transient SSH "
-                "allow), or use the serial console (Connect > Serial console "
-                "on the VM resource page)."
-            ),
-        )
-
-    for attempt in range(6):
-        try:
-            target.run("echo ok", timeout=10)
-            break
-        except SSHError:
-            if attempt == 0:
-                output.detail("Waiting for provisioning transport...")
-            if attempt == 5:
-                # Give the platform's probe-failure guidance (azure: the
-                # scoped allow may not match the operator's real egress)
-                # before the typed error propagates.
-                if platform.probe_failure_hint:
-                    output.warn(platform.probe_failure_hint)
-                raise
-            time.sleep(3)
-    return target

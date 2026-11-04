@@ -3,14 +3,12 @@ and that a VM with no host-key record spawns nothing and never retries."""
 
 from __future__ import annotations
 
-import contextlib
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from agentworks.capabilities.base import RunContext
 from agentworks.execution import trust
 from agentworks.execution.errors import TrustMissing
 from agentworks.execution.trust import HOST_TRUST, TrustBinding, TrustMode
@@ -18,7 +16,6 @@ from agentworks.ssh import SSHError
 from agentworks.transports import (
     SSHTransport,
     agent_transport,
-    native_transport,
     transport,
     transport_for_user,
 )
@@ -175,28 +172,6 @@ def test_host_trust_keeps_first_use_against_the_operators_configuration() -> Non
 
 
 # -- The loops that retry never retry a missing record ---------------------------------------
-
-
-def test_native_transport_raises_on_the_first_attempt_without_the_network_hint(captured_output: Any) -> None:
-    vm = _vm_row("web")
-    target = _vm_transport()
-    platform = MagicMock()
-    platform.name = "aws"
-    platform.probe_failure_hint = "check the network"
-    platform.transient_route.return_value = contextlib.nullcontext()
-    platform.native_transport.return_value = target
-
-    with (
-        patch("agentworks.transports.time.sleep") as sleep,
-        patch.object(target, "run", wraps=target.run) as run,
-        contextlib.ExitStack() as stack,
-        pytest.raises(TrustMissing),
-    ):
-        native_transport(vm, platform, _config(), ctx=RunContext(), stack=stack)
-
-    assert run.call_count == 1
-    sleep.assert_not_called()
-    assert captured_output.warnings == []
 
 
 def test_the_agent_probe_does_not_rewrap_a_missing_record_as_unreachable() -> None:

@@ -28,7 +28,6 @@ from agentworks.errors import StateError
 from agentworks.execution import root_script, ssh_process
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
-from agentworks.transports import WSL2Transport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -39,7 +38,6 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow
     from agentworks.execution.root_script import RawRun
     from agentworks.resources.graph import Readiness
-    from agentworks.transports import Transport
 
 _STATUS_TIMEOUT_SECONDS = 10
 _BOOTSTRAP_DEADLINE_SECONDS = 900
@@ -945,16 +943,6 @@ class WSL2Platform(VMPlatform):
     def native_shell(self, vm: VMRow, ctx: RunContext) -> int:
         """An interactive login shell as the admin: ``wsl.exe --distribution <distro> --user <admin>``."""
         return ssh_process.run_terminal([_WSL, "--distribution", self._distro_name(vm), "--user", vm.admin_username])
-
-    def native_transport(
-        self,
-        vm: VMRow,
-        ctx: RunContext,
-        *,
-        config: Config | None = None,
-    ) -> Transport:
-        # ctx is unused: wsl.exe is local and needs no backend credential.
-        return WSL2Transport(distro_name=self._distro_name(vm), user=vm.admin_username)
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         distro_name = self._distro_name(vm)

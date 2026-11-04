@@ -23,7 +23,7 @@ priority band [100, 199] under the deny:
   confirmed or the create fails/aborts. The fixed name is what lets the
   close hooks delete it without any in-process state.
 - ``allow-ssh-transient-<nonce>`` (per operation): poked by
-  ``transient_route`` at the lowest free slot in the band and removed
+  ``_transient_route`` at the lowest free slot in the band and removed
   by name on exit. Per-operation rules are what make concurrent native
   ops on one VM safe: the old single well-known rule meant one op's
   exit could remove the allow another op still relied on; now each op
@@ -372,7 +372,7 @@ def remove_ssh_allow(
     operations' transient rules are untouched).
 
     ``rule_name`` is the fixed ``allow-ssh-bootstrap`` on the hook paths
-    and the poke's nonce name on the ``transient_route`` exit and the
+    and the poke's nonce name on the ``_transient_route`` exit and the
     poke's own attempt cleanup. A 404 is fine (the rule was already
     gone: a hook re-run, a VM that never had it, or a create that never
     landed server-side). Any other failure warns instead of raising:

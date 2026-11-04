@@ -31,7 +31,6 @@ from agentworks.plugins.proxmox.teardown import (
     rollback_partial_create,
     stop_and_delete_vm,
 )
-from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
 from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
 from agentworks.topics import TopicProse
 
@@ -39,7 +38,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.capabilities.base import RunContext
-    from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution.root_script import RawRun
 
@@ -139,8 +137,8 @@ class ProxmoxPlatform(VMPlatform):
 
         Creation runs the bootstrap, the Tailscale join and the address read as root through
         QEMU Guest Agent, with the auth key only on the join script's stdin. An address
-        that cannot be read logs the node out. Core checks the live Debian release through
-        the returned QGA execution transport. A bootstrap, join or address failure rolls the
+        that cannot be read logs the node out. Core then checks the live Debian release over
+        SSH at the returned address. A bootstrap, join or address failure rolls the
         cloned VM back; a later core mismatch retains an addressable failed VM for explicit
         deletion.
 
@@ -481,22 +479,6 @@ class ProxmoxPlatform(VMPlatform):
     def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
         """Run ``script`` as root through the QEMU Guest Agent, which needs no guest sshd."""
         return guest_agent.run_as_root(self._api(ctx), self._vm_node(vm), self._vmid(vm), script, deadline)
-
-    def native_transport(
-        self,
-        vm: VMRow,
-        ctx: RunContext,
-        *,
-        config: Config | None = None,
-    ) -> ProxmoxExecTransport:
-        """Build the VM's Tailscale-independent QGA execution channel."""
-        del config
-        return ProxmoxExecTransport(
-            self._api(ctx),
-            node=self._vm_node(vm),
-            vmid=self._vmid(vm),
-            admin_username=vm.admin_username,
-        )
 
     # -- Helpers ---------------------------------------------------------------
 

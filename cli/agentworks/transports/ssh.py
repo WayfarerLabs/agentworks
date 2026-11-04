@@ -83,11 +83,9 @@ def note_ssh_interactive_exit(code: int, endpoint: str) -> None:
     and ssh's own diagnostic went to the alternate screen that the
     terminal guard has since discarded.
 
-    Shared by ``SSHTransport`` and ``RemoteLimaTransport``, whose outer
-    hop is an ``ssh -t`` with the same failure mode. Callers invoke this
-    from ``_note_interactive_exit``, which the ABC calls only after the
-    guard has closed; see ``Transport._note_interactive_exit`` for why
-    that ordering matters.
+    ``SSHTransport._note_interactive_exit`` calls this; the ABC calls
+    that only after the guard has closed, and
+    ``Transport._note_interactive_exit`` says why that ordering matters.
     """
     if code != SSH_TRANSPORT_ERROR:
         return

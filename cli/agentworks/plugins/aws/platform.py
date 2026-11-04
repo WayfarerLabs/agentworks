@@ -8,7 +8,7 @@ with smallest-that-fits selection, and the baseline-deny / ephemeral-scoped-allo
 exposure model azure's redesign established (a security
 group that denies all inbound by default; SSH via ephemeral rules scoped to the
 operator's egress prefixes; ``post_tailscale_ready`` / ``secure_failed_vm`` /
-``transient_route`` close hooks; create rollback on both failure and operator
+``_transient_route`` close hooks; create rollback on both failure and operator
 interrupt). Two deliberate divergences from azure are documented where they
 live: ``runup`` / ``status`` classify credential rejection, authorization
 denial, and an unreachable endpoint separately, and the security-group
@@ -39,7 +39,6 @@ from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bo
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import AuthorizationError, ConfigError, NotFoundError, StateError, TokenRejectedError
-from agentworks.execution.trust import TrustBinding, TrustMode
 from agentworks.plugins.aws.auth import _build_access_key_session, _build_ambient_session
 from agentworks.plugins.aws.config import (
     AwsAmbientAuth,
@@ -70,15 +69,12 @@ from agentworks.plugins.aws.network import (
     wrap_ec2_error,
 )
 from agentworks.topics import TopicProse
-from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
     from agentworks.capabilities.base import RunContext
-    from agentworks.config import Config
     from agentworks.db import VMRow
-    from agentworks.transports import Transport
 
 
 # Debian's image naming for the EC2 architecture vocabulary. The mapping
@@ -145,11 +141,10 @@ class EC2Platform(PublicAddressPlatform):
         """,
     )
 
-    # Warned by the transports factory when every reachability probe fails: the
-    # ephemeral SSH allow is scoped to the DETECTED egress IP, so an operator
+    # The ephemeral SSH allow is scoped to the DETECTED egress IP, so an operator
     # whose SSH traffic leaves through a different address (VPN split tunnel,
     # proxy, CGNAT) gets a hole that does not match and every probe times out.
-    probe_failure_hint: ClassVar[str | None] = (
+    _probe_failure_hint = (
         "The transient EC2 SSH allow is scoped to your detected public IP; "
         "if your SSH traffic egresses elsewhere (VPN split tunnel, proxy, "
         "CGNAT), add your address(es) to operator.ssh_allow_cidrs in your "
@@ -690,31 +685,6 @@ class EC2Platform(PublicAddressPlatform):
         region = vm.platform_metadata.get("region")
         return f"{instance_id}@{region}" if region else instance_id
 
-    def native_transport(
-        self,
-        vm: VMRow,
-        ctx: RunContext,
-        *,
-        config: Config | None = None,
-    ) -> Transport:
-        # The public IP is read LIVE off a fresh describe every time (EC2
-        # reassigns it across stop/start, so it is never cached). The SSH route
-        # is opened by transient_route, which the transports factory wraps
-        # around this call; a stopped instance has no public IP, which
-        # propagates to SSHTransport(host="") and the factory's typed StateError.
-        public_ip = self._public_address(vm, ctx)
-
-        identity_file = None
-        if config is not None:
-            identity_file = getattr(getattr(config, "operator", None), "ssh_private_key", None)
-
-        return SSHTransport(
-            host=public_ip,
-            trust=TrustBinding(TrustMode.VM, vm.name),
-            user=vm.admin_username,
-            identity_file=identity_file,
-        )
-
     def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:
         """Close provisioning access now that Tailscale is up.
 
@@ -742,7 +712,7 @@ class EC2Platform(PublicAddressPlatform):
         back inside :meth:`create` and never reach this hook. The ordinary-command
         gate refuses the kept VM, ``vm shell --platform`` included, so
         debugging goes through the EC2 serial console; ``vm delete``'s logout
-        pokes a fresh transient allow via :meth:`transient_route`.
+        pokes a fresh transient allow via :meth:`_transient_route`.
 
         ``ctx`` is the create op's own scoped context, whose secrets were
         resolved before Phase A began, so even the interrupt path never resolves
@@ -753,7 +723,7 @@ class EC2Platform(PublicAddressPlatform):
         self._close_provisioning_access(vm, ctx)
 
     @contextlib.contextmanager
-    def transient_route(self, vm: VMRow, ctx: RunContext, *, config: Config | None = None) -> Iterator[None]:
+    def _transient_route(self, vm: VMRow, ctx: RunContext) -> Iterator[None]:
         """Open a scoped SSH route to the VM for the context's duration.
 
         Enter pokes this operation's SSH allow scoped to the operator's egress
@@ -765,9 +735,8 @@ class EC2Platform(PublicAddressPlatform):
         contract). Unlike azure there is no public-IP heal on enter: the EC2
         auto-assigned IP is permanent for the VM's lifetime.
 
-        ``ctx`` is the op-start context threaded from the factory; ``config``
-        carries OPERATOR settings (``operator.ssh_allow_cidrs``), mirroring
-        azure and :meth:`native_transport`.
+        ``ctx`` is the op-start context; its ``config`` carries the operator's
+        ``operator.ssh_allow_cidrs``.
 
         ``poke_ssh_allow`` checks the matching revoke permissions before it
         mutates ingress and cleans up any partial poke itself. Once the poke
@@ -775,7 +744,7 @@ class EC2Platform(PublicAddressPlatform):
         """
         ec2 = self._client("ec2", self._region_of(vm), ctx)
         security_group_id = self._security_group_id(vm)
-        prefixes = operator_ssh_prefixes(config_allow_cidrs(config))
+        prefixes = operator_ssh_prefixes(config_allow_cidrs(ctx.config))
         poke_ssh_allow(ec2, security_group_id, prefixes)
         try:
             yield

@@ -33,6 +33,7 @@ from agentworks.execution.trust import TrustBinding, TrustMode
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from contextlib import AbstractContextManager
     from pathlib import Path
 
     from agentworks.capabilities.base import RunContext
@@ -125,10 +126,11 @@ class PublicSSH:
 class PublicAddressPlatform(VMPlatform):
     """A cloud platform whose root channel is :class:`PublicSSH` to the VM's public address.
 
-    A subclass supplies :meth:`_public_address` and :attr:`public_address_hint`;
-    its ``transient_route`` opens the firewall allow each call needs, and its
-    ``probe_failure_hint`` explains an allow that does not match the
-    operator's egress.
+    A subclass supplies its route (:meth:`_transient_route`), the address
+    read (:meth:`_public_address`) and two hints. All of it is private to the
+    cloud: core reaches the VM only through ``run_as_root``,
+    ``read_host_keys`` and ``native_shell``, each of which opens and closes its
+    own route, so no firewall allow outlives one call.
     """
 
     recovery_needs_guest_sshd: ClassVar[bool] = True
@@ -140,6 +142,26 @@ class PublicAddressPlatform(VMPlatform):
 
         Abstract, so registration refuses a cloud that leaves it out; a
         subclass supplies it as a class attribute.
+        """
+
+    @property
+    @abstractmethod
+    def _probe_failure_hint(self) -> str:
+        """Warned when the VM never answers inside a fresh route: the allow may not match the operator's egress.
+
+        Abstract like :attr:`public_address_hint`, and supplied the same way.
+        """
+
+    @abstractmethod
+    def _transient_route(self, vm: VMRow, ctx: RunContext) -> AbstractContextManager[None]:
+        """Open an SSH route to the VM for the context's duration, and close exactly it on every exit.
+
+        A cloud's VM denies all inbound traffic at baseline, so the route is
+        this call's own firewall allow, scoped to the operator's egress
+        prefixes (widened by ``ctx.config.operator.ssh_allow_cidrs``).
+        ``ctx`` is the op-start context: opening and closing the route are
+        backend calls that read their credential through it, with no ambient
+        fallback.
         """
 
     @abstractmethod
@@ -186,7 +208,7 @@ class PublicAddressPlatform(VMPlatform):
     @contextlib.contextmanager
     def _public_ssh(self, vm: VMRow, ctx: RunContext, binding: TrustBinding) -> Iterator[PublicSSH]:
         """An answering :class:`PublicSSH` to the VM under ``binding``, for as long as the route is open."""
-        with self.transient_route(vm, ctx, config=ctx.config):
+        with self._transient_route(vm, ctx):
             address = self._public_address(vm, ctx)
             if not address:
                 raise StateError(
@@ -198,5 +220,5 @@ class PublicAddressPlatform(VMPlatform):
             # Every operation's context is built with the operator's configuration.
             assert ctx.config is not None
             target = PublicSSH(address, vm.admin_username, ctx.config.operator.ssh_private_key, binding)
-            target.wait_until_answering(failure_hint=self.probe_failure_hint)
+            target.wait_until_answering(failure_hint=self._probe_failure_hint)
             yield target

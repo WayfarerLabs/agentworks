@@ -25,7 +25,7 @@ a route is needed and revoked after:
   its fixed-name bootstrap allow. Revoking the recorded tuples rather than
   sweeping all ingress is what lets a concurrent ``vm shell --platform`` route's
   distinct allow survive the close (nothing serializes commands per VM);
-- ``transient_route``'s per-operation poke, removed by revoking exactly the
+- ``_transient_route``'s per-operation poke, removed by revoking exactly the
   prefixes it authorized.
 
 EC2-native divergence from azure's per-operation nonce-named rules: an EC2

@@ -36,8 +36,12 @@ for module in pkgutil.walk_packages(
 ):
     importlib.import_module(module.name)
 
-# Modules outside the package that are built on it alone (HLA D14).
+# Modules outside the package that are built on it alone (HLA D14). Importing
+# public_ssh runs the vm_platform package, which proves the Lima and WSL2
+# platforms and the shared provisioning modules too.
+import agentworks.capabilities.vm_platform.public_ssh
 import agentworks.vms.contract
+import agentworks.vms.recovery
 
 assert not any(
     loaded == name or loaded.startswith(name + ".")

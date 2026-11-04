@@ -8,7 +8,7 @@ and NO standing allow: SSH happens through ephemeral allows in the band
 egress IP plus the ``operator.ssh_allow_cidrs`` config extras.
 ``create`` opens the fixed-name bootstrap hole,
 ``post_tailscale_ready`` / ``secure_failed_vm`` close it, and
-``transient_route`` pokes/removes a per-operation nonce-named rule
+``_transient_route`` pokes/removes a per-operation nonce-named rule
 around each native-transport session (concurrent ops each own theirs),
 converging legacy VMs on the way.
 
@@ -333,7 +333,7 @@ class TestTransientRoute:
         network = _install_fakes(monkeypatch, public_ip_attached=False).network
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with _platform().transient_route(vm, RunContext()):
+        with _platform()._transient_route(vm, RunContext()):
             assert network.public_ip_addresses.created == [("rg1", "vm1-ip")]
             assert len(network.network_interfaces.updated) == 1
             nic = network.network_interfaces.updated[0][2]
@@ -345,7 +345,7 @@ class TestTransientRoute:
         network = _install_fakes(monkeypatch, public_ip_attached=True).network
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with _platform().transient_route(vm, RunContext()):
+        with _platform()._transient_route(vm, RunContext()):
             assert network.public_ip_addresses.created == []
             assert network.network_interfaces.updated == []
 
@@ -366,7 +366,7 @@ class TestTransientRoute:
         )
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with _platform().transient_route(vm, RunContext(), config=_operator_config(["198.51.100.0/24"])):
+        with _platform()._transient_route(vm, RunContext(config=_operator_config(["198.51.100.0/24"]))):
             # Call order: deny re-pin (create), legacy SSH delete, allow poke.
             kinds = [(e[0], e[3]) for e in network.security_rules.events]
             transient = network.security_rules.transient_names()
@@ -416,7 +416,7 @@ class TestTransientRoute:
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
         body_ran = False
-        with _platform().transient_route(vm, RunContext()):
+        with _platform()._transient_route(vm, RunContext()):
             body_ran = True
 
         assert body_ran
@@ -451,7 +451,7 @@ class TestTransientRoute:
         monkeypatch.setattr(rules, "begin_create_or_update", _create)
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with pytest.raises(AzureError), _platform().transient_route(vm, RunContext()):
+        with pytest.raises(AzureError), _platform()._transient_route(vm, RunContext()):
             pytest.fail("the body must not run when the poke fails")
 
         # Every attempted rule was created server-side and then removed
@@ -490,7 +490,7 @@ class TestTransientRoute:
         monkeypatch.setattr(rules, "begin_create_or_update", _create)
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with pytest.raises(AzureError), _platform().transient_route(vm, RunContext()):
+        with pytest.raises(AzureError), _platform()._transient_route(vm, RunContext()):
             pytest.fail("the body must not run when the poke fails")
 
         attempted = rules.transient_names()
@@ -507,7 +507,7 @@ class TestTransientRoute:
         network = _install_fakes(monkeypatch).network
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with pytest.raises(RuntimeError, match="kaboom"), _platform().transient_route(vm, RunContext()):
+        with pytest.raises(RuntimeError, match="kaboom"), _platform()._transient_route(vm, RunContext()):
             raise RuntimeError("kaboom")
 
         rule_name = network.security_rules.transient_names()[0]
@@ -523,7 +523,7 @@ class TestTransientRoute:
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
         entered = False
-        with _platform().transient_route(vm, RunContext(), config=_operator_config(["198.51.100.0/24"])):
+        with _platform()._transient_route(vm, RunContext(config=_operator_config(["198.51.100.0/24"]))):
             entered = True
             # Poison ONLY the exit path's delete.
             network.security_rules.delete_error = RuntimeError("boom")
@@ -547,9 +547,9 @@ class TestPerOperationAllows:
         rules: _FakeSecurityRules = network.security_rules
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with _platform().transient_route(vm, RunContext()):
+        with _platform()._transient_route(vm, RunContext()):
             outer_name = rules.transient_names()[0]
-            with _platform().transient_route(vm, RunContext()):
+            with _platform()._transient_route(vm, RunContext()):
                 inner_name = rules.transient_names()[1]
                 assert inner_name != outer_name
                 outer_rule, inner_rule = rules.rules[outer_name], rules.rules[inner_name]
@@ -693,5 +693,5 @@ class TestEnsureDenyRaises:
         network.security_rules.create_error = RuntimeError("boom")
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with pytest.raises(AzureError), _platform().transient_route(vm, RunContext()):
+        with pytest.raises(AzureError), _platform()._transient_route(vm, RunContext()):
             pytest.fail("the body must not run when convergence fails")

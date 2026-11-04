@@ -6,7 +6,7 @@ Run everything local from `cli/`:
 uv run pytest tests/execution
 ```
 
-The package's tests pass with the six legacy modules blocked: `conftest.py` here evicts them from
+The package's tests pass with the legacy modules blocked: `conftest.py` here evicts them from
 `sys.modules`, removes the attribute on their parent package and puts a finder that refuses them
 first on `sys.meta_path`, for every test. `test_independence.py` proves the same at import time in a
 fresh interpreter. Tests that exercise a migrated manager live elsewhere in `tests/` and use the
@@ -36,7 +36,7 @@ returns canned outcomes without ssh.
   the secret in no field, one dispatch), `read_host_keys`, and `run_process` against a local Bash.
 - `test_run_process.py`: `run_process` over Python children (the deadline, the output limit, a
   background child, end of file). Marked `windows`, since WSL2's root channel runs only there.
-- `legacy_modules.py`: the six legacy module names, shared by the conftest blocker, the fresh
+- `legacy_modules.py`: the legacy module names, shared by the conftest blocker, the fresh
   interpreter guard and the static import check.
 
 ## Conformance vectors

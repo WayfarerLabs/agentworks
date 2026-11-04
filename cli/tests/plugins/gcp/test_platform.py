@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -281,13 +281,12 @@ def test_lifecycle_is_idempotent_live_ip_and_transient_routes_are_distinct(
     platform.start(vm, gce_ctx())
     platform.start(vm, gce_ctx())
     assert len(instances.start_requests) == 1
-    native = platform.native_transport(vm, gce_ctx())
-    assert cast("Any", native).host == "203.0.113.20"
+    assert platform._public_address(vm, gce_ctx()) == "203.0.113.20"
 
-    with platform.transient_route(vm, gce_ctx()):
+    with platform._transient_route(vm, gce_ctx()):
         route_one = set(firewalls.resources) - {result.platform_metadata["deny_rule"]}
         assert len(route_one) == 1
-        with platform.transient_route(vm, gce_ctx()):
+        with platform._transient_route(vm, gce_ctx()):
             routes_both = set(firewalls.resources) - {result.platform_metadata["deny_rule"]}
             assert len(routes_both) == 2
             assert route_one < routes_both
@@ -301,7 +300,7 @@ def test_lifecycle_is_idempotent_live_ip_and_transient_routes_are_distinct(
     assert len(instances.delete_requests) == 1
 
 
-def test_native_transport_fails_when_the_owned_instance_is_missing(
+def test_the_public_address_read_fails_when_the_owned_instance_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     platform, cache = gce_platform(monkeypatch, gce_guest())
@@ -310,7 +309,7 @@ def test_native_transport_fails_when_the_owned_instance_is_missing(
     cache.instances.resource = None
 
     with pytest.raises(StateError) as caught:
-        platform.native_transport(vm, gce_ctx())
+        platform._public_address(vm, gce_ctx())
 
     assert caught.value.entity_kind == "vm"
     assert caught.value.entity_name == vm.name
@@ -655,7 +654,7 @@ def test_transient_route_open_failure_never_yields_or_mutates_stable_deny(
     cache.firewalls.insert_failures = [unavailable_one, unavailable_two]
     yielded = False
 
-    with pytest.raises(ConnectivityError), platform.transient_route(vm, gce_ctx()):
+    with pytest.raises(ConnectivityError), platform._transient_route(vm, gce_ctx()):
         yielded = True
 
     assert not yielded
@@ -675,7 +674,7 @@ def test_transient_route_close_failure_warns_and_retains_only_its_exact_rule(
     platform.post_tailscale_ready(vm, gce_ctx())
     cache.firewalls.delete_failures = [api_error(api_exceptions.ServiceUnavailable, "provider-private-detail")]
 
-    with platform.transient_route(vm, gce_ctx()):
+    with platform._transient_route(vm, gce_ctx()):
         [route_name] = set(cache.firewalls.resources) - {result.platform_metadata["deny_rule"]}
 
     assert {result.platform_metadata["deny_rule"], route_name} == set(cache.firewalls.resources)
