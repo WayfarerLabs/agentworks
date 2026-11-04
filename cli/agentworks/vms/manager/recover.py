@@ -78,10 +78,16 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
         run_as_root = partial(platform.run_as_root, vm, ops_ctx)
         if joined:
             output.info("Tailscale node rejoined the tailnet")
-            address = settle_tailnet_address(run_as_root, node=vm.hostname, rerun_hint=f"Run 'agw vm recover {name}'.")
+            address = settle_tailnet_address(
+                run_as_root, node=vm.hostname, rerun_hint=f"Run 'agw vm recover {name}'.", log=log.record
+            )
         else:
             # A flaky channel never logs out a node that was working.
-            address = read_tailnet_address(run_as_root, node=vm.hostname)
+            try:
+                address = read_tailnet_address(run_as_root, node=vm.hostname, log=log.record)
+            except ConnectivityError as error:
+                error.add_hint(f"Run 'agw vm logs {name}' for what each read reported.")
+                raise
         if address != vm.tailscale_host:
             db.update_vm_tailscale(name, address)
             sync_ssh_config(config, db)

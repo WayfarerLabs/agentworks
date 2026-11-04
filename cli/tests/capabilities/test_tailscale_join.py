@@ -154,6 +154,18 @@ def test_exhaustion_logs_out_once_and_gives_the_rerun_hint() -> None:
     assert isinstance(caught.value.__cause__, ConnectivityError)
 
 
+def test_the_caller_s_log_records_every_read_and_the_logout() -> None:
+    guest = reads_failing(Answer(status=1))
+    records: list[object] = []
+
+    with pytest.raises(ConnectivityError):
+        settle_tailnet_address(
+            guest.run_as_root, node=NODE, rerun_hint=HINT, log=lambda request, result: records.append(result)
+        )
+
+    assert len(records) == ADDRESS_READS + 1 == len(guest.scripts)
+
+
 @pytest.mark.parametrize("logout", [Answer(status=1), Answer(status=None), Answer(raises=ConnectivityError("dropped"))])
 def test_a_failed_logout_names_the_node_for_the_admin_console(logout: Answer) -> None:
     guest = reads_failing(Answer(status=1), logout=logout)

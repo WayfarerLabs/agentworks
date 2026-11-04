@@ -191,6 +191,44 @@ def test_without_a_join_reads_that_run_out_never_log_the_node_out(
     assert guest.count("tailscale logout") == 0
 
 
+def test_a_read_alone_that_runs_out_points_at_the_log_that_recorded_every_read(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    from contextlib import contextmanager
+
+    from agentworks.vms.manager import recover
+
+    records: list[object] = []
+
+    class _Log:
+        display_path = "log"
+
+        def step(self, name: str) -> None: ...
+
+        def output(self, text: str) -> None: ...
+
+        def record(self, request: object, result: object) -> None:
+            records.append(request)
+
+    @contextmanager
+    def _recording_log(*_args: object, **_kwargs: object):  # noqa: ANN202
+        yield _Log()
+
+    monkeypatch.setattr(recover, "_operation_log", _recording_log)
+    _seed(db)
+    guest = _guest(monkeypatch, address=Answer(status=1))
+    _waits(monkeypatch)
+
+    with pytest.raises(ConnectivityError) as caught:
+        _recover(db, make_config())
+
+    assert caught.value.hint is not None
+    assert len(records) == len(guest.scripts) == 1 + tailscale_join.ADDRESS_READS
+
+
 @pytest.mark.parametrize("repair", [Answer(status=1), Answer(status=None)], ids=["failed", "unknown"])
 def test_a_repair_that_does_not_succeed_stops_before_the_address_read(
     db: Database,

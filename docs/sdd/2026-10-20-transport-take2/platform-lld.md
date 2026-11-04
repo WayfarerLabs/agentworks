@@ -299,20 +299,22 @@ takes a `run_as_root`:
   since it may have joined. Neither retries (I24). An empty or whitespace-only key never reaches it:
   create refuses one at its boundary, beside the line-safety check (`vms/manager/lifecycle.py`),
   since `tailscale up` would wait for an interactive login.
-- `read_tailnet_address(run_as_root, *, node) -> str` is slice 3's read loop: up to six
+- `read_tailnet_address(run_as_root, *, node, log=None) -> str` is slice 3's read loop: up to six
   `tailscale ip -4` reads (15 s each) two seconds apart. A read fails on a non-zero status, an
   unknown outcome, a `ValueError` from `parse_tailnet_address`, or a `ConnectivityError` the
   platform raises, the channel's counterpart of today's `SSHError`; any other `AgentworksError`
   (`TrustMismatch`, `TrustMissing`, a provider's `StateError`) propagates at once, because a retry
-  cannot change it. Exhaustion raises `ConnectivityError` naming the node.
-- `settle_tailnet_address(run_as_root, *, node, rerun_hint) -> str` is that read plus slice 3's
-  logout: on exhaustion it runs one `tailscale logout` (30 s) and raises `ConnectivityError` from
-  the read's error. When the logout returned status 0, the message says so and the hint is
-  `rerun_hint`; otherwise the hint names the node for removal in the admin console. Create passes
-  `CREATE_RERUN_HINT`, which says the join spent the auth key, so a single-use key needs replacing
-  before the create runs again (the rollback reports for itself whether the backend was removed),
-  and rekey passes `agw vm recover NAME`: a node whose address cannot be read is unusable, and the
-  next recover's repair reads `NeedsLogin` and rejoins it.
+  cannot change it. Exhaustion raises `ConnectivityError` naming the node. `log` records each read
+  in the caller's operation log (recover and rekey pass theirs); recover's read alone, on
+  exhaustion, adds a hint naming `agw vm logs NAME`.
+- `settle_tailnet_address(run_as_root, *, node, rerun_hint, log=None) -> str` is that read plus
+  slice 3's logout, both recorded through `log`: on exhaustion it runs one `tailscale logout` (30 s)
+  and raises `ConnectivityError` from the read's error. When the logout returned status 0, the
+  message says so and the hint is `rerun_hint`; otherwise the hint names the node for removal in the
+  admin console. Create passes `CREATE_RERUN_HINT`, which says the join spent the auth key, so a
+  single-use key needs replacing before the create runs again (the rollback reports for itself
+  whether the backend was removed), and rekey passes `agw vm recover NAME`: a node whose address
+  cannot be read is unusable, and the next recover's repair reads `NeedsLogin` and rejoins it.
 - `ConnectivityError` rather than slice 3's `ProvisioningError`, because it is true for all three
   callers (the VM did not report an address over its root channel). Create still reports a
   `ProvisioningError`: the manager wraps any untyped failure of `create` in one

@@ -398,7 +398,7 @@ def rekey_vm(
             hint=f"Run 'agw vm logs {name}' for its output, then 'agw vm recover {name}'.",
         )
         new_ip = settle_tailnet_address(
-            partial(platform.run_as_root, vm, ops_ctx), node=vm.hostname, rerun_hint=recover_hint
+            partial(platform.run_as_root, vm, ops_ctx), node=vm.hostname, rerun_hint=recover_hint, log=logger.record
         )
 
         # Update DB and SSH config with the new IP (correct regardless of
