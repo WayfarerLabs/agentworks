@@ -315,8 +315,8 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
 - [x] Delete the legacy `TailscaleWait` and `wait_for_reconnect` (`transports/__init__.py:248`,
       `:279`) with their last callers, which move to `reachability.wait` in this slice.
 - [x] Add `agw vm recover <vm>`, with its operation log:
-  - refuse a VM whose provisioning failed, a stopped VM, and, worded separately, a VM whose power
-    state is unknown;
+  - refuse a VM whose provisioning failed and a VM whose power state is unknown, and start a stopped
+    VM itself, with no wait, rather than refuse it;
   - host-key re-establishment first when the record is missing;
   - the repair script, then the address read, settling only when the repair joined, then one wait.
     Repoint `VMNotReady` and `TrustMissing` guidance at it.
