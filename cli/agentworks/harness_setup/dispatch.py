@@ -23,9 +23,10 @@ from agentworks.capabilities.harness_integration.setup import (
     VMSetupInvocation,
     WorkspaceSetupInvocation,
 )
-from agentworks.errors import ConfigError, StateError
+from agentworks.errors import ConfigError, ConnectivityError, ExternalError, StateError
 from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
+from agentworks.harness_setup.outcomes import SetupFailure
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 from agentworks.native_files import ROOT_FILE_DIRECTORIES
 
@@ -36,6 +37,29 @@ if TYPE_CHECKING:
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.resources.registry import Registry
     from agentworks.transports import Transport
+
+
+class _SetupInfrastructureFailure(Exception):
+    """Keep callback infrastructure failures outside the facet recovery boundary."""
+
+    def __init__(self, original: Exception) -> None:
+        self.original = original
+        super().__init__()
+
+
+def _sanitize(invocation: SetupInvocation, text: str) -> str:
+    """Redact diagnostics before they enter persisted state or the failure list."""
+    representations = {
+        representation
+        for value in invocation.secrets.values()
+        if value
+        for representation in (value, shlex.quote(value))
+    }
+    for value in sorted(representations, key=len, reverse=True):
+        text = text.replace(value, "[REDACTED]")
+    if invocation.runner.logger is not None:
+        text = invocation.runner.logger.sanitize(text)
+    return text
 
 
 def destination_id(vm: VMRow, runner: Transport, *, location: str | None = None, username: str | None = None) -> str:
@@ -63,6 +87,7 @@ def run_setup(
     invocation: SetupInvocation,
     *,
     operation: str,
+    failures: list[SetupFailure],
     buffered: bool = False,
     held: NativeMutationGuard | None = None,
 ) -> NativeSetupState:
@@ -71,6 +96,8 @@ def run_setup(
     A fresh owner's caller buffers and commits this result with its owner row.
     It must already have refused native residue and own failed-create rollback.
     Existing owners checkpoint confirmed ownership changes before another can run.
+    Recoverable integration failures retain that prefix and join the command's
+    failure collection; shared infrastructure failures and cancellation abort.
     """
     from agentworks.artifacts.routing import inactive_destination, setup_artifacts
 
@@ -131,6 +158,12 @@ def run_setup(
         def persist(value: NativeSetupState) -> None:
             if not buffered:
                 write_native_setup(db, inputs.kind, inputs.name, value, operation=operation)
+
+        def checkpoint_state(value: NativeSetupState) -> None:
+            try:
+                persist(value)
+            except Exception as error:
+                raise _SetupInfrastructureFailure(error) from error
 
         for name in (*desired, *(name for name in prior if name not in desired)):
             previous = prior.get(name)
@@ -196,26 +229,34 @@ def run_setup(
                 except ValidationError:
                     raise StateError("integration returned malformed native claim metadata") from None
                 state = replace_setup_record(state, current)
-                persist(state)
+                checkpoint_state(state)
 
             def checkpoint_files(files: tuple[OwnedArtifactFile, ...]) -> None:
                 nonlocal current, state
                 current = current.model_copy(update={"artifact_files": files})
                 state = replace_setup_record(state, current)
-                persist(state)
+                checkpoint_state(state)
 
             def report_incomplete(reason: str, *, integration_name: str = name) -> None:
                 nonlocal current, state
                 if not isinstance(reason, str) or not reason.strip():
                     raise StateError("integration returned an invalid incomplete-setup reason")
+                try:
+                    reason = _sanitize(invocation, reason)
+                except Exception as error:
+                    raise _SetupInfrastructureFailure(error) from error
                 if reason not in current.incomplete_reasons:
                     current = current.model_copy(update={"incomplete_reasons": (*current.incomplete_reasons, reason)})
                     state = replace_setup_record(state, current)
-                    persist(state)
-                output.warn(
-                    f"Native setup for {inputs.component}/{inputs.name} via {integration_name}: {reason.rstrip('.')}. "
-                    f"Resolve the reported conflict before retrying. {remediation}"
-                )
+                    checkpoint_state(state)
+                try:
+                    output.warn(
+                        f"Native setup for {inputs.component}/{inputs.name} via {integration_name}: "
+                        f"{reason.rstrip('.')}. "
+                        f"Resolve the reported conflict before retrying. {remediation}"
+                    )
+                except Exception as error:
+                    raise _SetupInfrastructureFailure(error) from error
 
             scoped_secrets = {ref.name: invocation.secrets[ref.name] for ref in integration.config_secret_refs()}
             call = replace(
@@ -226,25 +267,44 @@ def run_setup(
                 secrets=scoped_secrets,
                 artifacts=artifacts,
             )
-            if isinstance(call, VMSetupInvocation):
-                application = integration.vm_init(call)
-            elif isinstance(call, UserSetupInvocation):
-                application = integration.user_init(call)
-            elif isinstance(call, WorkspaceSetupInvocation):
-                application = integration.workspace_init(call)
-            else:
-                raise StateError("unknown native setup invocation")
-            application = validate_application(application, artifacts, inputs.facet, integration=name)
-            roots = ROOT_FILE_DIRECTORIES if location is None else (location,)
-            publication = publish_artifacts(
-                call.runner,
-                application.files,
-                current.artifact_files,
-                checkpoint_files,
-                roots=roots,
-                group=call.linux_group if isinstance(call, WorkspaceSetupInvocation) else "",
-                root=isinstance(call, VMSetupInvocation),
-            )
+            try:
+                if isinstance(call, VMSetupInvocation):
+                    application = integration.vm_init(call)
+                elif isinstance(call, UserSetupInvocation):
+                    application = integration.user_init(call)
+                elif isinstance(call, WorkspaceSetupInvocation):
+                    application = integration.workspace_init(call)
+                application = validate_application(application, artifacts, inputs.facet, integration=name)
+                roots = ROOT_FILE_DIRECTORIES if location is None else (location,)
+                publication = publish_artifacts(
+                    call.runner,
+                    application.files,
+                    current.artifact_files,
+                    checkpoint_files,
+                    roots=roots,
+                    group=call.linux_group if isinstance(call, WorkspaceSetupInvocation) else "",
+                    root=isinstance(call, VMSetupInvocation),
+                )
+            except _SetupInfrastructureFailure as error:
+                raise error.original from None
+            except (ConfigError, StateError, ExternalError, ConnectivityError) as error:
+                reason = _sanitize(invocation, str(error)).strip() or type(error).__name__
+                hint = _sanitize(invocation, f"{error.hint} {remediation}" if error.hint else remediation)
+                current = current.model_copy(
+                    update={
+                        "complete": False,
+                        "pending_cleanup": block is None,
+                        "incomplete_reasons": (*current.incomplete_reasons, reason),
+                    }
+                )
+                state = replace_setup_record(state, current)
+                persist(state)
+                failures.append(SetupFailure(inputs.kind, inputs.name, facet, name, reason, hint))
+                if invocation.runner.logger is not None:
+                    invocation.runner.logger.warning(
+                        f"Setup failed for {inputs.kind}/{inputs.name} facet={facet} integration={name}: {reason}"
+                    )
+                continue
             owned = publication.files
             current = current.model_copy(
                 update={"artifact_files": owned, "deferred": application.deferred, "skipped": publication.skipped}
