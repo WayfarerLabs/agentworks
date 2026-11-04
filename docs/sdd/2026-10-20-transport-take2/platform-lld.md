@@ -275,7 +275,7 @@ Changes to `capabilities/vm_platform/base.py`, under `contract_version` 2 (slice
 | `read_host_keys(vm, ctx) -> tuple[HostKey, ...]`            | New with a default, `root_script.read_host_keys(partial(self.run_as_root, vm, ctx))`; the clouds override it                                                                                                             |
 | `native_shell(vm, ctx) -> int`                              | New. The default raises `FeatureUnavailable`; a platform offers a shell by overriding it, and core checks first with `require_native_shell`, which compares `type(platform).native_shell` with `VMPlatform.native_shell` |
 | `native_shell_unavailable_hint`                             | Kept, as guidance text only (Proxmox's console pointer, `plugins/proxmox/platform.py:154-158`)                                                                                                                           |
-| `native_transport`, `transient_route`, `probe_failure_hint` | Deleted (`base.py:335`, `:408`, `:203`). The clouds keep a private `_transient_route(vm, ctx)` reading `ctx.config`, and `_probe_failure_hint`, both abstract on `PublicAddressPlatform`                                 |
+| `native_transport`, `transient_route`, `probe_failure_hint` | Deleted (`base.py:335`, `:408`, `:203`). The clouds keep a private `_transient_route(vm, ctx)` reading `ctx.config`, abstract on `PublicAddressPlatform`, whose `_probe_failure_hint` is one string for all three        |
 | `ProvisionRequest.ssh_private_key`                          | `Path`, not `Path \| None`: create always passes `config.operator.ssh_private_key` (`vms/manager/lifecycle.py:510`), a required `Path` (`config/models.py:29`)                                                           |
 
 The docstrings that present the route as a public hook (`:355-375`, `:377-406`, `:433-460`) are
@@ -444,8 +444,9 @@ incident row I32); GCP's read raises `GCEError` itself instead. It then builds
 `PublicSSH(address, admin, identity_file, binding)` with the identity file from
 `ctx.config.operator.ssh_private_key` (every operation's context carries the configuration), runs
 `wait_until_answering(failure_hint=self._probe_failure_hint)`, and yields it for as long as the
-route is open. `_transient_route` and `_probe_failure_hint` are abstract members of the base, which
-each cloud supplies and nothing outside the cloud calls. Then:
+route is open. `_transient_route` is an abstract member of the base, which each cloud supplies and
+nothing outside the cloud calls; `_probe_failure_hint` is the base's one string, the shared
+`operator.ssh_allow_cidrs` advice. Then:
 
 - `run_as_root`: `trust.require_record(vm.name)` first, so a VM with no record opens no firewall
   rule, then `run_as_root(script, deadline)` inside `_public_ssh` under VM trust.

@@ -141,16 +141,6 @@ class EC2Platform(PublicAddressPlatform):
         """,
     )
 
-    # The ephemeral SSH allow is scoped to the DETECTED egress IP, so an operator
-    # whose SSH traffic leaves through a different address (VPN split tunnel,
-    # proxy, CGNAT) gets a hole that does not match and every probe times out.
-    _probe_failure_hint = (
-        "The transient EC2 SSH allow is scoped to your detected public IP; "
-        "if your SSH traffic egresses elsewhere (VPN split tunnel, proxy, "
-        "CGNAT), add your address(es) to operator.ssh_allow_cidrs in your "
-        "agentworks config."
-    )
-
     public_address_hint = (
         "A stopped EC2 instance has no public IP: start it, or check the instance in the EC2 console "
         "(the EC2 serial console reaches it without one)."

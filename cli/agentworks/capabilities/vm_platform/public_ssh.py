@@ -148,13 +148,23 @@ class PublicAddressPlatform(VMPlatform):
     """A cloud platform whose root channel is :class:`PublicSSH` to the VM's public address.
 
     A subclass supplies its route (:meth:`_transient_route`), the address
-    read (:meth:`_public_address`) and two hints. All of it is private to the
+    read (:meth:`_public_address`) and :attr:`public_address_hint`. All of it is private to the
     cloud: core reaches the VM only through ``run_as_root``,
     ``read_host_keys`` and ``native_shell``, each of which opens and closes its
     own route, so no firewall allow outlives one call.
     """
 
     recovery_needs_guest_sshd: ClassVar[bool] = True
+
+    # Warned when the VM never answers inside a fresh route. Every cloud's allow
+    # is scoped to the DETECTED egress IP, so an operator whose SSH traffic leaves
+    # through a different address (VPN split tunnel, proxy, CGNAT) gets a hole
+    # that does not match and every probe times out.
+    _probe_failure_hint: ClassVar[str] = (
+        "The temporary SSH allow is scoped to your detected public IP; if your SSH traffic leaves through "
+        "another address (VPN split tunnel, proxy, CGNAT), add it to operator.ssh_allow_cidrs in your "
+        "agentworks config."
+    )
 
     @property
     @abstractmethod
@@ -163,14 +173,6 @@ class PublicAddressPlatform(VMPlatform):
 
         Abstract, so registration refuses a cloud that leaves it out; a
         subclass supplies it as a class attribute.
-        """
-
-    @property
-    @abstractmethod
-    def _probe_failure_hint(self) -> str:
-        """Warned when the VM never answers inside a fresh route: the allow may not match the operator's egress.
-
-        Abstract like :attr:`public_address_hint`, and supplied the same way.
         """
 
     @abstractmethod

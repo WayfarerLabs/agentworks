@@ -109,17 +109,6 @@ class AzureVMPlatform(PublicAddressPlatform):
         """,
     )
 
-    # The ephemeral NSG allow is scoped to the DETECTED egress IP, so an
-    # operator whose SSH traffic leaves through a different address (VPN
-    # split tunnel, proxy, CGNAT) gets a hole that does not match and every
-    # probe times out.
-    _probe_failure_hint = (
-        "The transient Azure SSH allow is scoped to your detected "
-        "public IP; if your SSH traffic egresses elsewhere (VPN "
-        "split tunnel, proxy, CGNAT), add your address(es) to "
-        "operator.ssh_allow_cidrs in your agentworks config."
-    )
-
     public_address_hint = (
         "Check the VM's network configuration in the Azure portal (its NIC's public IP and the NSG's "
         "transient SSH allow), or use the serial console (Connect > Serial console on the VM resource page)."

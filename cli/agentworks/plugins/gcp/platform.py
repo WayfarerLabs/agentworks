@@ -216,10 +216,6 @@ class GCEPlatform(PublicAddressPlatform):
         `gcp-gce` vm-site becomes ready.
         """,
     )
-    _probe_failure_hint = (
-        "The transient GCE SSH allow is scoped to the detected public IP. "
-        "Set operator.ssh_allow_cidrs when SSH exits through another VPN, proxy, or NAT address."
-    )
     public_address_hint = "Check the instance's external IP in the Google Cloud console, or use its serial console."
 
     def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
