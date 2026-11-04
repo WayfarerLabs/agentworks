@@ -230,9 +230,9 @@ def run_initialization(
             output.warn(
                 f"SSH identity evidence for VM '{vm_name}' is unknown, so ordinary SSH commands "
                 "will refuse to connect. If the configured key still works, retry with "
-                f"'agw vm reinit {vm_name}'. Otherwise, use "
-                f"'agw vm shell {vm_name} --platform' where supported to restore access before "
-                "reinitializing. If platform recovery is unavailable, recreate the VM."
+                f"'agw vm reinit {vm_name}'. Otherwise, run 'agw vm recover {vm_name}', which "
+                "restores the configured key through the platform's own channel, then reinitialize. "
+                "If recovery cannot reach the VM, recreate it."
             )
 
         from agentworks.db.instance_state import AppliedStateKey
