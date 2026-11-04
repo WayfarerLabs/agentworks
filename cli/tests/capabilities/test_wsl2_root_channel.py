@@ -52,11 +52,11 @@ def test_the_native_shell_is_a_login_shell_as_the_admin(monkeypatch: pytest.Monk
     argvs: list[list[str]] = []
     monkeypatch.setattr(
         "agentworks.capabilities.vm_platform.wsl2.ssh_process.run_terminal",
-        lambda argv: argvs.append(list(argv)) or 0,
+        lambda argv: argvs.append(list(argv)) or 7,
     )
     vm: Any = SimpleNamespace(name="dev", admin_username="agw", platform_metadata={"distro_name": "team-dev"})
 
-    WSL2Platform("wsl2", {"name": "wsl2"}).native_shell(vm, RunContext())
+    assert WSL2Platform("wsl2", {"name": "wsl2"}).native_shell(vm, RunContext()) == 7
 
     (argv,) = argvs
     # No --exec, so the admin's login shell starts with its startup files.
