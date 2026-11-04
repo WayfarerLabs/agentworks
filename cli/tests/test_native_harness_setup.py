@@ -403,7 +403,8 @@ def test_checkpoint_failure_stops_before_next_native_mutation(
         assert cli.plugins(cli.markets()) == ()
 
 
-def test_claude_project_dependency_retains_only_its_marketplace(transport: LocalFixtureTransport) -> None:
+@pytest.mark.parametrize("strategy", [None, "replace", "merge-overwrite", "merge-preserve", "skip-existing"])
+def test_claude_project_dependency_retains_only_its_marketplace(transport: LocalFixtureTransport, strategy) -> None:
     market = market_fixture(transport, "claude")
     claims: list[tuple[NativeClaim, ...]] = []
     setup_user(
@@ -422,19 +423,44 @@ def test_claude_project_dependency_retains_only_its_marketplace(transport: Local
     user_settings = transport.home / ".claude/settings.json"
     project_settings = project / ".claude/settings.json"
     before_project = project_settings.read_bytes()
-    incomplete: list[str] = []
-    setup_user(
-        "claude",
-        None,
-        replace(invocation(transport, claims, prior=record(claims[-1], "claude")), report_incomplete=incomplete.append),
+    mapping = transport.root / "settings-source.json"
+    mapping.write_text('{"mapped": true}')
+    config = (
+        None if strategy is None else NativeUserConfig(settings=SettingsMapping(source=str(mapping), strategy=strategy))
     )
-    assert incomplete
-    assert project_settings.read_bytes() == before_project
-    assert [(claim.role, claim.identifier) for claim in claims[-1]] == [("marketplace", "fixture-market")]
-    document = parse_settings(user_settings.read_bytes(), format="json")
-    enabled = document.get("enabledPlugins", {})
-    assert isinstance(enabled, dict)
-    assert "one@fixture-market" not in enabled
+    incomplete: list[str] = []
+    previous_user_bytes = None
+    previous_user_inode = None
+    for _ in range(2):
+        setup_user(
+            "claude",
+            config,
+            replace(
+                invocation(transport, claims, prior=record(claims[-1], "claude")), report_incomplete=incomplete.append
+            ),
+        )
+        assert project_settings.read_bytes() == before_project
+        assert [(claim.role, claim.identifier) for claim in claims[-1]] == [("marketplace", "fixture-market")]
+        document = parse_settings(user_settings.read_bytes(), format="json")
+        enabled = document.get("enabledPlugins", {})
+        assert isinstance(enabled, dict)
+        assert "one@fixture-market" not in enabled
+        if strategy not in (None, "skip-existing"):
+            assert document["mapped"] is True
+        with NativeFiles(transport) as files:
+            cli = NativeCLI("claude", files, home=str(transport.home), config_root=str(user_settings.parent))
+            assert {item.name for item in cli.markets()} == {"fixture-market"}
+            assert {(item.identifier, item.scope) for item in cli.plugins(cli.markets())} == {
+                ("two@fixture-market", "project")
+            }
+        current_user_bytes = user_settings.read_bytes()
+        current_user_inode = user_settings.stat().st_ino
+        if previous_user_bytes is not None:
+            assert current_user_bytes == previous_user_bytes
+            assert current_user_inode == previous_user_inode
+        previous_user_bytes = current_user_bytes
+        previous_user_inode = current_user_inode
+    assert len(incomplete) == 2
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])

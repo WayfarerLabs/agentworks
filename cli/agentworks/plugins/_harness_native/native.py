@@ -559,6 +559,9 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
             if not _owned(previous_plugin_claim, existing_plugin.source) and selector in by_plugin:
                 output.info(f"Adopting matching native plugin '{selector}' via {tool}.")
             checkpoint(adopted, "plugin", selector, force=changed)
+        removed_keys = tuple(_native_key(tool, old.role, old.identifier) for old in removed)
+        # Confirmed removals take precedence over an earlier inventory snapshot.
+        protected.difference_update(removed_keys)
         if protected:
             # Unrelated native commands can discard malformed declarations.
             # Preserve the affected entries exactly as observed, without deriving
@@ -600,6 +603,6 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 destination,
                 current=current,
                 overlays=overlays,
-                removed=tuple(_native_key(tool, old.role, old.identifier) for old in removed),
+                removed=removed_keys,
                 protected=tuple(sorted(protected)),
             )
