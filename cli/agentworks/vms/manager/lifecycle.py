@@ -648,8 +648,13 @@ def create_vm(
                 # recovery-guidance warning.
                 # Phase A writes complete only once the VM contract passed, and every
                 # ordinary command refuses a VM that is not complete, so the status
-                # chooses the guidance and nothing needs marking here.
-                row = db.get_vm(vm_name)
+                # chooses the guidance and nothing needs marking here. A read that
+                # fails must not replace the interrupt, and the delete wording is
+                # the safe one when the status is unknown.
+                try:
+                    row = db.get_vm(vm_name)
+                except Exception:
+                    row = None
                 if row is None or row.provisioning_status != ProvisioningStatus.COMPLETE.value:
                     output.warn(
                         f"VM '{vm_name}' exists but was not verified; run 'agw vm delete {vm_name}' to remove it."

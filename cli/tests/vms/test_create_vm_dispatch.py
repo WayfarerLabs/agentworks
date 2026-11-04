@@ -5,6 +5,7 @@ config-secret resolve pass end to end (no env-read shadow path).
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from textwrap import dedent
 from types import SimpleNamespace
@@ -415,6 +416,46 @@ def test_create_vm_attests_the_core_release_and_keeps_an_unattested_vm_gated(
     assert row.debian_release is None
     with pytest.raises(StateError):
         vm_manager._guard_incomplete_vm(row)
+
+
+def test_an_interrupt_keeps_its_place_when_the_cancel_handler_cannot_read_the_row(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """The cancel handler reads the row to choose its guidance; a failed read gives the delete guidance."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.vms.manager import lifecycle
+
+    monkeypatch.setattr(
+        LimaPlatform,
+        "create",
+        lambda *_a, **_k: ProvisionResult(platform_metadata={"instance_name": "box"}, tailnet_address="100.64.0.7"),
+    )
+    interrupt = KeyboardInterrupt("stop")
+    read = db.get_vm
+    broken = False
+
+    def _get_vm(name: str) -> object:
+        if broken:
+            raise sqlite3.OperationalError("database is locked")
+        return read(name)
+
+    def _interrupted_phase_a(*_args: object, **_kwargs: object) -> None:
+        nonlocal broken
+        broken = True
+        raise interrupt
+
+    monkeypatch.setattr(db, "get_vm", _get_vm)
+    monkeypatch.setattr(vm_manager, "bootstrap_vm", _interrupted_phase_a)
+    monkeypatch.setattr(lifecycle, "_warn_init_cancel", lambda *_a: pytest.fail("reinit guidance for an unread row"))
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        vm_manager.create_vm(db, make_config(), name="box", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert caught.value is interrupt
+    assert len(captured_output.warnings) == 1
 
 
 def test_create_vm_logger_close_failure_retains_owner_and_reports_once(
