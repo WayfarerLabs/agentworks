@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import ExternalError, StateError
+from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -33,8 +34,10 @@ traverse = getattr(os, 'O_PATH', os.O_RDONLY) | os.O_DIRECTORY | os.O_NOFOLLOW
 def classify(error):
     # Report a link, a non-directory component, and a denial as distinct
     # statuses so the caller can name the cause instead of failing generically.
-    if error.errno in (errno.ELOOP, errno.ENOTDIR):
+    if error.errno == errno.ELOOP:
         sys.exit(4)
+    if error.errno == errno.ENOTDIR:
+        sys.exit(6)
     if error.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
         sys.exit(5)
     raise error
@@ -112,7 +115,7 @@ try:
     else:
         with os.fdopen(source_fd, 'rb') as source:
             if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-                sys.exit(4)
+                sys.exit(7)
             metadata = os.fstat(source.fileno())
             mode = stat.S_IMODE(metadata.st_mode)
             if op == 'read':
@@ -194,18 +197,31 @@ ROOT_FILE_DIRECTORIES = ("/etc/claude-code", "/etc/codex", "/opt/agentworks/arti
 
 _UNSUITABLE_PATH = 4
 _DENIED_PATH = 5
+_NON_DIRECTORY_PATH = 6
+_NON_REGULAR_PATH = 7
+_PATH_FAILURES = (_UNSUITABLE_PATH, _DENIED_PATH, _NON_DIRECTORY_PATH, _NON_REGULAR_PATH)
 
 
 def _path_failure(subject: str, destination: str, returncode: int) -> StateError:
     """Name why a guarded path could not be used, from the guest program's status."""
     if returncode == _UNSUITABLE_PATH:
         return StateError(
-            f"{subject} '{destination}' is a symlink or is not a regular file",
+            f"{subject} '{destination}' is a symlink",
             hint=(
                 "Agentworks owns this file and never reads or writes through a link. Remove the link on the VM, "
                 "stop whatever installs it (commonly a dotfiles install script) from claiming this path, and "
                 "express those values through the integration's settings mapping instead."
             ),
+        )
+    if returncode == _NON_DIRECTORY_PATH:
+        return StateError(
+            f"{subject} '{destination}' requires real directories at every parent component",
+            hint="Inspect the parent path components and restore the expected directory layout, then retry setup.",
+        )
+    if returncode == _NON_REGULAR_PATH:
+        return StateError(
+            f"{subject} '{destination}' is not a regular file",
+            hint="Inspect the destination's file type and restore the expected regular file before retrying setup.",
         )
     if returncode == _DENIED_PATH:
         return StateError(
@@ -240,11 +256,16 @@ def root_native_path(path: str, *, directory: bool = False) -> str:
 
 def require_python3(runner: Transport) -> None:
     """Check the guest prerequisite before native setup, including older VMs."""
-    if not runner.run("command -v python3 >/dev/null", check=False, discard_output=True).ok:
+    result = runner.run("if command -v python3 >/dev/null 2>&1; then printf 'available'; else printf 'missing'; fi")
+    if not result.ok:
+        raise SSHError(f"native setup Python prerequisite probe failed (exit {result.returncode})")
+    if result.stdout == "missing":
         raise StateError(
             "native harness setup requires python3 on the VM",
-            hint="Run agw vm reinit <vm-name> to install required system packages before retrying setup.",
+            hint="Reinitialize this VM to install required system packages, then retry setup.",
         )
+    if result.stdout != "available":
+        raise ExternalError("native setup Python prerequisite probe returned an unexpected response")
 
 
 class NativeFiles(AbstractContextManager["NativeFiles"]):
@@ -388,7 +409,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
             raise ExternalError("could not publish native settings file") from None
         if result.returncode == 2:
             raise StateError("native settings changed during setup; retry against the current file")
-        if result.returncode in (_UNSUITABLE_PATH, _DENIED_PATH):
+        if result.returncode in _PATH_FAILURES:
             raise _path_failure("native settings file", destination, result.returncode)
         if not result.ok:
             raise StateError("native settings publication could not establish the destination ownership or mode")
@@ -400,7 +421,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         result = self.runner.run(command, check=False, discard_output=True)
         if result.returncode == 2:
             raise StateError("owned native file changed; retaining it for operator inspection")
-        if result.returncode in (_UNSUITABLE_PATH, _DENIED_PATH):
+        if result.returncode in _PATH_FAILURES:
             raise _path_failure("owned native file", destination, result.returncode)
         if not result.ok:
             raise StateError("owned native file could not be removed safely")

@@ -158,3 +158,89 @@ def test_unprivileged_operations_keep_normal_scope_access(tmp_path):
         files.prune_empty_parents(str(path), root=str(package))
     assert not package.exists()
     assert target.home.is_dir()
+
+
+@pytest.mark.parametrize("returncode", [1, 9, 127, 255])
+def test_python_prerequisite_probe_failures_preserve_failure_kind_and_status(returncode):
+    from agentworks.ssh import SSHError, SSHResult
+
+    runner = Mock(spec=Transport)
+    runner.run.return_value = SSHResult(returncode, "", "fixture profile or transport error")
+    with pytest.raises(SSHError) as caught:
+        native.require_python3(runner)
+    assert str(returncode) in str(caught.value)
+    assert runner.run.call_count == 1
+
+
+def test_python_prerequisite_probe_preserves_the_transport_exception():
+    from agentworks.ssh import SSHError
+
+    failure = SSHError("fixture SSH failure")
+    runner = Mock(spec=Transport)
+    runner.run.side_effect = failure
+    with pytest.raises(SSHError) as caught:
+        native.require_python3(runner)
+    assert caught.value is failure
+
+
+@pytest.mark.parametrize("observation", ["missing", "available", "", "profile outputavailable"])
+def test_python_prerequisite_requires_an_unambiguous_successful_observation(observation):
+    from agentworks.errors import ExternalError
+    from agentworks.ssh import SSHResult
+
+    runner = Mock(spec=Transport)
+    runner.run.return_value = SSHResult(0, observation, "")
+    if observation == "available":
+        native.require_python3(runner)
+    else:
+        with pytest.raises(StateError if observation == "missing" else ExternalError):
+            native.require_python3(runner)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux guest filesystem operations")
+@pytest.mark.parametrize("operation", ["read", "fingerprint", "publish", "remove", "directory"])
+def test_regular_file_parent_is_distinct_from_leaf_symlink_and_never_mutated(tmp_path, operation, monkeypatch):
+    target = LocalFixtureTransport(tmp_path / "target")
+    parent = target.home / "not-a-directory"
+    parent.write_bytes(b"operator file")
+    with native.NativeFiles(target) as files:
+        path = str(parent / "child")
+        observed = []
+        run = target.run
+
+        def record(command, **kwargs):
+            result = run(command, **kwargs)
+            observed.append(result.returncode)
+            return result
+
+        monkeypatch.setattr(target, "run", record)
+        with pytest.raises(StateError):
+            if operation == "publish":
+                files.publish(path, b"fixture", expected=None)
+            elif operation == "remove":
+                files.remove(path, expected="a" * 64)
+            else:
+                getattr(files, operation)(path)
+        assert observed[-1] == native._NON_DIRECTORY_PATH
+        assert parent.read_bytes() == b"operator file"
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux guest filesystem operations")
+@pytest.mark.parametrize("python_available", [False, True])
+def test_python_prerequisite_observes_the_command_in_the_guest_environment(tmp_path, python_available):
+    from pathlib import Path
+
+    target = LocalFixtureTransport(tmp_path / "target")
+    binary_dir = target.root / "bin"
+    binary_dir.mkdir()
+    (binary_dir / "bash").symlink_to("/bin/bash")
+    if python_available:
+        (binary_dir / "python3").symlink_to(Path(sys.executable))
+    target.environment["PATH"] = str(binary_dir)
+    if python_available:
+        native.require_python3(target)
+    else:
+        with pytest.raises(StateError):
+            native.require_python3(target)
+    assert len(target.commands) == 1
+    assert not list((target.root / "tmp").iterdir())

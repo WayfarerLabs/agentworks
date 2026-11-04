@@ -43,7 +43,7 @@ def create_vm_workspace(
     Errors if the workspace directory already exists on the VM.
 
     Self-cleaning: the group and directory are created early, then the
-    clone and configuration follow. A failure anywhere after those
+    clone and configuration follow. A failure or cancellation after those
     resources exist (most often the git clone) tears down exactly what
     this function made and re-raises the ORIGINAL error, so a failed
     create leaves no residue on the VM (issue #262). ``realize._cleanup``
@@ -151,7 +151,7 @@ def create_vm_workspace(
         # the default ACL. Shared with workspace repair so the two never drift and
         # a first repair of this workspace is a no-op.
         apply_workspace_acls(target, workspace_path)
-    except Exception:
+    except BaseException:
         # Best-effort teardown of exactly what was created above: the same
         # primitives the delete path uses (rm -rf the directory, groupdel the
         # group), so partially-created state is tolerated (a failure at
@@ -161,7 +161,7 @@ def create_vm_workspace(
         # and surfaced as a warning while the original propagates.
         try:
             delete_vm_workspace(vm, config, ws_name, workspace_path, ws_group, logger=logger)
-        except Exception as cleanup_err:
+        except BaseException as cleanup_err:
             output.warn(
                 f"cleanup after failed workspace create '{ws_name}' failed: {cleanup_err}. "
                 f"VM may have a residual directory ({workspace_path}) or group ({ws_group})."
