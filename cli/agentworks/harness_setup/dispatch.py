@@ -26,7 +26,7 @@ from agentworks.capabilities.harness_integration.setup import (
 from agentworks.errors import ConfigError, ConnectivityError, ExternalError, StateError
 from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
-from agentworks.harness_setup.outcomes import SetupFailure
+from agentworks.harness_setup.outcomes import SetupFailure, sanitize_setup_diagnostic
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 from agentworks.native_files import ROOT_FILE_DIRECTORIES
 
@@ -59,7 +59,7 @@ def _sanitize(invocation: SetupInvocation, text: str) -> str:
         text = text.replace(value, "[REDACTED]")
     if invocation.runner.logger is not None:
         text = invocation.runner.logger.sanitize(text)
-    return text
+    return sanitize_setup_diagnostic(text)
 
 
 def destination_id(vm: VMRow, runner: Transport, *, location: str | None = None, username: str | None = None) -> str:
@@ -99,7 +99,7 @@ def run_setup(
     Recoverable integration failures retain that prefix and join the command's
     failure collection; shared infrastructure failures and cancellation abort.
     """
-    from agentworks.artifacts.routing import inactive_destination, setup_artifacts
+    from agentworks.artifacts.routing import RoutingResult, inactive_destination, setup_artifacts
 
     expected = {"vm": VMSetupInvocation, "user": UserSetupInvocation, "workspace": WorkspaceSetupInvocation}
     if not isinstance(invocation, expected[inputs.facet]):
@@ -111,9 +111,22 @@ def run_setup(
         else f"Run 'agw {'agent' if inputs.component == 'agent' else 'vm'} reinit {inputs.name}'."
     )
     with native_mutation_guard(db.path, invocation.vm.name, held=held):
+        # Validate and bind the complete activation map before its first mutation.
+        bound = {}
+        for name, selected in inputs.activations.items():
+            ensure_harness_integration_enabled(registry, name)
+            implementation = harness_integration_for(name)
+            bound[name] = implementation.for_setup(
+                owner_kind=inputs.kind, owner_name=inputs.name, facet=facet, config=selected.config
+            )
+
+        for integration in bound.values():
+            if any(ref.name not in invocation.secrets for ref in integration.config_secret_refs()):
+                raise StateError("native setup received an unresolved config secret")
+
+        state = read_native_setup(db, inputs.kind, inputs.name)
         if inputs.artifact_snapshot is not None and not buffered:
             write_capture(db, inputs.kind, inputs.name, inputs.component, inputs.artifact_snapshot, operation=operation)
-        state = read_native_setup(db, inputs.kind, inputs.name)
         prior = {record.integration: record for record in state.records if record.component == inputs.component}
         fallback: tuple[ArtifactDeferral, ...] = ()
         if not inputs.activations and inputs.artifact_snapshot is not None and inputs.artifact_snapshot.inputs:
@@ -142,18 +155,6 @@ def run_setup(
             username=invocation.username if isinstance(invocation, UserSetupInvocation) else None,
         )
         desired = inputs.activations
-        # Validate and bind the complete activation map before its first mutation.
-        bound = {}
-        for name, selected in inputs.activations.items():
-            ensure_harness_integration_enabled(registry, name)
-            implementation = harness_integration_for(name)
-            bound[name] = implementation.for_setup(
-                owner_kind=inputs.kind, owner_name=inputs.name, facet=facet, config=selected.config
-            )
-
-        for integration in bound.values():
-            if any(ref.name not in invocation.secrets for ref in integration.config_secret_refs()):
-                raise StateError("native setup received an unresolved config secret")
 
         def persist(value: NativeSetupState) -> None:
             if not buffered:
@@ -198,21 +199,37 @@ def run_setup(
                     persist(state)
                     output.warn(f"Native cleanup for {name} remains pending; enable its integration and retry setup.")
                     continue
+                if not integration.implements_setup(facet) and not previous.claims and not previous.artifact_files:
+                    state = NativeSetupState(
+                        records=tuple(
+                            record
+                            for record in state.records
+                            if (record.component, record.integration) != (inputs.component, name)
+                        )
+                    )
+                    persist(state)
+                    continue
                 declaration = previous.declaration
             else:
                 integration = bound[name]
                 declaration = inputs.declaration(name, block)
 
-            artifacts = (
-                ArtifactInputs() if block is None else setup_artifacts(db, registry, inputs, invocation.vm, name)
+            routing = (
+                RoutingResult(ArtifactInputs())
+                if block is None
+                else setup_artifacts(db, registry, inputs, invocation.vm, name)
             )
+            artifacts = routing.inputs
 
             current = SetupRecord(
                 component=inputs.component,
                 integration=name,
                 destination_id=destination,
                 declaration=declaration,
-                artifact_inputs=tuple(item.identity for item in artifacts.items()),
+                artifact_inputs=tuple(item.identity for item in artifacts.items())
+                if previous is None
+                else previous.artifact_inputs,
+                deferred=() if previous is None else previous.deferred,
                 claims=() if previous is None else previous.claims,
                 artifact_files=()
                 if previous is None or previous.destination_id != destination
@@ -242,7 +259,7 @@ def run_setup(
                 if not isinstance(reason, str) or not reason.strip():
                     raise StateError("integration returned an invalid incomplete-setup reason")
                 try:
-                    reason = _sanitize(invocation, reason)
+                    reason = _sanitize(invocation, reason) or "Integration reported incomplete setup."
                 except Exception as error:
                     raise _SetupInfrastructureFailure(error) from error
                 if reason not in current.incomplete_reasons:
@@ -268,6 +285,11 @@ def run_setup(
                 artifacts=artifacts,
             )
             try:
+                if routing.retain_previous:
+                    report_incomplete(
+                        "Some ancestor artifact routes are unavailable; existing placement is retained until "
+                        "the ancestor's setup and captured inputs are repaired."
+                    )
                 if isinstance(call, VMSetupInvocation):
                     application = integration.vm_init(call)
                 elif isinstance(call, UserSetupInvocation):
@@ -284,6 +306,7 @@ def run_setup(
                     roots=roots,
                     group=call.linux_group if isinstance(call, WorkspaceSetupInvocation) else "",
                     root=isinstance(call, VMSetupInvocation),
+                    retain_previous=routing.retain_previous,
                 )
             except _SetupInfrastructureFailure as error:
                 raise error.original from None
@@ -306,8 +329,31 @@ def run_setup(
                     )
                 continue
             owned = publication.files
+            artifact_inputs = tuple(item.identity for item in artifacts.items())
+            current_ids = set(artifact_inputs)
+            deferred = application.deferred
+            if routing.retain_previous and previous is not None:
+                retained_ids = routing.unresolved_routes or frozenset(item.input_id for item in previous.deferred)
+                artifact_inputs = tuple(
+                    dict.fromkeys(
+                        (*artifact_inputs, *(item for item in previous.artifact_inputs or () if item in retained_ids))
+                    )
+                )
+                deferred = (
+                    *(
+                        item
+                        for item in previous.deferred
+                        if item.input_id in retained_ids and item.input_id not in current_ids
+                    ),
+                    *deferred,
+                )
             current = current.model_copy(
-                update={"artifact_files": owned, "deferred": application.deferred, "skipped": publication.skipped}
+                update={
+                    "artifact_files": owned,
+                    "artifact_inputs": artifact_inputs,
+                    "deferred": deferred,
+                    "skipped": publication.skipped,
+                }
             )
             if block is None:
                 if current.claims or current.artifact_files or current.incomplete_reasons:

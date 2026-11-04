@@ -51,10 +51,11 @@ def describe_setup_failures(failures: list[SetupFailure]) -> str:
         return ""
     details = []
     for failure in failures:
-        facet = "admin" if failure.owner_kind == "vm" and failure.facet == "user" else failure.facet
+        scope = " scope=admin" if failure.owner_kind == "vm" and failure.facet == "user" else ""
         detail = (
             f"{sanitize_setup_diagnostic(failure.owner_kind)}/{sanitize_setup_diagnostic(failure.owner_name)} "
-            f"facet={sanitize_setup_diagnostic(facet)} integration={sanitize_setup_diagnostic(failure.integration)}: "
+            f"facet={sanitize_setup_diagnostic(failure.facet)}{scope} "
+            f"integration={sanitize_setup_diagnostic(failure.integration)}: "
             f"{sanitize_setup_diagnostic(failure.reason)}"
         )
         if failure.hint:

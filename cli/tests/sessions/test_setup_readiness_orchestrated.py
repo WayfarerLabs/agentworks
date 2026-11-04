@@ -3,6 +3,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
+from uuid import uuid4
 
 import pytest
 
@@ -12,7 +13,7 @@ from agentworks.capabilities.harness_integration.setup import SetupEvidence, Set
 from agentworks.db import Database, SessionStatus
 from agentworks.errors import BrokenStateError, StateError
 from agentworks.harness_setup.model import NativeSetupState, SetupFacet, SetupRecord
-from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
+from agentworks.harness_setup.outcomes import SetupFailure, describe_setup_failures, raise_setup_failures
 from agentworks.harness_setup.readiness import RequiredSetupMissingError
 from agentworks.harness_setup.state import write_native_setup
 from agentworks.instance_specs import persist_creation_overlay
@@ -189,13 +190,19 @@ def test_pending_owners_check_fresh_applied_setup_before_launch(
         raise_setup_failures(failures_)
 
     monkeypatch.setattr("agentworks.sessions.manager._create.raise_setup_failures", report)
-    monkeypatch.setattr("agentworks.sessions.manager._create_roll.raise_setup_failures", report)
+    described = []
+
+    def describe(failures_: list[SetupFailure]) -> str:
+        described.append(tuple(failures_))
+        return describe_setup_failures(failures_)
+
+    monkeypatch.setattr("agentworks.sessions.manager._create_roll.describe_setup_failures", describe)
 
     def realize(db_: Database, config: Any, registry: Any, **kwargs: Any) -> None:
         inputs = kwargs["setup_inputs"]
         collectors.append(kwargs["setup_failures"])
         if not complete:
-            failure = SetupFailure(inputs.kind, inputs.name, inputs.facet, "shell", "fixture native failure")
+            failure = SetupFailure(inputs.kind, inputs.name, inputs.facet, "shell", uuid4().hex)
             kwargs["setup_failures"].append(failure)
             failures.append(failure)
         events.append(f"realize_{inputs.kind}")
@@ -255,9 +262,16 @@ def test_pending_owners_check_fresh_applied_setup_before_launch(
                 assert caught.value.entity_kind == ("workspace" if new_workspace else "agent")
                 assert caught.value.entity_name == "s1"
                 assert caught.value.hint is not None
+                assert all(failure.reason in caught.value.hint for failure in failures)
+                if new_workspace:
+                    assert "--workspace s1" in caught.value.hint
+                if new_agent:
+                    assert "--agent s1" in caught.value.hint
         assert all(collector is collectors[0] for collector in collectors)
         assert collectors[0] == failures
-        assert reported == [tuple(failures)]
+        required_failure = not complete and severity == "required"
+        assert reported == ([] if required_failure else [tuple(failures)])
+        assert described == ([tuple(failures)] if required_failure else [])
         result_roles = [role for role, _, _ in captured_output.lines if role is output.Role.RESULT]
         assert result_roles == ([output.Role.RESULT] if complete else [])
         before_setup = [
@@ -300,9 +314,7 @@ def test_optional_setup_failure_does_not_disable_core_failure_unwind(
     def realize(db_: Database, config: Any, registry: Any, **kwargs: Any) -> None:
         inputs = kwargs["setup_inputs"]
         collectors.append(kwargs["setup_failures"])
-        kwargs["setup_failures"].append(
-            SetupFailure(inputs.kind, inputs.name, inputs.facet, "shell", "fixture native failure")
-        )
+        kwargs["setup_failures"].append(SetupFailure(inputs.kind, inputs.name, inputs.facet, "shell", uuid4().hex))
         events.append(f"realize_{inputs.kind}")
         if inputs.kind == "agent":
             db_.insert_agent(inputs.name, "vm1", f"agt-{inputs.name}")

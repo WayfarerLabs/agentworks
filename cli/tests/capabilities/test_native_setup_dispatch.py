@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from agentworks.artifacts.model import ArtifactInputs
+from agentworks.artifacts.routing import RoutingResult
 from agentworks.capabilities.harness_integration.setup import (
     SetupInvocation,
     UserSetupInvocation,
@@ -13,7 +14,7 @@ from agentworks.capabilities.harness_integration.setup import (
     WorkspaceSetupInvocation,
 )
 from agentworks.db import Database
-from agentworks.errors import ExternalError
+from agentworks.errors import ExternalError, StateError
 from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
@@ -50,7 +51,7 @@ def facet_case(db, monkeypatch, component):
     monkeypatch.setattr(
         "agentworks.harness_setup.dispatch.ensure_harness_integration_enabled", lambda registry, name: None
     )
-    monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: ArtifactInputs())
+    monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: RoutingResult(ArtifactInputs()))
     return inputs, invocation
 
 
@@ -67,17 +68,11 @@ def test_unimplemented_activation_fails_without_successful_record(db, facet_case
     inputs = replace(inputs, activations={integration: CapabilityConfig.model_validate({})})
     monkeypatch.setattr(SetupInputs, "declaration", lambda *args: {})
     failures: list[SetupFailure] = []
-    state = run_setup(db, Mock(), inputs, invocation, failures=failures, operation="fixture-setup", buffered=buffered)
-    assert len(failures) == 1
-    assert failures[0].owner_kind == inputs.kind and failures[0].owner_name == inputs.name
-    assert not state.records[0].complete
-    records = read_native_setup(db, inputs.kind, inputs.name).records
-    if buffered:
-        assert records == ()
-    else:
-        (record,) = records
-        assert record.integration == integration and record.component == inputs.component
-        assert not record.complete and record.claims == ()
+    with pytest.raises(StateError) as caught:
+        run_setup(db, Mock(), inputs, invocation, failures=failures, operation="fixture-setup", buffered=buffered)
+    assert caught.value.entity_kind == inputs.kind and caught.value.entity_name == inputs.name
+    assert failures == []
+    assert read_native_setup(db, inputs.kind, inputs.name).records == ()
     assert invocation.runner.method_calls == []
 
 
@@ -119,7 +114,7 @@ def test_retirement_removes_legacy_claim_free_unsupported_record(db, facet_case)
 
 @pytest.fixture
 def setup_case(tmp_path, monkeypatch):
-    monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: ArtifactInputs())
+    monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: RoutingResult(ArtifactInputs()))
     events = []
     failures: set[str] = set()
 
@@ -339,7 +334,9 @@ def test_deferral_notice_follows_successful_application(db, facet_case, monkeypa
             return application
 
     monkeypatch.setattr("agentworks.harness_setup.dispatch.harness_integration_for", lambda name: Deferring)
-    monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: received(*artifacts))
+    monkeypatch.setattr(
+        "agentworks.artifacts.routing.setup_artifacts", lambda *args: RoutingResult(received(*artifacts))
+    )
     monkeypatch.setattr(SetupInputs, "declaration", lambda *args: {})
     inputs = replace(inputs, activations={"deferring": CapabilityConfig.model_validate({})})
     warning = Mock()
@@ -399,7 +396,7 @@ def test_vm_publication_uses_root_and_records_skips_without_rerouting(db, facet_
     publish = Mock(return_value=ArtifactPublication(skipped=(skip,)))
     monkeypatch.setattr("agentworks.harness_setup.dispatch.harness_integration_for", lambda name: Applying)
     monkeypatch.setattr("agentworks.harness_setup.dispatch.publish_artifacts", publish)
-    monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: received(item))
+    monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: RoutingResult(received(item)))
     monkeypatch.setattr(SetupInputs, "declaration", lambda *args: {})
     inputs = replace(inputs, activations={"applying": CapabilityConfig.model_validate({})})
     state = run_setup(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup")

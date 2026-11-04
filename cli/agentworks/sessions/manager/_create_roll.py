@@ -26,8 +26,8 @@ import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, require_implemented_start
 from agentworks.db import SessionMode
-from agentworks.errors import ExternalError, NotFoundError, StateError, ValidationError
-from agentworks.harness_setup.outcomes import raise_setup_failures
+from agentworks.errors import ExternalError, NotFoundError, ValidationError
+from agentworks.harness_setup.outcomes import describe_setup_failures
 from agentworks.harness_setup.readiness import RequiredSetupMissingError
 
 if TYPE_CHECKING:
@@ -571,10 +571,18 @@ def _roll_forward(
         # The owners completed their core work. Keep them and their native
         # progress so the operator can repair the session's required setup.
         _render_retained_overlay_outcomes(db, plan, graph)
-        try:
-            raise_setup_failures(setup_failures)
-        except StateError as setup_error:
-            error.hint = "\n".join(part for part in (error.hint, str(setup_error), setup_error.hint) if part)
+        retained = []
+        if graph.pending_workspace is not None:
+            retained.append(
+                f"Workspace '{plan.workspace_name}' was retained; "
+                f"retry with --workspace {plan.workspace_name} instead of --new-workspace."
+            )
+        if graph.pending_agent is not None:
+            retained.append(
+                f"Agent '{plan.agent_name}' was retained; retry with --agent {plan.agent_name} instead of --new-agent."
+            )
+        summary = describe_setup_failures(setup_failures)
+        error.hint = "\n".join(part for part in (error.hint, *retained, summary) if part)
         raise
     except KeyboardInterrupt:
         output.warn(f"Cancelling session create '{plan.name}'... rolling back.")
