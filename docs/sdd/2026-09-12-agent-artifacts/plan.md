@@ -1314,3 +1314,28 @@ Lima/Debian 13 and performed no model calls. It reports independently verified c
 limits include other workstation/backend combinations, the native-write/checkpoint interruption
 window, real transcript creation, some native source variants and workspace copy/rehome. These are
 scoped acceptance results, not blanket final-head acceptance or permission to lock either SDD.
+
+The continuation implementation is reviewed at `df7b3cd`; production code is unchanged through the
+subsequent VM test-import correction and developer-guide clarification. The full local CI selection
+passed **10,498 tests, 11 skipped**. The final import-only delta also receives focused VM checks.
+Ruff lint/format passes across 929 files and strict mypy across 893 files. Package wheel/source
+builds, file lint, Rulesync 7.14.0, locked-SDD checks and Typer isolation pass. Website tests passed
+160 Python and 103 Node cases; both site bases produced deterministic double builds. Real isolated
+CLI help, config initialization, both concept guides and artifact inspection help passed; the
+isolated home and build roots were removed and their absence checked.
+
+All three private lanes found no remaining code issue in this increment. Project review passed 50
+focused cases; complexity passed 68 and proved the callback infrastructure marker and required
+consumer retention with failing deletion controls; correctness passed 92. Project review caught one
+stale developer-README rollback statement, now corrected. Earlier worker checks run from the
+repository root missed the CLI's strict configuration; root checks from `cli/` caught and corrected
+four test typing errors and two test import groups before handoff. No ignored failures or relaxed
+checks were used. Final documentation-only review and exact pushed-head CI are recorded with the
+checkpoint handoff.
+
+The [critical reading](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6638116414)
+records every later material finding and the scoped acceptance evidence. Current continuation
+contains a malformed native inventory failure to its facet but does not yet make inventory entries
+individually skippable. Workspace ACL/adoption, native-only freshness and the uncovered retirement
+and ambiguity guards remain open. The exhausted public correction budget is not silently renewed.
+Neither SDD is locked or represented as complete.
