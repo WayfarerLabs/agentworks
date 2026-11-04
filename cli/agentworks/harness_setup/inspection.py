@@ -61,6 +61,7 @@ def include_native_setup(
             "complete": record.complete,
             "pending_cleanup": record.pending_cleanup,
             "incomplete_reason_count": len(record.incomplete_reasons),
+            "skipped_destination_count": len(record.skipped),
             "claim_count": len(record.claims),
             "artifact_file_count": len(record.artifact_files),
         }

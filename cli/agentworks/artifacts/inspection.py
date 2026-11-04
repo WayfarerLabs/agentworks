@@ -9,6 +9,7 @@ from agentworks import output
 from agentworks.artifacts.bundle import resolve_bundle
 from agentworks.errors import NotFoundError, StateError, ValidationError
 from agentworks.harness_setup.inputs import SetupInputs
+from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.harness_setup.state import UnsupportedNativeSetupVersionError, read_native_setup
 from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
@@ -398,7 +399,7 @@ def render_artifacts(inspection: ArtifactInspection) -> None:
         output.info(f"{owner.scope}/{owner.resource_name} (facet: {owner.facet}; capture: {owner.capture_status})")
         output.info(f"  Bundles: {', '.join(owner.bundles) or '(none declared)'}")
         for diagnostic in owner.diagnostics:
-            output.info(f"  {diagnostic}")
+            output.info(f"  {sanitize_setup_diagnostic(diagnostic)}")
         for artifact in owner.artifacts:
             content = artifact.input_id[:12] if artifact.input_id is not None else "contents unknown"
             revision = artifact.revision or ("not applicable" if artifact.input_id is not None else "unknown")
@@ -431,21 +432,26 @@ def render_artifacts(inspection: ArtifactInspection) -> None:
             if integration.status != activation:
                 details.append(integration.status)
             if integration.reason:
-                details.append(integration.reason)
+                details.append(sanitize_setup_diagnostic(integration.reason))
             output.info(f"  {integration.name}: {'; '.join(details)}")
             for reason in integration.recorded_incomplete_reasons:
-                output.info(f"    Recorded incomplete: {reason}")
+                output.info(f"    Recorded incomplete: {sanitize_setup_diagnostic(reason)}")
             for input_id in integration.passthrough_inputs:
                 output.info(f"    Core passthrough: {input_id[:12]} to {integration.passthrough_destination}")
             for input_id in integration.recorded_handled:
                 output.info(f"    Recorded handled: {input_id[:12]}")
             for item in integration.recorded_deferred:
                 if owner.facet == "session":
-                    output.info(f"    Recorded unhandled: {item.input_id[:12]}: {item.reason}")
+                    output.info(
+                        f"    Recorded unhandled: {item.input_id[:12]}: {sanitize_setup_diagnostic(item.reason)}"
+                    )
                 else:
-                    output.info(f"    Recorded deferred: {item.input_id[:12]} to {item.destination}: {item.reason}")
+                    output.info(
+                        f"    Recorded deferred: {item.input_id[:12]} to {item.destination}: "
+                        f"{sanitize_setup_diagnostic(item.reason)}"
+                    )
             for skipped in integration.recorded_skipped:
-                output.info(f"    Recorded skipped: {skipped.path}: {skipped.reason}")
+                output.info(f"    Recorded skipped: {skipped.path}: {sanitize_setup_diagnostic(skipped.reason)}")
             for placement in integration.placements:
                 output.info(f"    Recorded placement: {placement.path} ({placement.native_identity or 'file'})")
     output.info("Recorded application does not verify current native files or model context.")

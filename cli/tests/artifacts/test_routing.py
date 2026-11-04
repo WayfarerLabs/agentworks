@@ -138,7 +138,7 @@ def test_inactive_diamond_passes_each_origin_once_without_records(db):
 @pytest.mark.parametrize("user", ["agent", "admin"])
 def test_inactive_vm_inputs_are_handled_by_actual_active_user(db, user):
     fixture = graph(db, active=(user,))
-    prepared = setup_artifacts(db, fixture.registry, fixture.owners[user], fixture.vm, "shell")
+    prepared = setup_artifacts(db, fixture.registry, fixture.owners[user], fixture.vm, "shell").inputs
     assert prepared.local == fixture.captures[user].inputs
     assert prepared.deferred == {fixture.captures["vm"].inputs.owner: fixture.captures["vm"].inputs}
     fixture.save(user, inherited=fixture.captures["vm"].inputs)
@@ -156,9 +156,9 @@ def test_inactive_vm_routes_only_to_user_and_workspace_keeps_local_inputs(db):
     }
     assert available_deferred_inputs(vm, "workspace", "shell") == {}
     assert available_deferred_inputs(vm, "session", "shell") == {}
-    assert setup_artifacts(db, fixture.registry, fixture.owners["workspace"], fixture.vm, "shell") == ArtifactInputs(
-        local=fixture.captures["workspace"].inputs
-    )
+    assert setup_artifacts(
+        db, fixture.registry, fixture.owners["workspace"], fixture.vm, "shell"
+    ).inputs == ArtifactInputs(local=fixture.captures["workspace"].inputs)
 
 
 def test_newly_inherited_vm_inputs_are_unknown_until_active_user_setup(db):
@@ -216,9 +216,9 @@ def test_setup_routes_only_requested_vm_branch_and_uses_prospective_capture(db):
     fixture = graph(db, active=("vm",), counts={"vm": 2})
     fixture.save("vm", routes={"vm-0": "workspace", "vm-1": "user"})
     owner = replace(fixture.owners["agent"], artifact_snapshot=fixture.captures["agent"])
-    result = setup_artifacts(db, fixture.registry, owner, fixture.vm, "shell")
+    result = setup_artifacts(db, fixture.registry, owner, fixture.vm, "shell").inputs
     assert [item.origin.entry for item in result.items()] == ["vm-1", "agent-0"]
-    project = setup_artifacts(db, fixture.registry, fixture.owners["workspace"], fixture.vm, "shell")
+    project = setup_artifacts(db, fixture.registry, fixture.owners["workspace"], fixture.vm, "shell").inputs
     assert [item.origin.entry for item in project.items()] == ["vm-0", "workspace-0"]
 
 

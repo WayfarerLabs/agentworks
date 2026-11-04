@@ -17,6 +17,7 @@ from agentworks.artifacts.state import (
 )
 from agentworks.errors import ConfigError, StateError
 from agentworks.harness_setup.inputs import SetupInputs
+from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.harness_setup.state import UnsupportedNativeSetupVersionError, read_native_setup
 from agentworks.secrets.orchestration import SecretTarget
 
@@ -54,6 +55,8 @@ class RoutingResult:
     inputs: ArtifactInputs
     ancestor_files: tuple[OwnedArtifactFile, ...] = ()
     active_facets: tuple[ArtifactFacet, ...] = ()
+    unresolved_routes: frozenset[str] = frozenset()
+    retain_previous: bool = False
 
 
 def inspect_owner_artifacts(
@@ -160,9 +163,34 @@ def inspect_owner_artifacts(
             record,
             prepared,
         )
+    declaration = None
+    if record is not None:
+        try:
+            declaration = inputs.declaration(integration_name, block)
+        except ConfigError:
+            return ArtifactOwnerView(
+                inputs,
+                captured,
+                capture_status,
+                "unavailable",
+                "The activated facet's current configuration is unavailable.",
+                record,
+                prepared,
+            )
     # An optional native-only facet needs no fabricated artifact result, but its
     # incomplete native setup above remains actionable even without artifact inputs.
     if not prepared and (record is None or not (record.artifact_files or record.artifact_inputs)):
+        if record is not None and declaration != record.declaration:
+            assert declaration is not None
+            return ArtifactOwnerView(
+                inputs,
+                captured,
+                capture_status,
+                "stale",
+                "; ".join(_declaration_changes(record.declaration, declaration)) + ".",
+                record,
+                prepared,
+            )
         return ArtifactOwnerView(inputs, captured, capture_status, "current", record=record, prepared=prepared)
     if record is None or record.artifact_inputs is None:
         return ArtifactOwnerView(
@@ -174,18 +202,7 @@ def inspect_owner_artifacts(
             record,
             prepared,
         )
-    try:
-        declaration = inputs.declaration(integration_name, block)
-    except ConfigError:
-        return ArtifactOwnerView(
-            inputs,
-            captured,
-            capture_status,
-            "unavailable",
-            "The activated facet's current configuration is unavailable.",
-            record,
-            prepared,
-        )
+    assert declaration is not None
     current_ids = tuple(item.identity for item in prepared.items())
     if declaration != record.declaration or current_ids != record.artifact_inputs:
         differences = _declaration_changes(record.declaration, declaration) if declaration != record.declaration else []
@@ -224,7 +241,8 @@ def inspect_owner_artifacts(
 
 def _brief(names: tuple[str, ...]) -> str:
     """Keep drift diagnostics bounded without exposing values or artifact bodies."""
-    return ", ".join(names if len(names) <= 3 else (*names[:2], "..."))
+    selected = names if len(names) <= 3 else (*names[:2], "...")
+    return sanitize_setup_diagnostic(", ".join(sanitize_setup_diagnostic(name).rstrip(".") for name in selected))
 
 
 def _changed_keys(before: object, after: object) -> tuple[str, ...]:
@@ -289,28 +307,46 @@ def report_ancestor(view: ArtifactOwnerView, integration_name: str) -> None:
     if view.status not in ("current", "inactive"):
         owner = view.owner
         output.warn(
-            f"Setup via {integration_name} at {owner.component}/{owner.name}: {view.reason} "
+            f"Setup via {integration_name} at {owner.component}/{owner.name}: {sanitize_setup_diagnostic(view.reason)} "
             f"{owner_remediation(view)} Continuing with available captured routes and existing placement."
         )
 
 
 def setup_artifacts(
     db: Database, registry: Registry, inputs: SetupInputs, vm: VMRow, integration_name: str
-) -> ArtifactInputs:
+) -> RoutingResult:
     """Prepare local capture plus available VM routes without repairing ancestors."""
     if inputs.kind == "vm" and inputs.name != vm.name:
         raise StateError("artifact setup requires the actual owning VM")
     prepared = _require(inspect_owner_artifacts(db, registry, inputs)).prepared
     assert prepared is not None
     if inputs.component == "vm":
-        return prepared
+        return RoutingResult(prepared)
     if inputs.component not in ("admin", "agent", "workspace"):
         raise StateError("artifact setup requires a VM, user or workspace facet")
     ancestor = _vm_inputs(db, registry, vm)
     view = inspect_owner_artifacts(db, registry, ancestor, integration_name)
     report_ancestor(view, integration_name)
-    return ArtifactInputs(
-        local=prepared.local, deferred=available_deferred_inputs(view, inputs.facet, integration_name)
+    inherited = available_deferred_inputs(view, inputs.facet, integration_name)
+    known = {item.identity for group in inherited.values() for item in group.items()}
+    recorded = frozenset(
+        route.input_id
+        for route in (() if view.record is None else view.record.deferred)
+        if route.destination == inputs.facet
+    )
+    unresolved = recorded - known
+    # Missing evidence cannot authorize removal of a descendant's existing files.
+    # A confirmed empty routing result, including an incomplete native-only
+    # attempt, remains distinct from unavailable artifact routing.
+    unknown = (
+        view.record is None
+        and integration_name in view.owner.activations
+        or view.capture_status in ("missing", "unavailable")
+    ) and bool(view.owner.artifacts.bundles or view.captured and view.captured.inputs)
+    return RoutingResult(
+        ArtifactInputs(local=prepared.local, deferred=inherited),
+        unresolved_routes=unresolved,
+        retain_previous=bool(unresolved) or unknown,
     )
 
 

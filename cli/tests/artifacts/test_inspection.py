@@ -461,7 +461,7 @@ def test_stale_inactive_capture_explains_available_passthrough_without_refresh(d
     assert encoded["status"] == "stale" and encoded["passthrough_inputs"] == list(expected)
     assert encoded["passthrough_destination"] == destination
     if component == "vm":
-        runtime = setup_artifacts(db, fixture.registry, fixture.owners["agent"], fixture.vm, "shell")
+        runtime = setup_artifacts(db, fixture.registry, fixture.owners["agent"], fixture.vm, "shell").inputs
         assert (
             tuple(item.identity for item in runtime.deferred[fixture.captures["vm"].inputs.owner].items()) == expected
         )
