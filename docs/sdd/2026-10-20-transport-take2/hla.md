@@ -668,12 +668,13 @@ The channels' details are in [platform-lld.md](./platform-lld.md).
   - **Logout** runs at delete. Its result is the script's own status, or unknown if the connection
     drops first. A cloud VM with no store record is not logged out, since delete never logs out
     under Unverified trust; it warns naming the node.
-- **The operator entry point** is the new `agw vm recover <vm>`. It refuses a VM that is not running
-  or whose provisioning failed, and resolves the auth key in its boundary. It first offers host-key
-  re-establishment (D9) when the VM has no store record, since every other step needs trust. It then
-  runs the repair, reads the address (settling, with its logout on exhaustion, only when the repair
-  joined), and waits once over SSH. When the channel needs the guest's sshd and sshd is broken, or
-  recovery fails, it stops and tells the operator to repair or recreate the machine (R7).
+- **The operator entry point** is the new `agw vm recover <vm>`. It refuses a VM whose provisioning
+  failed or whose power state the platform cannot report, starts a stopped VM itself, and resolves
+  the auth key in its boundary. It first offers host-key re-establishment (D9) when the VM has no
+  store record, since every other step needs trust. It then runs the repair, reads the address
+  (settling, with its logout on exhaustion, only when the repair joined), and waits once over SSH.
+  When the channel needs the guest's sshd and sshd is broken, or recovery fails, it stops and tells
+  the operator to repair or recreate the machine (R7).
 - **Debian attestation at create** moves from the native transport to the base checks (D10). The
   Phase A `tailscale ip -4` fallback goes away with the required `tailnet_address` (R10).
 
