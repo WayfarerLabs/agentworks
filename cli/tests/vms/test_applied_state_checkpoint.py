@@ -10,13 +10,13 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
-from agentworks.harness_setup.outcomes import SetupFailure
 
 from agentworks.db import AppliedStateKey, InitStatus
 from agentworks.db.instance_state import InstanceStateRepository
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError
 from agentworks.harness_setup.inputs import SetupInputs
+from agentworks.harness_setup.outcomes import SetupFailure
 from agentworks.ssh_identity import VerifiedSSHIdentity, read_private_ssh_identity
 from agentworks.vms.applied_state import (
     VerifiedSSHAppliedState,

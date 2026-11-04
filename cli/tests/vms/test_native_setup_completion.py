@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock
 
 import pytest
-from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 
 from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
@@ -14,6 +13,7 @@ from agentworks.config import load_config
 from agentworks.db import InitStatus, ProvisioningStatus, VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import StateError
+from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 from agentworks.output import Role
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
