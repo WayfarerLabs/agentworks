@@ -77,12 +77,15 @@ def publish_artifacts(
     roots: tuple[str, ...],
     group: str = "",
     root: bool = False,
+    retain_previous: bool = False,
 ) -> ArtifactPublication:
     """Preflight all destinations, then checkpoint each confirmed file change.
 
     Modified obsolete whole files remain owned for later cleanup. Matching files
     can be adopted; differing unowned files skip their artifact without blocking
     independent entries. Generated sections preserve all surrounding content.
+    Unresolved inherited routes hold every prior placement and its related
+    package against retirement or replacement until the inputs can be resolved.
     """
     if not desired and not previous:
         return ArtifactPublication()
@@ -103,14 +106,49 @@ def publish_artifacts(
     if len(planned) != len(desired) or len(current) != len(previous):
         raise StateError("artifact publication contains duplicate destinations")
     skipped: list[ArtifactSkip] = []
+    held_paths = set(current) if retain_previous else set()
+    if held_paths:
+        prior_origins = {origin for prior in previous for origin in prior.origins}
+        prior_identities = {prior.native_identity for prior in previous if prior.native_identity is not None}
+        package_roots = {
+            package
+            for prior in previous
+            if (package := prior.package_root or _skill_entrypoint_directory(prior)) is not None
+        }
+        for item in desired:
+            if (
+                prior_origins.intersection(item.origins)
+                or item.native_identity in prior_identities
+                or any(item.path.startswith(package + "/") for package in package_roots)
+            ):
+                held_paths.add(item.path)
+        for path in dict.fromkeys((*current, *planned)):
+            if path not in held_paths:
+                continue
+            origins = (current.get(path) or planned[path]).origins
+            if path in planned:
+                origins = tuple(dict.fromkeys((*origins, *planned[path].origins)))
+            reason = (
+                "inherited artifact routes are unresolved; "
+                "existing placement is retained until ancestor setup is repaired"
+            )
+            skipped.append(ArtifactSkip(path=path, origins=origins, reason=reason))
+        output.warn("Retaining existing artifact placement while inherited routes are unresolved.")
+    paths = tuple(path for path in dict.fromkeys((*planned, *current)) if path not in held_paths)
+    if not paths:
+        return ArtifactPublication(tuple(current.values()), tuple(skipped))
     with NativeFiles(runner, root=root) as files:
-        observed = {path: files.fingerprint(path) for path in dict.fromkeys((*planned, *current))}
+        observed = {path: files.fingerprint(path) for path in paths}
         modified = {
             path
             for path, prior in current.items()
-            if observed[path] is not None and observed[path] != (prior.sha256, _mode(prior.executable, group, root))
+            if path not in held_paths
+            and observed[path] is not None
+            and observed[path] != (prior.sha256, _mode(prior.executable, group, root))
         }
         for path, item in planned.items():
+            if path in held_paths:
+                continue
             prior = current.get(path)
             if observed[path] is not None and prior is not None and prior.generated_section != item.generated_section:
                 raise StateError(
@@ -118,7 +156,7 @@ def publish_artifacts(
                     hint="Retire the old placement and use a separate destination for the new artifact.",
                 )
         sections: dict[str, tuple[bytes | None, bytes]] = {}
-        skipped_paths: set[str] = set()
+        skipped_paths = set(held_paths)
         for path in observed:
             entry = planned.get(path) or current[path]
             if not entry.generated_section:
@@ -204,7 +242,9 @@ def publish_artifacts(
                 continue
             data = observed[path]
             if path in modified:
-                output.warn("An obsolete owned artifact was modified; its file and cleanup evidence were retained.")
+                output.warn(
+                    f"Obsolete owned artifact '{path}' was modified; its file and cleanup evidence were retained."
+                )
                 continue
             if data is not None:
                 files.remove(path, expected=prior.sha256)
@@ -214,7 +254,7 @@ def publish_artifacts(
             del current[path]
             checkpoint(tuple(current.values()))
         _report_file_changes("Removed", removed)
-        _report_file_changes("Removed", removed_sections, noun="managed artifact section")
+        _report_file_changes("Removed", removed_sections, noun="managed artifact section body")
         publication = sorted(
             planned.items(),
             key=lambda item: (
