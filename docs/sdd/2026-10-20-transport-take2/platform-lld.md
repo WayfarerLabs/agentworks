@@ -653,7 +653,7 @@ operation log, and the error names the script, its status and `agw vm logs NAME`
 
 | Situation                                              | Error                                                                | Hint or effect                                                                  |
 | ------------------------------------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| No native shell on the platform                        | `FeatureUnavailable` (`StateError`, new in `execution/errors.py`)    | The platform's `native_shell_unavailable_hint`, else its console                |
+| No native shell on the platform                        | `FeatureUnavailable` (`StateError`, new in `execution/errors.py`)    | The platform's `native_shell_unavailable_hint`, when it declares one            |
 | `--platform` with `--workspace`                        | `ValidationError`                                                    | `cd` inside the shell                                                           |
 | Start or gate: no answer after the wait, or no address | `ConnectivityError`                                                  | `agw vm recover NAME`                                                           |
 | Recover: power state unknown                           | `StateError`                                                         | Check the provider or `agw vm describe NAME`; a stopped VM is started instead   |

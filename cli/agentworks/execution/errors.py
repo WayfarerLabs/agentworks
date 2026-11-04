@@ -46,16 +46,15 @@ class FeatureUnavailable(StateError):
     """A VM's platform does not offer what the command needs, such as a native shell.
 
     Raised before the operation boundary resolves anything. ``hint`` is the
-    platform's own guidance; without one, the hint points at its console.
+    platform's own guidance, when it gives any.
     """
 
     def __init__(self, vm_name: str, platform_name: str, feature: str, hint: str | None) -> None:
-        self.vm_name = vm_name
         super().__init__(
             f"VM platform '{platform_name}' does not offer {feature}",
             entity_kind="vm",
             entity_name=vm_name,
-            hint=hint or f"Reach VM '{vm_name}' through the {platform_name} platform's own console.",
+            hint=hint,
         )
 
 

@@ -223,7 +223,6 @@ class VMPlatform(Capability):
 
     # Guidance for a platform that offers no native shell (it does not
     # override :meth:`native_shell`): where its operator reaches a VM by hand.
-    # None points at the platform's console in general terms.
     native_shell_unavailable_hint: ClassVar[str | None] = None
 
     # Whether ``run_as_root``'s channel goes through the guest's sshd, so a
