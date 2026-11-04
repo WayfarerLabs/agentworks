@@ -173,8 +173,8 @@ def _record_address(db: Database, vm_name: str, tailnet_address: str, log: Opera
 def _secure(db: Database, vm_name: str, platform: VMPlatform, ctx: RunContext, *, what: str) -> None:
     """Close the kept VM's provisioning access, best effort: the original failure keeps propagating.
 
-    The operator can still reach the VM through ``vm shell --platform`` or the
-    platform's console.
+    The ordinary-command gate refuses the kept VM, ``vm shell --platform``
+    included, so the operator reaches it through the platform's console.
     """
     try:
         vm = db.get_vm(vm_name)

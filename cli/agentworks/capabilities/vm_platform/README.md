@@ -265,8 +265,9 @@ are local); Azure, EC2, GCE, and Proxmox use it:
   the success-only hook never fired on either. Create-time bootstrap failure stays inside the
   platform rollback window and never reaches this hook. Azure and GCE delete the owned fixed-name
   bootstrap allow and EC2 revokes the recorded bootstrap tuples, so the VM defaults to zero inbound
-  exposure; debugging survives via `vm shell --platform` (a fresh per-operation allow) and the
-  platform's serial console (not firewall-gated).
+  exposure. The ordinary-command gate refuses the kept VM, `vm shell --platform` included, so
+  debugging goes through the platform's serial console (not firewall-gated); `vm delete`'s logout
+  opens its own per-operation allow.
 
 The two closing hooks and `transient_route` take `ctx` because opening or closing the firewall route
 (an Azure NSG rule, an EC2 security-group rule) is a backend call; the caller (Phase A,

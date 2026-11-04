@@ -464,10 +464,10 @@ class VMPlatform(Capability):
         its bootstrap ingress indefinitely. Implementations must not
         assume the VM is reachable, and the caller treats the hook as
         best-effort: the original failure keeps propagating regardless.
-        Operator debugging survives the fail-closed posture: ``vm shell
-        --platform`` pokes a fresh transient allow via
-        :meth:`transient_route`, and platform consoles outside the
-        firewalled path (Azure's serial console) are unaffected.
+        The ordinary-command gate refuses the kept VM, ``vm shell
+        --platform`` included, so operator debugging goes through
+        platform consoles outside the firewalled path (Azure's serial
+        console), which the fail-closed posture leaves unaffected.
 
         ``ctx`` is the op-start :class:`RunContext` (see
         :meth:`create`): closing the ingress is a backend call and

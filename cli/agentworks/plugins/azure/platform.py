@@ -863,10 +863,11 @@ class AzureVMPlatform(PublicAddressPlatform):
         interrupted (left incomplete) is kept for debugging, and this hook deletes
         the fixed-name bootstrap allow so it defaults to zero inbound
         exposure. Create-time bootstrap failures roll back inside
-        :meth:`create` and never reach this hook. Debugging and recovery stay possible: ``vm
-        shell --platform`` and ``vm delete`` poke a fresh transient
-        allow via :meth:`transient_route`, and the Azure serial console
-        is not NSG-gated.
+        :meth:`create` and never reach this hook. The ordinary-command
+        gate refuses the kept VM, ``vm shell --platform`` included, so
+        debugging goes through the Azure serial console, which is not
+        NSG-gated; ``vm delete``'s logout pokes a fresh
+        transient allow via :meth:`transient_route`.
 
         ``ctx`` is the create op's own scoped context, whose secrets
         were resolved before Phase A began, so even the interrupt path
