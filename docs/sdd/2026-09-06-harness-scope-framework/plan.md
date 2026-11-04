@@ -817,14 +817,14 @@ edits. This consumes the single additional round, not a standing allowance for l
 
 - [x] Freeze the full batch, record authenticated authorization, assess every material item and
       establish isolated implementation ownership.
-- [ ] Preserve failed routing and existing descendant placements; enforce unsupported-facet
+- [x] Preserve failed routing and existing descendant placements; enforce unsupported-facet
       preflight and retain fatal persistence/cancellation behavior.
-- [ ] Correct native entry-local inventory, bounded diagnostics, native-only freshness, workspace
+- [x] Correct native entry-local inventory, bounded diagnostics, native-only freshness, workspace
       ACL/adoption and generated-section stability; cover the identified deletion controls.
-- [ ] Align recovery guidance, developer/operator guides, fixtures and acceptance milestones with
+- [x] Align recovery guidance, developer/operator guides, fixtures and acceptance milestones with
       the corrected behavior.
-- [ ] Integrate the changes, complete all three private review lanes and required checks, and hand
-      off the exact green head with honest ready/draft intent.
+- [x] Integrate the changes, complete all three private review lanes and required local checks.
+- [ ] Publish the exact green ready handoff and audit the separate full integration-test result.
 - [ ] Reconcile the expanded live evidence and any later findings against retained requirements
       before final promotion and locking. Feedback arriving mid-round is a later batch.
 
@@ -841,3 +841,40 @@ continues to handle access and Git identity only. Recovery guidance must identif
 existing-owner session bindings, the possibility of a running session after a failing command, and
 the destructive nature of explicit workspace recreation. This round introduces no implicit setup or
 new workspace command. Neither SDD is locked.
+
+### Additional round validation and disposition
+
+The integrated source at `3da18ff` passed the full local CI selection with **10,693 tests, 11
+skipped**, with Claude Code 2.1.316 and Codex 0.166.0 available for real isolated native fixtures.
+Configured Ruff lint/format passed across 934 files and strict mypy across 898 files. File lint,
+Rulesync 7.14.0, locked-SDD checks, package wheel/source builds, Typer isolation and real isolated
+CLI config/help/both concept guides/artifact inspection help passed. Website validation passed 160
+Python tests, 103 Node tests and deterministic double builds at both site bases. The final
+pushed-head CI and ready signal are recorded in the PR handoff.
+
+All three private lanes reviewed the round and re-reviewed the corrected source clean. Initial
+review exposed three additional cases: unreadable evidence after bundle declarations were cleared, a
+partial first VM file prefix mistaken for confirmed routing, and control sequences reconstructing a
+secret after raw matching. The fixes use the existing nullable input field and normalize secret
+patterns before the final size bound. Twenty-two dedicated tests all failed on `11cc97a` and all
+passed with the correction; user file operations run through real `NativeFiles`, while the VM
+checkpoint failure is simulated. Follow-up focused reviews passed 142 project, 142 complexity and
+164 independent correctness cases. Real local Git/POSIX ACL checks prove adoption, script execution,
+group/mode preservation and an unchanged first repair; live acceptance across different users is not
+inferred.
+
+An isolated startup-banner check also caught a Python presence-probe regression. A line-delimited
+marker now tolerates unrelated startup output while rejecting ambiguous or missing evidence; 131
+focused cases cover local execution and first-party SSH command construction without a VM. The first
+complete source run then caught a native settings interaction: retaining a marketplace for a project
+plugin restored a user plugin's already-removed enable flag. Confirmed removals now take precedence
+over snapshot protection. Five real-Claude cases cover no mapping and all four mapping policies,
+repeated retirement, unchanged project bytes and stable bytes and inode in user settings. All three
+lanes re-reviewed this final small correction clean; a deletion control reproduces the old failure.
+The full suite was rerun without filtering failures and passed at `3da18ff`.
+
+The unrelated website browser witness once failed while heavy checks overlapped. The complete
+160-test website suite passed unchanged on a separate run, and CI website validation passed too. No
+assertion, timeout or test-selection weakening was used. The additional round is now consumed; new
+published findings require a later authenticated disposition rather than an automatic fifth
+correction round. Both locks still await the final requirement-by-requirement live acceptance audit.
