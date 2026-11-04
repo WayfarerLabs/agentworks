@@ -184,9 +184,9 @@ VM or spends a Tailscale auth key.
   Agentworks runs (`install`, `flock`, `nohup`, `setsid`, `tar`). Provisioning is complete only once
   they pass. A VM that fails them is kept in a failed state, and one whose create is interrupted or
   killed before then is kept with its provisioning incomplete. `vm start`, `vm stop`, `vm rekey`,
-  `vm recover`, `vm reinit`, `vm exec`, `vm shell` (with `--platform` too), `vm port-forward` and
-  `vm confirm-release` refuse either, while `vm describe`, `vm list` and `vm verify-connection`
-  still run; delete it with `agw vm delete NAME`.
+  `vm recover`, `vm reinit`, `vm exec`, `vm shell` (with `--platform` too), `vm port-forward`,
+  `vm backup` and `vm confirm-release` refuse either, while `vm describe`, `vm list` and
+  `vm verify-connection` still run; delete it with `agw vm delete NAME`.
 - **Reinit** starts with the same checks on the VM as it is. A live release that differs from the
   recorded one refuses first, as before. A failed check stops reinit before it changes anything and
   names recreation. The pam_env settings and an unsupported login shell only warn.

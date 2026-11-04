@@ -701,9 +701,9 @@ then systemd, passwordless `sudo` for the admin, and the base tools Agentworks r
 this fails, the VM is kept in a failed state; if create is interrupted first, it is kept with its
 provisioning incomplete. Either way its temporary provisioning access is closed, and `vm start`,
 `vm stop`, `vm rekey`, `vm recover`, `vm reinit`, `vm exec`, `vm shell` (with `--platform` too),
-`vm port-forward` and `vm confirm-release` refuse it, as they do a VM a killed create left in
-progress; `vm describe`, `vm list` and `vm verify-connection` still run. `agw vm delete <name>`
-removes it.
+`vm port-forward`, `vm backup` and `vm confirm-release` refuse it, as they do a VM a killed create
+left in progress; `vm describe`, `vm list` and `vm verify-connection` still run.
+`agw vm delete <name>` removes it.
 
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
 alphanumeric plus dash, no leading/trailing dash): a short identifier for this Agentworks
