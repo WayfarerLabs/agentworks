@@ -414,7 +414,7 @@ def test_create_vm_attests_the_core_release_and_keeps_an_unattested_vm_gated(
     assert row.init_status == InitStatus.PENDING.value
     assert row.debian_release is None
     with pytest.raises(StateError):
-        vm_manager._guard_failed_vm(row)
+        vm_manager._guard_incomplete_vm(row)
 
 
 def test_create_vm_logger_close_failure_retains_owner_and_reports_once(

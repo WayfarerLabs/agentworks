@@ -13,7 +13,7 @@ from agentworks.execution import reachability, trust
 from agentworks.execution.errors import TrustMismatch
 from agentworks.execution.requests import Command, Script
 from agentworks.execution.results import Result, Unknown, UnknownReason
-from agentworks.vms.manager import _guard_failed_vm
+from agentworks.vms.manager import _guard_incomplete_vm
 from tests.vm_access_support import Admin
 from tests.vms.phase_a_support import (
     ADDRESS,
@@ -141,7 +141,7 @@ def test_an_interrupt_before_the_contract_passes_secures_and_leaves_the_vm_gated
     assert row.provisioning_status != ProvisioningStatus.COMPLETE.value
     assert phase.platform.secured == [VM]
     with pytest.raises(StateError):
-        _guard_failed_vm(row)
+        _guard_incomplete_vm(row)
 
 
 def test_an_interrupt_after_complete_leaves_the_vm_complete(phase: PhaseAHarness) -> None:

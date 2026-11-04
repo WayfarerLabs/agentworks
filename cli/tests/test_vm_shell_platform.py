@@ -649,27 +649,27 @@ def test_a_vm_whose_provisioning_never_completed_is_refused(
     tmp_path: Path, status: str, allow_failed_init: bool
 ) -> None:
     """A killed create can leave a row pending or in progress with no arm run: never attested, so gated."""
-    from agentworks.vms.manager import _guard_failed_vm
+    from agentworks.vms.manager import _guard_incomplete_vm
 
     db = _seed_db(tmp_path, provisioning_status=status)
     vm = db.get_vm("vm1")
     assert vm is not None
 
     with pytest.raises(StateError) as caught:
-        _guard_failed_vm(vm, allow_failed_init=allow_failed_init)
+        _guard_incomplete_vm(vm, allow_failed_init=allow_failed_init)
 
     assert caught.value.entity_name == "vm1"
     db.close()
 
 
 def test_a_completed_vm_passes_the_gate(tmp_path: Path) -> None:
-    from agentworks.vms.manager import _guard_failed_vm
+    from agentworks.vms.manager import _guard_incomplete_vm
 
     db = _seed_db(tmp_path)
     vm = db.get_vm("vm1")
     assert vm is not None
 
-    _guard_failed_vm(vm)
+    _guard_incomplete_vm(vm)
     db.close()
 
 

@@ -360,7 +360,7 @@ connection (`driver.py:396-404`). An interrupt that lands before then finds the 
 the `except BaseException` arm (`driver.py:193-210`) secures the VM as today and now also marks the
 row `FAILED` unless `COMPLETE` has been written (it is entered only after step 1 sets `IN_PROGRESS`,
 so a `PENDING` row cannot reach it). A VM that was never attested is retained as failed, as D9 and
-incident row I26 require. The ordinary-command gate (`_guard_failed_vm`, `vms/manager/_helpers.py`)
+incident row I26 require. The ordinary-command gate (`_guard_incomplete_vm`, `vms/manager/_helpers.py`)
 refuses every row whose provisioning is not `COMPLETE`, naming `vm delete`, so an unattested VM
 stays out of them, including one a hard kill (`SIGTERM`, `SIGKILL`) left `IN_PROGRESS` with no arm
 run. `lifecycle.py` prints the delete wording whenever provisioning is not `COMPLETE`, not only when

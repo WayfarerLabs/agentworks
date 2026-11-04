@@ -532,7 +532,7 @@ start failure is the signal. The README and ADR 0003 are updated to say so (Coll
 
 `vms/manager/recover.py`, wired in `cli/commands/vm.py` as `vm rekey` is. In order:
 
-1. `_require_vm`; `_guard_failed_vm(vm, allow_failed_init=True)`, which still refuses a VM whose
+1. `_require_vm`; `_guard_incomplete_vm(vm, allow_failed_init=True)`, which still refuses a VM whose
    provisioning failed (`vms/manager/_helpers.py:229-235`): a create retained as failed before
    enrolling is deleted and recreated, not recovered. Then `verify_tailscale_available()`.
 2. The boundary, as rekey builds it (`power.py:421-441`): the VM-template node with the live VM

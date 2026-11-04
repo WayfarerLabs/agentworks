@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.errors import StateError, ValidationError
 
-from ._helpers import _guard_failed_vm, _require_vm
+from ._helpers import _guard_incomplete_vm, _require_vm
 from .boundary import gated_vm_boundary
 
 if TYPE_CHECKING:
@@ -56,7 +56,7 @@ def port_forward_vm(
     # Before any database read or guard: an unsupported client refuses first.
     execution.resolve_ssh()
     vm = _require_vm(db, name)
-    _guard_failed_vm(vm)
+    _guard_incomplete_vm(vm)
     if vm.tailscale_host is None:
         raise StateError(
             f"VM '{name}' has no Tailscale IP",

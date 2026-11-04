@@ -724,7 +724,7 @@ def test_create_keeps_a_vm_whose_phase_a_did_not_complete_out_of_every_command(
     assert row is not None
     assert row.provisioning_status != ProvisioningStatus.COMPLETE.value
     with pytest.raises(StateError):
-        vm_manager._guard_failed_vm(row)
+        vm_manager._guard_incomplete_vm(row)
 
 
 def test_a_failure_after_phase_a_completed_maps_to_reinit_advice(

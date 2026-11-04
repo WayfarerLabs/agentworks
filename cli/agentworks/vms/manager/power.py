@@ -14,7 +14,7 @@ from agentworks.naming import NAME_RE
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
 from ._helpers import (
-    _guard_failed_vm,
+    _guard_incomplete_vm,
     _lookup_or_synthesize_secret,
     _mask_env_var_backend_for,
     _require_vm,
@@ -49,7 +49,7 @@ def start_vm(
     from agentworks.bootstrap import load_request_registry
 
     vm = _require_vm(db, name)
-    _guard_failed_vm(vm)
+    _guard_incomplete_vm(vm)
     # Before the boundary resolves a secret or the start boots the VM: with no
     # host-key record the reconnect check below could only fail, and its
     # failure would send the repair path to spend a Tailscale auth key.
@@ -141,7 +141,7 @@ def stop_vm(
     node's held platform.
     """
     vm = _require_vm(db, name)
-    _guard_failed_vm(vm)
+    _guard_incomplete_vm(vm)
     vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
     platform = vm_node.site.platform
     # Record intent BEFORE the already-stopped short-circuit: an
@@ -399,7 +399,7 @@ def rekey_vm(
     from agentworks.vms.templates import resolve_live_template
 
     vm = _require_vm(db, name)
-    _guard_failed_vm(vm)
+    _guard_incomplete_vm(vm)
     _warn_legacy_release(vm)
     # Before the auth key resolves: a rekey with no host-key record would spend
     # the new key and record the new address before its reconnect check raised.

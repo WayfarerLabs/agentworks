@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from agentworks.errors import StateError
 
 from ._helpers import (
-    _guard_failed_vm,
+    _guard_incomplete_vm,
     _require_vm,
     _resolve_workspace_for_vm,
 )
@@ -82,7 +82,7 @@ def shell_vm(
     # operator diagnose what failed or apply a manual fix (e.g. healing
     # the issue #117 latched DNS state) before re-running reinit. Same
     # rationale applies to `vm exec` (see exec_vm below).
-    _guard_failed_vm(vm, allow_failed_init=True)
+    _guard_incomplete_vm(vm, allow_failed_init=True)
 
     # Resolve workspace before the transport-state guard: a cross-VM
     # mismatch is more diagnostic than "no Tailscale", so it should
@@ -224,7 +224,7 @@ def exec_vm(
     # twin of shell: both are diagnostic primitives, and running
     # `agw vm exec failed-vm cat /var/log/cloud-init.log` is precisely
     # the kind of investigation an operator does on a failed-init VM.
-    _guard_failed_vm(vm, allow_failed_init=True)
+    _guard_incomplete_vm(vm, allow_failed_init=True)
 
     ws = _resolve_workspace_for_vm(db, vm, workspace_name)
 

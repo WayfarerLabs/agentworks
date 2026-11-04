@@ -210,7 +210,7 @@ def _init_log_hint(vm_name: str) -> str:
     return f" See log: {format_host_path(logs[0])}" if logs else ""
 
 
-def _guard_failed_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
+def _guard_incomplete_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
     """Block operations on a VM whose provisioning never completed, or whose initialization failed.
 
     Provisioning is complete only once create's Phase A passed the VM

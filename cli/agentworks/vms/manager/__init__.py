@@ -30,7 +30,7 @@ from agentworks.vms.initializer import (
 
 from ._helpers import (
     _SLUG_PROMPT,
-    _guard_failed_vm,
+    _guard_incomplete_vm,
     _human_bytes,
     _init_log_hint,
     _lookup_or_synthesize_secret,
@@ -77,7 +77,7 @@ __all__ = [
     "_SLUG_PROMPT",
     "_VmAdminEnvScopes",
     "_ensure_tailscale",
-    "_guard_failed_vm",
+    "_guard_incomplete_vm",
     "_human_bytes",
     "_init_log_hint",
     "_is_tailscale_reachable",
