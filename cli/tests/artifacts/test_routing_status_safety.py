@@ -67,6 +67,15 @@ def test_missing_active_routing_record_preserves_existing_placement(db):
     assert not result.retain_previous and not result.inputs.deferred
 
 
+@pytest.mark.parametrize("count", [0, 1])
+def test_first_failed_outer_attempt_has_no_confirmed_empty_routing_result(db, count):
+    fixture = graph(db, active=("vm", "agent"), counts={"vm": count})
+    fixture.save("vm", complete=False)
+    result = setup_artifacts(db, fixture.registry, fixture.owners["agent"], fixture.vm, "shell")
+    assert result.retain_previous == bool(count)
+    assert not result.unresolved_routes and not result.inputs.deferred
+
+
 def test_legacy_failure_reasons_are_safe_and_bounded_in_human_views(db, capsys):
     fixture = graph(db, active=("agent",))
     original = fixture.save("agent")

@@ -338,11 +338,17 @@ def setup_artifacts(
     # Missing evidence cannot authorize removal of a descendant's existing files.
     # A confirmed empty routing result, including an incomplete native-only
     # attempt, remains distinct from unavailable artifact routing.
+    has_inputs = bool(view.captured.inputs) if view.captured is not None else bool(view.owner.artifacts.bundles)
     unknown = (
-        view.record is None
+        (
+            view.record is None
+            or not view.record.complete
+            and not view.record.deferred
+            and not view.record.artifact_files
+        )
         and integration_name in view.owner.activations
         or view.capture_status in ("missing", "unavailable")
-    ) and bool(view.owner.artifacts.bundles or view.captured and view.captured.inputs)
+    ) and has_inputs
     return RoutingResult(
         ArtifactInputs(local=prepared.local, deferred=inherited),
         unresolved_routes=unresolved,
