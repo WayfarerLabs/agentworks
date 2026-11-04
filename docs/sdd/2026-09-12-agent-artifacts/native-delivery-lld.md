@@ -332,10 +332,12 @@ still feed its readable old deferrals to sibling or descendant setup without aut
 though the declaration were empty.
 
 The internal routing result distinguishes known unresolved input IDs from unavailable routing
-without IDs. If either prevents establishing the applicable inputs, publication holds all prior
-placements against removal or replacement, including generated sections and related packages. Native
-setup and independent new paths continue; the attempt remains incomplete with an explicit reason.
-This conservative hold is necessary because old content-dependent input IDs cannot be reversed to
-owners after capture replacement. Available inputs are never substituted for unknown old content.
-The existing applied-state IDs and claims carry pending work until the source is repaired; there is
-no new persisted ledger or artifact wire format.
+without IDs. Unavailable capture or routing evidence remains unknown even when current bundle
+selection is empty; declarations alone cannot prove removal converged. If either prevents
+establishing the applicable inputs, publication holds all prior placements against removal or
+replacement, including generated sections and related packages. Native setup and independent new
+paths continue; the attempt remains incomplete with an explicit reason. This conservative hold is
+necessary because old content-dependent input IDs cannot be reversed to owners after capture
+replacement. Available inputs are never substituted for unknown old content. The existing
+applied-state IDs and claims carry pending work until the source is repaired; there is no new
+persisted ledger or artifact wire format.

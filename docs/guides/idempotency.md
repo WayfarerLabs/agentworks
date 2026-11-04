@@ -47,7 +47,7 @@ reinit reads both stored inputs again.
 warnings and can finish with a `partial` status. Required system-package installation is fatal on
 failure. A valid VM/admin harness facet's domain or transport failure preserves confirmed progress,
 records its reason, and lets independent setup and the terminal authorized-key write finish. The VM
-is checkpointed as partial before the command reports collected failures and exits unsuccessfully.
+is recorded as partial before the command reports collected failures and exits unsuccessfully.
 Cancellation, shared persistence failures, invalid activation preflight and unexpected internal
 errors still abort. An integration failure does not report complete setup.
 

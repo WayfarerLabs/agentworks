@@ -220,7 +220,9 @@ incomplete, stale or failed setup is not successful current setup. Keep pending-
 after explicitly requested creation. The check is read-only and does not invoke ancestor setup.
 Cache only inside the same operation and evaluated setup generation.
 
-Failure diagnostics are redacted before terminal sanitization and a 2 KiB UTF-8 bound. The same
+Failure diagnostics match operation redactions both before and after terminal normalization, before
+a 2 KiB UTF-8 bound. Secret patterns use the same unbounded normalization as the text, including
+logger-only redactions, so control sequences cannot reconstruct a secret after matching. The same
 rendering boundary protects older persisted reasons without rewriting their state. A pure summary
 formatter supplies both the terminal aggregate and explicit required-prerequisite hints; formatting
 does not raise and catch an error merely to obtain its text. VM user-facet diagnostics identify the
