@@ -60,7 +60,7 @@ them:
 | `agentworks/execution/root_script.py` (slice 4)  | `RawRun`, `RootScriptResult`, `run`, `run_process`, `read_host_keys` ([platform-lld.md](./platform-lld.md))       |
 | `agentworks/execution/trust.py` (slice 4)        | Gains `fingerprint(key)`, OpenSSH's `SHA256:` form                                                                |
 | `agentworks/vms/manager/port_forward.py`         | `port_forward_vm`, moved out of `tailscale.py` so the file can pass the static import check                       |
-| `agentworks/vms/manager/platform_shell.py`       | The legacy-touching part of `vm shell --platform`, moved out of `exec.py`; legacy until slice 4                   |
+| `agentworks/vms/manager/platform_shell.py`       | Held `vm shell --platform`'s legacy part until slice 4 deleted it for `native_shell`                              |
 | `tests/execution/conftest.py`                    | The legacy-module blocker                                                                                         |
 | `tests/execution/conformance/`                   | The vectors and their lanes                                                                                       |
 | `tests/vm_access_support.py`                     | `RecordingVMAccess`                                                                                               |
@@ -86,7 +86,7 @@ Citations of the proof in this LLD (`carrier.py`, `connection.py`, `_io.py` and 
 | `tests/execution/` proof tests, `conformance.py`, their READMEs | Deleted with their modules, except the process-level cases of `carriers/ssh/test_client.py` (duplex pressure `:146`, EOF on empty input `:164`, capture limits `:174`, short and failed writes `:219` and `:234`, deadline reap `:272`, interruption `:430`, local signals `:449`, descendant handles `:459` and `:507`, the Windows environment `:543`), which are adapted to the pump |
 
 `test_independence.py` stays (HLA D14) with its `prepare()` section replaced: after importing every
-submodule it asserts that none of the six legacy modules is in `sys.modules`.
+submodule it asserts that none of the legacy modules is in `sys.modules`.
 
 ## Client resolution
 
@@ -542,7 +542,7 @@ above and waits for the client, polling `Popen.wait(timeout=0.2)` so Ctrl-C is d
 | Error                 | Kind                 | Raised for                                                                                                                                                                                   | PR A hint                                                                   |
 | --------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `ClientUnsupported`   | `ConfigError`        | No acceptable OpenSSH, or the resolved client fails to start                                                                                                                                 | The install guidance in the message                                         |
-| `VMNotReady`          | `StateError`         | `NotDelivered(PYTHON_MISSING)` (an unelevated 127) and `NotDelivered(STDLIB_MISSING)`                                                                                                        | `agw vm reinit <vm>`, whose Phase A still runs without python3              |
+| `VMNotReady`          | `StateError`         | `NotDelivered(PYTHON_MISSING)` (an unelevated 127) and `NotDelivered(STDLIB_MISSING)`                                                                                                        | `agw vm recover <vm>`, whose repair installs python3                        |
 | `TrustMismatch`       | `StateError`         | `Unknown(HOST_KEY)`, and the forward's token                                                                                                                                                 | Verify the new key, remove the store file, `import-host-keys --known-hosts` |
 | `RequestRefused`      | `StateError`         | `NotDelivered(REFUSED)` under `run` and `attach`; names the code                                                                                                                             | Fix the working directory or the command                                    |
 | `ExecutionIncomplete` | `ConnectivityError`  | Any other `NotDelivered` or `Unknown`; carries the `Result`, names which, and shows the client log tail. An `AUTH_FAILED` says the VM did not accept the configured key and that nothing ran | A `NotDelivered` command did not start; an `Unknown` one may have run       |
@@ -576,7 +576,8 @@ the package attribute so one patch reaches every manager.
   interactive call, with the import at `:72`) moves to `platform_shell.py`, still legacy until slice
   4, so `exec.py` imports nothing retired. `vm shell --platform` uses `native_transport`, and
   `native_shell` is slice 4's. `port_forward_vm` moves from `tailscale.py`, which keeps
-  `_ensure_tailscale`'s legacy imports.
+  `_ensure_tailscale`'s legacy imports. Slice 4 then deleted `platform_shell.py` and
+  `_ensure_tailscale`: `vm shell --platform` calls the platform's `native_shell`.
 - **Agent probe.** `_assert_agent_ssh_works` (`agents/manager/_common.py:237`) takes a legacy
   `Transport`, and the sessions and agent-create paths still call it. A new
   `_assert_agent_access_works` in `agents/manager/access.py`, a file under the static check, serves
@@ -622,7 +623,7 @@ the package attribute so one patch reaches every manager.
 
 ## Guards, fakes and tests
 
-- **Blocker** (`tests/execution/conftest.py`). An autouse function fixture removes the six legacy
+- **Blocker** (`tests/execution/conftest.py`). An autouse function fixture removes the legacy
   modules and their submodules from `sys.modules`, deletes the attribute on each parent package (so
   `from agentworks import ssh` also fails), and puts a `MetaPathFinder` that raises `ImportError`
   first on `sys.meta_path`. It uses `monkeypatch` so every test restores them. The session fixture

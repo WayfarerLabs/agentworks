@@ -58,7 +58,7 @@ slice 4, which repoints the hint at `agw vm recover`; there is no stopgap wordin
 | `agentworks/vms/manager/pam_env.py`                                                            | Deleted; its probe becomes the contract's pam-env row                                                                                                 |
 | The vm-platform kind, six platforms and their docs                                             | `contract_version` 1 to 2                                                                                                                             |
 
-**Independence.** `contract.py`, `reachability.py` and `oplog.py` import nothing from the six legacy
+**Independence.** `contract.py`, `reachability.py` and `oplog.py` import nothing from the legacy
 modules (R10). The fresh-interpreter guard walks only `agentworks.execution`
 (`tests/execution/test_independence.py`), so it gains an explicit import of
 `agentworks.vms.contract`; `agentworks/vms/__init__.py` is empty, so that import pulls in nothing

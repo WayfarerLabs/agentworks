@@ -79,9 +79,9 @@ is checked on the connections that follow.
 | `vms/manager/recover.py` (slice 4)       | `agw vm recover`: trust re-establishment, the repair, the address and one wait                                                                                                                | new                                                               |
 | `vms/initializer/phase_a.py` (slice 3)   | Phase A for a new VM: first contact in Enroll mode, release attestation and the base checks, inside the fail-closed span; no legacy import                                                    | `driver.py` Phase A                                               |
 
-`agentworks.terminal` is not one of the six legacy modules, so attach keeps using its guard. The
-proof modules that do not fit are deleted when the package is adopted: `carrier.py`'s generic
-carrier protocol, `carriers/proxmox.py` and `carriers/_proxmox_http.py` (R10).
+`agentworks.terminal` is not one of the legacy modules, so attach keeps using its guard. The proof
+modules that do not fit are deleted when the package is adopted: `carrier.py`'s generic carrier
+protocol, `carriers/proxmox.py` and `carriers/_proxmox_http.py` (R10).
 
 ## Decisions
 
@@ -745,7 +745,7 @@ deleted.
   rehome leaves `capabilities/vm_platform/__init__.py` importing no legacy code (today it reaches
   `lima.py` and `wsl2.py`, which do). The platform plugins cannot pass the guard until slice 5,
   since importing any of them loads the plugin index; they join the static check instead.
-- **The test guard.** A conftest under `cli/tests/execution/` blocks the six legacy modules for the
+- **The test guard.** A conftest under `cli/tests/execution/` blocks the legacy modules for the
   whole directory, so the package's tests pass with them unavailable, as R10 requires.
 - **Migrated consumers.** These cannot pass an import guard until the end, because most of the tree
   imports legacy modules transitively. Each slice instead adds its migrated files to a static check
