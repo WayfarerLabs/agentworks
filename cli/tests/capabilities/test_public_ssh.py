@@ -320,6 +320,25 @@ def test_a_clouds_native_shell_runs_inside_its_own_route_after_the_probe(
 
 
 @pytest.mark.parametrize("factory", CLOUDS, ids=["aws", "azure", "gcp"])
+def test_an_interrupted_native_shell_still_closes_its_route(
+    monkeypatch: pytest.MonkeyPatch, factory: Callable[[], Any]
+) -> None:
+    cloud = _Cloud(monkeypatch, factory, "203.0.113.7")
+    seed_vm_trust("box")
+
+    def interrupted(access: PublicSSH) -> int:
+        cloud._ran("shell")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(PublicSSH, "shell", interrupted)
+
+    with pytest.raises(KeyboardInterrupt):
+        cloud.platform.native_shell(_vm(), _ctx())
+
+    assert cloud.events == ["route-open", "probe", "shell", "route-close"]
+
+
+@pytest.mark.parametrize("factory", CLOUDS, ids=["aws", "azure", "gcp"])
 def test_a_clouds_native_shell_for_a_vm_with_no_record_opens_no_route(
     monkeypatch: pytest.MonkeyPatch, factory: Callable[[], Any]
 ) -> None:

@@ -176,8 +176,8 @@ VM or spends a Tailscale auth key.
   131,071 bytes is refused before anything runs, because Linux cannot execute it.
 - **`vm shell` and `agent shell` without `--workspace` no longer print the message of the day or the
   last-login line.** sshd prints them only when it runs the login shell itself.
-- **`vm port-forward` exits 0 when you stop it** with Ctrl-C or `SIGTERM`, exits non-zero when a
-  forward cannot be set up (a busy local port, for example) instead of running with nothing
+- **`vm port-forward` exits 0 when you stop it** with Ctrl-C, `SIGTERM` or `SIGHUP`, exits non-zero
+  when a forward cannot be set up (a busy local port, for example) instead of running with nothing
   forwarded.
 
 ## Create, reinit and the VM contract

@@ -164,10 +164,13 @@ def _shell_native(
     gets the account's own login environment. Inside the platform-recovery
     gate, the platform runs the shell under the terminal guard with the
     boundary's op-start context, which a cloud needs for its route.
+    ``SIGTERM`` and ``SIGHUP`` raise ``KeyboardInterrupt`` meanwhile, so what
+    the command holds is released.
     """
     from agentworks import output
     from agentworks.bootstrap import load_request_registry
     from agentworks.capabilities.vm_platform.base import require_native_shell
+    from agentworks.interrupts import termination_as_interrupt
     from agentworks.terminal import guarded_terminal
     from agentworks.vms.sites import resolve_site
 
@@ -183,10 +186,15 @@ def _shell_native(
     registry = load_request_registry(config, live_database=db)
     require_native_shell(resolve_site(vm.site, registry), vm.name)
 
-    with gated_vm_platform_recovery_boundary(db, config, registry, vm, interaction=interaction) as (
-        vm_node,
-        _resolver,
-        ops_ctx,
+    # A closed terminal or a SIGTERM unwinds like Ctrl-C, so the hold and a
+    # cloud's temporary firewall allow are released.
+    with (
+        termination_as_interrupt(),
+        gated_vm_platform_recovery_boundary(db, config, registry, vm, interaction=interaction) as (
+            vm_node,
+            _resolver,
+            ops_ctx,
+        ),
     ):
         with guarded_terminal() as guard:
             code = vm_node.site.platform.native_shell(vm, ops_ctx)

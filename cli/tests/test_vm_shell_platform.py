@@ -10,6 +10,9 @@ recording ``VMAccess``) and the platform, so they stay hermetic.
 from __future__ import annotations
 
 import contextlib
+import os
+import signal
+import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -263,6 +266,54 @@ def test_the_native_shell_runs_under_the_terminal_guard_and_255_is_noted_after_i
     assert events == ["guard-enter", "guard-exit", *(["warn"] if status == 255 else [])]
     assert clean_exits == [status == 0]
     db.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+@pytest.mark.parametrize("signal_name", ["SIGTERM", "SIGHUP"])
+def test_a_terminated_native_shell_unwinds_so_what_it_holds_is_released(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_name: str,
+) -> None:
+    """Python ends on an unhandled SIGTERM or SIGHUP without running ``finally``, which would leave a cloud's
+    temporary firewall allow open. The shell turns them into an interrupt, so the route closes."""
+    from agentworks.vms import manager as vm_manager
+
+    db = _seed_db(tmp_path)
+    _patch_common(monkeypatch, vm_manager, interactive_log=[])
+    platform = stub_vm_gates(monkeypatch)
+    events: list[str] = []
+    number = getattr(signal, signal_name)
+    before = signal.getsignal(number)
+
+    def native_shell(_platform: object, vm: object, ctx: object) -> int:
+        with _route(events):
+            os.kill(os.getpid(), number)
+            raise AssertionError(f"{signal_name} was not delivered as an interrupt")
+
+    monkeypatch.setattr(type(platform), "native_shell", native_shell, raising=False)
+
+    with pytest.raises(KeyboardInterrupt):
+        vm_manager.shell_vm(
+            db,
+            _make_config(),  # type: ignore[arg-type]
+            "vm1",
+            native_shell=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert events == ["route-open", "route-close"]
+    assert signal.getsignal(number) == before
+    db.close()
+
+
+@contextlib.contextmanager
+def _route(events: list[str]) -> Iterator[None]:
+    events.append("route-open")
+    try:
+        yield
+    finally:
+        events.append("route-close")
 
 
 # -- Failed-init handling -----------------------------------------------------
