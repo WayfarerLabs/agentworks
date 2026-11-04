@@ -9,6 +9,7 @@ from agentworks import output
 from agentworks.db import VMStatus
 from agentworks.errors import StateError, UserAbort
 from agentworks.execution import trust
+from agentworks.execution.errors import TrustMissing
 from agentworks.naming import NAME_RE
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
@@ -44,9 +45,10 @@ def start_vm(
 
     vm = _require_vm(db, name)
     _guard_incomplete_vm(vm)
-    # No host-key record is refused here: the start still boots the VM, and
-    # the wait below raises TrustMissing, whose hint names 'agw vm recover',
-    # which needs a running VM to read the keys through the platform.
+    # A VM with no host-key record is not refused here: the start boots it,
+    # and the wait below raises TrustMissing, whose hint names
+    # 'agw vm recover', which needs a running VM to read the keys through
+    # the platform.
     registry = load_request_registry(config, live_database=db)
     vm_node, ops_ctx = _live_vm_boundary(
         db,
@@ -78,7 +80,12 @@ def start_vm(
     # The keepalive anchors the VM through the wait. A VM that does not answer
     # fails naming 'agw vm recover', which repairs what a start cannot.
     with vm_node.hold_active():
-        _mgr._await_tailnet(db, config, vm, already_running=status == VMStatus.RUNNING)
+        try:
+            _mgr._await_tailnet(db, config, vm, already_running=status == VMStatus.RUNNING)
+        except TrustMissing as error:
+            if status != VMStatus.RUNNING:
+                error.add_hint(f"VM '{name}' was started and is left running.")
+            raise
     # Only emit "is ready" on the path that actually started the VM. When
     # status was already RUNNING we already said so above, and Tailscale
     # verification usually answers at once, so an extra "is ready" line is

@@ -150,10 +150,12 @@ def test_a_stopped_vm_without_a_host_key_record_starts_then_fails_naming_recover
     monkeypatch.setattr(vm_manager, "_await_tailnet", _await_tailnet)
     monkeypatch.setattr(execution, "resolve_ssh", lambda: SSHClient("/usr/bin/ssh", (9, 2)))
 
-    with pytest.raises(TrustMissing):
+    with pytest.raises(TrustMissing) as caught:
         vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert events == ["status", "start"]
+    # The start adds to the record's own hint, since the VM it booted stays up.
+    assert caught.value.hint != TrustMissing("box").hint
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.RUNNING)
     monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)

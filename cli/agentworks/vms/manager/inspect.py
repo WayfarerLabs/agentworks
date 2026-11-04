@@ -379,15 +379,14 @@ def _project_vm_issue(issue: VMIssue) -> JsonObject:
     return {"source": issue.source.value, "code": _VM_ISSUE_CODE_UNAVAILABLE}
 
 
-# NOTE on ``_await_tailnet`` (start_vm), ``_tailscale_logout`` (delete_vm),
-# and ``_query_live_resources`` (describe_vm): all three are defined
-# elsewhere (``tailscale.py``, ``_helpers.py``), and tests monkeypatch them
-# as attributes of the PACKAGE (``agentworks.vms.manager._await_tailnet`` /
-# ``._tailscale_logout`` / ``._query_live_resources``). A plain ``from
+# NOTE on ``_query_live_resources`` (describe_vm): it is defined in
+# ``_helpers.py``, and tests monkeypatch it as an attribute of the PACKAGE
+# (``agentworks.vms.manager._query_live_resources``). A plain ``from
 # ._helpers import _query_live_resources`` here would bind a local name in
 # THIS module's namespace, invisible to a monkeypatch of the package
-# attribute. Each call goes through ``import agentworks.vms.manager as
-# _mgr`` at call time instead.
+# attribute, so the call goes through ``import agentworks.vms.manager as
+# _mgr`` at call time instead. ``power.py`` reaches ``_await_tailnet`` and
+# ``_tailscale_logout`` the same way.
 
 
 def vm_listing(
