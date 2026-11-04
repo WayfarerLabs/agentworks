@@ -10,7 +10,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.debian import DebianSupport, classify_release
 from agentworks.execution import trust
 
-from ._helpers import _vm_scope
+from ._helpers import _mask_env_var_backend_for, _vm_scope
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -266,3 +266,60 @@ def _live_vm_boundary(
     )
     resolver.resolve()
     return vm_node, _platform_ops_ctx(config, scope, vm_node, resolver)
+
+
+def _auth_key_boundary(
+    db: Database,
+    config: Config,
+    vm: VMRow,
+    *,
+    ignore_env: bool = False,
+    interaction: TtyInteractionPolicy,
+) -> tuple[LiveVMNode, Resolver, RunContext, str]:
+    """The composition root of a command whose planned op spends the VM template's
+    Tailscale auth key (``vm rekey``, ``agw vm recover``).
+
+    The walk roots the VM-template node beside the live VM node, so the auth
+    key is in the union: the sweep predicts it can resolve over the template's
+    declaration, and it resolves in the ONE boundary pass with the site's
+    secrets (proxmox's API token), in a single prompt session. The template
+    node roots first, so template readiness precedes the platform preflight.
+    ``ignore_env`` masks the env-var backend for the auth key across both the
+    preflight and the resolve, so the prompt backend takes over. Returns the
+    live node, the resolver (whose cache a later gate serves), the op-start
+    context and the line-safe auth key.
+    """
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import secret_union
+    from agentworks.orchestration.walk import walk
+    from agentworks.secrets.line_safety import LineOrientedSecretUse, require_line_safe_secret
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import live_vm_node, vm_template_node
+    from agentworks.vms.templates import resolve_live_template
+
+    registry = load_request_registry(config, live_database=db)
+    resolver = Resolver(config, registry, interaction=interaction)
+    vm_node = live_vm_node(db, config, registry, vm)
+    template = resolve_live_template(db, registry, vm.name, vm.template)
+    nodes = walk(vm_template_node(template), vm_node)
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
+    # A cache hit: the key is in the union already, and this only fetches the
+    # declaration the env-var mask needs.
+    declaration = resolver.register_name(template.tailscale_auth_key)
+    scope = _vm_scope(db, vm.name)
+    with _mask_env_var_backend_for(declaration, masked=ignore_env):
+        preflight_all(
+            nodes,
+            RunContext(config=config, operation_scope=scope),
+            registry=registry,
+            interaction=interaction,
+        )
+        resolver.resolve()
+    auth_key = require_line_safe_secret(
+        resolver.get(template.tailscale_auth_key),
+        use=LineOrientedSecretUse.TAILSCALE,
+        secret_name=template.tailscale_auth_key,
+    )
+    return vm_node, resolver, _platform_ops_ctx(config, scope, vm_node, resolver), auth_key

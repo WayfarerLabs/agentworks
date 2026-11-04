@@ -331,6 +331,25 @@ def vm_rekey(
     )
 
 
+@vm_app.command("recover")
+def vm_recover(
+    name: Annotated[str, typer.Argument(help="VM name")],
+) -> None:
+    """Repair a running VM's SSH access, python3 and Tailscale node.
+
+    Through the platform's own channel, without the VM's Tailscale: records a
+    missing host key once you confirm its fingerprints, restores your SSH key,
+    installs python3, restarts a broken SSH server where the platform's
+    channel does not use it, and rejoins Tailscale when the node needs a
+    login. Then it waits for the VM to answer over SSH.
+    """
+    interaction = ordinary_tty_interaction_policy()
+    from agentworks.config import load_config
+    from agentworks.vms.manager import recover_vm
+
+    recover_vm(get_db(), load_config(), name, interaction=interaction)
+
+
 @vm_app.command("reinit")
 def vm_reinit(
     name: Annotated[str, typer.Argument(help="VM name")],

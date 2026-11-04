@@ -298,13 +298,6 @@ def test_a_refused_handover_does_not_get_the_working_directory_hint() -> None:
     assert handover != working_directory
 
 
-def test_a_vm_without_python_points_at_reinit() -> None:
-    error = VMNotReady("box", NotDeliveredReason.PYTHON_MISSING)
-
-    assert error.hint is not None
-    assert "agw vm reinit box" in error.hint
-
-
 def test_errors_show_ssh_diagnostics_but_never_the_payload() -> None:
     tail = "box: Permission denied (publickey)."
     loud = result(Unknown(UnknownReason.CONNECTION), stdout=SECRET.encode(), log=tail)

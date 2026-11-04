@@ -646,6 +646,7 @@ just a vm-site.
 | `agw vm delete <name>`                              | Delete a VM (with confirmation)                                |
 | `agw vm backup <name>`                              | Back up a VM: metadata, agents, workspaces, and files          |
 | `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)      |
+| `agw vm recover <name>`                             | Repair a running VM's SSH access, python3 and Tailscale node   |
 | `agw vm port-forward <name> <ports...>`             | Forward local port(s) to a VM (like kubectl port-forward)      |
 | `agw vm logs <name>`                                | Show SSH logs for a VM                                         |
 | `agw vm import-host-keys (--all \| <name>...)`      | Import VM host keys from `known_hosts` into the host-key store |
@@ -693,9 +694,10 @@ then systemd, passwordless `sudo` for the admin, and the base tools Agentworks r
 `flock`, `nohup`, `setsid`, `tar`). The VM's provisioning is complete only once they pass. If any of
 this fails, the VM is kept in a failed state; if create is interrupted first, it is kept with its
 provisioning incomplete. Either way its temporary provisioning access is closed, and `vm start`,
-`vm stop`, `vm rekey`, `vm reinit`, `vm exec`, `vm shell` (with `--platform` too), `vm port-forward`
-and `vm confirm-release` refuse it, as they do a VM a killed create left in progress; `vm describe`,
-`vm list` and `vm verify-connection` still run. `agw vm delete <name>` removes it.
+`vm stop`, `vm rekey`, `vm recover`, `vm reinit`, `vm exec`, `vm shell` (with `--platform` too),
+`vm port-forward` and `vm confirm-release` refuse it, as they do a VM a killed create left in
+progress; `vm describe`, `vm list` and `vm verify-connection` still run. `agw vm delete <name>`
+removes it.
 
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
 alphanumeric plus dash, no leading/trailing dash): a short identifier for this Agentworks
@@ -717,15 +719,14 @@ pam_env settings in `/etc/environment`, `/etc/security/pam_env.conf` or the admi
 pam_env settings to the commands it runs; and an admin or agent account whose login shell is not
 `sh`, `dash`, `bash` or `zsh`, naming `agw vm reinit <vm>` for the admin and
 `agw agent reinit <agent>` for an agent. The checks run through Agentworks' SSH path, so a VM
-without `python3` cannot be reinitialized.
+without `python3` cannot be reinitialized until `agw vm recover <name>` installs it.
 
 VMs created before SSH lifecycle-evidence tracking have no synthesized identity evidence. Ordinary
 canonical SSH commands refuse that unknown state until one successful `agw vm reinit <name>` proves
 and records the configured identity. After upgrading Agentworks, run that reinit while the installed
-key still works. If it no longer works, try `agw vm shell <name> --platform` where supported,
-restore the configured public key, and rerun reinit. A platform-native transport can itself depend
-on the configured key, so use provider-native recovery tooling or recreate the VM if it cannot
-connect.
+key still works. If it no longer works, `agw vm recover <name>` restores the configured public key
+through the platform's own channel; then rerun reinit. On a cloud that channel is SSH with the same
+key, so use the provider's console or recreate the VM when the VM refuses it.
 
 `vm confirm-release` reads `/etc/os-release` over SSH at the VM's tailnet address, through the same
 path as `vm exec` (so the VM needs `python3`), and shows the recorded and live Debian releases. It
@@ -736,6 +737,26 @@ records the recognized live release and marks initialization pending. The comman
 refreshes its timestamp and leaves initialization state unchanged. See
 [Upgrading a Debian VM](../docs/guides/debian-vm-upgrades.md) for the operator-led upgrade and
 provider-recovery boundary.
+
+`vm recover` repairs what a start cannot, through the platform's own channel (`limactl shell`,
+`wsl.exe`, the Proxmox guest agent, or SSH to a cloud VM's public address), which works without the
+VM's Tailscale. It refuses a VM whose provisioning did not complete (delete and recreate it), a
+stopped VM (start it first), and a VM whose power state the platform could not report. The Tailscale
+auth key resolves up front, with the site's secrets. In one run it:
+
+1. Reads the VM's host keys through that channel when no record exists, shows each key's fingerprint
+   to compare with the VM's console, and records them only once you confirm.
+2. Runs one repair script as root: it restores your SSH public key in the admin's `authorized_keys`,
+   installs `python3` when it is missing or lacks its standard library, restarts a broken SSH server
+   on WSL2 and Proxmox (where the channel does not go through it), and rejoins Tailscale when the
+   node needs a login. A missing Tailscale is reported, not installed.
+3. Reads the VM's tailnet address and records it. After a rejoin, an address that cannot be read
+   logs the node out again, as create does.
+4. Waits once for the VM to answer over SSH.
+
+A failed step stops there and names the script; its output is in the operation log
+(`agw vm logs <name>`). On Lima, Remote Lima and the clouds the channel itself is the VM's SSH
+server, so a broken one there needs the provider's console or recreation.
 
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
 message shows what will be deleted. Pass `--yes` to skip the prompt.
@@ -767,7 +788,7 @@ own path instead, and needs neither the client nor `python3`). Agentworks uses t
 client was resolved, and an unsupported one is refused before anything else runs. These commands run
 `ssh -F none` in batch mode, so `~/.ssh/config` does not apply and an encrypted private key must be
 loaded in the SSH agent. The VM needs `python3`; a VM without it is reported as unable to run
-Agentworks requests, and `agw vm reinit <name>` installs it. A command that is not found exits 127,
+Agentworks requests, and `agw vm recover <name>` installs it. A command that is not found exits 127,
 one that cannot run exits 126, and a missing workspace directory exits 125.
 
 `vm port-forward` runs until interrupted and exits 0 when stopped with Ctrl-C or `SIGTERM`. It exits

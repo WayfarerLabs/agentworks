@@ -2,10 +2,11 @@
 
 This package preserves the flat ``agentworks.vms.manager`` import surface
 that predates the split into submodules (``_helpers``, ``boundary``,
-``tailscale``, ``port_forward``, ``lifecycle``, ``reinit``, ``inspect``,
-``power``, ``exec``): every name below is re-exported here so ``from agentworks.vms.manager import create_vm`` (and
-the many ``agentworks.vms.manager.<name>`` attribute / monkeypatch
-references across the codebase and test suite) keep working unchanged.
+``tailscale``, ``port_forward``, ``lifecycle``, ``reinit``, ``recover``,
+``inspect``, ``power``, ``exec``): every name below is re-exported here
+so ``from agentworks.vms.manager import create_vm`` (and the many
+``agentworks.vms.manager.<name>`` attribute / monkeypatch references
+across the codebase and test suite) keep working unchanged.
 
 The four names imported from ``agentworks.vms.initializer`` are the
 canonical entry point into that package from ``manager``: submodules that
@@ -62,6 +63,7 @@ from .inspect import (
 from .lifecycle import create_vm
 from .port_forward import port_forward_vm
 from .power import delete_vm, rekey_vm, start_vm, stop_vm
+from .recover import recover_vm
 from .reinit import reinit_vm
 from .release import confirm_vm_release, reconcile_release
 from .tailscale import (
@@ -104,6 +106,7 @@ __all__ = [
     "gated_vm_platform_recovery_boundary",
     "list_vms",
     "port_forward_vm",
+    "recover_vm",
     "reinit_vm",
     "rejoin_tailscale",
     "reconcile_release",

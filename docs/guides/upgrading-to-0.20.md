@@ -54,8 +54,10 @@ UTF-16, which `ssh-keygen` cannot read, so write the file with
 A VM whose creation failed before its first connection has no record either. Delete it with
 `agw vm delete NAME` and create it again. A cloud VM whose create failed after it joined Tailscale
 but before its key was recorded has no record, and deleting it cannot log its node out of Tailscale,
-so remove the node in the Tailscale admin console. A VM that cannot rejoin Tailscale cannot be
-imported until it can, so recreate it.
+so remove the node in the Tailscale admin console. For a VM that cannot rejoin Tailscale, or has no
+entry to import, run `agw vm recover NAME`: it reads the host keys through the platform's own
+channel, records them once you confirm their fingerprints against the VM's console, and rejoins the
+node.
 
 ## What fails until the import runs
 
@@ -118,7 +120,8 @@ VM or spends a Tailscale auth key.
 - **`python3` on the VM.** Every request starts a small Python program on the VM. A VM without
   `python3`, or with one that lacks its standard library, is reported as unable to run Agentworks
   requests. New VMs get it at provisioning. `vm reinit` and `vm confirm-release` now connect the
-  same way (see below), so they cannot run on such a VM either.
+  same way (see below), so they cannot run on such a VM either; `agw vm recover NAME` installs it
+  through the platform's own channel.
 - **A supported login shell for the admin and every agent.** The admin and agent template `shell`
   fields now accept only `sh`, `dash`, `bash` and `zsh`; a path such as `/usr/bin/zsh` is read as
   its basename. Any other shell, such as `fish` or `tcsh`, is a configuration error that names the
@@ -181,7 +184,7 @@ VM or spends a Tailscale auth key.
   Agentworks runs (`install`, `flock`, `nohup`, `setsid`, `tar`). Provisioning is complete only once
   they pass. A VM that fails them is kept in a failed state, and one whose create is interrupted or
   killed before then is kept with its provisioning incomplete. `vm start`, `vm stop`, `vm rekey`,
-  `vm reinit`, `vm exec`, `vm shell` (with `--platform` too), `vm port-forward` and
+  `vm recover`, `vm reinit`, `vm exec`, `vm shell` (with `--platform` too), `vm port-forward` and
   `vm confirm-release` refuse either, while `vm describe`, `vm list` and `vm verify-connection`
   still run; delete it with `agw vm delete NAME`.
 - **Reinit** starts with the same checks on the VM as it is. A live release that differs from the

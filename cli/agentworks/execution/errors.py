@@ -35,8 +35,9 @@ class TrustMissing(StateError):
             entity_kind="vm",
             entity_name=vm_name,
             hint=(
-                f"Run 'agw vm import-host-keys {vm_name}' (see its --help for --known-hosts), "
-                "or delete and recreate a VM whose create never enrolled."
+                f"Run 'agw vm import-host-keys {vm_name}' (see its --help for --known-hosts), or "
+                f"'agw vm recover {vm_name}' to read the keys through the platform and confirm them; "
+                "delete and recreate a VM whose create never enrolled."
             ),
         )
 
@@ -76,8 +77,8 @@ def _with_tail(message: str, client_log_tail: str) -> str:
 class VMNotReady(StateError):
     """The VM cannot run agw-launch: no python3, or one without its standard library.
 
-    PR A's hint names ``agw vm reinit``, whose release probe and Phase A still
-    run on the legacy stack and so reach a VM without python3.
+    The hint names ``agw vm recover``, whose repair script installs python3
+    through the platform's own channel, which needs no python3 on the VM.
     """
 
     def __init__(self, vm_name: str, reason: NotDeliveredReason) -> None:
@@ -94,7 +95,7 @@ class VMNotReady(StateError):
             f"VM '{vm_name}' cannot run Agentworks requests: {what}",
             entity_kind="vm",
             entity_name=vm_name,
-            hint=f"Run 'agw vm reinit {vm_name}' to install python3.",
+            hint=f"Run 'agw vm recover {vm_name}' to install python3.",
         )
 
 

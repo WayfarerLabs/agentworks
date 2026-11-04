@@ -35,6 +35,7 @@ MIGRATED_FILES = (
     "vms/manager/release.py",
     "vms/initializer/phase_a.py",
     "vms/recovery.py",
+    "vms/manager/recover.py",
 )
 
 

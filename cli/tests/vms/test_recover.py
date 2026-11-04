@@ -1,0 +1,320 @@
+"""``agw vm recover``: the boundary, the refusals, host-key re-establishment, the repair, the address and the wait.
+
+Real config, registry, resolver and backend loop (env-var backend); the
+platform's status read and its root channel (a fake guest) are the fakes, and
+so is the final wait.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import pytest
+
+from agentworks.capabilities.vm_platform import tailscale_join
+from agentworks.db import ProvisioningStatus, VMStatus
+from agentworks.errors import ConnectivityError, StateError, UserAbort
+from agentworks.execution import reachability, trust
+from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.vms import manager as vm_manager
+from tests._root_channel_fakes import ADDRESS, Answer, FakeGuest
+from tests.conftest import seed_vm_trust
+from tests.ssh_fixtures import fake_host_key
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from agentworks.config import Config
+    from agentworks.db import Database
+    from tests.conftest import CapturedOutput
+    from tests.vm_access_support import AccessRecorder
+
+KEY = "tskey-recover"
+NEW_ADDRESS = "100.64.0.77"
+HOST_KEY = fake_host_key()
+
+
+@pytest.fixture(autouse=True)
+def _world(monkeypatch: pytest.MonkeyPatch, vm_access_recorder: AccessRecorder) -> list[str]:
+    """The workstation is on Tailscale, the SSH config is untouched, retries do not sleep, the key is in the env."""
+    synced: list[str] = []
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", KEY)
+    monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda config, db: synced.append("sync"))
+    monkeypatch.setattr("agentworks.capabilities.vm_platform.tailscale_join.time.sleep", lambda seconds: None)
+    return synced
+
+
+def _seed(db: Database, *, record: bool = True) -> None:
+    db.insert_vm("box", site="proxmox", hostname="box-node")
+    db.update_vm_tailscale("box", ADDRESS)
+    db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
+    if record:
+        seed_vm_trust("box")
+
+
+def _is_repair(payload: str) -> bool:
+    return "BackendState" in payload
+
+
+def _guest(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    status: VMStatus = VMStatus.RUNNING,
+    repair: Answer | None = None,
+    address: Answer | None = None,
+    events: list[str] | None = None,
+) -> FakeGuest:
+    repair = repair if repair is not None else Answer()
+    address = address if address is not None else Answer(stdout=f"{NEW_ADDRESS}\n".encode())
+    host_keys = Answer(stdout=f"{HOST_KEY.key_type} {HOST_KEY.blob} root@box\n".encode())
+
+    def respond(payload: str, seen: int) -> Answer:
+        if _is_repair(payload):
+            return repair
+        if payload == "tailscale ip -4":
+            return address
+        if payload.startswith("cat /etc/ssh/"):
+            return host_keys
+        return Answer()
+
+    guest = FakeGuest(respond=respond, events=events)
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: status)
+    monkeypatch.setattr(
+        ProxmoxPlatform, "run_as_root", lambda self, vm, ctx, script, deadline: guest.run_as_root(script, deadline)
+    )
+    return guest
+
+
+def _waits(monkeypatch: pytest.MonkeyPatch, *, answers: bool = True) -> list[reachability.Wording]:
+    waits: list[reachability.Wording] = []
+
+    def _wait(access: object, *, wording: reachability.Wording) -> bool:
+        waits.append(wording)
+        return answers
+
+    monkeypatch.setattr(reachability, "wait", _wait)
+    return waits
+
+
+def _recover(db: Database, config: Config) -> None:
+    vm_manager.recover_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
+
+
+def test_a_healthy_node_is_repaired_read_and_verified_with_the_key_resolved_once(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """One boundary burst holds the auth key beside the site's secret; the key travels in the repair script alone;
+    the address is read, recorded when it changed, and verified once."""
+    _seed(db)
+    guest = _guest(monkeypatch)
+    waits = _waits(monkeypatch)
+
+    _recover(db, make_config())
+
+    assert [sorted(names) for names in resolve_counter] == [["proxmox-token", "tailscale-auth-key"]]
+    assert [_is_repair(payload) for payload in guest.payloads] == [True, False]
+    assert guest.payloads[1] == "tailscale ip -4"
+    assert [KEY.encode() in script for script in guest.scripts] == [True, False]
+    assert waits == [reachability.Wording.VERIFY]
+    row = db.get_vm("box")
+    assert row is not None and row.tailscale_host == NEW_ADDRESS
+
+
+def test_the_operation_log_never_holds_the_key(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+    tmp_path: Path,
+) -> None:
+    from agentworks import ssh
+
+    # The suite's log directory is per worker, so this test's log needs one of its own.
+    monkeypatch.setattr(ssh, "LOG_DIR", tmp_path / "logs")
+    _seed(db)
+    _guest(monkeypatch, repair=Answer(stdout=f"echoed {KEY}\njoined\n".encode()))
+    _waits(monkeypatch)
+
+    _recover(db, make_config())
+
+    (log,) = ssh.LOG_DIR.glob("box-*-recover.log")
+    text = log.read_text(encoding="utf-8")
+    assert "BackendState" not in text  # the script's source is never written
+    assert KEY not in text
+
+
+def test_a_join_selects_the_settle_and_the_reconnect_wording(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """After a join the node is unusable without its address, so reads that run out log it out."""
+    _seed(db)
+    guest = _guest(monkeypatch, repair=Answer(stdout=b"joined\n"), address=Answer(status=1))
+    waits = _waits(monkeypatch)
+
+    with pytest.raises(ConnectivityError):
+        _recover(db, make_config())
+
+    assert guest.count("tailscale logout") == 1
+    assert waits == []
+
+    db.delete_vm("box")
+    _seed(db)
+    guest = _guest(monkeypatch, repair=Answer(stdout=b"joined\n"))
+    _recover(db, make_config())
+    assert waits == [reachability.Wording.RECONNECT]
+
+
+def test_without_a_join_reads_that_run_out_never_log_the_node_out(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A flaky channel must not log out a node that was working."""
+    _seed(db)
+    guest = _guest(monkeypatch, address=Answer(status=1))
+    _waits(monkeypatch)
+
+    with pytest.raises(ConnectivityError):
+        _recover(db, make_config())
+
+    assert guest.count("tailscale ip -4") == tailscale_join.ADDRESS_READS
+    assert guest.count("tailscale logout") == 0
+
+
+@pytest.mark.parametrize("repair", [Answer(status=1), Answer(status=None)], ids=["failed", "unknown"])
+def test_a_repair_that_does_not_succeed_stops_before_the_address_read(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+    repair: Answer,
+) -> None:
+    _seed(db)
+    guest = _guest(monkeypatch, repair=repair)
+    waits = _waits(monkeypatch)
+
+    with pytest.raises((StateError, ConnectivityError)):
+        _recover(db, make_config())
+
+    assert len(guest.scripts) == 1
+    assert waits == []
+
+
+def test_a_repaired_vm_that_does_not_answer_raises(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db)
+    _guest(monkeypatch)
+    _waits(monkeypatch, answers=False)
+
+    with pytest.raises(ConnectivityError):
+        _recover(db, make_config())
+
+
+@pytest.mark.parametrize("status", [VMStatus.STOPPED, VMStatus.DEALLOCATED, VMStatus.UNKNOWN])
+def test_a_vm_that_is_not_running_is_refused_before_any_script(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    status: VMStatus,
+) -> None:
+    _seed(db)
+    guest = _guest(monkeypatch, status=status)
+
+    with pytest.raises(StateError):
+        _recover(db, make_config())
+
+    assert guest.scripts == []
+
+
+def test_a_stopped_vm_and_one_whose_state_is_unknown_are_refused_differently(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(db)
+    config = make_config()
+    refusals: list[StateError] = []
+    for status in (VMStatus.STOPPED, VMStatus.UNKNOWN):
+        _guest(monkeypatch, status=status)
+        with pytest.raises(StateError) as caught:
+            _recover(db, config)
+        refusals.append(caught.value)
+
+    stopped, unknown = refusals
+    assert (str(stopped), stopped.hint) != (str(unknown), unknown.hint)
+
+
+@pytest.mark.parametrize("provisioning", [ProvisioningStatus.FAILED, ProvisioningStatus.IN_PROGRESS])
+def test_a_vm_whose_provisioning_did_not_complete_is_refused_before_any_secret(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    provisioning: ProvisioningStatus,
+) -> None:
+    _seed(db)
+    db.update_vm_provisioning_status("box", provisioning)
+    guest = _guest(monkeypatch)
+
+    with pytest.raises(StateError):
+        _recover(db, make_config())
+
+    assert resolve_counter == []
+    assert guest.scripts == []
+
+
+def test_a_missing_record_is_written_only_after_confirmation_then_synced(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+    _world: list[str],
+) -> None:
+    _seed(db, record=False)
+    events: list[str] = []
+    _guest(monkeypatch, events=events)
+    _waits(monkeypatch)
+
+    def _confirm(message: str, default: bool = False) -> bool:
+        events.append(f"confirm:{trust.has_record('box')}")
+        return True
+
+    monkeypatch.setattr("agentworks.output.confirm", _confirm)
+
+    _recover(db, make_config())
+
+    assert trust.stored_keys("box") == (HOST_KEY,)
+    assert events[:2] == ["root:cat /etc/ssh/ssh_host_*_key.pub", "confirm:False"]
+    assert _is_repair(events[2])
+    assert _world[0] == "sync"
+
+
+def test_a_refused_record_writes_nothing_and_stops(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db, record=False)
+    guest = _guest(monkeypatch)
+    monkeypatch.setattr("agentworks.output.confirm", lambda message, default=False: False)
+
+    with pytest.raises(UserAbort):
+        _recover(db, make_config())
+
+    assert not trust.has_record("box")
+    assert not any(_is_repair(payload) for payload in guest.payloads)
