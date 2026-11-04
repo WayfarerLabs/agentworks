@@ -356,6 +356,7 @@ def rekey_vm(
     between.
     """
     import agentworks.execution as execution
+    import agentworks.vms.manager as _mgr
     from agentworks.capabilities.vm_platform.tailscale_join import settle_tailnet_address
     from agentworks.execution import reachability
     from agentworks.execution.access import Admin
@@ -369,6 +370,10 @@ def rekey_vm(
     # Before the auth key resolves: a rekey with no host-key record would spend
     # the new key and record the new address before its reconnect check raised.
     trust.require_record(name)
+    # The settle reads the new address from the VM, but the final wait reaches
+    # it over the tailnet, so a workstation off Tailscale is refused before the
+    # key is spent, as recover refuses it.
+    _mgr.verify_tailscale_available()
     # The final wait runs through agentworks.execution: an unsupported client
     # refuses before a secret or the platform is touched.
     execution.resolve_ssh()

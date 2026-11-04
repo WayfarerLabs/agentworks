@@ -45,6 +45,12 @@ def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_vm_ssh_identity(monkeypatch)
 
 
+@pytest.fixture(autouse=True)
+def _on_tailscale(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The workstation is on Tailscale, whatever the test host is: rekey checks it first."""
+    monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
+
+
 def _seed_vm(db: Database, *, operator_stopped: bool = False) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
@@ -276,6 +282,32 @@ def test_rekey_without_a_host_key_record_raises_before_resolving_or_touching_the
     assert events == []
     row = db.get_vm("box")
     assert row is not None and row.tailscale_host == "100.64.0.9"
+
+
+def test_a_workstation_off_tailscale_refuses_rekey_before_resolving_or_touching_the_vm(
+    db: Database,
+    make_config,  # noqa: ANN001
+    _ts_key: None,
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The final wait reaches the VM over the tailnet, so the new key must not be spent first."""
+    from agentworks.errors import ConnectivityError
+
+    config = make_config()
+    _seed_vm(db)
+    events = _fake_status(monkeypatch, VMStatus.RUNNING)
+
+    def _off_tailscale() -> None:
+        raise ConnectivityError("not on Tailscale")
+
+    monkeypatch.setattr(vm_manager, "verify_tailscale_available", _off_tailscale)
+
+    with pytest.raises(ConnectivityError, match="not on Tailscale"):
+        vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert resolve_counter == []
+    assert events == []
 
 
 def test_an_unsupported_client_refuses_rekey_before_resolving_or_touching_the_vm(
