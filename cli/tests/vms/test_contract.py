@@ -269,6 +269,18 @@ def test_each_shell_warning_is_routed_to_the_accounts_own_identity(
     assert len(captured_output.warnings) == 2
 
 
+def test_an_admin_with_no_passwd_entry_is_warned_with_no_fix(
+    monkeypatch: pytest.MonkeyPatch, captured_output: Any
+) -> None:
+    # The connection authenticated as the admin, so a missing entry is the guest's lookup failing, which
+    # reinit cannot set up.
+    monkeypatch.setattr(contract, "shell_fix_command", lambda *_a: pytest.fail("a fix was offered"))
+
+    contract.enforce(report(Finding(LOGIN_SHELLS, (f"agentworks {NO_PASSWD_ENTRY}",))), "box")
+
+    assert len(captured_output.warnings) == 1
+
+
 def test_the_shell_fix_is_agent_reinit_for_an_agent_and_vm_reinit_for_the_admin() -> None:
     assert contract.shell_fix_command(WORKER, "box") == ("agw", "agent", "reinit", "worker")
     assert contract.shell_fix_command(Admin(), "box") == ("agw", "vm", "reinit", "box")
