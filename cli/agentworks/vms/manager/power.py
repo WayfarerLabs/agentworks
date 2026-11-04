@@ -44,9 +44,9 @@ def start_vm(
 
     vm = _require_vm(db, name)
     _guard_incomplete_vm(vm)
-    # Before the boundary resolves a secret or the start boots the VM: with no
-    # host-key record the wait below could only fail.
-    trust.require_record(name)
+    # No host-key record is refused here: the start still boots the VM, and
+    # the wait below raises TrustMissing, whose hint names 'agw vm recover',
+    # which needs a running VM to read the keys through the platform.
     registry = load_request_registry(config, live_database=db)
     vm_node, ops_ctx = _live_vm_boundary(
         db,

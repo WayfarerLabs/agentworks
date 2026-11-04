@@ -24,6 +24,7 @@ from agentworks.execution.errors import TrustMissing
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
+from agentworks.vms.manager.tailscale import _await_tailnet
 from tests.conftest import seed_vm_trust
 
 if TYPE_CHECKING:
@@ -125,25 +126,43 @@ def test_start_stopped_vm_resolves_once_starts_and_clears_flag(
     assert not any("already running" in m for m in captured_output.info)
 
 
-def test_start_without_a_host_key_record_raises_before_resolving_or_touching_the_vm(
+class _ReachedTrust(Exception):
+    """Recover got as far as re-establishing the missing record."""
+
+
+def test_a_stopped_vm_without_a_host_key_record_starts_then_fails_naming_recover_which_can_then_run(
     db: Database,
     make_config,  # noqa: ANN001
-    resolve_counter: list[list[str]],
     monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
 ) -> None:
-    """The wait after a start could only fail for want of a record."""
+    """A VM from before the host-key store, stopped while idle: the start boots it, and the real wait's
+    first probe raises TrustMissing (whose hint names recover) before anything spawns. Recover, which
+    refuses a stopped VM, then runs on the now running VM."""
+    import agentworks.execution as execution
+    from agentworks.execution.client import SSHClient
+
     config = make_config()
-    _seed_vm(db, operator_stopped=True)
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "ts-key")
+    _seed_vm(db)
     trust.remove("box")
     events = _fake_power(monkeypatch, VMStatus.STOPPED)
+    monkeypatch.setattr(vm_manager, "_await_tailnet", _await_tailnet)
+    monkeypatch.setattr(execution, "resolve_ssh", lambda: SSHClient("/usr/bin/ssh", (9, 2)))
 
     with pytest.raises(TrustMissing):
         vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert resolve_counter == []
-    assert events == []
-    row = db.get_vm("box")
-    assert row is not None and row.operator_stopped is True
+    assert events == ["status", "start"]
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.RUNNING)
+    monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
+
+    def _reached(*_args: object, **_kwargs: object) -> None:
+        raise _ReachedTrust
+
+    monkeypatch.setattr("agentworks.vms.manager.recover._reestablish_trust", _reached)
+    with pytest.raises(_ReachedTrust):
+        vm_manager.recover_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
 
 def test_start_running_vm_short_circuits_but_still_clears_flag(
