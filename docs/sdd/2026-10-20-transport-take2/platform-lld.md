@@ -511,10 +511,11 @@ over SSH at ADDRESS") whose hint is `Run 'agw vm recover x'.`; the wait's own ra
 - `start_vm` replaces the rejoin block and its auth-key resolution (`vms/manager/power.py:85-120`)
   with `_await_tailnet` inside the same `hold_active()`. The `trust.require_record` before the
   boundary goes (`:53-56`): a stopped VM with no record must still start, so that its wait raises
-  `TrustMissing` naming recover, which starts a stopped VM itself (below). When the start booted the
-  VM, that error's hint adds that the VM is left running. Otherwise an idle-stopped VM from before
-  the host-key store could neither start nor be recovered. `LiveVMNode.auto_start` keeps its check,
-  since the gating commands' own boundary refuses such a VM earlier.
+  `TrustMissing` naming recover, which starts a stopped VM itself (below). A start that booted the
+  VM says so before the wait, so a failed wait still reads as a running VM. Otherwise an
+  idle-stopped VM from before the host-key store could neither start nor be recovered.
+  `LiveVMNode.auto_start` keeps its check, since the gating commands' own boundary refuses such a VM
+  earlier.
 - `LiveVMNode.auto_start` replaces `_tailscale_rejoin_required` and `_ensure_tailscale`
   (`vms/nodes.py:265-282`) with `_await_tailnet(..., already_running=False)` inside `vm_active`.
 - `_ensure_tailscale`, `_tailscale_rejoin_required` and `_tailscale_logout` are deleted

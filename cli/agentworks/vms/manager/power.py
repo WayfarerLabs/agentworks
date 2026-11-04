@@ -9,7 +9,6 @@ from agentworks import output
 from agentworks.db import VMStatus
 from agentworks.errors import StateError, UserAbort
 from agentworks.execution import trust
-from agentworks.execution.errors import TrustMissing
 from agentworks.naming import NAME_RE
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
@@ -71,6 +70,8 @@ def start_vm(
         output.info(f"VM '{name}' is already running")
     else:
         platform.start(vm, ops_ctx)
+        # Before the wait, so a wait that fails still says the VM is up.
+        output.info(f"VM '{name}' started")
         if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
             db.record_vm_started(name)
         else:
@@ -79,12 +80,7 @@ def start_vm(
     # The keepalive anchors the VM through the wait. A VM that does not answer
     # fails naming 'agw vm recover', which repairs what a start cannot.
     with vm_node.hold_active():
-        try:
-            _mgr._await_tailnet(db, config, vm, already_running=status == VMStatus.RUNNING)
-        except TrustMissing as error:
-            if status != VMStatus.RUNNING:
-                error.add_hint(f"VM '{name}' was started and is left running.")
-            raise
+        _mgr._await_tailnet(db, config, vm, already_running=status == VMStatus.RUNNING)
     # Only emit "is ready" on the path that actually started the VM. When
     # status was already RUNNING we already said so above, and Tailscale
     # verification usually answers at once, so an extra "is ready" line is
