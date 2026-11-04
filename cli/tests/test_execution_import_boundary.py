@@ -30,12 +30,17 @@ MIGRATED_FILES = (
     # function body and skips TYPE_CHECKING blocks; this check reads both.
     "capabilities/vm_platform/__init__.py",
     "capabilities/vm_platform/base.py",
+    "capabilities/vm_platform/bootstrap_script.py",
+    "capabilities/vm_platform/cloud_init.py",
+    "capabilities/vm_platform/debian_release.py",
+    "capabilities/vm_platform/kinds.py",
     "capabilities/vm_platform/lima.py",
     "capabilities/vm_platform/lima_host.py",
-    "capabilities/vm_platform/wsl2.py",
     "capabilities/vm_platform/public_ssh.py",
-    "capabilities/vm_platform/bootstrap_script.py",
+    "capabilities/vm_platform/skel.py",
+    "capabilities/vm_platform/ssh_exposure.py",
     "capabilities/vm_platform/tailscale_join.py",
+    "capabilities/vm_platform/wsl2.py",
     # The plugins cannot pass the package guard until slice 5: importing one
     # loads the plugin index, which loads the harness plugins.
     "plugins/aws/platform.py",

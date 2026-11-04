@@ -686,13 +686,13 @@ refuses a provisioning-failed VM (step 1).
   (`tests/test_execution_import_boundary.py:24`): the four plugin `platform.py` files,
   `plugins/proxmox/guest_agent.py`, `vms/manager/recover.py`, `vms/manager/tailscale.py`,
   `vms/nodes.py`, `orchestration/activation.py` and `vms/initializer/tailscale_preflight.py`.
-- **Both guards for the platform package.** The package guard runs no function body and skips
-  `TYPE_CHECKING` blocks, so it cannot see a legacy import there (`base.py` held one, for the
-  deleted `ExecTransport`). The `vm_platform` modules it proves therefore stay in `MIGRATED_FILES`
-  as well, as `vms/contract.py` does: the interim `lima_host.py` and `public_ssh.py` entries, with
-  `__init__.py`, `base.py`, `lima.py` and `wsl2.py` added once they imported nothing legacy.
   `power.py` cannot (`LOG_DIR`, the session teardown), nor can `_scope.py` (`SSHLogger`, `:29-30`)
   or `_helpers.py`; all three call new code, which R10 allows.
+- **Both guards for the platform package.** The package guard runs no function body and skips
+  `TYPE_CHECKING` blocks, so it cannot see a legacy import there (`base.py` held one, for the
+  deleted `ExecTransport`). Every `vm_platform` module it proves is therefore in `MIGRATED_FILES` as
+  well, as `vms/contract.py` is: the interim `lima_host.py` and `public_ssh.py` entries, and the
+  package's other modules once they imported nothing legacy.
 - **Deleted with no caller left.** `transports/lima.py`, `remote_lima.py`, `wsl2.py` and
   `_shared.py` (their only users are the platforms and `transports/__init__.py`'s exports), the
   `native_transport` factory, `plugins/proxmox/transport.py`, `vms/manager/platform_shell.py`, and
