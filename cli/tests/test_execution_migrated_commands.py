@@ -68,8 +68,8 @@ def test_an_unsupported_client_refuses_before_the_database_is_read(
         COMMANDS[command](UntouchableDatabase(), SimpleNamespace())
 
 
-def test_vm_shell_platform_does_not_need_an_openssh_client(monkeypatch: pytest.MonkeyPatch) -> None:
-    # --platform reaches the VM through the platform's own channel, which is the way in when ssh is the problem.
+def test_vm_shell_platform_runs_no_client_check_up_front(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Local Lima and WSL2 need no OpenSSH client; Remote Lima and the clouds resolve it themselves.
     monkeypatch.setattr("agentworks.execution.resolve_ssh", unsupported)
 
     with pytest.raises(AssertionError, match="database was read"):

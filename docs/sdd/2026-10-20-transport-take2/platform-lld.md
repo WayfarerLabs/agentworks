@@ -837,10 +837,11 @@ the live half of each proof is the slice's Live evidence.
 The deleted entry points carried this other incident-derived behavior:
 
 - **The factory's propagation probe (I17)** survives as `PublicSSH.wait_until_answering`, which
-  `_public_ssh` runs before every cloud script and native shell. Its retry over Lima and WSL2 is
-  retired: a local channel has no firewall allow to wait for, so it fails or answers at once. The
-  probe now runs `true` under `sudo -n /bin/bash -s` rather than `echo ok` as the admin, which the
-  VM contract's passwordless `sudo` check already requires.
+  `_public_ssh` runs before every cloud script and native shell. Its retry over the other platforms
+  (Lima, Remote Lima, WSL2 and Proxmox) is retired: a channel with no firewall allow has nothing to
+  wait for, so it fails or answers at once. The probe now runs `true` under `sudo -n /bin/bash -s`
+  rather than `echo ok` as the admin, which the VM contract's passwordless `sudo` check already
+  requires.
 - **The attach notice after the guard (I6)** survives in `_shell_native`, for every platform's
   native shell rather than only the SSH-backed transports, worded without claiming the cause.
 - **The interactive hop's keepalives** survive: Remote Lima's host argv and the clouds' VM policy
