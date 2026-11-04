@@ -45,9 +45,11 @@ reinit reads both stored inputs again.
 
 `vm reinit` re-runs initialization using the current config. Many core installation steps collect
 warnings and can finish with a `partial` status. Required system-package installation is fatal on
-failure, as is harness integration setup: VM/admin setup must finish before the terminal
-authorized-key write and successful initialization checkpoint. An integration failure preserves its
-last confirmed native claims for retry; it does not report complete setup.
+failure. A valid VM/admin harness facet's domain or transport failure preserves confirmed progress,
+records its reason, and lets independent setup and the terminal authorized-key write finish. The VM
+is checkpointed as partial before the command reports collected failures and exits unsuccessfully.
+Cancellation, shared persistence failures, invalid activation preflight and unexpected internal
+errors still abort. An integration failure does not report complete setup.
 
 If the VM was created with `--spec` or `--admin-spec`, reinit consumes both stored final layers
 after their selected VM and admin templates. It does not accept a flag to change or clear either

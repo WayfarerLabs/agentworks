@@ -278,11 +278,12 @@ section. A file containing ordinary instructions but no markers retains those in
 receives a section. A missing partner, reversed pair or duplicate marker warns and skips that file
 without modifying it. Inspection records the skipped application; it is not reported as applied or
 silently rerouted. Restore a complete pair or remove the broken markers, then retry the owning
-setup. Retirement removes only a complete generated section and preserves surrounding content; an
-empty instruction file may remain. A malformed obsolete section retains cleanup evidence. An active
-integration can continue with that skip; removing the whole activation retains its pending cleanup
-until the section is repaired or removed. Existing section ownership never authorizes replacing the
-entire file.
+setup. Retirement clears the generated body and retains an empty complete marker pair as its
+insertion anchor. Surrounding bytes and section position remain stable across removal and restore;
+an instruction file containing only the empty marker pair may remain. A malformed obsolete section
+retains cleanup evidence. An active integration can continue with that skip; removing the whole
+activation retains its pending cleanup until the section is repaired or removed. Existing section
+ownership never authorizes replacing the entire file.
 
 Claude's VM instructions use the same section mechanism in `/etc/claude-code/CLAUDE.md`. Its managed
 skill and agent directories are `/etc/claude-code/.claude/skills/` and
@@ -307,12 +308,14 @@ inventory checks existing entries in known machine, user and direct workspace di
 reads native metadata names, including Codex configuration registrations, rather than assuming
 filenames are names. Conflicts identify the native name and competing paths. During setup,
 conflicting artifacts are deferred individually to the next supported facet while independent
-artifacts continue. Ordinary safe retirement removes prior owned placements no longer in that plan;
-modified or unowned files remain protected. If session delivery still has a native-name conflict,
-the affected inputs are reported as unhandled and excluded from both files and launch arguments;
-independent delivery and launch continue. A non-conflicting native namespace can allow a later facet
-to handle a previously deferred input. Problems solely in existing ancestor placement also warn
-without blocking launch.
+artifacts continue. When inherited routes cannot be resolved, prior placements and related packages
+are retained against replacement and removal until their source evidence is available. New
+independent paths can still apply. Ordinary safe retirement removes prior owned placements no longer
+in that plan; modified or unowned files remain protected. If session delivery still has a
+native-name conflict, the affected inputs are reported as unhandled and excluded from both files and
+launch arguments; independent delivery and launch continue. A non-conflicting native namespace can
+allow a later facet to handle a previously deferred input. Problems solely in existing ancestor
+placement also warn without blocking launch.
 
 Inventory covers selected skill/persona types, with at most 512 directory entries, YAML headers up
 to 32 KiB each and 1 MiB combined, and an Agentworks rendered-TOML budget for Codex personas of 32

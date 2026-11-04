@@ -38,8 +38,9 @@ For one owner:
 
 1. Acquire the native mutation guard before reading prior applied-state records or observing native
    state.
-2. Read prior applied-state records and bind the ordered desired activations. Include retired
-   activations with remaining claims after desired entries, in stable prior order.
+2. Read prior applied-state records and bind the ordered desired activations. Reject an
+   unimplemented desired facet before capture or native setup, including default-only activations.
+   Include retired activations with remaining claims after desired entries, in stable prior order.
 3. For each integration, prepare sources and native observations and reject conflicting desired
    plugin/settings changes before its first write.
 4. Persist incomplete status before the first mutation, retaining existing claims needed for retry.
@@ -218,3 +219,9 @@ Use the actual bound user's applied-state record; admin or another agent cannot 
 incomplete, stale or failed setup is not successful current setup. Keep pending-target readiness
 after explicitly requested creation. The check is read-only and does not invoke ancestor setup.
 Cache only inside the same operation and evaluated setup generation.
+
+Failure diagnostics are redacted before terminal sanitization and a 2 KiB UTF-8 bound. The same
+rendering boundary protects older persisted reasons without rewriting their state. A pure summary
+formatter supplies both the terminal aggregate and explicit required-prerequisite hints; formatting
+does not raise and catch an error merely to obtain its text. VM user-facet diagnostics identify the
+admin scope while retaining the facet name `user`.

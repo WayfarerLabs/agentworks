@@ -287,7 +287,26 @@ owner, facet and integration with repair guidance and exits unsuccessfully. A ne
 workspace remains available with its partial setup; it is not reported as fully initialized.
 Explicit required prerequisites still block their consumer, while recommended prerequisites warn.
 Cancellation, shared state failures, invalid activation preflight and unexpected internal errors
-still abort immediately. A failed facet is distinct from an entry skipped with a warning.
+still abort immediately. A failed facet is distinct from an entry skipped with a warning. Creation
+messages confirm that the core owner exists; inspect completion evidence for harness setup health.
+
+A non-zero session-create result can leave a running session when only ancestor facet failures were
+collected. Inspect the session before retrying. An explicit required prerequisite can instead leave
+no session while keeping the newly created ancestors. Reuse those owners with `--agent <name>` or
+`--workspace <name>`, rather than repeating `--new-agent` or `--new-workspace`. Agent and VM setup
+can be retried with their reinit commands. Workspaces have no integration retry command:
+`workspace repair` handles access and Git identity only. Preserve uncommitted work and review the
+normal deletion/recreation lifecycle before choosing to recreate one; recreation is destructive.
+
+Confirmed deferrals survive failed setup attempts. If a recorded input is no longer readable from
+its owner's capture, descendant setup reports the unknown route and preserves prior placements,
+including shared generated sections and related packages. Independent native setup and new
+independent paths can still apply. Repair the source owner's capture/setup before retrying the
+affected descendant; unknown content is never substituted with a current revision or treated as an
+empty declaration authorizing cleanup.
+
+Failure reasons and hints are redacted, restricted to one terminal-safe line and bounded to 2 KiB
+each. Human inspection also bounds older saved diagnostics without rewriting the recorded state.
 
 Use the existing owning inspection commands, such as `agw agent describe worker`,
 `agw workspace describe project`, or `agw vm describe dev`, to inspect the `harness-native-setup`

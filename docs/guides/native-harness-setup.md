@@ -107,15 +107,14 @@ files. An installed version can change through the native tool without changing 
 association. A differing unowned source or association is preserved with a warning; resolve that
 native conflict before retrying setup.
 
-Claude's git and GitHub list entries do not expose every source option. If the corresponding user
-source declaration is absent from native settings, including an empty marketplace object, Agentworks
-treats the source as unobservable and preserves it, including during mapped-settings publication.
-Restore the native user declaration before retrying setup. When that declaration is absent,
-marketplace retirement or replacement also retains dependent plugins before attempting any
-uninstall. Agentworks does not broaden user-scoped removal to all scopes or write a guessed
-declaration. Native commands can discard incomplete marketplace placeholders themselves; final
-settings mapping uses their current observed document rather than restoring an earlier incomplete
-object.
+Claude's git and GitHub list entries do not expose every source option. A missing or malformed user
+source declaration, or one inconsistent with native inventory, makes that entry unobservable.
+Agentworks retains and names affected selected or owned entries while independent entries continue.
+Restore a valid native association before retrying setup. Marketplace retirement or replacement also
+retains dependent plugins when the user declaration needed for removal is absent. Agentworks does
+not broaden user-scoped removal to all scopes or write a guessed source. Explicitly protected named
+operator entries are retained through unrelated native rewrites and mapped-settings publication;
+other incomplete placeholders can follow the native CLI's own normalization.
 
 Current-attempt incomplete reasons are retained with setup evidence. `agw artifact show` and managed
 session-start warnings identify the retained entry and its reason. Resolve that native or file

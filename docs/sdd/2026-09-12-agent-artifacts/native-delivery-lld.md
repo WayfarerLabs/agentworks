@@ -72,9 +72,10 @@ section publication with fixed `<!-- BEGIN AGENTWORKS GENERATED -->` and
 `<!-- END AGENTWORKS GENERATED -->` delimiters. Core replaces a complete section regardless of
 changes inside it and preserves surrounding bytes, ownership, permissions and extended attributes.
 Missing partners, reversed or duplicate markers warn and skip the file, recording the reason
-separately from deferrals. Cleanup removes only the generated section; it may leave an empty file.
-The existing whole-file ownership checks remain unchanged for skills, personas and separate native
-rule files.
+separately from deferrals. Cleanup clears the generated body and retains an empty complete marker
+pair as an insertion anchor. This preserves operator bytes and section position through repeated
+removal and restoration without a second ownership-history store. The existing whole-file ownership
+checks remain unchanged for skills, personas and separate native rule files.
 
 Skill members retain their captured bytes and executable intent. Adapters neither flatten skills
 into prompts nor omit supporting files. The Claude session plugin is named `agentworks-artifacts`;
@@ -322,3 +323,19 @@ personas, rule and skill loading paths, fresh/resume carrier selection, native p
 cleanup through native diagnostics and a scoped VM. R10 excludes model calls and external
 marketplaces from this acceptance. File existence, native diagnostics and green renderer tests must
 not be reported as proof that a model consumed an artifact.
+
+## Failed routing and conservative publication
+
+A setup attempt starts incomplete while retaining its prior confirmed input IDs and deferrals. Only
+a validated successful application replaces that routing result. A failed outer facet can therefore
+still feed its readable old deferrals to sibling or descendant setup without authorizing removal as
+though the declaration were empty.
+
+The internal routing result distinguishes known unresolved input IDs from unavailable routing
+without IDs. If either prevents establishing the applicable inputs, publication holds all prior
+placements against removal or replacement, including generated sections and related packages. Native
+setup and independent new paths continue; the attempt remains incomplete with an explicit reason.
+This conservative hold is necessary because old content-dependent input IDs cannot be reversed to
+owners after capture replacement. Available inputs are never substituted for unknown old content.
+The existing applied-state IDs and claims carry pending work until the source is repaired; there is
+no new persisted ledger or artifact wire format.

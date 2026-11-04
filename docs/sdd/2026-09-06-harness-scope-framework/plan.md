@@ -804,3 +804,40 @@ contains a malformed native inventory failure to its facet but does not yet make
 individually skippable. Workspace ACL/adoption, native-only freshness and the uncovered retirement
 and ambiguity guards remain open. The exhausted public correction budget is not silently renewed.
 Neither SDD is locked or represented as complete.
+
+## Additional authorized feedback/fix round 1 of 1, 2026-11-04
+
+The operator explicitly approved one additional round after the green continuation checkpoint at
+`9e52d4e`. The batch was frozen at 20:45 UTC, more than an hour after handoff, and includes the
+previously open findings plus saga `6638655434`, Muntz `6639301024` and live report `6640566529`.
+The
+[critical reading and round charter](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6641797832)
+records each disposition. The PR remains draft during work; `review-requested` was removed before
+edits. This consumes the single additional round, not a standing allowance for later feedback.
+
+- [x] Freeze the full batch, record authenticated authorization, assess every material item and
+      establish isolated implementation ownership.
+- [ ] Preserve failed routing and existing descendant placements; enforce unsupported-facet
+      preflight and retain fatal persistence/cancellation behavior.
+- [ ] Correct native entry-local inventory, bounded diagnostics, native-only freshness, workspace
+      ACL/adoption and generated-section stability; cover the identified deletion controls.
+- [ ] Align recovery guidance, developer/operator guides, fixtures and acceptance milestones with
+      the corrected behavior.
+- [ ] Integrate the changes, complete all three private review lanes and required checks, and hand
+      off the exact green head with honest ready/draft intent.
+- [ ] Reconcile the expanded live evidence and any later findings against retained requirements
+      before final promotion and locking. Feedback arriving mid-round is a later batch.
+
+The copied-workspace `template="copied"` resolution failure exists in current main: copy records
+that synthetic template at `workspaces/manager/copy.py`, and artifact/runtime resolution calls the
+strict workspace-template resolver. Copy also omits native applied evidence on main. This round
+leaves that existing lifecycle contract unchanged rather than copying source ownership claims into a
+new destination. It is a separate workspace follow-up, with live reproduction in `6640566529`. The
+requirement that destination changes must not inherit proof of setup remains in force.
+
+A workspace integration retry/reinit command remains deliberately excluded by the operator's
+existing design. Retention preserves the owner's work and partial evidence; `workspace repair`
+continues to handle access and Git identity only. Recovery guidance must identify retained owners,
+existing-owner session bindings, the possibility of a running session after a failing command, and
+the destructive nature of explicit workspace recreation. This round introduces no implicit setup or
+new workspace command. Neither SDD is locked.
