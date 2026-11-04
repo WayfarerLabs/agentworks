@@ -54,12 +54,15 @@ def confirm_vm_release(
     from agentworks.execution.access import Admin
     from agentworks.vms.contract import observe_release
 
-    from ._helpers import _require_vm
+    from ._helpers import _guard_incomplete_vm, _require_vm
     from .boundary import gated_vm_boundary
 
     # Before any database read or gate: an unsupported client refuses first.
     execution.resolve_ssh()
     vm = _require_vm(db, name)
+    # A failed initialization only warns: reinit refuses release drift and names
+    # this command, so refusing here would leave that VM with no way forward.
+    _guard_incomplete_vm(vm, allow_failed_init=True)
     registry = load_request_registry(config, live_database=db)
     with gated_vm_boundary(db, config, registry, vm, interaction=interaction):
         # Only the release request: adoption does not run the rest of the contract.

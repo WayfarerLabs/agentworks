@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from agentworks.db import Database, InitStatus
+from agentworks.db import Database, InitStatus, ProvisioningStatus
 from agentworks.debian import (
     DEBIAN_RELEASES,
     DebianRelease,
@@ -25,6 +25,11 @@ from tests.vm_access_support import AccessRecorder
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+
+def insert_complete_vm(db: Database) -> None:
+    db.insert_vm("box", site="lima-local", hostname="box")
+    db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
 
 
 def os_release(release: DebianRelease) -> Result:
@@ -111,7 +116,7 @@ def test_confirm_release_runs_only_the_release_request(
     make_config,  # noqa: ANN001
     answer_release: Callable[[DebianRelease], AccessRecorder],
 ) -> None:
-    db.insert_vm("box", site="lima-local", hostname="box")
+    insert_complete_vm(db)
     recorder = answer_release(DebianRelease.TRIXIE)
 
     confirm_vm_release(db, make_config(), "box", yes=True, interaction=TtyInteractionPolicy.REFUSE)
@@ -127,7 +132,7 @@ def test_confirm_release_adopts_live_change_and_requires_reinit(
     monkeypatch: pytest.MonkeyPatch,
     answer_release: Callable[[DebianRelease], AccessRecorder],
 ) -> None:
-    db.insert_vm("box", site="lima-local", hostname="box")
+    insert_complete_vm(db)
     db.update_vm_debian_release("box", DebianRelease.BOOKWORM)
     db.update_vm_init_status("box", InitStatus.COMPLETE)
     answer_release(DebianRelease.TRIXIE)
@@ -162,7 +167,7 @@ def test_confirm_release_adopts_unknown_or_backward_observation(
     recorded: DebianRelease | None,
     observed: DebianRelease,
 ) -> None:
-    db.insert_vm("box", site="lima-local", hostname="box")
+    insert_complete_vm(db)
     if recorded is not None:
         db.update_vm_debian_release("box", recorded)
     db.update_vm_init_status("box", InitStatus.COMPLETE)
@@ -188,7 +193,7 @@ def test_confirm_release_rolls_back_observation_when_pending_write_fails(
     monkeypatch: pytest.MonkeyPatch,
     answer_release: Callable[[DebianRelease], AccessRecorder],
 ) -> None:
-    db.insert_vm("box", site="lima-local", hostname="box")
+    insert_complete_vm(db)
     db.update_vm_debian_release("box", DebianRelease.BOOKWORM)
     db.update_vm_init_status("box", InitStatus.COMPLETE)
     answer_release(DebianRelease.TRIXIE)
@@ -219,7 +224,7 @@ def test_confirm_release_refreshes_matching_observation_without_reinit(
     monkeypatch: pytest.MonkeyPatch,
     answer_release: Callable[[DebianRelease], AccessRecorder],
 ) -> None:
-    db.insert_vm("box", site="lima-local", hostname="box")
+    insert_complete_vm(db)
     db.update_vm_debian_release("box", DebianRelease.TRIXIE)
     db.update_vm_init_status("box", InitStatus.COMPLETE)
     answer_release(DebianRelease.TRIXIE)
@@ -243,7 +248,7 @@ def test_confirm_release_decline_preserves_recorded_state(
     monkeypatch: pytest.MonkeyPatch,
     answer_release: Callable[[DebianRelease], AccessRecorder],
 ) -> None:
-    db.insert_vm("box", site="lima-local", hostname="box")
+    insert_complete_vm(db)
     db.update_vm_debian_release("box", DebianRelease.BOOKWORM)
     db.update_vm_init_status("box", InitStatus.COMPLETE)
     answer_release(DebianRelease.TRIXIE)
@@ -271,7 +276,7 @@ def test_an_unsupported_client_refuses_confirm_release_before_the_gate(
 ) -> None:
     from agentworks.execution.errors import ClientUnsupported
 
-    db.insert_vm("box", site="lima-local", hostname="box")
+    insert_complete_vm(db)
 
     def _unsupported() -> object:
         raise ClientUnsupported("no supported OpenSSH client")
@@ -286,3 +291,38 @@ def test_an_unsupported_client_refuses_confirm_release_before_the_gate(
 
     with pytest.raises(ClientUnsupported):
         confirm_vm_release(db, make_config(), "box", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+
+@pytest.mark.parametrize("status", [ProvisioningStatus.FAILED, ProvisioningStatus.IN_PROGRESS])
+def test_confirm_release_refuses_a_vm_whose_provisioning_did_not_complete(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    status: ProvisioningStatus,
+) -> None:
+    db.insert_vm("box", site="lima-local", hostname="box")
+    db.update_vm_provisioning_status("box", status)
+    monkeypatch.setattr(
+        "agentworks.bootstrap.load_request_registry", lambda *a, **k: pytest.fail("the registry was loaded")
+    )
+
+    with pytest.raises(StateError):
+        confirm_vm_release(db, make_config(), "box", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    vm = db.get_vm("box")
+    assert vm is not None
+    assert vm.debian_release is None
+
+
+def test_confirm_release_reaches_a_vm_whose_initialization_failed(
+    db: Database,
+    make_config,  # noqa: ANN001
+    answer_release: Callable[[DebianRelease], AccessRecorder],
+) -> None:
+    insert_complete_vm(db)
+    db.update_vm_init_status("box", InitStatus.FAILED)
+    answer_release(DebianRelease.TRIXIE)
+
+    assert confirm_vm_release(db, make_config(), "box", yes=True, interaction=TtyInteractionPolicy.REFUSE) is (
+        DebianRelease.TRIXIE
+    )
