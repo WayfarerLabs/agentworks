@@ -260,11 +260,11 @@ def create_session(
 
     Accepts the same flag combinations the ``agw session create`` CLI
     surfaces, validates them, prompts the operator for anything left
-    unspecified (where interactive), and atomically provisions whichever
-    ephemeral resources (workspace, agent) the operator requested
-    alongside the session itself. On any failure after a mutation
-    begins, every ephemeral resource created during the call is rolled
-    back.
+    unspecified (where interactive), and provisions the requested workspace,
+    agent and session. Core failures unwind newly created resources. Collected
+    facet failures retain completed owners and their partial setup; explicit
+    required setup blocks only its session consumer. A session can be running
+    when the final collected-failure report makes the command fail.
 
     Args:
         name: Session name.

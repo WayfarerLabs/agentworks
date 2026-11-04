@@ -699,6 +699,8 @@ def create_vm(
     vm = db.get_vm(vm_name)
     assert vm is not None
     render_overlay_outcome(overlay_outcome)
+    if setup_failures:
+        output.info(f"Log: {logger.display_path}")
     raise_setup_failures(setup_failures)
     if vm.init_status == InitStatus.PARTIAL.value:
         output.result(f"VM '{vm_name}' is ready (with warnings, see above)")
@@ -984,6 +986,8 @@ def reinit_vm(
     refreshed_vm = db.get_vm(name)
     assert refreshed_vm is not None
     # Terminal outcome line at column 0 via result().
+    if setup_failures:
+        output.info(f"Log: {logger.display_path}")
     raise_setup_failures(setup_failures)
     if refreshed_vm.init_status == InitStatus.PARTIAL.value:
         output.result(f"VM '{name}' reinitialized (with warnings, see above)")
