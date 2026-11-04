@@ -95,7 +95,7 @@ DENY_ALL_INBOUND_RULE_PRIORITY = 200
 # The ephemeral SSH allows: TCP/22 from the operator's egress prefixes
 # only, created when a route is needed and deleted after. Bootstrap uses
 # the FIXED name (one bootstrap per VM, and the close hooks must know
-# the name without in-process state); every native-transport session
+# the name without in-process state); every root script and native shell
 # pokes its own PREFIX+nonce rule so concurrent ops cannot cross-remove.
 # Both allocate priorities from the band below (bootstrap takes 100 by
 # construction: the NSG is created fresh with it).

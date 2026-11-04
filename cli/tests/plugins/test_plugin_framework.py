@@ -201,17 +201,17 @@ class _AbstractPlatform(VMPlatform):
     description = "abstract: no power ops implemented"
 
 
-class _NoNativeConfig(AgwModel):
-    name: Literal["no-native-platform"]
+class _NoRootChannelConfig(AgwModel):
+    name: Literal["no-root-channel-platform"]
 
 
-class _PlatformWithoutNativeExecution(VMPlatform):
-    """Implements every operation except required native execution."""
+class _PlatformWithoutARootChannel(VMPlatform):
+    """Implements every operation except ``run_as_root``, the required root channel."""
 
     contract_version = 2
-    name = "no-native-platform"
-    description = "omits native execution"
-    config_model = _NoNativeConfig
+    name = "no-root-channel-platform"
+    description = "omits the root channel"
+    config_model = _NoRootChannelConfig
 
     def create(self, request: Any, ctx: Any) -> Any:
         raise NotImplementedError
@@ -453,7 +453,7 @@ class _HarnessOfferingAnUnsafeMergeContract(ConformingHarnessIntegration):
     [
         ("vm-platform", _NotAPlatform, "does not derive from VMPlatform"),
         ("vm-platform", _AbstractPlatform, "it is abstract"),
-        ("vm-platform", _PlatformWithoutNativeExecution, "it is abstract"),
+        ("vm-platform", _PlatformWithoutARootChannel, "it is abstract"),
         ("vm-platform", _PlatformWithoutADescription, "'description' class attribute"),
         ("secret-backend", _BackendMissingItsOperations, "does not derive from SecretBackend"),
         ("secret-backend", _BackendWithoutTtySupport, "does not derive from SecretBackend"),
@@ -466,7 +466,7 @@ class _HarnessOfferingAnUnsafeMergeContract(ConformingHarnessIntegration):
     ids=[
         "wrong-base",
         "abstract",
-        "missing-native-transport",
+        "missing-root-channel",
         "missing-metadata",
         "missing-operations",
         "missing-attribute",

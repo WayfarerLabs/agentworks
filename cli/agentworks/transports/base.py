@@ -46,8 +46,8 @@ class Transport(abc.ABC):
     def describe(self) -> str:
         """Return a short ``<scheme>:<endpoint>`` label for log lines, such as ``ssh:100.64.0.1``.
 
-        Used by :mod:`agentworks.vms.initializer` to label transports in
-        init events without isinstance branching.
+        ``write_file``'s operation-log lines and the SSH transport's
+        dropped-connection notice name the transport with it.
         """
 
     @abc.abstractmethod

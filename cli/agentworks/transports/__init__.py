@@ -2,10 +2,10 @@
 
 Two named factories plus one low-level helper:
 
-- :func:`transport` -- the admin's transport to a VM (SSH to its tailnet
+- :func:`transport`: the admin's transport to a VM (SSH to its tailnet
   address).
-- :func:`agent_transport` -- the same as a named agent's Linux user.
-- :func:`transport_for_user` -- the helper both call. Direct use is
+- :func:`agent_transport`: the same as a named agent's Linux user.
+- :func:`transport_for_user`: the helper both call. Direct use is
   reserved for the mid-create case where the agent row doesn't exist yet
   (today's only direct caller is ``agents/initializer.py``).
 

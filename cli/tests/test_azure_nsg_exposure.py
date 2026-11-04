@@ -9,7 +9,7 @@ egress IP plus the ``operator.ssh_allow_cidrs`` config extras.
 ``create`` opens the fixed-name bootstrap hole,
 ``post_tailscale_ready`` / ``secure_failed_vm`` close it, and
 ``_transient_route`` pokes/removes a per-operation nonce-named rule
-around each native-transport session (concurrent ops each own theirs),
+around each root script or native shell (concurrent ops each own theirs),
 converging legacy VMs on the way.
 
 Azure is a real dependency in the test env, so the fakes are installed
