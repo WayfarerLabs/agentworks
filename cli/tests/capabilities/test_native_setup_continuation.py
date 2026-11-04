@@ -236,3 +236,60 @@ def test_warning_log_failure_is_fatal_before_sibling(setup_case, monkeypatch):
     with pytest.raises(StateError) as caught:
         run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
     assert caught.value is failure and events == [("first", False)]
+
+
+def test_failure_diagnostic_is_durable_before_next_integration(setup_case, monkeypatch):
+    db, inputs, invocation, events, injected = setup_case
+    injected.add("first")
+    original = harness_integration_for("first").user_init
+
+    def initialize(self, call):
+        if self.name == "second":
+            first = read_native_setup(db, "agent", "agent").records[0]
+            assert not first.complete and first.incomplete_reasons
+            assert first.claims[0].identifier == "first"
+        return original(self, call)
+
+    monkeypatch.setattr(harness_integration_for("first"), "user_init", initialize)
+    failures: list[SetupFailure] = []
+    run_setup(db, Mock(), inputs, invocation, failures=failures, operation="agent-reinit")
+    assert events == [("first", False), ("second", False)] and len(failures) == 1
+
+
+def test_invalid_binding_aborts_before_execution_or_native_state(setup_case, monkeypatch):
+    from agentworks.errors import ConfigError
+
+    db, inputs, invocation, events, _ = setup_case
+    failure = ConfigError(str(uuid4()))
+
+    def binding(cls, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(harness_integration_for("second"), "for_setup", classmethod(binding))
+    failures: list[SetupFailure] = []
+    with pytest.raises(ConfigError) as caught:
+        run_setup(db, Mock(), inputs, invocation, failures=failures, operation="agent-reinit")
+    assert caught.value is failure
+    assert events == [] and failures == []
+    assert read_native_setup(db, "agent", "agent").records == ()
+
+
+def test_soft_callback_diagnostics_are_redacted_without_new_failure(setup_case, monkeypatch):
+    db, inputs, invocation, events, _ = setup_case
+    token = "private-'" + uuid4().hex
+    invocation = replace(invocation, secrets={"token": token})
+    original = harness_integration_for("first").user_init
+    warning = Mock()
+    monkeypatch.setattr("agentworks.harness_setup.dispatch.output.warn", warning)
+
+    def initialize(self, call):
+        if self.name == "first":
+            call.report_incomplete(f"{uuid4()}: {token} {shlex.quote(token)}")
+        return original(self, call)
+
+    monkeypatch.setattr(harness_integration_for("first"), "user_init", initialize)
+    failures: list[SetupFailure] = []
+    state = run_setup(db, Mock(), inputs, invocation, failures=failures, operation="agent-reinit")
+    assert not state.records[0].complete and state.records[1].complete and failures == []
+    assert token not in state.model_dump_json() and token not in str(warning.call_args)
+    assert warning.call_count == 1

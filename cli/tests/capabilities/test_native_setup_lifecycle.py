@@ -17,6 +17,7 @@ from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.lifecycle import prepare_agent_setup, prepare_vm_setup, prepare_workspace_setup
 from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
+from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 from agentworks.harness_setup.state import read_native_setup, write_native_setup
 from agentworks.origin import Origin
 from agentworks.resources.registry import Registry
@@ -101,6 +102,7 @@ def test_component_inputs_keep_only_ancestors_and_retirement(db, registry, vm, m
 @pytest.fixture
 def native(monkeypatch, tmp_path):
     target = Mock(spec=Transport)
+    target.logger = None
     target.run.return_value = SimpleNamespace(stdout="native-identity", ok=True)
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
@@ -128,6 +130,14 @@ def native(monkeypatch, tmp_path):
             self.redactions = redactions
             loggers.append(self)
 
+        def sanitize(self, text):
+            for value in self.redactions:
+                text = text.replace(value, "[REDACTED]")
+            return text
+
+        def warning(self, text):
+            pass
+
         def close(self):
             self.closed = True
 
@@ -137,7 +147,10 @@ def native(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("kind", ["agent", "workspace"])
 @pytest.mark.parametrize("fail_insert", [False, True])
-def test_fresh_owner_buffers_setup_until_atomic_row_commit(db, registry, vm, native, monkeypatch, kind, fail_insert):
+@pytest.mark.parametrize("fail_setup", [False, True])
+def test_fresh_owner_buffers_setup_until_atomic_row_commit(
+    db, registry, vm, native, monkeypatch, kind, fail_insert, fail_setup
+):
     name = "agent" if kind == "agent" else "project"
     env = _env(TOKEN={"secret": "setup-token"}, AGENTWORKS_SESSION="forged")
     inputs = SetupInputs(
@@ -166,6 +179,8 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(db, registry, vm, nat
         invocation.checkpoint((claim,))
         assert read_native_setup(db, kind, name).records == ()
         calls.append(claim)
+        if fail_setup:
+            raise ExternalError("fixture setup interruption: private-value")
         return ArtifactApplication()
 
     monkeypatch.setattr(ShellIntegration, "user_init" if kind == "agent" else "workspace_init", initialize)
@@ -176,12 +191,15 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(db, registry, vm, nat
 
         monkeypatch.setattr(db, "insert_agent" if kind == "agent" else "insert_workspace", fail)
 
+    failures: list[SetupFailure] = []
+
     def create() -> None:
         if kind == "agent":
             realize_agent(
                 db,
                 MagicMock(),
                 registry,
+                setup_failures=failures,
                 name=name,
                 vm=vm,
                 template=ResolvedAgentTemplate("default"),
@@ -195,6 +213,7 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(db, registry, vm, nat
                 db,
                 MagicMock(),
                 registry,
+                setup_failures=failures,
                 name=name,
                 vm=vm,
                 template=ResolvedTemplate("default"),
@@ -202,16 +221,24 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(db, registry, vm, nat
                 setup_values={"setup-token": "private-value"},
             )
 
+        raise_setup_failures(failures)
+
     if fail_insert:
         with pytest.raises(ExternalError):
             create()
         assert read_native_setup(db, kind, name).records == ()
         (native.removed_agent if kind == "agent" else native.removed_project).assert_called_once()
     else:
-        create()
+        if fail_setup:
+            with pytest.raises(StateError):
+                create()
+        else:
+            create()
         (record,) = read_native_setup(db, kind, name).records
-        assert record.complete and record.claims == tuple(calls)
+        assert record.complete is not fail_setup and record.claims == tuple(calls)
         assert "private-value" not in record.model_dump_json()
+        assert (db.get_agent(name) if kind == "agent" else db.get_workspace(name)) is not None
+        (native.removed_agent if kind == "agent" else native.removed_project).assert_not_called()
     assert calls and native.loggers[0].closed
 
 
@@ -255,6 +282,7 @@ def test_failed_exclusive_creation_never_arms_realizer_rollback(db, registry, vm
             db,
             MagicMock(),
             registry,
+            setup_failures=[],
             name="a",
             vm=vm,
             template=ResolvedAgentTemplate("default"),
@@ -330,6 +358,7 @@ def test_config_secret_registration_and_delivery_share_actual_owner(db, vm, nati
                 logger=Mock(),
                 held=guard,
                 operation="agent-create",
+                failures=[],
                 buffered=True,
             )
         assert len(observed) == 1
@@ -350,6 +379,7 @@ def test_applied_state_appearing_after_empty_preparation_refuses_before_core(db,
             db,
             MagicMock(),
             registry,
+            setup_failures=[],
             name="a",
             vm=vm,
             template=template,
@@ -362,8 +392,10 @@ def test_applied_state_appearing_after_empty_preparation_refuses_before_core(db,
     assert read_native_setup(db, "agent", "a") == later
 
 
-@pytest.mark.parametrize("fail_user", [False, True])
-def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry, vm, native, monkeypatch, fail_user):
+@pytest.mark.parametrize("failed_components", [(), ("vm",), ("admin",), ("vm", "admin")])
+def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(
+    db, registry, vm, native, monkeypatch, failed_components
+):
     from agentworks.db import InitStatus
     from agentworks.debian import DebianRelease
     from agentworks.vms.initializer.driver import VMInitializationOperation, run_initialization
@@ -390,6 +422,8 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry,
         assert "ADMIN_ONLY" not in invocation.environment
         assert "AGENTWORKS_AGENT" not in invocation.environment
         events.append("vm")
+        if "vm" in failed_components:
+            raise ExternalError("VM setup failed: vm-private")
         return ArtifactApplication()
 
     def user_setup(self, invocation):
@@ -399,8 +433,8 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry,
         assert self.owner_kind == "vm" and self.owner_name == vm.name
         assert db.get_vm(vm.name).init_status != InitStatus.COMPLETE.value
         events.append("admin")
-        if fail_user:
-            raise RuntimeError("admin setup failed: vm-private")
+        if "admin" in failed_components:
+            raise ExternalError("admin setup failed: vm-private")
         return ArtifactApplication()
 
     def final_keys(*args, **kwargs):
@@ -414,6 +448,8 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry,
     monkeypatch.setattr(ShellIntegration, "user_init", user_setup)
     monkeypatch.setattr("agentworks.ssh.LOG_DIR", db.path.parent / "logs")
     logger = _RealSSHLogger(vm.name, "setup-fixture", redactions=("vm-private",))
+
+    failures: list[SetupFailure] = []
 
     def run() -> None:
         run_initialization(
@@ -432,17 +468,15 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry,
             operation=VMInitializationOperation.VM_REINIT,
             setup_inputs=inputs,
             setup_values={"vm-token": "vm-private"},
+            setup_failures=failures,
         )
 
-    if fail_user:
-        with pytest.raises(RuntimeError):
-            run()
-    else:
-        run()
-    assert events == ["core", "vm", "admin"] + ([] if fail_user else ["keys"])
+    run()
+    assert len(failures) == len(failed_components)
+    assert events == ["core", "vm", "admin", "keys"]
     logger.close()
     assert all("vm-private" not in (event.detail or "") for event in db.list_vm_events(vm.name))
     records = read_native_setup(db, "vm", vm.name).records
-    assert records[0].component == "vm" and records[0].complete
-    assert records[1].component == "admin" and records[1].complete is not fail_user
-    assert db.get_vm(vm.name).init_status == (InitStatus.FAILED if fail_user else InitStatus.COMPLETE).value
+    assert records[0].component == "vm" and records[0].complete == ("vm" not in failed_components)
+    assert records[1].component == "admin" and records[1].complete == ("admin" not in failed_components)
+    assert db.get_vm(vm.name).init_status == (InitStatus.PARTIAL if failed_components else InitStatus.COMPLETE).value
