@@ -127,9 +127,12 @@ node out over that same channel and fails create. Reading the address sends no k
 sends the key twice. `tailscale_join.py` gets:
 
 ```text
-read_tailnet_address(run_as_root, *, node: str) -> str
-settle_tailnet_address(run_as_root, *, node: str, rerun_hint: str) -> str
+read_tailnet_address(run_as_root, *, node: str, log=None) -> str
+settle_tailnet_address(run_as_root, *, node: str, rerun_hint: str, log=None) -> str
 ```
+
+`log` is the optional operation-log callable `root_script.run` takes; recover and rekey pass theirs,
+so the reads and the settle's logout are recorded.
 
 `read_tailnet_address` runs `tailscale ip -4` (15 s) through `root_script.run` up to
 `ADDRESS_READS = 6` times, `ADDRESS_PAUSE_SECONDS = 2` apart, accepting the first value
