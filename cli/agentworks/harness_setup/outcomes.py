@@ -2,9 +2,35 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from agentworks.errors import StateError
+from agentworks.resources.render import sanitize_fact_line
+
+# Remove complete terminal strings and escape sequences before the shared scalar
+# boundary strips remaining controls, including truncated or malformed sequences.
+_TERMINAL_SEQUENCES = re.compile(
+    r"(?:\x1b[\]PX^_]|[\x90\x98\x9d-\x9f]).*?(?:\x07|\x1b\\|\x9c|$)"
+    r"|(?:\x1b\[|\x9b)[0-?]*[ -/]*(?:[@-~]|$)|\x1b[ -/]*[@-~]",
+    re.DOTALL,
+)
+_DIAGNOSTIC_LIMIT = 2048
+_TRUNCATED = "... [truncated]"
+
+
+def sanitize_setup_diagnostic(text: str) -> str:
+    """Bound a setup diagnostic to one terminal-safe line and 2 KiB of UTF-8.
+
+    Callers redact credentials before this transformation or truncation. Render
+    persisted older diagnostics through the same boundary without rewriting state.
+    """
+    text = _TERMINAL_SEQUENCES.sub("", text)
+    text = sanitize_fact_line(" ".join(text.split()))
+    encoded = text.encode("utf-8")
+    if len(encoded) > _DIAGNOSTIC_LIMIT:
+        text = encoded[: _DIAGNOSTIC_LIMIT - len(_TRUNCATED)].decode("utf-8", errors="ignore") + _TRUNCATED
+    return text
 
 
 @dataclass(frozen=True)
@@ -19,17 +45,25 @@ class SetupFailure:
     hint: str | None = None
 
 
-def raise_setup_failures(failures: list[SetupFailure]) -> None:
-    """Fail the command once its independent setup work and state commits finish."""
+def describe_setup_failures(failures: list[SetupFailure]) -> str:
+    """Describe ordered failures for terminal errors or prerequisite repair hints."""
     if not failures:
-        return
+        return ""
     details = []
     for failure in failures:
+        facet = "admin" if failure.owner_kind == "vm" and failure.facet == "user" else failure.facet
         detail = (
-            f"{failure.owner_kind}/{failure.owner_name} facet={failure.facet} "
-            f"integration={failure.integration}: {failure.reason}"
+            f"{sanitize_setup_diagnostic(failure.owner_kind)}/{sanitize_setup_diagnostic(failure.owner_name)} "
+            f"facet={sanitize_setup_diagnostic(facet)} integration={sanitize_setup_diagnostic(failure.integration)}: "
+            f"{sanitize_setup_diagnostic(failure.reason)}"
         )
         if failure.hint:
-            detail += f" Repair: {failure.hint}"
+            detail += f" Repair: {sanitize_setup_diagnostic(failure.hint)}"
         details.append(detail)
-    raise StateError("Setup failed:\n" + "\n".join(details))
+    return "Setup failed:\n" + "\n".join(details)
+
+
+def raise_setup_failures(failures: list[SetupFailure]) -> None:
+    """Fail the command once its independent setup work and state commits finish."""
+    if failures:
+        raise StateError(describe_setup_failures(failures))
