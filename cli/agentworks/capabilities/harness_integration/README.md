@@ -347,10 +347,18 @@ their respective live owners, including resources still pending during session c
 
 A VM-family mutation guard spans core provisioning, integration setup, and failed-create cleanup.
 Setup checkpoints record confirmed native claims through instance state. Fresh agent and workspace
-applied-state records remain buffered until the owner row and desired overlay commit atomically;
-failed creation cleans up the newly owned native resource. Fresh agent creation refuses an existing
-unowned Linux account or home before arming rollback. Existing agents retain the create-or-converge
-reinit path. VM/admin setup finishes before the final VM initialization and SSH-identity checkpoint.
+applied-state records remain buffered until the owner row and desired overlay commit atomically. A
+core creation failure cleans up the newly owned native resource. A valid setup facet's domain or
+transport failure instead preserves confirmed progress, records the current failure and lets
+independent facets and core bookkeeping finish. The command reports collected failures at its outer
+boundary with a failing exit status; newly created owners and their partial records remain. Shared
+persistence failures, cancellation, invalid activation preflight and unexpected internal errors
+still abort immediately. Fresh agent creation refuses an existing unowned Linux account or home
+before arming rollback. Existing agents retain the create-or-converge reinit path. VM/admin setup
+finishes before the final VM initialization and SSH-identity checkpoint, even with collected facet
+failures. See
+[reconciling setup](../../../../docs/guides/harness-facets.md#inspecting-and-reconciling-setup) for
+inspection and repair.
 
 Session create, start, and restart check the integration's declared setup prerequisites before
 session mutation. These checks inspect evidence and native placement; they do not provision an
