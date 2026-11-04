@@ -253,8 +253,9 @@ pass the static check, and the package's tests pass with the legacy modules bloc
   - a platform that cannot report the address logs the node out over its provisioning channel and
     fails create, without a second join, and names the node when the logout fails;
   - a VM with pam_env settings gets a warning naming the file and still passes the contract;
-  - Phase A marks the VM `FAILED` and secures it on a failure or an interrupt before the contract
-    passes, and leaves `COMPLETE` once it has;
+  - Phase A secures the VM on a failure or an interrupt before the contract passes, a failure marks
+    it `FAILED`, the gate refuses any VM that is not `COMPLETE`, and `COMPLETE` is written once the
+    contract has passed;
   - `reachability.wait` stops at the first authentication failure.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history); rows I22 to I28 are in the HLA inventory.
