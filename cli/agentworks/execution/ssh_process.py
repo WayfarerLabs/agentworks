@@ -336,7 +336,7 @@ def exit_status(returncode: int) -> int:
 
 
 def run_terminal(argv: Sequence[str]) -> int:
-    """Run the client on the operator's terminal and return its exit status."""
+    """Run ``argv`` (the client, or a platform's own shell program) on the operator's terminal; return its status."""
     process = spawn(argv, stdin=None, stdout=None, stderr=None)
     try:
         return exit_status(process.wait())

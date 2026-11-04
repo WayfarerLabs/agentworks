@@ -25,7 +25,7 @@ from agentworks.capabilities.vm_platform.tailscale_join import (
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import StateError
-from agentworks.execution import root_script
+from agentworks.execution import root_script, ssh_process
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
 from agentworks.transports import WSL2Transport
@@ -941,6 +941,10 @@ class WSL2Platform(VMPlatform):
         ``ctx`` is unused: wsl.exe is local and needs no backend credential.
         """
         return _run_as_root(self._distro_name(vm), script, deadline)
+
+    def native_shell(self, vm: VMRow, ctx: RunContext) -> int:
+        """An interactive login shell as the admin: ``wsl.exe --distribution <distro> --user <admin>``."""
+        return ssh_process.run_terminal([_WSL, "--distribution", self._distro_name(vm), "--user", vm.admin_username])
 
     def native_transport(
         self,

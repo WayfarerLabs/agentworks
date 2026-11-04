@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow, VMStatus
     from agentworks.debian import DebianRelease
+    from agentworks.execution.errors import FeatureUnavailable
     from agentworks.execution.root_script import RawRun
     from agentworks.execution.trust import HostKey, TrustBinding
     from agentworks.transports import ExecTransport
@@ -221,8 +222,9 @@ class VMPlatform(Capability):
         """
         return None
 
-    # Operator guidance shown before attempting a native interactive shell.
-    # None means the platform declares full native interaction.
+    # Guidance for a platform that offers no native shell (it does not
+    # override :meth:`native_shell`): where its operator reaches a VM by hand.
+    # None points at the platform's console in general terms.
     native_shell_unavailable_hint: ClassVar[str | None] = None
 
     # Whether ``run_as_root``'s channel goes through the guest's sshd, so a
@@ -411,6 +413,20 @@ class VMPlatform(Capability):
         platform whose channel needs a credential.
         """
 
+    def native_shell(self, vm: VMRow, ctx: RunContext) -> int:
+        """Open an interactive login shell on the VM through the platform's own channel.
+
+        Optional: a platform offers one by overriding this, and the default
+        offers none. Core checks for the override with
+        :func:`require_native_shell` before the operation boundary, so a
+        platform without one is refused before any credential resolves. The
+        override runs the shell on the operator's terminal, without the VM's
+        Tailscale, and returns its exit status; core owns the terminal guard
+        around it. ``ctx`` is the op-start context, for a platform whose
+        channel needs a credential.
+        """
+        raise _native_shell_unavailable(self, vm.name)
+
     def read_host_keys(self, vm: VMRow, ctx: RunContext) -> tuple[HostKey, ...]:
         """The VM's public host keys, read through :meth:`run_as_root` by core's fixed script.
 
@@ -532,3 +548,19 @@ class VMPlatform(Capability):
         same way the transport hooks did.
         """
         return nullcontext()
+
+
+def require_native_shell(platform: VMPlatform, vm_name: str) -> None:
+    """Refuse a platform that does not override :meth:`VMPlatform.native_shell`.
+
+    Reads only the class, so a command calls it before its operation boundary
+    resolves anything.
+    """
+    if type(platform).native_shell is VMPlatform.native_shell:
+        raise _native_shell_unavailable(platform, vm_name)
+
+
+def _native_shell_unavailable(platform: VMPlatform, vm_name: str) -> FeatureUnavailable:
+    from agentworks.execution.errors import FeatureUnavailable
+
+    return FeatureUnavailable(vm_name, platform.name, "a native shell", platform.native_shell_unavailable_hint)

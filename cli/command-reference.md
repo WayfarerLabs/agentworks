@@ -638,6 +638,7 @@ just a vm-site.
 | `agw vm describe <name>`                            | Show VM details, workspaces, and event log                     |
 | `agw vm verify-connection <name>`                   | Test the canonical admin connection without starting the VM    |
 | `agw vm shell <name> [--workspace <ws>]`            | Admin shell on a VM (optionally rooted in a workspace)         |
+| `agw vm shell <name> --platform`                    | A shell through the platform's own channel, without Tailscale  |
 | `agw vm exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command as admin (optionally from a workspace)  |
 | `agw vm start <name>`                               | Start a stopped VM and clear its manual-stop intent            |
 | `agw vm stop <name>`                                | Stop a VM and keep it stopped (no auto-start)                  |
@@ -801,14 +802,15 @@ lives on a different VM is rejected with a `ValidationError` before any SSH work
 `vm shell`, `vm exec`, `vm verify-connection`, `vm port-forward`, `agent shell` and `agent exec`,
 and `vm create`, `vm reinit` and `vm confirm-release` for their checks of the VM, connect with the
 OpenSSH client on the workstation, version 8.5 or newer (`vm shell --platform` uses the platform's
-own path instead, and needs neither the client nor `python3`). Agentworks uses the first `ssh` on
-`PATH`; on Windows it uses only the native Win32-OpenSSH under `System32\OpenSSH` or
-`Program Files\OpenSSH`, never the `ssh` bundled with Git for Windows. `agw doctor` shows which
-client was resolved, and an unsupported one is refused before anything else runs. These commands run
-`ssh -F none` in batch mode, so `~/.ssh/config` does not apply and an encrypted private key must be
-loaded in the SSH agent. The VM needs `python3`; a VM without it is reported as unable to run
-Agentworks requests, and `agw vm recover <name>` installs it. A command that is not found exits 127,
-one that cannot run exits 126, and a missing workspace directory exits 125.
+own path instead and needs no `python3`; it needs the client only for Remote Lima and the clouds).
+Agentworks uses the first `ssh` on `PATH`; on Windows it uses only the native Win32-OpenSSH under
+`System32\OpenSSH` or `Program Files\OpenSSH`, never the `ssh` bundled with Git for Windows.
+`agw doctor` shows which client was resolved, and an unsupported one is refused before anything else
+runs. These commands run `ssh -F none` in batch mode, so `~/.ssh/config` does not apply and an
+encrypted private key must be loaded in the SSH agent. The VM needs `python3`; a VM without it is
+reported as unable to run Agentworks requests, and `agw vm recover <name>` installs it. A command
+that is not found exits 127, one that cannot run exits 126, and a missing workspace directory
+exits 125.
 
 `vm port-forward` runs until interrupted and exits 0 when stopped with Ctrl-C or `SIGTERM`. It exits
 non-zero when a forward cannot be set up, such as a busy local port.
@@ -817,24 +819,28 @@ In both exec commands the `--` separator is only required when the remote comman
 starts with `-` (it stops Agentworks from reading the token as its own option); without it, a
 dash-led first token is rejected with a hint naming the recoveries. Bare commands need no `--`.
 
-Combining `--workspace` with `--platform` works (the shell still `cd`s into the workspace) but the
-workspace's template env and the `AGENTWORKS_WORKSPACE` identity vars are not delivered: the
-platform-native transports (`limactl shell`, `wsl.exe`) drop the `env=` kwarg by design. Treat
-`--platform` as a transport-repair escape hatch, not a routine combination.
+`agw vm shell --platform` opens a shell through the platform's own channel instead of Tailscale:
+`limactl shell` for Lima and Remote Lima (as Lima's own guest user), `wsl.exe` for WSL2, and SSH to
+the VM's public address for AWS, Azure and GCP. Use it when Tailscale itself is what you need to
+reach the VM to fix (the issue #117 latched DNS state is the canonical case: its heal restarts
+`tailscaled`, which would end a shell over the tailnet mid-sequence); `agw vm recover <name>`
+repairs the common cases without a shell. The shell gets the account's own login environment: no
+environment from the VM template or the admin settings, and no secret, is resolved for it. It takes
+no `--workspace`; combining the two is refused, so `cd` into the workspace directory inside the
+shell instead. A platform without a native shell is refused before anything is resolved: Proxmox's
+QEMU Guest Agent runs commands but provides no terminal, so use the Proxmox web UI's serial console
+(`VM > Console` in the Proxmox VE web UI) there.
 
-`agw vm shell --platform` opens the same shell over the platform-native transport (`limactl shell`
-for Lima, `wsl.exe` for WSL2, SSH via the VM's public IP for Azure) instead of Tailscale. Useful
-when Tailscale itself is the thing you need to reach the VM to fix (the issue #117 latched DNS state
-is the canonical case: its heal involves restarting tailscaled, which would terminate a
-Tailscale-SSH session mid-sequence). On Azure, the VM's firewall denies all inbound traffic at
-baseline; for the duration of the session an ephemeral SSH allow rule scoped to your detected public
-IP is created (one per session, so concurrent sessions never tear down each other's access), and
-removed again on exit (the public IP itself is permanent). If your SSH traffic egresses through a
-different address than the detection sees (VPN split tunnel, proxy, CGNAT), set `ssh_allow_cidrs` in
-the config's `[operator]` section to a list of IPv4 addresses and/or CIDRs to allow additionally; if
-detection fails entirely, those entries are used alone. Proxmox QGA supplies native non-interactive
-execution, but it does not provide the interactive terminal required by this flag. Use the Proxmox
-web UI's serial console (`VM > Console` in the Proxmox VE web UI) as the equivalent escape hatch.
+On a cloud VM the shell connects as every VM connection does (`ssh -F none`, your configured key,
+the VM's recorded host key), so it refuses a VM with no recorded host key before opening anything,
+and an encrypted key must be loaded in the SSH agent. The VM's firewall denies all inbound traffic
+at baseline; for the duration of the session a temporary SSH allow rule scoped to your detected
+public IP is created (one per session, so concurrent sessions never tear down each other's access)
+and removed again on exit. If your SSH traffic egresses through a different address than the
+detection sees (VPN split tunnel, proxy, CGNAT), set `ssh_allow_cidrs` in the config's `[operator]`
+section to a list of IPv4 addresses and/or CIDRs to allow additionally; if detection fails entirely,
+those entries are used alone. A shell that ends with status 255 gets a notice that the connection
+may have dropped.
 
 #### Host keys
 

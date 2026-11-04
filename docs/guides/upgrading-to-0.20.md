@@ -69,11 +69,11 @@ the import. That covers `vm shell`, `vm exec`, `vm reinit`, `vm backup`, `vm por
 VM that any of them would trigger; `vm rekey` checks first so it never spends a Tailscale auth key.
 Two commands differ. `vm start` resolves no key at all: it starts the VM, and its wait then refuses
 with the same hint, so the VM is left running. `vm shell --platform` on a cloud VM (AWS, Azure, GCP)
-resolves credentials and opens its temporary network rule first and then refuses. On a running VM,
-`agw vm recover NAME` is the one command that repairs a VM without a record: it reads the keys
-through the platform and records them once you confirm their fingerprints, without a file to import.
-`vm describe`, `session describe` and the status listings that span several VMs warn that the VM has
-no record, leave out what they would have read over SSH, and carry on.
+resolves the site's credentials first and then refuses, before it opens any network rule. On a
+running VM, `agw vm recover NAME` is the one command that repairs a VM without a record: it reads
+the keys through the platform and records them once you confirm their fingerprints, without a file
+to import. `vm describe`, `session describe` and the status listings that span several VMs warn that
+the VM has no record, leave out what they would have read over SSH, and carry on.
 
 `vm delete` still works without a record, because deleting is what you do with a broken VM. It
 cannot reach a cloud VM (AWS, Azure, GCP) to log its node out of Tailscale, though, so that step is
@@ -103,8 +103,10 @@ that sends each request over the OpenSSH client's standard input instead of on t
 line. For `vm create` that is everything after the platform has created the VM and joined it to the
 tailnet; for `vm reinit`, its checks of the VM (see
 [Create, reinit and the VM contract](#create-reinit-and-the-vm-contract)). `vm shell --platform`
-keeps its platform-native path and needs none of what follows. Everything else keeps its current
-path for now.
+uses the platform's own channel instead and needs no `python3`; on a cloud VM that channel is SSH to
+its public address under the same rules (see
+[Start, recover, rekey and delete](#start-recover-rekey-and-delete)). Everything else keeps its
+current path for now.
 
 ### What these commands need
 
@@ -213,5 +215,12 @@ VM or spends a Tailscale auth key.
 - **`vm rekey`** runs its steps as one script through the platform's own channel and keeps an
   operation log. When the new address cannot be read, the node is logged out and the error names
   `agw vm recover`.
+- **`vm shell --platform` no longer takes `--workspace`.** Combining the two is refused; `cd` into
+  the workspace directory inside the shell instead. The shell gets the account's own login
+  environment, with nothing from the VM template or admin settings and no secret resolved for it. On
+  a cloud VM it connects as every other VM connection does: `ssh -F none` with your configured key,
+  so `~/.ssh/config` does not apply and an encrypted key must be loaded in the SSH agent, and it
+  refuses a VM with no recorded host key. A platform without a native shell (Proxmox) is refused
+  before anything is resolved.
 - **`vm delete`** reports whether the logout worked. It does not log out a cloud VM whose host key
   was never recorded, and names the node to remove in the Tailscale admin console instead.

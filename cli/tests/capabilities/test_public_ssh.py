@@ -102,6 +102,21 @@ def test_a_provider_address_that_is_not_one_literal_host_is_refused(host: str) -
         PublicSSH(host, "agw", Path("/k"), TrustBinding(TrustMode.VM, "box"))
 
 
+def test_the_shell_asks_for_a_terminal_and_runs_the_admins_login_shell(monkeypatch: pytest.MonkeyPatch) -> None:
+    argvs: list[list[str]] = []
+    monkeypatch.setattr(
+        "agentworks.capabilities.vm_platform.public_ssh.ssh_process.run_terminal",
+        lambda argv: argvs.append(list(argv)) or 255,
+    )
+
+    assert target().shell() == 255
+
+    (argv,) = argvs
+    assert argv[1:4] == ["-F", "none", "-t"]
+    # No remote command: the host is last, so sshd starts the admin's login shell.
+    assert argv[-3:] == ["agw", "--", "203.0.113.7"]
+
+
 # -- The client log ----------------------------------------------------------------------
 
 
@@ -288,6 +303,32 @@ def test_a_cloud_vm_with_a_record_refuses_an_unverified_host_key_read(
 
     assert cloud.events == []
     assert cloud.bindings == []
+
+
+@pytest.mark.parametrize("factory", CLOUDS, ids=["aws", "azure", "gcp"])
+def test_a_clouds_native_shell_runs_inside_its_own_route_after_the_probe(
+    monkeypatch: pytest.MonkeyPatch, factory: Callable[[], Any]
+) -> None:
+    cloud = _Cloud(monkeypatch, factory, "203.0.113.7")
+    seed_vm_trust("box")
+    monkeypatch.setattr(PublicSSH, "shell", lambda access: cloud._ran("shell") or 3)
+
+    assert cloud.platform.native_shell(_vm(), _ctx()) == 3
+
+    assert cloud.events == ["route-open", "probe", "shell", "route-close"]
+    assert [binding.mode for binding in cloud.bindings] == [TrustMode.VM]
+
+
+@pytest.mark.parametrize("factory", CLOUDS, ids=["aws", "azure", "gcp"])
+def test_a_clouds_native_shell_for_a_vm_with_no_record_opens_no_route(
+    monkeypatch: pytest.MonkeyPatch, factory: Callable[[], Any]
+) -> None:
+    cloud = _Cloud(monkeypatch, factory, "203.0.113.7")
+
+    with pytest.raises(TrustMissing):
+        cloud.platform.native_shell(_vm(), _ctx())
+
+    assert cloud.events == []
 
 
 # GCP's address read raises GCEError itself for an instance with no external address.

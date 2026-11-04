@@ -76,6 +76,34 @@ def test_the_root_channel_is_limactl_shell_with_the_script_only_on_stdin(
     assert not any("tskey-private" in argument for argument in argv)
 
 
+@pytest.mark.parametrize(
+    ("host", "tail"),
+    [
+        (None, ["limactl", "shell", "vm1"]),
+        ("me@gpu-box", ["--", "me@gpu-box", "$SHELL -lc 'limactl shell vm1'"]),
+    ],
+    ids=["local", "remote"],
+)
+def test_the_native_shell_is_limactl_shell_on_the_operators_terminal(
+    monkeypatch: pytest.MonkeyPatch, host: str | None, tail: list[str]
+) -> None:
+    argvs: list[list[str]] = []
+    monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: SSHClient("/usr/bin/ssh", (9, 2)))
+    monkeypatch.setattr(
+        "agentworks.capabilities.vm_platform.lima_host.ssh_process.run_terminal",
+        lambda argv: argvs.append(list(argv)) or 7,
+    )
+
+    assert LimaHost(host).shell("vm1") == 7
+
+    (argv,) = argvs
+    assert argv[-len(tail) :] == tail
+    if host is not None:
+        # A terminal for the hop, and no batch mode: the operator's interactive hop may prompt.
+        assert "-t" in argv
+        assert "BatchMode=yes" not in argv
+
+
 @pytest.mark.skipif(shutil.which("sleep") is None, reason="needs sleep")
 def test_a_command_that_outlives_its_timeout_is_a_typed_failure() -> None:
     with pytest.raises(LimaCommandFailed):

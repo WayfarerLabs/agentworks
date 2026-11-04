@@ -153,7 +153,7 @@ def test_vm_shell_platform_flag_routes_native(monkeypatch: pytest.MonkeyPatch) -
         captured,
     )
     assert result.exit_code == 0, result.output
-    assert captured["platform_transport"] is True
+    assert captured["native_shell"] is True
 
 
 def test_vm_shell_provisioner_alias_is_removed(

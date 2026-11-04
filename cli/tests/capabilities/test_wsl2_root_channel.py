@@ -46,3 +46,18 @@ def test_on_windows_wsl_exe_is_named_by_absolute_path(environ: dict[str, str], e
 
     assert PureWindowsPath(program).is_absolute()
     assert program == expected
+
+
+def test_the_native_shell_is_a_login_shell_as_the_admin(monkeypatch: pytest.MonkeyPatch) -> None:
+    argvs: list[list[str]] = []
+    monkeypatch.setattr(
+        "agentworks.capabilities.vm_platform.wsl2.ssh_process.run_terminal",
+        lambda argv: argvs.append(list(argv)) or 0,
+    )
+    vm: Any = SimpleNamespace(name="dev", admin_username="agw", platform_metadata={"distro_name": "team-dev"})
+
+    WSL2Platform("wsl2", {"name": "wsl2"}).native_shell(vm, RunContext())
+
+    (argv,) = argvs
+    # No --exec, so the admin's login shell starts with its startup files.
+    assert argv[1:] == ["--distribution", "team-dev", "--user", "agw"]

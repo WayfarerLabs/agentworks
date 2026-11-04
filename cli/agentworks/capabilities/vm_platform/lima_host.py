@@ -1,7 +1,7 @@
 """Where a Lima site's ``limactl`` runs: this machine, or the site's placement host over SSH.
 
 :class:`LimaHost` runs ``limactl`` commands, the VM's root channel
-(``limactl shell <instance> sudo -n /bin/bash -s``) and, on a placement host,
+(``limactl shell <instance> sudo -n /bin/bash -s``), its native shell and, on a placement host,
 the detached create that must survive the workstation's connection. A remote
 command runs under the host user's login shell (``$SHELL -lc``), which is
 what puts Homebrew's ``limactl`` on its ``PATH``, through the host policy
@@ -17,7 +17,7 @@ import shlex
 import subprocess
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import agentworks.execution as execution
 from agentworks import output
@@ -99,6 +99,15 @@ class LimaHost:
         return root_script.run_process(
             self._argv(f"limactl shell {shlex.quote(instance)} sudo -n /bin/bash -s"), script, deadline
         )
+
+    def shell(self, instance: str) -> int:
+        """An interactive ``limactl shell <instance>`` on the operator's terminal; returns its exit status.
+
+        Remotely the host connection asks for a terminal (``ssh -t``) and runs
+        ``limactl`` under the host user's login shell, as every remote command does.
+        """
+        command = f"limactl shell {shlex.quote(instance)}"
+        return ssh_process.run_terminal(self._argv(command, mode=ssh_process.ArgvMode.TERMINAL))
 
     def upload(self, path: str, content: str) -> None:
         """Write ``content`` to ``path``, mode 0600, through stdin, never an argument."""
@@ -217,11 +226,16 @@ class LimaHost:
     def _returncode(self, command: str) -> int:
         return self._execute(command, input=None, timeout=None).returncode
 
-    def _argv(self, command: str) -> list[str]:
+    def _argv(
+        self,
+        command: str,
+        *,
+        mode: Literal[ssh_process.ArgvMode.PIPE, ssh_process.ArgvMode.TERMINAL] = ssh_process.ArgvMode.PIPE,
+    ) -> list[str]:
         if self.host is None:
             return shlex.split(command)
         return ssh_process.build_host_argv(
-            execution.resolve_ssh(), self.host, ssh_process.ArgvMode.PIPE, f"$SHELL -lc {shlex.quote(command)}"
+            execution.resolve_ssh(), self.host, mode, f"$SHELL -lc {shlex.quote(command)}"
         )
 
     def _execute(self, command: str, *, input: str | None, timeout: float | None) -> _Completed:

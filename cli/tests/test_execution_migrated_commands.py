@@ -73,9 +73,7 @@ def test_vm_shell_platform_does_not_need_an_openssh_client(monkeypatch: pytest.M
     monkeypatch.setattr("agentworks.execution.resolve_ssh", unsupported)
 
     with pytest.raises(AssertionError, match="database was read"):
-        vm_manager.shell_vm(
-            UntouchableDatabase(), SimpleNamespace(), "box", platform_transport=True, interaction=REFUSE
-        )  # type: ignore[arg-type]
+        vm_manager.shell_vm(UntouchableDatabase(), SimpleNamespace(), "box", native_shell=True, interaction=REFUSE)  # type: ignore[arg-type]
 
 
 # -- The agent probe: an unreachable VM versus an agent that predates the rollout (I19) ------

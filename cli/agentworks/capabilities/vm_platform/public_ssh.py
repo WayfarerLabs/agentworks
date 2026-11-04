@@ -10,7 +10,7 @@ record, or an Unverified provisioning binding where a create or a host-key
 read has no record to verify against.
 
 :class:`PublicAddressPlatform` is the clouds' shared base: it implements
-``run_as_root`` and ``read_host_keys`` over one route-scoped connection,
+``run_as_root``, ``read_host_keys`` and ``native_shell`` over one route-scoped connection,
 and each cloud supplies only how to read its live public address.
 
 This module imports nothing from the legacy transport stack.
@@ -91,6 +91,13 @@ class PublicSSH:
             )
         return raw
 
+    def shell(self) -> int:
+        """An interactive login shell as the admin on the operator's terminal; returns ssh's status."""
+        argv = ssh_process.build_argv(
+            execution.resolve_ssh(), self._policy, self._destination, ssh_process.ArgvMode.TERMINAL
+        )
+        return ssh_process.run_terminal(argv)
+
     def wait_until_answering(self, *, failure_hint: str | None) -> None:
         """Probe with ``true`` until one completes: a fresh firewall allow can take seconds to apply.
 
@@ -148,6 +155,16 @@ class PublicAddressPlatform(VMPlatform):
         trust.require_record(vm.name)
         with self._public_ssh(vm, ctx, TrustBinding(TrustMode.VM, vm.name)) as target:
             return target.run_as_root(script, deadline)
+
+    def native_shell(self, vm: VMRow, ctx: RunContext) -> int:
+        """An interactive shell as the admin over SSH to the public address, inside its own route.
+
+        Like :meth:`run_as_root`, a VM with no host-key record raises
+        ``TrustMissing`` before any route opens.
+        """
+        trust.require_record(vm.name)
+        with self._public_ssh(vm, ctx, TrustBinding(TrustMode.VM, vm.name)) as target:
+            return target.shell()
 
     def read_host_keys(self, vm: VMRow, ctx: RunContext) -> tuple[HostKey, ...]:
         """The host keys of a VM with no record, read at its public address under an Unverified file.

@@ -399,13 +399,14 @@ def vm_shell(
         typer.Option(
             "--platform",
             help=(
-                "Use the platform-native interactive transport, when available, to access the VM without Tailscale SSH."
+                "Open the platform's own shell (limactl, wsl.exe, or SSH to a cloud VM's public address), "
+                "which works without the VM's Tailscale."
             ),
         ),
     ] = False,
     workspace: Annotated[
         str | None,
-        typer.Option("--workspace", help="cd into a workspace"),
+        typer.Option("--workspace", help="cd into a workspace (not with --platform)"),
     ] = None,
 ) -> None:
     """Open a shell on a VM as the admin user."""
@@ -418,7 +419,7 @@ def vm_shell(
             get_db(),
             load_config(),
             name,
-            platform_transport=platform,
+            native_shell=platform,
             workspace_name=workspace,
             interaction=interaction,
         )

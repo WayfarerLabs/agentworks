@@ -708,6 +708,10 @@ class LimaPlatform(VMPlatform):
         """
         return self._host.run_as_root(self._instance_name(vm), script, deadline)
 
+    def native_shell(self, vm: VMRow, ctx: RunContext) -> int:
+        """An interactive ``limactl shell``, as Lima's own guest user, locally or through the placement host."""
+        return self._host.shell(self._instance_name(vm))
+
     def native_transport(
         self,
         vm: VMRow,
