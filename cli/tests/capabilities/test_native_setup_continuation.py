@@ -31,7 +31,7 @@ def test_multiple_failures_keep_execution_and_report_order(setup_case):
         raise_setup_failures(failures)
     rendered = str(caught.value)
     assert rendered.index("integration=first") < rendered.index("integration=second")
-    assert all(item.reason in rendered and item.hint in rendered for item in failures)
+    assert all(item.reason in rendered and item.hint is not None and item.hint in rendered for item in failures)
     raise_setup_failures([])
 
 
@@ -178,7 +178,6 @@ def test_failure_message_and_hint_redact_all_operation_secrets(setup_case, monke
     if with_logger:
         monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
         logger = SSHLogger("fixture", "setup", redactions=(extra,))
-        logger.warning = Mock(wraps=logger.warning)
     invocation.runner.logger = logger
     invocation = replace(invocation, secrets={"token": token, "overlap": token[:8]})
     reason = f"{uuid4()}: {token} {shlex.quote(token)} {extra if with_logger else ''}"
@@ -197,12 +196,14 @@ def test_failure_message_and_hint_redact_all_operation_secrets(setup_case, monke
         raise_setup_failures(failures)
     surfaces = [state.model_dump_json(), str(failures), str(caught.value)]
     if logger is not None:
-        assert logger.warning.call_count == 1
+        assert len(logger.warnings) == 1
         surfaces.extend((str(logger.warnings), logger.path.read_text()))
     assert all(token not in surface and shlex.quote(token) not in surface for surface in surfaces)
     if with_logger:
         assert all(extra not in surface for surface in surfaces)
-    assert "[REDACTED]" in failures[0].reason and "[REDACTED]" in failures[0].hint
+    failure = failures[0]
+    assert failure.hint is not None
+    assert "[REDACTED]" in failure.reason and "[REDACTED]" in failure.hint
     assert state == read_native_setup(db, "agent", "agent")
 
 
