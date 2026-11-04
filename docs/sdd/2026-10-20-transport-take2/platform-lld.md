@@ -265,15 +265,15 @@ the agent, as for every VM connection.
 
 Changes to `capabilities/vm_platform/base.py`, under `contract_version` 2 (slice 3's bump):
 
-| Member                                                      | After this slice                                                                                                                                                         |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `run_as_root(vm, ctx, script, deadline)`                    | New, abstract, and in the descriptor's `required_operations` (`capabilities/vm_platform/kinds.py:138`)                                                                   |
-| `recovery_needs_guest_sshd: ClassVar[bool]`                 | New, annotation only, in `required_attributes` (`kinds.py:140`); the generic mechanism refuses a platform without it (`capabilities/conformance.py:152`)                 |
-| `read_host_keys(vm, ctx) -> tuple[HostKey, ...]`            | New with a default, `root_script.read_host_keys(partial(self.run_as_root, vm, ctx))`; the clouds override it                                                             |
-| `native_shell(vm, ctx) -> int`                              | New. The default raises `FeatureUnavailable`; a platform offers a shell by overriding it, and core checks `type(platform).native_shell is VMPlatform.native_shell` first |
-| `native_shell_unavailable_hint`                             | Kept, as guidance text only (Proxmox's console pointer, `plugins/proxmox/platform.py:154-158`)                                                                           |
-| `native_transport`, `transient_route`, `probe_failure_hint` | Deleted (`base.py:335`, `:408`, `:203`). The clouds keep a private `_transient_route(vm, ctx)` reading `ctx.config`, and their hint as a module constant                 |
-| `ProvisionRequest.ssh_private_key`                          | `Path`, not `Path \| None`: create always passes `config.operator.ssh_private_key` (`vms/manager/lifecycle.py:510`), a required `Path` (`config/models.py:29`)           |
+| Member                                                      | After this slice                                                                                                                                                                                                         |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `run_as_root(vm, ctx, script, deadline)`                    | New, abstract, and in the descriptor's `required_operations` (`capabilities/vm_platform/kinds.py:138`)                                                                                                                   |
+| `recovery_needs_guest_sshd: ClassVar[bool]`                 | New, annotation only, in `required_attributes` (`kinds.py:140`); the generic mechanism refuses a platform without it (`capabilities/conformance.py:152`)                                                                 |
+| `read_host_keys(vm, ctx) -> tuple[HostKey, ...]`            | New with a default, `root_script.read_host_keys(partial(self.run_as_root, vm, ctx))`; the clouds override it                                                                                                             |
+| `native_shell(vm, ctx) -> int`                              | New. The default raises `FeatureUnavailable`; a platform offers a shell by overriding it, and core checks first with `require_native_shell`, which compares `type(platform).native_shell` with `VMPlatform.native_shell` |
+| `native_shell_unavailable_hint`                             | Kept, as guidance text only (Proxmox's console pointer, `plugins/proxmox/platform.py:154-158`)                                                                                                                           |
+| `native_transport`, `transient_route`, `probe_failure_hint` | Deleted (`base.py:335`, `:408`, `:203`). The clouds keep a private `_transient_route(vm, ctx)` reading `ctx.config`, and `_probe_failure_hint`, both abstract on `PublicAddressPlatform`                                 |
+| `ProvisionRequest.ssh_private_key`                          | `Path`, not `Path \| None`: create always passes `config.operator.ssh_private_key` (`vms/manager/lifecycle.py:510`), a required `Path` (`config/models.py:29`)                                                           |
 
 The docstrings that present the route as a public hook (`:355-375`, `:377-406`, `:433-460`) are
 rewritten to match. `root_script.read_host_keys(run_as_root)` runs `cat /etc/ssh/ssh_host_*_key.pub`
@@ -434,14 +434,15 @@ which holds the root channel once. Each cloud supplies two things:
 (`plugins/aws/platform.py:703-718`, `plugins/azure/platform.py:800-824`,
 `plugins/gcp/platform.py:580-597`), and `public_address_hint`, its own console hint, an abstract
 property each cloud sets as a class attribute, so registration refuses a cloud without it. The
-base's private context manager `_public_ssh(vm, ctx, binding)` opens
-`transient_route(vm, ctx, config=ctx.config)`, reads the address, and raises `StateError` with
-`public_address_hint` when it is empty, where the factory raised it for every platform
-(`transports/__init__.py:215-228`, incident row I32); GCP's read raises `GCEError` itself instead.
-It then builds `PublicSSH(address, admin, identity_file, binding)` with the identity file from
+base's private context manager `_public_ssh(vm, ctx, binding)` opens the cloud's
+`_transient_route(vm, ctx)`, reads the address, and raises `StateError` with `public_address_hint`
+when it is empty, where the factory raised it for every platform (`transports/__init__.py:215-228`,
+incident row I32); GCP's read raises `GCEError` itself instead. It then builds
+`PublicSSH(address, admin, identity_file, binding)` with the identity file from
 `ctx.config.operator.ssh_private_key` (every operation's context carries the configuration), runs
-`wait_until_answering(failure_hint=probe_failure_hint)`, and yields it for as long as the route is
-open. Then:
+`wait_until_answering(failure_hint=self._probe_failure_hint)`, and yields it for as long as the
+route is open. `_transient_route` and `_probe_failure_hint` are abstract members of the base, which
+each cloud supplies and nothing outside the cloud calls. Then:
 
 - `run_as_root`: `trust.require_record(vm.name)` first, so a VM with no record opens no firewall
   rule, then `run_as_root(script, deadline)` inside `_public_ssh` under VM trust.
@@ -450,7 +451,8 @@ open. Then:
   (`trust.py:281-299`) and `_public_ssh` under that binding,
   `root_script.read_host_keys(target.run_as_root)` under that Unverified file. HLA D9's only
   post-provisioning use of Unverified.
-- `native_shell`: inside the route, the probe, then `shell()`.
+- `native_shell`: `trust.require_record(vm.name)` first, as for `run_as_root`, then inside the route
+  under VM trust, the probe, then `shell()`.
 - `create` builds
   `PublicSSH(public address, admin, request.ssh_private_key, request.provisioning_trust)` where it
   builds an `SSHTransport` (`aws/platform.py:573-582`, `azure/platform.py:643-652`,
@@ -468,11 +470,11 @@ one). `recovery_needs_guest_sshd = True`. Unverified provisioning before enrollm
 `root_script.run(partial(platform.run_as_root, vm, ctx), ...)`. Core reads a script's status only as
 zero or non-zero; a failed check prints its reason on stderr and exits 1.
 
-| Script | What it does, in order                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Deadline | Secret   |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- | -------- |
-| Repair | Append `/usr/sbin:/sbin` to `PATH` (`dpkg` needs `ldconfig` and `start-stop-daemon` on it). Fail if the admin account is missing. Append the configured public key to the admin's `authorized_keys` unless the exact line is there, first adding a newline when the file's last byte is not one, with today's modes (`bootstrap_script.py:143-155`). When `REPAIR_SSHD=1`, create `/run/sshd`, fail if `sshd -t` fails, then `systemctl unmask`, `enable` and `restart ssh.service`, before the package install. Unless `dpkg -s python3` succeeds, `apt-get update` and `DEBIAN_FRONTEND=noninteractive apt-get install -y python3`, both with `-o DPkg::Lock::Timeout=120` and their output on stderr. Fail if `tailscale` is missing, start `tailscaled` unless `systemctl is-active` says it runs, then read `BackendState` from `tailscale status --json` with python3: `Running` does nothing, `NeedsLogin` runs `JOIN_FRAGMENT` and prints `joined`, anything else fails naming the state | 600 s    | auth key |
-| Rekey  | `trap '' HUP PIPE`; today's sequence (`vms/manager/power.py:499-518`): restart `tailscaled`, logout, `JOIN_FRAGMENT`, restart, each followed by 15 s, the logout under `timeout 60`. Each step's output is captured with its status, the first failure stops the sequence, and the buffer is printed once at the end (A channel that drops)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | 180 s    | auth key |
-| Logout | `trap '' HUP PIPE`; `out=$(tailscale logout 2>&1) \|\| s=$?`, then `printf` the output with `\|\| true` and exit with `s`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 30 s     | none     |
+| Script | What it does, in order                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Deadline | Secret   |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | -------- |
+| Repair | Append `/usr/sbin:/sbin` to `PATH` (`dpkg` needs `ldconfig` and `start-stop-daemon` on it). Fail if the admin account is missing. Append the configured public key to the admin's `authorized_keys` unless the exact line is there, first adding a newline when the file's last byte is not one, with today's modes (`bootstrap_script.py:143-155`). When `REPAIR_SSHD=1`, create `/run/sshd`, fail if `sshd -t` fails, then `systemctl unmask`, `enable` and `restart ssh.service`, before the package install. Unless `dpkg -s python3` succeeds, `apt-get update` and `DEBIAN_FRONTEND=noninteractive apt-get install -y python3`, both with `-o DPkg::Lock::Timeout=120` and their output on stderr. Fail if `tailscale` is missing, start `tailscaled` unless `systemctl is-active` says it runs, then read `BackendState` from `tailscale status --json` with python3, reading it again up to 15 times two seconds apart while it is `NoState` or `Starting` (a daemon just started reads those before it settles): `Running` does nothing, `NeedsLogin` runs `JOIN_FRAGMENT` and prints `joined`, anything else fails naming the state | 600 s    | auth key |
+| Rekey  | `trap '' HUP PIPE`; today's sequence (`vms/manager/power.py:499-518`): restart `tailscaled`, logout, `JOIN_FRAGMENT`, restart, each followed by 15 s, the logout under `timeout 60`. Each step's output is captured with its status, the first failure stops the sequence, and the buffer is printed once at the end (A channel that drops)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | 180 s    | auth key |
+| Logout | `trap '' HUP PIPE`; `out=$(tailscale logout 2>&1) \|\| s=$?`, then `printf` the output with `\|\| true` and exit with `s`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | 30 s     | none     |
 
 - `dpkg -s python3` covers both of agw-launch's `VMNotReady` causes: Debian's `python3` package
   depends on its standard library, so a VM with only `python3-minimal`, the `STDLIB_MISSING` case
@@ -509,9 +511,10 @@ over SSH at ADDRESS") whose hint is `Run 'agw vm recover x'.`; the wait's own ra
 - `start_vm` replaces the rejoin block and its auth-key resolution (`vms/manager/power.py:85-120`)
   with `_await_tailnet` inside the same `hold_active()`. The `trust.require_record` before the
   boundary goes (`:53-56`): a stopped VM with no record must still start, so that its wait raises
-  `TrustMissing` naming recover, which refuses a stopped VM. Otherwise an idle-stopped VM from
-  before the host-key store could neither start nor be recovered. `LiveVMNode.auto_start` keeps its
-  check, since the gating commands' own boundary refuses such a VM earlier.
+  `TrustMissing` naming recover, which refuses a stopped VM. When the start booted the VM, that
+  error's hint adds that the VM is left running. Otherwise an idle-stopped VM from before the
+  host-key store could neither start nor be recovered. `LiveVMNode.auto_start` keeps its check,
+  since the gating commands' own boundary refuses such a VM earlier.
 - `LiveVMNode.auto_start` replaces `_tailscale_rejoin_required` and `_ensure_tailscale`
   (`vms/nodes.py:265-282`) with `_await_tailnet(..., already_running=False)` inside `vm_active`.
 - `_ensure_tailscale`, `_tailscale_rejoin_required` and `_tailscale_logout` are deleted
@@ -570,7 +573,9 @@ that a broken SSH server there needs the provider console or recreation.
 ### `vm rekey`
 
 The boundary and the running check stay (`power.py:401-464`), and rekey gains an operation log built
-the same way (the `rekey` stem). The native transport and the per-step commands (`:480-528`) become
+the same way (the `rekey` stem). Before the boundary it runs `verify_tailscale_available()`, as
+recover does: its final wait reaches the VM over the tailnet, so a workstation off Tailscale is
+refused before the key is spent. The native transport and the per-step commands (`:480-528`) become
 the rekey script under the existing gate, then `settle_tailnet_address`, which replaces today's own
 `tailscale ip -4` read (`:520-527`). Then, as today, the address is recorded, the SSH config synced
 and the `rekey` event written (`:532-534`), then `wait_for_share` and `reachability.wait` on the
@@ -607,15 +612,16 @@ returns.
 
 ### `vm shell --platform`
 
-`shell_vm` (`vms/manager/exec.py:119-129`, `:163-178`) refuses `--workspace` with `--platform`
-before anything else, with the hint to `cd` inside the shell. It checks for the override right after
-resolving the site, before the boundary, and raises `FeatureUnavailable` with the platform's hint
-when there is none. Otherwise, inside `gated_vm_platform_recovery_boundary` with no environment
-targets, it runs `platform.native_shell(vm, ops_ctx)` under `guarded_terminal`, sets `clean_exit` on
-a zero status, and after the guard prints the 255 notice (I6) without claiming the cause: "the
-native shell ended with status 255 (the connection may have dropped); terminal restored". The
-environment is not composed and its secrets are not resolved (R7: the native shell does not seed
-it). `platform_shell.py` is deleted.
+`shell_vm` (`vms/manager/exec.py:119-129`, `:163-178`) hands `--platform` to `_shell_native`, which
+refuses `--workspace` before anything else, with the hint to `cd` inside the shell. It calls
+`require_native_shell` right after resolving the site, before the boundary, which raises
+`FeatureUnavailable` with the platform's hint when there is none. Otherwise, inside
+`gated_vm_platform_recovery_boundary` with no environment targets, it runs
+`platform.native_shell(vm, ops_ctx)` under `guarded_terminal`, sets `clean_exit` on a zero status,
+and after the guard prints the 255 notice (I6) without claiming the cause: "the native shell ended
+with status 255 (the connection may have dropped); terminal restored". The environment is not
+composed and its secrets are not resolved (R7: the native shell does not seed it).
+`platform_shell.py` is deleted.
 
 ## Retiring the lazy repair-secret protocol
 
@@ -671,12 +677,18 @@ refuses a provisioning-failed VM (step 1).
   (`tests/test_execution_import_boundary.py:24`): the four plugin `platform.py` files,
   `plugins/proxmox/guest_agent.py`, `vms/manager/recover.py`, `vms/manager/tailscale.py`,
   `vms/nodes.py`, `orchestration/activation.py` and `vms/initializer/tailscale_preflight.py`.
+- **Both guards for the platform package.** The package guard runs no function body and skips
+  `TYPE_CHECKING` blocks, so it cannot see a legacy import there (`base.py` held one, for the
+  deleted `ExecTransport`). The `vm_platform` modules it proves therefore stay in `MIGRATED_FILES`
+  as well, as `vms/contract.py` does: the interim `lima_host.py` and `public_ssh.py` entries, with
+  `__init__.py`, `base.py`, `lima.py` and `wsl2.py` added once they imported nothing legacy.
   `power.py` cannot (`LOG_DIR`, the session teardown), nor can `_scope.py` (`SSHLogger`, `:29-30`)
   or `_helpers.py`; all three call new code, which R10 allows.
 - **Deleted with no caller left.** `transports/lima.py`, `remote_lima.py`, `wsl2.py` and
   `_shared.py` (their only users are the platforms and `transports/__init__.py`'s exports), the
   `native_transport` factory, `plugins/proxmox/transport.py`, `vms/manager/platform_shell.py`, and
-  their tests. Slice 8's list loses the Proxmox module.
+  their tests. `ExecTransport`, which only the native path used, folds into `Transport`. Slice 8's
+  list loses the Proxmox module, and so does `tests/execution/legacy_modules.py`.
 
 ## Tests
 
@@ -798,6 +810,42 @@ the wrapper test and the logger's construction-time set; I32 by the clouds' test
 
 The wording of #251 is I15's, re-proved for start; #350's order changes as stated under delete; and
 the guard of `102adcff5` becomes the plain union refusal.
+
+### Result
+
+Audited at batch C2's code, after the native transport's deletion. Every row holds in the new path;
+the live half of each proof is the slice's Live evidence.
+
+| Row | Where it holds now                                                                                                                                                                               | Proof                                                                                                   |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| I29 | The rekey script: restart, logout under `timeout 60`, join, restart, 15 s after each (`vms/recovery.py:155-168`)                                                                                 | `test_rekey_restarts_logs_out_joins_and_restarts_with_a_pause_after_each`; the rekey cells              |
+| I30 | Rekey and logout share the `trap '' HUP PIPE` prologue that writes nothing until `finish` (`vms/recovery.py:138-153`)                                                                            | Vector W4 (`conformance/root_vectors.py:128`, `:267`): L on CI, V on Lima, Remote Lima and Azure        |
+| I31 | `root_script.run` redacts the secret from every field and record (`execution/root_script.py:142`); `_operation_log` registers the key before the first write (`vms/manager/_helpers.py:215-223`) | The wrapper tests                                                                                       |
+| I32 | `PublicAddressPlatform._public_ssh` raises `StateError` with `public_address_hint` before any connection (`capabilities/vm_platform/public_ssh.py:209-219`); GCP's read raises `GCEError` itself | `test_a_cloud_vm_with_no_public_address_is_a_state_error`                                               |
+| I33 | Teardown and logout are best-effort spans that re-raise only `UserAbort`; `platform.delete` follows them (`vms/manager/power.py:246-269`)                                                        | `tests/vms/test_delete_logout.py`                                                                       |
+| I34 | WSL2's root channel is `wsl.exe --user root --exec /bin/bash -s` over a pipe, with no sudo and so no `use_pty` (`capabilities/vm_platform/wsl2.py:63-71`)                                        | Vector W7 (`conformance/root_vectors.py:180`), V on WSL2; its root-startup-file half is checked by hand |
+
+The deleted entry points carried this other incident-derived behavior:
+
+- **The factory's propagation probe (I17)** survives as `PublicSSH.wait_until_answering`, which
+  `_public_ssh` runs before every cloud script and native shell. Its retry over Lima and WSL2 is
+  retired: a local channel has no firewall allow to wait for, so it fails or answers at once. The
+  probe now runs `true` under `sudo -n /bin/bash -s` rather than `echo ok` as the admin, which the
+  VM contract's passwordless `sudo` check already requires.
+- **The attach notice after the guard (I6)** survives in `_shell_native`, for every platform's
+  native shell rather than only the SSH-backed transports, worded without claiming the cause.
+- **The interactive hop's keepalives** survive: Remote Lima's host argv and the clouds' VM policy
+  both send `ServerAliveInterval=15` and `ServerAliveCountMax=4`, the legacy
+  `SSH_INTERACTIVE_ALIVE_*` values.
+- **Closed stdin on the local transports (`3b8a73624`)** survives in the root channel, whose wrapper
+  runs `exec </dev/null` and whose `run_process` writes the script and closes stdin. The native
+  shell inherits the operator's terminal on purpose.
+- **The execution-only refusal of `vm shell --platform`** (the factory's `Transport` type check
+  after construction, and `native_shell_unavailable_hint` before it) becomes the class-level
+  `require_native_shell` check, before the boundary.
+- **The native shell's environment, workspace `cd` and `--workspace` combination** are retired
+  deliberately: the native shell composes no environment and resolves no secret (R7), and
+  `--workspace` with `--platform` is refused with the hint to `cd` inside the shell.
 
 ## Collateral
 
