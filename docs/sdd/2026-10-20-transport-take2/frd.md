@@ -314,6 +314,14 @@ was stopped, which under the `vm start` ruling no longer rejoins on start, the o
 
 > Document it (Recommended)
 
+### 2026-11-04
+
+[Asked how to treat the cells the integration tester could not cover for PR A (I4 live, Debian 12
+guests, an OpenSSH 8.5 client, Proxmox, Remote Lima from macOS and a cloud driven from Windows), the
+operator chose:]
+
+> Merge; carry them forward (Recommended)
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.

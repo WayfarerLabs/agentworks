@@ -73,20 +73,25 @@ answer.
   - a missing record raises `TrustMissing` and never falls back to first use;
   - Enroll mode is reachable only from create;
   - managed entries carry store options only once a record exists.
-- [ ] Re-prove incident row I9 (host keys preserved across stop and start).
+- [x] Re-prove incident row I9 (host keys preserved across stop and start): the store unchanged and
+      the guest fingerprints matching after a stop and start on Remote Lima from Linux and Windows,
+      local Lima from macOS, WSL2, AWS, Azure and GCP (heads `9327e02b` and `7b169591`;
+      [comment 6571182125](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6571182125)).
+- [ ] Re-prove I9 on Proxmox. Carried forward to before closeout by the operator's 2026-11-04
+      ruling.
 - [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
 - [x] Collateral: update the command reference and completions, add an operator guide section on the
       one-time import, add release notes, and update `cli/agentworks/execution/README.md`.
-- [ ] Live evidence, on every platform: create, the operator's own `ssh` to a managed entry, import
-      of an existing VM, an address change after rekey, a stop and start, and the operator's
-      `known_hosts` byte-identical after a create. Cells:
-  - Remote Lima from macOS and Linux;
-  - local Lima from macOS;
-  - WSL2;
-  - Proxmox, AWS, Azure and GCP from at least one workstation each, Windows among them.
-
-  Include an encrypted key served by the agent.
+- [x] Live evidence, through PR A's rounds 1 to 4
+      ([comment 6571182125](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6571182125)
+      and the reports it links): create, the operator's own `ssh` to a managed entry, import of an
+      existing VM (including malformed sources), a stop and start, and the operator's `known_hosts`
+      byte-identical. Cells covered: Remote Lima from Linux and Windows, local Lima from macOS, WSL2
+      from Windows, and AWS, Azure and GCP from Linux, with an encrypted key served by the agent.
+- [ ] Live evidence still open, carried forward to before closeout by the operator's 2026-11-04
+      ruling: Remote Lima from macOS, Proxmox, a cloud from Windows, and an address change after
+      rekey.
 
 Definition of done: every core connection to a VM verifies against the store, the only acceptance of
 a new key is create's enrollment, and nothing in Agentworks writes the operator's `known_hosts` for
@@ -141,7 +146,9 @@ a VM connection.
       config boundary (HLA D4), with sample-config comments and release notes.
 - [x] Add the resolver's verdict to doctor's required-tools group, beside the existing `ssh`, `scp`
       and `tailscale` presence rows, which stay until the legacy paths go (slice 8).
-- [ ] Conformance vectors, run against a local sshd and python3 on Linux and on live targets:
+- [x] Conformance vectors, run against a local sshd and python3 on Linux (the L and S lanes in CI)
+      and on live Debian 13 targets (the V lane on Linux, macOS and Windows;
+      [comment 6571182125](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6571182125)):
   - literal argv, including empty arguments, whitespace and shell characters;
   - script versus stdin, with script source absent from guest argv;
   - every interpreter and startup choice;
@@ -169,24 +176,28 @@ a VM connection.
   - payload stdout that does not end in a newline, and a `refused` trailer;
   - the deadline;
   - binary stdin and stdout on Windows.
+- [ ] Run the conformance vectors on a live Debian 12 target. Carried forward to before closeout by
+      the operator's 2026-11-04 ruling: agw creates Debian 12 only on Proxmox.
 - [x] Unit-test the stream filters under every split and interleaving of the two streams, which
       covers stdout's last bytes arriving after the trailer.
-- [ ] Re-prove incident rows I1 to I7, I11 to I14, I19 and I21, I11 with a conformance vector in
-      which a bash child of the payload reads no account startup file, run with a pipe and with a
-      socket on stdin.
+- [x] Re-prove incident rows I1, I2, I5, I6, I7, I12, I13, I14, I19 and I21 live, I3 on Debian 13
+      guests, and I11 with a pipe and with no stdin
+      ([comment 6571182125](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6571182125),
+      which gives each row's head and workstation).
+- [ ] Re-prove I4 live, I3 on a Debian 12 guest, and I11 with a socket on stdin. Carried forward to
+      before closeout by the operator's 2026-11-04 ruling.
 - [x] Amend ADRs 0013 and 0014.
 - [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
 - [x] Collateral: update the command reference and guides for any changed behavior, and
       `cli/agentworks/execution/README.md`.
-- [ ] Live evidence:
-  - all three workstations against Remote Lima;
-  - Linux and macOS against local Lima;
-  - Windows against WSL2;
-  - one cloud.
-
-  Include a Debian 12 and a Debian 13 guest, and an OpenSSH 8.5 client on one workstation; if no bed
-  has one, that cell goes to the operator for disposition.
+- [x] Live evidence
+      ([comment 6571182125](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6571182125)
+      and the reports it links): Remote Lima from Linux and Windows, local Lima from macOS, WSL2
+      from Windows, and AWS, Azure and GCP from Linux, all on Debian 13 guests.
+- [ ] Live evidence still open, carried forward to before closeout by the operator's 2026-11-04
+      ruling: Remote Lima from macOS, local Lima from Linux (the Linux bed has no `/dev/kvm`), a
+      Debian 12 guest, and an OpenSSH 8.5 client.
 
 Definition of done: the migrated commands reach VMs only through `agentworks.execution`, their files
 pass the static check, and the package's tests pass with the legacy modules blocked.
