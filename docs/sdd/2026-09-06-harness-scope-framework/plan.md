@@ -749,3 +749,32 @@ pre-removal dependent retention. The final documentation checkpoint is reviewed 
 publication. This supersedes the earlier interim validation status while preserving its historical
 counts and the late finding. The operator policy answer and the remaining actual-scope acceptance
 matrix are still open; no lockfile or merge intent is claimed.
+
+## Independent setup continuation, operator direction 2026-11-04
+
+The operator resolved the earlier own-failure question by directing continuation of independent
+facets and a final failure report. This is direct implementation authorization, separate from the
+three exhausted public feedback/fix rounds. The 2026-11-02 checkpoint statements that the policy
+answer was pending are historical and superseded here. Invalid activation preflight, cancellation,
+shared state failures and unexpected internal errors retain immediate failure behavior. Session
+launch safety remains unchanged.
+
+- [x] Record the authenticated ruling and align the owned FRD, architecture and permanent guides.
+- [ ] Implement explicit operation-local failure collection, truthful partial records and
+      independent continuation through VM/admin, agent, workspace and session-created ancestors.
+- [ ] Verify required prerequisites retain completed ancestors, recommended prerequisites remain
+      advisory, and persistence/cancellation still abort without swallowed failures.
+- [ ] Complete the private project, complexity and correctness reviews, run required gates, and
+      publish a coherent exact-head handoff.
+- [ ] Dispose the later published workspace permission/adoption and native status findings under
+      authenticated direction; the exhausted feedback budget does not authorize another fix round.
+- [ ] Audit the expanded live evidence from PR comment `6575184960` against retained requirements
+      and close remaining acceptance gaps before creating either lockfile.
+
+The later live report exercised prerequisite/readiness fixtures, real agent-reinit cancellation,
+admin artifacts, Git capture/ref refresh, VM power cycles, Grok and Claude workaround launches,
+workspace collisions and settings mappings, and multi-user isolation. It used Linux with remote
+Lima/Debian 13 and performed no model calls. It reports independently verified cleanup. Its precise
+limits include other workstation/backend combinations, the native-write/checkpoint interruption
+window, real transcript creation, some native source variants and workspace copy/rehome. These are
+scoped acceptance results, not blanket final-head acceptance or permission to lock either SDD.

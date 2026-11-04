@@ -616,3 +616,19 @@ ownership and normal safe-cleanup rights. Do not add independent cache-origin ve
 installation-intent tracking or a provenance store. Native version updates do not change the stable
 owned association. This clarifies R9's comparison boundary without weakening native result checks,
 settings authorization or malformed-input error handling.
+
+## Operator ruling: continue independent setup after facet errors, 2026-11-04
+
+The operator directed: "So as long as we don't have explicit dependencies between facets, my
+thinking is that we continue with facet failures and report at the end." After discussing that
+policy, the operator authorized implementation: "Sweet! Make it happen!"
+
+A valid activated setup facet can fail without stopping independent facets or the remaining owning
+initialization. Preserve its confirmed progress, record its current failure, continue independent
+work, and report all collected facet failures at the command boundary with a failing exit status.
+New agent and workspace owners retain their completed core setup and partial facet records. An
+explicit required prerequisite still blocks its consumer; recommended prerequisites warn. Neither
+creates an implicit dependency between sibling facets. Cancellation, shared persistence failures,
+invalid activation/binding preflight, and unexpected internal errors still abort through their
+existing paths. This supersedes the earlier fail-fast treatment of setup-facet execution errors; it
+does not change session launch safety or introduce a dependency framework.

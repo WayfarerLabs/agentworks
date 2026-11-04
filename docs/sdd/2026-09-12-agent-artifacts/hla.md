@@ -603,3 +603,14 @@ ruling replaces automatic session delivery and final-session errors with named o
 and terminal warnings; unsupported native session skill types remain unhandled. The
 [implementation plan](plan.md) sequences the complete delivery on this branch and PR, including the
 shared identity prerequisite and acceptance.
+
+## Setup-facet failures and command outcomes
+
+Owning setup preserves the confirmed artifact state when a valid facet reports a domain or transport
+error. Core records a sanitized current-attempt reason, continues independent facets and the owner's
+remaining initialization, and reports the collected failures at the command boundary with a failing
+exit status. New agent and workspace records commit with their partial setup. This is separate from
+optional unhandled-artifact warnings and explicit required/recommended prerequisites. Shared
+persistence failures, cancellation, invalid activation/binding preflight and unexpected internal
+errors remain fatal. Session preparation still enforces its own safe publication and launch checks;
+this change does not make a failed session carrier safe to launch.

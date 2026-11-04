@@ -46,21 +46,36 @@ For one owner:
 5. After each plugin or marketplace mutation, observe its authoritative result and checkpoint the
    resulting ownership before proceeding. Persistence failure aborts further writes. Settings
    publication creates no ownership claim and needs only the operation's completion record.
-6. Record completion only after successful return. Keep incomplete or pending cleanup evidence on
-   failure; a same-input retry must not mistake it for a successful current setup.
-7. Release the guard on every exit, including interruption.
+6. Record completion only after successful return. For a facet domain or transport error, preserve
+   the confirmed prefix, persist the sanitized current-attempt reason, append an owner/facet/
+   integration failure to the command's list, and continue the next independent facet. A same-input
+   retry must not mistake the record for successful current setup.
+7. Release the guard on every exit, including interruption. The command reports the collected
+   failures with one typed error after its independent initialization and bookkeeping complete.
+
+The collector is operation-local and does not replace the returned applied state. Each command
+creates it explicitly; shared realization helpers append to it without raising the aggregate inside
+rollback spans. Persistence callback failures propagate their original exception and abort further
+writes, even when the exception type would otherwise describe a recoverable facet error. Shared
+state reads, binding preflight, cancellation and unexpected internal exceptions are not collected.
+Soft entry skips remain incomplete reports and do not become command errors.
 
 For VM init, preserve the existing final authorized-key reconciliation and terminal checkpoint
-ordering. Harness setup occurs before that terminal key write. VM and admin records are distinct
-components of the same VM-owned native slice; neither overwrites the existing SSH/hardware slices.
+ordering. Harness setup occurs before that terminal key write. Collected facet errors do not skip
+the write or its checkpoint: the VM becomes partial, then the command reports the failures with exit
+status 1. VM and admin records are distinct components of the same VM-owned native slice; neither
+overwrites the existing SSH/hardware slices.
 
 New agents and workspaces have no database owner until native creation succeeds. Their initial
 applied-state records are buffered with the creation operation and inserted atomically with the
 owner and desired overlay. Workspace creation retains its existing refusal to adopt unexplained
 native residue. Fresh agent creation refuses an existing unowned Linux user or home before mutation
-or rollback is armed. After that check, handled creation failure cleans up only the native owner
-created by this operation and drops its applied-state record buffer. A process crash leaves residue
-that a new create refuses to adopt. Reinit of a database-owned agent retains convergence and
+or rollback is armed. After that check, core creation failure cleans up only the native owner
+created by this operation and drops its applied-state record buffer. A collected facet error instead
+commits the new owner and its partial records, completes independent grants and SSH configuration,
+and reports the failures at the outer command boundary. An explicit required session prerequisite
+retains already-created ancestor owners while blocking session launch. A process crash leaves
+residue that a new create refuses to adopt. Reinit of a database-owned agent retains convergence and
 checkpoints directly into its existing instance-state row. This does not add partial-create rows or
 a workspace repair/reinit command.
 

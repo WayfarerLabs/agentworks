@@ -281,6 +281,14 @@ current-attempt incomplete reasons. Resolved secrets and settings contents are n
 keeps the last confirmed mutation prefix so a retry can reconcile what actually completed. Fresh
 agent and workspace applied-state records commit with their owner rows.
 
+If a valid setup facet fails, initialization stops that facet, records its failure, and continues
+other independent facets and the remaining owner setup. At the end the command lists the failed
+owner, facet and integration with repair guidance and exits unsuccessfully. A newly created agent or
+workspace remains available with its partial setup; it is not reported as fully initialized.
+Explicit required prerequisites still block their consumer, while recommended prerequisites warn.
+Cancellation, shared state failures, invalid activation preflight and unexpected internal errors
+still abort immediately. A failed facet is distinct from an entry skipped with a warning.
+
 Use the existing owning inspection commands, such as `agw agent describe worker`,
 `agw workspace describe project`, or `agw vm describe dev`, to inspect the `harness-native-setup`
 lifecycle evidence. The summary includes completion, pending cleanup, and claim counts, without

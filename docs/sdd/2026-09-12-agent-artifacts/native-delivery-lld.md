@@ -249,9 +249,11 @@ override conflicts are still checked for enabled new session delivery. Ancestor-
 problems are reported rather than enforced as session prerequisites. Disabled session inputs do not
 introduce restrictions on native launch arguments. Outer native placement and its safety/ownership
 checks remain in place. Core emits final unhandled warnings after full output validation and stores
-the deferrals so inspection does not claim success. Known domain failures retain their error type
-and focused remediation through the agent lifecycle; version/configuration refusals are not recast
-as unexplained SSH failures.
+the deferrals so inspection does not claim success. Setup-facet domain and transport failures retain
+their sanitized reason and focused remediation in incomplete state and the command's failure list.
+Independent setup and owner bookkeeping continue before the terminal error summary; these failures
+are not recast as unexplained SSH failures. Persistence failures and cancellation still abort.
+Session preparation errors retain their existing fail-before-teardown behavior.
 
 An ancestor-only check still returns its native root for discovery-path diagnostics. A missing
 ancestor-only target produces an advisory warning; a missing target needed for new delivery remains

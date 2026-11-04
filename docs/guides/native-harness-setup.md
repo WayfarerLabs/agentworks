@@ -135,6 +135,13 @@ after a native mutation but before its checkpoint heals on retry when the result
 matches the declaration; adoption is recorded and reported. Settings retention is intentional and is
 separate from pending plugin cleanup.
 
+A native setup error stops that facet while independent facets and the owner's remaining setup
+continue. The command reports the collected failures at the end and returns a failing exit status;
+completed core setup and confirmed native claims remain recorded. Shared persistence failures and
+cancellation still abort immediately. Inspect the recorded reason before retrying the owning
+operation. Workspace creation has no reinit command; changing its setup requires explicit recreation
+through the ordinary workspace lifecycle.
+
 ## Native compatibility evidence
 
 Native CLI fixture tests require Codex and Claude executables on the test runner's PATH. The
