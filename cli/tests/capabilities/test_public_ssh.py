@@ -183,6 +183,28 @@ def test_the_wait_stops_at_once_where_waiting_cannot_help(
     assert len(argvs) == 1
 
 
+def test_the_wait_stops_at_once_when_sudo_refuses_to_start_the_script(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """The VM answered: an admin without passwordless sudo is not a network that needs more time."""
+    probes: list[bytes] = []
+
+    def run_process(argv: list[str], script: bytes, deadline: float) -> RawRun:
+        probes.append(script)
+        Path(argv[argv.index("-E") + 1]).write_text("")
+        return RawRun(b"", b"sudo: a password is required\n")
+
+    monkeypatch.setattr(root_script, "run_process", run_process)
+
+    with pytest.raises(StateError) as caught:
+        target().wait_until_answering(failure_hint="check operator.ssh_allow_cidrs")
+
+    assert not isinstance(caught.value, ConnectivityError)
+    assert caught.value.hint
+    assert len(probes) == 1
+    assert captured_output.warnings == []  # not the firewall hint
+
+
 # -- Each cloud's run_as_root and read_host_keys ------------------------------------------
 
 

@@ -49,6 +49,11 @@ _PROVIDER_ACCESS_HINT = (
     "to restore the admin's authorized key, or delete and recreate the VM."
 )
 
+# sudo's own prefix for the lines it prints when it refuses to run a command,
+# such as "sudo: a password is required" under -n. Guest output, read only
+# when the script never started.
+_SUDO_REFUSAL_PREFIX = "sudo: "
+
 PROBE_ATTEMPTS = 6
 PROBE_DEADLINE_SECONDS = 10
 PROBE_INTERVAL_SECONDS = 3
@@ -102,14 +107,30 @@ class PublicSSH:
     def wait_until_answering(self, *, failure_hint: str | None) -> None:
         """Probe with ``true`` until one completes: a fresh firewall allow can take seconds to apply.
 
-        ``true`` reads nothing, so probing again is safe. A refused key or a
-        host-key mismatch raises at once. When no probe completes,
-        ``failure_hint`` (the platform's guidance for an allow that does not
-        match the operator's egress) is warned before the error.
+        ``true`` reads nothing, so probing again is safe. A refused key, a
+        host-key mismatch or a ``sudo -n`` that refused to start the script
+        raises at once: the VM answered, and waiting cannot change any of
+        them. When no probe completes, ``failure_hint`` (the platform's
+        guidance for an allow that does not match the operator's egress) is
+        warned before the error.
         """
         for attempt in range(PROBE_ATTEMPTS):
-            if root_script.run(self.run_as_root, "true", deadline=PROBE_DEADLINE_SECONDS).status == 0:
+            result = root_script.run(self.run_as_root, "true", deadline=PROBE_DEADLINE_SECONDS)
+            if result.status == 0:
                 return
+            if result.status is None and any(
+                line.startswith(_SUDO_REFUSAL_PREFIX) for line in result.channel_tail.splitlines()
+            ):
+                raise StateError(
+                    f"VM '{self._vm_name}' answered at its public address {self._destination.host}, but its admin "
+                    f"'{self._destination.user}' cannot run sudo without a password",
+                    entity_kind="vm",
+                    entity_name=self._vm_name,
+                    hint=(
+                        "Agentworks runs its root scripts there with 'sudo -n'. Restore the admin's passwordless "
+                        "sudo through the provider's console, or delete and recreate the VM."
+                    ),
+                )
             if attempt == 0:
                 output.detail("Waiting for the VM to answer at its public address...")
             if attempt < PROBE_ATTEMPTS - 1:

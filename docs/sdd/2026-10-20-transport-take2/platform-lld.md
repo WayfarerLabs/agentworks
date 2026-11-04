@@ -257,7 +257,10 @@ the agent, as for every VM connection.
   warns `failure_hint` before raising `ConnectivityError` when none completes: today's propagation
   wait after a fresh firewall allow (`transports/__init__.py:230-244`, incident row I17). `true`
   reads nothing, so retrying it is allowed. A key refusal or `TrustMismatch` raises at once: on an
-  enrolled VM, waiting cannot change either.
+  enrolled VM, waiting cannot change either. So does a probe with no start marker whose channel tail
+  has a line starting `sudo:` (sudo's prefix when `-n` refuses), which `root_script.run` otherwise
+  reports as an unknown outcome: it raises `StateError` saying the VM answered but its admin lacks
+  passwordless sudo, rather than retrying and warning the firewall hint.
 - `shell() -> int` runs the `TERMINAL` argv with no remote command (a login shell) and returns its
   status.
 
