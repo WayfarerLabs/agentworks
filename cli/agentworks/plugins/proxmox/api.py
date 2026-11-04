@@ -342,6 +342,10 @@ class ProxmoxAPI:
 
         return None
 
+    def guest_agent_ping(self, node: str, vmid: int, *, timeout: float | None = None) -> None:
+        """Ask the VM's guest agent to answer; raises ``ProxmoxAPIError`` while it does not."""
+        self._request("POST", f"/nodes/{node}/qemu/{vmid}/agent/ping", timeout=timeout)
+
     def guest_agent_exec(
         self,
         node: str,

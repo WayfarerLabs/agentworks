@@ -1,7 +1,12 @@
 """Proxmox's root channel: the QEMU Guest Agent runs ``/bin/bash -s`` with the script as its input.
 
-QGA always starts commands as root, so there is no elevation. One ``exec``
-dispatches the script as ``input-data`` (limited to 65,536 characters), then
+QGA always starts commands as root, so there is no elevation. The agent is
+pinged every two seconds until it answers, since a VM that has just started
+has none running yet; a ping carries no script, so asking again is safe. The
+pinging stops at ``AGENT_WAIT_SECONDS`` or the script's deadline, whichever
+comes first, so a VM with no agent at all fails in about two minutes. Then
+one ``exec`` dispatches the script as ``input-data`` (limited to 65,536
+characters), with whatever remains of the deadline, then
 ``exec-status`` is polled every two seconds until the guest reports an exit
 or the deadline passes. QGA has no cancellation endpoint: at the deadline the
 result is empty, so the outcome is unknown, and nothing is dispatched again.
@@ -24,6 +29,7 @@ if TYPE_CHECKING:
 
 INPUT_DATA_LIMIT = 65_536
 POLL_INTERVAL_SECONDS = 2.0
+AGENT_WAIT_SECONDS = 120
 _ROOT_SHELL = ["/bin/bash", "-s"]
 
 
@@ -34,16 +40,22 @@ def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: 
     the request got, and never chains the original error, whose request could
     quote the script. The API refusing the site's token (401 or 403) is a
     ``TokenRejectedError`` instead, since no connection problem explains it.
+    A guest agent that does not answer its ping by the deadline raises
+    ``ConnectivityError`` before anything is dispatched.
     """
     where = f"{vmid}@{node}"
     text = script.decode("utf-8")
     if len(text) > INPUT_DATA_LIMIT:
         raise ConnectivityError(f"a root script for Proxmox VM {where} exceeds QGA's {INPUT_DATA_LIMIT} characters")
-    expires = time.monotonic() + deadline
+    start = time.monotonic()
+    expires = start + deadline
+    _await_agent(api, node, vmid, where, min(expires, start + AGENT_WAIT_SECONDS))
     # Each failure is raised after its handler, so the original is not even the context.
     failure: AgentworksError | None = None
     try:
-        pid = api.guest_agent_exec(node, vmid, command=list(_ROOT_SHELL), input_data=text, timeout=deadline)
+        pid = api.guest_agent_exec(
+            node, vmid, command=list(_ROOT_SHELL), input_data=text, timeout=max(expires - time.monotonic(), 0.1)
+        )
     except Exception as error:
         failure = _token_rejected(
             error, f"Proxmox rejected the API token while dispatching a root script to VM {where}"
@@ -76,6 +88,31 @@ def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: 
                 cast("str", status.get("err-data", "")).encode("utf-8"),
             )
         time.sleep(min(POLL_INTERVAL_SECONDS, max(0.0, expires - time.monotonic())))
+
+
+def _await_agent(api: ProxmoxAPI, node: str, vmid: int, where: str, expires: float) -> None:
+    """Ping the guest agent until it answers, or raise by ``expires`` with nothing dispatched.
+
+    Any failure but a token rejection means the agent is not answering yet.
+    """
+    while (remaining := expires - time.monotonic()) > 0:
+        failure: AgentworksError | None = None
+        try:
+            api.guest_agent_ping(node, vmid, timeout=remaining)
+            return
+        except Exception as error:
+            failure = _token_rejected(
+                error, f"Proxmox rejected the API token while pinging the guest agent of VM {where}"
+            )
+        if failure is not None:
+            raise failure
+        time.sleep(min(POLL_INTERVAL_SECONDS, max(0.0, expires - time.monotonic())))
+    raise ConnectivityError(
+        f"the QEMU guest agent of Proxmox VM {where} did not answer, so no script was dispatched",
+        hint=(
+            "The VM needs qemu-guest-agent installed and running; check it from the VM's console in the Proxmox web UI."
+        ),
+    )
 
 
 def _token_rejected(error: Exception, message: str) -> TokenRejectedError | None:

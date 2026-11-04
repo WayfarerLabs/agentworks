@@ -167,13 +167,13 @@ the one place a process starts. Its `ClientUnsupported` stays OpenSSH-only: a pr
 resolved client that cannot start raises `ConnectivityError` naming it, the precedent
 `_ensure_limactl` set for a missing local tool (`lima.py:327-344`).
 
-| Platform    | `argv` (stdin is the script)                                                                | Bounds                                   | Needs guest sshd | Native shell                                 |
-| ----------- | ------------------------------------------------------------------------------------------- | ---------------------------------------- | ---------------- | -------------------------------------------- |
-| Lima, local | `limactl shell <instance> sudo -n /bin/bash -s`                                             | `run_process`                            | yes              | `limactl shell <instance>`                   |
-| Remote Lima | host argv, `ssh -T <host> '$SHELL -lc "limactl shell <instance> sudo -n /bin/bash -s"'`     | `run_process`                            | yes              | host argv `ssh -t`, `limactl shell` inside   |
-| WSL2        | `wsl --distribution <distro> --user root --exec /bin/bash -s`                               | `run_process`                            | no               | `wsl --distribution <distro> --user <admin>` |
-| Proxmox     | QGA `exec` of `/bin/bash -s` with `input-data`, then `exec-status` every 2 s                | polling stops at the deadline; QGA's cap | no               | none (Proxmox web console)                   |
-| Clouds      | VM policy argv, `ssh -T -l <admin> <public address> 'sudo -n /bin/bash -s'`, inside a route | `run_process`                            | yes              | VM policy `ssh -t`, inside a route           |
+| Platform    | `argv` (stdin is the script)                                                                               | Bounds                                              | Needs guest sshd | Native shell                                 |
+| ----------- | ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ---------------- | -------------------------------------------- |
+| Lima, local | `limactl shell <instance> sudo -n /bin/bash -s`                                                            | `run_process`                                       | yes              | `limactl shell <instance>`                   |
+| Remote Lima | host argv, `ssh -T <host> '$SHELL -lc "limactl shell <instance> sudo -n /bin/bash -s"'`                    | `run_process`                                       | yes              | host argv `ssh -t`, `limactl shell` inside   |
+| WSL2        | `wsl --distribution <distro> --user root --exec /bin/bash -s`                                              | `run_process`                                       | no               | `wsl --distribution <distro> --user <admin>` |
+| Proxmox     | QGA `ping` until it answers, then `exec` of `/bin/bash -s` with `input-data`, then `exec-status` every 2 s | pinging and polling stop at the deadline; QGA's cap | no               | none (Proxmox web console)                   |
+| Clouds      | VM policy argv, `ssh -T -l <admin> <public address> 'sudo -n /bin/bash -s'`, inside a route                | `run_process`                                       | yes              | VM policy `ssh -t`, inside a route           |
 
 - Every channel already carries stdin byte-exact in production: Lima's join over `limactl shell`
   (`lima.py:120`, `:490-493`), WSL2's and Proxmox's `input_text` (`transports/wsl2.py:90-95`,
@@ -418,16 +418,23 @@ stdin has been a pipe since `3b8a73624`. Incident row I34 holds this, with vecto
 ### Proxmox
 
 `guest_agent.run_as_root(api, node, vmid, script, deadline) -> RawRun` is written fresh from the
-dispatch-and-poll half of `plugins/proxmox/transport.py:51-137`: one `guest_agent_exec` of
-`["/bin/bash", "-s"]` with `input-data`, then `guest_agent_exec_status` every two seconds until it
-reports exit or the deadline passes. Dispatch and status failures raise `ConnectivityError` with no
-stdin in the message (`transport.py:69-123`), except an HTTP 401 or 403, which raises
-`TokenRejectedError`; a status failure of either kind says the script may still be running. A
-`_TruncatedQGAOutput` report raises `ConnectivityError` saying the script exited with its output cut
-short. No failure chains the API error, whose request quotes the script. `create` runs the bootstrap
-through it with `run_bootstrap` and today's 600-second deadline (`platform.py:600`), then joins and
-settles, deleting `_run_bootstrap_via_agent` (`platform.py:566-636`); `native_transport`
-(`:488-502`) and `transport.py` go. No `native_shell` override. `recovery_needs_guest_sshd = False`.
+dispatch-and-poll half of `plugins/proxmox/transport.py:51-137`. First it pings the guest agent
+(`guest_agent_ping`, `POST .../agent/ping`) every two seconds until it answers, since a VM that has
+just started (recover starts a stopped one with no wait) has no agent running yet. A ping carries no
+script, so asking again is safe; a token rejection raises `TokenRejectedError` at once, any other
+failure means not yet, and no answer within `AGENT_WAIT_SECONDS` (120 s) or the deadline, whichever
+comes first, raises `ConnectivityError` saying no script was dispatched, so a VM with no agent fails
+in about two minutes rather than after the repair's 600. Then one `guest_agent_exec` of
+`["/bin/bash", "-s"]` with `input-data`, with whatever remains of the deadline, then
+`guest_agent_exec_status` every two seconds until it reports exit or the deadline passes. Dispatch
+and status failures raise `ConnectivityError` with no stdin in the message (`transport.py:69-123`),
+except an HTTP 401 or 403, which raises `TokenRejectedError`; a status failure of either kind says
+the script may still be running. A `_TruncatedQGAOutput` report raises `ConnectivityError` saying
+the script exited with its output cut short. No failure chains the API error, whose request quotes
+the script. `create` runs the bootstrap through it with `run_bootstrap` and today's 600-second
+deadline (`platform.py:600`), then joins and settles, deleting `_run_bootstrap_via_agent`
+(`platform.py:566-636`); `native_transport` (`:488-502`) and `transport.py` go. No `native_shell`
+override. `recovery_needs_guest_sshd = False`.
 
 ### AWS, Azure and GCP
 

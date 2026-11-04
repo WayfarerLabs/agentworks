@@ -16,6 +16,8 @@ from agentworks.capabilities.vm_platform import tailscale_join
 from agentworks.db import ProvisioningStatus, VMStatus
 from agentworks.errors import ConnectivityError, StateError, UserAbort
 from agentworks.execution import reachability, trust
+from agentworks.execution.root_script import RawRun
+from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
@@ -306,6 +308,61 @@ def test_a_stopped_vm_is_started_under_the_hold_then_repaired(
     assert any(_is_repair(payload) for payload in guest.payloads)
     row = db.get_vm("box")
     assert row is not None and row.operator_stopped is False and row.last_started_at is not None
+
+
+class _BootingGuestAgent:
+    """The Proxmox API of a VM that recover just started: its guest agent answers only from the third ping."""
+
+    def __init__(self, guest: FakeGuest) -> None:
+        self.guest = guest
+        self.pings = 0
+        self.dispatches = 0
+        self.finished: dict[int, RawRun] = {}
+
+    def guest_agent_ping(self, node: str, vmid: int, *, timeout: float) -> None:
+        self.pings += 1
+        if self.pings < 3:
+            raise ProxmoxAPIError("QEMU guest agent is not running")
+
+    def guest_agent_exec(self, node: str, vmid: int, *, command: list[str], input_data: str, timeout: float) -> int:
+        if self.pings < 3:
+            raise ProxmoxAPIError("QEMU guest agent is not running")
+        self.dispatches += 1
+        self.finished[self.dispatches] = self.guest.run_as_root(input_data.encode(), timeout)
+        return self.dispatches
+
+    def guest_agent_exec_status(self, node: str, vmid: int, *, pid: int, timeout: float) -> dict[str, object]:
+        raw = self.finished.pop(pid)
+        return {"exited": True, "out-data": raw.stdout.decode(), "err-data": raw.stderr.decode()}
+
+
+def test_a_stopped_proxmox_vm_recovers_in_one_run_through_its_real_channel(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Just after the start, the guest agent is not up yet; the channel waits for it rather than failing the
+    first script."""
+    _seed(db)
+    db.update_vm_platform_metadata("box", {"vmid": "101", "node": "pve1"})
+    guest = FakeGuest(
+        respond=lambda payload, seen: (
+            Answer(stdout=f"{NEW_ADDRESS}\n".encode()) if payload == "tailscale ip -4" else Answer()
+        )
+    )
+    agent = _BootingGuestAgent(guest)
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED)
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, vm, ctx: None)
+    monkeypatch.setattr(ProxmoxPlatform, "_api", lambda self, ctx: agent)
+    monkeypatch.setattr("agentworks.plugins.proxmox.guest_agent.time.sleep", lambda seconds: None)
+    _waits(monkeypatch)
+
+    _recover(db, make_config())
+
+    assert agent.pings >= 3
+    assert [_is_repair(payload) for payload in guest.payloads] == [True, False]
+    assert agent.dispatches == len(guest.scripts)
 
 
 def test_a_vm_whose_power_state_is_unknown_is_refused_before_any_script(

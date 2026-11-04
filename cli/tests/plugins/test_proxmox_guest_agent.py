@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from typing import Any
 
 import pytest
@@ -17,11 +18,25 @@ SCRIPT = b"{\nAGW_SECRET=tskey-auth-private\n(\ntrue\n)\n}\n"
 class FakeAPI:
     """Records each QGA call; ``statuses`` are the exec-status answers in order."""
 
-    def __init__(self, statuses: list[dict[str, Any] | BaseException], dispatch: BaseException | None = None) -> None:
+    def __init__(
+        self,
+        statuses: list[dict[str, Any] | BaseException],
+        dispatch: BaseException | None = None,
+        pings: list[BaseException | None] | None = None,
+    ) -> None:
         self.statuses = statuses
         self.dispatch = dispatch
+        self.pings = pings if pings is not None else []
+        self.ping_count = 0
         self.execs: list[tuple[list[str], str | None]] = []
         self.polls = 0
+
+    def guest_agent_ping(self, node: str, vmid: int, *, timeout: float | None = None) -> None:
+        """Answers once ``pings`` (each failure in turn, ``None`` for an answer) runs out."""
+        self.ping_count += 1
+        failure = self.pings.pop(0) if self.pings else None
+        if failure is not None:
+            raise failure
 
     def guest_agent_exec(
         self, node: str, vmid: int, *, command: list[str], input_data: str | None = None, timeout: float | None = None
@@ -61,7 +76,7 @@ def test_the_script_is_the_input_of_one_bash_s_and_the_streams_come_back() -> No
 
 
 def test_the_deadline_returns_empty_streams_without_dispatching_again(monkeypatch: pytest.MonkeyPatch) -> None:
-    clock = iter([0.0, 0.0, 100.0, 100.0])
+    clock = iter([0.0, 0.0, 0.0, 100.0, 100.0])
     monkeypatch.setattr("agentworks.plugins.proxmox.guest_agent.time.monotonic", lambda: next(clock))
     api = FakeAPI([])
 
@@ -90,6 +105,48 @@ def test_a_failed_call_raises_without_the_script_anywhere(api: FakeAPI) -> None:
     assert error.__cause__ is None
     assert error.__context__ is None
     assert len(api.execs) == 1
+
+
+def test_an_agent_that_answers_on_the_third_ping_gets_the_script_once() -> None:
+    """A VM that has just started has no agent yet: pinging carries no script, so it may be asked again."""
+    not_yet = ProxmoxAPIError("QEMU guest agent is not running")
+    api = FakeAPI([{"exited": True, "exitcode": 0}], pings=[not_yet, not_yet, None])
+
+    run(api)
+
+    assert api.ping_count == 3
+    assert len(api.execs) == 1
+
+
+def test_an_agent_that_never_answers_raises_at_the_cap_with_nothing_dispatched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A VM with no agent fails after the cap, not after a long script deadline such as the repair's."""
+    ticks = itertools.count(0.0, 2.0)
+    seen: list[float] = []
+    monkeypatch.setattr(
+        "agentworks.plugins.proxmox.guest_agent.time.monotonic", lambda: seen.append(next(ticks)) or seen[-1]
+    )
+    api = FakeAPI([], pings=[ProxmoxAPIError("not running")] * 1000)
+
+    with pytest.raises(ConnectivityError) as caught:
+        run(api, deadline=600)
+
+    assert max(seen) <= guest_agent.AGENT_WAIT_SECONDS + 2 * guest_agent.POLL_INTERVAL_SECONDS
+    assert api.execs == []
+    assert caught.value.hint
+    assert caught.value.__context__ is None
+
+
+def test_a_rejected_token_on_the_ping_raises_at_once() -> None:
+    api = FakeAPI([], pings=[_rejected(401), None])
+
+    with pytest.raises(TokenRejectedError) as caught:
+        run(api)
+
+    assert api.ping_count == 1
+    assert api.execs == []
+    assert caught.value.__context__ is None
 
 
 def test_a_script_over_qgas_input_limit_is_refused_before_dispatch() -> None:

@@ -138,6 +138,9 @@ class FakeProxmoxAPI:
         self.calls.append(("guest_agent_exec_wait", node, vmid, command, argv, timeout))
         return {"exitcode": 0, "out-data": ""}
 
+    def guest_agent_ping(self, node: str, vmid: int, *, timeout: float) -> None:
+        return None
+
     def guest_agent_exec(self, node: str, vmid: int, *, command: list[str], input_data: str, timeout: float) -> int:
         self.calls.append(("guest_agent_exec", node, vmid, tuple(command)))
         pid = len(self.calls)
