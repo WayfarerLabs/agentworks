@@ -134,16 +134,17 @@ def test_merge_requires_valid_destination(strategy: SettingsStrategy, format: Se
         b'{"a": "\xff"}',
     ],
 )
-@pytest.mark.parametrize("strategy", ["replace", "skip-existing"])
+@pytest.mark.parametrize("strategy", ["replace", "merge-overwrite", "merge-preserve", "skip-existing"])
 def test_invalid_json_source_always_rejected(source: bytes, strategy: SettingsStrategy) -> None:
     with pytest.raises(ConfigError):
         PreparedSettings.from_bytes(source, format="json", strategy=strategy)
 
 
 @pytest.mark.parametrize("source", [b"a = 1\na = 2", b"[a]\n[a]\n", b"a = {b=1, b=2}", b"a=\xff"])
-def test_invalid_toml_source_rejected(source: bytes) -> None:
+@pytest.mark.parametrize("strategy", ["replace", "merge-overwrite", "merge-preserve", "skip-existing"])
+def test_invalid_toml_source_rejected(source: bytes, strategy: SettingsStrategy) -> None:
     with pytest.raises(ConfigError):
-        PreparedSettings.from_bytes(source, format="toml", strategy="skip-existing")
+        PreparedSettings.from_bytes(source, format="toml", strategy=strategy)
 
 
 def test_toml_native_values_survive_semantic_serialization() -> None:
@@ -193,3 +194,26 @@ def test_merge_rejects_duplicate_destination_keys(
 ) -> None:
     with pytest.raises(ConfigError):
         PreparedSettings.from_bytes(source, format=format, strategy=strategy).apply(destination)
+
+
+@pytest.mark.parametrize("format", ["json", "toml"])
+@pytest.mark.parametrize("strategy", ["replace", "merge-overwrite", "merge-preserve", "skip-existing"])
+def test_invalid_settings_source_reports_its_workstation_path_without_content(tmp_path, format, strategy):
+    source = tmp_path / "workstation-settings"
+    source.write_bytes(b"external-private-value = [")
+    with pytest.raises(ConfigError) as caught:
+        prepare_settings(SettingsMapping(source=str(source), strategy=strategy), format=format)
+    assert str(source) in str(caught.value)
+    assert "external-private-value" not in "".join(traceback.format_exception(caught.value))
+
+
+@pytest.mark.parametrize("format,source", [("json", b"{}"), ("toml", b"")])
+@pytest.mark.parametrize("strategy", ["merge-overwrite", "merge-preserve"])
+def test_invalid_settings_destination_reports_its_guest_path_without_content(tmp_path, format, source, strategy):
+    destination = str(tmp_path / "guest-settings")
+    prepared = PreparedSettings.from_bytes(source, format=format, strategy=strategy)
+    invalid = b"external-private-value = ["
+    with pytest.raises(ConfigError) as caught:
+        prepared.apply(invalid, destination_path=destination)
+    assert destination in str(caught.value)
+    assert "external-private-value" not in "".join(traceback.format_exception(caught.value))

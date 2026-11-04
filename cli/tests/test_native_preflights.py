@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.capabilities.harness_integration.settings import SettingsMapping, parse_settings, serialize_settings
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, ExternalError
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.native_files import NativeFiles
 from agentworks.plugins._harness_native.native import setup_user
@@ -30,7 +30,15 @@ def transport(tmp_path: Path) -> LocalFixtureTransport:
 
 
 @pytest.mark.parametrize(
-    "tool,declaration", [("codex", None), ("claude", None), ("claude", {}), ("claude", {"autoUpdate": False})]
+    "tool,declaration",
+    [
+        ("codex", None),
+        ("claude", None),
+        ("claude", {}),
+        ("claude", {"autoUpdate": False}),
+        ("claude", False),
+        ("claude", {"source": {"source": "git", "url": "file:///missing-stale-market"}}),
+    ],
 )
 @pytest.mark.parametrize("option", ["ref", "sparse"])
 def test_incomplete_or_differing_git_source_survives_mapping(transport, tool, declaration, option):
@@ -112,8 +120,9 @@ def test_incomplete_or_differing_git_source_survives_mapping(transport, tool, de
 @pytest.mark.parametrize("source_kind", ["local", "git"])
 @pytest.mark.parametrize("action", ["retire", "replace"])
 @pytest.mark.parametrize("declaration", [None, {}, {"autoUpdate": False}])
+@pytest.mark.parametrize("dependent", [False, True])
 def test_claude_missing_user_declaration_blocks_removal_before_dependent_uninstall(
-    transport, source_kind, action, declaration
+    transport, source_kind, action, declaration, dependent
 ):
     if source_kind == "git":
         market, source = git_market(transport, "claude")
@@ -123,7 +132,7 @@ def test_claude_missing_user_declaration_blocks_removal_before_dependent_uninsta
     claims: list[tuple[NativeClaim, ...]] = []
     setup_user(
         "claude",
-        NativeUserConfig(marketplaces=[source], plugins=["one@fixture-market"]),
+        NativeUserConfig(marketplaces=[source], plugins=["one@fixture-market"] if dependent else []),
         invocation(transport, claims),
     )
     previous = claims[-1]
@@ -151,18 +160,22 @@ def test_claude_missing_user_declaration_blocks_removal_before_dependent_uninsta
     assert set(previous) <= set(claims[-1])
     assert {item.identifier for item in claims[-1]} == {
         "fixture-market",
-        "one@fixture-market",
         "independent",
         "two@independent",
-    }
+    } | ({"one@fixture-market"} if dependent else set())
     document = json.loads(destination.read_bytes())
     assert document["mapped"] is True
     assert document.get("extraKnownMarketplaces", {}).get("fixture-market") in (None, declaration)
-    assert document["enabledPlugins"]["one@fixture-market"] is True
+    if dependent:
+        assert document["enabledPlugins"]["one@fixture-market"] is True
+    else:
+        assert "one@fixture-market" not in document.get("enabledPlugins", {})
     with NativeFiles(transport) as files:
         cli = NativeCLI("claude", files, home=str(transport.home), config_root=str(destination.parent))
         assert {item.name for item in cli.markets()} == {"fixture-market", "independent"}
-        assert {item.identifier for item in cli.plugins(cli.markets())} == {"one@fixture-market", "two@independent"}
+        assert {item.identifier for item in cli.plugins(cli.markets())} == {"two@independent"} | (
+            {"one@fixture-market"} if dependent else set()
+        )
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
@@ -213,8 +226,10 @@ def test_ambiguous_plugin_preserves_claims_and_mapping_while_unique_selection_co
     )
     assert not incomplete
     before = (root / ("config.toml" if tool == "codex" else "settings.json")).read_bytes()
-    with pytest.raises(ConfigError):
-        setup_user(tool, NativeUserConfig(plugins=["absent"]), invocation(transport, []))
+    missing = "fixture-missing-selector"
+    with pytest.raises(ConfigError) as caught:
+        setup_user(tool, NativeUserConfig(plugins=[missing]), invocation(transport, []))
+    assert missing in str(caught.value)
     assert (root / ("config.toml" if tool == "codex" else "settings.json")).read_bytes() == before
 
 
@@ -241,3 +256,167 @@ def test_malformed_persisted_plugin_source_retains_on_retirement_and_heals_desir
     assert {item.role for item in claims[-1]} == {"marketplace", "plugin"}
     setup_user(tool, None, invocation(transport, claims, prior=record(claims[-1], tool)))
     assert claims[-1] == ()
+
+
+@pytest.mark.parametrize("tool", ["codex", "claude"])
+def test_ambiguous_selection_retains_both_previously_owned_marketplaces(transport, tool):
+    market = market_fixture(transport, tool)
+    second = copied_market(market, tool, name="second-market")
+    claims: list[tuple[NativeClaim, ...]] = []
+    setup_user(tool, NativeUserConfig(marketplaces=[str(market), str(second)]), invocation(transport, claims))
+    previous = claims[-1]
+    incomplete: list[str] = []
+    setup_user(
+        tool,
+        NativeUserConfig(plugins=["one"]),
+        replace(invocation(transport, claims, prior=record(previous, tool)), report_incomplete=incomplete.append),
+    )
+    assert len(incomplete) == 1
+    assert claims[-1] == previous
+    root = transport.home / (".codex" if tool == "codex" else ".claude")
+    with NativeFiles(transport) as files:
+        cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(root))
+        assert {item.name for item in cli.markets()} == {"fixture-market", "second-market"}
+        assert cli.plugins(cli.markets()) == ()
+
+
+@pytest.mark.parametrize("declaration", [False, {"source": {"source": "directory", "path": "/missing-stale-market"}}])
+@pytest.mark.parametrize("owned", [False, True])
+@pytest.mark.parametrize("mapped", [False, True])
+def test_claude_invalid_named_declaration_retains_association_and_converges_independent_market(
+    transport, declaration, owned, mapped
+):
+    market = market_fixture(transport, "claude")
+    claims: list[tuple[NativeClaim, ...]] = []
+    setup_user(
+        "claude",
+        NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
+        invocation(transport, claims),
+    )
+    previous = claims[-1] if owned else ()
+    root = transport.home / ".claude"
+    destination = root / "settings.json"
+    document = json.loads(destination.read_bytes())
+    document["extraKnownMarketplaces"]["fixture-market"] = declaration
+    destination.write_text(json.dumps(document))
+    registry_path = root / "plugins/known_marketplaces.json"
+    registered = json.loads(registry_path.read_bytes())["fixture-market"]
+    independent = copied_market(market, "claude", name="independent")
+    mapping = transport.root / "settings-source.json"
+    mapping.write_text('{"mapped": true}')
+    incomplete: list[str] = []
+    setup_user(
+        "claude",
+        NativeUserConfig(
+            marketplaces=[str(market), str(independent)],
+            plugins=["one@fixture-market", "two@independent"],
+            settings=SettingsMapping(source=str(mapping), strategy="replace") if mapped else None,
+        ),
+        replace(invocation(transport, claims, prior=record(previous, "claude")), report_incomplete=incomplete.append),
+    )
+    assert incomplete and any("fixture-market" in item for item in incomplete)
+    codex_market = market_fixture(transport, "codex")
+    codex_claims: list[tuple[NativeClaim, ...]] = []
+    setup_user(
+        "codex",
+        NativeUserConfig(marketplaces=[str(codex_market)], plugins=["one@fixture-market"]),
+        invocation(transport, codex_claims),
+    )
+    assert {item.role for item in codex_claims[-1]} == {"marketplace", "plugin"}
+    assert set(previous) <= set(claims[-1])
+    assert {(item.role, item.identifier) for item in claims[-1]} == {
+        ("marketplace", "independent"),
+        ("plugin", "two@independent"),
+    } | ({(item.role, item.identifier) for item in previous} if owned else set())
+    assert json.loads(registry_path.read_bytes())["fixture-market"] == registered
+    final_document = json.loads(destination.read_bytes())
+    assert final_document["extraKnownMarketplaces"]["fixture-market"] == declaration
+    if mapped:
+        assert final_document["mapped"] is True
+    with NativeFiles(transport) as files:
+        cli = NativeCLI("claude", files, home=str(transport.home), config_root=str(root))
+        markets = {item.name: item for item in cli.markets()}
+        assert markets["fixture-market"].source is None
+        assert markets["fixture-market"].unavailable_reason is not None
+        assert markets["independent"].source is not None
+        assert {item.identifier for item in cli.plugins(tuple(markets.values()))} == {
+            "one@fixture-market",
+            "two@independent",
+        }
+
+
+@pytest.mark.parametrize(
+    "payload,declarations",
+    [
+        ({}, {}),
+        ([{"name": "one", "source": "directory"}], {}),
+        ([{"name": "one", "source": "directory", "path": 5}], {}),
+        ([{"name": "one", "source": "directory", "path": "/one"}], []),
+        ([{"name": "one", "source": "directory", "path": "/one"}] * 2, {}),
+    ],
+)
+def test_invalid_broad_marketplace_inventory_still_refuses(transport, monkeypatch, payload, declarations):
+    root = transport.home / ".claude"
+    root.mkdir()
+    (root / "settings.json").write_text(json.dumps({"extraKnownMarketplaces": declarations}))
+    with NativeFiles(transport) as files:
+        cli = NativeCLI("claude", files, home=str(transport.home), config_root=str(root))
+        monkeypatch.setattr(cli, "command", lambda *a, **k: payload)
+        with pytest.raises(ExternalError):
+            cli.markets()
+
+
+@pytest.mark.parametrize(
+    "args,selector",
+    [
+        (
+            [
+                "plugin",
+                "marketplace",
+                "add",
+                "https://fixture-secret@example.invalid/market.git?token=fixture-query#v1",
+            ],
+            "example.invalid/market.git",
+        ),
+        (["plugin", "marketplace", "remove", "fixture-market"], "fixture-market"),
+        (["plugin", "install", "one@fixture-market"], "one@fixture-market"),
+        (["plugin", "uninstall", "one@fixture-market"], "one@fixture-market"),
+    ],
+)
+def test_native_operation_failure_identifies_request_without_provider_output_or_url_credentials(
+    transport, args, selector
+):
+    with NativeFiles(transport) as files:
+        cli = NativeCLI("claude", files, home=str(transport.home), config_root=str(transport.home / ".claude"))
+        cli._resolved = ("/bin/false", "/usr/bin:/bin")
+        with pytest.raises(ExternalError) as caught:
+            cli.command(args)
+    diagnostic = str(caught.value)
+    assert selector in diagnostic
+    assert all(operation in diagnostic for operation in args[:2])
+    assert "fixture-secret" not in diagnostic
+    assert "fixture-query" not in diagnostic
+    assert not any(ord(character) < 32 for character in diagnostic)
+
+
+@pytest.mark.parametrize("declaration", [False, {"source": {"source": "directory", "path": "/missing-unrelated"}}])
+def test_unknown_unclaimed_market_does_not_block_unrelated_qualified_plugin(transport, declaration):
+    market = market_fixture(transport, "claude")
+    setup_user("claude", NativeUserConfig(marketplaces=[str(market)]), invocation(transport, []))
+    destination = transport.home / ".claude/settings.json"
+    document = json.loads(destination.read_bytes())
+    document["extraKnownMarketplaces"]["fixture-market"] = declaration
+    destination.write_text(json.dumps(document))
+    independent = copied_market(market, "claude", name="independent")
+    claims: list[tuple[NativeClaim, ...]] = []
+    incomplete: list[str] = []
+    setup_user(
+        "claude",
+        NativeUserConfig(marketplaces=[str(independent)], plugins=["two@independent"]),
+        replace(invocation(transport, claims), report_incomplete=incomplete.append),
+    )
+    assert not incomplete
+    assert {(item.role, item.identifier) for item in claims[-1]} == {
+        ("marketplace", "independent"),
+        ("plugin", "two@independent"),
+    }

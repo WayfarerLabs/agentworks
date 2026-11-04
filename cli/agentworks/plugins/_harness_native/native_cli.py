@@ -12,9 +12,11 @@ import posixpath
 import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 from agentworks.capabilities.harness_integration.settings import parse_settings
 from agentworks.errors import ConfigError, ExternalError
+from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -61,6 +63,7 @@ with os.fdopen(fd, 'w') as output:
 class NativeMarket:
     name: str
     source: str | None
+    unavailable_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -92,6 +95,52 @@ def _text(value: object) -> str:
 def identity(value: object) -> str:
     """Canonical, non-secret native source identity for ownership claims."""
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _command_description(tool: NativeTool, args: list[str]) -> str:
+    """Identify an operation without provider output or URL credentials."""
+    count = 3 if args[:2] == ["plugin", "marketplace"] else 2
+    operation = " ".join(args[:count])
+    selector = args[count] if len(args) > count and not args[count].startswith("--") else None
+    if selector is not None and args[:3] == ["plugin", "marketplace", "add"] and "://" in selector:
+        try:
+            parsed = urlsplit(selector)
+            selector = urlunsplit((parsed.scheme, parsed.netloc.rsplit("@", 1)[-1], parsed.path, "", parsed.fragment))
+        except ValueError:
+            selector = "<invalid URL>"
+    return sanitize_setup_diagnostic(f"{tool} {operation}" + ("" if selector is None else f" {selector!r}"))
+
+
+def _claude_market(name: str, source: dict[str, object], declaration: object) -> NativeMarket:
+    """Keep a named declaration gap local without guessing its full association."""
+    kind = _text(source["source"])
+    location_key = {"directory": "path", "github": "repo", "git": "url", "url": "url"}[kind]
+    _text(source[location_key])
+    if "ref" in source:
+        _text(source["ref"])
+    if not isinstance(declaration, dict):
+        return NativeMarket(name, None, "its extraKnownMarketplaces user declaration is not an object")
+    if "source" not in declaration:
+        if kind in ("git", "github"):
+            return NativeMarket(name, None, "its full git source is unavailable without a usable user declaration")
+        return NativeMarket(name, identity({"source": source}))
+    declared_source = declaration["source"]
+    if not isinstance(declared_source, dict):
+        return NativeMarket(name, None, "its user declaration has no object-valued source")
+    observed = dict(source)
+    # Only omitted optional fields come from the current native declaration.
+    # A differing source never establishes ownership or permission to remove it.
+    for key in ("ref", "sparsePaths"):
+        if key in declared_source and key not in observed:
+            observed[key] = declared_source[key]
+    if declared_source != observed:
+        return NativeMarket(name, None, "its user declaration source differs from the observed native registration")
+    if "ref" in observed and not isinstance(observed["ref"], str):
+        return NativeMarket(name, None, "its user declaration has an invalid source ref")
+    sparse = observed.get("sparsePaths", [])
+    if not isinstance(sparse, list) or any(not isinstance(item, str) or not item for item in sparse):
+        return NativeMarket(name, None, "its user declaration has invalid sparse paths")
+    return NativeMarket(name, identity({"source": observed}))
 
 
 class NativeCLI:
@@ -175,7 +224,9 @@ class NativeCLI:
         )
         result = self.files.runner.run("bash", input_text=script, env=env, check=False, timeout=180)
         if not result.ok:
-            raise ExternalError(f"{self.tool} native plugin operation failed; inspect its setup with the native CLI")
+            raise ExternalError(
+                f"{_command_description(self.tool, args)} failed; inspect its setup with the native CLI"
+            )
         if not structured:
             return None
         self.files.runner.copy_from(remote, local)
@@ -191,9 +242,16 @@ class NativeCLI:
             if self.isolated
             else self.config_root
         )
-        settings = self.files.read(active_root + ("/config.toml" if self.tool == "codex" else "/settings.json"))
+        settings_path = active_root + ("/config.toml" if self.tool == "codex" else "/settings.json")
+        settings = self.files.read(settings_path)
         document = (
-            {} if settings is None else parse_settings(settings, format="toml" if self.tool == "codex" else "json")
+            {}
+            if settings is None
+            else parse_settings(
+                settings,
+                format="toml" if self.tool == "codex" else "json",
+                location=f"guest destination {settings_path!r}",
+            )
         )
         configured_raw = document.get("marketplaces" if self.tool == "codex" else "extraKnownMarketplaces", {})
         try:
@@ -214,8 +272,8 @@ class NativeCLI:
                         for key in ("source", "repo", "url", "path", "ref", "sparsePaths")
                         if key in entry
                     }
-                declaration = _object(configured.get(name, {}))
                 if self.tool == "codex":
+                    declaration = _object(configured.get(name, {}))
                     native_source = {"source_type": source["sourceType"], "source": source["source"]}
                     for key in ("ref", "sparse_paths"):
                         if key in declaration:
@@ -223,23 +281,21 @@ class NativeCLI:
                     if any(key in declaration and declaration[key] != value for key, value in native_source.items()):
                         raise ValueError
                 else:
-                    if source.get("source") in ("git", "github") and "source" not in declaration:
-                        # List output omits sparse paths, so without a current
-                        # declaration it cannot establish the full association.
-                        result.append(NativeMarket(name, None))
-                        continue
-                    declared_source = _object(declaration.get("source", source))
-                    # Recover optional source fields omitted by list output from
-                    # the current native user declaration for the full identity.
-                    for key in ("ref", "sparsePaths"):
-                        if key in declared_source and key not in source:
-                            source[key] = declared_source[key]
-                    if declared_source != source:
-                        raise ValueError
-                    native_source = {"source": source}
+                    result.append(_claude_market(name, source, configured.get(name, {})))
+                    continue
                 result.append(NativeMarket(name, identity(native_source)))
-            if len({market.name for market in result}) != len(result):
+            observed_names = {market.name for market in result}
+            if len(observed_names) != len(result):
                 raise ValueError
+            if self.tool == "claude":
+                # A bad current declaration can hide a still-registered entry
+                # from list output. Its name is evidence, never its full source.
+                for name in configured:
+                    if name in observed_names:
+                        continue
+                    result.append(
+                        NativeMarket(name, None, "its user declaration has no matching native inventory entry")
+                    )
             return tuple(result)
         except (KeyError, ValueError, TypeError):
             raise ExternalError(f"invalid {self.tool} native marketplace inventory") from None

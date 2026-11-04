@@ -23,6 +23,7 @@ from agentworks.capabilities.harness_integration.settings import (
 )
 from agentworks.errors import ConfigError, StateError
 from agentworks.harness_setup.model import NativeClaim
+from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.native_files import NativeFiles, native_path
 from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeMarket, NativePlugin, NativeTool, identity
 
@@ -93,9 +94,9 @@ class _MappingPlan:
     contributions: SettingsObject
 
     @classmethod
-    def build(cls, prepared: PreparedSettings, initial: bytes | None) -> _MappingPlan:
-        result = prepared.apply(initial)
-        return cls(prepared, result.skipped, prepared.contributions(initial))
+    def build(cls, prepared: PreparedSettings, initial: bytes | None, destination: str) -> _MappingPlan:
+        result = prepared.apply(initial, destination_path=destination)
+        return cls(prepared, result.skipped, prepared.contributions(initial, destination_path=destination))
 
     def publish(
         self,
@@ -111,14 +112,16 @@ class _MappingPlan:
         if self.skipped:
             return
         # Keep the initial skip decision even when plugin commands create the file.
-        result = self.prepared.apply(None if self.prepared.strategy == "skip-existing" else current)
+        result = self.prepared.apply(
+            None if self.prepared.strategy == "skip-existing" else current, destination_path=destination
+        )
         document = parse_settings(result.content, format=self.prepared.format)
         for key, name in removed:
             _table(document, key).pop(name, None)
         native = (
             {}
             if current is None or not (overlays or protected)
-            else parse_settings(current, format=self.prepared.format)
+            else parse_settings(current, format=self.prepared.format, location=f"guest destination {destination!r}")
         )
         for (key, name), value in overlays:
             if key not in document:
@@ -156,7 +159,7 @@ def setup_workspace(
     destination = root + "/" + _filename(tool)
     with NativeFiles(invocation.runner) as files:
         initial = files.read(destination)
-        plan = _MappingPlan.build(prepared, initial)
+        plan = _MappingPlan.build(prepared, initial, destination)
         plan.publish(files, destination, current=initial, group=invocation.linux_group)
         if claims:
             invocation.checkpoint(())
@@ -249,16 +252,20 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
             return
         with NativeFiles(invocation.runner) as files:
             initial = files.read(destination)
-            settings_plan = _MappingPlan.build(prepared, initial)
+            settings_plan = _MappingPlan.build(prepared, initial, destination)
             settings_plan.publish(files, destination, current=initial)
         return
     with NativeFiles(invocation.runner) as files:
         initial = files.read(destination)
-        plan = None if mapping is None or prepared is None else _MappingPlan.build(prepared, initial)
+        plan = None if mapping is None or prepared is None else _MappingPlan.build(prepared, initial, destination)
         # Native inventory must be trustworthy before mutation. A settings-only
         # replacement can repair malformed input; plugin reconciliation refuses
         # it until that separate repair makes ownership observable again.
-        initial_document = {} if initial is None else parse_settings(initial, format=_format(tool))
+        initial_document = (
+            {}
+            if initial is None
+            else parse_settings(initial, format=_format(tool), location=f"guest destination {destination!r}")
+        )
         cli = NativeCLI(tool, files, home=invocation.home, config_root=root, environment=invocation.environment)
         root_exists = files.directory(root)
         markets = cli.markets() if root_exists else ()
@@ -298,7 +305,9 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 if item == selector or ("@" not in selector and item.split("@")[0] == selector)
             ]
             if not matches:
-                raise ConfigError("requested plugin is absent in the native marketplaces")
+                raise ConfigError(
+                    f"requested plugin {sanitize_setup_diagnostic(selector)!r} is absent in the native marketplaces"
+                )
             if len(matches) != 1:
                 ambiguous[selector] = matches
                 continue
@@ -381,11 +390,31 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
         # Claude's user-scoped removal requires the current user declaration,
         # even when list still reports a registration. Check before uninstalling
         # any dependencies; never fall back to removal across all scopes.
-        retiring_markets = {claim.identifier for claim in obsolete if claim.role == "marketplace"}
+        relevant_markets = (
+            {market.name for market in desired}
+            | {
+                claim.identifier if claim.role == "marketplace" else claim.identifier.rpartition("@")[2]
+                for claim in native_claims
+            }
+            | {selector.rpartition("@")[2] for selector in selectors}
+        )
+        for market in markets:
+            if market.name in relevant_markets and market.unavailable_reason is not None:
+                skip("marketplace", market.name, market.unavailable_reason)
+
+        retiring_markets = {
+            claim.identifier
+            for claim in obsolete
+            if claim.role == "marketplace"
+            and claim.identifier in by_market
+            and _owned(claim, by_market[claim.identifier].source)
+        }
         replacing_markets = {
             market.name
             for market in desired
-            if market.name in by_market and by_market[market.name].source != market.source
+            if market.name in by_market
+            and by_market[market.name].source != market.source
+            and _owned(prior.get(("marketplace", market.name)), by_market[market.name].source)
         }
         for name in sorted(replacing_markets & retained_markets):
             skip("marketplace", name, "replacement would affect an ambiguous plugin selection")
@@ -530,6 +559,31 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
             if not _owned(previous_plugin_claim, existing_plugin.source) and selector in by_plugin:
                 output.info(f"Adopting matching native plugin '{selector}' via {tool}.")
             checkpoint(adopted, "plugin", selector, force=changed)
+        if protected:
+            # Unrelated native commands can discard malformed declarations.
+            # Preserve the affected entries exactly as observed, without deriving
+            # a source or adopting an association from that incomplete evidence.
+            current = files.read(destination)
+            document = (
+                {}
+                if current is None
+                else parse_settings(current, format=_format(tool), location=f"guest destination {destination!r}")
+            )
+            changed = False
+            for key, name in protected:
+                original = _table(initial_document, key)
+                observed = _table(document, key)
+                if name in original:
+                    if name not in observed or observed[name] != original[name]:
+                        if key not in document:
+                            document[key] = {}
+                        _table(document, key)[name] = original[name]
+                        changed = True
+                elif name in observed:
+                    observed.pop(name)
+                    changed = True
+            if changed:
+                files.publish(destination, serialize_settings(document, format=_format(tool)), expected=_hash(current))
         if plan is not None:
             current = files.read(destination)
             overlays: tuple[tuple[tuple[str, str], SettingsValue], ...] = tuple(
