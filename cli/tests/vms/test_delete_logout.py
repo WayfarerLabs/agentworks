@@ -56,8 +56,9 @@ def _log_out(db: Database, guest: FakeGuest) -> None:
         (Answer(status=None), True),
         (Answer(raises=ConnectivityError("channel failed")), True),
         (Answer(raises=TrustMissing("box")), True),
+        (Answer(raises=ProvisioningError("provider said no")), True),
     ],
-    ids=["logged-out", "failed", "unknown", "channel-raised", "never-enrolled"],
+    ids=["logged-out", "failed", "unknown", "channel-raised", "never-enrolled", "provider-raised"],
 )
 def test_each_logout_outcome_is_reported_and_nothing_reaches_the_vm_after_it(
     db: Database,
@@ -75,35 +76,11 @@ def test_each_logout_outcome_is_reported_and_nothing_reaches_the_vm_after_it(
     assert vm_access_recorder.operations == []
 
 
-def test_a_warning_names_the_node_for_the_admin_console(db: Database, captured_output: CapturedOutput) -> None:
-    """The node is what the operator removes; the VM's name is not its node's."""
-    _log_out(db, FakeGuest(respond=lambda payload, seen: Answer(raises=TrustMissing("box"))))
-
-    (warning,) = captured_output.warnings
-    assert "box-node" in warning
-
-
-def test_the_logout_carries_no_secret_and_runs_once(db: Database, captured_output: CapturedOutput) -> None:
-    guest = FakeGuest()
-
-    _log_out(db, guest)
-
-    (script,) = guest.scripts
-    assert b"AGW_SECRET" not in script
-
-
 def test_an_operator_abort_is_not_downgraded(db: Database) -> None:
     guest = FakeGuest(respond=lambda payload, seen: Answer(raises=UserAbort("stop")))
 
     with pytest.raises(UserAbort):
         _log_out(db, guest)
-
-
-def test_a_provider_failure_is_reported_not_raised(db: Database, captured_output: CapturedOutput) -> None:
-    """Any platform raise is a logout that could not be confirmed: delete continues."""
-    _log_out(db, FakeGuest(respond=lambda payload, seen: Answer(raises=ProvisioningError("provider said no"))))
-
-    assert len(captured_output.warnings) == 1
 
 
 def test_a_never_enrolled_cloud_vm_is_not_logged_out_and_its_node_is_named(

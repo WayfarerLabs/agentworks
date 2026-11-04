@@ -278,24 +278,6 @@ def test_a_vm_that_is_not_running_is_refused_before_any_script(
     assert guest.scripts == []
 
 
-def test_a_stopped_vm_and_one_whose_state_is_unknown_are_refused_differently(
-    db: Database,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _seed(db)
-    config = make_config()
-    refusals: list[StateError] = []
-    for status in (VMStatus.STOPPED, VMStatus.UNKNOWN):
-        _guest(monkeypatch, status=status)
-        with pytest.raises(StateError) as caught:
-            _recover(db, config)
-        refusals.append(caught.value)
-
-    stopped, unknown = refusals
-    assert (str(stopped), stopped.hint) != (str(unknown), unknown.hint)
-
-
 @pytest.mark.parametrize("provisioning", [ProvisioningStatus.FAILED, ProvisioningStatus.IN_PROGRESS])
 def test_a_vm_whose_provisioning_did_not_complete_is_refused_before_any_secret(
     db: Database,

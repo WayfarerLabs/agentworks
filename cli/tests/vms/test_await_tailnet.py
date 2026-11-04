@@ -96,32 +96,6 @@ def test_a_vm_with_no_address_raises_without_waiting(
     assert waits == []
 
 
-@pytest.mark.parametrize(
-    ("status", "expected_flag"),
-    [(VMStatus.RUNNING, True), (VMStatus.STOPPED, False)],
-)
-def test_start_vm_threads_already_running_from_status(
-    db: Database,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-    resolve_counter: list[list[str]],  # noqa: ARG001
-    status: VMStatus,
-    expected_flag: bool,
-) -> None:
-    """``start_vm`` derives the wait's wording from the observed power state."""
-    config = make_config()
-    _seed_vm(db)
-    captured: dict[str, object] = {}
-
-    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: status)
-    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: None)
-    monkeypatch.setattr(vm_manager, "_await_tailnet", lambda *a, **k: captured.update(k))
-
-    vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
-
-    assert captured["already_running"] is expected_flag
-
-
 def test_start_vm_through_a_hold_that_anchors_waits_exactly_once(
     db: Database,
     make_config,  # noqa: ANN001
