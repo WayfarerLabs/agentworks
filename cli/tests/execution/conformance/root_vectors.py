@@ -17,6 +17,7 @@ import time
 import uuid
 import warnings
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -220,6 +221,127 @@ def wsl2_missing_distro_error_reads_as_text(lane: RootLane) -> None:
     assert "\0" not in result.channel_tail
 
 
+# -- Core's recovery scripts: W4's rekey half, W6 and W9 ------------------------------------------
+
+
+@dataclass
+class _LanePlatform:
+    """The lane's root channel where a recovery function takes a platform.
+
+    ``prefix`` runs before each script, and ``deadline``, when given, replaces the script's own.
+    """
+
+    lane: RootLane
+    recovery_needs_guest_sshd: bool = True
+    prefix: str = ""
+    deadline: float | None = None
+
+    def run_as_root(self, vm: object, ctx: object, script: bytes, deadline: float) -> RawRun:
+        return self.lane.run_as_root(self.prefix.encode() + script, self.deadline or deadline)
+
+
+def _admin(lane: RootLane) -> str:
+    """An account the lane's guest has: the VM's admin, or the local user."""
+    result = lane.run("id -un")
+    assert result.status == 0, result.channel_tail
+    return result.stdout.decode().strip()
+
+
+def _stub_tailscale_and_systemctl(lane: RootLane, tmp: str, *, slow_logout: bool) -> None:
+    """Stubs first on ``PATH`` that record each call, so a live VM's node and daemons are untouched."""
+    stub = f"""#!/bin/bash
+printf '%s %s\\n' "$(basename "$0")" "$*" >> {tmp}/calls
+if [ "$(basename "$0")" = tailscale ] && [ "$1" = logout ] && [ -e {tmp}/slow ]; then /bin/sleep 3; fi
+if [ "$(basename "$0")" = tailscale ] && [ "$1" = up ]; then cat > {tmp}/joined-with; fi
+exit 0
+"""
+    script = [f"umask 077\nmkdir {tmp}\ncat > {tmp}/tailscale <<'AGW_STUB'\n{stub}AGW_STUB"]
+    script += [f"cp {tmp}/tailscale {tmp}/{name}" for name in ("systemctl", "sleep")]
+    script += [f"chmod 700 {tmp}/tailscale {tmp}/systemctl {tmp}/sleep"]
+    if slow_logout:
+        script += [f"touch {tmp}/slow"]
+    assert lane.check("\n".join(script))
+
+
+def the_rekey_script_finishes_after_its_channel_closes_mid_logout(lane: RootLane) -> None:
+    """W4's rekey half: the channel closes during the logout step, and the join and the final restart still land."""
+    from agentworks.capabilities.base import RunContext
+    from agentworks.vms import recovery
+
+    if lane.name == "V" and lane.platform not in ("lima", "azure-vm"):
+        pytest.skip("W4's live cells are Lima, Remote Lima and Azure")
+    tmp = scratch_path()
+    _stub_tailscale_and_systemctl(lane, tmp, slow_logout=True)
+    platform: Any = _LanePlatform(lane, prefix=f"export PATH={tmp}:$PATH\n", deadline=1)
+    vm: Any = SimpleNamespace(name="conformance", admin_username=_admin(lane))
+
+    result = recovery.rekey(platform, vm, RunContext(), auth_key=SECRET, log=None)
+    finished = _wait(lambda: lane.check(f"grep -c 'restart tailscaled' {tmp}/calls | grep -qx 2"))
+    calls = lane.run(f"grep -v '^sleep' {tmp}/calls; cat {tmp}/joined-with; rm -rf {tmp}")
+
+    assert result.status is None  # W4: the outcome is unknown
+    assert finished
+    assert calls.stdout.decode().splitlines() == [
+        "systemctl restart tailscaled",
+        "tailscale logout",
+        "tailscale up --auth-key=file:/dev/stdin",
+        "systemctl restart tailscaled",
+        SECRET,
+    ]
+
+
+def the_repair_runs_to_status_zero(lane: RootLane) -> None:
+    """W6, the repair: on a Debian 12 and a Debian 13 guest whose node is healthy, the repair exits 0 and leaves
+    python3 with its standard library. Run it once on a guest prepared with python3 absent and once with only
+    ``python3-minimal``; preparing them is by hand, since it removes packages. The rekey and logout scripts change
+    the node, so their live cells are ``vm rekey`` and ``vm delete``; on the guest's own Bash they run here against
+    stubs."""
+    from agentworks.capabilities.base import RunContext
+    from agentworks.vms import recovery
+
+    if lane.name != "V":
+        pytest.skip("live lane only")
+    admin = _admin(lane)
+    stand_in_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOU3HUqrGubKZio8MVx9WOFPYHGIHl5tIyF3skwoAxv0 agw-conformance"
+    vm: Any = SimpleNamespace(name="conformance", admin_username=admin)
+    platform: Any = _LanePlatform(lane)
+
+    # A healthy node reads Running, so the stand-in key is never used.
+    repaired = recovery.repair(platform, vm, RunContext(), public_key=stand_in_key, auth_key=SECRET, log=None)
+    lane.run(f"sed -i '/ agw-conformance$/d' ~{admin}/.ssh/authorized_keys")
+    stdlib = lane.check("python3 -c 'import json, ssl, venv'")
+
+    tmp = scratch_path()
+    _stub_tailscale_and_systemctl(lane, tmp, slow_logout=False)
+    stubbed: Any = _LanePlatform(lane, prefix=f"export PATH={tmp}:$PATH\n")
+    rekeyed = recovery.rekey(stubbed, vm, RunContext(), auth_key=SECRET, log=None)
+    logged_out = recovery.logout(stubbed, vm, RunContext())
+    lane.run(f"rm -rf {tmp}")
+
+    assert repaired.status == 0, repaired.stderr  # W6
+    assert not recovery.joined(repaired)
+    assert stdlib
+    assert (rekeyed.status, logged_out.status) == (0, 0)
+
+
+def backend_state_reads_as_expected(lane: RootLane) -> None:
+    """W9: ``BackendState`` reads ``Running`` for a healthy node, and ``NeedsLogin`` for one removed in the admin
+    console and for an expired ephemeral key. Set ``AGW_CONFORMANCE_BACKEND_STATE=NeedsLogin`` for those two cells,
+    after removing the node or letting its key expire, and recover the VM afterwards."""
+    import os
+
+    from agentworks.vms import recovery
+
+    if lane.name != "V":
+        pytest.skip("live lane only")
+    expected = os.environ.get("AGW_CONFORMANCE_BACKEND_STATE", "Running")
+
+    result = lane.run(recovery.BACKEND_STATE_FRAGMENT)
+
+    assert result.status == 0, result.channel_tail
+    assert result.stdout.decode().strip() == expected  # W9
+
+
 # -- The list ------------------------------------------------------------------------------
 
 
@@ -235,13 +357,14 @@ ROOT_VECTORS = [
     RootVector("w2-cut-short-runs-nothing", "L", a_script_cut_short_runs_nothing),
     RootVector("w3-secret-in-no-argv-or-child-env", "LV", the_secret_reaches_the_payload_and_no_argv_or_child_env),
     RootVector("w4-trapped-payload-outlives-its-channel", "LV", a_trapped_payload_finishes_after_its_channel_closes),
+    RootVector("w4-rekey-outlives-its-channel", "LV", the_rekey_script_finishes_after_its_channel_closes_mid_logout),
     RootVector("w5-statuses", "LV", payload_statuses_come_back_as_themselves),
+    RootVector("w6-repair-runs-to-zero", "V", the_repair_runs_to_status_zero),
     RootVector("w7-wsl2-no-controlling-terminal", "V", wsl2_payload_has_no_controlling_terminal),
     RootVector("w7-wsl2-killed-wsl-exe-recorded", "V", wsl2_records_what_killing_wsl_exe_does_to_the_payload),
     RootVector("w8-wsl2-missing-distro-reads-as-text", "V", wsl2_missing_distro_error_reads_as_text),
+    RootVector("w9-backend-state", "V", backend_state_reads_as_expected),
 ]
-"""W6 (the core scripts on Debian 12 and 13), W9 (``BackendState``) and W4's rekey half run core's
-recovery scripts, and join this list with them."""
 
 
 def root_vectors_for(lane: str) -> list[RootVector]:
