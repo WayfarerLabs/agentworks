@@ -8,6 +8,12 @@ Accepted. Builds on the capability/declarable resource split of
 [ADR 0016](0016-yaml-resource-manifests.md); the capability lifecycle contract this layer drives
 (validate/construct/preflight/runup/ops) is documented in `cli/agentworks/capabilities/README.md`.
 
+Amended: the Tailscale rejoin key's conditional late acquisition (Decision, the gate's ordering) is
+gone with the rejoin itself. `vm start` and the gate's auto-start only wait for the VM to answer and
+name `agw vm recover`, whose own boundary resolves the auth key with the site's secrets, so no gate
+resolves anything after its boundary and the batch gate serves only the boundary's cache (see the
+[transport take 2 SDD](../sdd/2026-10-20-transport-take2/)). The decision stands.
+
 ## Context
 
 Every service-layer command used to hand-wire its own world. Each command bound its VM platform

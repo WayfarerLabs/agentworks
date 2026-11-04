@@ -200,9 +200,11 @@ agw vm delete test-vm
 
 ### Native recovery and interactive access
 
-Agentworks uses QEMU Guest Agent for Tailscale-independent administrative commands. Start-time
-Tailscale rejoin, `vm rekey`, logout during deletion, and create-time release verification therefore
-remain available when Tailscale SSH is unavailable.
+Agentworks uses QEMU Guest Agent as the root channel that works without Tailscale: create's
+bootstrap and Tailscale join, `agw vm recover`, `vm rekey` and the logout during deletion run
+through it. A started VM that does not answer over Tailscale SSH fails `vm start` with a hint to run
+`agw vm recover`, which can also restart a broken SSH server here, since the guest agent does not
+depend on it.
 
 QEMU Guest Agent does not provide an interactive terminal, so `vm shell --platform` is unavailable
 for Proxmox. Use the Proxmox web UI's serial console for interactive access. Normal Agentworks work

@@ -7,10 +7,10 @@ must be explicit, including when all configuration fields use defaults.
 
 Agentworks installs `python3` as a required system package on every VM during create and reinit.
 Native setup uses its standard library for guarded file access, atomic publication and artifact
-discovery; `python3-venv` and `python3-pip` are not required. Run `agw vm reinit <vm-name>` to
-repair an older VM missing the interpreter. A missing interpreter is reported before staging or
-native mutation. The harness CLI itself must also be installed through the existing package or
-install-command configuration.
+discovery; `python3-venv` and `python3-pip` are not required. Run `agw vm recover <vm-name>` to
+install it on an older VM missing the interpreter, then `agw vm reinit <vm-name>`. A missing
+interpreter is reported before staging or native mutation. The harness CLI itself must also be
+installed through the existing package or install-command configuration.
 
 ## Settings mappings
 

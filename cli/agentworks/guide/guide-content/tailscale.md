@@ -27,12 +27,15 @@ not store the value in its database or generated SSH configuration.
 
 ## Recover or move a VM's tailnet association
 
-`agw vm rekey NAME` re-enrolls a VM with a separately obtained replacement auth key. Use it to
-recover a VM whose ephemeral node expired or move a VM to another tailnet as described below. The
-command does not create, rotate, or revoke the auth key. It uses the platform's recovery transport,
-records the new tailnet address, refreshes SSH configuration, and verifies Tailscale SSH.
-`--ignore-env` bypasses an environment-provided key so another configured secret source can supply
-the replacement.
+`vm start` does not rejoin Tailscale. A VM whose node was removed in the admin console, or whose
+ephemeral key's node expired while it was offline, fails its start with a hint; on the running VM,
+`agw vm recover NAME` rejoins it with the VM template's auth key and verifies Tailscale SSH.
+
+`agw vm rekey NAME` re-enrolls a VM with a separately obtained replacement auth key. Use it to move
+a VM to another tailnet as described below. The command does not create, rotate, or revoke the auth
+key. It runs through the platform's own channel, records the new tailnet address, refreshes SSH
+configuration, and verifies Tailscale SSH. `--ignore-env` bypasses an environment-provided key so
+another configured secret source can supply the replacement.
 
 An advanced use case moves a VM to another tailnet. This is useful when workloads need access to
 private infrastructure on another tailnet but the operator does not want the entire Agentworks
