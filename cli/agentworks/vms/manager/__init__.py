@@ -11,7 +11,7 @@ across the codebase and test suite) keep working unchanged.
 The four names imported from ``agentworks.vms.initializer`` are the
 canonical entry point into that package from ``manager``: submodules that
 call them (``lifecycle.py``'s ``create_vm``, ``reinit.py``'s ``reinit_vm``,
-``tailscale.py``'s ``_ensure_tailscale``) do so via
+``recover.py``'s ``recover_vm``) do so via
 ``import agentworks.vms.manager as _mgr`` at call time rather than
 importing these names directly, so that tests which monkeypatch e.g.
 ``agentworks.vms.manager.verify_tailscale_available`` affect every
@@ -24,7 +24,6 @@ from __future__ import annotations
 from agentworks.vms.initializer import (
     VMInitializationOperation,
     bootstrap_vm,
-    rejoin_tailscale,
     run_initialization,
     verify_tailscale_available,
 )
@@ -34,7 +33,6 @@ from ._helpers import (
     _guard_incomplete_vm,
     _human_bytes,
     _init_log_hint,
-    _lookup_or_synthesize_secret,
     _mask_env_var_backend_for,
     _query_live_resources,
     _require_vm,
@@ -67,10 +65,9 @@ from .recover import recover_vm
 from .reinit import reinit_vm
 from .release import confirm_vm_release, reconcile_release
 from .tailscale import (
-    _ensure_tailscale,
+    _await_tailnet,
     _is_tailscale_reachable,
     _tailscale_logout,
-    _tailscale_rejoin_required,
     _warned_tailscale_missing,
 )
 from .verification import VMConnectionVerification, verify_vm_connection
@@ -78,14 +75,12 @@ from .verification import VMConnectionVerification, verify_vm_connection
 __all__ = [
     "_SLUG_PROMPT",
     "_VmAdminEnvScopes",
-    "_ensure_tailscale",
+    "_await_tailnet",
     "_guard_incomplete_vm",
     "_human_bytes",
     "_init_log_hint",
     "_is_tailscale_reachable",
-    "_tailscale_rejoin_required",
     "_live_vm_boundary",
-    "_lookup_or_synthesize_secret",
     "_mask_env_var_backend_for",
     "_query_live_resources",
     "_require_vm",
@@ -108,7 +103,6 @@ __all__ = [
     "port_forward_vm",
     "recover_vm",
     "reinit_vm",
-    "rejoin_tailscale",
     "reconcile_release",
     "rekey_vm",
     "render_vm_listing",

@@ -426,6 +426,33 @@ def test_logout_failure_does_not_skip_delete(
     assert db.get_vm("dvm") is None
 
 
+def test_session_teardown_failure_still_logs_out_and_deletes(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """The teardown's legacy transport can fail (it raises TrustMissing on a VM
+    with no record); the logout has its own span and still runs."""
+    from agentworks.vms.manager import power
+
+    _seed(db)
+    counts = _fake_backend(monkeypatch)
+    logouts: list[str] = []
+
+    def _broken_teardown(*a: object, **k: object) -> None:
+        raise RuntimeError("teardown transport exploded")
+
+    monkeypatch.setattr(power, "_teardown_vm_sessions", _broken_teardown)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda vm, *a, **k: logouts.append(vm.name))
+
+    vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert logouts == ["dvm"]
+    assert counts["delete"] == 1
+    assert db.get_vm("dvm") is None
+
+
 def test_stranded_site_warns_with_hint_and_still_deletes_row(
     db: Database,
     make_config,  # noqa: ANN001

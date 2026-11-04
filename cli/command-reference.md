@@ -657,6 +657,12 @@ different: that records your intent, so it stays down and commands that would ne
 hint until you run `agw vm start`, which clears the intent. `agw vm describe` shows which case a
 stopped VM is in: its status reads `stopped (manual)` versus `stopped (idle)`.
 
+`vm start`, and the automatic start, start the VM and wait up to about four minutes for it to answer
+over SSH at its tailnet address. A VM that does not answer fails with a hint to run
+`agw vm recover <name>`; the VM is left running. Neither rejoins Tailscale, so a VM whose node was
+removed in the admin console, or whose ephemeral key's node expired while it was offline, fails this
+way, and `agw vm recover` rejoins it.
+
 Plain `vm list` is a local inventory read. Add `--status` to query each selected VM platform for
 current power state; this never starts a VM. The human table adds `STATUS` only for that request,
 and the command reports progress before provider work. `--status` cannot be combined with
@@ -758,8 +764,18 @@ A failed step stops there and names the script; its output is in the operation l
 (`agw vm logs <name>`). On Lima, Remote Lima and the clouds the channel itself is the VM's SSH
 server, so a broken one there needs the provider's console or recreation.
 
+`vm rekey` restarts `tailscaled`, logs the node out, joins with the new key and restarts it again,
+in one script through the platform's own channel, then reads and records the new address and waits
+for the VM to answer there. If the new address cannot be read, the node is logged out and the error
+names `agw vm recover`, which rejoins it. A rekeyed VM that does not answer only warns, since its
+new address is recorded.
+
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
-message shows what will be deleted. Pass `--yes` to skip the prompt.
+message shows what will be deleted. Pass `--yes` to skip the prompt. Delete logs the VM's node out
+of the tailnet through the platform's own channel and reports the outcome; when the logout fails or
+cannot be confirmed, it names the node to remove in the Tailscale admin console. A cloud VM whose
+host key was never recorded is not logged out at all, since nothing could verify the VM that
+answered, so delete names its node instead. The backend VM is deleted either way.
 
 `vm backup` exports the VM row and exact owner tree of agents, workspaces, sessions, events, grants,
 desired instance specs, and workspace files. It does not create or copy a provider VM snapshot,

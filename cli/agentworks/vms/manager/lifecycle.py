@@ -63,10 +63,10 @@ if TYPE_CHECKING:
 # ``monkeypatch.setattr(vm_manager, "verify_tailscale_available", ...)``
 # would silently fail to take effect. Every call to one of these four
 # names below therefore goes through ``import agentworks.vms.manager as
-# _mgr`` at call time. ``tailscale.py``'s ``_ensure_tailscale`` needs the
-# same treatment for ``verify_tailscale_available`` / ``rejoin_tailscale``
-# (it is not only ``lifecycle.py`` that consumes these names, despite
-# there being one canonical import site in ``manager/__init__.py``).
+# _mgr`` at call time. ``reinit.py`` and ``recover.py`` give
+# ``verify_tailscale_available`` the same treatment (it is not only
+# ``lifecycle.py`` that consumes these names, despite there being one
+# canonical import site in ``manager/__init__.py``).
 
 
 def _warn_init_cancel(vm_name: str) -> None:

@@ -379,17 +379,15 @@ def _project_vm_issue(issue: VMIssue) -> JsonObject:
     return {"source": issue.source.value, "code": _VM_ISSUE_CODE_UNAVAILABLE}
 
 
-# NOTE on ``_ensure_tailscale`` (start_vm), ``_tailscale_logout``
-# (delete_vm), and ``_query_live_resources`` (describe_vm): all three are
-# defined elsewhere (``tailscale.py``, ``_helpers.py``), and tests
-# monkeypatch them as attributes of the PACKAGE
-# (``agentworks.vms.manager._ensure_tailscale`` / ``._tailscale_logout`` /
-# ``._query_live_resources``). A plain ``from .tailscale import
-# _ensure_tailscale`` (or ``from ._helpers import
-# _query_live_resources``) here would bind a local name in THIS module's
-# namespace, invisible to a monkeypatch of the package attribute. All
-# three calls below go through ``import agentworks.vms.manager as _mgr``
-# at call time instead.
+# NOTE on ``_await_tailnet`` (start_vm), ``_tailscale_logout`` (delete_vm),
+# and ``_query_live_resources`` (describe_vm): all three are defined
+# elsewhere (``tailscale.py``, ``_helpers.py``), and tests monkeypatch them
+# as attributes of the PACKAGE (``agentworks.vms.manager._await_tailnet`` /
+# ``._tailscale_logout`` / ``._query_live_resources``). A plain ``from
+# ._helpers import _query_live_resources`` here would bind a local name in
+# THIS module's namespace, invisible to a monkeypatch of the package
+# attribute. Each call goes through ``import agentworks.vms.manager as
+# _mgr`` at call time instead.
 
 
 def vm_listing(

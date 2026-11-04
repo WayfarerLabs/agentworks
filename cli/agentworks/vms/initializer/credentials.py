@@ -1,48 +1,13 @@
-"""Tailscale connectivity preflight/rejoin and Git credential preparation."""
+"""The workstation's Tailscale preflight.
+
+This module imports nothing from the legacy transport stack.
+"""
 
 from __future__ import annotations
 
-import ipaddress
 import subprocess
-from typing import TYPE_CHECKING
 
-from agentworks import output
 from agentworks.errors import ConnectivityError
-from agentworks.secrets.line_safety import LineOrientedSecretUse, require_line_safe_secret
-from agentworks.ssh import SSHError
-
-if TYPE_CHECKING:
-    from agentworks.db import Database
-    from agentworks.transports import ExecTransport
-
-
-TAILSCALE_JOIN_STDIN_COMMAND = (
-    'IFS= read -r TAILSCALE_AUTH_KEY && test -n "$TAILSCALE_AUTH_KEY" && tailscale up --auth-key "$TAILSCALE_AUTH_KEY"'
-)
-"""The join that ``vm start``'s rejoin and ``vm rekey`` send over a native transport, with the key on stdin."""
-
-
-def join_tailscale_ephemerally(
-    target: ExecTransport,
-    auth_key: str,
-    *,
-    timeout: int | None = None,
-) -> None:
-    """Send one auth key on stdin to a fixed guest command over a native transport.
-
-    The resolved value never enters host or guest command text. Transport
-    sensitive-input semantics also keep reflected output and native failures
-    out of logs, return values, diagnostics, and chained exception objects.
-    Create joins through the platform's root channel instead
-    (``capabilities.vm_platform.tailscale_join``).
-    """
-    auth_key = require_line_safe_secret(auth_key, use=LineOrientedSecretUse.TAILSCALE)
-    target.run(
-        TAILSCALE_JOIN_STDIN_COMMAND,
-        sudo=True,
-        timeout=timeout,
-        input_text=f"{auth_key}\n",
-    )
 
 
 def verify_tailscale_available() -> None:
@@ -67,62 +32,3 @@ def verify_tailscale_available() -> None:
             "VM initialization requires Tailscale to switch from the provisioning "
             "transport to direct SSH. Run 'tailscale up' first."
         )
-
-
-def rejoin_tailscale(
-    db: Database,
-    vm_name: str,
-    exec_target: ExecTransport,
-    *,
-    auth_key: str,
-) -> str:
-    """Re-join Tailscale on a VM that lost its node (e.g. ephemeral key).
-
-    Installs Tailscale if needed, joins the tailnet, and updates the DB
-    with the new Tailscale IP. ``auth_key`` is resolved by the caller via
-    the framework's eager-resolve.
-
-    Returns the new Tailscale IP.
-    """
-    output.info("Tailscale node not reachable. Re-joining tailnet...")
-
-    # Ensure Tailscale is installed (idempotent)
-    exec_target.run(
-        "bash -c 'command -v tailscale >/dev/null || curl -fsSL https://tailscale.com/install.sh | sh'",
-        sudo=True,
-        check=False,
-    )
-
-    return _join_tailscale(db, vm_name, exec_target, auth_key=auth_key)
-
-
-def _join_tailscale(
-    db: Database,
-    vm_name: str,
-    exec_target: ExecTransport,
-    *,
-    auth_key: str,
-) -> str:
-    """Join Tailscale, update DB. Returns the Tailscale IP.
-
-    The Tailscale auth key arrives via the ``auth_key`` keyword argument
-    from the framework's eager-resolve at manager-entry. The legacy
-    env-var fallback and
-    prompt-here-if-missing path are gone; callers must thread the
-    resolved value in.
-    """
-    # Daemon-side flags (e.g. --tun=userspace-networking for WSL2) live in
-    # /etc/default/tailscaled, set during bootstrap. `tailscale up` is the
-    # client and only takes client-side flags.
-    join_tailscale_ephemerally(exec_target, auth_key)
-    result = exec_target.run("tailscale ip -4", sudo=True)
-
-    raw_ip_output = result.stdout.strip()
-    tailscale_ip = raw_ip_output.splitlines()[0].strip() if raw_ip_output else ""
-    try:
-        ipaddress.IPv4Address(tailscale_ip)
-    except ValueError:
-        raise SSHError(f"tailscale ip -4 returned invalid address: {raw_ip_output!r}") from None
-    output.detail(f"Tailscale IP: {tailscale_ip}")
-    db.update_vm_tailscale(vm_name, tailscale_ip)
-    return tailscale_ip

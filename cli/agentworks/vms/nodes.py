@@ -232,7 +232,7 @@ class LiveVMNode:
 
     def auto_start(self, gate_secrets: SecretReader) -> None:
         from agentworks import output
-        from agentworks.vms.manager import _ensure_tailscale, _tailscale_rejoin_required
+        from agentworks.vms.manager import _await_tailnet
 
         # Re-read the intent flag: the row this node was built from may
         # predate a concurrent `vm stop` / `vm start` in another
@@ -252,8 +252,8 @@ class LiveVMNode:
         # This is the last check ahead of the start for a gate opened without
         # that precondition: an earlier one would have to live in
         # confirmed_active, a boolean query, and the start is the first thing
-        # that spends anything (with no record the reconnect check could only
-        # fail and send the repair path to spend a Tailscale auth key).
+        # that spends anything (with no record the wait after it could only
+        # fail).
         trust.require_record(self._row.name)
         observed = self._observed.value if self._observed else "stopped"
         output.info(f"VM '{self._row.name}' is {observed}. Starting...")
@@ -262,24 +262,9 @@ class LiveVMNode:
         if self._observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
             self._db.record_vm_started(self._row.name)
 
+        # A VM that does not answer fails naming 'agw vm recover'.
         with platform.vm_active(self._row, config=self._config):
-            if _tailscale_rejoin_required(
-                self._db,
-                self._config,
-                self._row,
-                already_running=False,
-            ):
-                auth_key_name = self.repair_secret_refs()[0]
-                _ensure_tailscale(
-                    self._db,
-                    self._config,
-                    self._row,
-                    platform,
-                    # The unchanged gate reader remains the only auth source.
-                    self._gate_ops_ctx(gate_secrets),
-                    auth_keys=gate_secrets,
-                    auth_key_name=auth_key_name,
-                )
+            _await_tailnet(self._db, self._config, self._row, already_running=False)
 
     def hold_active(self) -> AbstractContextManager[None]:
         return self._site.platform.vm_active(self._row, config=self._config)

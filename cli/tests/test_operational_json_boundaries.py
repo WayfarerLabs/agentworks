@@ -266,15 +266,13 @@ def test_session_json_never_enters_activation_around_the_envelope(
     from agentworks import output
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
     from agentworks.sessions import manager as sessions
-    from agentworks.vms import manager as vms
 
     config = make_config()
     _seed_session(db)
     _wire_cli(monkeypatch, db, config)
-    monkeypatch.setattr(vms, "_tailscale_rejoin_required", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED)
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: output.info("ACTIVATION_OUTPUT_SENTINEL"))
-    monkeypatch.setattr(vms, "_ensure_tailscale", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", lambda *_args, **_kwargs: None)
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sessions, "check_session_status", lambda *_args, **_kwargs: SessionStatus.STOPPED)
 

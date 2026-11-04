@@ -109,10 +109,10 @@ def _publish_pending_plan(
 def _reload_vm(db: Database, target_vm_name: str) -> VMRow:
     """Reload the VM row inside the gate and assert it has an address.
 
-    The gate may have rejoined Tailscale (only when the VM was
-    stopped/deallocated) and updated ``vms.tailscale_host``. The
-    in-memory ``vm`` from the pre-check would otherwise read stale and
-    the address check below could spuriously raise. (The pre-create
+    A concurrent ``agw vm recover`` or ``vm rekey`` may have updated
+    ``vms.tailscale_host``. The in-memory ``vm`` from the pre-check would
+    otherwise read stale and the address check below could spuriously
+    raise. (The pre-create
     SecretTarget read only ``vm.template``, which a refresh cannot
     change, so the pre-refresh row was safe to target; the nodes keep
     their construction row, whose identity fields a refresh cannot change

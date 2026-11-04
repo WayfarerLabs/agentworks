@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import contextlib
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -88,7 +88,6 @@ def _reachable(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
 def _stop_the_vms(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     """Backend fakes for the stopped-VM gate path, recording per-VM."""
     _reachable(monkeypatch, False)
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
     monkeypatch.setattr(
         ProxmoxPlatform,
         "status",
@@ -100,9 +99,8 @@ def _stop_the_vms(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
         lambda self, row, ctx: events.append(f"start:{row.name}"),
     )
     monkeypatch.setattr(
-        vm_manager,
-        "_ensure_tailscale",
-        lambda db, config, vm, platform, ctx, **k: events.append(f"tailscale:{vm.name}"),
+        "agentworks.vms.manager._await_tailnet",
+        lambda db, config, vm, **k: events.append(f"tailscale:{vm.name}"),
     )
 
 
@@ -354,7 +352,7 @@ def test_stop_all_two_stopped_vms_one_site_one_backend_burst(
 
     assert resolve_counter == [["proxmox-token"]]
     assert events == [
-        # gate vm-a: observe, start, rejoin (inside auto_start's own
+        # gate vm-a: observe, start, the wait (inside auto_start's own
         # hold), then the gate's held-active span opens
         "status:vm-a",
         "start:vm-a",
@@ -817,7 +815,7 @@ def test_stop_all_two_sessions_one_vm_composes_one_node_one_gate(
     assert resolve_counter == [["proxmox-token"]]
 
 
-def test_batch_repair_path_resolves_the_rejoin_key_late(
+def test_a_batch_gate_whose_vm_does_not_answer_names_recover_and_resolves_no_key(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
@@ -825,44 +823,28 @@ def test_batch_repair_path_resolves_the_rejoin_key_late(
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """The late-resolve branch of the batch gate callback, for real: a
-    started VM fails to reconnect and the repair path reads the
-    template's rejoin auth key through the gate reader, which resolves
-    it LATE through the source chain (the boundary burst, then exactly
-    one repair burst) with no seed error; the heal the imperative
-    repair carried survives the batch composition."""
-    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "tskey-late")
+    """A started VM that does not answer fails the batch naming recover:
+    the gate never resolves a Tailscale key, whatever the source chain
+    holds, and dispatches nothing to the VM's root channel."""
+    from agentworks.execution import reachability
+    from agentworks.vms.manager.tailscale import VMNotAnswering
+
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "tskey-unused")
     config = make_config()
     _seed_vm(db, "box", "100.64.0.9")
     _seed_session(db, "s1", "ws-box")
     _reachable(monkeypatch, False)
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED)
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: None)
-    keys: list[str] = []
+    monkeypatch.setattr(
+        ProxmoxPlatform, "run_as_root", lambda *a, **k: pytest.fail("a script was dispatched to the VM")
+    )
+    monkeypatch.setattr(reachability, "wait", lambda access, *, wording: False)
 
-    def _failing_reconnect(
-        db_: object,
-        config_: object,
-        vm: object,
-        platform: object,
-        ctx: object,
-        *,
-        auth_keys: Any,
-        auth_key_name: str,
-    ) -> None:
-        # The started VM fails to reconnect: the real repair reads the
-        # rejoin key through the caller-supplied source at exactly this
-        # point (see _ensure_tailscale), so the fake reads it the same
-        # way and lets the gate reader's lazy branch run for real.
-        keys.append(auth_keys.get(auth_key_name))
+    with pytest.raises(VMNotAnswering):
+        session_manager.stop_all_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
 
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", _failing_reconnect)
-
-    session_manager.stop_all_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
-
-    assert keys == ["tskey-late"]
-    assert resolve_counter == [["proxmox-token"], ["tailscale-auth-key"]]
+    assert resolve_counter == [["proxmox-token"]]
 
 
 def test_batch_gate_refuses_an_undeclared_outside_union_name(

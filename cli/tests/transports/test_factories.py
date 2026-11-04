@@ -4,7 +4,7 @@ Covers the three named factories (``transport``, ``agent_transport``,
 ``native_transport``), the low-level helper (``transport_for_user``),
 the no-failover invariant (polymorphic-transports SDD R3), the Azure
 ``transient_route`` lifecycle, the reachability-probe retry loop, the
-defensive empty-host guard, and ``wait_for_reconnect``.
+and the defensive empty-host guard.
 """
 
 from __future__ import annotations
@@ -20,17 +20,11 @@ from agentworks.errors import StateError
 from agentworks.execution.trust import HOST_TRUST
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import (
-    LimaTransport,
-    RemoteLimaTransport,
     SSHTransport,
-    TailscaleWait,
-    Transport,
-    WSL2Transport,
     agent_transport,
     native_transport,
     transport,
     transport_for_user,
-    wait_for_reconnect,
 )
 from tests.native_exec_support import ExecutionOnlyTransport
 
@@ -359,90 +353,3 @@ def test_native_transport_azure_close_fires_on_downstream_exception() -> None:
         native_transport(vm, platform, config, ctx=ctx, stack=stack)
 
     assert events == ["open", "close"]
-
-
-# ---------------------------------------------------------------------------
-# wait_for_reconnect
-# ---------------------------------------------------------------------------
-
-
-def test_wait_for_reconnect_returns_true_on_first_success() -> None:
-    """Polymorphic over any Transport via ``run``. The double-check
-    handles flapping but only fires after a prior failure."""
-    t = SSHTransport(trust=HOST_TRUST, host="1.2.3.4", user="agentworks")
-    with patch.object(t, "run", return_value=SSHResult(returncode=0, stdout="", stderr="")) as mock_run:
-        assert wait_for_reconnect(t) is True
-        mock_run.assert_called_once()
-
-
-def test_wait_for_reconnect_double_checks_after_prior_failure() -> None:
-    t = SSHTransport(trust=HOST_TRUST, host="1.2.3.4", user="agentworks")
-    calls = 0
-
-    def flaky(*_a: object, **_kw: object) -> SSHResult:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise SSHError("flap")
-        return SSHResult(returncode=0, stdout="", stderr="")
-
-    with (
-        patch.object(t, "run", side_effect=flaky),
-        patch("agentworks.transports.time.sleep"),
-    ):
-        assert wait_for_reconnect(t) is True
-    # First call fails, second succeeds, third is the double-check.
-    assert calls == 3
-
-
-def test_wait_for_reconnect_returns_false_after_max_attempts() -> None:
-    t = SSHTransport(trust=HOST_TRUST, host="1.2.3.4", user="agentworks")
-    with (
-        patch.object(t, "run", side_effect=SSHError("never")),
-        patch("agentworks.transports.time.sleep"),
-    ):
-        assert wait_for_reconnect(t, max_attempts=2) is False
-
-
-def test_wait_for_reconnect_accepts_any_transport() -> None:
-    """``wait_for_reconnect`` is polymorphic over the Transport ABC, not
-    SSH-specific. A LimaTransport / WSL2Transport / RemoteLimaTransport
-    works equally well -- the contract is just ``target.run()``."""
-    for t in [
-        LimaTransport(vm_name="vm1"),
-        WSL2Transport(distro_name="distro"),
-        RemoteLimaTransport(vm_name="vm1", vm_host_ssh="h"),
-    ]:
-        assert isinstance(t, Transport)
-        with patch.object(t, "run", return_value=SSHResult(returncode=0, stdout="", stderr="")):
-            assert wait_for_reconnect(t) is True
-
-
-def test_tailscale_wait_wording_is_a_closed_set() -> None:
-    """The context vocabulary pins the exact operator-facing strings, so
-    a byte-level regression in either message pair is caught here."""
-    reconnect_waiting = "Waiting for Tailscale to reconnect (this may take several minutes)..."
-    assert TailscaleWait.RECONNECT.waiting_message == reconnect_waiting
-    assert TailscaleWait.RECONNECT.success_message == "Tailscale SSH reconnected"
-    assert TailscaleWait.VERIFY.waiting_message == "Verifying Tailscale connectivity..."
-    assert TailscaleWait.VERIFY.success_message == "Tailscale SSH reachable"
-
-
-def test_wait_for_reconnect_default_context_is_reconnect(captured_output) -> None:  # noqa: ANN001
-    """The default context emits the reconnect wording."""
-    t = SSHTransport(trust=HOST_TRUST, host="1.2.3.4", user="agentworks")
-    with patch.object(t, "run", return_value=SSHResult(returncode=0, stdout="", stderr="")):
-        assert wait_for_reconnect(t) is True
-    assert any("Waiting for Tailscale to reconnect" in line for line in captured_output.detail)
-    assert any("Tailscale SSH reconnected" in line for line in captured_output.detail)
-
-
-def test_wait_for_reconnect_verify_context_emits_verify_wording(captured_output) -> None:  # noqa: ANN001
-    """``context=TailscaleWait.VERIFY`` selects the truthful verify lines
-    and never the scary reconnect wording."""
-    t = SSHTransport(trust=HOST_TRUST, host="1.2.3.4", user="agentworks")
-    with patch.object(t, "run", return_value=SSHResult(returncode=0, stdout="", stderr="")):
-        assert wait_for_reconnect(t, context=TailscaleWait.VERIFY) is True
-    assert any("Verifying Tailscale connectivity" in line for line in captured_output.detail)
-    assert any("Tailscale SSH reachable" in line for line in captured_output.detail)
-    assert not any("reconnect" in line for line in captured_output.detail)

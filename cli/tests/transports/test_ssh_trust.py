@@ -21,7 +21,6 @@ from agentworks.transports import (
     native_transport,
     transport,
     transport_for_user,
-    wait_for_reconnect,
 )
 from tests.conftest import seed_vm_trust
 from tests.transports.conftest import ok_completed
@@ -176,33 +175,6 @@ def test_host_trust_keeps_first_use_against_the_operators_configuration() -> Non
 
 
 # -- The loops that retry never retry a missing record ---------------------------------------
-
-
-def test_wait_for_reconnect_raises_on_the_first_attempt() -> None:
-    t = _vm_transport()
-
-    with (
-        patch("agentworks.transports.time.sleep") as sleep,
-        patch.object(t, "run", wraps=t.run) as run,
-        patch("agentworks.transports.ssh.subprocess.run") as spawn,
-        pytest.raises(TrustMissing),
-    ):
-        wait_for_reconnect(t)
-
-    assert run.call_count == 1
-    sleep.assert_not_called()
-    spawn.assert_not_called()
-
-
-def test_wait_for_reconnect_still_reports_an_unreachable_vm_as_false() -> None:
-    seed_vm_trust("web")
-    t = _vm_transport()
-
-    with (
-        patch("agentworks.transports.time.sleep"),
-        patch.object(t, "run", side_effect=SSHError("down")),
-    ):
-        assert wait_for_reconnect(t, max_attempts=2) is False
 
 
 def test_native_transport_raises_on_the_first_attempt_without_the_network_hint(captured_output: Any) -> None:

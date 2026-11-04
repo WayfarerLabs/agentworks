@@ -190,9 +190,8 @@ def reinit_vm(
     # The reinit graph: the live VM (whose row's site field is its edge
     # to the vm-site node) plus each declared credential as its own
     # root. The vm-template is deliberately NOT a node here: its
-    # Tailscale key is not part of reinit's planned ops (a broken
-    # node's rejoin resolves it on the gate's own conditional repair
-    # path), so it must not join the boundary union.
+    # Tailscale key is not part of reinit's planned ops (repairing a broken
+    # node is 'agw vm recover'), so it must not join the boundary union.
     nodes = walk(vm_node, *cred_nodes)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
@@ -258,11 +257,8 @@ def reinit_vm(
         # Build Tailscale SSH target with logging
         from agentworks.ssh import SSHLogger
 
-        # The activation gate and any conditional Tailscale rejoin finish
-        # before this logger exists. The rejoin path separately enforces that
-        # its auth-key-bearing transport has no logger, so this operation log's
-        # redaction set includes credentials and every resolved setup input
-        # before any incremental initialization log write.
+        # This operation log's redaction set includes credentials and every
+        # resolved setup input before any incremental initialization log write.
         logger = SSHLogger(
             name,
             "vm-reinit",

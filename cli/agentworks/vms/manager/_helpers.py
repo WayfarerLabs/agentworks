@@ -320,28 +320,6 @@ def _mask_env_var_backend_for(
         os.environ.update(saved)
 
 
-def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
-    """Return the ``SecretDecl`` for ``name`` from the framework
-    Registry, or synthesize a bare one matching the auto-declare shape
-    if no Resource was published or auto-declared under that name.
-
-    Used by ``start_vm``'s conditional standalone resolution and by operation
-    resolvers registering an undeclared repair name. A well-known name that no
-    manifest references has no registry row, so a strict lookup raises
-    ``KeyError``. Synthesizing a bare ``SecretDecl`` (the same shape
-    ``_SecretKind.synthesize`` would produce, minus ``origin`` which resolution
-    doesn't read) keeps the source chain callable.
-    """
-    from agentworks.secrets.base import SecretDecl
-    from agentworks.secrets.kinds import SECRET_KIND_NAME
-
-    try:
-        found: SecretDecl = registry.lookup(SECRET_KIND_NAME, name)
-        return found
-    except KeyError:
-        return SecretDecl(name=name, description="")
-
-
 def _query_live_resources(db: Database, vm: VMRow, config: Config) -> dict[str, str] | None:
     """Query live resource usage from a VM over SSH."""
     from agentworks import output

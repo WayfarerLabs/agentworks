@@ -31,11 +31,7 @@ that caller must switch to package-object indirection.
 
 from __future__ import annotations
 
-from .credentials import (
-    _join_tailscale,
-    rejoin_tailscale,
-    verify_tailscale_available,
-)
+from .credentials import verify_tailscale_available
 from .driver import (
     VMInitializationOperation,
     _phase_b_setup,
@@ -105,7 +101,6 @@ __all__ = [
     "_ensure_agentworks_files_sourced",
     "_harden_admin_home",
     "_install_apt_packages",
-    "_join_tailscale",
     "_phase_b_setup",
     "_preserve_ssh_host_keys",
     "_reconcile_authorized_keys",
@@ -118,7 +113,6 @@ __all__ = [
     "_write_sudoers_console_setenv",
     "_write_sudoers_env_keep",
     "bootstrap_vm",
-    "rejoin_tailscale",
     "run_initialization",
     "verify_tailscale_available",
 ]

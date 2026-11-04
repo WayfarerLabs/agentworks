@@ -1,18 +1,20 @@
-"""Tailscale power-state fast path: reachability probe, rejoin, logout."""
+"""Tailscale around a VM's power state: the reachability fast path, the wait after a start, delete's logout.
+
+This module imports nothing from the legacy transport stack.
+"""
 
 from __future__ import annotations
 
-import contextlib
 import subprocess
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.errors import StateError
+from agentworks.errors import ConnectivityError, UserAbort
 
 from ._helpers import _require_vm
 
 if TYPE_CHECKING:
-    from agentworks.capabilities.base import RunContext, SecretReader
+    from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
@@ -66,126 +68,76 @@ def _is_tailscale_reachable(tailscale_host: str) -> bool:
         return False
 
 
-def _ensure_tailscale(
-    db: Database,
-    config: Config,
-    vm: VMRow,
-    platform: VMPlatform,
-    ctx: RunContext,
-    *,
-    auth_keys: SecretReader,
-    auth_key_name: str,
-) -> None:
-    """Rejoin Tailscale using one explicitly scoped auth-key reader."""
-    import agentworks.vms.manager as _mgr
-    from agentworks.secrets.line_safety import (
-        LineOrientedSecretUse,
-        require_line_safe_secret,
-    )
-    from agentworks.transports import native_transport, transport, wait_for_reconnect
+class VMNotAnswering(ConnectivityError):
+    """A running VM did not answer over SSH after a start, or has no tailnet address to answer at.
 
-    auth_key = require_line_safe_secret(
-        auth_keys.get(auth_key_name),
-        use=LineOrientedSecretUse.TAILSCALE,
-        secret_name=auth_key_name,
-    )
-    db.clear_vm_tailscale(vm.name)
-
-    # native_transport() composes Azure's route open/close (heal the
-    # public IP, poke and remove the scoped ephemeral SSH allow) via
-    # transient_route polymorphism with the reachability probe. Other
-    # platforms have a nullcontext transient_route and just build the
-    # native transport.
-    with contextlib.ExitStack() as _stack:
-        # verify_tailscale_available / rejoin_tailscale route through the
-        # package object (not a direct import from
-        # ``agentworks.vms.initializer``) so tests that monkeypatch
-        # ``agentworks.vms.manager.verify_tailscale_available`` /
-        # ``.rejoin_tailscale`` (the same two names ``create_vm`` /
-        # ``reinit_vm`` call in ``lifecycle.py`` and ``reinit.py``) affect this call site too.
-        _mgr.verify_tailscale_available()
-        exec_target = native_transport(vm, platform, config, ctx=ctx, stack=_stack)
-        # A rejoin command contains the resolved auth key. This fast repair
-        # path deliberately has no durable operation log, so reject any future
-        # transport change that attaches a redaction-free logger here. A
-        # logged rejoin must instead construct its logger with ``auth_key`` in
-        # the immutable redaction set before the first write.
-        if exec_target.logger is not None:
-            raise StateError(
-                "Tailscale rejoin transport unexpectedly has an operation logger",
-                entity_kind="vm",
-                entity_name=vm.name,
-            )
-        _mgr.rejoin_tailscale(db, vm.name, exec_target, auth_key=auth_key)
-
-    # After the stack unwinds (Azure has removed its transient SSH
-    # allow), wait for Tailscale SSH on the new IP to be reachable. The
-    # probe is cheap on platforms whose IP didn't change (succeeds on
-    # the first try).
-    refreshed = db.get_vm(vm.name)
-    if refreshed and refreshed.tailscale_host:
-        wait_for_reconnect(transport(refreshed, config))
-
-    # Update SSH config in case the Tailscale IP changed
-    from agentworks.ssh_config import sync_ssh_config
-
-    sync_ssh_config(config, db)
-
-
-def _tailscale_rejoin_required(
-    db: Database,
-    config: Config,
-    vm: VMRow,
-    *,
-    already_running: bool,
-) -> bool:
-    """Return whether a known Tailscale host requires a rejoin."""
-    from agentworks.transports import TailscaleWait, transport, wait_for_reconnect
-
-    refreshed = _require_vm(db, vm.name)
-    if not refreshed.tailscale_host:
-        return True
-    context = TailscaleWait.VERIFY if already_running else TailscaleWait.RECONNECT
-    if wait_for_reconnect(transport(refreshed, config), context=context):
-        return False
-    output.info(f"Tailscale node {refreshed.tailscale_host} did not reconnect, rejoining...")
-    return True
-
-
-def _tailscale_logout(vm: VMRow, config: Config, platform: VMPlatform, ctx: RunContext) -> None:
-    """Best-effort: deregister from Tailscale via the provisioning transport.
-
-    Uses ``native_transport(vm, platform, config, ctx=..., stack=...)``
-    so the Azure route open/close lifecycle and the reachability probe
-    are composed polymorphically; ``ctx`` is the caller's op-start
-    context, which that lifecycle's NSG calls read their credential from
-    (an SP site authenticates as itself, no ambient fallback). Platforms
-    whose factory fails are surfaced through the transport error family,
-    which this best-effort cleanup catches and warns.
+    The hint names ``agw vm recover``, which repairs what a start cannot: a
+    removed or expired Tailscale node, a broken sshd, a missing python3.
     """
-    from agentworks.transports import native_transport
 
-    output.info("Deregistering from Tailscale...")
+    def __init__(self, vm_name: str, address: str | None) -> None:
+        self.vm_name = vm_name
+        super().__init__(
+            f"VM '{vm_name}' is running but did not answer over SSH at {address}"
+            if address
+            else f"VM '{vm_name}' is running but has no tailnet address recorded",
+            entity_kind="vm",
+            entity_name=vm_name,
+            hint=f"Run 'agw vm recover {vm_name}'.",
+        )
+
+
+def _await_tailnet(db: Database, config: Config, vm: VMRow, *, already_running: bool) -> None:
+    """Wait for a VM that was just started, or was running already, to answer over SSH.
+
+    Re-reads the row for its address and waits with ``reachability.wait`` as
+    the admin. A VM that does not answer, or has no address, raises
+    :class:`VMNotAnswering`. The wait's own raises (a changed host key, a
+    refused key, a VM without python3) propagate with their hints.
+    """
+    import agentworks.execution as execution
+    from agentworks.execution import reachability
+    from agentworks.execution.access import Admin
+
+    current = _require_vm(db, vm.name)
+    address = current.tailscale_host
+    if address:
+        wording = reachability.Wording.VERIFY if already_running else reachability.Wording.RECONNECT
+        if reachability.wait(execution.vm_access(current, config, Admin()), wording=wording):
+            return
+    raise VMNotAnswering(vm.name, address)
+
+
+def _tailscale_logout(vm: VMRow, platform: VMPlatform, ctx: RunContext) -> None:
+    """Log the VM's node out of the tailnet over its root channel, best effort, and say what happened.
+
+    Each outcome is reported and none is checked over SSH, since the VM is
+    going away. A cloud VM whose host key was never recorded refuses inside
+    ``run_as_root``, before any route opens: an impostor could report a
+    logout that never happened, so the node is named for removal instead.
+    """
+    from agentworks.execution.errors import TrustMissing
+    from agentworks.vms import recovery
+
+    node = vm.hostname
+    removal = f"remove '{node}' in the Tailscale admin console if it is listed there"
+    output.info("Logging out of Tailscale...")
     try:
-        with contextlib.ExitStack() as stack:
-            exec_target = native_transport(vm, platform, config, ctx=ctx, stack=stack)
-
-            # Fire and forget: tailscale down + logout can disrupt
-            # networking on the VM, killing SSH-based transports before
-            # they get a response. Lima/WSL2 use local transports and
-            # are unaffected, but the nohup approach works universally.
-            exec_target.run(
-                "nohup sh -c 'tailscale down && tailscale logout' >/dev/null 2>&1 &",
-                sudo=True,
-                timeout=10,
-            )
-            # Reported here, at the point of the action, so the transcript
-            # keeps real order: the stack exit below closes Azure's
-            # transient SSH route (its own "Closing SSH route..." line),
-            # and nothing after the dispatch confirms the deregistration
-            # any further, so printing after the close would misorder the
-            # story (#350). Other platforms' transient_route is a
-            # nullcontext, so their output is unchanged.
-            output.info("Tailscale node deregistered")
-    except Exception as e:
-        output.warn(f"Tailscale logout failed (node may remain in admin console): {e}")
+        result = recovery.logout(platform, vm, ctx)
+    except UserAbort:
+        raise
+    except TrustMissing:
+        output.warn(
+            f"Tailscale node {node} was not logged out: the host key of VM '{vm.name}' was never "
+            f"recorded, so its logout could not be trusted; {removal}"
+        )
+        return
+    except Exception as error:
+        output.warn(f"the Tailscale logout of node {node} could not be confirmed ({error}); {removal}")
+        return
+    if result.status == 0:
+        output.info(f"Tailscale node {node} logged out")
+    elif result.status is None:
+        output.warn(f"the Tailscale logout of node {node} could not be confirmed; {removal}")
+    else:
+        output.warn(f"'tailscale logout' exited with status {result.status} on node {node}; {removal}")

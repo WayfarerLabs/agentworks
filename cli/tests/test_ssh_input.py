@@ -134,8 +134,8 @@ def test_ssh_run_rejects_logging_sensitive_input_before_subprocess() -> None:
 
 
 def test_transport_stdin_allocates_no_tty_and_leaves_stdin_open() -> None:
-    """The production path. ``join_tailscale_ephemerally`` sends the
-    tailnet auth key over stdin with no ``tty`` override, so the stdin
+    """The production path. Git credential reconciliation sends its
+    payload over stdin with no ``tty`` override, so the stdin
     branch must neither force a TTY (``-tt`` would corrupt the byte-exact
     payload) nor close stdin (``-n`` would starve the remote reader). It
     uses ``-T`` (no pty, also defeating operator ``RequestTTY force``) and

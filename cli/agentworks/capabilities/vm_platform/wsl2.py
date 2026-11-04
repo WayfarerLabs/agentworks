@@ -418,7 +418,7 @@ def _keepalive(distro_name: str) -> Iterator[None]:
     This is a pure power-hold: it anchors and (if needed) boots the
     distro, nothing more. Verifying Tailscale connectivity is NOT this
     function's job; the shared paths handle that uniformly across all
-    platforms (``_ensure_tailscale`` on ``vm start`` and gate
+    platforms (``_await_tailnet`` on ``vm start`` and gate
     auto-start, the gate itself on the generic held-active span), and
     every one of them runs inside this hold, so the anchor covers the
     verification without duplicating it here.

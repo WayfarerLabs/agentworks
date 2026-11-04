@@ -194,3 +194,21 @@ VM or spends a Tailscale auth key.
   script's shell, with the working directory, the names of its environment variables and its
   deadline. A script's text and an environment variable's value are not written. Commands still on
   the old path log as before.
+
+## Start, recover, rekey and delete
+
+- **`vm start` no longer rejoins Tailscale.** It, and the automatic start of a VM that stopped on
+  its own, start the VM and wait up to about four minutes for it to answer over SSH. A VM that does
+  not answer fails with a hint to run `agw vm recover NAME`, and is left running. That includes a VM
+  on an ephemeral auth key whose node expired while it was offline, and one whose node was removed
+  in the Tailscale admin console. No start resolves the auth key any more.
+- **`agw vm recover NAME`** is new. On a running VM, through the platform's own channel, it records
+  missing host keys once you confirm their fingerprints, restores your SSH public key, installs
+  `python3`, restarts a broken SSH server on WSL2 and Proxmox, and rejoins Tailscale when the node
+  needs a login. Then it waits once for the VM to answer. See the
+  [command reference](../../cli/command-reference.md) for what it refuses.
+- **`vm rekey`** runs its steps as one script through the platform's own channel and keeps an
+  operation log. When the new address cannot be read, the node is logged out and the error names
+  `agw vm recover`.
+- **`vm delete`** reports whether the logout worked. It does not log out a cloud VM whose host key
+  was never recorded, and names the node to remove in the Tailscale admin console instead.

@@ -15,7 +15,7 @@ import pytest
 
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConfigError, StateError, ValidationError
+from agentworks.errors import ConfigError, StateError
 from agentworks.execution import trust
 from agentworks.execution.errors import TrustMissing
 from agentworks.orchestration.activation import activation_gate, ensure_active
@@ -25,75 +25,13 @@ from agentworks.vms.nodes import LiveVMNode, VMSiteNode
 from tests.conftest import seed_vm_trust
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Iterator
     from pathlib import Path
 
-    from agentworks.capabilities.base import SecretReader
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.resources.registry import Registry
-
-
-def _patch_actual_gate_ensure_sequence(
-    monkeypatch: pytest.MonkeyPatch,
-    events: list[str],
-    *,
-    failure_stage: str | None = None,
-    failure: BaseException | None = None,
-) -> dict[str, int]:
-    import agentworks.ssh_config as ssh_config
-    import agentworks.transports as transports
-    from agentworks.vms.manager.tailscale import _ensure_tailscale as actual_ensure
-
-    calls = {"verify": 0, "native": 0, "rejoin": 0, "final-wait": 0, "sync": 0}
-
-    def _raise_at(stage: str) -> None:
-        if failure_stage == stage:
-            assert failure is not None
-            raise failure
-
-    class _Target:
-        logger = None
-
-    def _verify() -> None:
-        calls["verify"] += 1
-
-    def _native(*args: object, **kwargs: object) -> _Target:
-        calls["native"] += 1
-        return _Target()
-
-    def _rejoin(*args: object, **kwargs: object) -> None:
-        calls["rejoin"] += 1
-        events.append("rejoin")
-        _raise_at("rejoin")
-        database = cast("Database", args[0])
-        name = cast("str", args[1])
-        database.update_vm_tailscale(name, "100.64.0.10")
-
-    def _final_wait(*args: object, **kwargs: object) -> bool:
-        calls["final-wait"] += 1
-        events.append("final-wait")
-        _raise_at("final-wait")
-        return True
-
-    def _sync(*args: object, **kwargs: object) -> None:
-        calls["sync"] += 1
-
-    monkeypatch.setattr(vm_manager, "verify_tailscale_available", _verify)
-    monkeypatch.setattr(vm_manager, "rejoin_tailscale", _rejoin)
-    monkeypatch.setattr(transports, "native_transport", _native)
-    monkeypatch.setattr(transports, "transport", lambda *args, **kwargs: object())
-    monkeypatch.setattr(transports, "wait_for_reconnect", _final_wait)
-    monkeypatch.setattr(ssh_config, "sync_ssh_config", _sync)
-
-    def _recording_ensure(*args: object, **kwargs: object) -> None:
-        events.append("ensure-enter")
-        cast("Callable[..., None]", actual_ensure)(*args, **kwargs)
-        events.append("ensure-return")
-
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", _recording_ensure)
-    return calls
 
 
 class _GatePlatform:
@@ -154,7 +92,6 @@ def test_fast_path_skips_status_and_secrets(db: Database, monkeypatch: pytest.Mo
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
     platform = _GatePlatform()
     node, _ = _node(db, platform, vm)
-    monkeypatch.setattr(node, "repair_secret_refs", lambda: ("tailscale-auth-key",))
 
     assert ensure_active(node, _no_resolve) == {}
     assert platform.status_calls == 0
@@ -164,19 +101,13 @@ def test_fast_path_skips_status_and_secrets(db: Database, monkeypatch: pytest.Mo
 def test_auto_resume_starts_and_holds_through_tailscale(
     db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: object
 ) -> None:
-    """Oracle: STOPPED without operator intent starts, then verifies
-    Tailscale inside the platform hold."""
+    """Oracle: STOPPED without operator intent starts, then waits for
+    the VM to answer inside the platform hold."""
     vm = _seed(db)
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
     platform = _GatePlatform(status=VMStatus.STOPPED)
     node, _ = _node(db, platform, vm)
-    monkeypatch.setattr(node, "repair_secret_refs", lambda: ("tailscale-auth-key",))
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
-    monkeypatch.setattr(
-        vm_manager,
-        "_ensure_tailscale",
-        lambda *a, **k: platform.events.append("tailscale"),
-    )
+    monkeypatch.setattr(vm_manager, "_await_tailnet", lambda *a, **k: platform.events.append("tailscale"))
 
     ensure_active(node, lambda name: "ts-key")
     assert platform.events == [
@@ -191,8 +122,7 @@ def test_auto_resume_starts_and_holds_through_tailscale(
 def test_auto_start_without_a_host_key_record_raises_before_starting_or_resolving(
     db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A VM with no record could only fail its reconnect check, and that
-    failure would send the repair path to spend a Tailscale auth key."""
+    """A VM with no record could only fail its wait after the start."""
     vm = _seed(db)
     trust.remove("gvm")
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
@@ -212,228 +142,30 @@ def test_auto_start_without_a_host_key_record_raises_before_starting_or_resolvin
     assert resolved == []
 
 
-def test_auto_resume_healthy_probe_releases_without_auth_reader_access(
-    db: Database,
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: object,
+def test_an_auto_started_vm_that_does_not_answer_names_recover_and_resolves_nothing(
+    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: object, vm_access_recorder: object
 ) -> None:
+    """The wait runs inside the hold, as a reconnect; a VM that does not
+    answer raises naming recover, and the gate resolves nothing past its
+    gate names."""
+    from agentworks.execution import reachability
+    from agentworks.vms.manager.tailscale import VMNotAnswering
+
     vm = _seed(db)
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
     platform = _GatePlatform(status=VMStatus.STOPPED)
     node, _ = _node(db, platform, vm)
 
-    def _no_repair_names() -> tuple[str, ...]:
-        raise AssertionError("healthy auto-start acquired a repair name")
+    def _wait(access: object, *, wording: reachability.Wording) -> bool:
+        platform.events.append(f"wait:{wording.name}")
+        return False
 
-    monkeypatch.setattr(node, "repair_secret_refs", _no_repair_names)
-    monkeypatch.setattr(
-        vm_manager,
-        "_tailscale_rejoin_required",
-        lambda *args, **kwargs: platform.events.append("probe-false") or False,
-    )
+    monkeypatch.setattr(reachability, "wait", _wait)
 
-    ensure_active(node, _no_resolve)
+    with pytest.raises(VMNotAnswering):
+        ensure_active(node, _no_resolve)
 
-    assert platform.events[2:] == ["hold-open", "probe-false", "hold-close"]
-
-
-def test_auto_resume_rejoin_orders_probe_reader_ensure_inside_hold(
-    db: Database,
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: object,
-) -> None:
-    vm = _seed(db)
-    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
-    platform = _GatePlatform(status=VMStatus.STOPPED)
-    node, _ = _node(db, platform, vm)
-
-    repair_name_calls = 0
-
-    def _repair_names() -> tuple[str, ...]:
-        nonlocal repair_name_calls
-        repair_name_calls += 1
-        if repair_name_calls == 1:
-            platform.events.append("repair-name")
-        return ("tailscale-auth-key",)
-
-    monkeypatch.setattr(node, "repair_secret_refs", _repair_names)
-    monkeypatch.setattr(
-        vm_manager,
-        "_tailscale_rejoin_required",
-        lambda *args, **kwargs: platform.events.append("probe-true") or True,
-    )
-
-    def _resolve(name: str) -> str:
-        platform.events.append("gate-reader-read")
-        return "ts-key"
-
-    calls = _patch_actual_gate_ensure_sequence(monkeypatch, platform.events)
-
-    values = ensure_active(node, _resolve)
-
-    assert platform.events[2:] == [
-        "hold-open",
-        "probe-true",
-        "repair-name",
-        "ensure-enter",
-        "gate-reader-read",
-        "rejoin",
-        "final-wait",
-        "ensure-return",
-        "hold-close",
-    ]
-    assert values == {"tailscale-auth-key": "ts-key"}
-    assert calls == {"verify": 1, "native": 1, "rejoin": 1, "final-wait": 1, "sync": 1}
-
-
-def test_auto_resume_multiline_repair_key_preserves_host_after_real_probe(
-    db: Database,
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: object,
-) -> None:
-    import agentworks.transports as transports
-
-    auth_key = "tskey-node-sentinel\r\ninjected\r\n"
-    vm = _seed(db)
-    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
-    platform = _GatePlatform(status=VMStatus.STOPPED)
-    node, _ = _node(db, platform, vm)
-    monkeypatch.setattr(node, "repair_secret_refs", lambda: ("tailscale-auth-key",))
-    monkeypatch.setattr(
-        transports,
-        "transport",
-        lambda *args, **kwargs: platform.events.append("probe-transport") or object(),
-    )
-    monkeypatch.setattr(
-        transports,
-        "wait_for_reconnect",
-        lambda *args, **kwargs: platform.events.append("repair-required") or False,
-    )
-    monkeypatch.setattr(
-        vm_manager,
-        "verify_tailscale_available",
-        lambda: pytest.fail("line-unsafe late key reached Tailscale availability work"),
-    )
-
-    def _resolve(name: str) -> str:
-        assert name == "tailscale-auth-key"
-        platform.events.append("late-resolve")
-        return auth_key
-
-    with pytest.raises(ValidationError) as caught:
-        ensure_active(node, _resolve)
-
-    assert platform.events == [
-        "status",
-        "start",
-        "hold-open",
-        "probe-transport",
-        "repair-required",
-        "late-resolve",
-        "hold-close",
-    ]
-    refreshed = db.get_vm("gvm")
-    assert refreshed is not None
-    assert refreshed.tailscale_host == "100.64.0.9"
-    assert "tskey-node-sentinel" not in repr((caught.value.args, vars(caught.value)))
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
-
-
-@pytest.mark.parametrize("failure_type", [RuntimeError, KeyboardInterrupt])
-@pytest.mark.parametrize("failure_stage", ["probe", "acquisition", "auth-read", "rejoin", "final-wait"])
-def test_auto_resume_tailscale_failure_matrix_releases_once_without_retry(
-    db: Database,
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: object,
-    failure_stage: str,
-    failure_type: type[BaseException],
-) -> None:
-    vm = _seed(db)
-    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
-    platform = _GatePlatform(status=VMStatus.STOPPED)
-    node, _ = _node(db, platform, vm)
-    failure = failure_type(failure_stage)
-
-    def _stage(name: str) -> None:
-        platform.events.append(name)
-        if failure_stage == name:
-            raise failure
-
-    def _probe(*args: object, **kwargs: object) -> bool:
-        _stage("probe")
-        return True
-
-    repair_name_calls = 0
-
-    def _repair_names() -> tuple[str, ...]:
-        nonlocal repair_name_calls
-        repair_name_calls += 1
-        if repair_name_calls == 1:
-            _stage("acquisition")
-        return ("tailscale-auth-key",)
-
-    def _resolve(name: str) -> str:
-        _stage("auth-read")
-        return "ts-key"
-
-    monkeypatch.setattr(node, "repair_secret_refs", _repair_names)
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", _probe)
-    calls = _patch_actual_gate_ensure_sequence(
-        monkeypatch,
-        platform.events,
-        failure_stage=failure_stage,
-        failure=failure,
-    )
-
-    with pytest.raises(failure_type) as caught:
-        ensure_active(node, _resolve)
-
-    assert caught.value is failure
-    assert platform.events.count(failure_stage) == 1
-    assert platform.events.count("hold-open") == platform.events.count("hold-close") == 1
-    assert platform.events[-1] == "hold-close"
-    expected_inside_hold = {
-        "probe": ["hold-open", "probe", "hold-close"],
-        "acquisition": ["hold-open", "probe", "acquisition", "hold-close"],
-        "auth-read": [
-            "hold-open",
-            "probe",
-            "acquisition",
-            "ensure-enter",
-            "auth-read",
-            "hold-close",
-        ],
-        "rejoin": [
-            "hold-open",
-            "probe",
-            "acquisition",
-            "ensure-enter",
-            "auth-read",
-            "rejoin",
-            "hold-close",
-        ],
-        "final-wait": [
-            "hold-open",
-            "probe",
-            "acquisition",
-            "ensure-enter",
-            "auth-read",
-            "rejoin",
-            "final-wait",
-            "hold-close",
-        ],
-    }
-    assert platform.events[2:] == expected_inside_hold[failure_stage]
-    no_ensure_work = {"verify": 0, "native": 0, "rejoin": 0, "final-wait": 0, "sync": 0}
-    expected_calls = {
-        "probe": no_ensure_work,
-        "acquisition": no_ensure_work,
-        "auth-read": no_ensure_work,
-        "rejoin": {"verify": 1, "native": 1, "rejoin": 1, "final-wait": 0, "sync": 0},
-        "final-wait": {"verify": 1, "native": 1, "rejoin": 1, "final-wait": 1, "sync": 0},
-    }
-    assert calls == expected_calls[failure_stage]
+    assert platform.events == ["status", "start", "hold-open", "wait:RECONNECT", "hold-close"]
 
 
 def test_manually_stopped_raises_and_skips_the_ping(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -468,7 +200,6 @@ def test_manually_stopped_but_running_out_of_band_proceeds(db: Database, monkeyp
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
     platform = _GatePlatform(status=VMStatus.RUNNING)
     node, _ = _node(db, platform, vm)
-    monkeypatch.setattr(node, "repair_secret_refs", lambda: ("tailscale-auth-key",))
 
     ensure_active(node, lambda name: "ts-key")
     assert platform.start_calls == 0
@@ -499,11 +230,9 @@ def test_concurrent_start_clears_the_flag_and_resumes(
     assert vm is not None
     db.set_operator_stopped("gvm", False)
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: None)
+    monkeypatch.setattr(vm_manager, "_await_tailnet", lambda *a, **k: None)
     platform = _GatePlatform(status=VMStatus.STOPPED)
     node, _ = _node(db, platform, vm)
-    monkeypatch.setattr(node, "repair_secret_refs", lambda: ("tailscale-auth-key",))
 
     ensure_active(node, lambda name: "ts-key")
     assert platform.start_calls == 1
@@ -516,11 +245,9 @@ def test_deallocated_auto_resumes_like_stopped(
 ) -> None:
     vm = _seed(db)
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: None)
+    monkeypatch.setattr(vm_manager, "_await_tailnet", lambda *a, **k: None)
     platform = _GatePlatform(status=VMStatus.DEALLOCATED)
     node, _ = _node(db, platform, vm)
-    monkeypatch.setattr(node, "repair_secret_refs", lambda: ("tailscale-auth-key",))
 
     ensure_active(node, lambda name: "ts-key")
     assert platform.start_calls == 1
@@ -549,39 +276,6 @@ def test_gate_span_holds_through_the_command_body(db: Database, monkeypatch: pyt
     with activation_gate(node, _no_resolve):
         platform.events.append("body")
     assert platform.events == ["hold-open", "body", "hold-close"]
-
-
-def test_rejoin_auth_key_reads_lazily_through_the_gate_reader(
-    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: object
-) -> None:
-    """The repair path hands ensure the unchanged lazy gate reader."""
-    vm = _seed(db)
-    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
-    platform = _GatePlatform(status=VMStatus.STOPPED)
-    node, _ = _node(db, platform, vm)
-    monkeypatch.setattr(node, "repair_secret_refs", lambda: ("tailscale-auth-key",))
-    captured: dict[str, object] = {}
-
-    def _capture(*a: object, **k: object) -> None:
-        auth_keys = cast("SecretReader", k["auth_keys"])
-        auth_key_name = cast("str", k["auth_key_name"])
-        captured["reader"] = auth_keys
-        captured["name"] = auth_key_name
-        captured["value"] = auth_keys.get(auth_key_name)
-
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", _capture)
-    resolved: list[str] = []
-
-    def _resolve(name: str) -> str:
-        resolved.append(name)
-        return "ts-key"
-
-    values = ensure_active(node, _resolve)
-    assert resolved == ["tailscale-auth-key"]
-    assert captured["name"] == "tailscale-auth-key"
-    assert captured["value"] == "ts-key"
-    assert values == {"tailscale-auth-key": "ts-key"}
 
 
 # -- the vm-template node ----------------------------------------------------

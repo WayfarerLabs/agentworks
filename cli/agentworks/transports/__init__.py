@@ -23,7 +23,6 @@ to the native transport.
 from __future__ import annotations
 
 import time
-from enum import Enum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
@@ -49,14 +48,12 @@ __all__ = [
     "LimaTransport",
     "RemoteLimaTransport",
     "SSHTransport",
-    "TailscaleWait",
     "Transport",
     "WSL2Transport",
     "agent_transport",
     "native_transport",
     "transport",
     "transport_for_user",
-    "wait_for_reconnect",
 ]
 
 
@@ -243,76 +240,3 @@ def native_transport(
                 raise
             time.sleep(3)
     return target
-
-
-class TailscaleWait(Enum):
-    """Operator-facing wording for :func:`wait_for_reconnect`.
-
-    A closed set of message pairs (waiting line, success line) so the
-    wording stays a fixed, honest vocabulary and no third ad-hoc pair
-    sneaks in at a future call site.
-
-    - ``RECONNECT`` describes the after-boot / rejoin case, where a wait
-      of several minutes is genuinely possible.
-    - ``VERIFY`` describes merely confirming a live connection on a VM
-      that was never down, so scary "reconnect" wording would misread.
-    """
-
-    RECONNECT = (
-        "Waiting for Tailscale to reconnect (this may take several minutes)...",
-        "Tailscale SSH reconnected",
-    )
-    VERIFY = (
-        "Verifying Tailscale connectivity...",
-        "Tailscale SSH reachable",
-    )
-
-    @property
-    def waiting_message(self) -> str:
-        return self.value[0]
-
-    @property
-    def success_message(self) -> str:
-        return self.value[1]
-
-
-def wait_for_reconnect(
-    target: Transport,
-    *,
-    max_attempts: int = 16,
-    context: TailscaleWait = TailscaleWait.RECONNECT,
-) -> bool:
-    """Poll ``target`` with ``echo ok`` until reachable or out of attempts.
-
-    Used after network disruptions (e.g. Azure public IP changes) that
-    temporarily break the transport. Double-checks once on first success
-    to handle flapping. Polymorphic over any :class:`Transport` via its
-    :meth:`Transport.run`. Returns ``True`` if the connection
-    stabilized, ``False`` if it timed out. A VM with no host-key record raises
-    :class:`TrustMissing` on the first attempt (it is not an ``SSHError``), so
-    callers never mistake it for an unreachable peer and rejoin Tailscale.
-
-    ``context`` selects the operator-facing lines from the
-    :class:`TailscaleWait` vocabulary. The default ``RECONNECT``
-    describes the reconnect-after-boot case (where a wait of several
-    minutes is genuinely possible); a caller that is merely confirming a
-    live connection (an already-running VM) passes ``VERIFY`` for
-    truthful "verifying" / "reachable" wording instead.
-    """
-    from agentworks import output
-    from agentworks.ssh import SSHError
-
-    output.detail(context.waiting_message)
-    for attempt in range(max_attempts):
-        try:
-            target.run("echo ok", timeout=10)
-            if attempt > 0:
-                time.sleep(2)
-                target.run("echo ok", timeout=10)
-            output.detail(context.success_message)
-            return True
-        except SSHError:
-            if attempt == max_attempts - 1:
-                output.warn("Tailscale SSH did not reconnect after ~240s, proceeding anyway")
-            time.sleep(5)
-    return False

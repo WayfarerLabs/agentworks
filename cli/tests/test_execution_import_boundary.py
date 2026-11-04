@@ -36,6 +36,10 @@ MIGRATED_FILES = (
     "vms/initializer/phase_a.py",
     "vms/recovery.py",
     "vms/manager/recover.py",
+    "vms/manager/tailscale.py",
+    "vms/nodes.py",
+    "orchestration/activation.py",
+    "vms/initializer/credentials.py",
 )
 
 
