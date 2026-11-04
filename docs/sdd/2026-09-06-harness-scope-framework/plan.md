@@ -196,8 +196,9 @@ fixtures, without touching the operator's installed plugins or authentication.
 - [ ] Exercise repeat setup, one-entry removal, removal of an integration activation, interruption,
       concurrent mutation, native drift, unknown codec versions, failed cleanup and owner deletion
       (R9).
-- [ ] Prove failed workspace setup unwinds under standalone and session-created paths and retry
-      refuses unexplained residue (R13).
+- [ ] Prove core workspace creation failures unwind under standalone and session-created paths and
+      retry refuses unexplained residue. Under the 2026-11-04 ruling, facet execution failures instead
+      retain the created owner and partial records while independent work continues (R13).
 - [x] Run full repository gates and focused native Windows tests from the current CI selection;
       record actual commands, exit codes and unreachable live surfaces.
 - [x] Obtain independent project, complexity and generic correctness/security reviews, resolve
