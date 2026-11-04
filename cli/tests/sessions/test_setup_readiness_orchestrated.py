@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 import pytest
 
+from agentworks import output
 from agentworks.capabilities.harness_integration import ShellIntegration
 from agentworks.capabilities.harness_integration.setup import SetupEvidence, SetupGap, SetupReadiness
 from agentworks.db import Database, SessionStatus
@@ -162,7 +163,14 @@ def test_create_existing_owners_checks_setup_before_secrets_or_session_mutation(
 @pytest.mark.parametrize("complete", [False, True])
 @pytest.mark.parametrize("severity", ["required", "recommended"])
 def test_pending_owners_check_fresh_applied_setup_before_launch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config, new_workspace, new_agent, complete, severity
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    config,
+    captured_output,
+    new_workspace,
+    new_agent,
+    complete,
+    severity,
 ) -> None:
     events: list[str] = []
     db = _create_stubs(tmp_path, monkeypatch, events)
@@ -250,6 +258,8 @@ def test_pending_owners_check_fresh_applied_setup_before_launch(
         assert all(collector is collectors[0] for collector in collectors)
         assert collectors[0] == failures
         assert reported == [tuple(failures)]
+        result_roles = [role for role, _, _ in captured_output.lines if role is output.Role.RESULT]
+        assert result_roles == ([output.Role.RESULT] if complete else [])
         before_setup = [
             *([] if new_agent else ["probe"]),
             "resolve",

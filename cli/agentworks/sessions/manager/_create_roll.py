@@ -151,6 +151,7 @@ def _start_session_slice(
     run_command: RunCommand,
     agent_target: Transport | None,
     secret_values: dict[str, str],
+    setup_incomplete: bool,
 ) -> None:
     """The session's own realizing slice: the grant, the DB row, the tmux
     launch, and the completion bookkeeping.
@@ -505,7 +506,11 @@ def _start_session_slice(
     # outer try so a failure here still triggers the ephemeral
     # rollback (a completed session itself is never rolled back).
     mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
-    output.result(f"Session '{name}' started ({mode_label}, template: {template.name})")
+    started = f"Session '{name}' started ({mode_label}, template: {template.name})"
+    if setup_incomplete:
+        output.info(f"{started}; harness setup incomplete")
+    else:
+        output.result(started)
 
     # Update the workspace's tmuxinator config.
     _mgr._regenerate_tmuxinator(db, config, vm, ws)
@@ -560,6 +565,7 @@ def _roll_forward(
             run_command=run_command,
             agent_target=agent_target,
             secret_values=secret_values,
+            setup_incomplete=bool(setup_failures),
         )
     except RequiredSetupMissingError as error:
         # The owners completed their core work. Keep them and their native
