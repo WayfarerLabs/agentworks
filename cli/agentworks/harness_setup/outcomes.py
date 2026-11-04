@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
 from agentworks.resources.render import sanitize_fact_line
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # Remove complete terminal strings and escape sequences before the shared scalar
 # boundary strips remaining controls, including truncated or malformed sequences.
@@ -19,14 +23,22 @@ _DIAGNOSTIC_LIMIT = 2048
 _TRUNCATED = "... [truncated]"
 
 
-def sanitize_setup_diagnostic(text: str) -> str:
+def normalize_setup_diagnostic(text: str) -> str:
+    """Normalize diagnostic text and secret patterns without truncating either."""
+    text = _TERMINAL_SEQUENCES.sub("", text)
+    return sanitize_fact_line(" ".join(text.split()))
+
+
+def sanitize_setup_diagnostic(text: str, *, redact: Callable[[str], str] | None = None) -> str:
     """Bound a setup diagnostic to one terminal-safe line and 2 KiB of UTF-8.
 
-    Callers redact credentials before this transformation or truncation. Render
-    persisted older diagnostics through the same boundary without rewriting state.
+    Callers can redact raw text first, then redact normalized representations
+    through the callback before truncation. Render persisted older diagnostics
+    through the same boundary without rewriting state.
     """
-    text = _TERMINAL_SEQUENCES.sub("", text)
-    text = sanitize_fact_line(" ".join(text.split()))
+    text = normalize_setup_diagnostic(text)
+    if redact is not None:
+        text = redact(text)
     encoded = text.encode("utf-8")
     if len(encoded) > _DIAGNOSTIC_LIMIT:
         text = encoded[: _DIAGNOSTIC_LIMIT - len(_TRUNCATED)].decode("utf-8", errors="ignore") + _TRUNCATED

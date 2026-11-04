@@ -233,7 +233,7 @@ def test_warning_log_failure_is_fatal_before_sibling(setup_case, monkeypatch):
     db, inputs, invocation, events, injected = setup_case
     injected.add("first")
     failure = StateError(str(uuid4()))
-    invocation.runner.logger = Mock(sanitize=lambda text: text, warning=Mock(side_effect=failure))
+    invocation.runner.logger = Mock(sanitize=lambda text, **kwargs: text, warning=Mock(side_effect=failure))
     with pytest.raises(StateError) as caught:
         run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
     assert caught.value is failure and events == [("first", False)]

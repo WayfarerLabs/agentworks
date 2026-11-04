@@ -153,9 +153,16 @@ class SSHLogger:
         """
         return format_host_path(self.path)
 
-    def sanitize(self, text: str) -> str:
-        """Apply the operation redactions before publishing diagnostics or state."""
-        for secret in self._redact:
+    def sanitize(self, text: str, *, normalize: Callable[[str], str] | None = None) -> str:
+        """Redact operation secrets, optionally matching already-normalized text."""
+        patterns = (
+            self._redact
+            if normalize is None
+            else tuple(
+                sorted({value for secret in self._redact if (value := normalize(secret))}, key=len, reverse=True)
+            )
+        )
+        for secret in patterns:
             text = text.replace(secret, "[REDACTED]")
         return text
 

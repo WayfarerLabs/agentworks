@@ -49,6 +49,8 @@ class SetupRecord(AgwModel):
     claims: Annotated[tuple[NativeClaim, ...], Field(strict=False)] = ()
 
     artifact_files: Annotated[tuple[OwnedArtifactFile, ...], Field(strict=False)] = ()
+    # None means no confirmed artifact routing result, including a first
+    # attempt that checkpointed some files but did not finish publication.
     artifact_inputs: Annotated[tuple[_Hash, ...], Field(strict=False)] | None = None
     deferred: Annotated[tuple[ArtifactDeferral, ...], Field(strict=False)] = ()
     skipped: Annotated[tuple[ArtifactSkip, ...], Field(strict=False)] = ()

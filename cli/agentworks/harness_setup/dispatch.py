@@ -26,7 +26,7 @@ from agentworks.capabilities.harness_integration.setup import (
 from agentworks.errors import ConfigError, ConnectivityError, ExternalError, StateError
 from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
-from agentworks.harness_setup.outcomes import SetupFailure, sanitize_setup_diagnostic
+from agentworks.harness_setup.outcomes import SetupFailure, normalize_setup_diagnostic, sanitize_setup_diagnostic
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 from agentworks.native_files import ROOT_FILE_DIRECTORIES
 
@@ -59,7 +59,16 @@ def _sanitize(invocation: SetupInvocation, text: str) -> str:
         text = text.replace(value, "[REDACTED]")
     if invocation.runner.logger is not None:
         text = invocation.runner.logger.sanitize(text)
-    return sanitize_setup_diagnostic(text)
+
+    def redact_normalized(value: str) -> str:
+        patterns = {normalize_setup_diagnostic(item) for item in representations}
+        for pattern in sorted(filter(None, patterns), key=len, reverse=True):
+            value = value.replace(pattern, "[REDACTED]")
+        if invocation.runner.logger is not None:
+            value = invocation.runner.logger.sanitize(value, normalize=normalize_setup_diagnostic)
+        return value
+
+    return sanitize_setup_diagnostic(text, redact=redact_normalized)
 
 
 def destination_id(vm: VMRow, runner: Transport, *, location: str | None = None, username: str | None = None) -> str:
@@ -226,9 +235,7 @@ def run_setup(
                 integration=name,
                 destination_id=destination,
                 declaration=declaration,
-                artifact_inputs=tuple(item.identity for item in artifacts.items())
-                if previous is None
-                else previous.artifact_inputs,
+                artifact_inputs=None if previous is None else previous.artifact_inputs,
                 deferred=() if previous is None else previous.deferred,
                 claims=() if previous is None else previous.claims,
                 artifact_files=()
