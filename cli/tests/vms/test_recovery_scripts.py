@@ -47,7 +47,12 @@ case "$name" in
     systemctl) [ "$1" = is-active ] && exit "$(cat {root}/tailscaled-active)" ;;
     tailscale)
         case "$1" in
-            status) printf '{{"BackendState": "%s"}}\\n' "$(cat {root}/state)" ;;
+            status)
+                # One state per read; the last line repeats once the others are used.
+                printf '{{"BackendState": "%s"}}\\n' "$(head -n 1 {root}/state)"
+                if [ "$(wc -l < {root}/state)" -gt 1 ]; then
+                    tail -n +2 {root}/state > {root}/state.next && mv {root}/state.next {root}/state
+                fi ;;
             up) cat > {root}/joined-with ;;
             logout) echo "logout output"; exit "$(cat {root}/logout-status)" ;;
         esac ;;
@@ -155,6 +160,25 @@ def test_a_node_that_needs_a_login_joins_with_the_key_on_stdin(guest: Guest) -> 
     assert recovery.joined(result)
     assert guest.called("tailscale")[-1] == "tailscale up --auth-key=file:/dev/stdin"
     assert (guest.root / "joined-with").read_text() == f"{KEY}\n"
+
+
+def test_a_settling_state_is_read_again_until_it_settles(guest: Guest) -> None:
+    guest.set("state", "Starting\nStarting\nNeedsLogin\n")
+
+    result = _repair(guest)
+
+    assert result.status == 0
+    assert recovery.joined(result)
+    assert guest.called("tailscale") == ["tailscale status --json"] * 3 + ["tailscale up --auth-key=file:/dev/stdin"]
+
+
+def test_a_state_that_never_settles_fails_after_a_bounded_number_of_reads(guest: Guest) -> None:
+    guest.set("state", "NoState\n")
+
+    result = _repair(guest)
+
+    assert result.status == 1
+    assert guest.called("tailscale") == ["tailscale status --json"] * recovery.SETTLING_STATE_READS
 
 
 def test_any_other_state_fails_without_a_join(guest: Guest) -> None:

@@ -42,11 +42,12 @@ connected and can see the VM, then `tailscale ping HOST` with the Tailscale addr
 
 When a VM does not answer after `agw vm start`, or Tailscale itself needs repair, run
 `agw vm recover NAME` on the running VM. It works through the platform's own channel, without
-Tailscale, and changes the VM: it restores your SSH key, installs `python3` if missing, restarts a
-broken SSH server where the channel does not use it, and rejoins Tailscale with the VM template's
-auth key when the node needs a login, then waits for SSH. A step that fails stops it and names
-`agw vm logs NAME`. If you would rather not change the VM, delete and recreate it instead.
-`agw vm shell NAME --platform` remains an interactive escape hatch where the platform offers one.
+Tailscale, and changes the VM, in this order: it restores your SSH key, restarts a broken SSH server
+where the channel does not use it, installs `python3` if missing, starts `tailscaled` if it is not
+running, and rejoins Tailscale with the VM template's auth key only when the node needs a login,
+then waits for SSH. A step that fails stops it and names `agw vm logs NAME`. If you would rather not
+change the VM, delete and recreate it instead. `agw vm shell NAME --platform` remains an interactive
+escape hatch where the platform offers one.
 
 ## Git authentication
 

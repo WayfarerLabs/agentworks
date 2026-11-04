@@ -208,10 +208,10 @@ VM or spends a Tailscale auth key.
   on an ephemeral auth key whose node expired while it was offline, and one whose node was removed
   in the Tailscale admin console. No start resolves the auth key any more.
 - **`agw vm recover NAME`** is new. On a running VM, through the platform's own channel, it records
-  missing host keys once you confirm their fingerprints, restores your SSH public key, installs
-  `python3`, restarts a broken SSH server on WSL2 and Proxmox, and rejoins Tailscale when the node
-  needs a login. Then it waits once for the VM to answer. See the
-  [command reference](../../cli/command-reference.md) for what it refuses.
+  missing host keys once you confirm their fingerprints, then restores your SSH public key, restarts
+  a broken SSH server on WSL2 and Proxmox, installs `python3`, starts `tailscaled` if it is not
+  running, and rejoins Tailscale only when the node needs a login. Then it waits once for the VM to
+  answer. See the [command reference](../../cli/command-reference.md) for what it refuses.
 - **`vm rekey`** runs its steps as one script through the platform's own channel and keeps an
   operation log. When the new address cannot be read, the node is logged out and the error names
   `agw vm recover`.

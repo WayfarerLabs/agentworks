@@ -7,8 +7,9 @@ server:
 
 - :func:`repair`, ``agw vm recover``'s one script: restore the admin's
   authorized key, restart a broken sshd where the channel does not depend on
-  it, install python3, start ``tailscaled`` if it is not running, and join
-  Tailscale only when the node needs a login.
+  it, install python3, start ``tailscaled`` if it is not running and wait
+  for its state to settle, and join Tailscale only when the node needs a
+  login.
 - :func:`rekey`, ``vm rekey``'s logout and rejoin with a new auth key.
 - :func:`logout`, ``vm delete``'s Tailscale logout.
 
@@ -59,6 +60,10 @@ BACKEND_STATE_FRAGMENT = (
 )
 """The command that prints the node's ``BackendState``: ``Running``, or ``NeedsLogin`` once the node is gone."""
 
+SETTLING_STATE_READS = 15
+SETTLING_STATE_INTERVAL_SECONDS = 2
+"""How often, and how far apart, the repair reads a ``BackendState`` that is still settling: about 30 seconds."""
+
 STABILIZE_SECONDS = 15
 """Rekey's pause after each step, for the daemon and the network to settle (incident row I29)."""
 
@@ -108,7 +113,17 @@ fi
 
 command -v tailscale >/dev/null || {{ echo "Tailscale is not installed" >&2; exit 1; }}
 systemctl is-active --quiet tailscaled || systemctl start tailscaled
-state=$({backend_state}) || {{ echo "Tailscale's state could not be read" >&2; exit 1; }}
+# A daemon that has just started reads NoState, then Starting, before it
+# settles on Running or NeedsLogin, so those two are read again, a bounded
+# number of times.
+reads=0
+while :; do
+    state=$({backend_state}) || {{ echo "Tailscale's state could not be read" >&2; exit 1; }}
+    case "$state" in NoState|Starting) ;; *) break ;; esac
+    reads=$((reads + 1))
+    [ "$reads" -lt {state_reads} ] || break
+    sleep {state_interval}
+done
 case "$state" in
     Running) ;;
     NeedsLogin)
@@ -181,6 +196,8 @@ def repair(
         key=shlex.quote(public_key),
         repair_sshd=0 if platform.recovery_needs_guest_sshd else 1,
         backend_state=BACKEND_STATE_FRAGMENT,
+        state_reads=SETTLING_STATE_READS,
+        state_interval=SETTLING_STATE_INTERVAL_SECONDS,
         join=JOIN_FRAGMENT,
         joined=JOINED,
     )
