@@ -508,10 +508,10 @@ Host connections such as Remote Lima's keep their own configuration and are not 
   `accept-new` records a key only when none is known, so once one reaches sshd the rest verify
   against it. The base contract check (D10) runs on the VM-mode connections that follow. The store
   is the only place the key is written. If create is interrupted after the reset, the VM is retained
-  as failed, and the remedy is delete and recreate: `agw vm recover` refuses a VM whose provisioning
-  failed. A VM with no importable entry can be brought in with an operator-verified file passed to
-  `--known-hosts` (`ssh-keyscan` output checked against the console's or provider's fingerprints).
-  The `TrustMissing` hint names both.
+  unattested and gated, and the remedy is delete and recreate: `agw vm recover` refuses a VM whose
+  provisioning did not complete. A VM with no importable entry can be brought in with an
+  operator-verified file passed to `--known-hosts` (`ssh-keyscan` output checked against the
+  console's or provider's fingerprints). The `TrustMissing` hint names both.
 - **Import.** `agw vm import-host-keys (--all | VM...) [--known-hosts PATH]`:
   - Reads the default `~/.ssh/known_hosts`, or the named file, without modifying it.
   - Matches each VM's recorded tailnet address with OpenSSH's own `ssh-keygen -F`, so the result is
@@ -837,7 +837,7 @@ linked issues and fix history) and adds rows before anything is deleted.
 | I23 | A first connection that left no key makes create fail where the cause is known (`vms/initializer/driver.py:438-445`)                                                                                                                               | 3            |
 | I24 | The auth key is joined exactly once: a failed address read never causes a second join, and now logs the node out (`tailscale_join.py:65-71`, `7307e2f60`)                                                                                          | 3            |
 | I25 | The platform's availability hold spans Phase A and Phase B (WSL2 idle shutdown) (`vms/manager/lifecycle.py:643`)                                                                                                                                   | 3            |
-| I26 | A release the guest reports is attested by core, never taken from the platform; an unattested or mismatched VM is retained failed with delete guidance, never recorded (`93aca2cfb`, `vms/manager/lifecycle.py:599-626`)                           | 3            |
+| I26 | A release the guest reports is attested by core, never taken from the platform; an unattested or mismatched VM is retained unattested and gated, with delete guidance, never recorded (`93aca2cfb`, `vms/manager/lifecycle.py:599-626`)            | 3            |
 | I27 | Ordinary operations refuse live release drift; adoption is the explicit `confirm-release` (`vms/manager/release.py:28-35`)                                                                                                                         | 3            |
 | I28 | A log's redaction set is complete before its first write, and no secret is retained in raw or shell-quoted form (`a38e49489`, `ssh.py:127-137`)                                                                                                    | 3            |
 | I29 | Rekey restarts `tailscaled` before the logout and after the join, with 15-second pauses, because a stale daemon hangs the logout and a rekeyed node can be unreachable (`cdd7a0045`, `vms/manager/power.py:489-518`)                               | 4            |

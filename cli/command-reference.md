@@ -692,9 +692,10 @@ key, and the VM contract's base checks follow on verified connections: the Debia
 then systemd, passwordless `sudo` for the admin, and the base tools Agentworks runs (`install`,
 `flock`, `nohup`, `setsid`, `tar`). The VM's provisioning is complete only once they pass. If any of
 this fails, the VM is kept in a failed state; if create is interrupted first, it is kept with its
-provisioning incomplete. Either way its temporary provisioning access is closed, every other VM
-command refuses it (as it does a VM a killed create left in progress), and `agw vm delete <name>`
-removes it.
+provisioning incomplete. Either way its temporary provisioning access is closed, and `vm start`,
+`vm stop`, `vm rekey`, `vm reinit`, `vm exec`, `vm shell` (with `--platform` too), `vm port-forward`
+and `vm confirm-release` refuse it, as they do a VM a killed create left in progress; `vm describe`,
+`vm list` and `vm verify-connection` still run. `agw vm delete <name>` removes it.
 
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
 alphanumeric plus dash, no leading/trailing dash): a short identifier for this Agentworks

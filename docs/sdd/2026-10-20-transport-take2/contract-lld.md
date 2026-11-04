@@ -356,24 +356,22 @@ Any `Exception` in steps 1 to 5's span takes the existing arm: provisioning `FAI
 (`exec_target.describe()`, `driver.py:149`); it becomes `ssh ADDRESS`.
 
 **Status and interrupts.** `COMPLETE` is now written after the contract passes, not before the first
-connection (`driver.py:396-404`). An interrupt that lands before then finds the row `IN_PROGRESS`;
-the `except BaseException` arm (`driver.py:193-210`) secures the VM as today and now also marks the
-row `FAILED` unless `COMPLETE` has been written (it is entered only after step 1 sets `IN_PROGRESS`,
-so a `PENDING` row cannot reach it). A VM that was never attested is retained as failed, as D9 and
-incident row I26 require. The ordinary-command gate (`_guard_incomplete_vm`, `vms/manager/_helpers.py`)
-refuses every row whose provisioning is not `COMPLETE`, naming `vm delete`, so an unattested VM
-stays out of them, including one a hard kill (`SIGTERM`, `SIGKILL`) left `IN_PROGRESS` with no arm
-run. `lifecycle.py` prints the delete wording whenever provisioning is not `COMPLETE`, not only when
-it is `FAILED`, because reinit refuses any such row (`lifecycle.py:813`) and the `PENDING` window
-includes the hold entered before `bootstrap_vm` (`lifecycle.py:643`). That cancel handler
-(`lifecycle.py:657-663`) only warns today; it now also marks a row that is not `COMPLETE` as
-`FAILED`, so the gates cover the `PENDING` window too. The wording is the attestation interrupt
-arm's today (`lifecycle.py:611-617`: the VM exists but was not verified; run `agw vm delete`), not
-`_warn_init_cancel`'s reinit advice. An interrupt after step 5 leaves `COMPLETE` and takes
-`_warn_init_cancel`. A post-ready wait that raises (`HOST_KEY`, `AUTH_FAILED`, anything else the
-table raises) is outside the span like the wait itself and propagates out of `bootstrap_vm` to
-`_raise_init_failure`: the row stays `COMPLETE`, the VM was attested seconds earlier, and the
-operator is told to `vm reinit`.
+connection (`driver.py:396-404`). An interrupt that lands before then finds the row `PENDING` or
+`IN_PROGRESS`; the `except BaseException` arm (`driver.py:193-210`) only secures the VM, as today,
+and leaves the row as the interrupt found it. The gate holds the promise instead: the
+ordinary-command gate (`_guard_incomplete_vm`, `vms/manager/_helpers.py`) refuses every row whose
+provisioning is not `COMPLETE`, naming `vm delete`, so a VM that was never attested is retained
+unattested and gated, as D9 and incident row I26 require, including one a hard kill (`SIGTERM`,
+`SIGKILL`) left `IN_PROGRESS` with no arm run. Create's cancel handler (`lifecycle.py:657-663`)
+marks nothing either: it reads the status once to choose its wording, the attestation interrupt
+arm's (`lifecycle.py:611-617`: the VM exists but was not verified; run `agw vm delete`) whenever
+provisioning is not `COMPLETE` or the read fails, and `_warn_init_cancel`'s reinit advice only for a
+`COMPLETE` row, because reinit refuses any other (`lifecycle.py:813`) and the `PENDING` window
+includes the hold entered before `bootstrap_vm` (`lifecycle.py:643`). An interrupt after step 5
+leaves `COMPLETE` and takes `_warn_init_cancel`. A post-ready wait that raises (`HOST_KEY`,
+`AUTH_FAILED`, anything else the table raises) is outside the span like the wait itself and
+propagates out of `bootstrap_vm` to `_raise_init_failure`: the row stays `COMPLETE`, the VM was
+attested seconds earlier, and the operator is told to `vm reinit`.
 
 **Enroll covers more than one connection.** The first-contact wait can make up to 17 connections
 (sixteen attempts and the confirming probe), all in Enroll mode. `accept-new` records a key only
@@ -607,11 +605,11 @@ None restates the implementation or our prose.
   re-read after the address is recorded; an invalid address fails before any connection and secures
   the VM; each of a first-contact timeout, an enrollment that left no key, a release mismatch and a
   base failure marks `FAILED`, records `provisioning_failed`, calls `secure_failed_vm` and leaves
-  the process raising; **an interrupt before the contract passes secures the VM and marks it
-  `FAILED`, and one after `COMPLETE` leaves it `COMPLETE`**; the post-ready wait returning `False`
-  warns and proceeds; Phase B receives a VM-bound legacy target; the only `enrollment_access` call
-  is the first contact. Reinit: no enrollment and no reachability wait, release drift refuses, a
-  base failure stops before `run_initialization`, the agents reach the script's environment.
+  the process raising; **an interrupt before the contract passes secures the VM and leaves it gated,
+  and one after `COMPLETE` leaves it `COMPLETE`**; the post-ready wait returning `False` warns and
+  proceeds; Phase B receives a VM-bound legacy target; the only `enrollment_access` call is the
+  first contact. Reinit: no enrollment and no reachability wait, release drift refuses, a base
+  failure stops before `run_initialization`, the agents reach the script's environment.
 - **Provisioning.** `read_tailnet_address` and `settle_tailnet_address` over a fake `run_as_root`: a
   first-read success and a success on the last read; a value that does not parse, a non-zero status,
   an unknown outcome and a platform `ConnectivityError` each treated as a failed read; a
@@ -697,15 +695,15 @@ complete or raise, `2841cb9fa` guarantee Python for native guest helpers), ADR 0
 bootstrap-fallback-removal and debian-release-transition SDDs. It adds these rows to the HLA's
 incident inventory (`hla.md:748-778`; I21 is the last row today):
 
-| Row | Behavior                                                                                                                                                                                                     | Re-proved in |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------ |
-| I22 | An operator interrupt during Phase A still closes the kept VM's provisioning access before it propagates (`driver.py:193-210`)                                                                               | 3            |
-| I23 | A first connection that left no key makes create fail where the cause is known (`driver.py:438-445`)                                                                                                         | 3            |
-| I24 | The auth key is joined exactly once: a failed address read never causes a second join, and now logs the node out (`tailscale_join.py:65-71`, `7307e2f60`)                                                    | 3            |
-| I25 | The platform's availability hold spans Phase A and Phase B (WSL2 idle shutdown) (`lifecycle.py:643`)                                                                                                         | 3            |
-| I26 | A release the guest reports is attested by core, never taken from the platform; an unattested or mismatched VM is retained failed with delete guidance, never recorded (`93aca2cfb`, `lifecycle.py:599-626`) | 3            |
-| I27 | Ordinary operations refuse live release drift; adoption is the explicit `confirm-release` (`release.py:28-35`)                                                                                               | 3            |
-| I28 | A log's redaction set is complete before its first write, and no secret is retained in raw or shell-quoted form (`a38e49489`, `ssh.py:127-137`)                                                              | 3            |
+| Row | Behavior                                                                                                                                                                                                                    | Re-proved in |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| I22 | An operator interrupt during Phase A still closes the kept VM's provisioning access before it propagates (`driver.py:193-210`)                                                                                              | 3            |
+| I23 | A first connection that left no key makes create fail where the cause is known (`driver.py:438-445`)                                                                                                                        | 3            |
+| I24 | The auth key is joined exactly once: a failed address read never causes a second join, and now logs the node out (`tailscale_join.py:65-71`, `7307e2f60`)                                                                   | 3            |
+| I25 | The platform's availability hold spans Phase A and Phase B (WSL2 idle shutdown) (`lifecycle.py:643`)                                                                                                                        | 3            |
+| I26 | A release the guest reports is attested by core, never taken from the platform; an unattested or mismatched VM is retained unattested and gated, with delete guidance, never recorded (`93aca2cfb`, `lifecycle.py:599-626`) | 3            |
+| I27 | Ordinary operations refuse live release drift; adoption is the explicit `confirm-release` (`release.py:28-35`)                                                                                                              | 3            |
+| I28 | A log's redaction set is complete before its first write, and no secret is retained in raw or shell-quoted form (`a38e49489`, `ssh.py:127-137`)                                                                             | 3            |
 
 I22 and I26 are re-proved by the Phase A interrupt and failure tests; I25 is the WSL2 create with
 the first contact now over SSH while the hold is the only thing keeping the distro up (a live cell).
