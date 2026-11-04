@@ -7,6 +7,7 @@ so is the final wait.
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING
 
 import pytest
@@ -23,6 +24,8 @@ from tests.conftest import seed_vm_trust
 from tests.ssh_fixtures import fake_host_key
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+    from contextlib import AbstractContextManager
     from pathlib import Path
 
     from agentworks.config import Config
@@ -96,6 +99,18 @@ def _waits(monkeypatch: pytest.MonkeyPatch, *, answers: bool = True) -> list[rea
 
     monkeypatch.setattr(reachability, "wait", _wait)
     return waits
+
+
+def _recording_hold(events: list[str]) -> Callable[..., AbstractContextManager[None]]:
+    @contextlib.contextmanager
+    def hold(platform: object, vm: object, *, config: object = None) -> Iterator[None]:
+        events.append("hold-open")
+        try:
+            yield
+        finally:
+            events.append("hold-close")
+
+    return hold
 
 
 def _recover(db: Database, config: Config) -> None:
@@ -262,15 +277,45 @@ def test_a_repaired_vm_that_does_not_answer_raises(
         _recover(db, make_config())
 
 
-@pytest.mark.parametrize("status", [VMStatus.STOPPED, VMStatus.DEALLOCATED, VMStatus.UNKNOWN])
-def test_a_vm_that_is_not_running_is_refused_before_any_script(
+@pytest.mark.parametrize("status", [VMStatus.STOPPED, VMStatus.DEALLOCATED])
+@pytest.mark.parametrize("record", [True, False], ids=["record", "no-record"])
+def test_a_stopped_vm_is_started_under_the_hold_then_repaired(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
     status: VMStatus,
+    record: bool,
+) -> None:
+    """A VM that stopped (a WSL2 distro that idled out after start, say) is started, with no wait, so a VM with no
+    host-key record is not sent back to a start whose own wait refuses it."""
+    _seed(db, record=record)
+    db.set_operator_stopped("box", True)
+    events: list[str] = []
+    guest = _guest(monkeypatch, status=status, events=events)
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, vm, ctx: events.append("start"))
+    monkeypatch.setattr(ProxmoxPlatform, "vm_active", _recording_hold(events))
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
+    monkeypatch.setattr("agentworks.output.confirm", lambda message, default: True)
+    _waits(monkeypatch)
+
+    _recover(db, make_config())
+
+    assert events[:2] == ["hold-open", "start"]
+    assert events[-1] == "hold-close"
+    assert any(_is_repair(payload) for payload in guest.payloads)
+    row = db.get_vm("box")
+    assert row is not None and row.operator_stopped is False and row.last_started_at is not None
+
+
+def test_a_vm_whose_power_state_is_unknown_is_refused_before_any_script(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed(db)
-    guest = _guest(monkeypatch, status=status)
+    guest = _guest(monkeypatch, status=VMStatus.UNKNOWN)
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, vm, ctx: pytest.fail("an unknown VM was started"))
 
     with pytest.raises(StateError):
         _recover(db, make_config())

@@ -335,9 +335,10 @@ def vm_rekey(
 def vm_recover(
     name: Annotated[str, typer.Argument(help="VM name")],
 ) -> None:
-    """Repair a running VM's SSH access, python3 and Tailscale node.
+    """Repair a VM's SSH access, python3 and Tailscale node.
 
-    Through the platform's own channel, without the VM's Tailscale: records a
+    Starts the VM first if it is stopped. Then, through the platform's own
+    channel, without the VM's Tailscale: records a
     missing host key once you confirm its fingerprints, restores your SSH key,
     restarts a broken SSH server where the platform's channel does not use
     it, installs python3, starts tailscaled if it is not running, and

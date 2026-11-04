@@ -69,11 +69,12 @@ the import. That covers `vm shell`, `vm exec`, `vm reinit`, `vm backup`, `vm por
 VM that any of them would trigger; `vm rekey` checks first so it never spends a Tailscale auth key.
 Two commands differ. `vm start` resolves no key at all: it starts the VM, and its wait then refuses
 with the same hint, so the VM is left running. `vm shell --platform` on a cloud VM (AWS, Azure, GCP)
-resolves the site's credentials first and then refuses, before it opens any network rule. On a
-running VM, `agw vm recover NAME` is the one command that repairs a VM without a record: it reads
-the keys through the platform and records them once you confirm their fingerprints, without a file
-to import. `vm describe`, `session describe` and the status listings that span several VMs warn that
-the VM has no record, leave out what they would have read over SSH, and carry on.
+resolves the site's credentials first and then refuses, before it opens any network rule.
+`agw vm recover NAME` is the one command that repairs a VM without a record, starting it first if it
+is stopped: it reads the keys through the platform and records them once you confirm their
+fingerprints, without a file to import. `vm describe`, `session describe` and the status listings
+that span several VMs warn that the VM has no record, leave out what they would have read over SSH,
+and carry on.
 
 `vm delete` still works without a record, because deleting is what you do with a broken VM. It
 cannot reach a cloud VM (AWS, Azure, GCP) to log its node out of Tailscale, though, so that step is
@@ -207,11 +208,12 @@ VM or spends a Tailscale auth key.
   not answer fails with a hint to run `agw vm recover NAME`, and is left running. That includes a VM
   on an ephemeral auth key whose node expired while it was offline, and one whose node was removed
   in the Tailscale admin console. No start resolves the auth key any more.
-- **`agw vm recover NAME`** is new. On a running VM, through the platform's own channel, it records
-  missing host keys once you confirm their fingerprints, then restores your SSH public key, restarts
-  a broken SSH server on WSL2 and Proxmox, installs `python3`, starts `tailscaled` if it is not
-  running, and rejoins Tailscale only when the node needs a login. Then it waits once for the VM to
-  answer. See the [command reference](../../cli/command-reference.md) for what it refuses.
+- **`agw vm recover NAME`** is new. It starts a stopped VM first; then, through the platform's own
+  channel, it records missing host keys once you confirm their fingerprints, then restores your SSH
+  public key, restarts a broken SSH server on WSL2 and Proxmox, installs `python3`, starts
+  `tailscaled` if it is not running, and rejoins Tailscale only when the node needs a login. Then it
+  waits once for the VM to answer. See the [command reference](../../cli/command-reference.md) for
+  what it refuses.
 - **`vm rekey`** runs its steps as one script through the platform's own channel and keeps an
   operation log. When the new address cannot be read, the node is logged out and the error names
   `agw vm recover`.

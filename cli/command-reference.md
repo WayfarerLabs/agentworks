@@ -647,7 +647,7 @@ just a vm-site.
 | `agw vm delete <name>`                              | Delete a VM (with confirmation)                                |
 | `agw vm backup <name>`                              | Back up a VM: metadata, agents, workspaces, and files          |
 | `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)      |
-| `agw vm recover <name>`                             | Repair a running VM's SSH access, python3 and Tailscale node   |
+| `agw vm recover <name>`                             | Repair a VM's SSH access, python3 and Tailscale node           |
 | `agw vm port-forward <name> <ports...>`             | Forward local port(s) to a VM (like kubectl port-forward)      |
 | `agw vm logs <name>`                                | Show SSH logs for a VM                                         |
 | `agw vm import-host-keys (--all \| <name>...)`      | Import VM host keys from `known_hosts` into the host-key store |
@@ -663,7 +663,7 @@ over SSH at its tailnet address. A VM that does not answer fails with a hint to 
 `agw vm recover <name>`; the VM is left running. Neither rejoins Tailscale, so a VM whose node was
 removed in the admin console, or whose ephemeral key's node expired while it was offline, fails this
 way, and `agw vm recover` rejoins it. `vm start` also boots a VM with no recorded host key; its wait
-then refuses for want of the record, naming recover, which records the keys on the running VM.
+then refuses for want of the record, naming recover, which records the keys.
 
 Plain `vm list` is a local inventory read. Add `--status` to query each selected VM platform for
 current power state; this never starts a VM. The human table adds `STATUS` only for that request,
@@ -748,9 +748,10 @@ provider-recovery boundary.
 
 `vm recover` repairs what a start cannot, through the platform's own channel (`limactl shell`,
 `wsl.exe`, the Proxmox guest agent, or SSH to a cloud VM's public address), which works without the
-VM's Tailscale. It refuses a VM whose provisioning did not complete (delete and recreate it), a
-stopped VM (start it first), and a VM whose power state the platform could not report. The Tailscale
-auth key resolves up front, with the site's secrets. In one run it:
+VM's Tailscale. It refuses a VM whose provisioning did not complete (delete and recreate it) and a
+VM whose power state the platform could not report. A stopped VM is started first, with no wait for
+SSH, and recover says so; like `vm start`, that clears a manual stop. The Tailscale auth key
+resolves up front, with the site's secrets. In one run it:
 
 1. Reads the VM's host keys through that channel when no record exists, shows each key's fingerprint
    to compare with the VM's console, and records them only once you confirm. Without a terminal to

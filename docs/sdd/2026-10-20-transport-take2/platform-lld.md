@@ -511,9 +511,9 @@ over SSH at ADDRESS") whose hint is `Run 'agw vm recover x'.`; the wait's own ra
 - `start_vm` replaces the rejoin block and its auth-key resolution (`vms/manager/power.py:85-120`)
   with `_await_tailnet` inside the same `hold_active()`. The `trust.require_record` before the
   boundary goes (`:53-56`): a stopped VM with no record must still start, so that its wait raises
-  `TrustMissing` naming recover, which refuses a stopped VM. When the start booted the VM, that
-  error's hint adds that the VM is left running. Otherwise an idle-stopped VM from before the
-  host-key store could neither start nor be recovered. `LiveVMNode.auto_start` keeps its check,
+  `TrustMissing` naming recover, which starts a stopped VM itself (below). When the start booted the
+  VM, that error's hint adds that the VM is left running. Otherwise an idle-stopped VM from before
+  the host-key store could neither start nor be recovered. `LiveVMNode.auto_start` keeps its check,
   since the gating commands' own boundary refuses such a VM earlier.
 - `LiveVMNode.auto_start` replaces `_tailscale_rejoin_required` and `_ensure_tailscale`
   (`vms/nodes.py:265-282`) with `_await_tailnet(..., already_running=False)` inside `vm_active`.
@@ -545,18 +545,22 @@ start failure is the signal. The README and ADR 0003 are updated to say so (Coll
    enrolling is deleted and recreated, not recovered. Then `verify_tailscale_available()`.
 2. The boundary, as rekey builds it (`power.py:421-441`): the VM-template node with the live VM
    node, one preflight and one resolve, so the auth key resolves up front with the site's secrets.
-3. The power state, read as rekey does (`power.py:458`). `STOPPED` or `DEALLOCATED` raises
-   `StateError` naming `agw vm start NAME`, which starts the VM before its own wait fails. `UNKNOWN`
-   raises a separate `StateError`: the platform could not report the VM's state, so check it in the
-   provider or with `agw vm describe NAME`.
+3. The power state, read as rekey does (`power.py:458`). `UNKNOWN` raises `StateError`: the platform
+   could not report the VM's state, so check it in the provider or with `agw vm describe NAME`.
+   `STOPPED` or `DEALLOCATED` is started in step 5, first thing under the hold, through
+   `platform.start` with no wait for SSH, clearing the operator-stopped flag as an explicit start
+   does and printing that it did. Refusing it instead loops for a VM with no record: start boots it
+   and its wait raises `TrustMissing` naming recover, and a WSL2 distro can idle out again after
+   start's hold ends, before recover runs.
 4. The operation log, from a factory in `vms/manager/_helpers.py` (a legacy file, which owns
    `LOG_DIR`'s other uses) that constructs an `SSHLogger` for the `recover` stem with the auth key
    in its redaction set. `recover.py` types it with slice 3's small log Protocol (contract-lld,
    "Independence"), so it imports nothing legacy.
-5. Inside `vm_node.hold_active()`, **trust**: with no store record, `platform.read_host_keys`, each
-   key's type and fingerprint printed with a line saying to compare them with the VM's console (a
-   cloud's serial console or system log), `output.confirm` defaulting to no, then
-   `trust.write_records` and `sync_ssh_config`. A refusal writes nothing and stops.
+5. Inside `vm_node.hold_active()`, the start of a stopped VM (step 3), then **trust**: with no store
+   record, `platform.read_host_keys`, each key's type and fingerprint printed with a line saying to
+   compare them with the VM's console (a cloud's serial console or system log), `output.confirm`
+   defaulting to no, then `trust.write_records` and `sync_ssh_config`. A refusal writes nothing and
+   stops.
 6. **Repair**, one script with the auth key and the log. A failed or unknown outcome stops recover.
 7. **Address**: when the repair printed `joined`, `settle_tailnet_address` with recover as its rerun
    hint, as create settles after its join; otherwise `read_tailnet_address` alone, so a flaky
@@ -647,7 +651,7 @@ operation log, and the error names the script, its status and `agw vm logs NAME`
 | No native shell on the platform                        | `FeatureUnavailable` (`StateError`, new in `execution/errors.py`)    | The platform's `native_shell_unavailable_hint`, else its console                |
 | `--platform` with `--workspace`                        | `ValidationError`                                                    | `cd` inside the shell                                                           |
 | Start or gate: no answer after the wait, or no address | `ConnectivityError`                                                  | `agw vm recover NAME`                                                           |
-| Recover: VM stopped / power state unknown              | `StateError`, two wordings                                           | `agw vm start NAME` / check the provider or `agw vm describe NAME`              |
+| Recover: power state unknown                           | `StateError`                                                         | Check the provider or `agw vm describe NAME`; a stopped VM is started instead   |
 | Repair or rekey: non-zero status                       | `StateError` naming the script and status                            | The log; repair or recreate (R7) / recover                                      |
 | Repair or rekey: unknown, or the platform raised       | `ConnectivityError`, or the raise                                    | The log, the sshd note where it applies; never re-dispatched                    |
 | Recover: no answer after the repair                    | `ConnectivityError`                                                  | Tailnet sharing and ACLs, then recreate                                         |
@@ -724,8 +728,8 @@ test of its own: the generic required-attribute check (`conformance.py:152`) cov
     script dispatched;
   - recover: keys written only after confirmation, then the SSH config synced; a failed repair stops
     before the address read; `joined` selects the settle and the reconnect wording, and without it
-    no logout runs; stopped and unknown power states refused with their two wordings before any
-    script; a provisioning-failed VM refused;
+    no logout runs; a stopped VM started under the hold and then repaired, and an unknown power
+    state refused before any script; a provisioning-failed VM refused;
   - rekey: one script, then the settle, the address recorded; a failed script names recover; a
     `False` wait warns and exits 0;
   - delete: each logout outcome reported with no `VMAccess` call after it; `TrustMissing` warns

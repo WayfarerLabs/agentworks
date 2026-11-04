@@ -1,7 +1,8 @@
 """``agw vm recover``: repair what a start cannot, through the platform's root channel.
 
-In order: re-establish the VM's host-key record when it is missing, under the
-operator's confirmation; run the repair script; read the tailnet address,
+In order: start the VM when it is stopped; re-establish the VM's host-key
+record when it is missing, under the operator's confirmation; run the repair
+script; read the tailnet address,
 settling it (and logging the node out when it cannot be read) only when the
 repair joined; then wait once for the VM to answer over SSH.
 
@@ -35,11 +36,15 @@ if TYPE_CHECKING:
 
 
 def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInteractionPolicy) -> None:
-    """Repair a running VM's SSH access, python3 and Tailscale node.
+    """Repair a VM's SSH access, python3 and Tailscale node, starting it first when it is stopped.
 
     Refuses before any secret resolves a VM whose provisioning did not
-    complete (delete and recreate it), and after the boundary a VM that is
-    not running or whose power state is unknown. The auth key resolves in the
+    complete (delete and recreate it), and after the boundary a VM whose
+    power state is unknown. A stopped VM is started through the platform,
+    with no wait for SSH, since recover reaches it through the platform's own
+    channel: a VM with no host-key record could otherwise never be recovered
+    once it stopped, since start's own wait refuses it. Like an explicit
+    start, that clears the operator-stopped flag. The auth key resolves in the
     boundary, since the repair joins the tailnet when the node needs a login.
     """
     import agentworks.vms.manager as _mgr
@@ -69,9 +74,16 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
 
     vm_node, _resolver, ops_ctx, auth_key = _auth_key_boundary(db, config, vm, interaction=interaction)
     platform = vm_node.site.platform
-    _require_running(platform.status(vm, ops_ctx), name)
+    status = platform.status(vm, ops_ctx)
+    _require_known_state(status, name)
 
     with _operation_log(name, "recover", redactions=(auth_key,)) as log, vm_node.hold_active():
+        if status is not VMStatus.RUNNING:
+            log.step("Start the VM")
+            db.set_operator_stopped(name, False)
+            platform.start(vm, ops_ctx)
+            db.record_vm_started(name)
+            output.info(f"VM '{name}' was {status.value}; started it")
         if not trust.has_record(name):
             log.step("Record the host keys")
             _reestablish_trust(db, config, vm, platform, ops_ctx)
@@ -116,14 +128,7 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
     output.result(f"VM '{name}' recovered")
 
 
-def _require_running(status: VMStatus, name: str) -> None:
-    if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-        raise StateError(
-            f"VM '{name}' is not running (status: {status.value})",
-            entity_kind="vm",
-            entity_name=name,
-            hint=f"Run 'agw vm start {name}'; run recover again if it does not answer.",
-        )
+def _require_known_state(status: VMStatus, name: str) -> None:
     if status is VMStatus.UNKNOWN:
         raise StateError(
             f"the platform could not report the power state of VM '{name}'",

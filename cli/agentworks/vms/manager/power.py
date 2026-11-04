@@ -47,8 +47,7 @@ def start_vm(
     _guard_incomplete_vm(vm)
     # A VM with no host-key record is not refused here: the start boots it,
     # and the wait below raises TrustMissing, whose hint names
-    # 'agw vm recover', which needs a running VM to read the keys through
-    # the platform.
+    # 'agw vm recover', which reads the keys through the platform.
     registry = load_request_registry(config, live_database=db)
     vm_node, ops_ctx = _live_vm_boundary(
         db,
