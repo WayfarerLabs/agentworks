@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from agentworks.artifacts.application import OwnedArtifactFile
+from agentworks.artifacts.application import ArtifactSkip, OwnedArtifactFile
 from agentworks.db import AppliedStateKey, VersionedPayload
 from agentworks.doctor import Status
 from agentworks.doctor_state import check_database
@@ -14,7 +14,7 @@ from agentworks.instance_description import instance_state_data
 
 
 @pytest.mark.parametrize("kind", ["vm", "agent", "workspace"])
-@pytest.mark.parametrize("mode", ["complete", "pending", "future", "malformed"])
+@pytest.mark.parametrize("mode", ["complete", "pending", "skipped", "future", "malformed"])
 def test_native_applied_state_is_inspected_without_io_or_payload_values(db, make_config, monkeypatch, kind, mode):
     from agentworks.agents.manager import agent_description
     from agentworks.instance_description import load_instance_description_registry
@@ -26,7 +26,7 @@ def test_native_applied_state_is_inspected_without_io_or_payload_values(db, make
     db.insert_workspace("work", "/srv/work", "box", "ws-work")
     name = {"vm": "box", "agent": "dev", "workspace": "work"}[kind]
     component = "admin" if kind == "vm" else kind
-    if mode in ("complete", "pending"):
+    if mode in ("complete", "pending", "skipped"):
         write_native_setup(
             db,
             kind,
@@ -41,6 +41,9 @@ def test_native_applied_state_is_inspected_without_io_or_payload_values(db, make
                         complete=mode == "complete",
                         pending_cleanup=mode == "pending",
                         incomplete_reasons=("fixture association conflict",) if mode == "pending" else (),
+                        skipped=(ArtifactSkip(path="/private/artifact-file", origins=("c" * 64,), reason="conflict"),)
+                        if mode == "skipped"
+                        else (),
                         claims=(NativeClaim(role="settings", identifier="settings", destination="/private/path"),),
                         artifact_files=(
                             OwnedArtifactFile(path="/private/artifact-file", sha256="b" * 64, origins=("c" * 64,)),
@@ -71,14 +74,15 @@ def test_native_applied_state_is_inspected_without_io_or_payload_values(db, make
     data = json.dumps(instance_state_data(state))
     assert "config-value-sentinel" not in data and "/private/path" not in data
     assert "/private/artifact-file" not in data
-    assert fact.status == ("recorded" if mode in ("complete", "pending") else "unavailable")
-    if mode in ("complete", "pending"):
+    assert fact.status == ("recorded" if mode in ("complete", "pending", "skipped") else "unavailable")
+    if mode in ("complete", "pending", "skipped"):
         assert fact.value is not None
         summaries = fact.value["integrations"]
         assert isinstance(summaries, list) and isinstance(summaries[0], dict)
         assert summaries[0]["claim_count"] == 1
         assert summaries[0]["artifact_file_count"] == 1
         assert summaries[0]["incomplete_reason_count"] == (1 if mode == "pending" else 0)
+        assert summaries[0]["skipped_destination_count"] == (1 if mode == "skipped" else 0)
     if mode == "future":
         assert state.unconsumed_records
     group = check_database(config)
@@ -90,6 +94,12 @@ def test_native_applied_state_is_inspected_without_io_or_payload_values(db, make
     )
     assert (
         outcome.status
-        == {"complete": Status.OK, "pending": Status.WARN, "future": Status.INFO, "malformed": Status.FAIL}[mode]
+        == {
+            "complete": Status.OK,
+            "pending": Status.WARN,
+            "skipped": Status.WARN,
+            "future": Status.INFO,
+            "malformed": Status.FAIL,
+        }[mode]
     )
     assert db.instance_state.get_applied_slices(kind, name) == original
