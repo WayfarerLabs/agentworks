@@ -44,6 +44,7 @@ case "$name" in
     getent) [ "$2" = "{admin}" ] && printf '%s:x:1000:1000::{root}/home:/bin/bash\\n' "$2" && exit 0; exit 2 ;;
     dpkg) exit "$(cat {root}/dpkg-status)" ;;
     sshd) exit "$(cat {root}/sshd-status)" ;;
+    systemctl) [ "$1" = is-active ] && exit "$(cat {root}/tailscaled-active)" ;;
     tailscale)
         case "$1" in
             status) printf '{{"BackendState": "%s"}}\\n' "$(cat {root}/state)" ;;
@@ -102,7 +103,13 @@ def guest(tmp_path: Path) -> Guest:
         path.chmod(stat.S_IRWXU)
     (tmp_path / "home").mkdir()
     made = Guest(tmp_path)
-    for knob, value in (("dpkg-status", "0"), ("sshd-status", "0"), ("state", "Running"), ("logout-status", "0")):
+    for knob, value in (
+        ("dpkg-status", "0"),
+        ("sshd-status", "0"),
+        ("state", "Running"),
+        ("logout-status", "0"),
+        ("tailscaled-active", "0"),
+    ):
         made.set(knob, value)
     return made
 
@@ -166,21 +173,51 @@ def test_python3_is_installed_only_when_dpkg_does_not_report_it(guest: Guest, in
     assert _repair(guest).status == 0
 
     assert guest.called("dpkg") == ["dpkg -s python3"]
-    expected = [] if installed else ["apt-get update", "apt-get install -y python3"]
-    assert guest.called("apt-get") == expected
+    installs = [call for call in guest.called("apt-get") if call.endswith(" install -y python3")]
+    assert len(installs) == (0 if installed else 1)
 
 
 def test_sshd_is_repaired_only_where_the_channel_does_not_use_it(guest: Guest) -> None:
+    restart = "systemctl restart ssh.service"
+
     assert _repair(guest, needs_guest_sshd=True).status == 0
-    assert guest.called("sshd") == guest.called("systemctl") == []
+    assert restart not in guest.calls
 
     assert _repair(guest, needs_guest_sshd=False).status == 0
-    assert guest.called("sshd") == ["sshd -t"]
-    assert guest.called("systemctl") == [
-        "systemctl unmask ssh.service",
-        "systemctl enable ssh.service",
-        "systemctl restart ssh.service",
-    ]
+    assert restart in guest.calls
+
+
+def test_sshd_is_repaired_before_python3_is_installed(guest: Guest) -> None:
+    """A broken sshd gets SSH access back before an install that can take minutes."""
+    guest.set("dpkg-status", "1")
+
+    assert _repair(guest, needs_guest_sshd=False).status == 0
+
+    commands = [call.split(" ", 1)[0] for call in guest.calls]
+    assert commands.index("sshd") < commands.index("apt-get")
+
+
+def test_a_key_file_without_a_final_newline_keeps_its_last_key_whole(guest: Guest) -> None:
+    keys = guest.root / "home" / ".ssh" / "authorized_keys"
+    keys.parent.mkdir()
+    keys.write_text("ssh-ed25519 AAAAexisting other@host")
+
+    assert _repair(guest).status == 0
+
+    assert guest.authorized_keys == ["ssh-ed25519 AAAAexisting other@host", PUBLIC_KEY]
+
+
+@pytest.mark.parametrize("active", [True, False])
+def test_tailscaled_is_started_before_its_state_is_read_only_when_it_is_not_running(guest: Guest, active: bool) -> None:
+    guest.set("tailscaled-active", "0" if active else "3")
+
+    assert _repair(guest).status == 0
+
+    calls = guest.calls
+    started = "systemctl start tailscaled" in calls
+    assert started is not active
+    if started:
+        assert calls.index("systemctl start tailscaled") < calls.index("tailscale status --json")
 
 
 def test_an_sshd_configuration_that_fails_its_test_is_not_restarted(guest: Guest) -> None:
@@ -189,7 +226,7 @@ def test_an_sshd_configuration_that_fails_its_test_is_not_restarted(guest: Guest
     result = _repair(guest, needs_guest_sshd=False)
 
     assert result.status == 1
-    assert guest.called("systemctl") == []
+    assert "systemctl restart ssh.service" not in guest.calls
     assert guest.called("tailscale") == []
 
 

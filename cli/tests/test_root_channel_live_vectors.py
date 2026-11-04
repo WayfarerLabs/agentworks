@@ -56,7 +56,12 @@ def live_root_lane(monkeypatch: pytest.MonkeyPatch) -> Iterator[RootLane]:
             database, config, registry, vm, interaction=TtyInteractionPolicy.ALLOW
         ) as (vm_node, _resolver, ops_ctx):
             platform = vm_node.site.platform
-            yield RootLane("V", partial(platform.run_as_root, vm, ops_ctx), platform=platform.name)
+            yield RootLane(
+                "V",
+                partial(platform.run_as_root, vm, ops_ctx),
+                platform=platform.name,
+                recovery_needs_guest_sshd=platform.recovery_needs_guest_sshd,
+            )
     finally:
         database.close()
 

@@ -6,8 +6,9 @@ without its Tailscale or, on a platform whose channel is not sshd, its SSH
 server:
 
 - :func:`repair`, ``agw vm recover``'s one script: restore the admin's
-  authorized key, install python3, restart a broken sshd where the channel
-  does not depend on it, and join Tailscale only when the node needs a login.
+  authorized key, restart a broken sshd where the channel does not depend on
+  it, install python3, start ``tailscaled`` if it is not running, and join
+  Tailscale only when the node needs a login.
 - :func:`rekey`, ``vm rekey``'s logout and rejoin with a new auth key.
 - :func:`logout`, ``vm delete``'s Tailscale logout.
 
@@ -63,6 +64,9 @@ STABILIZE_SECONDS = 15
 
 _REPAIR = """\
 set -eu
+# A root channel's PATH can lack the sbin directories, and dpkg refuses to
+# install a package unless ldconfig and start-stop-daemon are on it; sshd
+# lives there too.
 PATH="$PATH:/usr/sbin:/sbin"
 admin={admin}
 key={key}
@@ -70,20 +74,19 @@ repair_sshd={repair_sshd}
 
 entry=$(getent passwd "$admin") || {{ echo "the admin account '$admin' does not exist" >&2; exit 1; }}
 home=$(printf '%s\\n' "$entry" | cut -d: -f6)
+keys="$home/.ssh/authorized_keys"
 mkdir -p "$home/.ssh"
-grep -qxF "$key" "$home/.ssh/authorized_keys" 2>/dev/null || printf '%s\\n' "$key" >> "$home/.ssh/authorized_keys"
+if ! grep -qxF "$key" "$keys" 2>/dev/null; then
+    # A last line without its newline would otherwise run into the key.
+    if [ -s "$keys" ] && [ -n "$(tail -c 1 "$keys")" ]; then printf '\\n' >> "$keys"; fi
+    printf '%s\\n' "$key" >> "$keys"
+fi
 chown -R "$admin:" "$home/.ssh"
 chmod 700 "$home/.ssh"
-chmod 600 "$home/.ssh/authorized_keys"
+chmod 600 "$keys"
 
-# Debian's python3 package depends on its standard library, so this also
-# catches a VM with only python3-minimal. Package output goes to stderr,
-# which the operation log keeps, so stdout carries only the joined line.
-if ! dpkg -s python3 >/dev/null 2>&1; then
-    apt-get update >&2
-    DEBIAN_FRONTEND=noninteractive apt-get install -y python3 >&2
-fi
-
+# Before the package install, which can take minutes: a VM whose sshd is
+# broken gets its SSH access back first.
 if [ "$repair_sshd" = 1 ]; then
     # The unit creates sshd's privilege separation directory; a stopped or
     # masked one may have left none, and the configuration test needs it.
@@ -94,7 +97,17 @@ if [ "$repair_sshd" = 1 ]; then
     systemctl restart ssh.service
 fi
 
+# Debian's python3 package depends on its standard library, so this also
+# catches a VM with only python3-minimal. Package output goes to stderr,
+# which the operation log keeps, so stdout carries only the joined line.
+# The lock timeout waits out an unattended upgrade instead of failing.
+if ! dpkg -s python3 >/dev/null 2>&1; then
+    apt-get -o DPkg::Lock::Timeout=120 update >&2
+    DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y python3 >&2
+fi
+
 command -v tailscale >/dev/null || {{ echo "Tailscale is not installed" >&2; exit 1; }}
+systemctl is-active --quiet tailscaled || systemctl start tailscaled
 state=$({backend_state}) || {{ echo "Tailscale's state could not be read" >&2; exit 1; }}
 case "$state" in
     Running) ;;
@@ -130,7 +143,7 @@ join_tailnet() {{
 }}
 step systemctl restart tailscaled || finish
 sleep {pause}
-step tailscale logout || finish
+step timeout 60 tailscale logout || finish
 sleep {pause}
 step join_tailnet || finish
 sleep {pause}

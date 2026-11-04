@@ -36,7 +36,7 @@ SECRET = "tskey-auth-conformance-0123456789abcdef"
 
 @dataclass
 class RootLane:
-    """One way to reach a root shell: ``run_as_root`` and, for V, the platform's registry name.
+    """One way to reach a root shell: ``run_as_root`` and, for V, the platform's registry name and sshd dependence.
 
     ``name`` is ``L``, ``L-sudo`` or ``V``.
     """
@@ -44,6 +44,7 @@ class RootLane:
     name: str
     run_as_root: Callable[[bytes, float], RawRun]
     platform: str | None = None
+    recovery_needs_guest_sshd: bool = True
 
     def run(self, payload: str, *, deadline: float = DEADLINE, secret: str | None = None) -> RootScriptResult:
         return root_script.run(self.run_as_root, payload, deadline=deadline, secret=secret)
@@ -295,7 +296,7 @@ def the_repair_runs_to_status_zero(lane: RootLane) -> None:
     python3 with its standard library. Run it once on a guest prepared with python3 absent and once with only
     ``python3-minimal``; preparing them is by hand, since it removes packages. The rekey and logout scripts change
     the node, so their live cells are ``vm rekey`` and ``vm delete``; on the guest's own Bash they run here against
-    stubs."""
+    stubs. On WSL2 and Proxmox the repair's sshd half runs too, restarting ``ssh.service``."""
     from agentworks.capabilities.base import RunContext
     from agentworks.vms import recovery
 
@@ -304,7 +305,8 @@ def the_repair_runs_to_status_zero(lane: RootLane) -> None:
     admin = _admin(lane)
     stand_in_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOU3HUqrGubKZio8MVx9WOFPYHGIHl5tIyF3skwoAxv0 agw-conformance"
     vm: Any = SimpleNamespace(name="conformance", admin_username=admin)
-    platform: Any = _LanePlatform(lane)
+    # The lane's own sshd dependence, so the sshd half runs on WSL2 and Proxmox.
+    platform: Any = _LanePlatform(lane, recovery_needs_guest_sshd=lane.recovery_needs_guest_sshd)
 
     # A healthy node reads Running, so the stand-in key is never used.
     repaired = recovery.repair(platform, vm, RunContext(), public_key=stand_in_key, auth_key=SECRET, log=None)
