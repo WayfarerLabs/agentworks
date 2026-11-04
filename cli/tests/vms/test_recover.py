@@ -314,6 +314,7 @@ def test_a_missing_record_is_written_only_after_confirmation_then_synced(
         return True
 
     monkeypatch.setattr("agentworks.output.confirm", _confirm)
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
 
     _recover(db, make_config())
 
@@ -321,6 +322,24 @@ def test_a_missing_record_is_written_only_after_confirmation_then_synced(
     assert events[:2] == ["root:cat /etc/ssh/ssh_host_*_key.pub", "confirm:False"]
     assert _is_repair(events[2])
     assert _world[0] == "sync"
+
+
+def test_a_missing_record_without_a_terminal_is_refused_before_any_secret(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(db, record=False)
+    guest = _guest(monkeypatch)
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: False)
+
+    with pytest.raises(StateError) as caught:
+        _recover(db, make_config())
+
+    assert caught.value.hint is not None
+    assert resolve_counter == []
+    assert guest.scripts == []
 
 
 def test_a_refused_record_writes_nothing_and_stops(
@@ -332,6 +351,7 @@ def test_a_refused_record_writes_nothing_and_stops(
     _seed(db, record=False)
     guest = _guest(monkeypatch)
     monkeypatch.setattr("agentworks.output.confirm", lambda message, default=False: False)
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
 
     with pytest.raises(UserAbort):
         _recover(db, make_config())

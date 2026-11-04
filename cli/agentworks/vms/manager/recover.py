@@ -48,6 +48,17 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
 
     vm = _require_vm(db, name)
     _guard_incomplete_vm(vm, allow_failed_init=True)
+    if not trust.has_record(name) and not output.is_interactive():
+        # Recording keys read through the platform needs the operator to confirm them.
+        raise StateError(
+            f"VM '{name}' has no recorded host key, and recording one needs an interactive confirmation",
+            entity_kind="vm",
+            entity_name=name,
+            hint=(
+                f"Run 'agw vm recover {name}' interactively, or 'agw vm import-host-keys {name} "
+                "--known-hosts FILE' with a file whose fingerprints you verified against the VM's console."
+            ),
+        )
     _mgr.verify_tailscale_available()
     # The final wait runs through agentworks.execution: an unsupported client
     # refuses before a secret or the platform is touched.

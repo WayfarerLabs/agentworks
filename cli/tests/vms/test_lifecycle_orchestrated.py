@@ -156,6 +156,7 @@ def test_a_stopped_vm_without_a_host_key_record_starts_then_fails_naming_recover
     assert events == ["status", "start"]
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.RUNNING)
     monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
 
     def _reached(*_args: object, **_kwargs: object) -> None:
         raise _ReachedTrust

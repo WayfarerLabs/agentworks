@@ -751,7 +751,9 @@ stopped VM (start it first), and a VM whose power state the platform could not r
 auth key resolves up front, with the site's secrets. In one run it:
 
 1. Reads the VM's host keys through that channel when no record exists, shows each key's fingerprint
-   to compare with the VM's console, and records them only once you confirm.
+   to compare with the VM's console, and records them only once you confirm. Without a terminal to
+   confirm on, recover refuses such a VM before resolving anything; import its keys from a verified
+   file with `agw vm import-host-keys <name> --known-hosts FILE` instead.
 2. Runs one repair script as root: it restores your SSH public key in the admin's `authorized_keys`,
    installs `python3` when it is missing or lacks its standard library, restarts a broken SSH server
    on WSL2 and Proxmox (where the channel does not go through it), and rejoins Tailscale when the
