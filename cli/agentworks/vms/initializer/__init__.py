@@ -14,7 +14,7 @@ Phase B steps are non-fatal: failures produce warnings and a 'partial' status.
 
 This package preserves the flat ``agentworks.vms.initializer`` import
 surface that predates the split into submodules (``shell_env``, ``mise``,
-``ssh_keys``, ``packages``, ``credentials``, ``driver``, ``phase_a``): every name below
+``ssh_keys``, ``packages``, ``tailscale_preflight``, ``driver``, ``phase_a``): every name below
 is re-exported here so ``from agentworks.vms.initializer import
 bootstrap_vm`` (and the many ``agentworks.vms.initializer.<name>``
 attribute references across the codebase and test suite) keep working
@@ -31,7 +31,6 @@ that caller must switch to package-object indirection.
 
 from __future__ import annotations
 
-from .credentials import verify_tailscale_available
 from .driver import (
     VMInitializationOperation,
     _phase_b_setup,
@@ -77,6 +76,7 @@ from .ssh_keys import (
     _preserve_ssh_host_keys,
     _reconcile_authorized_keys,
 )
+from .tailscale_preflight import verify_tailscale_available
 
 __all__ = [
     "AGENTWORKS_IDENTITY_PROFILE_PATH",

@@ -76,7 +76,6 @@ class VMNotAnswering(ConnectivityError):
     """
 
     def __init__(self, vm_name: str, address: str | None) -> None:
-        self.vm_name = vm_name
         super().__init__(
             f"VM '{vm_name}' is running but did not answer over SSH at {address}"
             if address

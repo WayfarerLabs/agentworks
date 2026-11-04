@@ -39,7 +39,7 @@ MIGRATED_FILES = (
     "vms/manager/tailscale.py",
     "vms/nodes.py",
     "orchestration/activation.py",
-    "vms/initializer/credentials.py",
+    "vms/initializer/tailscale_preflight.py",
 )
 
 

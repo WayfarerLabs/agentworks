@@ -362,6 +362,9 @@ def rekey_vm(
     # Before the auth key resolves: a rekey with no host-key record would spend
     # the new key and record the new address before its reconnect check raised.
     trust.require_record(name)
+    # The final wait runs through agentworks.execution: an unsupported client
+    # refuses before a secret or the platform is touched.
+    execution.resolve_ssh()
 
     vm_node, resolver, ops_ctx, auth_key = _auth_key_boundary(
         db, config, vm, ignore_env=ignore_env, interaction=interaction

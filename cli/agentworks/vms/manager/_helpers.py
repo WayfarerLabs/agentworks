@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.base import SecretDecl
-    from agentworks.ssh import SSHLogger
+    from agentworks.vms.initializer.phase_a import OperationLog
 
 
 class _VmAdminEnvScopes(NamedTuple):
@@ -212,11 +212,11 @@ def _init_log_hint(vm_name: str) -> str:
 
 
 @contextlib.contextmanager
-def _operation_log(vm_name: str, command_stem: str, *, redactions: tuple[str, ...]) -> Iterator[SSHLogger]:
+def _operation_log(vm_name: str, command_stem: str, *, redactions: tuple[str, ...]) -> Iterator[OperationLog]:
     """An operation log for ``command_stem``, closed on exit, with ``redactions`` registered before its first write.
 
-    The factory a manager module that imports nothing legacy uses: it types
-    the log by the small ``OperationLog`` protocol, never as ``SSHLogger``.
+    Typed by the small ``OperationLog`` protocol, never as ``SSHLogger``, so a
+    manager module that imports nothing legacy can use it.
     """
     from agentworks.ssh import SSHLogger
 

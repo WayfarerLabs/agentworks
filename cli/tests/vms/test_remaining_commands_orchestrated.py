@@ -278,6 +278,31 @@ def test_rekey_without_a_host_key_record_raises_before_resolving_or_touching_the
     assert row is not None and row.tailscale_host == "100.64.0.9"
 
 
+def test_an_unsupported_client_refuses_rekey_before_resolving_or_touching_the_vm(
+    db: Database,
+    make_config,  # noqa: ANN001
+    _ts_key: None,
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.execution.errors import ClientUnsupported
+
+    config = make_config()
+    _seed_vm(db)
+    events = _fake_status(monkeypatch, VMStatus.RUNNING)
+
+    def _unsupported() -> object:
+        raise ClientUnsupported("no supported OpenSSH client")
+
+    monkeypatch.setattr("agentworks.execution.resolve_ssh", _unsupported)
+
+    with pytest.raises(ClientUnsupported):
+        vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert resolve_counter == []
+    assert events == []
+
+
 def test_rekey_missing_key_fails_at_the_one_resolve_before_status(
     db: Database,
     make_config,  # noqa: ANN001

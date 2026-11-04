@@ -1,4 +1,4 @@
-"""The workstation's Tailscale preflight.
+"""The workstation's Tailscale preflight: commands that reach a VM at its tailnet address need it.
 
 This module imports nothing from the legacy transport stack.
 """
@@ -29,6 +29,5 @@ def verify_tailscale_available() -> None:
     if result.returncode != 0:
         raise ConnectivityError(
             "This machine is not connected to Tailscale. "
-            "VM initialization requires Tailscale to switch from the provisioning "
-            "transport to direct SSH. Run 'tailscale up' first."
+            "Agentworks reaches VMs over SSH at their tailnet addresses. Run 'tailscale up' first."
         )

@@ -36,9 +36,10 @@ def _platform_ops_ctx(
     secret names (the declare/receive contract), under the command's
     scope.
 
-    The ONE definition of that shape: both composition roots below use
-    it, and so does ``rekey_vm``, which assembles its own boundary
-    inline (its gate opens after the resolve, so it fits neither root).
+    The ONE definition of that shape: the composition roots below use
+    it, including :func:`_auth_key_boundary`, which ``rekey_vm`` and
+    ``recover_vm`` share (rekey's gate opens after the resolve, and
+    recover opens none).
     Every platform op in the VM manager is therefore handed a context
     built here, and they cannot drift.
     """
