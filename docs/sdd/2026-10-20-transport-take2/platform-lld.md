@@ -670,9 +670,9 @@ refuses a provisioning-failed VM (step 1).
   (measured), until slice 5. They join `MIGRATED_FILES` instead
   (`tests/test_execution_import_boundary.py:24`): the four plugin `platform.py` files,
   `plugins/proxmox/guest_agent.py`, `vms/manager/recover.py`, `vms/manager/tailscale.py`,
-  `vms/nodes.py`, `orchestration/activation.py` and `vms/initializer/credentials.py`. `power.py`
-  cannot (`LOG_DIR`, the session teardown), nor can `_scope.py` (`SSHLogger`, `:29-30`) or
-  `_helpers.py`; all three call new code, which R10 allows.
+  `vms/nodes.py`, `orchestration/activation.py` and `vms/initializer/tailscale_preflight.py`.
+  `power.py` cannot (`LOG_DIR`, the session teardown), nor can `_scope.py` (`SSHLogger`, `:29-30`)
+  or `_helpers.py`; all three call new code, which R10 allows.
 - **Deleted with no caller left.** `transports/lima.py`, `remote_lima.py`, `wsl2.py` and
   `_shared.py` (their only users are the platforms and `transports/__init__.py`'s exports), the
   `native_transport` factory, `plugins/proxmox/transport.py`, `vms/manager/platform_shell.py`, and
@@ -832,7 +832,8 @@ the guard of `102adcff5` becomes the plain union refusal.
 - **Reviewer persona:** `.rulesync/subagents/agentworks-reviewer.md:191-194` loses the sanctioned
   conditional-repair exception; regenerate with rulesync.
 - **Docstrings and comments:** `transports/__init__.py:1-21`, `transports/base.py:3-9`,
-  `transports/ssh.py:87`, `vms/initializer/credentials.py:1`, `vms/manager/inspect.py:382-388`.
+  `transports/ssh.py:87`, `vms/initializer/tailscale_preflight.py:1`,
+  `vms/manager/inspect.py:382-388`.
 - **The commit** carries `BREAKING CHANGE:` footers (`CONTRIBUTING.md:69`) for the platform
   contract, `vm start` no longer rejoining (ephemeral keys included), and the
   `--platform --workspace` refusal.

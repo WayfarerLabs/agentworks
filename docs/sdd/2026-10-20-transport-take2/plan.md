@@ -306,21 +306,21 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
 - [ ] Make `transient_route` and `probe_failure_hint` private to each cloud. Add explicit imports of
       `public_ssh.py` and `vms/recovery.py` to the package guard, and the plugin and migrated files
       the platform LLD lists to the static check (HLA D14).
-- [ ] Add `vms/recovery.py` with the repair, rekey and logout scripts, and move rekey and delete's
+- [x] Add `vms/recovery.py` with the repair, rekey and logout scripts, and move rekey and delete's
       logout onto them, rekey with an operation log that registers the auth key. Make `vm start` and
       the activation gate start the VM, wait for it to answer over SSH, and fail with a hint naming
       `agw vm recover` when it does not, as the operator ruled on 2026-10-31 and 2026-11-01. Both
       waits use `reachability.wait`. Delete `vm start`'s rejoin and its conditional auth-key read
       (`vms/manager/power.py:85-120`), and `rejoin_tailscale` with its exports.
-- [ ] Delete the legacy `TailscaleWait` and `wait_for_reconnect` (`transports/__init__.py:248`,
+- [x] Delete the legacy `TailscaleWait` and `wait_for_reconnect` (`transports/__init__.py:248`,
       `:279`) with their last callers, which move to `reachability.wait` in this slice.
-- [ ] Add `agw vm recover <vm>`, with its operation log:
+- [x] Add `agw vm recover <vm>`, with its operation log:
   - refuse a VM whose provisioning failed, a stopped VM, and, worded separately, a VM whose power
     state is unknown;
   - host-key re-establishment first when the record is missing;
   - the repair script, then the address read, settling only when the repair joined, then one wait.
     Repoint `VMNotReady` and `TrustMissing` guidance at it.
-- [ ] Delete the activation gate's lazy repair-secret protocol, which only its rejoin used:
+- [x] Delete the activation gate's lazy repair-secret protocol, which only its rejoin used:
       `GateTarget.repair_secret_refs`, `_GateSecrets`, `Resolver.resolve_late_repair`, and the call
       sites in `vms/nodes.py` and `sessions/manager/_scope.py`. Update the collateral that names it,
       including the `agentworks-reviewer` persona's sanctioned conditional-repair shape.
