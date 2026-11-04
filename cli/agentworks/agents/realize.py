@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from agentworks.db import AgentRow, Database, VMRow
     from agentworks.git_credentials import CredentialRequest
     from agentworks.harness_setup.inputs import SetupInputs
+    from agentworks.harness_setup.outcomes import SetupFailure
     from agentworks.instance_specs import InstanceOverlay
     from agentworks.resources.registry import Registry
 
@@ -69,6 +70,7 @@ def realize_agent(
     grant_all_workspaces: bool = False,
     overlay: InstanceOverlay[BaseModel] | None = None,
     defer_overlay_report: bool = False,
+    setup_failures: list[SetupFailure],
     setup_inputs: SetupInputs | None = None,
     setup_values: Mapping[str, str] | None = None,
 ) -> AgentRow:
@@ -77,9 +79,10 @@ def realize_agent(
     runup under the skip-and-degrade policy), insert the DB row, and
     refresh the operator's SSH config.
 
-    Raises on failure AFTER unwinding its own partial state (the
+    Core failures raise AFTER unwinding its own partial state (the
     half-configured user); the caller's realization log never sees a
-    half-made agent. Returns the inserted row.
+    half-made agent. Native setup failures join ``setup_failures`` while the
+    agent row and completed setup progress are committed. Returns the inserted row.
     """
     # DRIFT GUARD (Phase 7, recipe use-gate): this choreography is itself never
     # gated; the recipe gate (``ensure_recipe_enabled``) lives at each COMMAND
@@ -90,6 +93,7 @@ def realize_agent(
     from agentworks.agents.manager import derive_linux_user
     from agentworks.ssh import SSHLogger
 
+    initial_failure_count = len(setup_failures)
     linux_user = derive_linux_user(name)
     # Supply every declared secret input when the logger is constructed. A logger's
     # redaction set is immutable because adding a secret after the first
@@ -153,6 +157,7 @@ def realize_agent(
                         config,
                         registry,
                         inputs=setup_inputs,
+                        failures=setup_failures,
                         vm=vm,
                         username=linux_user,
                         values=setup_values or {},
@@ -229,5 +234,6 @@ def realize_agent(
 
             sync_ssh_config(config, db)
 
-            output.info(f"Agent '{name}' created on VM '{vm.name}' (user: {agent.linux_user})")
+            setup_suffix = "; harness setup incomplete" if len(setup_failures) > initial_failure_count else ""
+            output.info(f"Agent '{name}' created on VM '{vm.name}' (user: {agent.linux_user}){setup_suffix}")
         return agent

@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.harness_setup.inputs import SetupInputs
+    from agentworks.harness_setup.outcomes import SetupFailure
     from agentworks.instance_specs import InstanceOverlay
     from agentworks.resources.registry import Registry
     from agentworks.workspaces.templates import ResolvedTemplate
@@ -54,6 +55,7 @@ def realize_workspace(
     template: ResolvedTemplate,
     overlay: InstanceOverlay[BaseModel] | None = None,
     defer_overlay_report: bool = False,
+    setup_failures: list[SetupFailure],
     setup_inputs: SetupInputs | None = None,
     setup_values: Mapping[str, str] | None = None,
 ) -> Path:
@@ -69,9 +71,10 @@ def realize_workspace(
     prompt or a VM start; this body is only the mutation.
 
     Returns the VS Code workspace stub path, for callers with an
-    open-in-VS-Code tail; callers without one ignore it. Raises on
-    failure AFTER unwinding its own partial state; the caller's
-    realization log never sees a half-made workspace.
+    open-in-VS-Code tail; callers without one ignore it. Core failures raise
+    AFTER unwinding its own partial state; the caller's
+    realization log never sees a half-made workspace. Native setup failures
+    join ``setup_failures`` while the row and setup progress are committed.
     """
     from agentworks.agents.grants import materialize_grant_all_agents, workspace_group
     from agentworks.ssh import SSHLogger
@@ -81,6 +84,7 @@ def realize_workspace(
         generate_vscode_workspace,
     )
 
+    initial_failure_count = len(setup_failures)
     workspace_path: str | None = None
     vscode_path: Path | None = None
 
@@ -138,6 +142,7 @@ def realize_workspace(
                         config,
                         registry,
                         inputs=setup_inputs,
+                        failures=setup_failures,
                         vm=vm,
                         root=workspace_path,
                         linux_group=workspace_group(name),
@@ -204,7 +209,8 @@ def realize_workspace(
         finally:
             ssh_logger.close()
 
-        output.info(f"Workspace '{name}' created")
+        setup_suffix = "; harness setup incomplete" if len(setup_failures) > initial_failure_count else ""
+        output.info(f"Workspace '{name}' created{setup_suffix}")
         # vscode_path was assigned inside the try before the row insert;
         # reaching here means the body completed without raising, so it is
         # set. Assert for the type-checker.

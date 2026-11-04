@@ -26,12 +26,15 @@ import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, require_implemented_start
 from agentworks.db import SessionMode
-from agentworks.errors import ExternalError, NotFoundError, ValidationError
+from agentworks.errors import ExternalError, NotFoundError, StateError, ValidationError
+from agentworks.harness_setup.outcomes import raise_setup_failures
+from agentworks.harness_setup.readiness import RequiredSetupMissingError
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow
+    from agentworks.harness_setup.outcomes import SetupFailure
     from agentworks.orchestration.unwind import RealizationLog
     from agentworks.resources.registry import Registry
     from agentworks.sessions.tmux import RunCommand
@@ -50,6 +53,7 @@ def _realize_ephemerals(
     vm: VMRow,
     secret_values: dict[str, str],
     log: RealizationLog,
+    setup_failures: list[SetupFailure],
 ) -> None:
     """Realize the pending workspace / agent in dependency order, recording
     each completed realization in ``log`` for the reverse-order unwind."""
@@ -86,6 +90,7 @@ def _realize_ephemerals(
                     name=plan.workspace_name,
                     vm=vm,
                     template=graph.workspace_tmpl,
+                    setup_failures=setup_failures,
                     setup_inputs=graph.pending_workspace.setup_inputs,
                     setup_values=secret_values,
                     overlay=graph.workspace_overlay,
@@ -120,6 +125,7 @@ def _realize_ephemerals(
                     template=graph.agent_tmpl,
                     credential_requests=credential_ops,
                     credential_redactions=git_redactions,
+                    setup_failures=setup_failures,
                     setup_inputs=graph.pending_agent.setup_inputs,
                     setup_values=secret_values,
                     overlay=graph.agent_overlay,
@@ -517,13 +523,15 @@ def _roll_forward(
     run_command: RunCommand,
     agent_target: Transport | None,
     secret_values: dict[str, str],
+    setup_failures: list[SetupFailure],
 ) -> None:
     """Realize the ephemerals then the session slice, unwinding the
-    realized ephemerals on any failure (rollback level 2)."""
+    realized ephemerals on core failure (rollback level 2). Required setup
+    blocks only its session consumer and retains completed owners for repair."""
     from agentworks.orchestration.unwind import RealizationLog
 
     # Realize the pending nodes in dependency order, recording each
-    # completed realization; on any later failure the log unwinds them in
+    # completed realization; on later core failure the log unwinds them in
     # reverse (agent before workspace, today's proven rollback order). The
     # session's own partial state is cleaned by its node's teardown in the
     # slice, and a COMPLETED session (tmux up) is deliberately never
@@ -539,6 +547,7 @@ def _roll_forward(
             vm=vm,
             secret_values=secret_values,
             log=log,
+            setup_failures=setup_failures,
         )
         _start_session_slice(
             db,
@@ -552,6 +561,15 @@ def _roll_forward(
             agent_target=agent_target,
             secret_values=secret_values,
         )
+    except RequiredSetupMissingError as error:
+        # The owners completed their core work. Keep them and their native
+        # progress so the operator can repair the session's required setup.
+        _render_retained_overlay_outcomes(db, plan, graph)
+        try:
+            raise_setup_failures(setup_failures)
+        except StateError as setup_error:
+            error.hint = "\n".join(part for part in (error.hint, str(setup_error), setup_error.hint) if part)
+        raise
     except KeyboardInterrupt:
         output.warn(f"Cancelling session create '{plan.name}'... rolling back.")
         log.unwind()

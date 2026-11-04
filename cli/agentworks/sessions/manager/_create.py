@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.errors import StateError
+from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 
 from ._create_build import _build_session_graph
 from ._create_plan import _resolve_session_plan
@@ -421,9 +422,11 @@ def create_session(
         # ===== Dependency-ordered roll-forward (S11) ========================
         #
         # Realize the ephemerals then the session's own slice, unwinding
-        # the realized ephemerals on any failure. The two-level rollback
+        # the realized ephemerals on core failures. Required setup retains
+        # completed owners for repair. The two-level rollback
         # (session-slice teardown, then ephemeral unwind) and the emit
         # order live in _roll_forward.
+        setup_failures: list[SetupFailure] = []
         _roll_forward(
             db,
             config,
@@ -435,4 +438,6 @@ def create_session(
             run_command=run_command,
             agent_target=agent_target,
             secret_values=secret_values,
+            setup_failures=setup_failures,
         )
+        raise_setup_failures(setup_failures)
