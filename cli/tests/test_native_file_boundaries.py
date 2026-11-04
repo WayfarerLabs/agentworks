@@ -11,7 +11,7 @@ import pytest
 import agentworks.native_files as native
 from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
 from agentworks.artifacts.publication import publish_artifacts
-from agentworks.errors import StateError
+from agentworks.errors import ExternalError, StateError
 from agentworks.transports import Transport
 from tests.native_setup_fixtures import LocalFixtureTransport
 
@@ -161,11 +161,12 @@ def test_unprivileged_operations_keep_normal_scope_access(tmp_path):
 
 
 @pytest.mark.parametrize("returncode", [1, 9, 127, 255])
-def test_python_prerequisite_probe_failures_preserve_failure_kind_and_status(returncode):
+@pytest.mark.parametrize("stdout", ["", "AGW_PYTHON3=available\n"])
+def test_python_prerequisite_probe_failures_preserve_failure_kind_and_status(returncode, stdout):
     from agentworks.ssh import SSHError, SSHResult
 
     runner = Mock(spec=Transport)
-    runner.run.return_value = SSHResult(returncode, "", "fixture profile or transport error")
+    runner.run.return_value = SSHResult(returncode, stdout, "fixture profile or transport error")
     with pytest.raises(SSHError) as caught:
         native.require_python3(runner)
     assert str(returncode) in str(caught.value)
@@ -183,17 +184,30 @@ def test_python_prerequisite_probe_preserves_the_transport_exception():
     assert caught.value is failure
 
 
-@pytest.mark.parametrize("observation", ["missing", "available", "", "profile outputavailable"])
-def test_python_prerequisite_requires_an_unambiguous_successful_observation(observation):
-    from agentworks.errors import ExternalError
+@pytest.mark.parametrize(
+    "observation,outcome",
+    [
+        ("AGW_PYTHON3=missing\n", StateError),
+        ("AGW_PYTHON3=available\n", None),
+        ("startup banner\nAGW_PYTHON3=available\ncompletion banner", None),
+        ("startup banner\nAGW_PYTHON3=missing\ncompletion banner", StateError),
+        ("", ExternalError),
+        ("profile outputavailable", ExternalError),
+        ("prefixAGW_PYTHON3=available\n", ExternalError),
+        ("AGW_PYTHON3=unknown\n", ExternalError),
+        ("AGW_PYTHON3=available\nAGW_PYTHON3=missing\n", ExternalError),
+        ("AGW_PYTHON3=available\nAGW_PYTHON3=available\n", ExternalError),
+    ],
+)
+def test_python_prerequisite_requires_an_unambiguous_successful_observation(observation, outcome):
     from agentworks.ssh import SSHResult
 
     runner = Mock(spec=Transport)
     runner.run.return_value = SSHResult(0, observation, "")
-    if observation == "available":
+    if outcome is None:
         native.require_python3(runner)
     else:
-        with pytest.raises(StateError if observation == "missing" else ExternalError):
+        with pytest.raises(outcome):
             native.require_python3(runner)
 
 
@@ -227,7 +241,8 @@ def test_regular_file_parent_is_distinct_from_leaf_symlink_and_never_mutated(tmp
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux guest filesystem operations")
 @pytest.mark.parametrize("python_available", [False, True])
-def test_python_prerequisite_observes_the_command_in_the_guest_environment(tmp_path, python_available):
+@pytest.mark.parametrize("startup_output", [False, True])
+def test_python_prerequisite_observes_the_command_in_the_guest_environment(tmp_path, python_available, startup_output):
     from pathlib import Path
 
     target = LocalFixtureTransport(tmp_path / "target")
@@ -237,10 +252,43 @@ def test_python_prerequisite_observes_the_command_in_the_guest_environment(tmp_p
     if python_available:
         (binary_dir / "python3").symlink_to(Path(sys.executable))
     target.environment["PATH"] = str(binary_dir)
+    if startup_output:
+        startup = target.root / "startup.sh"
+        startup.write_text("printf 'fixture startup banner'\ntrap 'printf completion-banner' EXIT\n")
+        target.environment["BASH_ENV"] = str(startup)
     if python_available:
         native.require_python3(target)
     else:
         with pytest.raises(StateError):
             native.require_python3(target)
     assert len(target.commands) == 1
+    assert not list((target.root / "tmp").iterdir())
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux guest shell operations")
+@pytest.mark.parametrize("login_shell", [False, True])
+def test_first_party_ssh_python_probe_accepts_startup_output_without_a_newline(tmp_path, monkeypatch, login_shell):
+    import subprocess
+
+    from agentworks.transports import SSHTransport
+
+    target = LocalFixtureTransport(tmp_path / "target")
+    startup = target.root / "startup.sh"
+    startup.write_text("printf 'fixture startup banner'\ntrap 'printf completion-banner' EXIT\n")
+    target.environment["BASH_ENV"] = str(startup)
+    execute = subprocess.run
+    calls = []
+
+    def ssh_locally(args, **kwargs):
+        assert args[0] == "ssh"
+        calls.append(args)
+        # Execute only the remote payload in the fixture's shell and environment.
+        return execute(["/bin/bash", "-c", args[-1]], cwd=target.home, env=target.environment, **kwargs)
+
+    monkeypatch.setattr("agentworks.transports.ssh.subprocess.run", ssh_locally)
+    transport = SSHTransport("fixture.invalid", user="fixture", login_shell=login_shell, retries=1)
+    assert transport.run("command -v python3 >/dev/null", check=False, discard_output=True).ok
+    native.require_python3(transport)
+    assert len(calls) == 2
+    assert all("-T" in args and "--" in args for args in calls)
     assert not list((target.root / "tmp").iterdir())

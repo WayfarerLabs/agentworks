@@ -643,7 +643,7 @@ def test_missing_guest_python_refuses_before_staging(transport: LocalFixtureTran
     from types import SimpleNamespace
     from unittest.mock import Mock
 
-    probe = Mock(return_value=SimpleNamespace(ok=True, stdout="missing"))
+    probe = Mock(return_value=SimpleNamespace(ok=True, stdout="AGW_PYTHON3=missing\n"))
     monkeypatch.setattr(transport, "run", probe)
     with pytest.raises(StateError), NativeFiles(transport):
         pytest.fail("missing prerequisite must stop before staging")

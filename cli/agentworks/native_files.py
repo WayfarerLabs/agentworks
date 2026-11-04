@@ -256,15 +256,23 @@ def root_native_path(path: str, *, directory: bool = False) -> str:
 
 def require_python3(runner: Transport) -> None:
     """Check the guest prerequisite before native setup, including older VMs."""
-    result = runner.run("if command -v python3 >/dev/null 2>&1; then printf 'available'; else printf 'missing'; fi")
+    result = runner.run(
+        "if command -v python3 >/dev/null 2>&1; then "
+        "printf '\\nAGW_PYTHON3=available\\n'; else printf '\\nAGW_PYTHON3=missing\\n'; fi"
+    )
     if not result.ok:
         raise SSHError(f"native setup Python prerequisite probe failed (exit {result.returncode})")
-    if result.stdout == "missing":
+    # Startup files can write unrelated output, even without a trailing newline.
+    # The probe starts its marker on a fresh line; ambiguity still fails closed.
+    observations = [
+        line.removeprefix("AGW_PYTHON3=") for line in result.stdout.splitlines() if line.startswith("AGW_PYTHON3=")
+    ]
+    if observations == ["missing"]:
         raise StateError(
             "native harness setup requires python3 on the VM",
             hint="Reinitialize this VM to install required system packages, then retry setup.",
         )
-    if result.stdout != "available":
+    if observations != ["available"]:
         raise ExternalError("native setup Python prerequisite probe returned an unexpected response")
 
 

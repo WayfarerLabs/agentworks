@@ -299,7 +299,7 @@ def test_native_probe_passes_environment_separately_and_rejects_policy_failures(
     def run(command, **kwargs):
         calls.append((command, kwargs))
         if len(calls) == 1:
-            return SimpleNamespace(returncode=0, ok=True, stdout="available", stderr="")
+            return SimpleNamespace(returncode=0, ok=True, stdout="AGW_PYTHON3=available\n", stderr="")
         return SimpleNamespace(
             returncode=0,
             ok=True,
