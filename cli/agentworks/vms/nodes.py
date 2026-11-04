@@ -133,7 +133,6 @@ class LiveVMNode:
         self._row = row
         self._site = site
         self._observed: VMStatus | None = None
-        self._repair_refs: tuple[str, ...] | None = None
 
     @property
     def key(self) -> str:
@@ -178,30 +177,11 @@ class LiveVMNode:
 
     def _gate_ops_ctx(self, gate_secrets: SecretReader) -> RunContext:
         """The op-start context for gate-driven power ops: the gate's
-        scoped reader (eager gate values, lazy repair values, anything
-        else refused) behind the standard ``ctx.secret`` surface."""
+        scoped reader (its gate values, anything else refused) behind the
+        standard ``ctx.secret`` surface."""
         from agentworks.capabilities.base import RunContext
 
         return RunContext(config=self._config, secrets=gate_secrets)
-
-    def repair_secret_refs(self) -> tuple[str, ...]:
-        # The rejoin auth key comes from the VM's template row field.
-        # Resolved on FIRST call, not construction: the gate consults
-        # this only when the repair path actually reads a name, which
-        # keeps the healthy path free of template resolution, exactly
-        # like the imperative repair path (_ensure_tailscale resolves
-        # the template only after a failed reconnect). Memoized so the
-        # gate reader's authorization check and the node's own read
-        # share one template resolution.
-        if self._repair_refs is None:
-            from agentworks.vms.templates import resolve_live_template
-
-            # One ref, always: the resolved template's auth-key name is
-            # non-optional (the kind's default is "tailscale-auth-key"),
-            # so there is no absent case to fold to an empty tuple.
-            tmpl = resolve_live_template(self._db, self._registry, self._row.name, self._row.template)
-            self._repair_refs = (tmpl.tailscale_auth_key,)
-        return self._repair_refs
 
     def confirmed_active(self) -> bool:
         from agentworks.vms.manager import _is_tailscale_reachable

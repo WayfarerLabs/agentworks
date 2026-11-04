@@ -18,7 +18,7 @@ from agentworks.name_filters import validate_name_filters
 from agentworks.vms.manager import gated_vm_boundary
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Iterator, Sequence
 
     from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     from agentworks.sessions.tmux import RunCommand
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
-    from agentworks.vms.nodes import LiveVMNode
 
 
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
@@ -359,16 +358,8 @@ def _batch_vm_boundary_impl(
     two stopped VMs sharing a site cost exactly ONE backend pass
     (a per-gate just-in-time resolve would re-resolve the shared
     site's secret, and ``Resolver.seed`` after the boundary raises by
-    design). The one exception is the repair path's Tailscale rejoin
-    key: it is inherently outside the boundary union (lazy, read only
-    when a started VM fails to reconnect) and resolves late through
-    the configured source chain, the same documented conditional-need exception
-    the imperative repair path carried; it cannot seed, because the
-    boundary has already resolved. The callback is built PER TARGET
-    and refuses any other outside-the-union name unless the target
-    declares it in ``repair_secret_refs`` (see the invariant comment
-    inline), so no future gate target can silently late-resolve per
-    VM.
+    design). ``Resolver.get`` refuses any name outside the union, so no
+    gate target can late-resolve a secret per VM.
 
     An empty VM set stays a complete no-op (no registry, no resolver,
     no gate), preserving the imperative lifecycle path's lazy-bind
@@ -397,8 +388,7 @@ def _batch_vm_boundary_impl(
     site_nodes: dict[str, VMSiteNode] = {}
     vm_nodes = [live_vm_node(db, config, registry, vm, site_nodes=site_nodes) for vm in vms]
     nodes = walk(*vm_nodes)
-    union = secret_union(nodes)
-    for secret_name in union:
+    for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
     scope = OperationScope(
         level=ScopeLevel.SYSTEM,
@@ -412,45 +402,9 @@ def _batch_vm_boundary_impl(
     )
     resolver.resolve()
 
-    covered = set(union)
-
-    def _gate_resolver(vm_node: LiveVMNode) -> Callable[[str], str]:
-        """Per-target gate callback: serve the boundary's cache; guard
-        the late-resolve branch against the target's own declaration."""
-
-        def _resolve(secret_name: str) -> str:
-            if secret_name in covered:
-                return resolver.get(secret_name)
-            # INVARIANT: the ONLY sanctioned post-boundary resolution
-            # is the repair path's rejoin key. Gate secrets ride the
-            # boundary union structurally (gate_secret_refs delegates
-            # to the site's declared secret_refs, which the walk
-            # unions), so a name outside the covered union must be one
-            # of THIS target's declared repair secrets; anything else
-            # refuses loudly (the declare/receive contract) rather
-            # than silently late-resolving per VM.
-            if secret_name not in vm_node.repair_secret_refs():
-                raise StateError(
-                    f"secret '{secret_name}' is outside the batch "
-                    f"boundary union and was not declared in this "
-                    f"activation target's repair_secret_refs, so the "
-                    f"batch gate will not resolve it late (the "
-                    f"declare/receive contract): gate secrets must "
-                    f"ride the boundary union; only the lazy rejoin "
-                    f"repair key resolves after it."
-                )
-            # The rejoin repair key: resolve late through the source
-            # chain, never seed (the boundary already resolved).
-            from agentworks.orchestration.secrets import secret_declarations
-
-            (decl,) = secret_declarations([secret_name], registry)
-            return resolver.resolve_late_repair(decl)
-
-        return _resolve
-
     with contextlib.ExitStack() as stack:
         for vm_node in vm_nodes:
-            stack.enter_context(activation_gate(vm_node, _gate_resolver(vm_node)))
+            stack.enter_context(activation_gate(vm_node, resolver.get))
         yield
 
 

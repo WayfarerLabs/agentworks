@@ -847,19 +847,17 @@ def test_a_batch_gate_whose_vm_does_not_answer_names_recover_and_resolves_no_key
     assert resolve_counter == [["proxmox-token"]]
 
 
-def test_batch_gate_refuses_an_undeclared_outside_union_name(
+def test_batch_gate_refuses_a_name_outside_the_union(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The guard on the late-resolve branch: a gate target that asks
-    for a name outside the boundary union which it did NOT declare in
-    repair_secret_refs is refused with the declare/receive error and
-    nothing late-resolves. Driven through the real batch composition
-    with a node-level gate_secret_refs patch (the callback is a
-    closure of the composition root, so a synthetic handle would test
-    a copy, not the real thing)."""
+    """A gate target that asks for a name outside the boundary union is
+    refused and nothing late-resolves. Driven through the real batch
+    composition with a node-level gate_secret_refs patch (the callback
+    is the composition root's resolver, so a synthetic handle would
+    test a copy, not the real thing)."""
     from agentworks.vms.nodes import LiveVMNode
 
     config = make_config()
@@ -873,7 +871,7 @@ def test_batch_gate_refuses_an_undeclared_outside_union_name(
 
     monkeypatch.setattr(ProxmoxPlatform, "status", _status_must_not_run)
 
-    with pytest.raises(StateError, match="repair_secret_refs"):
+    with pytest.raises(StateError, match="rogue-secret"):
         session_manager.stop_all_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
 
     # The boundary burst only; the rogue name never resolved.

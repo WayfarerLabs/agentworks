@@ -188,9 +188,8 @@ Look for:
   invoking a held instance's lifecycle directly instead of through its holding node, or an inline
   instance being keyed into a graph.
 - Secret access outside declare-and-receive: any resolved-value read that is not `ctx.secret(name)`
-  / scoped delivery; construct-time secret registration; a resurrected bound resolver; resolution
-  after the boundary pass outside the one sanctioned conditional-repair shape (the Tailscale rejoin
-  key, resolved late only when the repair path actually needs it).
+  / scoped delivery; construct-time secret registration; a resurrected bound resolver; any
+  resolution after the boundary pass.
 - Hand-wired edges: an orchestrator wiring dependencies the node factories should derive from
   declared references and row fields. Two constructions of "the same" node (the walk raises loudly
   on this; the fix is in the factory, not in softening the walk).

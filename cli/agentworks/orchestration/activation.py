@@ -6,9 +6,8 @@ state before their preflight and boundary resolve, so every readiness
 probe that reaches the target queries a live environment. Their gate
 OPENS after build and BEFORE the preflight sweep. Batch session status is
 the deliberate inverse: it completes one shared preflight and boundary
-resolve before opening each VM gate, then serves ordinary gate credentials
-from that cache and resolves only a conditionally-needed repair key late.
-In either ordering the gate is a SPAN, not a point: it stays open through
+resolve before opening each VM gate, then serves the gate credentials from
+that cache. In either ordering the gate is a SPAN, not a point: it stays open through
 the command (WSL2 must be HELD active, not merely started) and closes at
 the end, on success or failure, after any unwind.
 
@@ -34,11 +33,10 @@ Three properties are load-bearing:
   (:meth:`GateTarget.auto_start`), including the same re-read-the-flag
   race guard the retired imperative ``ensure_active`` carried.
 - **Gate secrets are delivered just-in-time, with caller ordering explicit.**
-  Observing and starting a stopped VM may need the platform's API credential
-  (the common case) or the Tailscale auth key (the rejoin repair case). For an
-  ordinary singular command, the gate opens before preflight and boundary
-  resolution. Its narrow, known names resolve through the normal source
-  chain only after the secret-free fast path fails. Resolving there is
+  Observing and starting a stopped VM may need the platform's API credential.
+  For an ordinary singular command, the gate opens before preflight and
+  boundary resolution. Its narrow, known names resolve through the normal
+  source chain only after the secret-free fast path fails. Resolving there is
   INHERENT rather than a resolve/preflight-ordering gap (issue #202):
   on-target preflight needs a live target, and bringing the target up can need
   these very secrets. Each name is its own single-declaration pass, so the
@@ -47,19 +45,14 @@ Three properties are load-bearing:
   resolver as it lands, so no secret resolves or prompts twice.
 
   Batch session status is deliberately different: its shared preflight and
-  boundary resolve complete first, then each VM gate reads ordinary gate
-  credentials from that boundary cache. Only a repair key whose need becomes
-  known after a start resolves late through the batch callback; it never seeds
-  after resolution. The post-boundary cache/late-repair path lives in
-  ``sessions.manager._scope._batch_vm_boundary`` and is not an expansion of
-  :func:`gate_secret_resolver`.
+  boundary resolve complete first, then each VM gate reads its gate
+  credentials from that boundary cache (``Resolver.get``), which refuses any
+  name outside the union. Nothing resolves after the boundary.
 
-  In both orderings, repair names (:meth:`GateTarget.repair_secret_refs`) are
-  consulted and resolved LAZILY on first read by the repair path, because
-  whether a rejoin is needed is knowable only after starting and watching the
-  VM fail to reconnect. Resolving eagerly would prompt every start for a key
-  almost never used. The node reads only the reader the gate hands it
-  (declare/receive holds), and resolution stays orchestrator-owned.
+  The gate resolves nothing else. A started VM that does not answer over SSH
+  fails naming ``agw vm recover``, whose own boundary resolves the Tailscale
+  auth key its repair may need, so no gate prompts for a key or carries a
+  conditional one.
 """
 
 from __future__ import annotations
@@ -67,7 +60,6 @@ from __future__ import annotations
 import contextlib
 from typing import TYPE_CHECKING, Protocol
 
-from agentworks.errors import StateError
 from agentworks.orchestration.secrets import ScopedSecrets
 
 if TYPE_CHECKING:
@@ -93,19 +85,6 @@ class GateTarget(Protocol):
         fast path cannot confirm the target active."""
         ...
 
-    def repair_secret_refs(self) -> tuple[str, ...]:
-        """The secret names only the post-start repair path needs (the
-        Tailscale rejoin auth key). Everything about them is LAZY: the
-        gate consults this method, and resolves a name, only when the
-        repair path actually reads one inside ``auto_start``, never up
-        front. Whether repair is needed is only knowable after the
-        start, and today's oracle (``vms.manager._ensure_tailscale``)
-        deliberately does not prompt every start for a key that is
-        almost never used; the same laziness lets an implementation
-        derive the names from state (the VM's template) that the
-        healthy path never has to touch."""
-        ...
-
     def confirmed_active(self) -> bool:
         """Cheap, secret-free fast path: ``True`` only when the target
         is positively known active (today's Tailscale reachability
@@ -122,13 +101,12 @@ class GateTarget(Protocol):
         ...
 
     def auto_start(self, gate_secrets: SecretReader) -> None:
-        """Start an auto-stopped target, including any post-start
-        reachability repair (the Tailscale rejoin path, with its
-        reusable-key messaging; its secrets arrive through
-        ``gate_secrets`` and resolve on first read). The node re-reads
-        its operator-stopped intent here and REFUSES a manually
-        stopped target with a typed error and the explicit-start hint:
-        the node, not the helper, is the authority."""
+        """Start an auto-stopped target and wait for it to answer,
+        failing with guidance when it does not. ``gate_secrets`` serves
+        only the gate's own names. The node re-reads its
+        operator-stopped intent here and REFUSES a manually stopped
+        target with a typed error and the explicit-start hint: the node,
+        not the helper, is the authority."""
         ...
 
     def hold_active(self) -> contextlib.AbstractContextManager[None]:
@@ -138,68 +116,23 @@ class GateTarget(Protocol):
         ...
 
 
-class _GateSecrets:
-    """The reader ``auto_start`` receives: eager gate values served
-    from the gate's values mapping, repair names resolved lazily on
-    first read. Lazily-resolved values are recorded into the same mapping
-    :func:`ensure_active` returns. What the resolve callback does with them is
-    caller-specific: an ordinary pre-boundary gate uses
-    :func:`gate_secret_resolver`, which seeds its later boundary resolver;
-    batch session status has already completed its boundary and instead
-    serves cache hits or performs the one permitted late repair resolve,
-    without seeding. Even the repair-name DECLARATION is consulted lazily (on
-    a read the eager set does not cover), so an untaken repair path costs
-    neither a resolve nor the state lookup the declaration may need.
-
-    Satisfies ``SecretReader``. Anything outside the declared gate and
-    repair names is refused, same contract as
-    :class:`~agentworks.orchestration.secrets.ScopedSecrets`.
-    """
-
-    def __init__(
-        self,
-        values: dict[str, str],
-        repair_names: Callable[[], tuple[str, ...]],
-        resolve_secret: Callable[[str], str],
-    ) -> None:
-        self._values = values
-        self._repair_names = repair_names
-        self._resolve_secret = resolve_secret
-
-    def get(self, name: str) -> str:
-        existing = self._values.get(name)
-        if existing is not None:
-            return existing
-        if name in self._repair_names():
-            value = self._resolve_secret(name)
-            self._values[name] = value
-            return value
-        raise StateError(
-            f"secret {name!r} was not declared as a gate or repair "
-            f"secret by this activation target, so it is not delivered "
-            f"to it (the declare/receive contract); declare it in "
-            f"gate_secret_refs or repair_secret_refs."
-        )
-
-
 def ensure_active(target: GateTarget, resolve_secret: Callable[[str], str]) -> dict[str, str]:
     """Converge ``target``'s power state: the gate's point half.
 
     Fast path first (no secret touched); otherwise resolve the
     target's gate secrets just-in-time and drive observe-then-start,
     with the operator-stopped refusal raised from the node's own
-    ``auto_start`` and the repair secrets resolving lazily only if the
-    repair path reads them. Returns every gate-resolved value, eager and lazy
-    alike (empty on the fast path). A singular pre-boundary caller's resolve
-    callback seeds its later boundary as each value lands; a batch
-    post-boundary caller uses its completed cache and never seeds after
-    resolution.
+    ``auto_start``. Returns every gate-resolved value (empty on the fast
+    path). A singular pre-boundary caller's resolve callback seeds its
+    later boundary as each value lands; a batch post-boundary caller
+    serves its completed cache and never seeds after resolution.
     """
     if target.confirmed_active():
         return {}
     values = {name: resolve_secret(name) for name in target.gate_secret_refs()}
-    if target.observed_stopped(ScopedSecrets(values, values.keys())):
-        target.auto_start(_GateSecrets(values, target.repair_secret_refs, resolve_secret))
+    gate_secrets = ScopedSecrets(values, values.keys())
+    if target.observed_stopped(gate_secrets):
+        target.auto_start(gate_secrets)
     return values
 
 
