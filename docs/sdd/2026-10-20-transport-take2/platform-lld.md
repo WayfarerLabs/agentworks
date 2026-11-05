@@ -171,7 +171,7 @@ resolved client that cannot start raises `ConnectivityError` naming it, the prec
 | ----------- | ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ---------------- | -------------------------------------------- |
 | Lima, local | `limactl shell <instance> sudo -n /bin/bash -s`                                                            | `run_process`                                       | yes              | `limactl shell <instance>`                   |
 | Remote Lima | host argv, `ssh -T <host> '$SHELL -lc "limactl shell <instance> sudo -n /bin/bash -s"'`                    | `run_process`                                       | yes              | host argv `ssh -t`, `limactl shell` inside   |
-| WSL2        | `wsl --distribution <distro> --user root --exec /bin/bash -s`                                              | `run_process`                                       | no               | `wsl --distribution <distro> --user <admin>` |
+| WSL2        | `wsl --distribution <distro> --user root --exec setsid -w /bin/bash -s`                                    | `run_process`                                       | no               | `wsl --distribution <distro> --user <admin>` |
 | Proxmox     | QGA `ping` until it answers, then `exec` of `/bin/bash -s` with `input-data`, then `exec-status` every 2 s | pinging and polling stop at the deadline; QGA's cap | no               | none (Proxmox web console)                   |
 | Clouds      | VM policy argv, `ssh -T -l <admin> <public address> 'sudo -n /bin/bash -s'`, inside a route                | `run_process`                                       | yes              | VM policy `ssh -t`, inside a route           |
 
@@ -216,8 +216,9 @@ What holds depends on the channel (incident row I30):
   API client does, and a lost status poll is an unknown outcome.
 - **WSL2**: the channel is local, so it ends early only at the deadline or an operator interrupt.
   When `wsl.exe` exits, systemd's `KillUserProcesses` reaped a backgrounded bootstrap (`1ae933a88`),
-  so the payload may be killed rather than finish; vector W7 records which. The scripts that need
-  the guarantee do not depend on it here, since nothing on WSL2 drops a channel.
+  so the payload may be killed rather than finish, though the hangup of `wsl.exe`'s terminal reaches
+  only `setsid`'s session, not the payload's; vector W7 records which. The scripts that need the
+  guarantee do not depend on it here, since nothing on WSL2 drops a channel.
 
 ## The host policy and `public_ssh.py`
 
@@ -427,11 +428,19 @@ deadline (today's, `wsl2_bootstrap.py:130-134`) and parses its markers from the 
 then create joins and settles. The bootstrap stays synchronous: a detached run would be in its own
 systemd-logind session, where `KillUserProcesses` can reap it when `wsl.exe` exits.
 
-Today's `setsid sudo -n /bin/bash FILE </dev/null` (`wsl2_bootstrap.py:131`) goes, for reasons that
-no longer apply: `setsid` was added because sudo's `use_pty` gave the bootstrap a terminal whose
-foreground group was sudo's monitor, so `dpkg`'s triggers stopped apt with `SIGTTIN` (`1ae933a88`).
-The new argv runs as root through `--user root`, with no sudo and so no `use_pty`, and `wsl.exe`'s
-stdin has been a pipe since `3b8a73624`. Incident row I34 holds this, with vector W7.
+Today's `setsid sudo -n /bin/bash FILE </dev/null` (`wsl2_bootstrap.py:131`) becomes
+`setsid -w /bin/bash -s` under `--user root`. `setsid` was added because sudo's `use_pty` gave the
+bootstrap a terminal whose foreground group was sudo's monitor, so `dpkg`'s triggers stopped apt
+with `SIGTTIN` (`1ae933a88`). The new argv needs no sudo, but no sudo is not enough: measured on WSL
+2.7.14.0, `wsl.exe --exec` makes its program a session leader with a pseudo-terminal as its
+controlling terminal (`pts/0`, its own foreground group, `/dev/tty` opens) whether or not `wsl.exe`
+has a console and although its stdin is a pipe (since `3b8a73624`). A payload that reads or resets
+`/dev/tty`, as a maintainer script may, then stops until the deadline. `setsid` (util-linux,
+essential in Debian 12 and 13) starts Bash in a new session with no controlling terminal; since
+`wsl.exe`'s program is already a group leader it forks, and `-w` waits for Bash so the channel ends
+when the script does. Bash inherits all three streams; the channel's own exit status is not read
+(D4). Incident row I34 holds this, with vector W7, and a unit test runs the in-distro argv under a
+controlling pseudo-terminal (`tests/capabilities/test_wsl2_root_channel.py`).
 `recovery_needs_guest_sshd = False`.
 
 ### Proxmox
@@ -895,7 +904,7 @@ the live half of each proof is the slice's Live evidence.
 | I31 | `root_script.run` redacts the secret from every field and record (`execution/root_script.py:142`); `_operation_log` registers the key before the first write (`vms/manager/_helpers.py:215-223`) | The wrapper tests                                                                                       |
 | I32 | `PublicAddressPlatform._public_ssh` raises `StateError` with `public_address_hint` before any connection (`capabilities/vm_platform/public_ssh.py:209-219`); GCP's read raises `GCEError` itself | `test_a_cloud_vm_with_no_public_address_is_a_state_error`                                               |
 | I33 | Teardown and logout are best-effort spans that re-raise only `UserAbort`; `platform.delete` follows them (`vms/manager/power.py:246-269`)                                                        | `tests/vms/test_delete_logout.py`                                                                       |
-| I34 | WSL2's root channel is `wsl.exe --user root --exec /bin/bash -s` over a pipe, with no sudo and so no `use_pty` (`capabilities/vm_platform/wsl2.py:63-71`)                                        | Vector W7 (`conformance/root_vectors.py:180`), V on WSL2; its root-startup-file half is checked by hand |
+| I34 | WSL2's root channel is `wsl.exe --user root --exec setsid -w /bin/bash -s` over a pipe: no sudo, and Bash in a session with no controlling terminal (`capabilities/vm_platform/wsl2.py:66-87`)   | Vector W7 (`conformance/root_vectors.py:180`), V on WSL2; its root-startup-file half is checked by hand |
 
 The deleted entry points carried this other incident-derived behavior:
 

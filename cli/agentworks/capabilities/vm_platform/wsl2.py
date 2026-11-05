@@ -64,15 +64,31 @@ def wsl_program(*, windows: bool, environ: Mapping[str, str]) -> str:
 # The one place the wsl.exe program is named.
 _WSL = wsl_program(windows=sys.platform == "win32", environ=os.environ)
 
+# The root channel's program inside the distro: Bash in a session of its own, with no controlling terminal.
+_DETACHED_ROOT_SHELL = ("/usr/bin/setsid", "-w", "/bin/bash", "-s")
+
 
 def _run_as_root(distro_name: str, script: bytes, deadline: float) -> RawRun:
-    """The distro's root channel: ``wsl.exe --user root --exec /bin/bash -s`` with ``script`` on stdin.
+    """The distro's root channel: ``wsl.exe --user root --exec setsid -w /bin/bash -s`` with ``script`` on stdin.
 
-    ``--exec`` starts ``/bin/bash`` directly, so root's login shell and its
+    ``--exec`` starts the program directly, so root's login shell and its
     startup files are not between ``wsl.exe`` and Bash, and ``--user root``
-    needs no sudo, so no ``use_pty`` gives the script a terminal.
+    needs no sudo. ``wsl.exe`` still makes the program a session leader with
+    a pseudo-terminal as its controlling terminal, whatever its own streams
+    are, so ``setsid`` (util-linux, essential in Debian) runs Bash in a new
+    session with none: a ``dpkg`` maintainer script that reads or resets
+    ``/dev/tty`` cannot stop the script. ``-w`` keeps the channel open until
+    Bash exits; Bash inherits all three streams.
     """
-    argv = [_WSL, "--distribution", distro_name, "--user", "root", "--exec", "/bin/bash", "-s"]
+    argv = [
+        _WSL,
+        "--distribution",
+        distro_name,
+        "--user",
+        "root",
+        "--exec",
+        *_DETACHED_ROOT_SHELL,
+    ]
     return root_script.run_process(argv, script, deadline)
 
 

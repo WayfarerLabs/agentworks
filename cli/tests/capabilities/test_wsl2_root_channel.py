@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import PureWindowsPath
+import os
+import subprocess
+import sys
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 from typing import Any
 
@@ -31,7 +34,61 @@ def test_the_script_reaches_bash_as_root_on_stdin_with_no_login_shell(monkeypatc
     assert sent == script
     assert not any("tskey-private" in argument for argument in argv)
     assert argv[argv.index("--user") + 1] == "root"
-    assert argv[-3:] == ["--exec", "/bin/bash", "-s"]
+    assert argv[argv.index("--exec") + 1 :][-2:] == ["/bin/bash", "-s"]
+
+
+def _in_distro_argv(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """What ``wsl.exe --exec`` runs inside the distro: the root channel's argv after ``--exec``."""
+    argvs: list[list[str]] = []
+
+    def run_process(argv: list[str], script: bytes, deadline: float) -> RawRun:
+        argvs.append(list(argv))
+        return RawRun(b"", b"")
+
+    monkeypatch.setattr(root_script, "run_process", run_process)
+    vm: Any = SimpleNamespace(name="dev", admin_username="agw", platform_metadata={"distro_name": "team-dev"})
+    WSL2Platform("wsl2", {"name": "wsl2"}).run_as_root(vm, RunContext(), b"", 30)
+    (argv,) = argvs
+    return argv[argv.index("--exec") + 1 :]
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux" or not Path("/usr/bin/setsid").exists() or not Path("/bin/bash").exists(),
+    reason="runs the in-distro argv on this Linux host, as wsl.exe would in the distro",
+)
+def test_the_script_has_no_controlling_terminal_even_when_wsl_gives_its_program_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``wsl.exe`` makes its program a session leader on a pseudo-terminal (I34, vector W7); the script must not see it.
+
+    The in-distro argv runs here as that program would: a session leader whose
+    controlling terminal is a fresh pty, with the script on a stdin pipe.
+    """
+    in_distro = _in_distro_argv(monkeypatch)
+    leader, follower = os.openpty()
+
+    def as_wsl_starts_it() -> None:
+        os.setsid()
+        import fcntl
+        import termios
+
+        fcntl.ioctl(follower, termios.TIOCSCTTY, 0)
+
+    script = b"if { : </dev/tty; } 2>/dev/null; then echo tty; else echo no-tty; fi\necho err >&2\nexit 7\n"
+    try:
+        completed = subprocess.run(
+            in_distro,
+            input=script,
+            capture_output=True,
+            preexec_fn=as_wsl_starts_it,  # noqa: PLW1509 - the child must own the pty before it execs
+            timeout=30,
+            check=False,
+        )
+    finally:
+        os.close(leader)
+        os.close(follower)
+
+    assert (completed.stdout, completed.stderr, completed.returncode) == (b"no-tty\n", b"err\n", 7)
 
 
 @pytest.mark.parametrize(
