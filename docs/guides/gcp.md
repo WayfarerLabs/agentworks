@@ -257,7 +257,8 @@ close only the priority-1 deny remains. Every script Agentworks runs over the ex
 (`vm recover`, `vm rekey`, and the Tailscale logout at `vm delete`) and every `vm shell --platform`
 session opens a fresh UUID-named scoped SSH allow and removes only its own rule when that script or
 session ends; an unproven close is retained and reported rather than sweeping another rule. On macOS
-and Linux this holds when the command is ended by `SIGTERM` or `SIGHUP` too.
+and Linux, these per-script and per-session allows are also removed when the command is ended by
+`SIGTERM` or `SIGHUP`.
 
 ## Recovery and safe cleanup
 

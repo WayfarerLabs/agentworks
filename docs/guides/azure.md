@@ -90,7 +90,8 @@ deny-all-inbound baseline. TCP/22 is allowed only from the detected operator add
 deletes it once create has reached the VM over Tailscale and checked it, or when the create fails or
 is interrupted. After that, every script Agentworks runs over the VM's public address (`vm recover`,
 `vm rekey`, and the Tailscale logout at `vm delete`) and every `vm shell --platform` session adds
-its own allow and deletes it when that script or session ends. On macOS and Linux this holds when
-the command is ended by `SIGTERM` or `SIGHUP` too. `agw vm delete <name>` deletes the VM first, then
-sweeps its auxiliary resources and confirms that the VM is absent before dropping the database row.
-A failed delete keeps the row so the operator can correct RBAC and retry.
+its own allow and deletes it when that script or session ends. On macOS and Linux, these per-script
+and per-session allows are also removed when the command is ended by `SIGTERM` or `SIGHUP`.
+`agw vm delete <name>` deletes the VM first, then sweeps its auxiliary resources and confirms that
+the VM is absent before dropping the database row. A failed delete keeps the row so the operator can
+correct RBAC and retry.

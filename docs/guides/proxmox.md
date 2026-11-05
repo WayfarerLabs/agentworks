@@ -218,9 +218,10 @@ When you run `agw vm create <name> --site proxmox`:
 
 1. Clones the template into the `agentworks` pool via the Proxmox REST API
 2. Configures CPU, memory, cloud-init user/SSH keys, and DHCP networking
-3. Starts the VM and waits for the QEMU guest agent to report an IP
+3. Starts the VM
 4. Waits for cloud-init and runs the bootstrap script through QEMU Guest Agent, which installs
-   system packages and Tailscale and configures the admin user
+   system packages and Tailscale and configures the admin user (the first of these waits for the
+   guest agent to answer)
 5. Joins Tailscale through QEMU Guest Agent, with the auth key on the script's stdin, and reads the
    VM's Tailscale address the same way
 6. Returns that address to core, which connects over Tailscale SSH, records the VM's host key,
@@ -232,8 +233,7 @@ After provisioning, normal operations use Tailscale SSH, as they do on Lima and 
 
 ### The guest agent does not answer
 
-Create reports `Timed out waiting for guest agent IP` when the agent never reports the VM's address,
-and a root script fails with
+A root script, including create's wait for cloud-init, fails with
 `the QEMU guest agent of Proxmox VM <vmid>@<node> did not answer, so no script was dispatched` when
 the agent does not answer within about two minutes. Check:
 
