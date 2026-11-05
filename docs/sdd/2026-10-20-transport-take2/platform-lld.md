@@ -639,6 +639,13 @@ start failure is the signal. The README and ADR 0003 are updated to say so (Coll
 8. **One wait**: `reachability.wait` with `RECONNECT` wording when the repair printed `joined`, else
    `VERIFY`. `False` raises `ConnectivityError`: the VM was repaired but does not answer over SSH at
    ADDRESS; the hint is to check tailnet sharing and ACLs, then recreate the VM (R7).
+9. **Identity**: the wait logged in with the configured key alone (`IdentitiesOnly=yes`), which the
+   repair installed, so recover records it as the VM's SSH identity with reinit's own proof,
+   `build_vm_initialization_slices(AuthorizedKeysApplied(...), include_hardware=False)` written by
+   `replace_applied_slices` under the operation `vm-recover`. Without it an operator who changed
+   keys gets a recover that succeeds while every SSH command refuses the drift, and reinit refuses
+   it too. The proof reads the private key again; a key replaced while recover ran yields no slice,
+   and recover raises `StateError` asking for a rerun, leaving the old record.
 
 When the repair fails or its outcome is unknown, the message names the script and its status (or
 "unknown") and points at `agw vm logs NAME`; on a platform whose recovery goes through sshd it adds

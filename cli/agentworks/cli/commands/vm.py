@@ -342,7 +342,8 @@ def vm_recover(
     confirm its fingerprints, restores your SSH key, restarts a broken SSH
     server where the platform's channel does not use it, installs python3,
     starts tailscaled if it is not running, and rejoins Tailscale only when
-    the node needs a login. Then it waits for the VM to answer over SSH.
+    the node needs a login. Then it waits for the VM to answer over SSH, and
+    records your configured SSH identity as the VM's.
     """
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config

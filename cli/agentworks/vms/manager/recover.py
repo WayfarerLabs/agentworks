@@ -3,8 +3,8 @@
 In order: start the VM when it is stopped; re-establish the VM's host-key
 record when it is missing, under the operator's confirmation; run the repair
 script; read the tailnet address, settling it (and logging the node out when
-it cannot be read) only when the repair joined; then wait once for the VM to
-answer over SSH.
+it cannot be read) only when the repair joined; wait once for the VM to answer
+over SSH; then record the configured SSH identity as the VM's.
 """
 
 from __future__ import annotations
@@ -30,6 +30,10 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.vms.applied_state import PreparedConfiguredSSHIdentity
+
+_OPERATION = "vm-recover"
+"""The operation an applied-state slice recover writes is recorded under."""
 
 
 def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInteractionPolicy) -> None:
@@ -65,9 +69,7 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
     # The final wait runs through agentworks.execution: an unsupported client
     # refuses before a secret or the platform is touched.
     execution.resolve_ssh()
-    public_key = prepare_configured_ssh_identity(
-        config.operator.ssh_public_key, config.operator.ssh_private_key
-    ).public_text
+    prepared = prepare_configured_ssh_identity(config.operator.ssh_public_key, config.operator.ssh_private_key)
 
     vm_node, _resolver, ops_ctx, auth_key = _auth_key_boundary(db, config, vm, interaction=interaction)
     platform = vm_node.site.platform
@@ -90,7 +92,9 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
 
             log.step("Repair")
             output.info("Repairing SSH access, python3 and Tailscale (this may take several minutes)...")
-            result = recovery.repair(platform, vm, ops_ctx, public_key=public_key, auth_key=auth_key, log=log.record)
+            result = recovery.repair(
+                platform, vm, ops_ctx, public_key=prepared.public_text, auth_key=auth_key, log=log.record
+            )
             hint = f"Run 'agw vm logs {name}' for its output."
             if platform.recovery_needs_guest_sshd:
                 hint += (
@@ -128,6 +132,8 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
                     entity_name=name,
                     hint="Check tailnet sharing and ACLs; if it still does not answer, delete and recreate the VM.",
                 )
+            log.step("Record the SSH identity")
+            _record_ssh_identity(db, name, prepared)
     output.result(f"VM '{name}' recovered")
 
 
@@ -139,6 +145,34 @@ def _require_known_state(status: VMStatus, name: str) -> None:
             entity_name=name,
             hint=f"Check the VM in its provider, or run 'agw vm describe {name}'.",
         )
+
+
+def _record_ssh_identity(db: Database, name: str, prepared: PreparedConfiguredSSHIdentity) -> None:
+    """Record the configured SSH identity as the VM's, as reinit does once its key write is proven.
+
+    The repair installed the configured key and the wait logged in with it
+    alone, so the VM accepts it; recording it is what lets a VM whose
+    operator changed keys pass the identity check every SSH command makes.
+    The proof is reinit's own (``build_vm_initialization_slices``), which
+    reads the private key again, so a key replaced while recover ran is not
+    recorded: recover fails instead, and a rerun records the key in place.
+    """
+    from agentworks.db.instance_state import AppliedStateKey
+    from agentworks.vms.applied_state import build_vm_initialization_slices
+    from agentworks.vms.initializer.ssh_keys import AuthorizedKeysApplied
+
+    slices = build_vm_initialization_slices(
+        AuthorizedKeysApplied(prepared.identity, prepared.private_key_ref), include_hardware=False
+    )
+    if AppliedStateKey.SSH_IDENTITY not in slices:
+        raise StateError(
+            f"the configured SSH identity changed or became unreadable while VM '{name}' was recovered, "
+            "so it was not recorded",
+            entity_kind="vm",
+            entity_name=name,
+            hint=f"Run 'agw vm recover {name}' again.",
+        )
+    db.instance_state.replace_applied_slices("vm", name, _OPERATION, slices)
 
 
 def _reestablish_trust(db: Database, config: Config, vm: VMRow, platform: VMPlatform, ctx: RunContext) -> None:

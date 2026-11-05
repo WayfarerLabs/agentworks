@@ -736,11 +736,13 @@ pam_env settings to the commands it runs; and an admin or agent account whose lo
 without `python3` cannot be reinitialized until `agw vm recover <name>` installs it.
 
 VMs created before SSH lifecycle-evidence tracking have no synthesized identity evidence. Ordinary
-canonical SSH commands refuse that unknown state until one successful `agw vm reinit <name>` proves
-and records the configured identity. After upgrading Agentworks, run that reinit while the installed
-key still works. If it no longer works, `agw vm recover <name>` restores the configured public key
-through the platform's own channel; then rerun reinit. On a cloud that channel is SSH with the same
-key, so use the provider's console or recreate the VM when the VM refuses it.
+canonical SSH commands refuse that unknown state until one successful `agw vm reinit <name>` or
+`agw vm recover <name>` proves and records the configured identity. After upgrading Agentworks, run
+that reinit while the installed key still works. If it no longer works, or you changed
+`operator.ssh_private_key` so that the VM's recorded identity no longer matches,
+`agw vm recover <name>` restores the configured public key through the platform's own channel and
+records it as the VM's identity once the VM answers over SSH with it. On a cloud that channel is SSH
+with the same key, so use the provider's console or recreate the VM when the VM refuses it.
 
 `vm confirm-release` reads `/etc/os-release` over SSH at the VM's tailnet address, through the same
 path as `vm exec` (so the VM needs `python3`), and shows the recorded and live Debian releases. It
@@ -772,6 +774,8 @@ resolves up front, with the site's secrets. In one run it:
 3. Reads the VM's tailnet address and records it. After a rejoin, an address that cannot be read
    logs the node out again, as create does.
 4. Waits once for the VM to answer over SSH.
+5. Records the configured SSH identity as the VM's, since the VM has just accepted it. A key file
+   replaced while recover ran is not recorded, and recover fails asking for a rerun.
 
 A failed step stops there and names the script; its output is in the operation log
 (`agw vm logs <name>`). On Lima, Remote Lima and the clouds the channel itself is the VM's SSH

@@ -577,12 +577,13 @@ refined by `--admin-spec`. `vm reinit` takes only the VM name and re-runs initia
 current config and both stored final layers. See
 [Instance specs](command-reference.md#instance-specs) for the exact create and agent-reinit surface.
 
-Agentworks records the configured SSH identity only after a VM create or reinit proves the admin
-`authorized_keys` result. It does not synthesize evidence for VMs created before this tracking was
-introduced. Such a VM needs one successful `agw vm reinit NAME` before ordinary canonical SSH
-commands will use it. If the configured key no longer works, `agw vm recover NAME` restores the
-configured public key through the platform's own channel; then reinitialize. On a cloud that channel
-is SSH with the same key, so use the provider's console or recreate the VM when the VM refuses it.
+Agentworks records the configured SSH identity only after a VM create, reinit or recover proves the
+VM accepts it. It does not synthesize evidence for VMs created before this tracking was introduced.
+Such a VM needs one successful `agw vm reinit NAME` before ordinary canonical SSH commands will use
+it. If the configured key no longer works, or you changed it, `agw vm recover NAME` restores the
+configured public key through the platform's own channel and records it once the VM answers over SSH
+with it. On a cloud that channel is SSH with the same key, so use the provider's console or recreate
+the VM when the VM refuses it.
 
 Agentworks verifies each VM's SSH host key against its own per-VM store, never trusting a first
 connection. A VM created before the store existed needs a one-time `agw vm import-host-keys --all`;

@@ -273,11 +273,17 @@ def require_vm_ssh_identity(
             hint=reinit_hint,
         )
     vm_context, entity_name = _vm_context(comparison.vm_name)
+    recover = f"'agw vm recover {entity_name}'" if entity_name is not None else "'agw vm recover' for this VM"
     raise VMSSHIdentityPolicyError(
         f"configured SSH identity for {vm_context} does not match its recorded identity",
         entity_kind="vm",
         entity_name=entity_name,
-        hint="Restore the private key matching the recorded fingerprint, or delete and recreate the VM.",
+        hint=(
+            "Restore the private key matching the recorded fingerprint. If you changed the key, "
+            f"{recover} installs and records it through the platform's own channel (on a cloud that "
+            "channel uses the configured key too, so use the provider's console); otherwise delete and "
+            "recreate the VM."
+        ),
     )
 
 

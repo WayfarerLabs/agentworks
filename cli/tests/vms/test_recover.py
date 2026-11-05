@@ -14,13 +14,17 @@ import pytest
 
 from agentworks.capabilities.vm_platform import tailscale_join
 from agentworks.db import ProvisioningStatus, VMStatus
+from agentworks.db.instance_state import AppliedStateKey
 from agentworks.errors import ConnectivityError, StateError, UserAbort, ValidationError
 from agentworks.execution import reachability, trust
 from agentworks.execution.root_script import RawRun
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.ssh_identity import VerifiedSSHIdentity
 from agentworks.vms import manager as vm_manager
+from agentworks.vms.applied_state import VMSSHIdentityState, compare_vm_ssh_identity, encode_ssh_identity
+from agentworks.vms.manager.boundary import require_vm_ssh_boundary
 from tests._root_channel_fakes import ADDRESS, Answer, FakeGuest
 from tests.conftest import seed_vm_trust
 from tests.ssh_fixtures import fake_host_key
@@ -479,3 +483,92 @@ def test_a_refused_record_writes_nothing_and_stops(
 
     assert not trust.has_record("box")
     assert not any(_is_repair(payload) for payload in guest.payloads)
+
+
+# -- The SSH identity -------------------------------------------------------------------------
+
+
+def _identity_state(db: Database, config: Config) -> VMSSHIdentityState:
+    return compare_vm_ssh_identity(db, "box", config.operator.ssh_private_key).state
+
+
+def _record_another_identity(db: Database) -> None:
+    db.instance_state.replace_applied_slices(
+        "vm",
+        "box",
+        "vm-reinit",
+        {AppliedStateKey.SSH_IDENTITY: encode_ssh_identity("/old/key", VerifiedSSHIdentity("SHA256:" + "A" * 43))},
+    )
+
+
+@pytest.mark.parametrize("recorded", [True, False], ids=["another-key-recorded", "none-recorded"])
+def test_a_recovered_vm_records_the_configured_identity_it_answered_with(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+    recorded: bool,
+) -> None:
+    """After an operator key change the repair installs the new key, so every SSH command must then accept it."""
+    _seed(db)
+    if recorded:
+        _record_another_identity(db)
+    config = make_config()
+    _guest(monkeypatch)
+    _waits(monkeypatch)
+
+    _recover(db, config)
+
+    assert _identity_state(db, config) is VMSSHIdentityState.MATCH
+    require_vm_ssh_boundary(db, config, db.get_vm("box"))  # type: ignore[arg-type]
+
+
+def test_a_vm_that_does_not_answer_keeps_its_recorded_identity(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db)
+    _record_another_identity(db)
+    config = make_config()
+    _guest(monkeypatch)
+    _waits(monkeypatch, answers=False)
+
+    with pytest.raises(ConnectivityError):
+        _recover(db, config)
+
+    assert _identity_state(db, config) is VMSSHIdentityState.DRIFT
+
+
+def test_a_key_replaced_while_recover_ran_is_not_recorded(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    from agentworks.ssh_identity import read_private_ssh_identity
+
+    _seed(db)
+    _record_another_identity(db)
+    config = make_config()
+    _guest(monkeypatch)
+    waits: list[str] = []
+
+    def wait_then_replace_the_key(access: object, *, wording: reachability.Wording) -> bool:
+        waits.append("wait")
+        monkeypatch.setattr(
+            "agentworks.vms.applied_state.read_private_ssh_identity",
+            lambda path: VerifiedSSHIdentity("SHA256:" + "B" * 43),
+        )
+        return True
+
+    monkeypatch.setattr(reachability, "wait", wait_then_replace_the_key)
+
+    with pytest.raises(StateError, match="not recorded") as caught:
+        _recover(db, config)
+
+    assert waits == ["wait"]
+    assert "agw vm recover box" in (caught.value.hint or "")
+    monkeypatch.setattr("agentworks.vms.applied_state.read_private_ssh_identity", read_private_ssh_identity)
+    assert _identity_state(db, config) is VMSSHIdentityState.DRIFT
