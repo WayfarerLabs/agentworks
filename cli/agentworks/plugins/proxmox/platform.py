@@ -4,6 +4,7 @@ via the Proxmox REST API."""
 from __future__ import annotations
 
 import functools
+import time
 import urllib.parse
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
@@ -22,7 +23,7 @@ from agentworks.capabilities.vm_platform.tailscale_join import (
 )
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import ProvisioningError, StateError
+from agentworks.errors import ConnectivityError, ProvisioningError, StateError
 from agentworks.execution import root_script
 from agentworks.plugins.proxmox import guest_agent
 from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
@@ -480,8 +481,25 @@ class ProxmoxPlatform(VMPlatform):
 
 
 def _wait_for_cloud_init(run_as_root: Callable[[bytes, float], RawRun], vmid: int) -> None:
-    """Wait for cloud-init to finish inside the VM; status 2 is recoverable warnings."""
-    result = root_script.run(run_as_root, "cloud-init status --wait", deadline=CLOUD_INIT_DEADLINE_SECONDS)
+    """Wait for cloud-init to finish inside the VM; status 2 is recoverable warnings.
+
+    A channel failure is asked again until :data:`CLOUD_INIT_DEADLINE_SECONDS`
+    runs out: cloud-init can restart the guest agent mid-run (Proxmox's
+    ``ciupgrade``), and ``cloud-init status --wait`` changes nothing, so
+    running it again is safe.
+    """
+    expires = time.monotonic() + CLOUD_INIT_DEADLINE_SECONDS
+    while True:
+        try:
+            result = root_script.run(
+                run_as_root, "cloud-init status --wait", deadline=max(expires - time.monotonic(), 0.1)
+            )
+            break
+        except ConnectivityError:
+            remaining = expires - time.monotonic()
+            if remaining <= 0:
+                raise
+            time.sleep(min(guest_agent.POLL_INTERVAL_SECONDS, remaining))
     if result.status == 2:
         output.warn(f"cloud-init completed with recoverable warnings on Proxmox VMID {vmid}; continuing")
     elif result.status != 0:
