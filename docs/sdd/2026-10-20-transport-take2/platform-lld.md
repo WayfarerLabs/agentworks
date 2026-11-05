@@ -562,7 +562,8 @@ start failure is the signal. The README and ADR 0003 are updated to say so (Coll
    node, one preflight and one resolve, so the auth key resolves up front with the site's secrets.
 3. The power state, read as rekey does (`power.py:458`). `UNKNOWN` raises `StateError`: the platform
    could not report the VM's state, so check it in the provider or with `agw vm describe NAME`.
-   `STOPPED` or `DEALLOCATED` is started in step 5, first thing under the hold, through
+   `STOPPED` or `DEALLOCATED` is started in step 5, before the hold as `start_vm` starts before its
+   own (`power.py:63-67`, since WSL2's keepalive boots a stopped distro itself), through
    `platform.start` with no wait for SSH, clearing the operator-stopped flag as an explicit start
    does and printing that it did. Refusing it instead loops for a VM with no record: start boots it
    and its wait raises `TrustMissing` naming recover, and a WSL2 distro can idle out again after
@@ -573,11 +574,11 @@ start failure is the signal. The README and ADR 0003 are updated to say so (Coll
    `LOG_DIR`'s other uses) that constructs an `SSHLogger` for the `recover` stem with the auth key
    in its redaction set. `recover.py` types it with slice 3's small log Protocol (contract-lld,
    "Independence"), so it imports nothing legacy.
-5. Inside `vm_node.hold_active()`, the start of a stopped VM (step 3), then **trust**: with no store
-   record, `platform.read_host_keys`, each key's type and fingerprint printed with a line saying to
-   compare them with the VM's console (a cloud's serial console or system log), `output.confirm`
-   defaulting to no, then `trust.write_records` and `sync_ssh_config`. A refusal writes nothing and
-   stops.
+5. Inside the operation log, the start of a stopped VM (step 3); then, inside
+   `vm_node.hold_active()`, **trust**: with no store record, `platform.read_host_keys`, each key's
+   type and fingerprint printed with a line saying to compare them with the VM's console (a cloud's
+   serial console or system log), `output.confirm` defaulting to no, then `trust.write_records` and
+   `sync_ssh_config`. A refusal writes nothing and stops.
 6. **Repair**, one script with the auth key and the log. A failed or unknown outcome stops recover.
 7. **Address**: when the repair printed `joined`, `settle_tailnet_address` with recover as its rerun
    hint, as create settles after its join; otherwise `read_tailnet_address` alone, so a flaky
@@ -745,7 +746,7 @@ test of its own: the generic required-attribute check (`conformance.py:152`) cov
     script dispatched;
   - recover: keys written only after confirmation, then the SSH config synced; a failed repair stops
     before the address read; `joined` selects the settle and the reconnect wording, and without it
-    no logout runs; a stopped VM started under the hold and then repaired, and an unknown power
+    no logout runs; a stopped VM started before the hold and then repaired, and an unknown power
     state refused before any script; a provisioning-failed VM refused;
   - rekey: one script, then the settle, the address recorded; a failed script names recover; a
     `False` wait warns and exits 0;

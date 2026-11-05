@@ -281,7 +281,7 @@ def test_a_repaired_vm_that_does_not_answer_raises(
 
 @pytest.mark.parametrize("status", [VMStatus.STOPPED, VMStatus.DEALLOCATED])
 @pytest.mark.parametrize("record", [True, False], ids=["record", "no-record"])
-def test_a_stopped_vm_is_started_under_the_hold_then_repaired(
+def test_a_stopped_vm_is_started_before_the_hold_then_repaired(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
@@ -290,7 +290,8 @@ def test_a_stopped_vm_is_started_under_the_hold_then_repaired(
     record: bool,
 ) -> None:
     """A VM that stopped (a WSL2 distro that idled out after start, say) is started, with no wait, so a VM with no
-    host-key record is not sent back to a start whose own wait refuses it."""
+    host-key record is not sent back to a start whose own wait refuses it. The start precedes the hold, as an explicit
+    start's does, and the hold covers everything after it."""
     _seed(db, record=record)
     db.set_operator_stopped("box", True)
     events: list[str] = []
@@ -303,7 +304,7 @@ def test_a_stopped_vm_is_started_under_the_hold_then_repaired(
 
     _recover(db, make_config())
 
-    assert events[:2] == ["hold-open", "start"]
+    assert events[:2] == ["start", "hold-open"]
     assert events[-1] == "hold-close"
     assert any(_is_repair(payload) for payload in guest.payloads)
     row = db.get_vm("box")

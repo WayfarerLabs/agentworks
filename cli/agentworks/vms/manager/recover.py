@@ -77,54 +77,57 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
     status = platform.status(vm, ops_ctx)
     _require_known_state(status, name)
 
-    with _operation_log(name, "recover", redactions=(auth_key,)) as log, vm_node.hold_active():
+    with _operation_log(name, "recover", redactions=(auth_key,)) as log:
+        # Started before the hold, as start_vm does: WSL2's keepalive boots a
+        # stopped distro as a side effect of holding it.
         if status is not VMStatus.RUNNING:
             log.step("Start the VM")
             db.set_operator_stopped(name, False)
             platform.start(vm, ops_ctx)
             db.record_vm_started(name)
             output.info(f"VM '{name}' was {status.value}; started it")
-        if not trust.has_record(name):
-            log.step("Record the host keys")
-            _reestablish_trust(db, config, vm, platform, ops_ctx)
+        with vm_node.hold_active():
+            if not trust.has_record(name):
+                log.step("Record the host keys")
+                _reestablish_trust(db, config, vm, platform, ops_ctx)
 
-        log.step("Repair")
-        output.info("Repairing SSH access, python3 and Tailscale (this may take several minutes)...")
-        result = recovery.repair(platform, vm, ops_ctx, public_key=public_key, auth_key=auth_key, log=log.record)
-        hint = f"Run 'agw vm logs {name}' for its output."
-        if platform.recovery_needs_guest_sshd:
-            hint += " A broken SSH server on this platform needs the provider's console, or recreating the VM."
-        recovery.require_success(result, script="repair", vm_name=name, hint=hint)
-        joined = recovery.joined(result)
+            log.step("Repair")
+            output.info("Repairing SSH access, python3 and Tailscale (this may take several minutes)...")
+            result = recovery.repair(platform, vm, ops_ctx, public_key=public_key, auth_key=auth_key, log=log.record)
+            hint = f"Run 'agw vm logs {name}' for its output."
+            if platform.recovery_needs_guest_sshd:
+                hint += " A broken SSH server on this platform needs the provider's console, or recreating the VM."
+            recovery.require_success(result, script="repair", vm_name=name, hint=hint)
+            joined = recovery.joined(result)
 
-        log.step("Read the tailnet address")
-        run_as_root = partial(platform.run_as_root, vm, ops_ctx)
-        if joined:
-            output.info("Tailscale node rejoined the tailnet")
-            address = settle_tailnet_address(
-                run_as_root, node=vm.hostname, rerun_hint=f"Run 'agw vm recover {name}'.", log=log.record
-            )
-        else:
-            # A flaky channel never logs out a node that was working.
-            try:
-                address = read_tailnet_address(run_as_root, node=vm.hostname, log=log.record)
-            except ConnectivityError as error:
-                error.add_hint(f"Run 'agw vm logs {name}' for what each read reported.")
-                raise
-        if address != vm.tailscale_host:
-            db.update_vm_tailscale(name, address)
-            sync_ssh_config(config, db)
+            log.step("Read the tailnet address")
+            run_as_root = partial(platform.run_as_root, vm, ops_ctx)
+            if joined:
+                output.info("Tailscale node rejoined the tailnet")
+                address = settle_tailnet_address(
+                    run_as_root, node=vm.hostname, rerun_hint=f"Run 'agw vm recover {name}'.", log=log.record
+                )
+            else:
+                # A flaky channel never logs out a node that was working.
+                try:
+                    address = read_tailnet_address(run_as_root, node=vm.hostname, log=log.record)
+                except ConnectivityError as error:
+                    error.add_hint(f"Run 'agw vm logs {name}' for what each read reported.")
+                    raise
+            if address != vm.tailscale_host:
+                db.update_vm_tailscale(name, address)
+                sync_ssh_config(config, db)
 
-        log.step("Wait for SSH")
-        wording = reachability.Wording.RECONNECT if joined else reachability.Wording.VERIFY
-        access = execution.vm_access(_require_vm(db, name), config, Admin(), log=log.record)
-        if not reachability.wait(access, wording=wording):
-            raise ConnectivityError(
-                f"VM '{name}' was repaired but does not answer over SSH at {address}",
-                entity_kind="vm",
-                entity_name=name,
-                hint="Check tailnet sharing and ACLs; if it still does not answer, delete and recreate the VM.",
-            )
+            log.step("Wait for SSH")
+            wording = reachability.Wording.RECONNECT if joined else reachability.Wording.VERIFY
+            access = execution.vm_access(_require_vm(db, name), config, Admin(), log=log.record)
+            if not reachability.wait(access, wording=wording):
+                raise ConnectivityError(
+                    f"VM '{name}' was repaired but does not answer over SSH at {address}",
+                    entity_kind="vm",
+                    entity_name=name,
+                    hint="Check tailnet sharing and ACLs; if it still does not answer, delete and recreate the VM.",
+                )
     output.result(f"VM '{name}' recovered")
 
 
