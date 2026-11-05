@@ -471,6 +471,12 @@ capture per owner component in the existing instance-state store. `routing.py` r
 and the selected integration's reusable results along one actual VM/user/workspace/session graph.
 Handling an input for one user does not consume the VM result for another user.
 
+An unavailable explicit route retains its input identity and source repair reason without a payload.
+Integrations receive only readable inputs. After validating an active receiver's result, core
+forwards the unavailable identities in its recorded input and deferral metadata, including on first
+application. Inactive receivers preserve the same metadata through fixed passthrough. Missing
+content stays incomplete through the session; it is never counted as delivered.
+
 `application.py` defines integration results, file/section ownership and recorded skips.
 `publication.py` validates plugin output and uses the shared guarded `NativeFiles` transport
 utility. Native formats and policy live in integration adapters. Existing files whose bytes match

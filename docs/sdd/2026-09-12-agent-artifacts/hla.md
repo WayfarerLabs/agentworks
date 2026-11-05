@@ -333,17 +333,20 @@ even when names match. Stable owner traversal is VM, actual user, workspace, ses
 cross-scope override precedence. Native adapters apply their own collision checks after receiving
 the preserved groups, including conflicts with already handled ancestor files.
 
-Persist each activated owner's successful result with the identities of the prepared artifact inputs
-actually supplied to that facet, alongside existing config/env dependencies. Reuse is valid while
-those inputs match; do not depend on a whole ancestor result's version. A VM change routed only to
-workspace cannot stale a user's unchanged inputs. Missing, interrupted or stale active-facet results
-report the owner's setup operation, including workspace recreation where applicable, without
-blocking a receiving facet. Active facets forward only their recorded explicit deferrals whose
-identities still resolve to readable captured inputs. Resolve them against original owner captures,
-independently of subsequent upstream routing changes. Missing handling or unresolvable identities
-are reported and omitted, rather than acknowledged or rerouted speculatively. Inactive facets use
-core's default routes. Unavailable branches do not discard known contributions from healthy ones.
-This projection never reruns an ancestor integration during session start.
+Persist each activated owner's result with the identities of its prepared artifact inputs, alongside
+existing config/env dependencies. Reuse is valid while those inputs match; do not depend on a whole
+ancestor result's version. A VM change routed only to workspace cannot stale a user's unchanged
+inputs. Missing, interrupted or stale active-facet results report the owner's setup operation,
+including workspace recreation where applicable, without blocking a receiving facet. Resolve
+recorded explicit deferrals against original owner captures, independently of subsequent upstream
+routing changes. Missing handling or unresolvable identities are reported; unavailable payloads are
+omitted from integration calls. After validating the integration's result against its readable
+inputs, core preserves the missing explicit identities as metadata in the receiver's recorded inputs
+and onward deferrals. This applies to fresh active receivers as well as inactive passthrough; it
+does not fabricate content or acknowledge delivery. The incomplete result retains the source owner's
+repair reason. Inactive facets use core's default routes. Unavailable branches do not discard known
+contributions from healthy ones. This projection never reruns an ancestor integration during session
+start.
 
 ## Applied state and file ownership
 

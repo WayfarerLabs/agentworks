@@ -338,17 +338,21 @@ payload for an explicit applicable route remains unknown even when current bundl
 empty. Inactive facets use core's fixed passthrough independently of opaque old active-facet state.
 
 When unknown applicable routes prevent establishing requested inputs, setup publication holds prior
-placements against removal or replacement, including generated sections and related packages.
-Native setup and independent new paths continue. Actual held paths or unavailable explicit inputs
-keep application incomplete; unrelated upstream uncertainty alone does not permanently fail a fresh
+placements against removal or replacement, including generated sections and related packages. Native
+setup and independent new paths continue. Actual held paths or unavailable explicit inputs keep
+application incomplete; unrelated upstream uncertainty alone does not permanently fail a fresh
 workspace's successfully applied local work. The conservative hold is needed because old
 content-dependent IDs cannot be reversed to owners after capture replacement.
 
-The session join retains missing route IDs through inactive user/workspace passthrough. Known
-unavailable IDs become terminal unhandled metadata; unknown routing without IDs records its owner
-and repair reason. The session launches with readable inputs and records incomplete delivery
-rather than calling the reduced set current. It does not fabricate missing canonical content or
-turn these optional inputs into prerequisites. Old private files remain usable until runtime
-teardown; afterward normal owned cleanup retires obsolete runs. Keeping unreferenced old files
-would not deliver missing content and does not justify accumulating run history. The existing
-applied-state fields carry the outcome; there is no new persisted ledger or artifact wire format.
+Missing explicit route IDs survive active receivers, including their first application, and inactive
+user/workspace passthrough. An integration receives only readable inputs; core appends the missing
+IDs to recorded input and onward-deferral metadata after validating that application. This preserves
+the source owner's repair reason without inventing content or accepting unknown IDs from integration
+output. The session join retains that metadata. Known unavailable IDs become terminal unhandled
+metadata; unknown routing without IDs records its owner and repair reason. The session launches with
+readable inputs and records incomplete delivery rather than calling the reduced set current. It does
+not fabricate missing canonical content or turn these optional inputs into prerequisites. Old
+private files remain usable until runtime teardown; afterward normal owned cleanup retires obsolete
+runs. Keeping unreferenced old files would not deliver missing content and does not justify
+accumulating run history. The existing applied-state fields carry the outcome; there is no new
+persisted ledger or artifact wire format.

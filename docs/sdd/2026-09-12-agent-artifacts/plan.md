@@ -1419,9 +1419,9 @@ correction round. Both locks still await the final requirement-by-requirement li
 The operator authorized up to two further public correction rounds and allowed unrelated fixes with
 clear paths that do not conflict with ongoing Transport/SSH work. This is the fifth published
 correction round, not a reset of the earlier historical allowances. The batch is frozen at
-2026-11-05 16:32 UTC against `1e0d2fe`: critical reading PR comment `6651844728`, the final-head live
-report `6646701174`, the instance-spec followup `6650616936`, and the expanded Proxmox/workstation
-report `6652928141`. The start is recorded in PR comment `6663467162`.
+2026-11-05 16:32 UTC against `1e0d2fe`: critical reading PR comment `6651844728`, the final-head
+live report `6646701174`, the instance-spec followup `6650616936`, and the expanded
+Proxmox/workstation report `6652928141`. The start is recorded in PR comment `6663467162`.
 
 - [x] Distinguish confirmed empty routing from unknown results without holding unrelated local
       application, including receiver-specific routes and inactive passthrough with opaque evidence.
@@ -1435,22 +1435,28 @@ report `6652928141`. The start is recorded in PR comment `6663467162`.
 - [x] Support observed Claude file marketplaces, isolate named unknown native sources, preserve
       confirmed current-operation native mutations during snapshot restoration, and bound private
       native-error transfer even when its original stderr file is read-only.
-- [x] Redact normalized guest errors and warnings before bounding them, preserve typed errors,
-      frame native discovery and identity responses, and identify offending inventory paths.
-      Actual per-path publication holds supply their own incomplete evidence; an unrelated upstream
+- [x] Redact normalized guest errors and warnings before bounding them, preserve typed errors, frame
+      native discovery and identity responses, and identify offending inventory paths. Actual
+      per-path publication holds supply their own incomplete evidence; an unrelated upstream
       condition alone does not permanently fail a newly created workspace's local setup.
 - [x] Isolate Git clones in unique private attempt paths and publish only confirmed completed
       checkouts. Preserve unexplained or occupied reservations instead of deleting them. Real Git
       controls reproduce replacement-work loss on the prior head and preserve committed, untracked
       and stashed work with the correction.
-- [x] Correct the adjacent admin session-launch log secret protection and exact-pane output capture, with
+- [x] Correct the adjacent admin session-create log redactions and exact-pane output capture, with
       real command-log and local tmux checks. Explicit non-interactive confirmations decline without
-      reading input or granting default consent. Add useful binding/corruption diagnostics and update
-      permanent recovery guidance, including source changes needed before destructive recreation.
+      reading input or granting default consent. Add useful binding/corruption diagnostics and
+      update permanent recovery guidance, including source changes needed before destructive
+      recreation.
 - [x] Correct adjacent Proxmox deletion and rollback classification using the exact structured
       provider missing-config response for the bound node/VMID. Locked, authentication, transport,
       task and malformed responses remain failures; direct delete preserves the core VM row.
       Rollback preserves its original failure/interrupt and warns. No Transport/SSH APIs changed.
+- [x] Protect analogous admin session start/restart logs after resolving secret values. Preserve the
+      successful core-owner status while disclosing incomplete native setup after soft holds or
+      skips. Detach unsafe provider traceback causes, preserve safe typed domain causes, and forward
+      missing explicit route IDs through fresh active receivers without fabricating payloads.
+      Restore the capability import boundary and remove the redundant join wrapper.
 - [ ] Complete the three private reviews, required integrated gates and final collateral audit.
 - [ ] Publish the exact green ready handoff without `review-requested`, then assess the separate
       full live result within the remaining one-round allowance.
@@ -1461,28 +1467,29 @@ report `6652928141`. The start is recorded in PR comment `6663467162`.
 
 The integrated source before private review is `f0e6e39`. Local lane evidence is scoped: routing and
 artifact/capability checks passed 1,365 cases with four skips; the broader native selection passed
-327 cases, followed by 30 bounded-transfer/discovery cases; Proxmox/core-deletion checks passed
-180 cases; workspace/session checks passed 153 cases. Lead diagnostic/session checks passed
-166 cases, and a later bounded diagnostic/readiness/tmux selection passed 55. These selections
-overlap, do not constitute the full repository gate, and do not replace backend acceptance.
+327 cases, followed by 30 bounded-transfer/discovery cases; Proxmox/core-deletion checks passed 180
+cases; workspace/session checks passed 153 cases. Lead diagnostic/session checks passed 166 cases,
+and a later bounded diagnostic/readiness/tmux selection passed 55. These selections overlap, do not
+constitute the full repository gate, and do not replace backend acceptance.
 
 The new live report materially confirms prior routing-loss, unsupported preflight, workspace ACL,
 native-only freshness, mapping and ref/sparse fixes. The subsequent report adds actual Proxmox 8/9
 and workstation cells, lifecycle/rekey and cleanup evidence. Their new contradictory findings still
-prevent a lock. Bookworm cannot currently be created by Agentworks, including through Proxmox,
-under the existing release policy; an unavailable test cell is not silently a passing one.
+prevent a lock. Bookworm cannot currently be created by Agentworks, including through Proxmox, under
+the existing release policy; an unavailable test cell is not silently a passing one.
 
 Desired instance specs remain desired state rather than a last-known-good application snapshot.
 Capture availability is not a structural declaration guarantee. This round reports retained template
 bindings and keeps the existing desired-before-convergence policy; it adds no automatic rollback.
 Malformed saved captures are not destructively replaced: their hints identify explicit state
 recovery rather than an ineffective ordinary-reinit loop. Workspace copy/rehome lifecycle repair,
-global Windows terminal/database classification, generalized remote-process cancellation, raw SSH-log
-normalization/bounds and broader transport protocol cleanup remain outside this correction. They
-need their owning contracts and current platform evidence. Unsafe publication through a link remains
-a facet error; no-follow protection is retained. Proxmox hard-stop semantics remain unchanged and
-are now documented; changing shutdown behavior would be a separate platform decision. Certificate
-trust guidance now includes a verified CA path rather than offering only disabled verification.
+global Windows terminal/database classification, generalized remote-process cancellation, raw
+SSH-log normalization/bounds and broader transport protocol cleanup remain outside this correction.
+They need their owning contracts and current platform evidence. Unsafe publication through a link
+remains a facet error; no-follow protection is retained. Proxmox hard-stop semantics remain
+unchanged and are now documented; changing shutdown behavior would be a separate platform decision.
+Certificate trust guidance now includes a verified CA path rather than offering only disabled
+verification.
 
 No final-head backend run or completion of either SDD is claimed by these local checks. The next
 ready handoff must emphasize unknown versus confirmed-empty routes, first checkpoints and legacy
