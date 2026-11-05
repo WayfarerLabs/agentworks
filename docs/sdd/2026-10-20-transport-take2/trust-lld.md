@@ -99,11 +99,11 @@ policy ignores configuration.
   session, agent and workspace commands already run before the gate and any secret, checks the
   record, so those commands refuse before any prompt or best-effort step. Backup checks it before it
   starts. `vm rekey` checks the store first too, before resolving a secret or touching the VM
-  (`vms/manager/power.py:367`), since it would otherwise spend the new key and record the new
+  (`vms/manager/power.py:374`), since it would otherwise spend the new key and record the new
   address before its final wait raised. The activation gate's start checks it just before it starts
   the VM (`LiveVMNode.auto_start`, `vms/nodes.py:237`), for a gate opened without that precondition.
   `vm start` does not: it boots the VM, and its wait raises `TrustMissing`, whose hint names
-  `agw vm recover`, which reads the keys through the platform (`vms/manager/power.py:47-49`).
+  `agw vm recover`, which reads the keys through the platform (`vms/manager/power.py:54-56`).
 - **`ENROLL`** is bound only by create (below), and only to Phase A's first-contact connections: the
   polled wait for the VM to answer, through the distinct factory `execution.enrollment_access`.
 - **`UNVERIFIED`** uses a file the create owns, because the platform builds its create-time
@@ -118,7 +118,7 @@ policy ignores configuration.
   - A key is accepted once and then pinned for the rest of the create, which matches what
     provisioning does today against the operator's file, without writing that file.
   - `vm recover`'s host-key read on a cloud VM with no record enters its own binding the same way
-    (`capabilities/vm_platform/public_ssh.py:238`), and nothing is recorded until the operator
+    (`capabilities/vm_platform/public_ssh.py:261`), and nothing is recorded until the operator
     confirms the fingerprints.
 
   The integration report on #856 showed that `StrictHostKeyChecking=no` with `/dev/null`, which D9
@@ -147,17 +147,17 @@ all, which slice 8's removal covers.
 | Backup's scp (`vms/backup.py:464`) and workspace copy (`workspaces/manager/copy.py:116`)                                                                       | the transport's, through a public `host_key_options()`          |
 | The port forward (`vms/manager/port_forward.py`, through `VMAccess.forward`)                                                                                   | `VM`                                                            |
 | A cloud's create-time `PublicSSH` (`aws/platform.py:564`, `azure/platform.py:637`, `gcp/platform.py:405`)                                                      | `UNVERIFIED`, from `ProvisionRequest.provisioning_trust`        |
-| A cloud's root channel and native shell (`PublicAddressPlatform.run_as_root` and `native_shell`, `capabilities/vm_platform/public_ssh.py:204-222`)             | `VM`                                                            |
-| A cloud's host-key read for recovery (`PublicAddressPlatform.read_host_keys`, `public_ssh.py:224-239`)                                                         | `UNVERIFIED`, under a fresh provisioning file                   |
-| Lima's placement-host connections (`ssh_process.build_host_argv`, `execution/ssh_process.py:206-235`, called from `capabilities/vm_platform/lima_host.py:237`) | `HOST_TRUST`                                                    |
+| A cloud's root channel and native shell (`PublicAddressPlatform.run_as_root` and `native_shell`, `capabilities/vm_platform/public_ssh.py:227-245`)             | `VM`                                                            |
+| A cloud's host-key read for recovery (`PublicAddressPlatform.read_host_keys`, `public_ssh.py:247-262`)                                                         | `UNVERIFIED`, under a fresh provisioning file                   |
+| Lima's placement-host connections (`ssh_process.build_host_argv`, `execution/ssh_process.py:206-235`, called from `capabilities/vm_platform/lima_host.py:235`) | `HOST_TRUST`                                                    |
 
 **Clouds before enrollment.** A cloud's create-time `PublicSSH` lives only inside the platform's
-`create`, under `UNVERIFIED`, for the bootstrap wait, the join and the address read; core never
-receives it. Core's first contact and everything after it run over the tailnet, whose peer WireGuard
-already authenticates, rather than over the public internet, except the cloud's root channel and
-native shell, which reach the public address under `VM` and refuse a VM with no record before any
-route opens. Only recovery's host-key read runs unverified, and the operator confirms what it reads
-against the VM's console before anything is recorded.
+`create`, under `UNVERIFIED`, for the bootstrap wait, the join, the address read and, when that read
+fails, the logout; core never receives it. Core's first contact and everything after it run over the
+tailnet, whose peer WireGuard already authenticates, rather than over the public internet, except
+the cloud's root channel and native shell, which reach the public address under `VM` and refuse a VM
+with no record before any route opens. Only recovery's host-key read runs unverified, and the
+operator confirms what it reads against the VM's console before anything is recorded.
 
 ## Enrollment and the other lifecycle hooks
 

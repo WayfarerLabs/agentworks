@@ -533,11 +533,14 @@ above and waits for the client, polling `Popen.wait(timeout=0.2)` so Ctrl-C is d
   removed.
 - **Signals.** The library installs none. `port_forward_vm` holds the forward inside the shared
   `agentworks.interrupts.termination_as_interrupt`, which raises `KeyboardInterrupt` on `SIGTERM`,
-  and on `SIGHUP` where it exists, for the duration of the block, leaves a signal the process
-  already ignores ignored (so a forward started under `nohup` outlives its terminal), and restores
-  the previous handlers. `port_forward_vm` owns the 0 on an operator stop and returns the client's
-  status for any other end. A cloud's route converts the same signals for as long as it is open, so
-  its firewall allow is removed when a command that holds one is ended by them.
+  and on `SIGHUP` where it exists, for the duration of the block, and restores the previous handlers
+  afterwards. A signal the process already ignores stays ignored (so a forward started under `nohup`
+  outlives its terminal); once one signal has arrived, further ones are ignored until the block
+  exits, so a second cannot cut the cleanup short; and a block inside another, or off the main
+  thread, changes nothing (`interrupts.py:32-59`). `port_forward_vm` owns the 0 on an operator stop
+  and returns the client's status for any other end. The clouds' route context opens the same block
+  around every route (`public_ssh.py:272`), so a cloud's firewall allow for a root script or a
+  native shell is removed when the command is ended by either signal.
 
 ## Errors
 
