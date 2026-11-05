@@ -138,7 +138,7 @@ def test_partial_fresh_producer_preserves_both_existing_user_files(fallback_plac
             "legacy",
             {
                 AppliedStateKey.HARNESS_NATIVE_SETUP: VersionedPayload(
-                    3, NativeSetupState(records=(producer,)).model_dump(mode="json")
+                    2, NativeSetupState(records=(producer,)).model_dump(mode="json")
                 )
             },
         )
