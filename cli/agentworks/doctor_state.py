@@ -152,7 +152,7 @@ def _report_instance_state(
 ) -> None:
     """Append value-free integrity and SSH comparison checks from one fleet read."""
     from agentworks.artifacts.state import UnsupportedArtifactCaptureVersionError, decode_captures
-    from agentworks.db import AppliedStateKey, InstanceRecordMetadata
+    from agentworks.db import AppliedStateKey, InstanceRecordMetadata, ProvisioningStatus
     from agentworks.doctor import (
         HealthCheck,
         InstanceStateHealthFact,
@@ -409,6 +409,12 @@ def _report_instance_state(
         if evidence is None:
             if vm_name in ssh_record_names:
                 continue
+            # Reinit refuses a VM whose provisioning did not complete, and nothing else records it.
+            not_recorded_hint = (
+                f"Run 'agw vm reinit {vm_name}' to establish SSH identity evidence."
+                if by_name[vm_name].provisioning_status == ProvisioningStatus.COMPLETE.value
+                else f"Its provisioning did not complete: only 'agw vm delete {vm_name}' is supported."
+            )
             add(
                 Status.WARN,
                 f"VM '{vm_name}' SSH identity",
@@ -416,7 +422,7 @@ def _report_instance_state(
                 InstanceStateHealthFactType.LIFECYCLE_COMPARISON,
                 missing_metadata,
                 comparison=VMSSHIdentityState.NOT_RECORDED.value,
-                hint=f"Run 'agw vm reinit {vm_name}' to establish SSH identity evidence.",
+                hint=not_recorded_hint,
             )
             continue
         applied, metadata = evidence

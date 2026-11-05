@@ -7,6 +7,7 @@ import functools
 import json
 import os
 import platform
+import shlex
 import subprocess
 import sys
 import urllib.request
@@ -29,10 +30,11 @@ from agentworks.capabilities.vm_platform.tailscale_join import (
 )
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import StateError
+from agentworks.errors import ExternalError, StateError
 from agentworks.execution import root_script, ssh_process
 from agentworks.programs import resolve_program
 from agentworks.schema import AgwModel
+from agentworks.terminal import sanitize_terminal_output
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
@@ -293,20 +295,37 @@ class _StripAuthRedirectHandler(urllib.request.HTTPRedirectHandler):
 _blob_opener = urllib.request.build_opener(_StripAuthRedirectHandler)
 
 
+class WSLCommandFailed(ExternalError):
+    """A ``wsl.exe`` command exited non-zero; the message quotes what it printed."""
+
+
 def _wsl(args: list[str], *, check: bool = True, timeout: int = 300) -> str:
     """Run a wsl.exe command and return stdout.
 
     wsl.exe emits UTF-16LE on redirected output unless WSL_UTF8=1 is
     set; decoding that as UTF-8 leaves a NUL after every ASCII char,
     which silently breaks the name-equality parsers (``status``,
-    ``_distro_exists``). Strip the NULs so both encodings parse.
+    ``_distro_exists``). Strip the NULs so both encodings parse. A failure
+    under ``check`` raises :class:`WSLCommandFailed` with wsl.exe's own text,
+    which it prints on stdout, not stderr.
     """
     result = subprocess.run(
         [_WSL, *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
     )
     if check and result.returncode != 0:
-        stderr = result.stderr.replace("\x00", "").strip()
-        raise RuntimeError(f"wsl command failed: {stderr}")
+        printed = "\n".join(
+            text for stream in (result.stderr, result.stdout) if (text := stream.replace("\x00", "").strip())
+        )
+        # No argument carries a secret: the auth key reaches the distro on the root channel's stdin.
+        command = sanitize_terminal_output(shlex.join(["wsl", *args]))
+        reason = sanitize_terminal_output(printed) or "no output"
+        raise WSLCommandFailed(
+            f"'{command}' exited with status {result.returncode}: {reason}",
+            hint=(
+                "WSL may have been shut down meanwhile ('wsl --shutdown' stops every distro). "
+                "Check it with 'wsl --status', then run the command again."
+            ),
+        )
     return result.stdout.replace("\x00", "")
 
 
@@ -842,9 +861,9 @@ class WSL2Platform(VMPlatform):
                     run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT
                 )
             except Exception:
-                # WSL2's error convention holds: the RuntimeErrors from
-                # _wsl / _powershell propagate unwrapped; the only new
-                # obligation is the teardown.
+                # WSL2's error convention holds: the errors from _wsl and
+                # _powershell propagate unwrapped; the only new obligation
+                # is the teardown.
                 output.detail(f"Cleaning up the partial WSL2 distro '{vm_name}'...")
                 self._cleanup_partial_create(vm_name, vm_name=request.vm_name, failure=sys.exc_info()[1])
                 raise
