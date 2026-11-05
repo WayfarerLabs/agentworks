@@ -251,14 +251,14 @@ the VM is running or was just started:
   Win32 Job-Object orphan-proofing for a hard-killed `agw`. No `ctx`: every hold that exists is
   local and makes no backend call. A cloud hold that did would take `ctx` as the ops do.
 - `post_tailscale_ready(vm, ctx) -> None` (default no-op). The contract is "close provisioning
-  access": it fires the instant Tailscale is reachable. Azure deletes the ephemeral bootstrap SSH
-  allow rule here, leaving the VM with zero inbound exposure behind its permanent deny-all-inbound
-  baseline (the public IP itself stays attached for the VM's whole lifetime); EC2 revokes exactly
-  the bootstrap allow's tuples (recorded in platform_metadata at create) to the same end, so a
-  concurrent native route's distinct allow survives; GCE removes its provider-ID-owned stable allow
-  and retains its priority-1 all-ingress deny. The asymmetry with the per-call route is intentional:
-  the bootstrap ingress opens inside `create()` (cloud-init needs inbound SSH from the operator),
-  and neither that nor this closing point is context-manager-shaped.
+  access": Phase A calls it once the VM answers over Tailscale and the VM contract has passed. Azure
+  deletes the ephemeral bootstrap SSH allow rule here, leaving the VM with zero inbound exposure
+  behind its permanent deny-all-inbound baseline (the public IP itself stays attached for the VM's
+  whole lifetime); EC2 revokes exactly the bootstrap allow's tuples (recorded in platform_metadata
+  at create) to the same end, so a concurrent native route's distinct allow survives; GCE removes
+  its provider-ID-owned stable allow and retains its priority-1 all-ingress deny. The asymmetry with
+  the per-call route is intentional: the bootstrap ingress opens inside `create()` (cloud-init needs
+  inbound SSH from the operator), and neither that nor this closing point is context-manager-shaped.
 - `secure_failed_vm(vm, ctx) -> None` (default no-op). Same contract as `post_tailscale_ready`, for
   the paths where a completed create is kept after Phase A fails (first contact, enrollment or the
   VM contract, which marks the row FAILED) or the operator interrupts it (the row stays incomplete);
