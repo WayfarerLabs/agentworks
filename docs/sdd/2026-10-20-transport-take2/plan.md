@@ -358,9 +358,18 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
       the command reference, the READMEs, the sample config, completions, the guides (including the
       Proxmox guide's start-time rejoin note, `docs/guides/proxmox.md:201-205`, and the
       troubleshooting topic), the reviewer persona, and the stale docstrings and comments.
+- [x] Consolidate after PR B's final private review:
+  - the clouds' probe-failure hint is one constant, `public_ssh.PROBE_FAILURE_HINT`, and create
+    waits through the same `PublicSSH.wait_until_answering` as every other root script;
+  - one logout, `tailscale_join.log_out` with `LOGOUT_SCRIPT`, serves the settle and delete, so
+    `vms/recovery.py` holds the repair and rekey scripts only;
+  - Proxmox waits for cloud-init through its root channel, and its root channel waits for the guest
+    agent to answer before it dispatches.
 - [ ] Live evidence:
   - create on every platform, with the key-free bootstrap's output size recorded on WSL2 and
     Proxmox;
+  - on Proxmox: `vm recover` of a stopped VM in one run, a create whose first-boot package upgrade
+    restarts the guest agent, and the guest agent's ping on each supported PVE major;
   - rekey, delete's logout and `vm recover` on every platform from at least one workstation each;
   - `vm start` after the node is removed, and after an ephemeral key's node expired;
   - recovery of a broken sshd on WSL2 and on Proxmox;
