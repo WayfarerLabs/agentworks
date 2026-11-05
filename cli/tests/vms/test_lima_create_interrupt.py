@@ -341,6 +341,25 @@ def test_ephemeral_tailscale_join_failure_cleans_up_without_key_in_error(
     assert secret not in repr((ran, guest.argvs))
 
 
+def test_an_interrupt_during_the_failure_rollback_restarts_it_and_retains_the_row(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """A Ctrl-C during the failure arm's cleanup reaches the interrupt arm, which tries again;
+    interrupted there too, the cleanup is abandoned and the instance handed to core."""
+    ran = _wire(monkeypatch, errors={"limactl delete": KeyboardInterrupt("during the cleanup")})
+    monkeypatch.setattr(
+        LimaPlatform,
+        "_create_local",
+        lambda self, name, yaml: (_ for _ in ()).throw(LimaCommandFailed("original failure")),
+    )
+
+    with pytest.raises(RetainedProvisioningError) as exc:
+        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
+
+    assert exc.value.platform_metadata == {"instance_name": "myvm"}
+    assert len(_deletes(ran)) == 2
+
+
 def test_second_interrupt_abandons_cleanup_and_retains_the_row(
     monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
 ) -> None:

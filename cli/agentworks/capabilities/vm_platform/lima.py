@@ -412,47 +412,56 @@ class LimaPlatform(VMPlatform):
         # here would be orphaned with nothing to target it (#340; the
         # azure precedent is #338). Everything before this try mutates
         # nothing, so no arm ever fires a cleanup call for an instance
-        # that was never made.
+        # that was never made. The arms nest like Proxmox's and WSL2's:
+        # the outer interrupt arm wraps the inner failure arm, so a Ctrl-C
+        # during the failure arm's cleanup restarts it under the full
+        # two-Ctrl-C protocol, which retains the row if it is abandoned.
         try:
-            if self.is_remote:
-                self._create_remote(instance_name, rendered, progress=request.progress)
-            else:
-                self._create_local(instance_name, rendered)
-
-            output.detail(f"Lima VM '{instance_name}' created.")
-
-            # Some bootstrap steps (currently the Apple-vz SVE mask, see
-            # bootstrap_script) only take effect after a reboot, and rebooting
-            # mid-provision is unreliable (lima-vm/lima#4867). Such steps drop a
-            # restart sentinel; restart the instance from the host when we see it.
-            # The probe stays generic: the host cannot cheaply tell which guest
-            # shape it is, so a bare failure is phrased for what it does know.
             try:
-                restart_pending = self._restart_sentinel_present(instance_name)
-            except LimaCommandFailed as e:
-                output.warn(f"could not check whether '{instance_name}' needs a restart to finish provisioning: {e}")
-                output.warn(
-                    f"if the VM misbehaves, 'limactl restart {instance_name}' reapplies any deferred bootstrap step."
-                )
-                restart_pending = False
-            if restart_pending:
-                output.detail(f"A bootstrap step needs a reboot; restarting '{instance_name}'...")
-                self._host.run(f"limactl restart {instance_name}")
+                if self.is_remote:
+                    self._create_remote(instance_name, rendered, progress=request.progress)
+                else:
+                    self._create_local(instance_name, rendered)
 
-            # The join follows any restart, so nothing but the address read
-            # sits between the join and the settle that logs a failed one out.
-            run_as_root = functools.partial(self._host.run_as_root, instance_name)
-            _wait_for_tailscaled(run_as_root, instance_name)
-            output.detail("Joining Tailscale...")
-            join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
-            output.detail("Retrieving Tailscale IP...")
-            tailnet_address = settle_tailnet_address(run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT)
+                output.detail(f"Lima VM '{instance_name}' created.")
+
+                # Some bootstrap steps (currently the Apple-vz SVE mask, see
+                # bootstrap_script) only take effect after a reboot, and rebooting
+                # mid-provision is unreliable (lima-vm/lima#4867). Such steps drop a
+                # restart sentinel; restart the instance from the host when we see it.
+                # The probe stays generic: the host cannot cheaply tell which guest
+                # shape it is, so a bare failure is phrased for what it does know.
+                try:
+                    restart_pending = self._restart_sentinel_present(instance_name)
+                except LimaCommandFailed as e:
+                    output.warn(
+                        f"could not check whether '{instance_name}' needs a restart to finish provisioning: {e}"
+                    )
+                    output.warn(
+                        f"if the VM misbehaves, 'limactl restart {instance_name}' "
+                        "reapplies any deferred bootstrap step."
+                    )
+                    restart_pending = False
+                if restart_pending:
+                    output.detail(f"A bootstrap step needs a reboot; restarting '{instance_name}'...")
+                    self._host.run(f"limactl restart {instance_name}")
+
+                # The join follows any restart, so nothing but the address read
+                # sits between the join and the settle that logs a failed one out.
+                run_as_root = functools.partial(self._host.run_as_root, instance_name)
+                _wait_for_tailscaled(run_as_root, instance_name)
+                output.detail("Joining Tailscale...")
+                join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
+                output.detail("Retrieving Tailscale IP...")
+                tailnet_address = settle_tailnet_address(
+                    run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT
+                )
+            except Exception as failure:
+                output.detail(f"Cleaning up the partial Lima instance '{instance_name}'...")
+                self._cleanup_partial_create(instance_name, vm_name=request.vm_name, failure=failure)
+                raise
         except KeyboardInterrupt:
             self._rollback_create_on_interrupt(instance_name, vm_name=request.vm_name)
-            raise
-        except Exception as failure:
-            output.detail(f"Cleaning up the partial Lima instance '{instance_name}'...")
-            self._cleanup_partial_create(instance_name, vm_name=request.vm_name, failure=failure)
             raise
 
         return ProvisionResult(
@@ -602,9 +611,11 @@ class LimaPlatform(VMPlatform):
         An instance that may remain is warned with the manual removal
         command and handed to core as :class:`RetainedProvisioningError`,
         whose message carries the original ``failure`` (``None`` for an
-        interrupt), so the row survives for ``vm delete`` to retry. An
-        operator's second Ctrl-C (``KeyboardInterrupt``) deliberately
-        escapes so :meth:`_rollback_create_on_interrupt` can abandon the
+        interrupt), so the row survives for ``vm delete`` to retry. A
+        ``KeyboardInterrupt`` during it is not contained: called from the
+        failure arm, it escapes to ``create``'s outer interrupt arm, which
+        restarts the cleanup under :meth:`_rollback_create_on_interrupt`;
+        called from there, it is the second Ctrl-C that abandons the
         cleanup.
         """
         if self.is_remote:
