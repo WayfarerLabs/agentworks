@@ -5,7 +5,9 @@ no ``finally`` runs: a cloud's temporary firewall allow, or any other state a
 command holds open, would outlive it. :func:`termination_as_interrupt` raises
 ``KeyboardInterrupt`` for them instead, as Ctrl-C does, for the span of a
 command that waits on something the operator ends (an interactive shell, a
-port forward), and restores the previous handlers afterwards. A signal the
+port forward), and restores the previous handlers afterwards. Once one has
+arrived, further ones are ignored until the block exits, so a second signal
+cannot cut short the cleanup the first one started. A signal the
 process already ignores stays ignored, so a command started under ``nohup``
 keeps running after its terminal closes.
 """
@@ -25,17 +27,24 @@ _TERMINATIONS = tuple(
 )
 
 
+def _interrupt(_signal: int, _frame: object) -> None:
+    for number in _TERMINATIONS:
+        if signal.getsignal(number) is _interrupt:
+            signal.signal(number, signal.SIG_IGN)
+    raise KeyboardInterrupt
+
+
 @contextlib.contextmanager
 def termination_as_interrupt() -> Iterator[None]:
-    """Raise ``KeyboardInterrupt`` on ``SIGTERM``, and ``SIGHUP`` where it exists, inside the block, unless ignored."""
+    """Raise ``KeyboardInterrupt`` on ``SIGTERM``, and ``SIGHUP`` where it exists, inside the block, unless ignored.
 
-    def interrupt(_signal: int, _frame: object) -> None:
-        raise KeyboardInterrupt
-
+    Inside an enclosing block it changes nothing, so the outermost block owns
+    the handlers and their restoration.
+    """
     previous = {
-        number: signal.signal(number, interrupt)
+        number: signal.signal(number, _interrupt)
         for number in _TERMINATIONS
-        if signal.getsignal(number) is not signal.SIG_IGN
+        if signal.getsignal(number) not in (signal.SIG_IGN, _interrupt)
     }
     try:
         yield

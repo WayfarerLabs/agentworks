@@ -50,3 +50,44 @@ def test_an_ignored_hangup_stays_ignored_inside_the_block() -> None:
         assert signal.getsignal(signal.SIGHUP) is signal.SIG_IGN
     finally:
         signal.signal(signal.SIGHUP, before)
+
+
+@posix_only
+def test_a_second_termination_does_not_cut_the_unwind_short() -> None:
+    """The cleanup a first signal starts (closing a cloud route, say) runs to the end through a second one."""
+    before = {number: signal.getsignal(number) for number in (signal.SIGTERM, signal.SIGHUP)}
+    unwound = False
+
+    with pytest.raises(KeyboardInterrupt), termination_as_interrupt():
+        try:
+            os.kill(os.getpid(), signal.SIGHUP)
+            raise AssertionError("SIGHUP was not delivered as an interrupt")
+        finally:
+            try:
+                os.kill(os.getpid(), signal.SIGTERM)
+                os.kill(os.getpid(), signal.SIGHUP)
+            except KeyboardInterrupt:
+                pytest.fail("a second termination interrupted the unwind")
+            unwound = True
+
+    assert unwound
+    assert {number: signal.getsignal(number) for number in before} == before
+
+
+@posix_only
+def test_a_second_termination_does_not_cut_an_outer_unwind_short() -> None:
+    """An inner block's exit must not re-arm the handler while the outer block is still unwinding the first signal."""
+    before = signal.getsignal(signal.SIGHUP)
+
+    with pytest.raises(KeyboardInterrupt), termination_as_interrupt():
+        try:
+            with termination_as_interrupt():
+                os.kill(os.getpid(), signal.SIGHUP)
+                raise AssertionError("SIGHUP was not delivered as an interrupt")
+        finally:
+            try:
+                os.kill(os.getpid(), signal.SIGHUP)
+            except KeyboardInterrupt:
+                pytest.fail("a second termination interrupted the outer unwind")
+
+    assert signal.getsignal(signal.SIGHUP) == before
