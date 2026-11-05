@@ -1,6 +1,6 @@
 # Transport Take 2: Contract Low-Level Design (Slice 3)
 
-- Status: Draft, revised after the private project and complexity reviews of `5a01d27f6`.
+- Status: Implemented in PR B, with the live evidence the plan lists still open.
 - Date: 2026-11-01
 - Architecture: [hla.md](./hla.md) D4 (elevation), D8 (reachability), D10 (the contract), D11 (first
   half), D13 (the operation log); requirements: R1, R4, R7, R10, R11

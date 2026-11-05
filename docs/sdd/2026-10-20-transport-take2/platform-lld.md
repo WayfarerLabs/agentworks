@@ -1,6 +1,6 @@
 # Transport Take 2: Platform Low-Level Design (Slice 4)
 
-- Status: Draft, revised after the private project and complexity reviews of `bfd38ce93`.
+- Status: Implemented in PR B, with the live evidence the plan lists still open.
 - Date: 2026-11-01
 - Architecture: [hla.md](./hla.md) D2 (host policy), D9 (re-establishment), D11 (second half), D13,
   D14; requirements: R1, R2, R4, R7, R8, R10, R11

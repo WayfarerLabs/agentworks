@@ -1,7 +1,7 @@
 # Implementation Plan: Transport Take 2
 
-- Status: Slices 1 and 2 implemented in PR A (#863), live evidence in progress; slices 3 to 8 not
-  started
+- Status: Slices 1 and 2 implemented in PR A (#863) and slices 3 and 4 in PR B, with the live
+  evidence cells listed below still open; slices 5 to 8 not started
 - Date: 2026-10-31
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -240,8 +240,8 @@ pass the static check, and the package's tests pass with the legacy modules bloc
     `execution.enrollment_access`, the enrollment post-condition, then the base checks including
     Debian attestation, then `reachability.wait` after `post_tailscale_ready`. `driver.bootstrap_vm`
     stays as the thin caller that hands Phase B a legacy target as today;
-  - `COMPLETE` is written after the contract passes, and an interrupt before then marks the VM
-    `FAILED` with delete guidance;
+  - `COMPLETE` is written after the contract passes; a failure before then marks the VM `FAILED`
+    with delete guidance, and an interrupt leaves the row never complete, which the gate refuses;
   - `vms/manager/release.py` splits into `contract.observe_release` and `reconcile_release`,
     `vm confirm-release` runs on `VMAccess`, and `probe_debian_release` is deleted;
   - `vms/contract.py`, `vms/initializer/phase_a.py` and `vms/manager/release.py` join the static
@@ -249,17 +249,17 @@ pass the static check, and the package's tests pass with the legacy modules bloc
 - [x] Implement the operation log record: `oplog.format_record`, `VMAccess`'s optional `log`
       callable and `SSHLogger.record`, with redaction left at the logger's one sink. `LOG_DIR`, its
       readers and `SSHLogger` stay until slice 8.
-- [ ] Add elevation, with its conformance vectors (E1, E2, E4 and E6), for the contract's sudo
+- [x] Add elevation, with its conformance vectors (E1, E2, E4 and E6), for the contract's sudo
       check, its first consumer: `elevated` on `BoundedRequestOptions`, `stage0_command(elevated=)`,
       and `PermissionDenied` for an agent-bound access, derived from the access's identity. An
-      elevated attach is excluded by the types. Prove an elevated request on a fresh,
-      never-initialized Debian 12 and 13 VM.
+      elevated attach is excluded by the types.
+- [ ] Prove an elevated request on a fresh, never-initialized Debian 12 and 13 VM.
 - [x] Add `vms/contract.py`: the `(id, severity, probe)` table, the script protocol and its parser,
       `observe_release`, `check_base` and `enforce`. Run the base checks first at reinit, moving
       slice 2's reinit pam_env warning into them, and add `vms/contract.py` to the package guard
       (HLA D14).
 - [x] Amend ADR 0025.
-- [ ] Tests:
+- [x] Tests:
   - a VM failing a base check is not reported ready, and a warning-only report does not fail;
   - a platform that cannot report the address logs the node out over its provisioning channel and
     fails create, without a second join, and names the node when the logout fails;
