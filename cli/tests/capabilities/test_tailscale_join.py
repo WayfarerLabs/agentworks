@@ -12,6 +12,8 @@ from agentworks.capabilities.vm_platform.base import parse_tailnet_address
 from agentworks.capabilities.vm_platform.public_ssh import KeyRefused, PublicSSH
 from agentworks.capabilities.vm_platform.tailscale_join import (
     ADDRESS_READS,
+    CLOUD_INIT_RECOVERABLE_STATUS,
+    DEFAULT_READINESS_COMMAND,
     JOIN_FRAGMENT,
     LOGOUT_SCRIPT,
     READINESS_WAIT_SECONDS,
@@ -24,10 +26,12 @@ from agentworks.errors import ConnectivityError, ProvisioningError
 from agentworks.execution.errors import TrustMismatch
 from agentworks.execution.root_script import RawRun
 from agentworks.execution.trust import TrustBinding, TrustMode
-from tests._root_channel_fakes import ADDRESS, Answer, FakeGuest
+from tests._root_channel_fakes import ADDRESS, Answer, FakeGuest, answer_by_payload
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from tests.conftest import CapturedOutput
 
 KEY = "tskey-auth-join-'swordfish"
 NODE = "lab-vm1"
@@ -335,6 +339,32 @@ def test_a_failed_readiness_command_raises_before_the_join(
     cloud: Callable[[FakeGuest], PublicSSH], answer: Answer
 ) -> None:
     guest = FakeGuest(lambda payload, seen: answer if payload == "ready" else Answer())
+
+    with pytest.raises(ProvisioningError):
+        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, readiness_command="ready")
+
+    assert guest.payloads == ["true", "ready"]
+
+
+def test_cloud_init_s_recoverable_status_warns_and_the_bootstrap_carries_on(
+    cloud: Callable[[FakeGuest], PublicSSH], captured_output: CapturedOutput
+) -> None:
+    """cloud-init finished with recoverable errors, so the VM is up: warn and join, as Proxmox's wait does."""
+    recoverable = Answer(status=CLOUD_INIT_RECOVERABLE_STATUS)
+    guest = FakeGuest(answer_by_payload(answers={DEFAULT_READINESS_COMMAND: recoverable}))
+
+    address = complete_cloud_bootstrap(cloud(guest), KEY, node=NODE)
+
+    assert address == ADDRESS
+    assert guest.payloads == ["true", DEFAULT_READINESS_COMMAND, JOIN_FRAGMENT, READ]
+    assert len(captured_output.warnings) == 1
+
+
+def test_another_readiness_command_s_status_2_is_a_failure(cloud: Callable[[FakeGuest], PublicSSH]) -> None:
+    """Status 2 means recoverable errors only for cloud-init; GCE's marker wait, say, did not complete."""
+    guest = FakeGuest(
+        lambda payload, seen: Answer(status=CLOUD_INIT_RECOVERABLE_STATUS) if payload == "ready" else Answer()
+    )
 
     with pytest.raises(ProvisioningError):
         complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, readiness_command="ready")

@@ -17,6 +17,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
     operator_owned_release_value,
 )
 from agentworks.capabilities.vm_platform.tailscale_join import (
+    CLOUD_INIT_RECOVERABLE_STATUS,
     CREATE_RERUN_HINT,
     join_tailscale,
     settle_tailnet_address,
@@ -486,7 +487,7 @@ class ProxmoxPlatform(VMPlatform):
 
 
 def _wait_for_cloud_init(run_as_root: Callable[[bytes, float], RawRun], vmid: int) -> None:
-    """Wait for cloud-init to finish inside the VM; status 2 is recoverable warnings.
+    """Wait for cloud-init to finish inside the VM; :data:`CLOUD_INIT_RECOVERABLE_STATUS` warns.
 
     A channel failure is asked again until :data:`CLOUD_INIT_DEADLINE_SECONDS`
     runs out: cloud-init can restart the guest agent mid-run (Proxmox's
@@ -505,8 +506,8 @@ def _wait_for_cloud_init(run_as_root: Callable[[bytes, float], RawRun], vmid: in
             if remaining <= 0:
                 raise
             time.sleep(min(guest_agent.POLL_INTERVAL_SECONDS, remaining))
-    if result.status == 2:
-        output.warn(f"cloud-init completed with recoverable warnings on Proxmox VMID {vmid}; continuing")
+    if result.status == CLOUD_INIT_RECOVERABLE_STATUS:
+        output.warn(f"cloud-init completed with recoverable errors on Proxmox VMID {vmid}; continuing")
     elif result.status != 0:
         outcome = "an unknown outcome" if result.status is None else f"exit {result.status}"
         raise ProvisioningError(f"cloud-init did not complete on Proxmox VMID {vmid} ({outcome})")

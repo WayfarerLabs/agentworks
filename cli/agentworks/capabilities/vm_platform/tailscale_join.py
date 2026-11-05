@@ -60,6 +60,10 @@ The platform's rollback reports for itself whether the backend was removed.
 
 DEFAULT_READINESS_COMMAND = "cloud-init status --wait"
 DEFAULT_READINESS_LABEL = "cloud-init"
+# ``cloud-init status --wait`` exits 2 when cloud-init finished with recoverable
+# errors (a deprecated key, a module that warned): the VM came up, so a wait
+# for it warns and carries on.
+CLOUD_INIT_RECOVERABLE_STATUS = 2
 
 
 def join_tailscale(run_as_root: Callable[[bytes, float], RawRun], auth_key: str, *, node: str) -> None:
@@ -185,7 +189,9 @@ def complete_cloud_bootstrap(
     and retrying a refused key, since a cloud's guest agent may install the
     key after sshd starts. A readiness failure raises before the key is
     sent, so the platform's create rollback removes the partial VM with the
-    key never used.
+    key never used. The default readiness command's
+    :data:`CLOUD_INIT_RECOVERABLE_STATUS` warns instead, as Proxmox's wait
+    for cloud-init does.
     """
     output.detail(f"Waiting for {readiness_label} bootstrap to complete (this may take several minutes)...")
     try:
@@ -206,7 +212,9 @@ def complete_cloud_bootstrap(
         result = root_script.run(target.run_as_root, readiness_command, deadline=READINESS_COMMAND_DEADLINE_SECONDS)
     except ConnectivityError as error:
         raise ProvisioningError(incomplete, hint=error.hint) from error
-    if result.status != 0:
+    if result.status == CLOUD_INIT_RECOVERABLE_STATUS and readiness_command == DEFAULT_READINESS_COMMAND:
+        output.warn(f"{readiness_label} completed with recoverable errors; continuing")
+    elif result.status != 0:
         raise ProvisioningError(incomplete)
     join_tailscale(target.run_as_root, auth_key, node=node)
     return settle_tailnet_address(target.run_as_root, node=node, rerun_hint=CREATE_RERUN_HINT)

@@ -349,9 +349,12 @@ takes a `run_as_root`:
   advice left unchained, since the rollback removes the VM. When the wait runs out, the
   `ProvisioningError` carries the wait's error's hint (a standing refusal's `agent_load_hint` for an
   encrypted key not loaded in the agent), and a readiness command whose channel raises keeps that
-  error's hint too. Then the readiness command runs once (600 s), and the bootstrap joins and
-  settles. `TAILSCALE_JOIN_STDIN_COMMAND` and the transport join leave `tailscale_join.py`; they
-  stay in `vms/initializer/credentials.py` only for rekey and `vm start`'s rejoin, and go with them.
+  error's hint too. Then the readiness command runs once (600 s); the default
+  `cloud-init status --wait` exiting 2 (`CLOUD_INIT_RECOVERABLE_STATUS`, finished with recoverable
+  errors) warns and carries on, as Proxmox's wait does, while any other non-zero status, or 2 from
+  another command such as GCP's marker wait, fails create. Then the bootstrap joins and settles.
+  `TAILSCALE_JOIN_STDIN_COMMAND` and the transport join leave `tailscale_join.py`; they stay in
+  `vms/initializer/credentials.py` only for rekey and `vm start`'s rejoin, and go with them.
 
 **The bootstrap script loses its key.** WSL2 and Proxmox are the last two platforms that generate
 the bootstrap with the key inside it (`capabilities/vm_platform/wsl2_bootstrap.py:62-69`,
