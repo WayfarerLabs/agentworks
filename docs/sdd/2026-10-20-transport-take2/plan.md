@@ -1,6 +1,6 @@
 # Implementation Plan: Transport Take 2
 
-- Status: Slices 1 and 2 implemented in PR A (#863) and slices 3 and 4 in PR B, with the live
+- Status: Slices 1 and 2 implemented in PR A (#863) and slices 3 and 4 in PR B (#866), with the live
   evidence cells listed below still open; slices 5 to 8 not started
 - Date: 2026-10-31
 - Requirements: [frd.md](./frd.md)
@@ -87,11 +87,12 @@ answer.
       ([comment 6571182125](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6571182125)
       and the reports it links): create, the operator's own `ssh` to a managed entry, import of an
       existing VM (including malformed sources), a stop and start, and the operator's `known_hosts`
-      byte-identical. Cells covered: Remote Lima from Linux and Windows, local Lima from macOS, WSL2
-      from Windows, and AWS, Azure and GCP from Linux, with an encrypted key served by the agent.
+      byte-identical. Cells covered: Remote Lima from Linux and Windows, local Lima from macOS (all
+      but import), WSL2 from Windows, and AWS, Azure and GCP from Linux. An encrypted key served by
+      the agent was used from Linux against Remote Lima.
 - [ ] Live evidence still open, carried forward to before closeout by the operator's 2026-11-04
-      ruling: Remote Lima from macOS, Proxmox, a cloud from Windows, and an address change after
-      rekey.
+      ruling: Remote Lima from macOS, Proxmox, a cloud from Windows, an address change after rekey,
+      import on local Lima from macOS, and an encrypted key served by the agent on every other cell.
 
 Definition of done: every core connection to a VM verifies against the store, the only acceptance of
 a new key is create's enrollment, and nothing in Agentworks writes the operator's `known_hosts` for
@@ -193,11 +194,12 @@ a VM connection.
       `cli/agentworks/execution/README.md`.
 - [x] Live evidence
       ([comment 6571182125](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6571182125)
-      and the reports it links): Remote Lima from Linux and Windows, local Lima from macOS, WSL2
-      from Windows, and AWS, Azure and GCP from Linux, all on Debian 13 guests.
+      and the reports it links): Remote Lima from Linux and Windows, local Lima from macOS and WSL2
+      from Windows, all on Debian 13 guests. AWS, Azure and GCP from Linux ran the exec surface
+      only, not the V lane.
 - [ ] Live evidence still open, carried forward to before closeout by the operator's 2026-11-04
       ruling: Remote Lima from macOS, local Lima from Linux (the Linux bed has no `/dev/kvm`), a
-      Debian 12 guest, and an OpenSSH 8.5 client.
+      Debian 12 guest, an OpenSSH 8.5 client, and the V lane against a live cloud.
 
 Definition of done: the migrated commands reach VMs only through `agentworks.execution`, their files
 pass the static check, and the package's tests pass with the legacy modules blocked.
