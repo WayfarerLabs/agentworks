@@ -111,15 +111,29 @@ def _tailscale_logout(vm: VMRow, platform: VMPlatform, ctx: RunContext) -> None:
     """Log the VM's node out of the tailnet over its root channel, best effort, and say what happened.
 
     Each outcome is reported and none is checked over SSH, since the VM is
-    going away. A cloud VM whose host key was never recorded refuses inside
+    going away. A VM the platform reports stopped or deallocated is not
+    asked: no channel reaches it, and a cloud's would wait two minutes to
+    find that out (a WSL2 distro the caller's hold has booted reports
+    running). A cloud VM whose host key was never recorded refuses inside
     ``run_as_root``, before any route opens: an impostor could report a
-    logout that never happened, so the node is named for removal instead.
+    logout that never happened. Either way the node is named for removal
+    instead.
     """
+    from agentworks.db import VMStatus
     from agentworks.execution.errors import TrustMissing
     from agentworks.vms import recovery
 
     node = vm.hostname
     removal = f"remove '{node}' in the Tailscale admin console if it is listed there"
+    try:
+        status = platform.status(vm, ctx)
+    except UserAbort:
+        raise
+    except Exception:
+        status = VMStatus.UNKNOWN
+    if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
+        output.warn(f"Tailscale node {node} was not logged out: VM '{vm.name}' is {status.value}; {removal}")
+        return
     output.info("Logging out of Tailscale...")
     try:
         result = recovery.logout(platform, vm, ctx)

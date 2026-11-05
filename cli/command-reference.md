@@ -780,9 +780,10 @@ new address is recorded.
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
 message shows what will be deleted. Pass `--yes` to skip the prompt. Delete logs the VM's node out
 of the tailnet through the platform's own channel and reports the outcome; when the logout fails or
-cannot be confirmed, it names the node to remove in the Tailscale admin console. A cloud VM whose
-host key was never recorded is not logged out at all, since nothing could verify the VM that
-answered, so delete names its node instead. The backend VM is deleted either way.
+cannot be confirmed, it names the node to remove in the Tailscale admin console. A VM that is
+stopped or deallocated is not logged out, since nothing reaches it, and neither is a cloud VM whose
+host key was never recorded, since nothing could verify the VM that answered; delete names the node
+instead. The backend VM is deleted either way.
 
 `vm backup` exports the VM row and exact owner tree of agents, workspaces, sessions, events, grants,
 desired instance specs, and workspace files. It does not create or copy a provider VM snapshot,

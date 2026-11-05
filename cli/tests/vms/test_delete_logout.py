@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from agentworks.capabilities.base import RunContext
+from agentworks.db import VMStatus
 from agentworks.errors import ConnectivityError, ProvisioningError, UserAbort
 from agentworks.execution.errors import TrustMissing
 from agentworks.vms.manager.tailscale import _tailscale_logout
@@ -29,8 +30,12 @@ class _Platform:
 
     recovery_needs_guest_sshd = True
 
-    def __init__(self, guest: FakeGuest) -> None:
+    def __init__(self, guest: FakeGuest, status: VMStatus = VMStatus.RUNNING) -> None:
         self.guest = guest
+        self._status = status
+
+    def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
+        return self._status
 
     def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> object:
         return self.guest.run_as_root(script, deadline)
@@ -44,8 +49,8 @@ def _vm(db: Database) -> VMRow:
     return vm
 
 
-def _log_out(db: Database, guest: FakeGuest) -> None:
-    _tailscale_logout(_vm(db), cast("VMPlatform", _Platform(guest)), RunContext())
+def _log_out(db: Database, guest: FakeGuest, status: VMStatus = VMStatus.RUNNING) -> None:
+    _tailscale_logout(_vm(db), cast("VMPlatform", _Platform(guest, status)), RunContext())
 
 
 @pytest.mark.parametrize(
@@ -76,6 +81,20 @@ def test_each_logout_outcome_is_reported_and_nothing_reaches_the_vm_after_it(
     assert vm_access_recorder.operations == []
 
 
+@pytest.mark.parametrize("status", [VMStatus.STOPPED, VMStatus.DEALLOCATED])
+def test_a_stopped_vm_is_not_asked_and_its_node_is_named(
+    db: Database, captured_output: CapturedOutput, status: VMStatus
+) -> None:
+    """No channel reaches a stopped VM; a cloud's would probe for two minutes and then blame the firewall."""
+    guest = FakeGuest(respond=lambda payload, seen: pytest.fail("a stopped VM was asked to log out"))
+
+    _log_out(db, guest, status)
+
+    assert guest.scripts == []
+    (warning,) = captured_output.warnings
+    assert "box-node" in warning
+
+
 def test_an_operator_abort_is_not_downgraded(db: Database) -> None:
     guest = FakeGuest(respond=lambda payload, seen: Answer(raises=UserAbort("stop")))
 
@@ -91,6 +110,7 @@ def test_a_never_enrolled_cloud_vm_is_not_logged_out_and_its_node_is_named(
     from agentworks.plugins.aws.platform import EC2Platform
 
     platform = EC2Platform("aws-site", {"region": "us-east-1", "auth": {"mode": "ambient"}})
+    monkeypatch.setattr(EC2Platform, "status", lambda self, vm, ctx: VMStatus.RUNNING)
     monkeypatch.setattr(
         EC2Platform, "_transient_route", lambda *a, **k: pytest.fail("a route opened for a never-enrolled VM")
     )
