@@ -918,7 +918,7 @@ def capture_output(
         tmux_cmd(f"capture-pane -t {q_session} {flags} -S -{lines}", socket_path),
         check=False,
     )
-    if result.returncode != 0:
+    if getattr(result, "returncode", None) != 0:
         from agentworks.errors import ExternalError
 
         raise ExternalError(

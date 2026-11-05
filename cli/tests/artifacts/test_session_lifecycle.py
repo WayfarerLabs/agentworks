@@ -707,6 +707,7 @@ def test_unknown_passthrough_restart_records_missing_delivery_and_retires_old_fi
     assert "tmux_create" in lifecycle.events and "kill" in lifecycle.events
     state = read_native_setup(lifecycle.db, "session", "s1").records[0]
     assert not state.complete and state.incomplete_reasons
+    assert state.artifact_inputs is not None
     assert item.identity in state.artifact_inputs
     assert any(entry.input_id == item.identity and entry.destination == "session" for entry in state.deferred)
     assert any("vm/vm1" in reason and item.identity[:12] in reason for reason in state.incomplete_reasons)

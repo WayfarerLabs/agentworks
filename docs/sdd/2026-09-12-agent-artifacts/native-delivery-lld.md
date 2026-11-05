@@ -346,7 +346,7 @@ content-dependent IDs cannot be reversed to owners after capture replacement.
 
 The session join retains missing route IDs through inactive user/workspace passthrough. Known
 unavailable IDs become terminal unhandled metadata; unknown routing without IDs records its owner
-and repair reason. The session launches with reconstructable inputs and records incomplete delivery
+and repair reason. The session launches with readable inputs and records incomplete delivery
 rather than calling the reduced set current. It does not fabricate missing canonical content or
 turn these optional inputs into prerequisites. Old private files remain usable until runtime
 teardown; afterward normal owned cleanup retires obsolete runs. Keeping unreferenced old files

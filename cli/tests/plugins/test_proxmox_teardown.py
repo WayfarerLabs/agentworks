@@ -123,7 +123,7 @@ def test_successful_task_without_absence_confirmation_still_fails(monkeypatch):
         fake.calls.append(("delete_vm", node, vmid))
         return "UPID:pve1:delete"
 
-    fake.delete_vm = report_success_without_removal
+    monkeypatch.setattr(fake, "delete_vm", report_success_without_removal)
     with pytest.raises(ProxmoxAPIError):
         platform.delete(_DeleteOp._vm_row(), RunContext())
     assert not fake.vm_deleted

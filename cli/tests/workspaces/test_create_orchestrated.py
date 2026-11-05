@@ -397,7 +397,7 @@ def test_workspace_setup_joins_eager_env_and_follows_directory_creation(
     monkeypatch.setenv("AW_SECRET_PROJECT_TOKEN", "project-private")
     target = Mock(spec=Transport)
     target.logger = None
-    target.run.return_value.stdout = "native-identity"
+    target.run.return_value.stdout = "\nAGW_NATIVE_ID=native-identity\n"
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     calls = []
 
@@ -441,7 +441,7 @@ def test_native_failure_preserves_workspace_and_continues_sibling_and_grants(db,
     db.insert_agent("dev", "box", "agt-dev", template="default", grant_all=True)
     target = Mock(spec=Transport)
     target.logger = None
-    target.run.return_value.stdout = "native-identity"
+    target.run.return_value.stdout = "\nAGW_NATIVE_ID=native-identity\n"
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     events = []
 

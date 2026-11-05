@@ -22,7 +22,7 @@ def test_admin_session_create_redacts_resolved_values_in_actual_command_log(tmp_
     from agentworks.sessions import manager, tmux
     from agentworks.sessions.manager import _create
 
-    events = []
+    events: list[str] = []
     db = _create_stubs(tmp_path, monkeypatch, events)
     stub_build_registry(monkeypatch)
     stub_vm_ssh_identity(monkeypatch)

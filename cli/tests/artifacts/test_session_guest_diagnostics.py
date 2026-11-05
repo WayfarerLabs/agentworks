@@ -1,5 +1,7 @@
 """Guest failures remain bounded and redacted at session boundaries."""
 
+import subprocess
+import traceback
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
@@ -16,14 +18,14 @@ from tests.artifacts.test_native_probe import probe
 from tests.native_setup_fixtures import LocalFixtureTransport
 
 
-def hostile_text():
+def hostile_text() -> tuple[str, str]:
     secret = uuid4().hex
     middle = len(secret) // 2
     rendered = secret[:middle] + "\x1b[31m\ufffd" + secret[middle:]
     return secret, "\x1b]0;guest-title\x07\n" + rendered + "\n" + "x" * (1024 * 1024)
 
 
-def assert_safe(text, secret):
+def assert_safe(text: str, secret: str) -> None:
     assert secret not in text
     assert "\x1b" not in text and "\x07" not in text and "\n" not in text and "\r" not in text
     assert len(text.encode()) <= 2048
@@ -71,6 +73,7 @@ def test_setup_runner_preserves_error_identity_and_sanitizes_environment():
         SetupRunner(target, {"TOKEN": secret}).run("fixture")
     assert caught.value is failure
     assert_safe(str(failure), secret)
+    assert failure.hint is not None
     assert_safe(failure.hint, secret)
 
 
@@ -121,3 +124,38 @@ def test_malformed_native_persona_metadata_keeps_its_path():
     path = "/fixture/.grok/agents/operator.md"
     problems = _inventory_problems([{"kind": "agent", "path": path, "frontmatter": ""}], (), {})
     assert len(problems) == 1 and problems[0].path == path
+
+
+def test_firstparty_ssh_timeout_cannot_expose_setenv_through_its_traceback(monkeypatch):
+    from agentworks.transports.ssh import SSHTransport
+
+    secret = uuid4().hex
+    calls: list[list[str]] = []
+
+    def run(arguments, **kwargs):
+        calls.append(arguments)
+        if len(calls) == 1:
+            return subprocess.CompletedProcess(arguments, 0, "\nAGW_PYTHON3=available\n", "")
+        raise subprocess.TimeoutExpired(arguments, 30)
+
+    monkeypatch.setattr("agentworks.transports.ssh.subprocess.run", run)
+    with pytest.raises(SSHError) as caught:
+        probe_native(SSHTransport("fixture.invalid", retries=1), tool="grok", environment={"TOKEN": secret})
+    assert len(calls) == 2 and any(secret in argument for argument in calls[1])
+    assert secret not in "".join(traceback.format_exception(caught.value))
+    assert caught.value.__cause__ is None and caught.value.__suppress_context__
+
+
+def test_safe_domain_causes_survive_without_unsafe_implicit_context():
+    from agentworks.errors import StateError
+    from agentworks.harness_setup.outcomes import sanitize_setup_error
+
+    secret, payload = hostile_text()
+    cause = ExternalError(payload, hint=payload)
+    error = StateError(payload)
+    error.__cause__ = cause
+    error.__context__ = subprocess.TimeoutExpired(["fixture", secret], 30)
+    sanitize_setup_error(error, redactions=(secret,))
+    assert error.__cause__ is cause and error.__context__ is None
+    assert_safe(str(cause), secret)
+    assert secret not in "".join(traceback.format_exception(error))

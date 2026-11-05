@@ -103,7 +103,7 @@ def test_component_inputs_keep_only_ancestors_and_retirement(db, registry, vm, m
 def native(monkeypatch, tmp_path):
     target = Mock(spec=Transport)
     target.logger = None
-    target.run.return_value = SimpleNamespace(stdout="native-identity", ok=True)
+    target.run.return_value = SimpleNamespace(stdout="\nAGW_NATIVE_ID=native-identity\n", ok=True)
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *a: "fixture")

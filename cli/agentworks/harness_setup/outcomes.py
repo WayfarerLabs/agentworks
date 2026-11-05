@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks.errors import AgentworksError, StateError
-from agentworks.resources.render import sanitize_fact_line
+from agentworks.terminal import sanitize_fact_line
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -72,7 +72,16 @@ def sanitize_setup_error(
         current.args = (sanitize_setup_diagnostic(str(current), redactions=values, redact=redact),)
         if current.hint:
             current.hint = sanitize_setup_diagnostic(current.hint, redactions=values, redact=redact)
-        current = current.__cause__
+        # Provider exception attributes can embed SSH argv and resolved values.
+        # Keep safe domain causes, but do not expose raw provider chains in logs
+        # or --debug output after sanitizing only their outer message.
+        current.__context__ = None
+        current.__suppress_context__ = True
+        cause = current.__cause__
+        if not isinstance(cause, AgentworksError):
+            current.__cause__ = None
+            break
+        current = cause
 
 
 @dataclass(frozen=True)

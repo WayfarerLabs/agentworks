@@ -879,7 +879,6 @@ assertion, timeout or test-selection weakening was used. The additional round is
 published findings require a later authenticated disposition rather than an automatic fifth
 correction round. Both locks still await the final requirement-by-requirement live acceptance audit.
 
-
 ## Additional authorized feedback/fix round 1 of 2, 2026-11-05
 
 The operator authorized up to two further public correction rounds and allowed unrelated fixes with
@@ -909,7 +908,7 @@ report `6652928141`. The start is recorded in PR comment `6663467162`.
       checkouts. Preserve unexplained or occupied reservations instead of deleting them. Real Git
       controls reproduce replacement-work loss on the prior head and preserve committed, untracked
       and stashed work with the correction.
-- [x] Correct the adjacent admin session-create log redactions and exact-pane output capture, with
+- [x] Correct the adjacent admin session-create log secret protection and exact-pane output capture, with
       real command-log and local tmux checks. Explicit non-interactive confirmations decline without
       reading input or granting default consent. Add useful binding/corruption diagnostics and update
       permanent recovery guidance, including source changes needed before destructive recreation.

@@ -199,7 +199,9 @@ def test_legacy_codec_only_trusts_complete_or_explicit_routing_results(version, 
     assert stored.payload.value == payload
     canonical = canonicalize_native_setup(stored)
     assert canonical.payload_version == 4
-    assert canonical.value["records"][0]["artifact_inputs"] == (None if expected is None else [identity])
+    records = canonical.value["records"]
+    assert isinstance(records, list) and isinstance(records[0], dict)
+    assert records[0]["artifact_inputs"] == (None if expected is None else [identity])
     assert decode_native_setup(_slice(canonical)) == decoded
 
 

@@ -48,6 +48,7 @@ def test_confirmed_empty_deferrals_do_not_hold_receiver_content(db, tmp_path, re
     # Exercise the publisher with this routing decision: own content can update
     # and retire even though the VM's unrelated native application is incomplete.
     transport = LocalFixtureTransport(tmp_path / receiver)
+    assert routed.inputs.local is not None
     item = next(routed.inputs.local.items())
     path = transport.home / "own-rule"
     retired = transport.home / "own-skill"
