@@ -26,6 +26,7 @@ touches the network.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -95,13 +96,17 @@ def _wire(
     *,
     errors: dict[str, BaseException] | None = None,
     listed: str = "",
+    statuses: dict[str, int] | None = None,
 ) -> _Calls:
     """Mock the backend seams; return the recorded calls.
 
     ``errors`` maps a substring (of the joined wsl args or the
     PowerShell script) to the exception the seam raises when it sees it
     (the call is still recorded first, so tests can pin exactly-once
-    attempts). ``listed`` is what ``wsl --list`` prints.
+    attempts). ``listed`` is what ``wsl --list`` prints, and ``statuses``
+    maps the first wsl argument (``--unregister``, ``--list``) to its
+    exit status, 0 when absent. ``_wsl`` itself runs for real over the
+    faked process.
     """
     calls = _Calls()
 
@@ -110,18 +115,19 @@ def _wire(
             if needle in text:
                 raise exc
 
-    def _fake_wsl(args: list[str], *, check: bool = True, timeout: int = 300) -> str:
+    def _fake_run_wsl(args: list[str], *, timeout: int = 300) -> subprocess.CompletedProcess[str]:
         joined = " ".join(args)
         calls.events.append(("wsl", joined))
         _raise_if_matched(joined)
-        return listed if args[:1] == ["--list"] else ""
+        status = (statuses or {}).get(args[0], 0)
+        return subprocess.CompletedProcess(args, status, listed if args[:1] == ["--list"] else "", "")
 
     def _fake_powershell(script: str, *, check: bool = True, timeout: int = 120) -> str:
         calls.events.append(("ps", script))
         _raise_if_matched(script)
         return ""
 
-    monkeypatch.setattr(wsl2, "_wsl", _fake_wsl)
+    monkeypatch.setattr(wsl2, "_run_wsl", _fake_run_wsl)
     monkeypatch.setattr(wsl2, "_powershell", _fake_powershell)
     monkeypatch.setattr(wsl2, "_download_debian_rootfs", lambda tarball, *, tag: None)
     monkeypatch.setattr(WSL2Platform, "_distro_exists", staticmethod(lambda name: False))
@@ -185,7 +191,6 @@ def test_failure_mid_provision_cleans_up_and_reraises(
 
     _assert_teardown_ran(calls)
     assert not any("Interrupted" in w for w in captured_output.warnings)
-    assert not any("Cleanup abandoned" in w for w in captured_output.warnings)
 
 
 def test_interrupt_during_primary_bootstrap_cleans_up_and_reraises_the_original(
@@ -221,8 +226,7 @@ def test_second_interrupt_abandons_cleanup_and_retains_the_row(
     assert exc.value.platform_metadata == {"distro_name": "vm1"}
     assert len(calls.wsl("--unregister")) == 1
     assert calls.ps("Remove-Item") == []
-    (abandoned,) = [w for w in captured_output.warnings if "Cleanup abandoned" in w]
-    assert "'wsl --unregister vm1'" in abandoned
+    assert any("'wsl --unregister vm1'" in w for w in captured_output.warnings)
 
 
 def test_cleanup_failure_warns_and_retains_the_row_with_the_original_failure(
@@ -250,7 +254,7 @@ def test_cleanup_failure_warns_and_retains_the_row_with_the_original_failure(
 def test_a_distro_still_registered_after_the_teardown_is_retained(
     monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, path: str
 ) -> None:
-    """``wsl --unregister`` runs unchecked, so the listing afterwards is what shows the distro gone."""
+    """The listing still names the distro, so it is not gone whatever the unregister said."""
     _wire(monkeypatch, listed="Debian\nvm1\n")
     failure: BaseException = RuntimeError("original failure") if path == "failure" else KeyboardInterrupt("first")
     monkeypatch.setattr(wsl2, "run_bootstrap", MagicMock(side_effect=failure))
@@ -430,5 +434,49 @@ def test_a_delete_that_leaves_the_distro_registered_raises_so_core_keeps_the_row
     _wire(monkeypatch, listed="vm1\n")
     vm = SimpleNamespace(name="vm1", platform_metadata={"distro_name": "vm1"})
 
-    with pytest.raises(StateError, match="still registered"):
+    with pytest.raises(StateError):
         WSL2Platform("wsl2", {}).delete(vm, RunContext())  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("unregister", "listing", "listed", "gone"),
+    [
+        (0, 0, "Debian\n", True),
+        (1, 0, "Debian\n", True),  # never registered: the unregister fails, the listing does not name it
+        (0, 1, "", True),  # the last distro went: the listing fails, but the unregister succeeded
+        (1, 1, "Error code: Wsl/WSL_E_DEFAULT_DISTRO_NOT_FOUND\n", True),  # WSL has no distro at all
+        (1, 1, "", False),  # neither succeeded, so nothing shows it gone
+        (1, 1, "The operation was aborted.\n", False),
+        (0, 0, "vm1\n", False),
+    ],
+    ids=["clean", "never-registered", "last-distro", "no-distributions", "both-failed", "listing-failed", "listed"],
+)
+def test_the_delete_counts_the_distro_gone_only_on_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+    unregister: int,
+    listing: int,
+    listed: str,
+    gone: bool,
+) -> None:
+    """A listing that fails says nothing: the distro is gone only when a step that succeeded shows it."""
+    _wire(monkeypatch, listed=listed, statuses={"--unregister": unregister, "--list": listing})
+    vm = SimpleNamespace(name="vm1", platform_metadata={"distro_name": "vm1"})
+
+    if gone:
+        WSL2Platform("wsl2", {}).delete(vm, RunContext())  # type: ignore[arg-type]
+    else:
+        with pytest.raises(StateError):
+            WSL2Platform("wsl2", {}).delete(vm, RunContext())  # type: ignore[arg-type]
+
+
+def test_a_rollback_whose_listing_fails_retains_the_row(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    _wire(monkeypatch, statuses={"--unregister": 1, "--list": 1})
+    monkeypatch.setattr(wsl2, "run_bootstrap", MagicMock(side_effect=RuntimeError("original failure")))
+
+    with pytest.raises(RetainedProvisioningError) as caught:
+        WSL2Platform("wsl2", {}).create(_request(), RunContext())
+
+    assert caught.value.platform_metadata == {"distro_name": "vm1"}

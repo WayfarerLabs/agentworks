@@ -194,8 +194,9 @@ and DB migration.
   absence, GCE confirms instance absence before removing its lifetime deny, and EC2 verifies account
   and ownership before terminating, waiting, and deleting its security group. Proxmox confirms that
   the node no longer lists the VMID, and Lima relies on `limactl delete --force`, which fails unless
-  the instance is gone or was never there. WSL2 unregisters unchecked and then confirms that
-  `wsl --list` no longer names the distro.
+  the instance is gone or was never there. WSL2 counts the distro gone only when `wsl --list` does
+  not name it and either `wsl --unregister` or the listing exited 0, or the listing reports that no
+  distro is installed at all; a listing that fails shows nothing.
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
 - `run_as_root(vm, ctx, script, deadline) -> RawRun` **MUST** run `/bin/bash -s` as root through the
