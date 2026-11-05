@@ -23,9 +23,15 @@ class ProxmoxAPIError(ProvisioningError):
     ``code`` carries the HTTP status when the failure was an HTTP error
     (``None`` for a non-HTTP failure), so callers can distinguish an
     auth rejection (401/403) from other failures without parsing the
-    message. Used by the platform's ``runup`` token check."""
+    message. Used by the platform's ``runup`` token check. ``provider_message``
+    is populated only from a structured JSON error response."""
 
     code: int | None = None
+    provider_message: str | None = None
+
+
+class ProxmoxVMNotFoundError(ProxmoxAPIError):
+    """The provider confirms this node's exact VM configuration is absent."""
 
 
 _QGA_BOOLEAN_FIELDS = ("exited", "out-truncated", "err-truncated")
@@ -165,9 +171,21 @@ class ProxmoxAPI:
             with response as resp:
                 resp_body = resp.read().decode()
         except urllib.error.HTTPError as e:
-            err_body = e.read().decode() if e.fp else ""
+            err_body = e.read().decode(errors="replace") if e.fp else ""
             err = ProxmoxAPIError(f"Proxmox API {method} {path} failed ({e.code}): {err_body}")
             err.code = e.code
+            try:
+                error_response = json.loads(err_body)
+            except ValueError:
+                error_response = None
+            if (
+                isinstance(error_response, dict)
+                and "data" in error_response
+                and error_response["data"] is None
+                and error_response.get("errors") in (None, {})
+                and isinstance(error_response.get("message"), str)
+            ):
+                err.provider_message = error_response["message"]
             raise err from e
         except (OSError, UnicodeError) as e:
             raise ProxmoxAPIError(f"Proxmox API {method} {path} failed: {e}") from e
@@ -248,9 +266,24 @@ class ProxmoxAPI:
         return str(result)
 
     def vm_status(self, node: str, vmid: int, *, timeout: float | None = None) -> dict[str, Any]:
-        """Get current VM status."""
-        result = self._request("GET", f"/nodes/{node}/qemu/{vmid}/status/current", timeout=timeout)
-        return result  # type: ignore[no-any-return]
+        """Get current VM status, distinguishing exact provider-confirmed absence.
+
+        Proxmox's AbstractConfig::load_config reports missing configurations as
+        HTTP 500 with this exact JSON message. Other failures and missing config
+        on another node or VMID are not evidence of absence for this target.
+        """
+        try:
+            result = self._request("GET", f"/nodes/{node}/qemu/{vmid}/status/current", timeout=timeout)
+        except ProxmoxAPIError as error:
+            missing = f"Configuration file 'nodes/{node}/qemu-server/{vmid}.conf' does not exist"
+            if error.code == 500 and error.provider_message in (missing, missing + "\n"):
+                failure = ProxmoxVMNotFoundError(f"Proxmox VM {vmid} is absent from node '{node}'")
+                failure.code = error.code
+                raise failure from error
+            raise
+        if not isinstance(result, dict) or result.get("status") not in ("running", "stopped"):
+            raise ProxmoxAPIError(f"Proxmox status for VM {vmid} on node '{node}' is malformed")
+        return result
 
     # -- Tasks -----------------------------------------------------------------
 
