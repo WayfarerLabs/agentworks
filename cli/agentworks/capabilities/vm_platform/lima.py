@@ -686,7 +686,19 @@ class LimaPlatform(VMPlatform):
             output.detail(f"Lima VM '{vm.name}' is already running")
             return
         output.info(f"Starting Lima VM '{vm.name}'...")
-        self._host.run(f"limactl start {self._instance_name(vm)}")
+        try:
+            self._host.run(f"limactl start {self._instance_name(vm)}")
+        except LimaCommandFailed as error:
+            # limactl start waits up to ten minutes for the guest's sshd, so a broken one ends here.
+            raise ConnectivityError(
+                f"Lima VM '{vm.name}' did not finish starting: {error}",
+                entity_kind="vm",
+                entity_name=vm.name,
+                hint=(
+                    f"Lima waits for the VM's SSH server. Run 'agw vm recover {vm.name}', which repairs it "
+                    "while Lima can still reach the VM; if Lima cannot, delete and recreate the VM."
+                ),
+            ) from error
         output.info(f"Lima VM '{vm.name}' started")
 
     def stop(self, vm: VMRow, ctx: RunContext) -> None:

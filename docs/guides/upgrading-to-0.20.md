@@ -238,10 +238,9 @@ before they resolve the auth key.
   in the Tailscale admin console. No start resolves the auth key any more.
 - **`agw vm recover NAME`** is new. It starts a stopped VM first; then, through the platform's own
   channel, it records missing host keys once you confirm their fingerprints, then restores your SSH
-  public key, restarts a broken SSH server on WSL2 and Proxmox, installs `python3`, starts
-  `tailscaled` if it is not running, and rejoins Tailscale only when the node needs a login. Then it
-  waits once for the VM to answer. See the [command reference](../../cli/command-reference.md) for
-  what it refuses.
+  public key, restarts a broken SSH server, installs `python3`, starts `tailscaled` if it is not
+  running, and rejoins Tailscale only when the node needs a login. Then it waits once for the VM to
+  answer. See the [command reference](../../cli/command-reference.md) for what it refuses.
 - **`vm rekey`** runs its steps as one script through the platform's own channel and keeps an
   operation log. When the VM does not answer over SSH at its new address after the rekey, the
   command fails with a hint to run `agw vm recover NAME`, instead of warning and exiting 0.

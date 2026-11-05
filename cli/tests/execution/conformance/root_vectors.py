@@ -326,7 +326,8 @@ def the_repair_runs_to_status_zero(lane: RootLane) -> None:
     python3 with its standard library. Run it once on a guest prepared with python3 absent and once with only
     ``python3-minimal``; preparing them is by hand, since it removes packages. The rekey and logout scripts change
     the node, so their live cells are ``vm rekey`` and ``vm delete``; on the guest's own Bash they run here against
-    stubs. On WSL2 and Proxmox the repair's sshd half runs too, restarting ``ssh.service``."""
+    stubs. The repair's sshd half runs on every platform, restarting ``ssh.service``: over sshd's own channel
+    (Lima, Remote Lima, the clouds) the script's session must survive it."""
     from agentworks.capabilities.base import RunContext
     from agentworks.vms import recovery
 
@@ -335,7 +336,7 @@ def the_repair_runs_to_status_zero(lane: RootLane) -> None:
     admin = _admin(lane)
     stand_in_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOU3HUqrGubKZio8MVx9WOFPYHGIHl5tIyF3skwoAxv0 agw-conformance"
     vm: Any = SimpleNamespace(name="conformance", admin_username=admin)
-    # The lane's own sshd dependence, so the sshd half runs on WSL2 and Proxmox.
+    # The lane's own sshd dependence, which only recover's failure hint reads.
     platform: Any = _LanePlatform(lane, recovery_needs_guest_sshd=lane.recovery_needs_guest_sshd)
 
     # A healthy node reads Running, so the stand-in key is never used.

@@ -766,11 +766,12 @@ resolves up front, with the site's secrets. In one run it:
    confirm on, recover refuses such a VM before resolving anything; import its keys from a verified
    file with `agw vm import-host-keys <name> --known-hosts FILE` instead.
 2. Runs one repair script as root, in this order: it restores your SSH public key in the admin's
-   `authorized_keys`; restarts a broken SSH server on WSL2 and Proxmox (where the channel does not
-   go through it); installs `python3` when it is missing or lacks its standard library; starts
-   `tailscaled` if it is not running and waits up to about 30 seconds for its state to settle; and
-   rejoins Tailscale only when the node needs a login. A missing Tailscale is reported, not
-   installed.
+   `authorized_keys`; checks the SSH server's configuration (a failed check stops the repair), then
+   unmasks, enables and restarts it, which ends no open session, so a stopped or masked server is
+   repaired even where the channel goes through it, as Lima's persistent connection can; installs
+   `python3` when it is missing or lacks its standard library; starts `tailscaled` if it is not
+   running and waits up to about 30 seconds for its state to settle; and rejoins Tailscale only when
+   the node needs a login. A missing Tailscale is reported, not installed.
 3. Reads the VM's tailnet address and records it. After a rejoin, an address that cannot be read
    logs the node out again, as create does.
 4. Waits once for the VM to answer over SSH.

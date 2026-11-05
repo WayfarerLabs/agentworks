@@ -226,21 +226,23 @@ def test_an_install_that_leaves_the_interpreter_unrunnable_fails_the_repair(gues
     assert guest.called("tailscale") == []
 
 
-def test_sshd_is_repaired_only_where_the_channel_does_not_use_it(guest: Guest) -> None:
-    restart = "systemctl restart ssh.service"
+@pytest.mark.parametrize("needs_guest_sshd", [True, False])
+def test_sshd_is_repaired_whatever_the_channel(guest: Guest, needs_guest_sshd: bool) -> None:
+    """A channel through sshd can run the script while sshd is stopped or masked (Lima's persistent connection)."""
+    assert _repair(guest, needs_guest_sshd=needs_guest_sshd).status == 0
 
-    assert _repair(guest, needs_guest_sshd=True).status == 0
-    assert restart not in guest.calls
-
-    assert _repair(guest, needs_guest_sshd=False).status == 0
-    assert restart in guest.calls
+    assert [call for call in guest.calls if call.endswith(" ssh.service")] == [
+        "systemctl unmask ssh.service",
+        "systemctl enable ssh.service",
+        "systemctl restart ssh.service",
+    ]
 
 
 def test_sshd_is_repaired_before_python3_is_installed(guest: Guest) -> None:
     """A broken sshd gets SSH access back before an install that can take minutes."""
     guest.set("python-status", "1")
 
-    assert _repair(guest, needs_guest_sshd=False).status == 0
+    assert _repair(guest).status == 0
 
     commands = [call.split(" ", 1)[0] for call in guest.calls]
     assert commands.index("sshd") < commands.index("apt-get")
@@ -272,7 +274,7 @@ def test_tailscaled_is_started_before_its_state_is_read_only_when_it_is_not_runn
 def test_an_sshd_configuration_that_fails_its_test_is_not_restarted(guest: Guest) -> None:
     guest.set("sshd-status", "255")
 
-    result = _repair(guest, needs_guest_sshd=False)
+    result = _repair(guest)
 
     assert result.status == 1
     assert "systemctl restart ssh.service" not in guest.calls

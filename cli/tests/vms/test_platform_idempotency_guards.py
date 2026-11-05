@@ -125,6 +125,30 @@ def test_lima_start_proceeds_when_stopped(monkeypatch: pytest.MonkeyPatch, captu
     assert ran and "limactl start" in ran[0]
 
 
+def test_a_lima_start_that_fails_is_a_typed_error_naming_recover(
+    monkeypatch: pytest.MonkeyPatch, captured_output: object
+) -> None:
+    """``limactl start`` waits ten minutes for the guest's sshd; a broken one must not end in a raw limactl error."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed
+    from agentworks.errors import ConnectivityError
+
+    platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
+    monkeypatch.setattr(LimaPlatform, "status", lambda self, vm, ctx: VMStatus.STOPPED)
+
+    def run(self: object, cmd: str, **kwargs: object) -> str:
+        raise LimaCommandFailed(f"limactl command failed (exit 1): {cmd}")
+
+    monkeypatch.setattr(LimaHost, "run", run)
+
+    with pytest.raises(ConnectivityError) as caught:
+        platform.start(_vm(), RunContext())  # type: ignore[arg-type]
+
+    assert caught.value.entity_name == "v1"
+    assert "agw vm recover v1" in (caught.value.hint or "")
+    assert isinstance(caught.value.__cause__, LimaCommandFailed)
+
+
 def test_proxmox_start_skips_when_already_running(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:
     """The empty context refuses any `ctx.secret` read, so a passing
     guard proves the API client was never built."""

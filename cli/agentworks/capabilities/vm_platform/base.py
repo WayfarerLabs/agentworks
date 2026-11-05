@@ -226,8 +226,9 @@ class VMPlatform(Capability):
     native_shell_unavailable_hint: ClassVar[str | None] = None
 
     # Whether ``run_as_root``'s channel goes through the guest's sshd, so a
-    # broken sshd means no root script can run at all. Declared by every
-    # platform (a descriptor requirement), never defaulted here.
+    # broken sshd can leave no root script a way in (recover's failure hint
+    # says so). Declared by every platform (a descriptor requirement), never
+    # defaulted here.
     recovery_needs_guest_sshd: ClassVar[bool]
 
     @property

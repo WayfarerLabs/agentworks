@@ -340,7 +340,7 @@ def vm_recover(
     Starts the VM first if it is stopped. Then, through the platform's own
     channel, without the VM's Tailscale: records a missing host key once you
     confirm its fingerprints, restores your SSH key, restarts a broken SSH
-    server where the platform's channel does not use it, installs python3,
+    server, installs python3,
     starts tailscaled if it is not running, and rejoins Tailscale only when
     the node needs a login. Then it waits for the VM to answer over SSH, and
     records your configured SSH identity as the VM's.

@@ -6,10 +6,10 @@ without its Tailscale or, on a platform whose channel is not sshd, its SSH
 server:
 
 - :func:`repair`, ``agw vm recover``'s one script: restore the admin's
-  authorized key, restart a broken sshd where the channel does not depend on
-  it, install python3 when agw-launch's interpreter does not run, start ``tailscaled`` if it is not running and wait
-  for its state to settle, and join Tailscale only when the node needs a
-  login.
+  authorized key, restart a broken sshd, install python3 when agw-launch's
+  interpreter does not run, start ``tailscaled`` if it is not running and
+  wait for its state to settle, and join Tailscale only when the node needs
+  a login.
 - :func:`rekey`, ``vm rekey``'s logout and rejoin with a new auth key.
 
 ``vm delete``'s logout is ``tailscale_join.log_out``, the one logout.
@@ -74,7 +74,6 @@ set -eu
 PATH="$PATH:/usr/sbin:/sbin"
 admin={admin}
 key={key}
-repair_sshd={repair_sshd}
 
 entry=$(getent passwd "$admin") || {{ echo "the admin account '$admin' does not exist" >&2; exit 1; }}
 home=$(printf '%s\\n' "$entry" | cut -d: -f6)
@@ -90,16 +89,18 @@ chmod 700 "$home/.ssh"
 chmod 600 "$keys"
 
 # Before the package install, which can take minutes: a VM whose sshd is
-# broken gets its SSH access back first.
-if [ "$repair_sshd" = 1 ]; then
-    # The unit creates sshd's privilege separation directory; a stopped or
-    # masked one may have left none, and the configuration test needs it.
-    install -d -m 0755 /run/sshd
-    sshd -t || {{ echo "sshd's configuration test failed" >&2; exit 1; }}
-    systemctl unmask ssh.service
-    systemctl enable ssh.service
-    systemctl restart ssh.service
-fi
+# broken gets its SSH access back first. This runs on every channel, sshd's
+# own included: a channel that runs this script can still face a stopped,
+# masked or misconfigured sshd (Lima's persistent connection outlives the
+# daemon, and a running daemon does not reread its configuration), and
+# restarting ssh.service, whose KillMode is process, ends no session. The
+# unit creates sshd's privilege separation directory; a stopped or masked
+# one may have left none, and the configuration test needs it.
+install -d -m 0755 /run/sshd
+sshd -t || {{ echo "sshd's configuration test failed" >&2; exit 1; }}
+systemctl unmask ssh.service
+systemctl enable ssh.service
+systemctl restart ssh.service
 
 # The interpreter agw-launch runs is what is tested, not the package: dpkg
 # still reports a removed but not purged python3, and python3-minimal alone
@@ -182,14 +183,13 @@ def repair(
 ) -> RootScriptResult:
     """Run the repair script once; :func:`joined` says whether it joined the tailnet.
 
-    ``public_key`` is the configured key's one line. The sshd repair runs only
-    where the platform's channel does not go through the guest's sshd: where
-    it does, a broken sshd means nothing could run.
+    ``public_key`` is the configured key's one line. The sshd repair runs on
+    every platform: that this script runs at all says the channel works now,
+    not that sshd will accept the next connection or survive the next boot.
     """
     payload = _REPAIR.format(
         admin=shlex.quote(vm.admin_username),
         key=shlex.quote(public_key),
-        repair_sshd=0 if platform.recovery_needs_guest_sshd else 1,
         python=shlex.quote(ssh_process.DEFAULT_PYTHON),
         backend_state=BACKEND_STATE_FRAGMENT,
         state_reads=SETTLING_STATE_READS,
