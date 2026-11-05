@@ -39,11 +39,17 @@ def start_vm(
     start IS this command's operation, and the operator-stopped flag
     is CLEARED by it, never consulted.
     """
+    import agentworks.execution as execution
     import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
 
     vm = _require_vm(db, name)
     _guard_incomplete_vm(vm)
+    # The wait below reaches the VM at its tailnet address through
+    # agentworks.execution, so a workstation off Tailscale or an unsupported
+    # client refuses before anything is resolved or started.
+    _mgr.verify_tailscale_available()
+    execution.resolve_ssh()
     # A VM with no host-key record is not refused here: the start boots it,
     # and the wait below raises TrustMissing, whose hint names
     # 'agw vm recover', which reads the keys through the platform.

@@ -34,6 +34,15 @@ if TYPE_CHECKING:
     from agentworks.db import Database
 
 
+@pytest.fixture(autouse=True)
+def _on_tailscale(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The workstation is on Tailscale with a supported client, whatever the test host is: start checks both first."""
+    from agentworks.execution.client import SSHClient
+
+    monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
+    monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: SSHClient("/usr/bin/ssh", (9, 2)))
+
+
 def _seed_vm(db: Database, *, operator_stopped: bool = False) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
@@ -124,6 +133,35 @@ def test_start_stopped_vm_resolves_once_starts_and_clears_flag(
     assert row.last_started_at is not None
     assert any("VM 'box' is ready" in m for m in captured_output.info)
     assert not any("already running" in m for m in captured_output.info)
+
+
+@pytest.mark.parametrize("refusal", ["off-tailscale", "unsupported-client"])
+def test_start_refuses_before_resolving_or_touching_the_vm(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    refusal: str,
+) -> None:
+    """The wait after the start reaches the VM over the tailnet with the OpenSSH client, so both are checked first."""
+    import agentworks.execution as execution
+    from agentworks.errors import AgentworksError, ConnectivityError
+    from agentworks.execution.errors import ClientUnsupported
+
+    _seed_vm(db, operator_stopped=True)
+    events = _fake_power(monkeypatch, VMStatus.STOPPED)
+
+    def _refuse() -> None:
+        raise ConnectivityError("not on Tailscale") if refusal == "off-tailscale" else ClientUnsupported("too old")
+
+    target = "verify_tailscale_available" if refusal == "off-tailscale" else "resolve_ssh"
+    monkeypatch.setattr(vm_manager if refusal == "off-tailscale" else execution, target, _refuse)
+
+    with pytest.raises(AgentworksError):
+        vm_manager.start_vm(db, make_config(), "box", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert resolve_counter == []
+    assert events == []
 
 
 class _ReachedTrust(Exception):

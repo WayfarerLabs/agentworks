@@ -27,6 +27,15 @@ if TYPE_CHECKING:
     from tests.vm_access_support import AccessRecorder
 
 
+@pytest.fixture(autouse=True)
+def _on_tailscale(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The workstation is on Tailscale with a supported client, whatever the test host is: start checks both first."""
+    from agentworks.execution.client import SSHClient
+
+    monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
+    monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: SSHClient("/usr/bin/ssh", (9, 2)))
+
+
 def _seed_vm(db: Database, *, address: str | None = "100.64.0.9") -> VMRow:
     db.insert_vm("box", site="proxmox", hostname="box")
     if address:

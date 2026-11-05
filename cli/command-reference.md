@@ -804,11 +804,12 @@ into the workspace; the exec variant runs the command from the workspace directo
 lives on a different VM is rejected with a `ValidationError` before any SSH work.
 
 `vm shell`, `vm exec`, `vm verify-connection`, `vm port-forward`, `agent shell` and `agent exec`,
-and `vm create`, `vm reinit` and `vm confirm-release` for their checks of the VM, connect with the
-OpenSSH client on the workstation, version 8.5 or newer (`vm shell --platform` uses the platform's
-own path instead and needs no `python3`; Remote Lima and the clouds need the client, and check it
-only once they connect, a cloud inside its temporary network route). Agentworks uses the first `ssh`
-on `PATH`; on Windows it uses only the native Win32-OpenSSH under `System32\OpenSSH` or
+`vm start` and the automatic start of a stopped VM, `vm rekey` and `vm recover` for their final
+waits, and `vm create`, `vm reinit` and `vm confirm-release` for their checks of the VM, connect
+with the OpenSSH client on the workstation, version 8.5 or newer (`vm shell --platform` uses the
+platform's own path instead and needs no `python3`; Remote Lima and the clouds need the client, and
+check it only once they connect, a cloud inside its temporary network route). Agentworks uses the
+first `ssh` on `PATH`; on Windows it uses only the native Win32-OpenSSH under `System32\OpenSSH` or
 `Program Files\OpenSSH`, never the `ssh` bundled with Git for Windows. `agw doctor` shows which
 client was resolved, and these commands, other than `vm shell --platform`, refuse an unsupported one
 before anything else runs. These commands run `ssh -F none` in batch mode, so `~/.ssh/config` does
