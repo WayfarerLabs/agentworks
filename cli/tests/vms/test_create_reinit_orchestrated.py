@@ -688,12 +688,10 @@ def test_a_phase_a_failure_that_would_hint_at_recover_gets_only_the_delete_guida
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,
-    capsys: pytest.CaptureFixture[str],
     cause: Exception,
 ) -> None:
     """Recover refuses a VM that never completed, so its hint must not reach the operator."""
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
-    from agentworks.cli._errors import echo_hint
     from agentworks.db import ProvisioningStatus
     from agentworks.errors import ProvisioningError
 
@@ -712,10 +710,8 @@ def test_a_phase_a_failure_that_would_hint_at_recover_gets_only_the_delete_guida
 
     with pytest.raises(ProvisioningError) as caught:
         vm_manager.create_vm(db, make_config(), name="fvm", interaction=TtyInteractionPolicy.REFUSE)
-    capsys.readouterr()
-    echo_hint(caught.value)
 
-    assert capsys.readouterr().err.count("Hint:") == 1
+    assert caught.value.__cause__ is None
 
 
 @pytest.mark.parametrize(

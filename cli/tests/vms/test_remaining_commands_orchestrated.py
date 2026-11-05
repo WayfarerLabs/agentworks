@@ -357,27 +357,31 @@ def test_rekey_missing_key_fails_at_the_one_resolve_before_status(
     assert events == []
 
 
-def test_rekey_rejects_multiline_key_before_status_or_daemon_action(
+@pytest.mark.parametrize(
+    "auth_key", ["tskey-prefix\ntskey-suffix\n", "", " \t "], ids=["multiline", "empty", "whitespace"]
+)
+def test_rekey_rejects_an_unusable_key_before_status_or_daemon_action(
     db: Database,
     make_config,
     monkeypatch: pytest.MonkeyPatch,
+    auth_key: str,
 ) -> None:
+    """A blank key would leave the join waiting for an interactive login after the logout."""
     from agentworks.errors import ValidationError
 
-    auth_key = "tskey-prefix\ntskey-suffix\n"
     config = make_config()
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", auth_key)
     _seed_vm(db)
     monkeypatch.setattr(
         ProxmoxPlatform,
         "status",
-        lambda *args, **kwargs: pytest.fail("status reached with a line-unsafe rekey secret"),
+        lambda *args, **kwargs: pytest.fail("status reached with an unusable rekey secret"),
     )
 
     with pytest.raises(ValidationError) as caught:
         vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert auth_key not in repr((caught.value.args, vars(caught.value)))
+    assert not auth_key.strip() or auth_key not in repr((caught.value.args, vars(caught.value)))
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
 

@@ -285,9 +285,8 @@ def test_the_shell_fix_targets_the_agent_for_an_agent_and_the_vm_for_the_admin()
     agent_fix = contract.shell_fix_command(WORKER, "box")
     admin_fix = contract.shell_fix_command(Admin(), "box")
 
-    assert agent_fix != admin_fix
-    assert agent_fix[-1] == "worker"
-    assert admin_fix[-1] == "box"
+    assert agent_fix[1:] == ("agent", "reinit", "worker")
+    assert admin_fix[1:] == ("vm", "reinit", "box")
 
 
 # -- The fragments, run for real by a local shell ------------------------------------------
