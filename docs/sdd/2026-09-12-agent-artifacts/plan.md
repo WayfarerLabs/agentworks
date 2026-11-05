@@ -1543,7 +1543,7 @@ main `c8d4dfb` and return to draft. The separate full live report was not publis
 - [x] Add a raw-before-normalized redaction regression with a failing deletion control. Keep the
       necessary pass; do not add a shared deferral abstraction or change missing-route logic merely
       for optional reason-text or counting differences.
-- [ ] Correct the related tmux liveness probe to target the exact pane and accept only valid native
+- [x] Correct the related tmux liveness probe to target the exact pane and accept only valid native
       observations. Exercise an actual private server alive then dead at status 23; malformed
       successful output remains unverified rather than falsely alive.
 - [ ] Complete the three independent private lanes and required integrated gates on the corrected
@@ -1582,3 +1582,10 @@ fixture failure. The fixture labeled the earlier premature-ID writer as the now-
 selection passes. Private correctness review also proved a preexisting real tmux liveness target/
 parser error that bypasses the corrected workload-failure path. The bounded prerequisite fix stays
 in the same round; integrated gates and all three lanes will review the corrected head again.
+
+Liveness correction `834463f4` integrates delegated `0f07c109`. The real-tool baseline produced 10
+failures and 7 passes, including a dead pane reported as alive; the corrected session selection
+passed 115 cases. Rolling back the target fails the real regression; rolling back parsing fails 13
+cases. Root integration passed 93 focused cases including the legacy file-preservation fixture. The
+lead independently verified all 19 reported worker test roots absent. Private reviewers will recheck
+this delta and the corrected fixture at one common final candidate.
