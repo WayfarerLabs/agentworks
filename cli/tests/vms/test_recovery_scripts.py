@@ -14,12 +14,14 @@ import os
 import stat
 import sys
 from dataclasses import dataclass
+from functools import partial
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.vm_platform.tailscale_join import log_out
 from agentworks.execution import root_script
 from agentworks.vms import recovery
 
@@ -296,7 +298,8 @@ def test_rekey_stops_at_the_first_failed_step_with_its_status(guest: Guest) -> N
 def test_logout_reports_the_logouts_own_status_and_output(guest: Guest, status: int) -> None:
     guest.set("logout-status", str(status))
 
-    result = recovery.logout(_platform(guest), _vm(), RunContext())
+    platform = _platform(guest)
+    result = log_out(partial(platform.run_as_root, _vm(), RunContext()))
 
     assert result.status == status
     assert guest.called("tailscale") == ["tailscale logout"]

@@ -6,6 +6,7 @@ This module imports nothing from the legacy transport stack.
 from __future__ import annotations
 
 import subprocess
+from functools import partial
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -119,9 +120,9 @@ def _tailscale_logout(vm: VMRow, platform: VMPlatform, ctx: RunContext) -> None:
     logout that never happened. Either way the node is named for removal
     instead.
     """
+    from agentworks.capabilities.vm_platform.tailscale_join import log_out
     from agentworks.db import VMStatus
     from agentworks.execution.errors import TrustMissing
-    from agentworks.vms import recovery
 
     node = vm.hostname
     removal = f"remove '{node}' in the Tailscale admin console if it is listed there"
@@ -136,7 +137,7 @@ def _tailscale_logout(vm: VMRow, platform: VMPlatform, ctx: RunContext) -> None:
         return
     output.info("Logging out of Tailscale...")
     try:
-        result = recovery.logout(platform, vm, ctx)
+        result = log_out(partial(platform.run_as_root, vm, ctx))
     except UserAbort:
         raise
     except TrustMissing:

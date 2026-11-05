@@ -1,6 +1,6 @@
 """Core's recovery scripts, run as root through the platform's own channel.
 
-Each of the three scripts has one function that runs it once with
+Each of the two scripts has one function that runs it once with
 ``root_script.run`` over ``platform.run_as_root``, so it reaches the VM
 without its Tailscale or, on a platform whose channel is not sshd, its SSH
 server:
@@ -11,15 +11,16 @@ server:
   for its state to settle, and join Tailscale only when the node needs a
   login.
 - :func:`rekey`, ``vm rekey``'s logout and rejoin with a new auth key.
-- :func:`logout`, ``vm delete``'s Tailscale logout.
+
+``vm delete``'s logout is ``tailscale_join.log_out``, the one logout.
 
 A script that finds a problem prints its reason on stderr and exits 1, so
 core reads its status only as zero or not and the reason reaches the
 operation log, never an error. The auth key is ``root_script``'s one secret,
 handed to Tailscale by ``JOIN_FRAGMENT`` on stdin.
 
-Rekey and logout can take the network away from their own channel, so they
-ignore ``SIGHUP`` and ``SIGPIPE`` and write nothing until they are done: each
+Rekey can take the network away from its own channel, so it ignores
+``SIGHUP`` and ``SIGPIPE`` and writes nothing until it is done: each
 step's output is captured with its status, the first failure stops the
 sequence, and the buffer is printed once at the end with ``|| true``. A
 channel that drops mid-script therefore leaves the remaining steps running
@@ -50,7 +51,6 @@ if TYPE_CHECKING:
 
 REPAIR_DEADLINE_SECONDS = 600
 REKEY_DEADLINE_SECONDS = 180
-LOGOUT_DEADLINE_SECONDS = 30
 
 JOINED = "joined"
 """The line the repair prints on stdout after it joined the tailnet."""
@@ -134,7 +134,7 @@ case "$state" in
 esac
 """
 
-# The prologue rekey and logout share: nothing reaches the channel until ``finish``.
+# Rekey's prologue: nothing reaches the channel until ``finish``.
 _CAPTURED = """\
 trap '' HUP PIPE
 set -eu
@@ -166,14 +166,6 @@ step systemctl restart tailscaled || finish
 sleep {pause}
 finish
 """
-
-_LOGOUT = (
-    _CAPTURED
-    + """\
-step tailscale logout || finish
-finish
-"""
-)
 
 
 def repair(
@@ -228,11 +220,6 @@ def rekey(
     return root_script.run(
         partial(platform.run_as_root, vm, ctx), payload, deadline=REKEY_DEADLINE_SECONDS, secret=auth_key, log=log
     )
-
-
-def logout(platform: VMPlatform, vm: VMRow, ctx: RunContext) -> RootScriptResult:
-    """Run the logout script once, with no operation log: it carries no secret and delete reports it."""
-    return root_script.run(partial(platform.run_as_root, vm, ctx), _LOGOUT, deadline=LOGOUT_DEADLINE_SECONDS)
 
 
 def require_success(result: RootScriptResult, *, script: str, vm_name: str, hint: str) -> None:

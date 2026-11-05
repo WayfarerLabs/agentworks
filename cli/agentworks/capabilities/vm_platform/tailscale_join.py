@@ -5,7 +5,8 @@ has installed Tailscale. The auth key travels only inside the join script,
 as ``root_script``'s unexported ``AGW_SECRET``, and :data:`JOIN_FRAGMENT`
 hands it to Tailscale on stdin, so it is in no argument on the workstation
 or the guest. The address read and the logout carry no key, so retrying a
-read never sends the key twice.
+read never sends the key twice. :func:`log_out` is the one logout, for the
+settle here and for ``vm delete``.
 
 This module imports nothing from the legacy transport stack.
 """
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
 
     from agentworks.execution.requests import RunRequest
     from agentworks.execution.results import Result
-    from agentworks.execution.root_script import RawRun
+    from agentworks.execution.root_script import RawRun, RootScriptResult
 
 JOIN_FRAGMENT = """printf '%s\\n' "$AGW_SECRET" | tailscale up --auth-key=file:/dev/stdin"""
 """The one join command: the shell's ``printf`` builtin pipes the key to Tailscale, which reads the file."""
@@ -127,32 +128,36 @@ def settle_tailnet_address(
 ) -> str:
     """The joined node's address, or the node logged out and ``ConnectivityError``.
 
-    A node whose address cannot be read is unusable, and core never enrolled
-    its host key, so nothing could log it out later: when the reads are
-    exhausted, ``tailscale logout`` runs once over the same channel. The
-    error's hint is then ``rerun_hint`` if the logout succeeded, and
-    otherwise names ``node`` for removal in the Tailscale admin console.
-    ``log`` records the reads and the logout in the caller's operation log.
+    A node whose address cannot be read is unusable, and nothing else would
+    log it out (after a create, core has not even enrolled its host key), so
+    when the reads are exhausted :func:`log_out` runs once over the same
+    channel. The error's hint is ``rerun_hint`` (``agw vm recover`` after a
+    rekey or a recover, a fresh key before a create runs again); when the
+    logout did not succeed, it first names ``node`` for removal in the
+    Tailscale admin console. ``log`` records the reads and the logout in the
+    caller's operation log.
     """
     try:
         return read_tailnet_address(run_as_root, node=node, log=log)
     except ConnectivityError as error:
         failure = error
-    if _log_out(run_as_root, log):
+    try:
+        logged_out = log_out(run_as_root, log=log).status == 0
+    except ConnectivityError:
+        logged_out = False
+    if logged_out:
         raise ConnectivityError(f"{failure}; the node was logged out of the tailnet", hint=rerun_hint) from failure
     raise ConnectivityError(
         f"{failure}, and it could not be logged out",
-        hint=f"Remove '{node}' in the Tailscale admin console.",
+        hint=f"Remove '{node}' in the Tailscale admin console. {rerun_hint}",
     ) from failure
 
 
-def _log_out(run_as_root: Callable[[bytes, float], RawRun], log: Callable[[RunRequest, Result], None] | None) -> bool:
-    """Whether ``tailscale logout`` completed with status 0; a raise counts as no."""
-    try:
-        result = root_script.run(run_as_root, "tailscale logout", deadline=LOGOUT_DEADLINE_SECONDS, log=log)
-    except ConnectivityError:
-        return False
-    return result.status == 0
+def log_out(
+    run_as_root: Callable[[bytes, float], RawRun], *, log: Callable[[RunRequest, Result], None] | None = None
+) -> RootScriptResult:
+    """Run ``tailscale logout`` once, carrying no secret; the caller reads the status and reports it."""
+    return root_script.run(run_as_root, "tailscale logout", deadline=LOGOUT_DEADLINE_SECONDS, log=log)
 
 
 def complete_cloud_bootstrap(

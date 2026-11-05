@@ -17,12 +17,13 @@ import time
 import uuid
 import warnings
 from dataclasses import dataclass
+from functools import partial
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT
+from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT, log_out
 from agentworks.execution import root_script
 
 if TYPE_CHECKING:
@@ -317,7 +318,7 @@ def the_repair_runs_to_status_zero(lane: RootLane) -> None:
     _stub_tailscale_and_systemctl(lane, tmp, slow_logout=False)
     stubbed: Any = _LanePlatform(lane, prefix=f"export PATH={tmp}:$PATH\n")
     rekeyed = recovery.rekey(stubbed, vm, RunContext(), auth_key=SECRET, log=None)
-    logged_out = recovery.logout(stubbed, vm, RunContext())
+    logged_out = log_out(partial(stubbed.run_as_root, vm, RunContext()))
     lane.run(f"rm -rf {tmp}")
 
     assert repaired.status == 0, repaired.stderr  # W6
