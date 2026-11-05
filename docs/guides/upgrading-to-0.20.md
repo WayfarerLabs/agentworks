@@ -200,7 +200,15 @@ has started.
   killed before then is kept with its provisioning incomplete. `vm start`, `vm stop`, `vm rekey`,
   `vm recover`, `vm reinit`, `vm exec`, `vm shell` (with `--platform` too), `vm port-forward`,
   `vm backup` and `vm confirm-release` refuse either, while `vm describe`, `vm list` and
-  `vm verify-connection` still run; delete it with `agw vm delete NAME`.
+  `vm verify-connection` still run; delete it with `agw vm delete NAME`. When the check that failed
+  is a missing `python3` or a missing host-key record, the error gives only that delete-and-recreate
+  guidance, since `vm recover` refuses a VM whose provisioning never completed.
+- **Cloud create** (AWS, Azure, GCP) waits up to 10 minutes for the new VM to answer over SSH at its
+  public address, instead of 30 tries 10 seconds apart. It fails at once, instead of trying again,
+  when the admin cannot run `sudo` without a password or the VM's host key changes during the
+  create.
+- **Proxmox create** no longer waits for the guest agent to report the VM's LAN address, and no
+  longer prints it.
 - **Reinit** starts with the same checks on the VM as it is. A live release that differs from the
   recorded one refuses first, as before. A failed check stops reinit before it changes anything and
   names recreation. The pam_env settings and an unsupported login shell only warn.
@@ -231,9 +239,13 @@ before they resolve the auth key.
   waits once for the VM to answer. See the [command reference](../../cli/command-reference.md) for
   what it refuses.
 - **`vm rekey`** runs its steps as one script through the platform's own channel and keeps an
-  operation log. When the new address cannot be read, the node is logged out and the error names
-  `agw vm recover`. When the VM does not answer over SSH after the rekey, the command fails with a
-  hint to run `agw vm recover NAME`, instead of warning and exiting 0.
+  operation log. When the VM does not answer over SSH at its new address after the rekey, the
+  command fails with a hint to run `agw vm recover NAME`, instead of warning and exiting 0.
+- **A node whose address cannot be read is logged out.** When `vm create`, `vm rekey` or
+  `vm recover` joins the node but cannot read its tailnet address, it logs the node out and fails
+  with a hint for the rerun: `agw vm recover NAME` after a rekey or a recover, and a fresh auth key
+  (for a single-use one) before running a create again. When that logout fails too, the hint first
+  names the node to remove in the Tailscale admin console, then gives the same rerun step.
 - **An empty auth key is refused.** `vm rekey` and `vm recover` refuse an empty or blank Tailscale
   auth key, as `vm create` does.
 - **`vm shell --platform` no longer takes `--workspace`.** Combining the two is refused; `cd` into
@@ -244,12 +256,15 @@ before they resolve the auth key.
   refuses a VM with no recorded host key. A platform without a native shell (Proxmox) is refused
   before anything is resolved.
 - **`vm delete`** reports whether the logout worked. It does not log out a cloud VM whose host key
-  was never recorded, and names the node to remove in the Tailscale admin console instead. It does
-  not start a stopped or deallocated VM to log it out either: it skips the logout and warns that the
-  node stays in the Tailscale admin console.
-- **A cloud VM's temporary SSH allow closes on `SIGTERM` and `SIGHUP`.** On macOS and Linux, every
-  command that opens a temporary firewall allow to a cloud VM (AWS, Azure, GCP) removes it when the
-  command is ended by `SIGTERM` or `SIGHUP` (a closed terminal), as it does on Ctrl-C.
+  was never recorded, and names the node to remove in the Tailscale admin console instead. It reads
+  the VM's power state once it holds the VM, so a WSL2 distro that the hold boots is still logged
+  out; a VM that is still stopped or deallocated is not, and the warning names its node for removal
+  in the admin console the same way.
+- **A cloud VM's temporary SSH allow closes on `SIGTERM` and `SIGHUP`.** On macOS and Linux, the
+  allow that a root script (`vm recover`, `vm rekey`, the logout at `vm delete`) or a
+  `vm shell --platform` session opens to a cloud VM (AWS, Azure, GCP) is removed when the command is
+  ended by `SIGTERM` or `SIGHUP` (a closed terminal), as it is on Ctrl-C. A second signal during
+  that cleanup is ignored, so it cannot cut the removal short.
 
 ## Third-party VM platforms
 
@@ -295,9 +310,18 @@ state the full contract, and the
 
 - **`ProvisionResult.tailnet_address` replaces `tailscale_ip`,** and the result no longer carries a
   transport. The address is required. `create()` joins Tailscale once through `run_as_root` with
-  `tailscale_join.join_tailscale` (the clouds through `complete_cloud_bootstrap`), reads the node's
-  address with `settle_tailnet_address`, and returns it. Core validates it, reaches the VM over SSH
-  there, and checks the live Debian release itself.
+  `tailscale_join.join_tailscale`, reads the node's address with `settle_tailnet_address`, and
+  returns it. Core validates it, reaches the VM over SSH there, and checks the live Debian release
+  itself.
+- **A cloud's create finishes through `complete_cloud_bootstrap(target, auth_key, node=...)`.** Its
+  `target` is a `public_ssh.PublicSSH` to the VM's public address under
+  `request.provisioning_trust`. It waits with
+  `PublicSSH.wait_until_answering(seconds=..., retry_refused_key=True)`, where a refused key raises
+  `public_ssh.KeyRefused` and is retried until the bound, since a cloud's guest agent may install
+  the key after sshd starts; then it waits for cloud-init, joins and settles the address.
+- **Phase A always calls `post_tailscale_ready`** once the VM contract passes, with the create's own
+  context, and `secure_failed_vm` when Phase A fails or is interrupted. A platform that opens
+  provisioning access in `create`, such as a bootstrap firewall allow, closes it in both.
 - **`generate_bootstrap_script()` no longer takes `tailscale_auth_key`.** The script it generates
   holds no secret and stops once Tailscale is installed, so a provider may retain it.
   `run_bootstrap()` runs it through a root channel, and `parse_bootstrap_steps()` replaces
