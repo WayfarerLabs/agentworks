@@ -709,13 +709,9 @@ class AzureVMPlatform(PublicAddressPlatform):
 
     def delete(self, vm: VMRow, ctx: RunContext) -> None:
         output.info(f"Deleting Azure VM '{vm.name}'...")
-        if not vm.platform_metadata.get("resource_id"):
-            # Row-only delete of a never-provisioned VM (nothing was
-            # created backend-side, so there is nothing to remove or
-            # verify); the caller deletes the row.
-            output.warn("no Azure resource ID, skipping Azure cleanup")
-            return
-
+        # A row with no resource ID (a create that ended before it
+        # returned) addresses nothing, so _resource_id refuses it rather
+        # than claim the resources its create may have left were deleted.
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         compute = self._compute_client(az_cfg, ctx)
         vm_delete_exc = delete_vm_and_resources(compute, self._network_client(az_cfg, ctx), rg, name)

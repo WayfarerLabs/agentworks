@@ -160,6 +160,11 @@ def delete_vm(
     remove the backend VM raises (the ``VMPlatform.delete`` contract)
     and the row survives for a retry, because a deleted row leaves a
     surviving backend VM orphaned with nothing to target it (#329).
+    The one refusal ``--force`` removes the row past is a platform's
+    refusal of a row with no platform metadata at all, which only a
+    create that ended before its platform returned leaves: nothing can
+    target that backend, so delete warns that it may remain, naming what
+    to look for, and removes the row and its host-key record.
     No activation gate ever opens (an operator-stopped VM would
     refuse; deletion never starts a stopped VM), and the Tailscale
     logout uses a hold-only span. ``UserAbort`` is the one exception
@@ -212,6 +217,7 @@ def delete_vm(
 
     with native_mutation_guard(db.path, vm.name):
         # Platform-specific cleanup (also handles Tailscale logout)
+        backend_left = False
         vm_node: LiveVMNode | None
         ops_ctx: RunContext | None = None
         try:
@@ -266,9 +272,28 @@ def delete_vm(
             # aborts the command HERE, keeping the row. Warning past it and
             # deleting the row would orphan a surviving backend VM with
             # nothing left to target it (#329). ``--force`` does not soften
-            # this: force skips the child-count guard and the confirm
-            # prompt, never a failed backend delete.
-            platform.delete(vm, ops_ctx)
+            # this, with one exception: a row the platform refuses because
+            # it holds no metadata at all, which only a create that ended
+            # before the platform returned leaves (create persists the
+            # metadata the moment the platform returns). Nothing can target
+            # its backend, so the row is all a retry could ever remove.
+            try:
+                platform.delete(vm, ops_ctx)
+            except StateError as refusal:
+                if vm.platform_metadata:
+                    raise
+                if not force:
+                    refusal.add_hint(
+                        f"Its create ended before the platform returned. Remove anything named or tagged "
+                        f"'{vm.hostname}' on vm-site '{vm.site}' there, then run "
+                        f"'agw vm delete --force {name}' to remove the row."
+                    )
+                    raise
+                output.warn(
+                    f"VM '{name}' has no platform metadata, so its backend was not deleted. Resources named "
+                    f"or tagged '{vm.hostname}' may remain on vm-site '{vm.site}'; remove them there."
+                )
+                backend_left = True
 
         # Clean up logs
         from agentworks.ssh import LOG_DIR
@@ -301,7 +326,7 @@ def delete_vm(
             trust.remove(name)
         finally:
             sync_ssh_config(config, db)
-        output.result(f"VM '{name}' deleted")
+        output.result(f"VM '{name}' removed; its backend was not deleted" if backend_left else f"VM '{name}' deleted")
 
 
 def _teardown_vm_sessions(db: Database, config: Config, vm: VMRow) -> None:

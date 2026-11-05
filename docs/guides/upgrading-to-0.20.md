@@ -200,9 +200,13 @@ has started.
   killed before then is kept with its provisioning incomplete. `vm start`, `vm stop`, `vm rekey`,
   `vm recover`, `vm reinit`, `vm exec`, `vm shell` (with `--platform` too), `vm port-forward`,
   `vm backup` and `vm confirm-release` refuse either, while `vm describe`, `vm list` and
-  `vm verify-connection` still run; delete it with `agw vm delete NAME`. When the check that failed
-  is a missing `python3` or a missing host-key record, the error gives only that delete-and-recreate
-  guidance, since `vm recover` refuses a VM whose provisioning never completed.
+  `vm verify-connection` still run; delete it with `agw vm delete NAME`. A create killed before its
+  platform finished leaves a row that records nothing addressing the backend: `vm delete` refuses
+  it, and `vm delete --force NAME` removes the row and its host-key record and warns that resources
+  named or tagged with the VM's hostname may remain on its vm-site, for you to remove there. When
+  the check that failed is a missing `python3` or a missing host-key record, the error gives only
+  that delete-and-recreate guidance, since `vm recover` refuses a VM whose provisioning never
+  completed.
 - **Cloud create** (AWS, Azure, GCP) waits up to 10 minutes for the new VM to answer over SSH at its
   public address, instead of 30 tries 10 seconds apart. It fails at once, instead of trying again,
   when the admin cannot run `sudo` without a password or the VM's host key changes during the

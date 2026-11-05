@@ -706,7 +706,11 @@ Linux `SIGTERM` or `SIGHUP`, or on Windows Ctrl-Break), it is kept with its prov
 Either way its temporary provisioning access is closed, and `vm start`, `vm stop`, `vm rekey`,
 `vm recover`, `vm reinit`, `vm exec`, `vm shell` (with `--platform` too), `vm port-forward`,
 `vm backup` and `vm confirm-release` refuse it, as they do a VM a killed create left in progress;
-`vm describe`, `vm list` and `vm verify-connection` still run. `agw vm delete <name>` removes it.
+`vm describe`, `vm list` and `vm verify-connection` still run. `agw vm delete <name>` removes it. A
+create killed before its platform finished (`SIGKILL`, or any kill on Windows) leaves a row that
+records nothing addressing the backend, so `vm delete` refuses it; `vm delete --force` then removes
+the row and its host-key record, and warns that resources named or tagged with the VM's hostname may
+remain on its vm-site, for you to remove there.
 
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
 alphanumeric plus dash, no leading/trailing dash): a short identifier for this Agentworks
@@ -788,7 +792,8 @@ booted by the hold delete keeps on it, and is then logged out), and neither is a
 key was never recorded, since nothing could verify the VM that answered; delete names the node
 instead. The backend VM is deleted either way. A backend delete that fails, such as a locked Proxmox
 VM or an unreachable Lima host, keeps the VM's row and its host-key record, so run `vm delete` again
-once the cause is fixed.
+once the cause is fixed. The one row `--force` removes past such a failure is one a killed create
+left with no platform metadata, as `vm create` describes above.
 
 `vm backup` exports the VM row and exact owner tree of agents, workspaces, sessions, events, grants,
 desired instance specs, and workspace files. It does not create or copy a provider VM snapshot,

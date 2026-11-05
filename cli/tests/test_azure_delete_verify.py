@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.errors import AuthorizationError
+from agentworks.errors import AuthorizationError, StateError
 from agentworks.plugins.azure.network import AzureError
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from tests._azure_platform_support import _RESOURCE_ID, _authorization_denied, _install_fakes
@@ -286,13 +286,13 @@ class TestGoneVMSucceeds:
         assert "agentworks-tagged disk" in warning
 
 
-def test_no_resource_id_short_circuits(monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput) -> None:
-    """Row-only delete of a never-provisioned VM: warn, touch nothing
-    backend-side (no delete, no probe), and return so the caller can
-    drop the row."""
+def test_a_row_with_no_resource_id_is_refused_and_touches_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A create that ended before it returned left no resource ID, so the
+    delete cannot address what it may have made: it refuses rather than
+    report those resources deleted, and makes no Azure call."""
     fakes = _install_fakes(monkeypatch)
 
-    _platform().delete(_vm_row(resource_id=None), RunContext())
+    with pytest.raises(StateError):
+        _platform().delete(_vm_row(resource_id=None), RunContext())
 
     assert fakes.events == []
-    assert any("no Azure resource ID" in w for w in captured_output.warnings)
