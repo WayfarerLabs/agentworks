@@ -1457,7 +1457,7 @@ Proxmox/workstation report `6652928141`. The start is recorded in PR comment `66
       skips. Detach unsafe provider traceback causes, preserve safe typed domain causes, and forward
       missing explicit route IDs through fresh active receivers without fabricating payloads.
       Restore the capability import boundary and remove the redundant join wrapper.
-- [ ] Complete the three private reviews, required integrated gates and final collateral audit.
+- [x] Complete the three private reviews, required integrated gates and final collateral audit.
 - [ ] Publish the exact green ready handoff without `review-requested`, then assess the separate
       full live result within the remaining one-round allowance.
 - [ ] Finish the requirement-by-requirement acceptance and promotion audit and create both locks
@@ -1496,3 +1496,29 @@ ready handoff must emphasize unknown versus confirmed-empty routes, first checkp
 codec evidence, inactive passthrough, optional session omission/inspection, clone cancellation and
 name reuse, native registration protection, bounded diagnostics, actual resolved-value logs, real
 pane capture, and locked/outage/already-gone Proxmox deletion on both tested PVE generations.
+
+### Corrected-head validation
+
+The three private lanes reviewed corrected source `b78d0fe`, the collateral alignment at `4bde5ae`,
+and the final test-only correction at `5f89ba1`, with no material findings remaining. Project review
+passed 52 focused cases; Muntz passed 143 and verified deletion controls for missing-ID forwarding
+and provider traceback secrecy; independent correctness passed 75, then the corrected final test.
+These selections overlap. The project findings restored the original truthful session-create
+checkbox and aligned the HLA, delivery LLD and durable artifact documentation with metadata-only
+forwarding after known-input validation.
+
+At `5f89ba1`, the full non-integration pytest selection passed 10,827 cases with 11 skips, exit 0.
+An earlier run passed 10,826 with one obsolete assertion requiring missing-route metadata to remain
+frozen; its replacement requires every missing identity to reach session deferrals while retaining
+incomplete-state, skip, ownership and actual file-byte checks. The focused correction passed 56
+cases. Ruff lint and format passed across 942 files; CI-exact mypy passed all 906 source/test files.
+File lint, Rulesync drift, locked-SDD validation, Typer isolation, source/wheel builds, Python
+website checks (160), Node website checks (103), deterministic builds for both site bases, and five
+isolated CLI drives all returned 0. The CLI drives covered help, first config initialization,
+artifact help and both packaged guides; the temporary home and site build roots were removed. These
+are local and isolated-process results, not final-head backend acceptance. Neither lock is created
+by them.
+
+The closeout read also removed stale SDD statements about a shell file workaround and fatal native
+identity collisions. Shell publishes directly; session identity conflicts leave affected inputs
+unhandled while independent inputs continue. Unsafe filesystem overlaps remain errors.

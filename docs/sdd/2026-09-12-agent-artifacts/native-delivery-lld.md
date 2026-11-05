@@ -94,8 +94,9 @@ belonging to one skill are one identity. Distinct origins claiming the same nati
 identity cannot be delivered by silently choosing one. Setup defers affected native entries with
 unchanged origins and reports partial completion; unrelated entries continue. Previously owned
 placements omitted from the new plan follow ordinary safe retirement, while modified/unowned content
-is retained. A new session carrier introducing a collision remains an error; conflicts solely
-between existing ancestor placements are reports. Session persona definitions are retained as
+is retained. Native identity collisions leave affected session inputs unhandled with a report;
+independent inputs continue. Conflicts solely between existing ancestor placements are reports.
+Unsafe filesystem destination overlaps remain errors. Session persona definitions are retained as
 individually owned files with their native identity; Claude and Grok still receive the combined
 definitions in one JSON argument. Previously handled ancestor payloads are not retransmitted.
 

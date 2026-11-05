@@ -481,12 +481,12 @@ separate native launch behavior. Claude supports that selection. Codex's existin
 config is prompt-mediated and does not promise full persona settings. Preserve that distinction in
 the CLI guidance and inspection output instead of claiming primary/delegated parity.
 
-With its session file workaround enabled, shell exposes the session publication index through
-`AGENTWORKS_ARTIFACTS_DIR`; its index records types, relative files and provenance for that
-session/run only. Ancestor publications use fixed locations: `~/.agentworks-artifacts/user/` for the
-actual user and `<workspace>/.agentworks-artifacts/` for the workspace. Document these locations
-without adding ancestor-index pointers or retransmitting handled payloads. Publication and
-discoverability fulfill shell delivery; shell does not claim to load rules into model context.
+Shell directly exposes the session publication index through `AGENTWORKS_ARTIFACTS_DIR`; its index
+records types, relative files and provenance for that session/run only. Ancestor publications use
+fixed locations: `~/.agentworks-artifacts/user/` for the actual user and
+`<workspace>/.agentworks-artifacts/` for the workspace. Document these locations without adding
+ancestor-index pointers or retransmitting handled payloads. Publication and discoverability fulfill
+shell delivery; shell does not claim to load rules into model context.
 
 Across integrations, hints may be combined into a single context fragment. Rules remain
 always-context guidance within their applicability. Standard skills retain their package and
