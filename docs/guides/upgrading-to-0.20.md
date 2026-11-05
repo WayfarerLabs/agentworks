@@ -2,7 +2,8 @@
 
 Agentworks 0.20 verifies every connection to a VM against a host-key store of its own instead of
 trusting whatever it sees first. Existing VMs need a one-time import before most commands will
-connect to them.
+connect to them. Third-party VM platform plugins must move to vm-platform contract version 2 (see
+[Third-party VM platforms](#third-party-vm-platforms)).
 
 ## Import existing host keys
 
@@ -99,20 +100,24 @@ store only. Your `~/.ssh/known_hosts` is no longer touched. `vm delete` removes 
 ## Connecting through the new layer
 
 `agw vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection`, `vm port-forward`,
-`vm create`, `vm reinit` and `vm confirm-release` now reach the VM through a new connection layer
-that sends each request over the OpenSSH client's standard input instead of on the `ssh` command
-line. For `vm create` that is everything after the platform has created the VM and joined it to the
-tailnet; for `vm reinit`, its checks of the VM (see
-[Create, reinit and the VM contract](#create-reinit-and-the-vm-contract)). `vm shell --platform`
-uses the platform's own channel instead and needs no `python3`; on a cloud VM that channel is SSH to
-its public address under the same rules (see
-[Start, recover, rekey and delete](#start-recover-rekey-and-delete)). Everything else keeps its
-current path for now.
+`vm create`, `vm reinit`, `vm confirm-release`, `vm start`, `vm rekey` and `vm recover` now reach
+the VM through a new connection layer that sends each request over the OpenSSH client's standard
+input instead of on the `ssh` command line. For `vm create` that is everything after the platform
+has created the VM and joined it to the tailnet; for `vm reinit`, its checks of the VM (see
+[Create, reinit and the VM contract](#create-reinit-and-the-vm-contract)). `vm start`, and the
+automatic start of a VM that stopped on its own, use it to wait for the VM to answer; `vm rekey` and
+`vm recover` use it for the same wait after their scripts, which run through the platform's own
+channel (see [Start, recover, rekey and delete](#start-recover-rekey-and-delete)).
+`vm shell --platform` uses the platform's own channel instead and needs no `python3`; on a cloud VM
+that channel is SSH to its public address under the same rules. Everything else keeps its current
+path for now.
 
 ### What these commands need
 
 Each of them checks the client first, so an unsupported one is refused before `vm create` builds a
-VM or spends a Tailscale auth key.
+VM, `vm start` starts one, or `vm rekey` and `vm recover` spend a Tailscale auth key. The automatic
+start, which other commands trigger, is the exception: it checks the client at its wait, once the VM
+has started.
 
 - **OpenSSH 8.5 or newer on the workstation.** Agentworks uses the first `ssh` on your `PATH`
   (ignoring empty and relative `PATH` entries) and checks its version once per run. A missing or
@@ -126,8 +131,9 @@ VM or spends a Tailscale auth key.
 - **`python3` on the VM.** Every request starts a small Python program on the VM. A VM without
   `python3`, or with one that lacks its standard library, is reported as unable to run Agentworks
   requests. New VMs get it at provisioning. `vm reinit` and `vm confirm-release` now connect the
-  same way (see below), so they cannot run on such a VM either; `agw vm recover NAME` installs it
-  through the platform's own channel.
+  same way (see below), so they cannot run on such a VM either, and the wait of `vm start`, of the
+  automatic start and of `vm rekey` fails on one. `agw vm recover NAME` installs it through the
+  platform's own channel before its own wait.
 - **A supported login shell for the admin and every agent.** The admin and agent template `shell`
   fields now accept only `sh`, `dash`, `bash` and `zsh`; a path such as `/usr/bin/zsh` is read as
   its basename. Any other shell, such as `fish` or `tcsh`, is a configuration error that names the
@@ -138,14 +144,15 @@ VM or spends a Tailscale auth key.
 
 ### What behaves differently
 
-- **No ssh configuration is read.** These commands run `ssh -F none` (for `vm create` and
-  `vm reinit`, the connections the new layer makes), so `~/.ssh/config` and the system configuration
-  do not apply to them. An `IdentityAgent` set only in `~/.ssh/config` (1Password, Secretive) is
-  ignored; the agent named by `SSH_AUTH_SOCK` serves the key. Every connection runs in batch mode,
-  so ssh never prompts for a key's passphrase: an encrypted key has to be loaded in that agent
-  first. A VM that refuses the configured key is reported as such, and nothing ran on it. When a
-  connection fails or the key is refused, and the configured key is passphrase-protected, the
-  error's hint mentions `ssh-add`; `vm port-forward` shows ssh's own log instead.
+- **No ssh configuration is read.** These commands run `ssh -F none` (for `vm create`, `vm reinit`,
+  `vm start`, `vm rekey` and `vm recover`, the connections the new layer makes), so `~/.ssh/config`
+  and the system configuration do not apply to them. An `IdentityAgent` set only in `~/.ssh/config`
+  (1Password, Secretive) is ignored; the agent named by `SSH_AUTH_SOCK` serves the key. Every
+  connection runs in batch mode, so ssh never prompts for a key's passphrase: an encrypted key has
+  to be loaded in that agent first. A VM that refuses the configured key is reported as such, and
+  nothing ran on it. When a connection fails or the key is refused, and the configured key is
+  passphrase-protected, the error's hint mentions `ssh-add`; `vm port-forward` shows ssh's own log
+  instead.
 - **Exit statuses.** `vm exec` and `agent exec` still run the command line under the account shell,
   so a command that cannot start exits 127 or 126 with the shell's message, as before. A missing
   workspace directory exits 125 with one line from `agw`. A command that exits 255 is no longer
@@ -176,9 +183,10 @@ VM or spends a Tailscale auth key.
   131,071 bytes is refused before anything runs, because Linux cannot execute it.
 - **`vm shell` and `agent shell` without `--workspace` no longer print the message of the day or the
   last-login line.** sshd prints them only when it runs the login shell itself.
-- **`vm port-forward` exits 0 when you stop it** with Ctrl-C, `SIGTERM` or `SIGHUP`, exits non-zero
-  when a forward cannot be set up (a busy local port, for example) instead of running with nothing
-  forwarded.
+- **`vm port-forward` exits 0 when you stop it** with Ctrl-C, and on macOS and Linux also with
+  `SIGTERM` or `SIGHUP` (a closed terminal); started under `nohup`, it keeps running after its
+  terminal closes. It exits non-zero when a forward cannot be set up (a busy local port, for
+  example) instead of running with nothing forwarded.
 
 ## Create, reinit and the VM contract
 
@@ -203,6 +211,14 @@ VM or spends a Tailscale auth key.
 
 ## Start, recover, rekey and delete
 
+`vm start`, the automatic start, `vm rekey` and `vm recover` wait for the VM to answer through the
+new connection layer, so they need what it needs (see
+[What these commands need](#what-these-commands-need)): OpenSSH 8.5 or newer on the workstation and
+`python3` on the VM. Their connections run `ssh -F none` in batch mode, so `~/.ssh/config` does not
+apply and an encrypted key must be loaded in the SSH agent. `vm start` checks the client, and that
+the workstation is on Tailscale, before it starts anything; `vm rekey` and `vm recover` check both
+before they resolve the auth key.
+
 - **`vm start` no longer rejoins Tailscale.** It, and the automatic start of a VM that stopped on
   its own, start the VM and wait up to about four minutes for it to answer over SSH. A VM that does
   not answer fails with a hint to run `agw vm recover NAME`, and is left running. That includes a VM
@@ -216,7 +232,10 @@ VM or spends a Tailscale auth key.
   what it refuses.
 - **`vm rekey`** runs its steps as one script through the platform's own channel and keeps an
   operation log. When the new address cannot be read, the node is logged out and the error names
-  `agw vm recover`.
+  `agw vm recover`. When the VM does not answer over SSH after the rekey, the command fails with a
+  hint to run `agw vm recover NAME`, instead of warning and exiting 0.
+- **An empty auth key is refused.** `vm rekey` and `vm recover` refuse an empty or blank Tailscale
+  auth key, as `vm create` does.
 - **`vm shell --platform` no longer takes `--workspace`.** Combining the two is refused; `cd` into
   the workspace directory inside the shell instead. The shell gets the account's own login
   environment, with nothing from the VM template or admin settings and no secret resolved for it. On
@@ -225,4 +244,65 @@ VM or spends a Tailscale auth key.
   refuses a VM with no recorded host key. A platform without a native shell (Proxmox) is refused
   before anything is resolved.
 - **`vm delete`** reports whether the logout worked. It does not log out a cloud VM whose host key
-  was never recorded, and names the node to remove in the Tailscale admin console instead.
+  was never recorded, and names the node to remove in the Tailscale admin console instead. It does
+  not start a stopped or deallocated VM to log it out either: it skips the logout and warns that the
+  node stays in the Tailscale admin console.
+- **A cloud VM's temporary SSH allow closes on `SIGTERM` and `SIGHUP`.** On macOS and Linux, every
+  command that opens a temporary firewall allow to a cloud VM (AWS, Azure, GCP) removes it when the
+  command is ended by `SIGTERM` or `SIGHUP` (a closed terminal), as it does on Ctrl-C.
+
+## Third-party VM platforms
+
+The vm-platform capability is now contract version 2. Registration matches contract versions
+exactly, so a platform that still declares version 1 is refused, and there is no version 1 adapter.
+Every shipped platform already declares version 2. Change every third-party platform class to
+declare:
+
+```python
+from typing import ClassVar
+
+contract_version: ClassVar[int] = 2
+```
+
+and make the changes below. The docstrings in
+[`cli/agentworks/capabilities/vm_platform/base.py`](../../cli/agentworks/capabilities/vm_platform/base.py)
+state the full contract, and the
+[vm-platform README](../../cli/agentworks/capabilities/vm_platform/README.md) its obligations.
+
+### A root channel replaces the native transport
+
+- **Implement `run_as_root(vm, ctx, script, deadline) -> RawRun`.** It is abstract and required. It
+  runs `/bin/bash -s` as root through the platform's own channel, without the VM's Tailscale, with
+  `script` on its stdin and nowhere else; it runs the script once and returns both streams with no
+  exit status. The platform's own create-time join runs through it, and so do `vm recover`,
+  `vm rekey` and the logout at `vm delete`.
+- **Declare `recovery_needs_guest_sshd`.** It is `True` when that channel goes through the guest's
+  sshd. It has no default, and registration refuses a platform that leaves it out.
+- **`native_transport()` is gone,** along with `transient_route()` and `probe_failure_hint`. A cloud
+  whose channel is SSH to the VM's public address subclasses `public_ssh.PublicAddressPlatform`, as
+  the AWS, Azure and GCP platforms do, and supplies its route as `_transient_route`, its live
+  address as `_public_address`, and `public_address_hint`.
+- **Override `native_shell(vm, ctx) -> int` to offer `vm shell --platform`.** It is optional: the
+  default offers no shell, and a platform without one should set `native_shell_unavailable_hint` to
+  say where its operator reaches a VM by hand.
+- **`read_host_keys(vm, ctx)`** has a default over `run_as_root`, used by `vm recover`. Override it
+  only when the channel itself verifies the host key it is reading.
+- **The platform transports are removed.** `agentworks.transports` no longer exports
+  `ExecTransport`, `LimaTransport`, `RemoteLimaTransport`, `WSL2Transport`, `native_transport`,
+  `wait_for_reconnect` or `TailscaleWait`, and `agentworks.plugins.proxmox.transport` is gone.
+
+### Create returns an address
+
+- **`ProvisionResult.tailnet_address` replaces `tailscale_ip`,** and the result no longer carries a
+  transport. The address is required. `create()` joins Tailscale once through `run_as_root` with
+  `tailscale_join.join_tailscale` (the clouds through `complete_cloud_bootstrap`), reads the node's
+  address with `settle_tailnet_address`, and returns it. Core validates it, reaches the VM over SSH
+  there, and checks the live Debian release itself.
+- **`generate_bootstrap_script()` no longer takes `tailscale_auth_key`.** The script it generates
+  holds no secret and stops once Tailscale is installed, so a provider may retain it.
+  `run_bootstrap()` runs it through a root channel, and `parse_bootstrap_steps()` replaces
+  `parse_bootstrap_output()` and `BootstrapResult`. `PROVISIONING_PACKAGES` now includes `python3`,
+  which every request core sends needs.
+- **`ProvisionRequest.ssh_private_key` is a `Path`,** never `None`.
+- **`ProvisionRequest.provisioning_trust` is new.** It is the unverified host-key binding a platform
+  uses when its create reaches the VM over a public address before core has recorded the VM's key.
