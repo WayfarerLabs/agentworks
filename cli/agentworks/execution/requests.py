@@ -17,6 +17,9 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+CAPTURE_LIMIT_BYTES = 1_048_576
+"""What :class:`CaptureOutput` keeps by default: 1 MiB of one stream."""
+
 AccountShell = Literal["sh", "dash", "bash", "zsh"]
 """The login shells a managed account may use: the four the constant first-stage
 command line is verified to parse under. The template ``shell`` fields use this
@@ -57,6 +60,22 @@ class RequestOptions:
     cwd: str | None = None
 
 
+@dataclass(frozen=True)
+class NoInput:
+    """No input: the payload's stdin is at end of file once the request is sent."""
+
+
+@dataclass(frozen=True)
+class Bytes:
+    """Input the client writes after the request and then closes: the payload's stdin, at its first byte.
+
+    ``data`` is not in the ``repr``, and no operation log record or error
+    holds it. Nothing bounds it but memory.
+    """
+
+    data: bytes = field(repr=False)
+
+
 @dataclass(frozen=True, kw_only=True)
 class BoundedRequestOptions(RequestOptions):
     """The options of a request that runs to a result, which a deadline can bound.
@@ -66,10 +85,18 @@ class BoundedRequestOptions(RequestOptions):
     ``sudo -n``: it is the prefix of the connection's first-stage command, not
     part of the request message, and an agent-bound access refuses it. A
     :class:`LoginShell` has neither, so an elevated attach cannot be written.
+
+    ``stdin`` is the payload's input under ``run``; ``stream`` takes the
+    operator's stdin as its own argument and refuses a request that carries
+    input. ``log_streams=False`` keeps both of the payload's streams out of
+    the operation log, for a payload whose output is file content or a
+    command line that must not be retained.
     """
 
     deadline: float | None = None
     elevated: bool = False
+    stdin: NoInput | Bytes = NoInput()
+    log_streams: bool = True
 
 
 @dataclass(frozen=True)
@@ -119,6 +146,22 @@ def shell_command_line(args: Sequence[str]) -> str:
 
 RunRequest = Command | Script
 """The requests ``run`` and ``stream`` take."""
+
+
+@dataclass(frozen=True)
+class CaptureOutput:
+    """A ``run`` sink that keeps up to ``limit`` bytes of its stream; more is ``Unknown(OUTPUT_LIMIT)``."""
+
+    limit: int = CAPTURE_LIMIT_BYTES
+
+
+@dataclass(frozen=True)
+class DiscardOutput:
+    """A ``run`` sink that keeps nothing. The stream is still read to its closing marker, so the outcome stands."""
+
+
+OutputSink = CaptureOutput | DiscardOutput
+"""Where ``run`` puts one of the payload's streams."""
 
 Request = RunRequest | LoginShell
 """Every request kind; ``LoginShell`` is the one ``attach`` takes."""

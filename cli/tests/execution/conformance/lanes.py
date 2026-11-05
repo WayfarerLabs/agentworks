@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
     from typing import NoReturn
 
+    from agentworks.config import Config
     from agentworks.db import VMRow
 
 SHELLS = ("sh", "dash", "bash", "zsh")
@@ -162,6 +163,10 @@ class Lane:
         """The lane's access to the same account with another key, for a vector about the key itself."""
         raise NotImplementedError
 
+    def access_with_log(self, log: Callable[[RunRequest, Result], None] | None) -> VMAccess:
+        """The lane's access to the same account, with an operation log, for a vector about what a log holds."""
+        raise NotImplementedError
+
     def shorten_handover_wait(self, seconds: int = 1) -> None:
         """Send a launcher whose parked half gives up after ``seconds``, instead of 30."""
         self.rewrite_launcher(b"handover_wait_seconds = 30", b"handover_wait_seconds = %d" % seconds)
@@ -259,15 +264,19 @@ class LocalLane(LocalFilesystem):
         self.home = tmp_path / "account-home"
         self.home.mkdir()
         self.workdir = str(tmp_path)
-        self.access = VMAccess(
+        self.access = self.access_with_log(None)
+        monkeypatch.setattr(client, "resolve_ssh", lambda: SSHClient("/nonexistent/ssh", (9, 9)))
+        monkeypatch.setattr(ssh_process, "build_argv", self._argv)
+
+    def access_with_log(self, log: Callable[[RunRequest, Result], None] | None) -> VMAccess:
+        return VMAccess(
             vm_name="local",
             host="127.0.0.1",
             user=getpass.getuser(),
             identity=Admin(),
             identity_file=Path("/nonexistent/identity"),
+            log=log,
         )
-        monkeypatch.setattr(client, "resolve_ssh", lambda: SSHClient("/nonexistent/ssh", (9, 9)))
-        monkeypatch.setattr(ssh_process, "build_argv", self._argv)
 
     def startup(self, name: str, content: str) -> None:
         """Write an account startup file (``.zshenv``, ``.bashrc``) read by the account shell."""
@@ -406,16 +415,11 @@ class SSHDLane(LocalFilesystem):
         self.scratch = tmp_path
         self.workdir = str(tmp_path)
         trust.write_records(vm_name, [server.host_key])
-        self.access = VMAccess(
-            vm_name=vm_name,
-            host="127.0.0.1",
-            user=getpass.getuser(),
-            identity=Admin(),
-            identity_file=server.client_key,
-            port=server.port,
-        )
+        self.access = self.access_with_identity(server.client_key)
 
-    def access_with_identity(self, identity_file: Path) -> VMAccess:
+    def access_with_identity(
+        self, identity_file: Path, log: Callable[[RunRequest, Result], None] | None = None
+    ) -> VMAccess:
         return VMAccess(
             vm_name=self.vm_name,
             host="127.0.0.1",
@@ -423,7 +427,11 @@ class SSHDLane(LocalFilesystem):
             identity=Admin(),
             identity_file=identity_file,
             port=self.server.port,
+            log=log,
         )
+
+    def access_with_log(self, log: Callable[[RunRequest, Result], None] | None) -> VMAccess:
+        return self.access_with_identity(self.server.client_key, log)
 
 
 # -- V ----------------------------------------------------------------------------------
@@ -435,11 +443,17 @@ class LiveLane(Lane):
     name = "V"
     workdir = "/tmp"
 
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, vm: VMRow, access: VMAccess) -> None:
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, vm: VMRow, config: Config) -> None:
         super().__init__(monkeypatch)
         self.vm = vm
-        self.access = access
+        self.config = config
+        self.access = self.access_with_log(None)
         self._created: list[str] = []
+
+    def access_with_log(self, log: Callable[[RunRequest, Result], None] | None) -> VMAccess:
+        from agentworks.execution import vm_access
+
+        return vm_access(self.vm, self.config, Admin(), log=log)
 
     def access_with_identity(self, identity_file: Path) -> VMAccess:
         return VMAccess(

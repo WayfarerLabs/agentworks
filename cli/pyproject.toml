@@ -96,6 +96,10 @@ runtime-evaluated-base-classes = [
     "agentworks.declared_resource.DeclaredResource",
 ]
 
+[tool.ruff.lint.flake8-bugbear]
+# Frozen request values, safe as argument defaults.
+extend-immutable-calls = ["agentworks.execution.requests.CaptureOutput"]
+
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["TCH"]
 # Import order in this file is meaningful: it controls the order command

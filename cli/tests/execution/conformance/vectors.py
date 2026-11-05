@@ -31,6 +31,7 @@ from agentworks.execution.results import (
     Unknown,
     UnknownReason,
 )
+from tests.execution.conformance import program_vectors
 from tests.execution.conformance.lanes import Lane, LocalFilesystem, LocalLane, SSHDLane, sudo_granted, unavailable
 
 if TYPE_CHECKING:
@@ -800,7 +801,8 @@ def build() -> list[Vector]:
         Vector("memfd-noexec-seal-refused", "L", memfd_refusing_the_noexec_seal_still_runs_the_script),
         Vector("memfd-cannot-be-created", "L", memfd_that_cannot_be_created_is_not_delivered),
     ]
-    return [*shared, *startup_exits, *startup_redirects, *local_only]
+    program = [Vector(*entry) for entry in program_vectors.ENTRIES]
+    return [*shared, *startup_exits, *startup_redirects, *local_only, *program]
 
 
 VECTORS = build()

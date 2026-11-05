@@ -42,7 +42,7 @@ def test_verify_connection_uses_one_canonical_no_op(
     assert calls == [("site", "local"), ("identity", "worker")]
     (call,) = vm_access_recorder.calls
     assert (call.identity, call.operation, call.request) == (Admin(), "run", Command(("true",), deadline=10))
-    assert call.options == {"check": True}
+    assert call.options["check"] is True
     assert not hasattr(result, "connected")
     assert result.transport == "ssh"
 

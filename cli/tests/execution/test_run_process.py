@@ -14,7 +14,7 @@ import time
 import pytest
 
 from agentworks.execution import root_script
-from agentworks.execution.pump import CAPTURE_LIMIT_BYTES
+from agentworks.execution.requests import CAPTURE_LIMIT_BYTES
 
 pytestmark = pytest.mark.windows
 

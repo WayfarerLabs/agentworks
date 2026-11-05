@@ -11,13 +11,14 @@ on it run on every CI host.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agentworks.execution import trust
 from agentworks.execution.access import Admin, Agent, Identity, VMAccess
 from agentworks.execution.client import SSHClient
+from agentworks.execution.requests import CaptureOutput, DiscardOutput
 from agentworks.execution.results import Completed, Result
 from agentworks.execution.trust import TrustMode
 from tests.ssh_fixtures import fake_host_key
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from typing import BinaryIO
 
-    from agentworks.execution.requests import Forward, LoginShell, RunRequest
+    from agentworks.execution.requests import Forward, LoginShell, OutputSink, RunRequest
 
 
 @dataclass(frozen=True)
@@ -44,9 +45,10 @@ class RecordingVMAccess(VMAccess):
     """Records ``run``, ``stream``, ``attach`` and ``forward`` and returns canned outcomes.
 
     ``run_outcomes`` is consumed in order, then ``Completed(0)`` results follow.
-    An outcome that is an exception is raised. ``stream_status``,
-    ``attach_status`` and ``forward_status`` are returned (or raised) by their
-    operation.
+    An outcome that is an exception is raised. A stream ``run`` was asked to
+    discard comes back empty, as it would from a real access.
+    ``stream_status``, ``attach_status`` and ``forward_status`` are returned
+    (or raised) by their operation.
     """
 
     def __init__(
@@ -66,13 +68,30 @@ class RecordingVMAccess(VMAccess):
         self.attach_status: int | BaseException = 0
         self.forward_status: int | BaseException = 0
 
-    def run(self, request: RunRequest, *, check: bool = False) -> Result:
+    def run(
+        self,
+        request: RunRequest,
+        *,
+        stdout: OutputSink = CaptureOutput(),
+        stderr: OutputSink = CaptureOutput(),
+        check: bool = False,
+    ) -> Result:
         self.calls.append(
-            Call(self.identity, "run", request, {"check": check}, enrolling=self.trust_mode is TrustMode.ENROLL)
+            Call(
+                self.identity,
+                "run",
+                request,
+                {"check": check, "stdout": stdout, "stderr": stderr},
+                enrolling=self.trust_mode is TrustMode.ENROLL,
+            )
         )
         outcome = self.run_outcomes.pop(0) if self.run_outcomes else Result(Completed(0))
         if isinstance(outcome, BaseException):
             raise outcome
+        if isinstance(stdout, DiscardOutput):
+            outcome = replace(outcome, stdout=b"")
+        if isinstance(stderr, DiscardOutput):
+            outcome = replace(outcome, stderr=b"")
         enrolls = self.trust_mode is TrustMode.ENROLL and isinstance(outcome.completion, Completed)
         if enrolls and not trust.has_record(self.vm_name):
             # What accept-new does when a connection reaches sshd and none is recorded.

@@ -28,18 +28,28 @@ those two attributes once (the `vm_access_recorder` fixture) and every manager f
 
 `VMAccess` has four operations:
 
-| Operation                                   | Returns                  | Use                                                       |
-| ------------------------------------------- | ------------------------ | --------------------------------------------------------- |
-| `run(request, check=False)`                 | `Result`                 | Buffered: up to 1 MiB per stream, then `OUTPUT_LIMIT`     |
-| `stream(request, stdin=, stdout=, stderr=)` | the guest's status       | Live output; `stream_to_operator` wires the process stdio |
-| `attach(login_shell)`                       | the shell's exit status  | The operator's terminal, under `guarded_terminal`         |
-| `forward(forwards, verbose=False)`          | the client's exit status | Blocking `ssh -N -L`; the caller owns the interrupt       |
+| Operation                                     | Returns                  | Use                                                       |
+| --------------------------------------------- | ------------------------ | --------------------------------------------------------- |
+| `run(request, stdout=, stderr=, check=False)` | `Result`                 | Buffered, into each stream's sink                         |
+| `stream(request, stdin=, stdout=, stderr=)`   | the guest's status       | Live output; `stream_to_operator` wires the process stdio |
+| `attach(login_shell)`                         | the shell's exit status  | The operator's terminal, under `guarded_terminal`         |
+| `forward(forwards, verbose=False)`            | the client's exit status | Blocking `ssh -N -L`; the caller owns the interrupt       |
 
 A request is a `Command` (a literal argv, run with no shell), a `Script` (source text run by `sh`,
 `bash` or the identity's default shell, optionally as a login shell) or a `LoginShell` (valid only
 for `attach`). Each takes `env` and `cwd` (absolute; `None` is the home directory); `Command` and
 `Script` also take `deadline` (seconds of local waiting; it never claims the guest command stopped).
 `vm exec` sends a `Script` under the identity's default shell, with several arguments shell-joined.
+
+`run`'s sinks are `CaptureOutput(limit=1 MiB)`, the default, which keeps up to `limit` bytes and
+makes more `Unknown(OUTPUT_LIMIT)`, and `DiscardOutput()`, which keeps nothing while the stream is
+still read to its closing marker. A caller whose output can exceed 1 MiB sets the limit per call.
+
+`Command` and `Script` take the payload's input as `stdin`: `NoInput()`, the default, or
+`Bytes(data)`, which the client writes after the request and then closes, so the payload reads it
+from its first byte. Nothing bounds it but memory. `stream` takes the operator's stdin as its own
+argument instead, and refuses a request that carries input with a `ValidationError`. Input is never
+formatted into a log record or an error, and `Bytes` keeps `data` out of its `repr`.
 
 `Command` and `Script` also take `elevated`, which runs the whole operation as root under `sudo -n`:
 it is the prefix of the constant first-stage command (below), not part of the request message, and
@@ -61,8 +71,10 @@ against the store.
 `run` calls once per request before raising for its outcome, so failures are logged. The block is
 `oplog.format_record`'s: the step label, the request's shape (the argv, or a script's shell and
 login flag, with the working directory, the environment's names and the deadline), the completion,
-both streams and ssh's diagnostics. No environment value or script source reaches the formatter; the
-logger redacts the secrets registered when it was constructed, at its one sink.
+both streams and ssh's diagnostics. A request with `log_streams=False` has neither stream in its
+record, for a payload whose output is file content or a command line that must not be retained. No
+environment value, script source or input reaches the formatter; the logger redacts the secrets
+registered when it was constructed, at its one sink.
 
 ## What a request becomes
 

@@ -16,11 +16,12 @@ import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from agentworks.errors import StateError
+from agentworks.errors import StateError, ValidationError
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, forwarding, pump, ssh_process
 from agentworks.execution.agw_launch import refusal_status
 from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, PermissionDenied, describe_refusal
+from agentworks.execution.requests import Bytes, CaptureOutput, NoInput
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.execution.trust import TrustBinding, TrustMode
 
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import VMRow
-    from agentworks.execution.requests import Forward, LoginShell, RunRequest
+    from agentworks.execution.requests import Forward, LoginShell, OutputSink, RunRequest
 
 
 SIGPIPE_STATUS = 128 + 13
@@ -91,21 +92,32 @@ class VMAccess:
 
     # -- Operations ------------------------------------------------------------
 
-    def run(self, request: RunRequest, *, check: bool = False) -> Result:
+    def run(
+        self,
+        request: RunRequest,
+        *,
+        stdout: OutputSink = CaptureOutput(),
+        stderr: OutputSink = CaptureOutput(),
+        check: bool = False,
+    ) -> Result:
         """Run ``request`` and return its buffered outcome.
 
-        The client closes ssh's stdin right after the request. Each stream is
-        read up to one pump constant (1 MiB); more is ``Unknown(OUTPUT_LIMIT)``.
-        With ``check`` a result that is not ``Completed(0)`` raises its typed error.
-        The access's operation log, when it has one, records every request
-        that reaches an outcome, before raising for a bad one. A request that
+        The client writes the request's ``stdin`` after it, then closes ssh's
+        stdin. Each stream goes to its sink: a ``CaptureOutput`` keeps up to
+        its limit, and more is ``Unknown(OUTPUT_LIMIT)``; a ``DiscardOutput``
+        keeps nothing, and the result's field for it is empty. With ``check``
+        a result that is not ``Completed(0)`` raises its typed error. The
+        access's operation log, when it has one, records every request that
+        reaches an outcome, before raising for a bad one. A request that
         raises before it is dispatched (no client, no trust record) is not
         logged.
         """
-        stdout, stderr = pump.Capture(), pump.Capture()
+        kept_stdout, kept_stderr = _capture(stdout), _capture(stderr)
         with self._passphrase_hint_on_connection_failure():
-            result = self._execute(request, stdin=None, on_stdout=stdout, on_stderr=stderr)
-            result = Result(result.completion, bytes(stdout.data), bytes(stderr.data), result.client_log_tail)
+            result = self._execute(
+                request, stdin=None, on_stdout=kept_stdout or _discard, on_stderr=kept_stderr or _discard
+            )
+            result = Result(result.completion, _kept(kept_stdout), _kept(kept_stderr), result.client_log_tail)
             if self._log is not None:
                 self._log(request, result)
             if check and result.require_completed(self.vm_name) != 0:
@@ -117,7 +129,9 @@ class VMAccess:
         """Run ``request`` with live output and return the guest's status.
 
         ``stdin`` is copied to the guest until end of file; pass the raw
-        binary stream, or ``None`` to close the guest's input at once. A refusal
+        binary stream, or ``None`` to close the guest's input at once. The
+        request itself carries no input here: one whose ``stdin`` is not
+        ``NoInput`` is a ``ValidationError`` before anything resolves. A refusal
         becomes the shell's status with one line on ``stderr``: 127 for a
         missing command, 126 for any other ``exec`` failure and 125 for a
         working directory. A consumer that leaves (``| head``) gets what ssh gave
@@ -137,6 +151,9 @@ class VMAccess:
 
             return write
 
+        # A boundary: plugins hold this access through their run context.
+        if not isinstance(request.stdin, NoInput):
+            raise ValidationError("stream sends the operator's stdin; a request with its own input runs under run")
         with self._passphrase_hint_on_connection_failure():
             result = self._execute(request, stdin=stdin, on_stdout=deliver(stdout), on_stderr=deliver(stderr))
             completion = result.completion
@@ -241,6 +258,8 @@ class VMAccess:
         ssh = client.resolve_ssh()
         nonce = envelope.new_nonce()
         wire = envelope.message(request, nonce=nonce)
+        if isinstance(request.stdin, Bytes):
+            wire += request.stdin.data
         policy, destination = self._policy(), self._destination()
         with ssh_process.client_log() as log:
             argv = ssh_process.build_argv(
@@ -263,6 +282,18 @@ class VMAccess:
                 stop = session.pump()
                 session.end()
             return ssh_process.outcome(session, stop, log)
+
+
+def _capture(sink: OutputSink) -> pump.Capture | None:
+    return pump.Capture(sink.limit) if isinstance(sink, CaptureOutput) else None
+
+
+def _kept(capture: pump.Capture | None) -> bytes:
+    return b"" if capture is None else bytes(capture.data)
+
+
+def _discard(_chunk: bytes) -> None:
+    """The pump sink for ``DiscardOutput``: the filter has already read the markers."""
 
 
 def stream_to_operator(access: VMAccess, request: RunRequest) -> int:

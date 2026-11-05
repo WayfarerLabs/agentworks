@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.execution import ssh_process
 from agentworks.execution.envelope import StreamFilter
+from agentworks.execution.requests import CAPTURE_LIMIT_BYTES
 from agentworks.execution.results import UnknownReason
 
 if TYPE_CHECKING:
@@ -34,7 +35,6 @@ if TYPE_CHECKING:
     from typing import BinaryIO
 
 CHUNK_BYTES = 65_536
-CAPTURE_LIMIT_BYTES = 1_048_576
 
 _POLL_SECONDS = 0.01
 _NATURAL_EXIT_SECONDS = 1.0

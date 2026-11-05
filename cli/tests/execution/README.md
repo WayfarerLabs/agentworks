@@ -73,6 +73,11 @@ The elevation vectors (E1, E2 and E6) run on L and V. On L they need the runner'
 `sudo -n`, skipping without it locally and failing without it when `CI` is set; E4, the
 distribution's default sudoers on a fresh VM, is V only.
 
+`conformance/program_vectors.py` holds the vectors for the request input and output options: a
+request's `Bytes` input reaches no log record or error, and `log_streams=False` keeps its streams
+out of the record (F1, on L, S and V), and `run`'s sinks capture to their limit or discard (L and
+S). They join the list in `vectors.py`.
+
 `conformance/test_attach_terminal.py` and `conformance/test_forward.py` cover what happens around
 the terminal half and a forward, on the same lanes.
 
