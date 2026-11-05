@@ -15,15 +15,24 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import capture_output
 from agentworks.ssh import SSHResult
 from tests.conftest import stub_build_registry, stub_vm_ssh_identity
-from tests.sessions.test_create_start_restart_orchestrated import _create_stubs
+from tests.sessions.test_create_start_restart_orchestrated import _create_stubs, _restart_fixture
 
 
-def test_admin_session_create_redacts_resolved_values_in_actual_command_log(tmp_path, monkeypatch):
+@pytest.mark.parametrize("operation", ["create", "restart"])
+def test_admin_session_launch_redacts_resolved_values_in_actual_command_log(tmp_path, monkeypatch, operation):
+    from agentworks.db import SessionMode
     from agentworks.sessions import manager, tmux
     from agentworks.sessions.manager import _create
 
     events: list[str] = []
-    db = _create_stubs(tmp_path, monkeypatch, events)
+    if operation == "create":
+        db = _create_stubs(tmp_path, monkeypatch, events)
+    else:
+        db, events = _restart_fixture(tmp_path, monkeypatch)
+        db._conn.execute(
+            "UPDATE sessions SET mode = ?, agent_name = NULL WHERE name = 's1'", (SessionMode.ADMIN.value,)
+        )
+        db._conn.commit()
     stub_build_registry(monkeypatch)
     stub_vm_ssh_identity(monkeypatch)
     log_root = tmp_path / "logs"
@@ -36,6 +45,7 @@ def test_admin_session_create_redacts_resolved_values_in_actual_command_log(tmp_
         return {**values, "fixture": secret}, agent
 
     monkeypatch.setattr(_create, "_preflight_and_resolve", resolve)
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *args, **kwargs: {"fixture": secret})
     monkeypatch.setattr(manager, "_resolve_session_env", lambda *args, **kwargs: {"TOKEN": kwargs["values"]["fixture"]})
 
     def transport(*args, logger=None, **kwargs):
@@ -56,14 +66,13 @@ def test_admin_session_create_redacts_resolved_values_in_actual_command_log(tmp_
 
     monkeypatch.setattr(tmux, "create_session", create)
     try:
-        manager.create_session(
-            db,
-            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
-            name="s1",
-            workspace="ws1",
-            admin=True,
-            interaction=TtyInteractionPolicy.REFUSE,
-        )
+        config = SimpleNamespace(session=SimpleNamespace(history_limit=1))
+        if operation == "create":
+            manager.create_session(
+                db, config, name="s1", workspace="ws1", admin=True, interaction=TtyInteractionPolicy.REFUSE
+            )
+        else:
+            manager.restart_session(db, config, name="s1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
         assert db.get_session("s1") is not None
         logs = [path.read_text() for path in log_root.glob("*.log")]
         assert logs and any("tmux new-session" in text for text in logs)

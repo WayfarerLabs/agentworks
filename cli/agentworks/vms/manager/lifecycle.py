@@ -705,7 +705,11 @@ def create_vm(
     if vm.init_status == InitStatus.PARTIAL.value:
         output.result(f"VM '{vm_name}' is ready (with warnings, see above)")
     else:
-        output.result(f"VM '{vm_name}' is ready!")
+        from agentworks.harness_setup.outcomes import setup_completion_suffix
+        from agentworks.harness_setup.state import read_native_setup
+
+        suffix = setup_completion_suffix(read_native_setup(db, "vm", vm_name))
+        output.result(f"VM '{vm_name}' is ready{suffix}.")
 
 
 def reinit_vm(
@@ -993,7 +997,11 @@ def reinit_vm(
         output.result(f"VM '{name}' reinitialized (with warnings, see above)")
         output.info(f"Log: {logger.display_path}")
     else:
-        output.result(f"VM '{name}' reinitialized successfully!")
+        from agentworks.harness_setup.outcomes import setup_completion_suffix
+        from agentworks.harness_setup.state import read_native_setup
+
+        suffix = setup_completion_suffix(read_native_setup(db, "vm", name))
+        output.result(f"VM '{name}' reinitialized{suffix}.")
 
 
 def _warn_newly_observed_legacy(vm: VMRow, observed: DebianRelease) -> None:

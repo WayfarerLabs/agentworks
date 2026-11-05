@@ -85,7 +85,6 @@ def realize_workspace(
         generate_vscode_workspace,
     )
 
-    initial_failure_count = len(setup_failures)
     workspace_path: str | None = None
     vscode_path: Path | None = None
 
@@ -209,7 +208,9 @@ def realize_workspace(
         finally:
             ssh_logger.close()
 
-        setup_suffix = "; harness setup incomplete" if len(setup_failures) > initial_failure_count else ""
+        from agentworks.harness_setup.outcomes import setup_completion_suffix
+
+        setup_suffix = setup_completion_suffix(native_setup)
         output.info(f"Workspace '{name}' created{setup_suffix}")
         # vscode_path was assigned inside the try before the row insert;
         # reaching here means the body completed without raising, so it is

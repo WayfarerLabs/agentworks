@@ -93,7 +93,6 @@ def realize_agent(
     from agentworks.agents.manager import derive_linux_user
     from agentworks.ssh import SSHLogger
 
-    initial_failure_count = len(setup_failures)
     linux_user = derive_linux_user(name)
     # Supply every declared secret input when the logger is constructed. A logger's
     # redaction set is immutable because adding a secret after the first
@@ -234,6 +233,8 @@ def realize_agent(
 
             sync_ssh_config(config, db)
 
-            setup_suffix = "; harness setup incomplete" if len(setup_failures) > initial_failure_count else ""
+            from agentworks.harness_setup.outcomes import setup_completion_suffix
+
+            setup_suffix = setup_completion_suffix(native_setup)
             output.info(f"Agent '{name}' created on VM '{vm.name}' (user: {agent.linux_user}){setup_suffix}")
         return agent

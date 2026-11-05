@@ -13,6 +13,8 @@ from agentworks.terminal import sanitize_fact_line
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
+    from agentworks.harness_setup.model import NativeSetupState
+
 # Remove complete terminal strings and escape sequences before the shared scalar
 # boundary strips remaining controls, including truncated or malformed sequences.
 _TERMINAL_SEQUENCES = re.compile(
@@ -94,6 +96,13 @@ class SetupFailure:
     integration: str
     reason: str
     hint: str | None = None
+
+
+def setup_completion_suffix(state: NativeSetupState | None) -> str:
+    """Distinguish a usable core owner from unfinished native application."""
+    return (
+        "; harness setup incomplete" if state is not None and any(not item.complete for item in state.records) else ""
+    )
 
 
 def describe_setup_failures(failures: list[SetupFailure]) -> str:

@@ -693,6 +693,7 @@ def reinit_agent(
 
             require_prepared_setup(db, "agent", name, ("agent",), () if setup_inputs is None else (setup_inputs,))
             setup_failures: list[SetupFailure] = []
+            native_setup = None
             with output.section("Agent Initialization"):
                 from agentworks.agents.initializer import create_agent_on_vm
                 from agentworks.ssh import SSHLogger
@@ -728,7 +729,7 @@ def reinit_agent(
                         if setup_inputs is not None:
                             from agentworks.harness_setup.lifecycle import apply_agent_setup
 
-                            apply_agent_setup(
+                            native_setup = apply_agent_setup(
                                 db,
                                 config,
                                 registry,
@@ -854,4 +855,6 @@ def reinit_agent(
             # column 0 via result(), matching the reference create/restart
             # flows.
             raise_setup_failures(setup_failures)
-            output.result(f"Agent '{name}' reinitialized")
+            from agentworks.harness_setup.outcomes import setup_completion_suffix
+
+            output.result(f"Agent '{name}' reinitialized{setup_completion_suffix(native_setup)}")

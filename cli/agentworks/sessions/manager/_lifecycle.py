@@ -637,8 +637,7 @@ def _launch_existing_session(
         from agentworks.ssh import SSHLogger
 
         operation = "restart" if replace_running else "start"
-        logger = SSHLogger(vm.name, f"session-{operation}")
-        admin_target = _mgr.transport(vm, config, logger=logger)
+        admin_target = _mgr.transport(vm, config)
         run_command: RunCommand = admin_target.run
 
         with output.section("Preflight"):
@@ -813,6 +812,17 @@ def _launch_existing_session(
                 allow_transient_auto_declare=True,
                 interaction=interaction,
             )
+
+        logger = SSHLogger(
+            vm.name,
+            f"session-{operation}",
+            redactions=tuple(dict.fromkeys((*graph_secret_values.values(), *secret_values.values()))),
+        )
+        admin_target = _mgr.transport(vm, config, logger=logger)
+        run_command = admin_target.run
+        if is_admin:
+            session_target = admin_target
+            session_run_command = admin_target.run
 
         from agentworks.artifacts.session import (
             commit_session_artifacts,
