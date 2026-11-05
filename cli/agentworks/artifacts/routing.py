@@ -367,10 +367,25 @@ def setup_artifacts(
     known = {item.identity for group in inherited.values() for item in group.items()}
     recorded = frozenset(_recorded_routes(view, inputs.facet, integration_name))
     unresolved = recorded - known
+    unknown = _routing_unknown(view, inputs.facet, integration_name)
+    detail = (
+        f"have no readable captured source ({_brief(tuple(identity[:12] for identity in sorted(unresolved)))})"
+        if unresolved
+        else "have no confirmed routing result"
+    )
+    unavailable = (
+        (
+            f"Artifact inputs via {integration_name} from {view.owner.component}/{view.owner.name} {detail}. "
+            + owner_remediation(view),
+        )
+        if unresolved or unknown
+        else ()
+    )
     return RoutingResult(
         ArtifactInputs(local=prepared.local, deferred=inherited),
         unresolved_routes=unresolved,
-        retain_previous=bool(unresolved) or _routing_unknown(view, inputs.facet, integration_name),
+        retain_previous=bool(unresolved) or unknown,
+        unavailable_reasons=unavailable,
     )
 
 
@@ -390,7 +405,7 @@ def session_artifacts(
     ancestors = (vm_view, user_view, workspace_view)
     for view in ancestors:
         report_ancestor(view, integration_name)
-    routed = _join_session_inputs(*ancestors, integration_name=integration_name, report=True)
+    routed = session_inherited_inputs(*ancestors, integration_name=integration_name, report=True)
     result = ArtifactInputs(local=local, deferred=routed.inputs.deferred)
     files: list[OwnedArtifactFile] = []
     active: list[ArtifactFacet] = []
@@ -473,7 +488,7 @@ def _session_routes(
     return tuple(routes)
 
 
-def _join_session_inputs(
+def session_inherited_inputs(
     vm: ArtifactOwnerView,
     user: ArtifactOwnerView,
     workspace: ArtifactOwnerView,
@@ -481,6 +496,7 @@ def _join_session_inputs(
     integration_name: str,
     report: bool = False,
 ) -> RoutingResult:
+    """Join captured session inputs and explicit unavailable-route evidence once."""
     routes = _session_routes(vm, user, workspace, integration_name=integration_name)
     selected = [identity for _, identities, _ in routes for identity in identities]
     if report and len(set(selected)) != len(selected):
@@ -496,13 +512,22 @@ def _join_session_inputs(
     unresolved = frozenset(selected_ids - resolved)
     reasons = []
     for view, identities, unknown in routes:
-        missing = tuple(identity[:12] for identity in identities if identity not in resolved)
+        missing_ids = unresolved.intersection(identities)
+        missing = tuple(identity[:12] for identity in identities if identity in missing_ids)
         if not missing and not unknown:
             continue
         detail = f"have no readable source ({_brief(missing)})" if missing else "have no confirmed routing result"
-        reason = (
+        recorded_reasons = tuple(
+            dict.fromkeys(
+                item.reason
+                for item in (() if view.record is None else view.record.deferred)
+                if item.destination == "session" and item.input_id in missing_ids
+            )
+        )
+        reason = sanitize_setup_diagnostic(
             f"Artifact inputs via {integration_name} at {view.owner.component}/{view.owner.name} {detail}. "
-            f"{owner_remediation(view)} Unavailable content was not delivered."
+            + (" ".join(recorded_reasons) + " " if recorded_reasons else "")
+            + f"{owner_remediation(view)} Unavailable content was not delivered."
         )
         if reason not in reasons:
             reasons.append(reason)
@@ -513,20 +538,6 @@ def _join_session_inputs(
         unresolved_routes=unresolved,
         retain_previous=bool(reasons),
         unavailable_reasons=tuple(reasons),
-    )
-
-
-def session_inherited_inputs(
-    vm: ArtifactOwnerView,
-    user: ArtifactOwnerView,
-    workspace: ArtifactOwnerView,
-    *,
-    integration_name: str,
-    report: bool = False,
-) -> dict[ArtifactOwner, ArtifactGroup]:
-    """Union available deferrals once in original owner and declaration order."""
-    return dict(
-        _join_session_inputs(vm, user, workspace, integration_name=integration_name, report=report).inputs.deferred
     )
 
 

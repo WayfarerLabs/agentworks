@@ -308,10 +308,10 @@ def run_setup(
             )
             try:
                 if routing.unresolved_routes:
-                    report_incomplete(
-                        "Some ancestor artifact routes are unavailable; existing placement is retained until "
-                        "the ancestor's setup and captured inputs are repaired."
-                    )
+                    for reason in routing.unavailable_reasons or (
+                        "Some ancestor artifact routes have no readable captured content; repair their owning setup.",
+                    ):
+                        report_incomplete(reason)
                 if isinstance(call, VMSetupInvocation):
                     application = integration.vm_init(call)
                 elif isinstance(call, UserSetupInvocation):
@@ -330,6 +330,17 @@ def run_setup(
                     root=isinstance(call, VMSetupInvocation),
                     retain_previous=routing.retain_previous,
                 )
+                if (
+                    routing.retain_previous
+                    and not routing.unresolved_routes
+                    and previous is not None
+                    and previous.destination_id == destination
+                    and {item.path for item in publication.skipped}.intersection(
+                        file.path for file in previous.artifact_files
+                    )
+                ):
+                    for reason in routing.unavailable_reasons:
+                        report_incomplete(reason)
             except _SetupInfrastructureFailure as error:
                 raise error.original from None
             except (ConfigError, StateError, ExternalError, ConnectivityError) as error:
@@ -353,22 +364,37 @@ def run_setup(
             owned = publication.files
             artifact_inputs = tuple(item.identity for item in artifacts.items())
             current_ids = set(artifact_inputs)
-            deferred = application.deferred
+            deferred_by_id: dict[str, ArtifactDeferral] = {}
             if routing.retain_previous and previous is not None:
                 retained_ids = routing.unresolved_routes or frozenset(item.input_id for item in previous.deferred)
-                artifact_inputs = tuple(
-                    dict.fromkeys(
-                        (*artifact_inputs, *(item for item in previous.artifact_inputs or () if item in retained_ids))
+                deferred_by_id.update(
+                    (item.input_id, item)
+                    for item in previous.deferred
+                    if item.input_id in retained_ids and item.input_id not in current_ids
+                )
+            # These IDs belong to recorded upstream routes, not to readable
+            # integration inputs. Core forwards their metadata only after the
+            # integration's known-input application has been validated.
+            if routing.unresolved_routes:
+                unresolved_reason = _sanitize(
+                    invocation,
+                    " ".join(routing.unavailable_reasons)
+                    or "The recorded upstream input has no readable captured content; repair its owning setup.",
+                )
+                deferred_by_id.update(
+                    (
+                        identity,
+                        ArtifactDeferral(
+                            input_id=identity,
+                            destination=inactive_destination(inputs.facet),
+                            reason=unresolved_reason,
+                        ),
                     )
+                    for identity in sorted(routing.unresolved_routes)
                 )
-                deferred = (
-                    *(
-                        item
-                        for item in previous.deferred
-                        if item.input_id in retained_ids and item.input_id not in current_ids
-                    ),
-                    *deferred,
-                )
+            deferred_by_id.update((item.input_id, item) for item in application.deferred)
+            deferred = tuple(deferred_by_id.values())
+            artifact_inputs = tuple(dict.fromkeys((*artifact_inputs, *deferred_by_id)))
             current = current.model_copy(
                 update={
                     "artifact_files": owned,

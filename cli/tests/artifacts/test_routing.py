@@ -408,7 +408,7 @@ def test_session_projection_shares_canonical_diamond_order(db):
         "shell",
         inherited=available_deferred_inputs(vm, "workspace", "shell"),
     )
-    inherited = session_inherited_inputs(vm, user, workspace, integration_name="shell")
+    inherited = session_inherited_inputs(vm, user, workspace, integration_name="shell").inputs.deferred
     assert inherited == fixture.route().inputs.deferred
     db.insert_session(
         "session",
@@ -650,7 +650,7 @@ def test_overlapping_stale_diamond_routes_deliver_same_input_once(db, monkeypatc
     workspace = inspect_owner_artifacts(db, fixture.registry, fixture.owners["workspace"], "shell")
     warnings: list[str] = []
     monkeypatch.setattr(output, "warn", warnings.append)
-    result = session_inherited_inputs(vm, user, workspace, integration_name="shell", report=True)
+    result = session_inherited_inputs(vm, user, workspace, integration_name="shell", report=True).inputs.deferred
     assert [item.origin.entry for group in result.values() for item in group.items()] == ["vm-0", "workspace-0"]
     assert len(warnings) == 1
 
@@ -709,7 +709,7 @@ def test_empty_replacement_capture_keeps_deferral_history_stale_and_reports_unre
         "agentworks.artifacts.routing.owner_remediation", lambda view: repairs.append(view.owner) or "fixture repair"
     )
 
-    result = session_inherited_inputs(*views, integration_name="shell", report=True)
+    result = session_inherited_inputs(*views, integration_name="shell", report=True).inputs.deferred
     assert not result and len(warnings) == 1
     assert repairs == [fixture.owners[receiver]]
     assert read_captures(db, "vm", "vm")["vm"] == empty
@@ -730,5 +730,5 @@ def test_runtime_deduplicates_recorded_and_new_vm_session_routes(db, monkeypatch
     warnings: list[str] = []
     monkeypatch.setattr(output, "warn", warnings.append)
 
-    result = session_inherited_inputs(*views, integration_name="shell", report=True)
+    result = session_inherited_inputs(*views, integration_name="shell", report=True).inputs.deferred
     assert result == {source.owner: source} and len(warnings) == 1

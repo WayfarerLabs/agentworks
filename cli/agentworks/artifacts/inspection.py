@@ -228,9 +228,9 @@ def inspect_artifacts(
 ) -> ArtifactInspection:
     """Project declarations and recorded application without acquiring or applying anything."""
     from agentworks.artifacts.routing import (
-        _join_session_inputs,
         available_deferred_inputs,
         inspect_owner_artifacts,
+        session_inherited_inputs,
     )
 
     with db.snapshot():
@@ -277,7 +277,7 @@ def inspect_artifacts(
                     )
                 elif owner.component == "session":
                     ancestors = (views["vm"], views["admin" if context.admin else "agent"], views["workspace"])
-                    routed = _join_session_inputs(*ancestors, integration_name=name)
+                    routed = session_inherited_inputs(*ancestors, integration_name=name)
                     inherited = dict(routed.inputs.deferred)
                     unavailable_reasons = routed.unavailable_reasons
                 view = inspect_owner_artifacts(db, registry, owner, name, inherited=inherited)
