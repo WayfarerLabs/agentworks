@@ -122,6 +122,21 @@ def test_a_failed_status_poll_says_why_without_chaining() -> None:
     assert caught.value.__context__ is None
 
 
+def test_a_failed_status_poll_shows_the_provider_s_text_as_a_terminal_can_take_it() -> None:
+    """The API's text is the provider's, not ours: controls are removed and only its last lines are kept."""
+    body = "\n".join(f"line {number}" for number in range(40)) + "\n\x1b]0;owned\x07\x1b[31mAgent error\x1b[0m"
+    api = FakeAPI([ProxmoxAPIError(body)])
+
+    with pytest.raises(ConnectivityError) as caught:
+        run(api)
+
+    message = str(caught.value)
+    assert "\x1b" not in message
+    assert "\x07" not in message
+    assert "line 39" in message
+    assert "line 0\n" not in message
+
+
 def test_an_agent_that_answers_on_the_third_ping_gets_the_script_once() -> None:
     """A VM that has just started has no agent yet: pinging carries no script, so it may be asked again."""
     not_yet = ProxmoxAPIError("QEMU guest agent is not running")

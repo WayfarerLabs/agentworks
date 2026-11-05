@@ -23,6 +23,7 @@ import time
 from typing import TYPE_CHECKING, cast
 
 from agentworks.errors import AgentworksError, ConnectivityError, TokenRejectedError
+from agentworks.execution import ssh_process
 from agentworks.execution.root_script import ChannelUnreachable, RawRun
 from agentworks.plugins.proxmox.api import ProxmoxAPIError, _TruncatedQGAOutput
 
@@ -76,7 +77,8 @@ def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: 
                 f"Proxmox QGA reported that the script on VM {where} (PID {pid}) exited, with its output cut short"
             )
         except Exception as error:
-            reason = f": {error}" if isinstance(error, ProxmoxAPIError) else ""
+            # The provider's text, shown as ssh's is: on a terminal, its last lines only.
+            reason = f": {ssh_process.tail_lines(str(error))}" if isinstance(error, ProxmoxAPIError) else ""
             failure = _token_rejected(
                 error,
                 f"Proxmox rejected the API token while polling the root script on VM {where} (PID {pid});"
