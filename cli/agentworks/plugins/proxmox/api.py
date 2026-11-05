@@ -18,6 +18,16 @@ from typing import Any
 from agentworks.errors import ProvisioningError
 
 
+def _error_body(error: urllib.error.HTTPError) -> str:
+    """An error response's body as text, or what of it could be read: callers branch on the HTTP code."""
+    if not error.fp:
+        return ""
+    try:
+        return error.read().decode("utf-8", errors="replace")
+    except (OSError, http.client.HTTPException):
+        return ""
+
+
 class ProxmoxAPIError(ProvisioningError):
     """A Proxmox API call failed.
 
@@ -172,8 +182,7 @@ class ProxmoxAPI:
             with response as resp:
                 resp_body = resp.read().decode()
         except urllib.error.HTTPError as e:
-            err_body = e.read().decode() if e.fp else ""
-            err = ProxmoxAPIError(f"Proxmox API {method} {path} failed ({e.code}): {err_body}")
+            err = ProxmoxAPIError(f"Proxmox API {method} {path} failed ({e.code}): {_error_body(e)}")
             err.code = e.code
             raise err from e
         except (OSError, UnicodeError, http.client.HTTPException) as e:

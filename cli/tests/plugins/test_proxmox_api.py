@@ -290,6 +290,29 @@ class TestErrorHandling:
 
         assert caught.value.__cause__ is source
 
+    @pytest.mark.parametrize("body", ["truncated", "not-utf-8"])
+    @patch("urllib.request.urlopen")
+    def test_an_http_error_whose_body_cannot_be_read_keeps_its_code(
+        self, mock_urlopen: MagicMock, api: ProxmoxAPI, body: str
+    ) -> None:
+        class _Truncated(BytesIO):
+            def read(self, size: int | None = -1) -> bytes:
+                raise http.client.IncompleteRead(b"partial")
+
+        fp = _Truncated() if body == "truncated" else BytesIO(b"\xff\xfe bad")
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            url="https://pve.example.com:8006/api2/json/cluster/nextid",
+            code=503,
+            msg="Service Unavailable",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=fp,
+        )
+
+        with pytest.raises(ProxmoxAPIError) as caught:
+            api.next_id()
+
+        assert caught.value.code == 503
+
     @patch("urllib.request.urlopen")
     def test_a_malformed_http_response_is_typed(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
         source = http.client.IncompleteRead(b"partial")
