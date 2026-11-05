@@ -37,7 +37,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedProvisioningError
 from agentworks.debian import DebianRelease
-from agentworks.errors import ProvisioningError
+from agentworks.errors import ProvisioningError, StateError
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from tests._proxmox_fakes import CLONE_UPID, NEWID, PROXMOX_CONFIG, START_UPID, TEMPLATE_VMID, FakeProxmoxAPI
@@ -488,3 +488,15 @@ class TestDeleteOp:
 
         with pytest.raises(ProxmoxAPIError, match="connection refused"):
             platform.delete(self._vm_row(), RunContext())
+
+    @pytest.mark.parametrize("vmid", ["not-a-number", "-1", "1e3", "\u0661\u0662", -1, True, 1.5])
+    def test_a_row_whose_vmid_is_not_a_number_is_refused_naming_the_row(
+        self, monkeypatch: pytest.MonkeyPatch, vmid: object
+    ) -> None:
+        platform, fake = _platform_with_fake(monkeypatch)
+        row = cast("VMRow", SimpleNamespace(name="vm1", platform_metadata={"vmid": vmid, "node": "pve1"}))
+
+        with pytest.raises(StateError, match="VM 'vm1'"):
+            platform.delete(row, RunContext())
+
+        assert "delete_vm" not in fake.ops()

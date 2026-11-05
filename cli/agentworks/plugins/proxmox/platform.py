@@ -282,14 +282,26 @@ class ProxmoxPlatform(VMPlatform):
         return str(node)
 
     def _vmid(self, vm: VMRow) -> int:
-        vmid = vm.platform_metadata.get("vmid")
+        # Typed as text, but the row's JSON is decoded without checking its values.
+        vmid: object = vm.platform_metadata.get("vmid")
         if not vmid:
             raise StateError(
                 f"VM '{vm.name}' has no proxmox vmid in its platform metadata; the DB row is incomplete",
                 entity_kind="vm",
                 entity_name=vm.name,
             )
-        return int(vmid)
+        # The row is persisted state, a trust boundary: backup, restore and
+        # legacy migration write it as well as create. Its JSON can carry the
+        # VMID as a number or as decimal text.
+        if type(vmid) is int and vmid >= 0:
+            return vmid
+        if isinstance(vmid, str) and vmid.isascii() and vmid.isdigit():
+            return int(vmid)
+        raise StateError(
+            f"VM '{vm.name}' has an invalid proxmox vmid in its platform metadata",
+            entity_kind="vm",
+            entity_name=vm.name,
+        )
 
     def _template_vmid(self, release: DebianRelease) -> int:
         return operator_owned_release_value(
