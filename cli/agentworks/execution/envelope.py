@@ -53,9 +53,13 @@ _MAX_CLOSING_LINE = 4096
 DEFAULT_TERM = "xterm-256color"
 
 
+_NONCE_BYTES = 16
+_ANY_START_LINE = re.compile(rb"\x1e[0-9a-f]{%d} start\n" % (2 * _NONCE_BYTES))
+
+
 def new_nonce() -> str:
     """A fresh per-request nonce: 32 lowercase hex characters, never in the payload's argv or environment."""
-    return secrets.token_hex(16)
+    return secrets.token_hex(_NONCE_BYTES)
 
 
 def new_handover_token() -> str:
@@ -169,6 +173,11 @@ def marker_prefix(nonce: str) -> bytes:
     endings.
     """
     return b"\x1e" + nonce.encode("ascii") + b" "
+
+
+def holds_a_start_line(data: bytes) -> bool:
+    """Whether ``data`` holds the start marker line of a request, whatever its nonce."""
+    return _ANY_START_LINE.search(data) is not None
 
 
 class _Phase(enum.Enum):

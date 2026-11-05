@@ -27,7 +27,7 @@ import agentworks.execution as execution
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import ConnectivityError, StateError
-from agentworks.execution import client, root_script, ssh_process, trust
+from agentworks.execution import client, envelope, root_script, ssh_process, trust
 from agentworks.execution.errors import TrustMismatch
 from agentworks.execution.trust import TrustBinding, TrustMode
 
@@ -71,7 +71,12 @@ class PublicSSH:
         self._vm_name = trust.vm_name
 
     def run_as_root(self, script: bytes, deadline: float) -> RawRun:
-        """Run ``script`` under ``sudo -n /bin/bash -s`` once, then type a host-key or key failure from ssh's log."""
+        """Run ``script`` under ``sudo -n /bin/bash -s`` once, then type a host-key or key failure from ssh's log.
+
+        The log is read only when the script never started: ssh writes the
+        server's banner there too, and a script that started has already
+        connected and logged in, so text in the log cannot mean either failure.
+        """
         with ssh_process.client_log() as log:
             argv = ssh_process.build_argv(
                 execution.resolve_ssh(),
@@ -83,6 +88,8 @@ class PublicSSH:
             )
             raw = root_script.run_process(argv, script, deadline)
             text = ssh_process.client_log_text(log)
+        if envelope.holds_a_start_line(raw.stderr):
+            return raw
         if ssh_process.HOST_KEY_FAILURE in text:
             raise TrustMismatch(self._vm_name, ssh_process.tail_lines(text))
         if ssh_process.AUTH_FAILURE in text:

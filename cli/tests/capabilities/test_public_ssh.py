@@ -142,6 +142,18 @@ def test_a_refused_key_in_the_client_log_leads_with_the_agent_load_hint_when_the
     assert hint.startswith("ssh-add the key") is (load_hint is not None)  # first: it fires only when likely
 
 
+@pytest.mark.parametrize(
+    "banner", ["Host key verification failed.\n", "Permission denied (publickey).\n"], ids=["host-key", "auth"]
+)
+def test_failure_text_in_the_log_of_a_script_that_started_is_not_a_failure(
+    monkeypatch: pytest.MonkeyPatch, banner: str
+) -> None:
+    """ssh logs the server's banner too; a script that started has already connected and logged in."""
+    answering(monkeypatch, log_text=banner, status=0)
+
+    assert root_script.run(target().run_as_root, "true", deadline=5).status == 0
+
+
 # -- wait_until_answering ----------------------------------------------------------------
 
 
