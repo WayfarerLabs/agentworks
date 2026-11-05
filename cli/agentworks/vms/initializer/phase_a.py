@@ -40,8 +40,6 @@ from agentworks.path_rendering import format_host_path
 from agentworks.vms import contract
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
@@ -75,7 +73,6 @@ def bootstrap(
     admin_username: str,
     tailnet_address: str,
     expected_release: DebianRelease,
-    on_tailscale_ready: Callable[[], None] | None = None,
 ) -> tuple[str, DebianRelease]:
     """Run Phase A and return the recorded address and the attested release.
 
@@ -135,19 +132,20 @@ def bootstrap(
         _secure(db, vm_name, platform, ctx, what="interrupted")
         raise
 
-    # The platform closes its provisioning access (Azure deletes the bootstrap
-    # SSH allow). A route change can unsettle the network briefly, so wait for
-    # the VM to answer again. The VM is attested and complete by now: a wait
-    # that runs out warns and proceeds, and one that raises (a changed host
-    # key, a refused key) propagates with the row still complete, which create
-    # reports as an initialization failure with reinit advice.
-    if on_tailscale_ready is not None:
-        try:
-            on_tailscale_ready()
-        except Exception as e:
-            output.warn(f"post-Tailscale-ready hook failed: {e}")
-        if not reachability.wait(access, wording=reachability.Wording.RECONNECT):
-            output.warn("Tailscale SSH did not reconnect after ~240s, proceeding anyway")
+    # The platform closes its provisioning access (the clouds remove their
+    # bootstrap SSH allow). A route change can unsettle the network briefly, so
+    # wait for the VM to answer again. The VM is attested and complete by now:
+    # a wait that runs out warns and proceeds, and one that raises (a changed
+    # host key, a refused key) propagates with the row still complete, which
+    # create reports as an initialization failure with reinit advice.
+    try:
+        ready = db.get_vm(vm_name)
+        assert ready is not None, "create_vm inserts the row before Phase A"
+        platform.post_tailscale_ready(ready, ctx)
+    except Exception as e:
+        output.warn(f"post-Tailscale-ready hook failed: {e}")
+    if not reachability.wait(access, wording=reachability.Wording.RECONNECT):
+        output.warn("Tailscale SSH did not reconnect after ~240s, proceeding anyway")
 
     return address, report.release
 

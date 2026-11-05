@@ -348,19 +348,6 @@ def create_vm(
     with output.section("Resolving Secrets"):
         resolver.resolve()
 
-    # Polymorphic post-Tailscale-ready hook. Azure overrides to delete
-    # its ephemeral bootstrap SSH allow rule (closing provisioning
-    # access the instant Tailscale becomes reachable); other platforms
-    # are no-op. It fires deep inside Phase A, so it closes over the same
-    # ``platform_obj`` / ``platform_ctx`` the create op ran with (both
-    # bound below, well before bootstrap_vm invokes this), which is what
-    # delivers the SP credential to the NSG call with no ambient
-    # fallback.
-    def _on_tailscale_ready() -> None:
-        refreshed = db.get_vm(vm_name)
-        assert refreshed is not None
-        platform_obj.post_tailscale_ready(refreshed, platform_ctx)
-
     # The keepalive hold spans BOTH init phases: WSL2 anchors its distro
     # against idle shutdown between Phase A (wsl.exe transport) and Phase B
     # (Tailscale SSH); the other platforms' hold is a no-op. It is entered
@@ -633,7 +620,6 @@ def create_vm(
                     admin_username=resolved_admin_username,
                     tailnet_address=result.tailnet_address,
                     expected_release=creation_release,
-                    on_tailscale_ready=_on_tailscale_ready,
                 )
                 output.info("Provisioning complete.")
             except (KeyboardInterrupt, UserAbort):

@@ -18,8 +18,6 @@ from agentworks.execution.results import Completed, Result
 from agentworks.vms.initializer import phase_a
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from agentworks.db import Database
     from tests.vm_access_support import AccessRecorder
 
@@ -38,13 +36,21 @@ def contract_outcomes(
 
 
 class SpyPlatform:
-    """Records the hook calls Phase A makes; ``secure_error`` makes the hook fail."""
+    """Records the hook calls Phase A makes; ``secure_error`` and ``ready_error`` make a hook fail."""
 
     name = "stub"
 
     def __init__(self) -> None:
         self.secured: list[str] = []
         self.secure_error: Exception | None = None
+        self.ready: list[str] = []
+        """The provisioning status of the row each ``post_tailscale_ready`` call was given."""
+        self.ready_error: BaseException | None = None
+
+    def post_tailscale_ready(self, vm: Any, ctx: object) -> None:
+        self.ready.append(vm.provisioning_status)
+        if self.ready_error is not None:
+            raise self.ready_error
 
     def secure_failed_vm(self, vm: Any, ctx: object) -> None:
         if self.secure_error is not None:
@@ -99,7 +105,6 @@ class PhaseAHarness:
         *,
         tailnet_address: str = ADDRESS,
         expected_release: DebianRelease = DebianRelease.TRIXIE,
-        on_tailscale_ready: Callable[[], None] | None = None,
     ) -> tuple[str, DebianRelease]:
         return phase_a.bootstrap(
             self.db,
@@ -111,7 +116,6 @@ class PhaseAHarness:
             admin_username="agentworks",
             tailnet_address=tailnet_address,
             expected_release=expected_release,
-            on_tailscale_ready=on_tailscale_ready,
         )
 
     def row(self) -> Any:

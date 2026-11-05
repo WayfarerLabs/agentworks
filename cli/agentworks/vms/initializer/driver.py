@@ -67,7 +67,7 @@ from .ssh_keys import (
 from .workspaces_dir import _setup_workspaces_directory
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
 
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform import VMPlatform
@@ -101,7 +101,6 @@ def bootstrap_vm(
     admin_username: str,
     tailnet_address: str,
     expected_release: DebianRelease,
-    on_tailscale_ready: Callable[[], None] | None = None,
 ) -> tuple[Transport, str, DebianRelease]:
     """Run Phase A (``phase_a.bootstrap``), then hand Phase B its legacy target.
 
@@ -126,7 +125,6 @@ def bootstrap_vm(
         admin_username=admin_username,
         tailnet_address=tailnet_address,
         expected_release=expected_release,
-        on_tailscale_ready=on_tailscale_ready,
     )
 
     # The operator's ``ssh awvm--<name>`` aliases go in before Phase B's many

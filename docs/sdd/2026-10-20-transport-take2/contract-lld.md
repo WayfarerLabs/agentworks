@@ -348,9 +348,9 @@ SSH-config sync (non-fatal, as today) and Phase B's `SSHTransport(..., trust=VM,
    The release is therefore the first contract request, directly after the first connection, as R1
    and D10 require; a release that fails raises before anything else is asked of the VM.
 5. **Complete.** Mark provisioning `COMPLETE` and record the `provisioning_complete` event with the
-   address, both inside the span as the event is today (`driver.py:172`). Then, outside the span and
-   still conditional on `on_tailscale_ready` as today (`driver.py:213-227`; create always passes
-   it): the hook, then `reachability.wait(access, wording=RECONNECT)`, whose `False` warns
+   address, both inside the span as the event is today (`driver.py:172`). Then, outside the span,
+   `bootstrap` calls `platform.post_tailscale_ready` on the refreshed row with the create's context
+   (a hook failure warns), then `reachability.wait(access, wording=RECONNECT)`, whose `False` warns
    "proceeding anyway".
 
 Any `Exception` in steps 1 to 5's span takes the existing arm: provisioning `FAILED`, the

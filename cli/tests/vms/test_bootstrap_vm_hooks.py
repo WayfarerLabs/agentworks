@@ -19,8 +19,6 @@ from agentworks.vms.initializer import driver
 from tests.vms.phase_a_support import ADDRESS, VM, PhaseAHarness
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from agentworks.db import Database
     from tests.vm_access_support import AccessRecorder
 
@@ -34,7 +32,7 @@ def phase(db: Database, vm_access_recorder: AccessRecorder, monkeypatch: pytest.
     return PhaseAHarness(db, vm_access_recorder)
 
 
-def bootstrap(phase: PhaseAHarness, on_ready: Callable[[], None] | None = None, logger: Any = None) -> Any:
+def bootstrap(phase: PhaseAHarness, logger: Any = None) -> Any:
     return driver.bootstrap_vm(
         phase.db,
         phase.config,
@@ -45,12 +43,11 @@ def bootstrap(phase: PhaseAHarness, on_ready: Callable[[], None] | None = None, 
         admin_username="agentworks",
         tailnet_address=ADDRESS,
         expected_release=DebianRelease.TRIXIE,
-        on_tailscale_ready=on_ready,
     )
 
 
 def test_phase_b_receives_a_vm_bound_target_at_the_recorded_address(phase: PhaseAHarness) -> None:
-    ts_target, home, release = bootstrap(phase, lambda: None)
+    ts_target, home, release = bootstrap(phase)
 
     assert ts_target.host == ADDRESS
     assert ts_target.trust == trust.TrustBinding(trust.TrustMode.VM, VM)
@@ -61,6 +58,6 @@ def test_phase_b_receives_a_vm_bound_target_at_the_recorded_address(phase: Phase
 def test_bootstrap_uses_manager_owned_logger_without_closing(phase: PhaseAHarness) -> None:
     logger = MagicMock(display_path="~/hookvm-vm-create.log")
 
-    bootstrap(phase, lambda: None, logger=logger)
+    bootstrap(phase, logger=logger)
 
     logger.close.assert_not_called()

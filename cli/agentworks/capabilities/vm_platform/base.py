@@ -414,11 +414,12 @@ class VMPlatform(Capability):
 
         Default no-op. The hook's contract is "close provisioning
         access": whatever ingress the platform opened for bootstrap is
-        no longer needed once Tailscale carries the traffic. Azure
-        overrides to delete the ephemeral bootstrap SSH allow rule
-        (scoped to the operator's egress prefixes; a permanent
-        deny-all-inbound baseline remains), leaving the VM with zero
-        inbound exposure. Unlike a cloud's route around each
+        no longer needed once Tailscale carries the traffic. The clouds
+        override it to remove their bootstrap SSH allow (scoped to the
+        operator's egress prefixes; the deny-all-inbound baseline
+        remains), leaving the VM with zero inbound exposure. Phase A
+        calls it after the VM contract passes, with the create's own
+        context. Unlike a cloud's route around each
         :meth:`run_as_root` call, this ingress is not one scope: it
         opens inside :meth:`create` (cloud-init needs inbound SSH) and
         closes at an async Tailscale-ready point inside Phase A
@@ -442,8 +443,8 @@ class VMPlatform(Capability):
         :meth:`create` while the platform's backend rollback window is open.
 
         Default no-op. Same contract as :meth:`post_tailscale_ready`
-        (which only fires on success): close provisioning access. Azure
-        overrides to delete the ephemeral bootstrap SSH allow rule, so a
+        (which only fires on success): close provisioning access. The
+        clouds override it to remove their bootstrap SSH allow, so a
         failed VM defaults to zero inbound exposure rather than keeping
         its bootstrap ingress indefinitely. Implementations must not
         assume the VM is reachable, and the caller treats the hook as

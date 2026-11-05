@@ -44,9 +44,11 @@ def test_the_sequence_records_enrolls_checks_then_completes(phase: PhaseAHarness
     address, release = phase.bootstrap(tailnet_address=f" {ADDRESS}\n")
 
     assert (address, release) == (ADDRESS, DebianRelease.TRIXIE)
-    # The first contact enrolls; then the contract, release first, over the admin's VM-mode access.
-    assert phase.recorder.operations == [("enroll", "run"), ("admin", "run"), ("admin", "run"), ("admin", "run")]
-    first_contact, release_request, script, sudo = phase.recorder.requests("run")
+    # The first contact enrolls; then the contract, release first, over the admin's VM-mode access, and
+    # after the platform's post-ready hook the reconnect probe over the same access.
+    assert phase.recorder.operations == [("enroll", "run")] + [("admin", "run")] * 4
+    first_contact, release_request, script, sudo, reconnect = phase.recorder.requests("run")
+    assert reconnect == reachability.PROBE
     assert first_contact == reachability.PROBE
     assert isinstance(release_request, Command)
     assert release_request.argv == ("cat", "/etc/os-release")
@@ -64,6 +66,7 @@ def test_the_sequence_records_enrolls_checks_then_completes(phase: PhaseAHarness
     assert trust.has_record(VM)
     assert phase.events() == ["provisioning_started", "provisioning_complete"]
     assert phase.platform.secured == []
+    assert phase.platform.ready == [ProvisioningStatus.COMPLETE.value]
 
 
 def test_the_requests_reach_the_operation_log(phase: PhaseAHarness) -> None:
@@ -145,11 +148,10 @@ def test_an_interrupt_before_the_contract_passes_secures_and_leaves_the_vm_gated
 
 
 def test_an_interrupt_after_complete_leaves_the_vm_complete(phase: PhaseAHarness) -> None:
-    def interrupt() -> None:
-        raise KeyboardInterrupt
+    phase.platform.ready_error = KeyboardInterrupt()
 
     with pytest.raises(KeyboardInterrupt):
-        phase.bootstrap(on_tailscale_ready=interrupt)
+        phase.bootstrap()
 
     assert phase.row().provisioning_status == ProvisioningStatus.COMPLETE.value
     assert phase.platform.secured == []
@@ -161,7 +163,7 @@ def test_a_post_ready_wait_that_runs_out_warns_and_proceeds(phase: PhaseAHarness
         *[Result(Unknown(UnknownReason.CONNECTION))] * reachability.ATTEMPTS,
     ]
 
-    address, _release = phase.bootstrap(on_tailscale_ready=lambda: None)
+    address, _release = phase.bootstrap()
 
     assert address == ADDRESS
     assert phase.row().provisioning_status == ProvisioningStatus.COMPLETE.value
@@ -169,7 +171,7 @@ def test_a_post_ready_wait_that_runs_out_warns_and_proceeds(phase: PhaseAHarness
 
 
 def test_the_post_ready_wait_is_on_the_vm_mode_access_and_never_enrolls(phase: PhaseAHarness) -> None:
-    phase.bootstrap(on_tailscale_ready=lambda: None)
+    phase.bootstrap()
 
     assert phase.recorder.operations[-1] == ("admin", "run")
     assert phase.recorder.requests("run")[-1] == reachability.PROBE
@@ -181,7 +183,7 @@ def test_a_post_ready_wait_that_raises_leaves_the_vm_complete_and_unsecured(phas
     phase.admin.run_outcomes = [*contract_outcomes(), Result(Unknown(UnknownReason.HOST_KEY))]
 
     with pytest.raises(TrustMismatch):
-        phase.bootstrap(on_tailscale_ready=lambda: None)
+        phase.bootstrap()
 
     assert phase.row().provisioning_status == ProvisioningStatus.COMPLETE.value
     assert phase.platform.secured == []
@@ -224,9 +226,7 @@ def test_a_secure_hook_failure_does_not_mask_the_interrupt(phase: PhaseAHarness)
 
 
 def test_the_post_ready_hook_fires_after_the_contract_and_never_secures(phase: PhaseAHarness) -> None:
-    fired: list[str] = []
+    phase.bootstrap()
 
-    phase.bootstrap(on_tailscale_ready=lambda: fired.append(phase.row().provisioning_status))
-
-    assert fired == [ProvisioningStatus.COMPLETE.value]
+    assert phase.platform.ready == [ProvisioningStatus.COMPLETE.value]
     assert phase.platform.secured == []
