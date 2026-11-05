@@ -129,6 +129,7 @@ from agentworks.capabilities.harness_integration.base import (
     require_commands,
 )
 from agentworks.errors import StateError
+from agentworks.execution.requests import Script, Shell
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 from agentworks.plugins.codex.artifacts import guidance_path, outer_artifacts, session_artifacts, vm_artifacts
@@ -147,7 +148,6 @@ if TYPE_CHECKING:
         WorkspaceSetupInvocation,
     )
     from agentworks.execution.access import VMAccess
-    from agentworks.transports import Transport
 
 
 class CodexUserConfig(NativeUserConfig):
@@ -362,8 +362,8 @@ def _probe_hint(returncode: int) -> str:
     hint: ``_FIND_FAILED_EXIT`` means ``find`` ran and failed against the
     on-disk sessions tree, so telling them to wait for the target to
     become reachable would point at a healthy component. Everything else
-    in the non-{0,1} band (an SSH failure's 255, a shell that would not
-    start) really is reachability.
+    in the non-{0,1} band (a shell that would not start) really is
+    reachability.
     """
     if returncode == _FIND_FAILED_EXIT:
         return (
@@ -390,6 +390,55 @@ _NO_SESSIONS_DIR_EXIT = 3  # sessions dir absent: codex never ran here
 _CWD_RESOLVE_EXIT = 4  # workspace dir could not be canonicalized: raise
 _FIND_FAILED_EXIT = 5  # find itself failed (not a mere no-match): raise
 _READ_FAILED_EXIT = 6  # the recorder file exists but would not read: raise
+
+
+# The three op-time probes, each run in the launch target's login and
+# interactive shell, the environment the pane gets, so ``CODEX_HOME``
+# resolves as the pane's codex resolves it. ``CodexIntegration`` reads their
+# exit codes and stdout.
+
+
+def recorder_probe(session_name: str) -> Script:
+    """Print the notify recorder's file for ``session_name``: exit 1 when absent, ``_READ_FAILED_EXIT`` unreadable."""
+    target = home_word(thread_tail(session_name))
+    inner = f"[ -f {target} ] || exit 1; cat {target} 2>/dev/null || exit {_READ_FAILED_EXIT}"
+    return Script(inner, Shell.USER_DEFAULT, login=True, interactive=True)
+
+
+def rollout_probe(sid: str) -> Script:
+    """Whether ``*-<sid>.jsonl`` exists under the sessions dir: exit 0 found, 1 not, ``_FIND_FAILED_EXIT`` failed."""
+    needle = shlex.quote(f"*-{sid}.jsonl")
+    inner = (
+        f"[ -d {_SESSIONS_DIR} ] || exit 1; "
+        f"out=$(find {_SESSIONS_DIR} -name {needle} -print -quit 2>/dev/null); rc=$?; "
+        f'[ -n "$out" ] && exit 0; [ "$rc" -eq 0 ] || exit {_FIND_FAILED_EXIT}; exit 1'
+    )
+    return Script(inner, Shell.USER_DEFAULT, login=True, interactive=True)
+
+
+def discovery_probe(workspace_path: str) -> Script:
+    """Print every interactive rollout whose cwd is ``workspace_path``, one path per line.
+
+    ``CodexIntegration._discover`` explains the filter and its exit codes.
+    """
+    workspace = shlex.quote(workspace_path)
+    awk = (
+        f"BEGIN{{s={_awk_string(_CLI_SOURCE_NEEDLE)};"
+        f'c="\\"cwd\\":\\"" ENVIRON["agw_ws"] "\\"";'
+        f"for(i=1;i<ARGC;i++){{"
+        f"r=(getline l < ARGV[i]);close(ARGV[i]);"
+        f"if(r<0){{print {_awk_string(_UNREADABLE_SENTINEL)};continue}}"
+        f"if(r>0&&index(l,s)&&index(l,c))print ARGV[i]}}}}"
+    )
+    inner = (
+        f"[ -d {_SESSIONS_DIR} ] || exit {_NO_SESSIONS_DIR_EXIT}; "
+        f"agw_ws=$(cd {workspace} 2>/dev/null && pwd -P) || exit {_CWD_RESOLVE_EXIT}; "
+        f"export agw_ws; "
+        f"find {_SESSIONS_DIR} -type f -name {shlex.quote('rollout-*.jsonl')} "
+        f"-exec awk {shlex.quote(awk)} {{}} + 2>/dev/null || exit {_FIND_FAILED_EXIT}; "
+        f"exit 0"
+    )
+    return Script(inner, Shell.USER_DEFAULT, login=True, interactive=True)
 
 
 class _Layer2(NamedTuple):
@@ -707,7 +756,7 @@ class CodexIntegration(HarnessIntegration):
 
     def _start_fresh(self, ctx: RunContext) -> str:
         """Reject the visible recorder binding and launch bare Codex."""
-        launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
+        launch_target = ctx.admin_access() if self._admin else ctx.agent_access()
         if launch_target is None:
             raise StateError(
                 "codex fresh start requires its owning launch target",
@@ -756,7 +805,7 @@ class CodexIntegration(HarnessIntegration):
         command that echoes the visible decision, provisions the recorder,
         and ``exec``s ``codex``.
         """
-        launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
+        launch_target = ctx.admin_access() if self._admin else ctx.agent_access()
         if launch_target is None:
             # Unlike claude-code (which keeps its minted id either way, so
             # guessing "fresh" is lossless), a codex fresh launch drops the
@@ -898,7 +947,7 @@ class CodexIntegration(HarnessIntegration):
             return marker
         return None
 
-    def _bound_session_id(self, transport: Transport) -> str | None:
+    def _bound_session_id(self, access: VMAccess) -> str | None:
         """The id bound to this session, or ``None`` when nothing is: the
         uuid codex last recorded through the notify recorder if there is
         one, else the id a previous op stored.
@@ -919,7 +968,7 @@ class CodexIntegration(HarnessIntegration):
         if "session_id" in self._state and not (isinstance(stored, str) and _RECORDED_ID_RE.match(stored)):
             del self._state["session_id"]  # sweep garbage; never this harness integration's write
             stored = None
-        recorded = self._recorded_thread_id(transport)
+        recorded = self._recorded_thread_id(access)
         if recorded is not None:
             if recorded != stored:
                 self._state["session_id"] = recorded
@@ -1146,7 +1195,7 @@ class CodexIntegration(HarnessIntegration):
         """``extra_args`` as raw option tokens after generated options."""
         return list(self.config.extra_args)
 
-    def _recorded_thread_id(self, transport: Transport) -> str | None:
+    def _recorded_thread_id(self, access: VMAccess) -> str | None:
         """The uuid the notify recorder last wrote for this session, or
         ``None`` when nothing valid is recorded.
 
@@ -1157,22 +1206,21 @@ class CodexIntegration(HarnessIntegration):
         only ever writes one, so anything else is not ours to interpret,
         and the fresh path clears it. Only a file that EXISTS and would
         not read raises, since that is a probe that could not run rather
-        than an answer.
+        than an answer, as does a probe that may not have run at all.
 
         The stdout parse tolerates login-shell noise the same way the
         discovery probe does: only uuid-shaped lines are considered.
         """
-        target = home_word(thread_tail(self._session_name))
-        inner = f"[ -f {target} ] || exit 1; cat {target} 2>/dev/null || exit {_READ_FAILED_EXIT}"
-        result = transport.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
-        if result.returncode == 1:
+        result = access.run(recorder_probe(self._session_name))
+        status = result.require_completed(access.vm_name)
+        if status == 1:
             return None  # nothing recorded yet: not bound
-        if result.returncode != 0:
+        if status != 0:
             recording = f"~/{thread_tail(self._session_name)}"
             raise StateError(
                 f"session '{self._session_name}': could not read the recorded "
                 f"codex thread id ({recording}) on "
-                f"{self._target_label} (exit {result.returncode}); refusing to "
+                f"{self._target_label} (exit {status}); refusing to "
                 f"guess resume-vs-launch.",
                 entity_kind="session",
                 entity_name=self._session_name,
@@ -1185,21 +1233,23 @@ class CodexIntegration(HarnessIntegration):
                     f"Remove {recording} on the launch target (or fix its permissions) and retry; "
                     f"the next resume identifies the conversation from codex's own state instead, "
                     f"so nothing is orphaned."
-                    if result.returncode == _READ_FAILED_EXIT
+                    if status == _READ_FAILED_EXIT
                     else "Retry once the launch target is reachable."
                 ),
             )
-        recorded = [line.strip() for line in result.stdout.splitlines() if _RECORDED_ID_RE.match(line.strip())]
+        stdout = result.stdout.decode("utf-8", "replace")
+        recorded = [line.strip() for line in stdout.splitlines() if _RECORDED_ID_RE.match(line.strip())]
         if len(recorded) != 1:
             return None  # empty, noise-only, or not something the recorder wrote
         return recorded[0]
 
-    def _rollout_exists(self, transport: Transport, sid: str) -> bool:
+    def _rollout_exists(self, access: VMAccess, sid: str) -> bool:
         """True iff the bound session's rollout
         (``rollout-<timestamp>-<sid>.jsonl``, hence the ``*-<sid>.jsonl``
         glob) exists under the sessions dir on the launch target.
-        Shell-neutral (the glob is quoted through to find); runs through
-        ``$SHELL -lic`` like the readiness probe. ``archived_sessions/``
+        Shell-neutral (the glob is quoted through to find); runs in the
+        login and interactive shell like the readiness probe
+        (:func:`rollout_probe`). ``archived_sessions/``
         is deliberately NOT probed: an archived session reports
         not-resumable and the caller drops the bound id and falls through to
         discovery, rather than silently reversing ``codex archive``. Note
@@ -1213,30 +1263,25 @@ class CodexIntegration(HarnessIntegration):
         printed match exits 0 (a found rollout is definitive even if find
         also stumbled elsewhere); a find that FAILED without printing one
         exits with the find-failed code rather than folding into "no
-        rollout". Anything but {0, 1} (that code, an SSH failure's 255, a
-        shell that could not start) raises: guessing "fresh" would drop
-        the bound id and orphan a resumable conversation."""
-        needle = shlex.quote(f"*-{sid}.jsonl")
-        inner = (
-            f"[ -d {_SESSIONS_DIR} ] || exit 1; "
-            f"out=$(find {_SESSIONS_DIR} -name {needle} -print -quit 2>/dev/null); rc=$?; "
-            f'[ -n "$out" ] && exit 0; [ "$rc" -eq 0 ] || exit {_FIND_FAILED_EXIT}; exit 1'
-        )
-        result = transport.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
-        if result.returncode == 0:
+        rollout". Any other exit (that code, a shell that could not start)
+        raises, and so does a probe that may not have run, with its typed
+        execution error: guessing "fresh" would drop the bound id and
+        orphan a resumable conversation."""
+        status = access.run(rollout_probe(sid)).require_completed(access.vm_name)
+        if status == 0:
             return True  # rollout on disk: resume
-        if result.returncode == 1:
+        if status == 1:
             return False  # the probe ran, no match: not resumable
         raise StateError(
             f"session '{self._session_name}': could not probe for the codex "
-            f"rollout on {self._target_label} (exit {result.returncode}); "
+            f"rollout on {self._target_label} (exit {status}); "
             f"refusing to guess resume-vs-launch.",
             entity_kind="session",
             entity_name=self._session_name,
-            hint=_probe_hint(result.returncode),
+            hint=_probe_hint(status),
         )
 
-    def _discover(self, transport: Transport) -> _Layer2:
+    def _discover(self, access: VMAccess) -> _Layer2:
         """Layer-2 discovery: the rollouts in this session's workspace
         directory that could be a human's interactive codex conversation.
 
@@ -1302,27 +1347,11 @@ class CodexIntegration(HarnessIntegration):
           dropped candidate can turn "several" into one confident wrong
           adoption.
         """
-        workspace = shlex.quote(self._workspace_path)
-        awk = (
-            f"BEGIN{{s={_awk_string(_CLI_SOURCE_NEEDLE)};"
-            f'c="\\"cwd\\":\\"" ENVIRON["agw_ws"] "\\"";'
-            f"for(i=1;i<ARGC;i++){{"
-            f"r=(getline l < ARGV[i]);close(ARGV[i]);"
-            f"if(r<0){{print {_awk_string(_UNREADABLE_SENTINEL)};continue}}"
-            f"if(r>0&&index(l,s)&&index(l,c))print ARGV[i]}}}}"
-        )
-        inner = (
-            f"[ -d {_SESSIONS_DIR} ] || exit {_NO_SESSIONS_DIR_EXIT}; "
-            f"agw_ws=$(cd {workspace} 2>/dev/null && pwd -P) || exit {_CWD_RESOLVE_EXIT}; "
-            f"export agw_ws; "
-            f"find {_SESSIONS_DIR} -type f -name {shlex.quote('rollout-*.jsonl')} "
-            f"-exec awk {shlex.quote(awk)} {{}} + 2>/dev/null || exit {_FIND_FAILED_EXIT}; "
-            f"exit 0"
-        )
-        result = transport.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
-        if result.returncode == _NO_SESSIONS_DIR_EXIT:
+        result = access.run(discovery_probe(self._workspace_path))
+        status = result.require_completed(access.vm_name)
+        if status == _NO_SESSIONS_DIR_EXIT:
             return _Layer2((), False)  # codex never ran on this target
-        if result.returncode == _CWD_RESOLVE_EXIT:
+        if status == _CWD_RESOLVE_EXIT:
             raise StateError(
                 f"session '{self._session_name}': could not resolve the "
                 f"workspace directory ({self._workspace_path}) on "
@@ -1332,18 +1361,18 @@ class CodexIntegration(HarnessIntegration):
                 entity_name=self._session_name,
                 hint="Check that the workspace directory exists on the launch target and retry.",
             )
-        if result.returncode != 0:
+        if status != 0:
             raise StateError(
                 f"session '{self._session_name}': could not probe for codex "
-                f"rollouts on {self._target_label} (exit {result.returncode}); "
+                f"rollouts on {self._target_label} (exit {status}); "
                 f"refusing to guess resume-vs-launch.",
                 entity_kind="session",
                 entity_name=self._session_name,
-                hint=_probe_hint(result.returncode),
+                hint=_probe_hint(status),
             )
         ids: list[str] = []
         unnamed = False
-        for line in result.stdout.splitlines():
+        for line in result.stdout.decode("utf-8", "replace").splitlines():
             path = line.strip()
             if path == _UNREADABLE_SENTINEL:
                 unnamed = True  # a candidate we could not read: the human decides

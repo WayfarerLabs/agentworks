@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import shlex
-import subprocess
 import uuid
 from typing import TYPE_CHECKING, cast
 
@@ -14,14 +13,19 @@ from agentworks.capabilities.config import capability_config_references, validat
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart
 from agentworks.command_checks import presence_probe
 from agentworks.errors import ConfigError, StateError
-from agentworks.plugins.grok.harness_integration import GrokBuildConfig, GrokBuildIntegration
+from agentworks.execution.errors import ExecutionIncomplete
+from agentworks.execution.requests import Script
+from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
+from agentworks.plugins.grok.harness_integration import GrokBuildConfig, GrokBuildIntegration, session_probe
 from agentworks.schema import RefOwner, merge_model
-from tests.conftest import _FakeResult, _FakeTarget, requires_posix_shell
-from tests.vm_access_support import command_check_access
+from tests.conftest import requires_posix_shell
+from tests.vm_access_support import Admin, RecordingVMAccess, account_shell, command_check_access, local_vm_access
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
+
+    from agentworks.execution.access import VMAccess
 
 _SID = "939b1597-7c61-5ace-80f4-14617b7b4257"
 
@@ -46,8 +50,16 @@ def _integration(
     )
 
 
-def _op_ctx(target: _FakeTarget) -> RunContext:
-    return RunContext(admin_target=target)
+def _launch_target(*, summary: int | None = None) -> RecordingVMAccess:
+    """The admin's access, answering the stored id's persisted-session probe with exit ``summary``."""
+    access = RecordingVMAccess([], Admin())
+    if summary is not None:
+        access.respond(session_probe(_SID), Result(Completed(summary)))
+    return access
+
+
+def _op_ctx(access: VMAccess) -> RunContext:
+    return RunContext(admin_access=access)
 
 
 def _scope() -> OperationScope:
@@ -161,19 +173,19 @@ def test_construct_revalidates_config() -> None:
 
 
 def test_persisted_summary_resumes() -> None:
-    target = _FakeTarget({"summary.json": _FakeResult(0)})
+    target = _launch_target(summary=0)
     command = _integration().start(_op_ctx(target))
     assert _grok_argv(command)[:2] == ["--resume", _SID]
 
 
 def test_absent_summary_starts_fresh() -> None:
-    target = _FakeTarget({"summary.json": _FakeResult(1)})
+    target = _launch_target(summary=1)
     command = _integration().start(_op_ctx(target))
     assert _grok_argv(command)[:2] == ["--session-id", _SID]
 
 
 def test_resume_only_resumes_an_existing_summary() -> None:
-    target = _FakeTarget({"summary.json": _FakeResult(0)})
+    target = _launch_target(summary=0)
     result = _integration(state={"session_id": _SID}).start(_op_ctx(target), intent=HarnessLaunchIntent.RESUME_ONLY)
     assert _grok_argv(result)[:2] == ["--resume", _SID]
 
@@ -181,21 +193,21 @@ def test_resume_only_resumes_an_existing_summary() -> None:
 @pytest.mark.parametrize(
     ("state", "target", "expected_probe_count"),
     [
-        pytest.param({}, _FakeTarget(), 0, id="no-stored-id"),
-        pytest.param({"session_id": _SID}, _FakeTarget({"summary.json": _FakeResult(1)}), 1, id="no-summary"),
-        pytest.param({"session_id": _SID}, _FakeTarget({"summary.json": _FakeResult(255)}), 1, id="probe-failed"),
+        pytest.param({}, _launch_target(), 0, id="no-stored-id"),
+        pytest.param({"session_id": _SID}, _launch_target(summary=1), 1, id="no-summary"),
+        pytest.param({"session_id": _SID}, _launch_target(summary=255), 1, id="probe-failed"),
     ],
 )
 def test_resume_only_refuses_without_resumable_state_and_preserves_integration_state(
     state: dict[str, object],
-    target: _FakeTarget,
+    target: RecordingVMAccess,
     expected_probe_count: int,
 ) -> None:
     before = state.copy()
     with pytest.raises(StateError):
         _integration(state=state).start(_op_ctx(target), intent=HarnessLaunchIntent.RESUME_ONLY)
     assert state == before
-    assert len(target.commands) == expected_probe_count
+    assert len(target.requests()) == expected_probe_count
 
 
 def test_resume_only_refuses_a_missing_target_without_state_mutation() -> None:
@@ -209,17 +221,17 @@ def test_create_rotates_the_id_without_probing_resumable_state(monkeypatch: pyte
     replacement_sid = "0a18a04b-d083-4dc8-961a-07f2151c9b35"
     monkeypatch.setattr(uuid, "uuid4", lambda: uuid.UUID(replacement_sid))
     state: dict[str, object] = {"session_id": _SID}
-    target = _FakeTarget({"summary.json": _FakeResult(0)})
+    target = _launch_target(summary=0)
 
     command = _integration(state=state).start(_op_ctx(target), intent=HarnessLaunchIntent.CREATE)
 
     assert _grok_argv(command)[:2] == ["--session-id", replacement_sid]
     assert state == {"session_id": replacement_sid}
-    assert target.commands == []
+    assert target.requests() == []
 
 
 def test_launch_intents_report_distinct_decisions() -> None:
-    target = _FakeTarget({"summary.json": _FakeResult(1)})
+    target = _launch_target(summary=1)
     missing = _integration().start(_op_ctx(target))
     created = _integration().start(_op_ctx(target), intent=HarnessLaunchIntent.CREATE)
     forced = _integration().start(_op_ctx(target), intent=HarnessLaunchIntent.FORCE_NEW)
@@ -229,15 +241,17 @@ def test_launch_intents_report_distinct_decisions() -> None:
 
 
 def test_repeated_start_uses_the_same_state_based_decision() -> None:
-    target = _FakeTarget({"summary.json": _FakeResult(0)})
+    target = _launch_target(summary=0)
     integration = _integration()
     assert integration.start(_op_ctx(target)) == integration.start(_op_ctx(target))
 
 
 def test_probe_uses_grok_home_and_the_persisted_summary_boundary() -> None:
-    target = _FakeTarget({"summary.json": _FakeResult(0)})
+    target = _launch_target(summary=0)
     _integration().start(_op_ctx(target))
-    (probe,) = target.commands
+    (request,) = target.requests()
+    assert isinstance(request, Script)
+    probe = request.source
     assert "GROK_HOME" in probe
     assert f"{_SID}/summary.json" in probe
     assert "-mindepth 3 -maxdepth 3" in probe
@@ -245,25 +259,34 @@ def test_probe_uses_grok_home_and_the_persisted_summary_boundary() -> None:
 
 
 def test_missing_session_root_is_clean_absence_but_find_failure_is_not() -> None:
-    target = _FakeTarget({"summary.json": _FakeResult(0)})
+    target = _launch_target(summary=0)
     _integration().start(_op_ctx(target))
-    (probe,) = target.commands
+    (request,) = target.requests()
+    assert isinstance(request, Script)
+    probe = request.source
     assert "[ -d " in probe
     assert "exit 6" in probe
 
     with pytest.raises(StateError):
-        _integration().start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(6)})))
+        _integration().start(_op_ctx(_launch_target(summary=6)))
 
 
-def test_transport_failure_refuses_to_guess() -> None:
+def test_an_undefined_probe_exit_refuses_to_guess() -> None:
     with pytest.raises(StateError) as exc:
-        _integration().start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(255)})))
+        _integration().start(_op_ctx(_launch_target(summary=255)))
     assert exc.value.entity_name == "s1"
+
+
+def test_a_probe_that_may_not_have_run_refuses_to_guess() -> None:
+    access = RecordingVMAccess([], Admin())
+    access.respond(session_probe(_SID), Result(Unknown(UnknownReason.CONNECTION)))
+    with pytest.raises(ExecutionIncomplete):
+        _integration().start(_op_ctx(access))
 
 
 def test_first_start_mints_and_records_a_uuid() -> None:
     state: dict[str, object] = {}
-    command = _integration(state=state).start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(1)}))).command
+    command = _integration(state=state).start(_op_ctx(_launch_target(summary=1))).command
     sid = state["session_id"]
     assert isinstance(sid, str) and len(sid) == 36
     assert sid in command
@@ -271,7 +294,7 @@ def test_first_start_mints_and_records_a_uuid() -> None:
 
 def test_wrong_typed_session_id_is_replaced_with_a_canonical_uuid() -> None:
     state: dict[str, object] = {"session_id": 7}
-    _integration(state=state).start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(1)})))
+    _integration(state=state).start(_op_ctx(_launch_target(summary=1)))
     sid = state["session_id"]
     assert isinstance(sid, str)
     assert str(uuid.UUID(sid)) == sid
@@ -279,51 +302,39 @@ def test_wrong_typed_session_id_is_replaced_with_a_canonical_uuid() -> None:
 
 def test_existing_session_id_is_reused_verbatim() -> None:
     state: dict[str, object] = {"session_id": _SID}
-    command = _integration(state=state).start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(0)})))
+    command = _integration(state=state).start(_op_ctx(_launch_target(summary=0)))
     assert _grok_argv(command)[:2] == ["--resume", _SID]
     assert state == {"session_id": _SID}
 
 
 @pytest.mark.parametrize("sid", ["not-a-uuid", _SID.replace("-", ""), f"{{{_SID}}}"])
 def test_invalid_persisted_session_id_is_rejected_before_probe(sid: str) -> None:
-    target = _FakeTarget({"summary.json": _FakeResult(0)})
+    target = _launch_target(summary=0)
     with pytest.raises(StateError) as exc:
         _integration(state={"session_id": sid}).start(_op_ctx(target))
     assert exc.value.entity_name == "s1"
-    assert target.commands == []
-
-
-class _LocalProbeTarget:
-    def __init__(self, grok_home: Path) -> None:
-        self._grok_home = grok_home
-
-    def run(self, command: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            command,
-            shell=True,
-            executable="/bin/sh",
-            env={"GROK_HOME": str(self._grok_home), "PATH": "/usr/bin:/bin", "SHELL": "/bin/sh"},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+    assert target.requests() == []
 
 
 @requires_posix_shell
-def test_probe_executes_against_groks_real_filesystem_boundary(tmp_path: Path) -> None:
+def test_probe_executes_against_groks_real_filesystem_boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     grok_home = tmp_path / "grok-home"
-    target = _LocalProbeTarget(grok_home)
+    home = tmp_path / "home"
+    home.mkdir()
+    # GROK_HOME comes from the account's login startup, as the pane's does.
+    (home / ".profile").write_text(f'export GROK_HOME="{grok_home}"\n')
+    target = local_vm_access(monkeypatch, home=home, shell=account_shell(tmp_path))
 
-    absent = _integration().start(_op_ctx(target))  # type: ignore[arg-type]
+    absent = _integration().start(_op_ctx(target))
     assert _grok_argv(absent)[:2] == ["--session-id", _SID]
 
     stub = grok_home / "sessions" / "encoded-cwd" / _SID
     stub.mkdir(parents=True)
-    incomplete = _integration().start(_op_ctx(target))  # type: ignore[arg-type]
+    incomplete = _integration().start(_op_ctx(target))
     assert _grok_argv(incomplete)[:2] == ["--session-id", _SID]
 
     (stub / "summary.json").write_text("{}")
-    persisted = _integration().start(_op_ctx(target))  # type: ignore[arg-type]
+    persisted = _integration().start(_op_ctx(target))
     assert _grok_argv(persisted)[:2] == ["--resume", _SID]
 
 
@@ -335,7 +346,7 @@ def test_managed_fields_map_to_canonical_flags() -> None:
             "reasoning_effort": "future-effort",
             "sandbox": "workspace-write",
         }
-    ).start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(1)})))
+    ).start(_op_ctx(_launch_target(summary=1)))
     argv = _grok_argv(command)
     assert argv == [
         "--session-id",
@@ -352,7 +363,7 @@ def test_managed_fields_map_to_canonical_flags() -> None:
 
 
 def test_empty_config_emits_only_the_fresh_session_identity() -> None:
-    command = _integration().start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(1)})))
+    command = _integration().start(_op_ctx(_launch_target(summary=1)))
     assert _grok_argv(command) == ["--session-id", _SID]
 
 
@@ -367,7 +378,7 @@ def test_fresh_workload_uses_native_controls_and_one_positional_prompt() -> None
             "rules": "Keep the diff focused",
             "extra_args": ["--future-flag"],
         }
-    ).start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(1)})))
+    ).start(_op_ctx(_launch_target(summary=1)))
     argv = _grok_argv(command)
 
     assert argv[argv.index("--agent") + 1] == "reviewer"
@@ -384,7 +395,7 @@ def test_fresh_workload_uses_native_controls_and_one_positional_prompt() -> None
 def test_fresh_initial_prompt_uses_a_positional_parser_boundary(initial_prompt: str) -> None:
     argv = _grok_argv(
         _integration({"initial_prompt": initial_prompt, "extra_args": ["--future-flag"]}).start(
-            _op_ctx(_FakeTarget({"summary.json": _FakeResult(1)}))
+            _op_ctx(_launch_target(summary=1))
         )
     )
 
@@ -400,7 +411,7 @@ def test_resume_reapplies_process_controls_but_not_fresh_conversation_content() 
             "agent": "reviewer",
             "rules": "Fresh rules",
         }
-    ).start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(0)})))
+    ).start(_op_ctx(_launch_target(summary=0)))
     argv = _grok_argv(command)
     assert argv[argv.index("--agent") + 1] == "reviewer"
     assert argv[argv.index("--rules") + 1] == "Fresh rules"
@@ -411,7 +422,7 @@ def test_resume_reapplies_process_controls_but_not_fresh_conversation_content() 
 def test_extra_args_are_quoted_and_appended_last() -> None:
     payload = "a'; touch /tmp/pwned #"
     command = _integration({"model": "managed", "extra_args": ["--future-flag", payload]}).start(
-        _op_ctx(_FakeTarget({"summary.json": _FakeResult(1)}))
+        _op_ctx(_launch_target(summary=1))
     )
     argv = _grok_argv(command)
     assert argv[-2:] == ["--future-flag", payload]

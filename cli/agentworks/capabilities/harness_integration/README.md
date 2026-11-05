@@ -576,8 +576,8 @@ sessions. Five rules, each earned:
    and tool-version drift; a stored opaque value the tool itself reported is not.
 2. **Decide resume-vs-launch at op time, on the launch target, from the tool's own durable state.**
    Probe for the stored id's artifact (for Claude, the transcript `<sid>.jsonl` under the projects
-   dir) over the transport, with the same `$SHELL -lic` environment the pane will get. Do it per op,
-   not cached: the world changes between ops. Restart calls `start` before teardown so an
+   dir) through the launch target's access, in the login and interactive shell the pane gets. Do it
+   per op, not cached: the world changes between ops. Restart calls `start` before teardown so an
    unsupported intent or strict-resume failure leaves the managed tmux runtime and integration-owned
    state intact; ordinary lifecycle runtime-identity repair can already have persisted observed
    facts. The decision therefore has to rely on durable tool state rather than process liveness.
@@ -671,10 +671,15 @@ Three rules make a per-user file legitimate under the session-scoped effects rul
 
 #### Probing the Launch Target
 
-Run probes as `"$SHELL" -lic '<inner>'` with `check=False`: login+interactive sources the same
-dotfiles the pane's shell will (mise activation, PATH fragments), so the probe answers for the
-environment the workload actually gets. Prefer shell-neutral inner commands (the transcript probe's
-`find ... -print -quit | grep -q .` avoids bash/zsh divergence on unmatched globs).
+Read the launch target's access with `ctx.admin_access()` or `ctx.agent_access()`, and build each
+probe with one named function returning
+`Script(inner, Shell.USER_DEFAULT, login=True, interactive=True)` (claude's `transcript_probe`,
+codex's `recorder_probe`, `rollout_probe` and `discovery_probe`, grok's `session_probe`): login and
+interactive startup sources the same dotfiles the pane's shell will (mise activation, PATH
+fragments), so the probe answers for the environment the workload actually gets. Read its exit code
+through `require_completed`, which raises the typed execution error for a probe that may not have
+run, so only a completed probe is ever classified. Prefer shell-neutral inner commands (the
+transcript probe's `find ... -print -quit` avoids bash/zsh divergence on unmatched globs).
 `require_commands` applies harness-specific refusal policy over the neutral
 `check_required_commands` mechanism; reuse it rather than hand-rolling executable checks.
 
@@ -688,22 +693,25 @@ The session layers, with the shipped tests as templates:
 
 - **Unit (the bulk):** `cli/tests/test_claude_code_integration.py`. Readiness runs against
   `command_check_access` from `cli/tests/vm_access_support.py`, an access whose command checks find
-  every command except the ones a test names missing. The detection probe uses `_FakeTarget` /
-  `_FakeResult` from `cli/tests/conftest.py`, a substring-to-result map standing in for the
-  transport and keyed on the stored id. Cover: config vocabulary (accepts, unknown-field raises,
-  wrong-type raises), both detection directions (probe hit resumes, miss launches fresh, other exit
-  raises), flag mapping and `extra_args` quoting, the visible-decision line, state minting, and the
-  integration's create, resume-only, resume-or-new, and force-new behavior.
+  every command except the ones a test names missing. The detection probe runs against a
+  `RecordingVMAccess` from the same module, answering the probe's own builder (`transcript_probe` of
+  the stored id) with an exit code through `respond`. Cover: config vocabulary (accepts,
+  unknown-field raises, wrong-type raises), both detection directions (probe hit resumes, miss
+  launches fresh, other exit raises), flag mapping and `extra_args` quoting, the visible-decision
+  line, state minting, and the integration's create, resume-only, resume-or-new, and force-new
+  behavior.
 - **Generated shell text, executed:** `cli/tests/test_codex_integration.py`. An exit-code stub
   proves how a probe's ANSWER is classified; it cannot prove the probe asks the right question, and
   the interesting logic in a stateful integration often lives in the shell text itself (codex's
   filter that keeps subagent rollouts out of the candidate set, the recorder script it provisions,
-  the three-layer quoting of a `-c` override). Run that text through a real `sh` against scratch
-  fixtures with `$HOME` pointed at a tmp dir: still no tool binary, but a mis-quoted token or an
-  inverted filter fails in the test rather than in a pane.
+  the three-layer quoting of a `-c` override). Run that text through `local_vm_access` from
+  `cli/tests/vm_access_support.py`, a real access whose account home is a tmp dir of scratch
+  fixtures: still no tool binary, but a mis-quoted token or an inverted filter fails in the test
+  rather than in a pane.
 - **Orchestrated:** `cli/tests/sessions/test_claude_code_orchestrated.py`. Real create/restart
-  through the orchestrator with stubbed transports: state persisted to the row, pre-existing blob
-  read back, substitution does not mangle the returned snippet.
+  through the orchestrator with a launch-target double whose `answer` the recording access asks for
+  each probe: state persisted to the row, pre-existing blob read back, substitution does not mangle
+  the returned snippet.
 - **Plugin end-to-end:** `cli/tests/plugins/test_claude.py`. Through `build_registry`:
   present-but-disabled row with `system-plugin` origin, gate refusal with the enable hint,
   enablement via `[plugins] system`.

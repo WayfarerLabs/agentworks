@@ -53,6 +53,7 @@ from agentworks.capabilities.harness_integration.base import (
     require_commands,
 )
 from agentworks.errors import StateError
+from agentworks.execution.requests import Script, Shell
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 from agentworks.plugins.claude.artifacts import outer_artifacts, session_artifacts, session_prompt_snapshot
@@ -70,7 +71,6 @@ if TYPE_CHECKING:
         WorkspaceSetupInvocation,
     )
     from agentworks.execution.access import VMAccess
-    from agentworks.transports import Transport
 
 
 class ClaudeCodeUserConfig(NativeUserConfig):
@@ -161,6 +161,22 @@ class ClaudeCodeConfig(AgwModel):
 # is ``$HOME/.claude``. Expanded by the target-side shell inside the
 # find probe, never here.
 _PROJECTS_DIR = "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
+
+
+def transcript_probe(sid: str) -> Script:
+    """Whether ``<sid>.jsonl`` exists under the projects dir: exit 0 found, 1 not, 6 when ``find`` failed.
+
+    It runs in the launch target's login and interactive shell, the
+    environment the pane gets, so ``CLAUDE_CONFIG_DIR`` resolves as the
+    pane's Claude resolves it.
+    """
+    needle = shlex.quote(f"{sid}.jsonl")
+    inner = (
+        f'[ -d "{_PROJECTS_DIR}" ] || exit 1; '
+        f'out=$(find "{_PROJECTS_DIR}" -name {needle} -print -quit 2>/dev/null); rc=$?; '
+        f'[ -n "$out" ] && exit 0; [ "$rc" -eq 0 ] || exit 6; exit 1'
+    )
+    return Script(inner, Shell.USER_DEFAULT, login=True, interactive=True)
 
 
 class ClaudeCodeIntegration(HarnessIntegration):
@@ -386,7 +402,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
         if resume_only and not (isinstance(stored_sid, str) and stored_sid):
             raise self._resume_only_error()
         sid = self._session_id(fresh=fresh)
-        launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
+        launch_target = ctx.admin_access() if self._admin else ctx.agent_access()
         resume = not fresh and launch_target is not None and self._transcript_exists(launch_target, sid)
         if resume_only and not resume:
             raise self._resume_only_error()
@@ -493,12 +509,12 @@ class ClaudeCodeIntegration(HarnessIntegration):
             prompt += f"\n\nInitial guidance for this goal:\n{self.config.initial_prompt}"
         return prompt
 
-    def _transcript_exists(self, transport: Transport, sid: str) -> bool:
+    def _transcript_exists(self, access: VMAccess, sid: str) -> bool:
         """True iff the stored session's transcript (``<sid>.jsonl``) exists
         under the projects dir on the launch target. Slug-independent
         (``find`` matches under ANY project directory); shell-neutral (no
-        glob reaches the shell). Runs through ``$SHELL -lic`` like the
-        readiness probe.
+        glob reaches the shell). Runs in the login and interactive shell
+        like the readiness probe (:func:`transcript_probe`).
 
         On restart this probe runs before the orchestrator tears down the old
         runtime, which may still be live. No flush wait is needed: Claude
@@ -512,25 +528,20 @@ class ClaudeCodeIntegration(HarnessIntegration):
         printed match exits 0 (a found transcript is definitive even if
         find also stumbled elsewhere); a find that FAILED without printing
         one (an unreadable subdir, not a mere no-match) exits 6 rather
-        than folding into "no transcript". Anything but {0, 1} (the 6, an
-        SSH failure's 255, a shell that could not start) raises: guessing
-        "fresh" would launch ``--session-id <reserved-uuid>``, which
-        Claude rejects as already-in-use on a real session's restart and
-        the pane fails to start."""
-        needle = shlex.quote(f"{sid}.jsonl")
-        inner = (
-            f'[ -d "{_PROJECTS_DIR}" ] || exit 1; '
-            f'out=$(find "{_PROJECTS_DIR}" -name {needle} -print -quit 2>/dev/null); rc=$?; '
-            f'[ -n "$out" ] && exit 0; [ "$rc" -eq 0 ] || exit 6; exit 1'
-        )
-        result = transport.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
-        if result.returncode == 0:
+        than folding into "no transcript". Any other exit (the 6, a shell
+        that could not start) raises, and a probe that may not have run
+        raises its typed execution error: guessing "fresh" would launch
+        ``--session-id <reserved-uuid>``, which Claude rejects as
+        already-in-use on a real session's restart and the pane fails to
+        start."""
+        status = access.run(transcript_probe(sid)).require_completed(access.vm_name)
+        if status == 0:
             return True  # transcript on disk: resume
-        if result.returncode == 1:
+        if status == 1:
             return False  # the probe ran, no match: launch fresh
         raise StateError(
             f"session '{self._session_name}': could not probe for the Claude "
-            f"transcript on {self._target_label} (exit {result.returncode}); "
+            f"transcript on {self._target_label} (exit {status}); "
             f"refusing to guess resume-vs-launch.",
             entity_kind="session",
             entity_name=self._session_name,

@@ -43,6 +43,7 @@ from agentworks.capabilities.harness_integration.base import (
     require_commands,
 )
 from agentworks.errors import StateError
+from agentworks.execution.requests import Script, Shell
 from agentworks.plugins.grok.artifacts import outer_artifacts, session_artifacts
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
@@ -58,7 +59,6 @@ if TYPE_CHECKING:
         WorkspaceSetupInvocation,
     )
     from agentworks.execution.access import VMAccess
-    from agentworks.transports import Transport
 
 
 class GrokBuildSetupConfig(AgwModel):
@@ -127,6 +127,24 @@ class GrokBuildConfig(AgwModel):
 # ``xai-grok-home`` crate: a non-empty ``GROK_HOME`` verbatim, otherwise
 # ``$HOME/.grok``. Sessions are stored below that same root.
 _SESSIONS_DIR = "${GROK_HOME:-$HOME/.grok}/sessions"
+
+
+def session_probe(sid: str) -> Script:
+    """Whether a persisted Grok session ``sid`` exists: exit 0 found, 1 not, 6 when ``find`` failed.
+
+    Grok treats a UUID directory as resumable only when it holds a regular
+    ``summary.json`` (``sessions/<encoded-cwd>/<uuid>/summary.json``). The
+    probe runs in the launch target's login and interactive shell, so
+    ``GROK_HOME`` resolves as the pane's Grok resolves it.
+    """
+    summary_path = shlex.quote(f"*/{sid}/summary.json")
+    inner = (
+        f'[ -d "{_SESSIONS_DIR}" ] || exit 1; '
+        f'out=$(find "{_SESSIONS_DIR}" -mindepth 3 -maxdepth 3 -type f '
+        f"-path {summary_path} -print -quit 2>/dev/null); rc=$?; "
+        f'[ -n "$out" ] && exit 0; [ "$rc" -eq 0 ] || exit 6; exit 1'
+    )
+    return Script(inner, Shell.USER_DEFAULT, login=True, interactive=True)
 
 
 class GrokBuildIntegration(HarnessIntegration):
@@ -274,7 +292,7 @@ class GrokBuildIntegration(HarnessIntegration):
         if resume_only and not (isinstance(stored_sid, str) and stored_sid):
             raise self._resume_only_error()
         sid = self._session_id(fresh=fresh)
-        launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
+        launch_target = ctx.admin_access() if self._admin else ctx.agent_access()
         resume = not fresh and launch_target is not None and self._session_exists(launch_target, sid)
         if resume_only and not resume:
             raise self._resume_only_error()
@@ -361,7 +379,7 @@ class GrokBuildIntegration(HarnessIntegration):
             prompt += f"\n\nInitial guidance for this goal:\n{self.config.initial_prompt}"
         return prompt
 
-    def _session_exists(self, transport: Transport, sid: str) -> bool:
+    def _session_exists(self, access: VMAccess, sid: str) -> bool:
         """Check Grok's own persisted-session boundary for ``sid``.
 
         Grok treats a UUID directory as resumable only when it contains a
@@ -371,25 +389,19 @@ class GrokBuildIntegration(HarnessIntegration):
         to reproduce Grok's cwd encoder. Verified against Grok Build 1.0.4;
         re-verify the boundary after a major upstream update.
 
-        Exit 1 is a clean absence. Exit 6 keeps a failed ``find`` distinct, so
-        an unreadable session root or transport failure never becomes an
-        accidental fresh launch over a persisted UUID.
+        Exit 1 is a clean absence (:func:`session_probe`). Exit 6 keeps a
+        failed ``find`` distinct, and a probe that may not have run raises its
+        typed execution error, so an unreadable session root or transport
+        failure never becomes an accidental fresh launch over a persisted UUID.
         """
-        summary_path = shlex.quote(f"*/{sid}/summary.json")
-        inner = (
-            f'[ -d "{_SESSIONS_DIR}" ] || exit 1; '
-            f'out=$(find "{_SESSIONS_DIR}" -mindepth 3 -maxdepth 3 -type f '
-            f"-path {summary_path} -print -quit 2>/dev/null); rc=$?; "
-            f'[ -n "$out" ] && exit 0; [ "$rc" -eq 0 ] || exit 6; exit 1'
-        )
-        result = transport.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
-        if result.returncode == 0:
+        status = access.run(session_probe(sid)).require_completed(access.vm_name)
+        if status == 0:
             return True
-        if result.returncode == 1:
+        if status == 1:
             return False
         raise StateError(
             f"session '{self._session_name}': could not probe for the Grok Build "
-            f"session on {self._target_label} (exit {result.returncode}); "
+            f"session on {self._target_label} (exit {status}); "
             "refusing to guess resume-vs-launch.",
             entity_kind="session",
             entity_name=self._session_name,

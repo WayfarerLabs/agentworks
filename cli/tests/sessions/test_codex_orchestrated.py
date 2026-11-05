@@ -34,6 +34,8 @@ import pytest
 
 from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.db import Database, SessionMode, SessionStatus
+from agentworks.execution.requests import Script
+from agentworks.execution.results import Completed, Result
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from tests.vm_access_support import command_status, install_access_recorder, is_command_check
@@ -43,7 +45,6 @@ from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gate
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from agentworks.execution.results import Result
     from tests.vm_access_support import Call
 
 
@@ -74,9 +75,9 @@ class _Result:
 
 
 class _CodexTarget:
-    """Launch-target double for the codex op: answers the readiness
-    ``command -v codex`` check (on its access) and the three op-time probes (the recorder
-    read, the ``*-<sid>.jsonl`` rollout presence probe, and the
+    """Launch-target double for the codex op: its access answers the
+    readiness ``command -v codex`` check and the three op-time probes (the
+    recorder read, the ``*-<sid>.jsonl`` rollout presence probe, and the
     source-filtered discovery probe), recording each into a shared event
     log. ``recorded`` seeds the recorder file with a codex-reported thread
     id; ``rollout_present`` decides the bound-id fork; ``discovered``
@@ -96,25 +97,25 @@ class _CodexTarget:
         self._discovered = discovered
 
     def run(self, cmd: str, **kwargs: object) -> _Result:
-        if ".thread" in cmd:
-            self._events.append("read_recorder")
-            if self._recorded is None:
-                return _Result(returncode=1)  # no recorder file: nothing bound
-            return _Result(returncode=0, stdout=f"{self._recorded}\n")
-        if "-exec awk" in cmd:
-            self._events.append("discover")
-            return _Result(returncode=0, stdout=self._discovered or "")
-        if ".jsonl" in cmd:
-            self._events.append("detect")
-            return _Result(returncode=0 if self._present else 1)
         return _Result()
 
     def answer(self, call: Call) -> Result | None:
-        """Its access finds the codex command; every other run falls through."""
-        if not is_command_check(call.request):
-            return None
-        self._events.append("probe")
-        return command_status(0)
+        if is_command_check(call.request):
+            self._events.append("probe")
+            return command_status(0)
+        source = call.request.source if isinstance(call.request, Script) else ""
+        if ".thread" in source:
+            self._events.append("read_recorder")
+            if self._recorded is None:
+                return Result(Completed(1))  # no recorder file: nothing bound
+            return Result(Completed(0), f"{self._recorded}\n".encode())
+        if "-exec awk" in source:
+            self._events.append("discover")
+            return Result(Completed(0), (self._discovered or "").encode())
+        if ".jsonl" in source:
+            self._events.append("detect")
+            return Result(Completed(0 if self._present else 1))
+        return None
 
 
 def _seed_db(tmp_path: Path) -> Database:

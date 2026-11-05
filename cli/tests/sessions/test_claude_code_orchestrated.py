@@ -33,6 +33,8 @@ import pytest
 
 from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.db import Database, SessionMode, SessionStatus
+from agentworks.execution.requests import Script
+from agentworks.execution.results import Completed, Result
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from tests.vm_access_support import command_status, install_access_recorder, is_command_check
@@ -42,7 +44,6 @@ from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gate
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from agentworks.execution.results import Result
     from tests.vm_access_support import Call
 
 
@@ -64,27 +65,26 @@ class _Result:
 
 
 class _ClaudeTarget:
-    """Launch-target double for the claude-code op: answers the readiness
-    ``command -v claude`` check (on its access) and the ``<sid>.jsonl`` find
-    probe (on its transport), recording each into a shared event log. ``transcript_present`` decides
-    resume-vs-launch."""
+    """Launch-target double for the claude-code op: its access answers the
+    readiness ``command -v claude`` check and the ``<sid>.jsonl`` transcript
+    probe, recording each into a shared event log. ``transcript_present``
+    decides resume-vs-launch. Its transport answers everything else."""
 
     def __init__(self, events: list[str], *, transcript_present: bool) -> None:
         self._events = events
         self._present = transcript_present
 
     def run(self, cmd: str, **kwargs: object) -> _Result:
-        if ".jsonl" in cmd:
-            self._events.append("detect")
-            return _Result(ok=self._present)
         return _Result()
 
     def answer(self, call: Call) -> Result | None:
-        """Its access finds the claude command; every other run falls through."""
-        if not is_command_check(call.request):
-            return None
-        self._events.append("probe")
-        return command_status(0)
+        if is_command_check(call.request):
+            self._events.append("probe")
+            return command_status(0)
+        if isinstance(call.request, Script) and ".jsonl" in call.request.source:
+            self._events.append("detect")
+            return Result(Completed(0 if self._present else 1))
+        return None
 
 
 def _seed_db(tmp_path: Path) -> Database:

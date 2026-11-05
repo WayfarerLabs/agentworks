@@ -21,13 +21,19 @@ from agentworks.capabilities.config import capability_config_references, validat
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart
 from agentworks.command_checks import presence_probe
 from agentworks.errors import ConfigError, StateError
-from agentworks.plugins.claude.harness_integration import ClaudeCodeConfig, ClaudeCodeIntegration
+from agentworks.execution.errors import ExecutionIncomplete
+from agentworks.execution.requests import Script
+from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
+from agentworks.plugins.claude.harness_integration import ClaudeCodeConfig, ClaudeCodeIntegration, transcript_probe
 from agentworks.schema import RefOwner, merge_model
-from tests.conftest import _FakeResult, _FakeTarget
-from tests.vm_access_support import command_check_access
+from tests.conftest import requires_posix_shell
+from tests.vm_access_support import Admin, RecordingVMAccess, account_shell, command_check_access, local_vm_access
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from pathlib import Path
+
+    from agentworks.execution.access import VMAccess
 
 _SID = "939b1597-7c61-5ace-80f4-14617b7b4257"  # a fixed stored uuid
 
@@ -52,10 +58,21 @@ def _harness_integration(
     )
 
 
-def _op_ctx(target: _FakeTarget) -> RunContext:
-    """A context carrying only the launch target (admin mode); the op
-    reads ``ctx.admin_target()`` and touches no scope."""
-    return RunContext(admin_target=target)
+def _launch_target(*, transcript: int | None = None) -> RecordingVMAccess:
+    """The admin's access, answering the stored id's transcript probe with exit ``transcript``.
+
+    Any other request completes with exit 0, as an unanswered one does on the fake.
+    """
+    access = RecordingVMAccess([], Admin())
+    if transcript is not None:
+        access.respond(transcript_probe(_SID), Result(Completed(transcript)))
+    return access
+
+
+def _op_ctx(access: VMAccess) -> RunContext:
+    """A context carrying only the launch target's access (admin mode); the op
+    reads ``ctx.admin_access()`` and touches no scope."""
+    return RunContext(admin_access=access)
 
 
 def _session_scope() -> OperationScope:
@@ -164,7 +181,7 @@ def test_construct_revalidates_config() -> None:
 
 
 def test_present_transcript_resumes() -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})  # found
+    target = _launch_target(transcript=0)  # found
     command = _harness_integration().start(_op_ctx(target)).command
     assert f"--resume {_SID}" in command
     assert "--session-id" not in command
@@ -172,7 +189,7 @@ def test_present_transcript_resumes() -> None:
 
 
 def test_absent_transcript_launches_fresh() -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})  # not found
+    target = _launch_target(transcript=1)  # not found
     command = _harness_integration().start(_op_ctx(target)).command
     assert f"--session-id {_SID}" in command
     assert "--resume" not in command
@@ -180,7 +197,7 @@ def test_absent_transcript_launches_fresh() -> None:
 
 
 def test_resume_only_resumes_an_existing_transcript() -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
+    target = _launch_target(transcript=0)
     result = _harness_integration(state={"session_id": _SID}).start(
         _op_ctx(target), intent=HarnessLaunchIntent.RESUME_ONLY
     )
@@ -190,21 +207,21 @@ def test_resume_only_resumes_an_existing_transcript() -> None:
 @pytest.mark.parametrize(
     ("state", "target", "expected_probe_count"),
     [
-        pytest.param({}, _FakeTarget(), 0, id="no-stored-id"),
-        pytest.param({"session_id": _SID}, _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)}), 1, id="no-transcript"),
-        pytest.param({"session_id": _SID}, _FakeTarget({f"{_SID}.jsonl": _FakeResult(255)}), 1, id="probe-failed"),
+        pytest.param({}, _launch_target(), 0, id="no-stored-id"),
+        pytest.param({"session_id": _SID}, _launch_target(transcript=1), 1, id="no-transcript"),
+        pytest.param({"session_id": _SID}, _launch_target(transcript=255), 1, id="probe-failed"),
     ],
 )
 def test_resume_only_refuses_without_resumable_state_and_preserves_integration_state(
     state: dict[str, object],
-    target: _FakeTarget,
+    target: RecordingVMAccess,
     expected_probe_count: int,
 ) -> None:
     before = state.copy()
     with pytest.raises(StateError):
         _harness_integration(state=state).start(_op_ctx(target), intent=HarnessLaunchIntent.RESUME_ONLY)
     assert state == before
-    assert len(target.commands) == expected_probe_count
+    assert len(target.requests()) == expected_probe_count
 
 
 def test_resume_only_refuses_a_missing_target_without_state_mutation() -> None:
@@ -215,7 +232,7 @@ def test_resume_only_refuses_a_missing_target_without_state_mutation() -> None:
 
 
 def test_launch_intents_report_distinct_decisions() -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    target = _launch_target(transcript=1)
     missing = _harness_integration().start(_op_ctx(target))
     created = _harness_integration().start(_op_ctx(target), intent=HarnessLaunchIntent.CREATE)
     forced = _harness_integration().start(_op_ctx(target), intent=HarnessLaunchIntent.FORCE_NEW)
@@ -225,15 +242,17 @@ def test_launch_intents_report_distinct_decisions() -> None:
 
 
 def test_repeated_start_uses_the_same_state_based_decision() -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
+    target = _launch_target(transcript=0)
     harness_integration = _harness_integration()
     assert harness_integration.start(_op_ctx(target)) == harness_integration.start(_op_ctx(target))
 
 
 def test_probe_is_slug_independent_and_finds_by_stored_id() -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
+    target = _launch_target(transcript=0)
     _harness_integration().start(_op_ctx(target))
-    (probe_cmd,) = target.commands
+    (probe,) = target.requests()
+    assert isinstance(probe, Script)
+    probe_cmd = probe.source
     assert f"{_SID}.jsonl" in probe_cmd
     assert "find" in probe_cmd
     # Rooted at the CLI's config dir with its documented override.
@@ -247,27 +266,54 @@ def test_probe_keeps_find_failure_distinct_from_a_clean_no_match() -> None:
     than folding into "no transcript". Pinned here because the fake target
     answers by exit code alone; the structure is what guarantees those
     codes mean what the fork thinks they mean."""
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
+    target = _launch_target(transcript=0)
     _harness_integration().start(_op_ctx(target))
-    (probe_cmd,) = target.commands
+    (probe,) = target.requests()
+    assert isinstance(probe, Script)
+    probe_cmd = probe.source
     assert "[ -d " in probe_cmd  # dir-missing is a clean no-match, not a find failure
     assert "exit 6" in probe_cmd  # find failure stays distinguishable
     # And the fork raises on that distinct code.
-    failing = _FakeTarget({f"{_SID}.jsonl": _FakeResult(6)})
+    failing = _launch_target(transcript=6)
     with pytest.raises(StateError, match="could not probe"):
         _harness_integration().start(_op_ctx(failing))
 
 
 def test_probe_that_could_not_execute_raises_rather_than_guessing() -> None:
-    """A non-{0,1} exit (an SSH failure's 255, a shell that could not
-    start) means the probe never ran. Guessing "fresh" would launch
-    ``--session-id`` over a reserved id and the pane would fail; the op
-    raises a typed error naming the target instead."""
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(255)})
+    """A non-{0,1} exit (a shell that could not start, say) means the probe
+    gave no answer. Guessing "fresh" would launch ``--session-id`` over a
+    reserved id and the pane would fail; the op raises a typed error naming
+    the target instead."""
+    target = _launch_target(transcript=255)
     with pytest.raises(StateError, match="could not probe") as exc:
         _harness_integration().start(_op_ctx(target))
     assert "exit 255" in str(exc.value)
     assert exc.value.entity_name == "s1"
+
+
+def test_probe_that_may_not_have_run_raises_its_execution_error() -> None:
+    access = RecordingVMAccess([], Admin())
+    access.respond(transcript_probe(_SID), Result(Unknown(UnknownReason.CONNECTION)))
+    with pytest.raises(ExecutionIncomplete):
+        _harness_integration().start(_op_ctx(access))
+
+
+@requires_posix_shell
+def test_probe_executes_against_the_projects_dir_login_startup_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_dir = tmp_path / "claude-config"
+    home = tmp_path / "home"
+    home.mkdir()
+    # CLAUDE_CONFIG_DIR comes from the account's login startup, as the pane's does.
+    (home / ".profile").write_text(f'export CLAUDE_CONFIG_DIR="{config_dir}"\n')
+    access = local_vm_access(monkeypatch, home=home, shell=account_shell(tmp_path))
+
+    assert "--session-id" in _claude_argv(_harness_integration().start(_op_ctx(access)))
+    transcript = config_dir / "projects" / "-srv-ws1" / f"{_SID}.jsonl"
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text("{}\n")
+    assert "--resume" in _claude_argv(_harness_integration().start(_op_ctx(access)))
 
 
 # -- the stored session id ---------------------------------------------------
@@ -276,7 +322,7 @@ def test_probe_that_could_not_execute_raises_rather_than_guessing() -> None:
 def test_first_start_mints_and_records_the_session_id() -> None:
     state: dict[str, object] = {}
     harness_integration = _harness_integration(state=state)
-    target = _FakeTarget()  # empty state means no id yet; find returns default ok
+    target = _launch_target()  # empty state means no id yet; the probe's default is found
     command = harness_integration.start(_op_ctx(target)).command
 
     minted = state["session_id"]
@@ -288,7 +334,7 @@ def test_first_start_mints_and_records_the_session_id() -> None:
 def test_resume_reads_the_stored_id_back_verbatim() -> None:
     """The round-trip the manager relies on: an id minted on create (in
     the state blob) is used verbatim on a later restart, never re-minted."""
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
+    target = _launch_target(transcript=0)
     harness_integration = _harness_integration(state={"session_id": _SID})
     command = harness_integration.start(_op_ctx(target)).command
     assert f"--resume {_SID}" in command
@@ -366,7 +412,7 @@ def test_base_hoist_is_a_no_op() -> None:
 
 
 def test_permission_mode_model_and_reasoning_effort_map_to_their_flags() -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    target = _launch_target(transcript=1)
     command = (
         _harness_integration({"permission_mode": "acceptEdits", "model": "sonnet", "reasoning_effort": "future-effort"})
         .start(_op_ctx(target))
@@ -388,7 +434,7 @@ def _claude_argv(command: str | HarnessStart) -> list[str]:
 
 
 def test_session_preferences_default_off() -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    target = _launch_target(transcript=1)
     argv = _claude_argv(_harness_integration().start(_op_ctx(target)))
     assert "--effort" not in argv
     assert "--remote-control" not in argv
@@ -396,7 +442,7 @@ def test_session_preferences_default_off() -> None:
 
 
 def test_remote_control_uses_the_session_name_as_its_title() -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    target = _launch_target(transcript=1)
     argv = _claude_argv(
         _harness_integration({"remote_control": True}, session_name="my-session").start(_op_ctx(target))
     )
@@ -405,7 +451,7 @@ def test_remote_control_uses_the_session_name_as_its_title() -> None:
 
 
 def test_fresh_workload_uses_native_controls_and_separates_the_prompt() -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    target = _launch_target(transcript=1)
     goal = "Finish safely; printf 'done'"
     initial = "Begin with the failing test"
     argv = _claude_argv(
@@ -430,7 +476,7 @@ def test_fresh_workload_uses_native_controls_and_separates_the_prompt() -> None:
 
 @pytest.mark.parametrize("initial_prompt", ["doctor", "--version"])
 def test_fresh_initial_prompt_cannot_be_parsed_as_a_command_or_option(initial_prompt: str) -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    target = _launch_target(transcript=1)
     argv = _claude_argv(
         _harness_integration({"initial_prompt": initial_prompt, "extra_args": ["--model", "opus"]}).start(
             _op_ctx(target)
@@ -442,7 +488,7 @@ def test_fresh_initial_prompt_cannot_be_parsed_as_a_command_or_option(initial_pr
 
 
 def test_resume_reapplies_process_controls_but_not_fresh_conversation_content() -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
+    target = _launch_target(transcript=0)
     argv = _claude_argv(
         _harness_integration(
             {
@@ -477,7 +523,7 @@ def test_resume_reapplies_process_controls_but_not_fresh_conversation_content() 
 def test_vim_mode_and_terminal_bell_share_session_local_settings(
     config: dict[str, object], expected: dict[str, str]
 ) -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    target = _launch_target(transcript=1)
     argv = _claude_argv(_harness_integration(config).start(_op_ctx(target)))
     index = argv.index("--settings")
     assert json.loads(argv[index + 1]) == expected
@@ -485,7 +531,7 @@ def test_vim_mode_and_terminal_bell_share_session_local_settings(
 
 
 def test_extra_args_appended_verbatim_last_and_quoted() -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    target = _launch_target(transcript=1)
     command = (
         _harness_integration(
             {"model": "opus", "reasoning_effort": "high", "vim_mode": True, "extra_args": ["--foo", "bar baz"]}
@@ -502,7 +548,7 @@ def test_extra_args_appended_verbatim_last_and_quoted() -> None:
 
 
 def test_raw_settings_in_extra_args_follow_generated_settings() -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    target = _launch_target(transcript=1)
     raw_settings = '{"editorMode":"normal"}'
     argv = _claude_argv(
         _harness_integration(
@@ -523,7 +569,7 @@ def test_extra_args_with_shell_metacharacters_cannot_inject() -> None:
     ``session_name``), so an adversarial value with quotes/metacharacters
     must be ``shlex.quote``d into one inert argv token, never shell-active."""
     payload = "a'; touch /tmp/pwned #"
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    target = _launch_target(transcript=1)
     command = _harness_integration({"extra_args": ["--append-system-prompt", payload]}).start(_op_ctx(target)).command
 
     # The command is `sh -c '<inner>'`; the payload is nested-quoted (once
@@ -538,8 +584,8 @@ def test_extra_args_with_shell_metacharacters_cannot_inject() -> None:
 
 
 def test_name_is_set_on_both_branches_as_the_display_label() -> None:
-    present = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
-    absent = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    present = _launch_target(transcript=0)
+    absent = _launch_target(transcript=1)
     assert "--name s1" in _harness_integration().start(_op_ctx(present)).command
     assert "--name s1" in _harness_integration().start(_op_ctx(absent)).command
 
@@ -550,7 +596,7 @@ def test_name_is_set_on_both_branches_as_the_display_label() -> None:
 def test_returned_string_is_a_single_sh_c_that_echoes_then_execs() -> None:
     """A single ``sh -c`` (so it survives the pane's ``exec`` wrapping),
     echoing the visible decision before exec-ing claude."""
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    target = _launch_target(transcript=1)
     command = _harness_integration().start(_op_ctx(target)).command
     assert command.startswith("sh -c ")
     assert "echo " in command
