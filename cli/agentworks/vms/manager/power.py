@@ -14,6 +14,7 @@ from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
 from ._helpers import _guard_incomplete_vm, _operation_log, _require_vm
 from .boundary import _auth_key_boundary, _live_vm_boundary, _warn_legacy_release
+from .tailscale import VMNotAnswering
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
@@ -429,10 +430,7 @@ def rekey_vm(
 
         output.info(f"Verifying SSH to {new_ip}...")
         access = execution.vm_access(_require_vm(db, name), config, Admin(), log=logger.record)
-        if reachability.wait(access, wording=reachability.Wording.RECONNECT):
-            output.result(f"VM '{name}' rekeyed successfully. Tailscale IP: {new_ip}")
-        else:
-            output.warn(
-                f"VM '{name}' rekeyed but {new_ip} is not reachable via SSH. "
-                f"Check tailnet sharing and ACLs, then run 'agw vm recover {name}'."
-            )
+        # The new address is recorded either way: the old one died with the logout.
+        if not reachability.wait(access, wording=reachability.Wording.RECONNECT):
+            raise VMNotAnswering(name, new_ip)
+        output.result(f"VM '{name}' rekeyed successfully. Tailscale IP: {new_ip}")

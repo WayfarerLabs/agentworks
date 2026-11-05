@@ -31,6 +31,7 @@ from agentworks.execution.trust import HOST_TRUST
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
+from agentworks.vms.manager.tailscale import VMNotAnswering
 from tests._root_channel_fakes import Answer, FakeGuest
 from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
 
@@ -463,7 +464,7 @@ def test_a_rekey_script_that_does_not_succeed_records_nothing_and_reads_no_addre
     assert row is not None and row.tailscale_host == "100.64.0.9"
 
 
-def test_a_rekeyed_vm_that_does_not_answer_warns_and_keeps_the_new_address(
+def test_a_rekeyed_vm_that_does_not_answer_raises_and_keeps_the_new_address(
     db: Database,
     make_config,  # noqa: ANN001
     _ts_key: None,
@@ -476,9 +477,9 @@ def test_a_rekeyed_vm_that_does_not_answer_warns_and_keeps_the_new_address(
     _fake_status(monkeypatch, VMStatus.RUNNING)
     _fake_rekey_channel(monkeypatch, answers=False)
 
-    vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
+    with pytest.raises(VMNotAnswering):
+        vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert len(captured_output.warnings) == 1
     row = db.get_vm("box")
     assert row is not None and row.tailscale_host == NEW_ADDRESS
 
