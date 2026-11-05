@@ -531,15 +531,17 @@ above and waits for the client, polling `Popen.wait(timeout=0.2)` so Ctrl-C is d
   `TrustMismatch` instead. Under `verbose` there is no log, so no tail and no `TrustMismatch`
   typing. The client always ends on the way out: terminate, one second, kill, and the log is
   removed.
-- **Signals.** The library installs none. `port_forward_vm` installs a `SIGTERM` handler that raises
-  `KeyboardInterrupt` for the duration of the forward and restores the previous handler (today's
-  handlers are never restored, `tailscale.py:180-181`). `port_forward_vm` owns the 0 on an operator
-  stop and returns the client's status for any other end. The legacy returned the terminated
-  client's status (`-15` on POSIX).
+- **Signals.** The library installs none. `port_forward_vm` holds the forward inside the shared
+  `agentworks.interrupts.termination_as_interrupt`, which raises `KeyboardInterrupt` on `SIGTERM`,
+  and on `SIGHUP` where it exists, for the duration of the block, leaves a signal the process
+  already ignores ignored (so a forward started under `nohup` outlives its terminal), and restores
+  the previous handlers. `port_forward_vm` owns the 0 on an operator stop and returns the client's
+  status for any other end. A cloud's route converts the same signals for as long as it is open, so
+  its firewall allow is removed when a command that holds one is ended by them.
 
 ## Errors
 
-| Error                 | Kind                 | Raised for                                                                                                                                                                                   | PR A hint                                                                   |
+| Error                 | Kind                 | Raised for                                                                                                                                                                                   | Hint                                                                        |
 | --------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `ClientUnsupported`   | `ConfigError`        | No acceptable OpenSSH, or the resolved client fails to start                                                                                                                                 | The install guidance in the message                                         |
 | `VMNotReady`          | `StateError`         | `NotDelivered(PYTHON_MISSING)` (an unelevated 127) and `NotDelivered(STDLIB_MISSING)`                                                                                                        | `agw vm recover <vm>`, whose repair installs python3                        |
