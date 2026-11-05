@@ -482,6 +482,31 @@ class TestTransientRoute:
         assert set(attempted) <= deleted
         assert not any(n.startswith(TRANSIENT_ALLOW_RULE_PREFIX) for n in rules.rules)
 
+    def test_an_interrupt_during_the_poke_removes_its_rule(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The route never learns the name of a rule whose create was interrupted, so the poke removes it."""
+        network = _install_fakes(monkeypatch).network
+        rules: _FakeSecurityRules = network.security_rules
+        real_create = rules.begin_create_or_update
+
+        class _InterruptedPoller(_Poller):
+            def result(self) -> object:
+                raise KeyboardInterrupt
+
+        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+            poller = real_create(rg, nsg, rule_name, rule)
+            if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
+                return _InterruptedPoller(rule)
+            return poller
+
+        monkeypatch.setattr(rules, "begin_create_or_update", _create)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        with pytest.raises(KeyboardInterrupt), _platform()._transient_route(vm, RunContext()):
+            pytest.fail("the body must not run when the poke is interrupted")
+
+        (attempted,) = rules.transient_names()
+        assert ("rg1", "vm1-nsg", attempted) in rules.deletes()
+
     def test_poke_attempt_cleanup_failure_warns(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:

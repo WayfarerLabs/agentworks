@@ -335,7 +335,8 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
     swallowed) before moving on: the create may have succeeded
     server-side even though the client-side wait failed, and only this
     function knows the nonce name, so the cleanup cannot be left to the
-    caller's exit path.
+    caller's exit path. An interrupt during the create removes the rule
+    the same way and propagates.
     """
     from uuid import uuid4
 
@@ -355,6 +356,10 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
             remove_ssh_allow(network, rg, name, rule_name, prefixes)
             last_exc = exc
             continue
+        except BaseException:
+            # An interrupt mid-create: the rule may exist, and only this name finds it.
+            remove_ssh_allow(network, rg, name, rule_name, prefixes)
+            raise
         return rule_name
     assert last_exc is not None  # the loop only falls through via the except arm
     raise wrap_azure_error(last_exc) from last_exc
