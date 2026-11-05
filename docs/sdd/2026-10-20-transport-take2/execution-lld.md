@@ -91,10 +91,11 @@ submodule it asserts that none of the legacy modules is in `sys.modules`.
 ## Client resolution
 
 `client.resolve_ssh() -> SSHClient` is cached for the process and returns the absolute path and the
-parsed `(major, minor)`. Every spawn takes the `SSHClient`, so no caller can launch a bare name.
+parsed `(major, minor)`. Every spawn in the package takes the `SSHClient`, so none of it launches a
+bare name; the legacy transports still run bare `ssh` and `scp` until slice 8 deletes them.
 
-- **POSIX.** The first `ssh` along `PATH`, skipping empty and relative elements. Only that candidate
-  is judged.
+- **POSIX.** The first `ssh` along `PATH`, skipping empty and relative elements, which is
+  `programs.find_program`. Only that candidate is judged.
 - **Windows.** `PATH` is never searched. The candidates, in order, are
   `%SystemRoot%\Sysnative\OpenSSH\ssh.exe`, `%SystemRoot%\System32\OpenSSH\ssh.exe`,
   `%ProgramW6432%\OpenSSH\ssh.exe` and `%ProgramFiles%\OpenSSH\ssh.exe`. Each is skipped when its
@@ -115,6 +116,13 @@ parsed `(major, minor)`. Every spawn takes the `SSHClient`, so no caller can lau
   `scp` and `tailscale`, because the legacy paths still use bare `ssh` and `scp`, and adds a row
   with the resolver's verdict: path and version, or the refusal. Slice 7 or 8 removes the `ssh` and
   `scp` rows with the last legacy user.
+
+Every other program core starts by name goes through `programs.resolve_program(name)`, the same walk
+over absolute `PATH` elements (`name.exe` on Windows), which raises `FileNotFoundError` as a missing
+program would: `tailscale` (the workstation preflight, the reachability ping, doctor) and PowerShell
+(WSL2's helper and the completion profile query). Windows looks a bare name up in the current
+directory before `PATH`, so a bare name there would run whatever the operator's working directory
+holds.
 
 ## Requests and results
 

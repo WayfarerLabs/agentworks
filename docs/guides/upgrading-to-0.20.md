@@ -123,11 +123,17 @@ has started.
   (ignoring empty and relative `PATH` entries) and checks its version once per run. A missing or
   older client is refused before anything else happens, with the paths it tried. `agw doctor` shows
   which client Agentworks resolved.
-- **The native Windows build on Windows.** Agentworks never searches `PATH` there, because `PATH`
-  commonly finds the `ssh` bundled with Git for Windows, whose argument handling breaks these
-  commands. It looks for Win32-OpenSSH in `System32\OpenSSH` and then `Program Files\OpenSSH`
+- **The native Windows build on Windows.** These commands never search `PATH` for `ssh` there,
+  because `PATH` commonly finds the `ssh` bundled with Git for Windows, whose argument handling
+  breaks them. It looks for Win32-OpenSSH in `System32\OpenSSH` and then `Program Files\OpenSSH`
   (including the 32-bit file system redirects) and judges each. Windows 10's inbox client is OpenSSH
   8.1, so install the Win32-OpenSSH MSI from <https://github.com/PowerShell/Win32-OpenSSH/releases>.
+- **No program from the current directory.** Windows looks a bare program name up in the current
+  directory before `PATH`, and on POSIX an empty or relative `PATH` entry means the current
+  directory. Agentworks now starts `tailscale` and PowerShell by their path in an absolute `PATH`
+  directory, like `ssh` on macOS and Linux. The commands that still use the older SSH path (VM and
+  agent initialization, sessions, workspaces and backups) start `ssh` and `scp` by name until a
+  later release moves them, so on Windows run `agw` from a directory whose contents you trust.
 - **`python3` on the VM.** Every request starts a small Python program on the VM. A VM without
   `python3`, or with one that lacks its standard library, is reported as unable to run Agentworks
   requests. New VMs get it at provisioning. `vm reinit` and `vm confirm-release` now connect the

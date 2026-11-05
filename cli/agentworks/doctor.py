@@ -706,8 +706,12 @@ def _check_tailscale() -> HealthGroup:
     is an ordinary secret and reports in the Secrets group like any
     other (`agw secret describe tailscale-auth-key` for detail).
     """
+    from agentworks.programs import resolve_program
+
     g = HealthGroup("Tailscale")
-    if not shutil.which("tailscale"):
+    try:
+        tailscale = resolve_program("tailscale")
+    except FileNotFoundError:
         # Required tools already fails the missing binary; nothing to
         # add here without it.
         g.info("Connectivity", "skipped (tailscale not installed)")
@@ -715,7 +719,7 @@ def _check_tailscale() -> HealthGroup:
 
     try:
         result = subprocess.run(
-            ["tailscale", "status"],
+            [tailscale, "status"],
             capture_output=True,
             text=True,
             encoding="utf-8",

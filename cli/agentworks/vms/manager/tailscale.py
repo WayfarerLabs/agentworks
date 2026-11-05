@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import ConnectivityError, UserAbort
+from agentworks.programs import resolve_program
 
 from ._helpers import _require_vm
 
@@ -45,7 +46,7 @@ def _is_tailscale_reachable(tailscale_host: str) -> bool:
 
     try:
         result = subprocess.run(
-            ["tailscale", "ping", "--timeout=5s", "-c=1", tailscale_host],
+            [resolve_program("tailscale"), "ping", "--timeout=5s", "-c=1", tailscale_host],
             capture_output=True,
             text=True,
             encoding="utf-8",

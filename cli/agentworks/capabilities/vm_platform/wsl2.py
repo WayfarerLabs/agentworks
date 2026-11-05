@@ -31,6 +31,7 @@ from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import StateError
 from agentworks.execution import root_script, ssh_process
+from agentworks.programs import resolve_program
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
 
@@ -312,7 +313,7 @@ def _wsl(args: list[str], *, check: bool = True, timeout: int = 300) -> str:
 def _powershell(script: str, *, check: bool = True, timeout: int = 120) -> str:
     """Run a PowerShell command and return stdout."""
     result = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", script],
+        [resolve_program("powershell"), "-NoProfile", "-Command", script],
         capture_output=True,
         text=True,
         encoding="utf-8",

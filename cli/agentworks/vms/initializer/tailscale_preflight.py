@@ -5,13 +5,14 @@ from __future__ import annotations
 import subprocess
 
 from agentworks.errors import ConnectivityError
+from agentworks.programs import resolve_program
 
 
 def verify_tailscale_available() -> None:
     """Pre-flight: verify the local machine is on Tailscale."""
     try:
         result = subprocess.run(
-            ["tailscale", "status"],
+            [resolve_program("tailscale"), "status"],
             capture_output=True,
             text=True,
             encoding="utf-8",

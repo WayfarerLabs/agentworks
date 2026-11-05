@@ -241,12 +241,16 @@ def _query_powershell_profile() -> Path | None:
     Tries pwsh (PowerShell Core) first, then powershell (Windows PowerShell).
     Uses -NoProfile to avoid loading a broken profile during the query.
     """
-    for cmd in ("pwsh", "powershell"):
-        if not shutil.which(cmd):
+    from agentworks.programs import resolve_program
+
+    for name in ("pwsh", "powershell"):
+        try:
+            program = resolve_program(name)
+        except FileNotFoundError:
             continue
         try:
             result = subprocess.run(
-                [cmd, "-NoProfile", "-Command", "$PROFILE"],
+                [program, "-NoProfile", "-Command", "$PROFILE"],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
