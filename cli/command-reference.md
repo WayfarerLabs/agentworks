@@ -816,8 +816,10 @@ without it is reported as unable to run Agentworks requests, and `agw vm recover
 it. A command that is not found exits 127, one that cannot run exits 126, and a missing workspace
 directory exits 125.
 
-`vm port-forward` runs until interrupted and exits 0 when stopped with Ctrl-C, `SIGTERM` or `SIGHUP`
-(a closed terminal). It exits non-zero when a forward cannot be set up, such as a busy local port.
+`vm port-forward` runs until interrupted and exits 0 when stopped with Ctrl-C, and on macOS and
+Linux also with `SIGTERM` or `SIGHUP` (a closed terminal); started under `nohup`, it keeps running
+after its terminal closes. It exits non-zero when a forward cannot be set up, such as a busy local
+port.
 
 In both exec commands the `--` separator is only required when the remote command's first token
 starts with `-` (it stops Agentworks from reading the token as its own option); without it, a

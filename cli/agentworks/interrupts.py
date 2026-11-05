@@ -5,7 +5,9 @@ no ``finally`` runs: a cloud's temporary firewall allow, or any other state a
 command holds open, would outlive it. :func:`termination_as_interrupt` raises
 ``KeyboardInterrupt`` for them instead, as Ctrl-C does, for the span of a
 command that waits on something the operator ends (an interactive shell, a
-port forward), and restores the previous handlers afterwards.
+port forward), and restores the previous handlers afterwards. A signal the
+process already ignores stays ignored, so a command started under ``nohup``
+keeps running after its terminal closes.
 """
 
 from __future__ import annotations
@@ -25,12 +27,16 @@ _TERMINATIONS = tuple(
 
 @contextlib.contextmanager
 def termination_as_interrupt() -> Iterator[None]:
-    """Raise ``KeyboardInterrupt`` on ``SIGTERM``, and ``SIGHUP`` where it exists, inside the block."""
+    """Raise ``KeyboardInterrupt`` on ``SIGTERM``, and ``SIGHUP`` where it exists, inside the block, unless ignored."""
 
     def interrupt(_signal: int, _frame: object) -> None:
         raise KeyboardInterrupt
 
-    previous = {number: signal.signal(number, interrupt) for number in _TERMINATIONS}
+    previous = {
+        number: signal.signal(number, interrupt)
+        for number in _TERMINATIONS
+        if signal.getsignal(number) is not signal.SIG_IGN
+    }
     try:
         yield
     finally:
