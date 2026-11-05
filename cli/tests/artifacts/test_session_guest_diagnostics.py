@@ -11,6 +11,7 @@ from agentworks.artifacts.native.common import ancestor_diagnostics
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.errors import ExternalError
 from agentworks.harness_setup.dispatch import destination_id
+from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.harness_setup.runner import SetupRunner
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import Transport
@@ -29,6 +30,14 @@ def assert_safe(text: str, secret: str) -> None:
     assert secret not in text
     assert "\x1b" not in text and "\x07" not in text and "\n" not in text and "\r" not in text
     assert len(text.encode()) <= 2048
+
+
+def test_raw_redaction_precedes_context_sensitive_terminal_normalization():
+    marker = uuid4().hex
+    secret = "x" + marker + "\nsecond-part"
+    rendered = sanitize_setup_diagnostic("\x1b[" + secret, redactions=(secret,))
+    assert marker not in rendered
+    assert_safe(rendered, secret)
 
 
 @pytest.mark.parametrize("stage", ["python-exception", "probe-exception", "probe-status", "probe-protocol"])
