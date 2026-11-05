@@ -18,7 +18,7 @@ from agentworks import output
 from agentworks.capabilities.vm_platform.base import parse_tailnet_address
 from agentworks.capabilities.vm_platform.public_ssh import SudoRefused
 from agentworks.errors import ConnectivityError, ProvisioningError
-from agentworks.execution import root_script
+from agentworks.execution import root_script, ssh_process
 from agentworks.execution.root_script import ChannelUnreachable
 
 if TYPE_CHECKING:
@@ -33,6 +33,8 @@ JOIN_FRAGMENT = """printf '%s\\n' "$AGW_SECRET" | tailscale up --auth-key=file:/
 """The one join command: the shell's ``printf`` builtin pipes the key to Tailscale, which reads the file."""
 
 JOIN_DEADLINE_SECONDS = 30
+JOIN_REASON_LINES = 5
+"""How many of a failed join's last stderr lines its error quotes: Tailscale's own reason is one or two."""
 ADDRESS_READS = 6
 ADDRESS_PAUSE_SECONDS = 2
 ADDRESS_READ_DEADLINE_SECONDS = 15
@@ -70,7 +72,10 @@ CLOUD_INIT_RECOVERABLE_STATUS = 2
 def join_tailscale(run_as_root: Callable[[bytes, float], RawRun], auth_key: str, *, node: str) -> None:
     """Join the VM to the tailnet as ``node`` with ``auth_key``, exactly once.
 
-    A non-zero status raises ``ProvisioningError``. An outcome that cannot
+    A non-zero status raises ``ProvisioningError`` quoting the last lines of
+    ``tailscale up``'s stderr, its reason (an invalid auth key, say), with
+    the key redacted as from every stream; the error reaches the create's
+    operation log as its outcome. An outcome that cannot
     be established, a channel that raised ``ConnectivityError`` included,
     raises naming ``node``, since the node may have joined. Neither retries.
     """
@@ -81,7 +86,10 @@ def join_tailscale(run_as_root: Callable[[bytes, float], RawRun], auth_key: str,
     if result.status is None:
         raise _join_unknown(node)
     if result.status != 0:
-        raise ProvisioningError(f"'tailscale up' exited with status {result.status} on node '{node}'")
+        reason = ssh_process.tail_lines(result.stderr.decode("utf-8", errors="replace"), JOIN_REASON_LINES)
+        raise ProvisioningError(
+            f"'tailscale up' exited with status {result.status} on node '{node}'" + (f": {reason}" if reason else "")
+        )
 
 
 def _join_unknown(node: str) -> ProvisioningError:

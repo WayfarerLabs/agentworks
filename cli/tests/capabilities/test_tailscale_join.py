@@ -279,6 +279,20 @@ def test_a_failed_join_raises_once_without_the_key(answer: Answer) -> None:
     assert_key_free(caught.value)
 
 
+def test_a_refused_join_quotes_tailscale_s_reason_with_the_key_redacted() -> None:
+    """An invalid auth key said only 'exited with status 1' before; Tailscale's own stderr is the reason."""
+    reason = f"backend error: invalid key: unable to validate API key {KEY}"
+    guest = FakeGuest(lambda payload, seen: Answer(status=1, stderr=f"\x1b[31m{reason}\n".encode()))
+
+    with pytest.raises(ProvisioningError) as caught:
+        join_tailscale(guest.run_as_root, KEY, node=NODE)
+
+    message = str(caught.value)
+    assert "backend error: invalid key: unable to validate API key [REDACTED]" in message
+    assert "\x1b" not in message
+    assert_key_free(caught.value)
+
+
 # -- The cloud bootstrap ---------------------------------------------------------------------
 
 

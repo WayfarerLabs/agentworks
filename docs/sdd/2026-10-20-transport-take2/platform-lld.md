@@ -309,11 +309,14 @@ takes a `run_as_root`:
   `printf '%s\n' "$AGW_SECRET" | tailscale up --auth-key=file:/dev/stdin`, used by `join_tailscale`
   and by recover's repair script, so create and recover join the same way.
 - `join_tailscale(run_as_root, auth_key, *, node)` runs it once with a 30-second deadline, as today
-  (`tailscale_join.py:84`). A non-zero status raises `ProvisioningError`; an unknown one, or a
-  channel that raised `ConnectivityError`, raises naming `node`, with the admin console in its hint,
-  since it may have joined. Neither retries (I24). An empty or whitespace-only key never reaches it:
-  create refuses one at its boundary, beside the line-safety check (`vms/manager/lifecycle.py`),
-  since `tailscale up` would wait for an interactive login.
+  (`tailscale_join.py:84`). A non-zero status raises `ProvisioningError` quoting the last five lines
+  of `tailscale up`'s stderr, its own reason (an invalid auth key, say), which `root_script.run` has
+  already redacted of the key and `tail_lines` neutralized for the terminal; create's operation log
+  records it as the create's outcome. An unknown one, or a channel that raised `ConnectivityError`,
+  raises naming `node`, with the admin console in its hint, since it may have joined. Neither
+  retries (I24). An empty or whitespace-only key never reaches it: create refuses one at its
+  boundary, beside the line-safety check (`vms/manager/lifecycle.py`), since `tailscale up` would
+  wait for an interactive login.
 - `read_tailnet_address(run_as_root, *, node, log=None) -> str` is slice 3's read loop: up to six
   `tailscale ip -4` reads (15 s each) two seconds apart. A read fails on a non-zero status, an
   unknown outcome, a `ValueError` from `parse_tailnet_address`, or a `ConnectivityError` the
