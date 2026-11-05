@@ -198,6 +198,11 @@ agw vm describe test-vm
 agw vm delete test-vm
 ```
 
+`agw vm delete` succeeds only once the node no longer lists the VM's ID. A delete that Proxmox
+refuses (a locked VM) or that gets no answer keeps the VM's row and its host-key record, so run it
+again once the cause is fixed. When a failed or interrupted create cannot remove its clone, it names
+the VM ID and node and keeps the VM in a failed state for `agw vm delete` to remove.
+
 ### Native recovery and interactive access
 
 Agentworks uses QEMU Guest Agent as the root channel that works without Tailscale: create's

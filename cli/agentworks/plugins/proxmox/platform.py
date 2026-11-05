@@ -406,16 +406,21 @@ class ProxmoxPlatform(VMPlatform):
                 tailnet_address = settle_tailnet_address(
                     run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT
                 )
-            except Exception:
+            except Exception as failure:
                 # Re-raised unwrapped after rollback: the manager preserves
                 # typed configuration/state failures and maps other backend
                 # exceptions at the create boundary, so wrapping here would
-                # only add a redundant provider layer.
+                # only add a redundant provider layer. A rollback that cannot
+                # remove the VM raises the retained-row error instead.
                 output.detail("Cleaning up the partial VM...")
-                rollback_partial_create(self._api(ctx), node, newid, pending_upid=pending_upid)
+                rollback_partial_create(
+                    self._api(ctx), node, newid, vm_name=request.vm_name, failure=failure, pending_upid=pending_upid
+                )
                 raise
         except KeyboardInterrupt:
-            rollback_create_on_interrupt(self._api(ctx), node, newid, pending_upid=pending_upid)
+            rollback_create_on_interrupt(
+                self._api(ctx), node, newid, vm_name=request.vm_name, pending_upid=pending_upid
+            )
             raise
 
         return ProvisionResult(

@@ -210,7 +210,9 @@ class ProxmoxAPI:
     def list_vms(self, node: str) -> list[dict[str, Any]]:
         """List the VMs on a node (GET /nodes/{node}/qemu)."""
         result = self._request("GET", f"/nodes/{node}/qemu")
-        return result if isinstance(result, list) else []
+        if not isinstance(result, list):
+            raise ProxmoxAPIError(f"Proxmox API GET /nodes/{node}/qemu returned a malformed listing")
+        return result
 
     def clone_vm(
         self,

@@ -35,15 +35,18 @@ class FakeProxmoxAPI:
     ``None`` entry in ``status_errors`` means "this call succeeds",
     letting a test target a later status call (e.g. the probe, the
     second status call in a teardown flow) without failing the first.
-    A deleted VM is modeled: ``delete_vm`` marks it gone and
-    ``vm_status`` then raises the API error a real PVE returns, which
-    is what keeps the post-teardown existence probe quiet on the happy
-    paths."""
+    The VM's existence is modeled: ``clone_vm`` makes it (a delete-op
+    test sets ``present``), ``delete_vm`` removes it, ``vm_status`` then
+    raises the API error a real PVE returns, and ``list_vms`` lists it
+    only while it exists, which is how teardown tells a VM gone from one
+    that remains. ``list_error`` makes the listing fail."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[Any, ...]] = []
         self.running = False
         self.vm_deleted = False
+        self.present = False
+        self.list_error: BaseException | None = None
         self.next_id_error: BaseException | None = None
         self.configure_error: BaseException | None = None
         self.stop_error: BaseException | None = None
@@ -67,10 +70,14 @@ class FakeProxmoxAPI:
         return NEWID
 
     def list_vms(self, node: str) -> list[dict[str, Any]]:
-        return []
+        if self.list_error is not None:
+            raise self.list_error
+        self.calls.append(("list_vms", node))
+        return [{"vmid": NEWID, "name": "vm1"}] if self.present else []
 
     def clone_vm(self, node: str, template_vmid: int, newid: int, name: str, **kw: Any) -> str:
         self.calls.append(("clone_vm", node, template_vmid, newid, name))
+        self.present = True
         return CLONE_UPID
 
     def configure_vm(self, node: str, vmid: int, **params: Any) -> None:
@@ -98,6 +105,7 @@ class FakeProxmoxAPI:
             raise self.delete_error
         self.calls.append(("delete_vm", node, vmid))
         self.vm_deleted = True
+        self.present = False
         return "UPID:pve1:delete"
 
     def vm_status(self, node: str, vmid: int) -> dict[str, Any]:

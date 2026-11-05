@@ -9,7 +9,9 @@ re-raised as-is; the manager wraps foreign ones) and a
 ``KeyboardInterrupt`` across the whole span (clone through the
 guest-agent bootstrap wait), re-raising the ORIGINAL interrupt; a
 SECOND interrupt during the cleanup abandons it loudly, naming the node
-and VMID for manual removal in the Proxmox web UI. An interrupt while a
+and VMID. A cleanup that cannot remove the VMID, abandoned or failed,
+hands it to core as ``RetainedProvisioningError``, so the row survives
+for ``vm delete`` to retry. An interrupt while a
 task is still in flight (likeliest: the minutes-long full clone)
 cancels the task first so the target VMID unlocks before the delete.
 
@@ -33,7 +35,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform import ProvisionRequest
+from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedProvisioningError
 from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
@@ -132,26 +134,25 @@ class TestInterruptDuringBootstrapWait:
         assert ("delete_vm", "pve1", NEWID) in fake.calls
         assert fake.ops().index("stop_vm") < fake.ops().index("delete_vm")
         assert "stop_task" not in fake.ops()
-        assert any("Ctrl-C again to abandon" in w for w in captured_output.warnings)
-        # The delete succeeded, so the orphan backstop stays quiet.
+        # The delete succeeded, so nothing warns that the VM remains.
         assert not any("may remain" in w for w in captured_output.warnings)
         _assert_template_untouched(fake)
 
-    def test_second_interrupt_abandons_cleanup_loudly(
+    def test_second_interrupt_abandons_cleanup_and_retains_the_row(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:
         """A second Ctrl-C during the cleanup abandons it instead of
         wedging: no further API calls are made, the warning names the
-        node and VMID (the operator's pointer for the Proxmox web UI),
-        and the ORIGINAL interrupt still propagates."""
+        node and VMID, and the VMID is handed to core so the row
+        survives for ``vm delete``."""
         platform, fake = _platform_with_fake(monkeypatch)
-        interrupt = _interrupt_the_bootstrap(monkeypatch)
+        _interrupt_the_bootstrap(monkeypatch)
         fake.stop_error = KeyboardInterrupt("second")
 
-        with pytest.raises(KeyboardInterrupt) as exc:
+        with pytest.raises(RetainedProvisioningError) as exc:
             platform.create(_request(tailscale=True), RunContext())
 
-        assert exc.value is interrupt
+        assert exc.value.platform_metadata == {"vmid": str(NEWID), "node": "pve1"}
         # Abandoned at the stop: nothing else was touched.
         assert "delete_vm" not in fake.ops()
         assert "stop_task" not in fake.ops()
@@ -201,21 +202,21 @@ class TestFailClosedBootstrap:
         assert _SENTINEL not in repr(captured_output.lines)
         _assert_template_untouched(fake)
 
-    def test_bootstrap_failure_cleanup_survivor_keeps_primary_and_manual_guidance(
+    def test_bootstrap_failure_cleanup_survivor_is_retained_without_the_key(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:
         platform, fake = _platform_with_fake(monkeypatch)
         fake.guest = FakeGuest(lambda payload, seen: Answer(status=None))
         fake.delete_error = ProxmoxAPIError("VM is locked")
 
-        with pytest.raises(ProvisioningError) as caught:
+        with pytest.raises(RetainedProvisioningError) as caught:
             platform.create(_request(tailscale=True), RunContext())
 
+        assert caught.value.platform_metadata == {"vmid": str(NEWID), "node": "pve1"}
         _assert_exception_graph_is_value_free(caught.value)
         (warning,) = [warning for warning in captured_output.warnings if "may remain" in warning]
         assert f"VM {NEWID}" in warning
         assert "node 'pve1'" in warning
-        assert "delete it there manually" in warning
         assert _SENTINEL not in warning
 
 
@@ -316,132 +317,82 @@ class TestEscalationFromFailureRollback:
         assert ("delete_vm", "pve1", NEWID) in fake.calls
         assert fake.ops().count("delete_vm") == 1
         assert fake.ops().count("stop_vm") == 0
-        assert any("Ctrl-C again to abandon" in w for w in captured_output.warnings)
         _assert_template_untouched(fake)
 
 
-class TestOrphanBackstopWarning:
-    """The post-teardown existence check: stop_and_delete_vm suppresses
-    a failed delete silently (delete()'s pinned contract), so both
-    rollback wrappers probe the VMID afterwards and warn when it still
-    exists (the likeliest cause: still locked by a clone that did not
-    settle within the bound). Proxmox has no azure-style tag sweep to
-    catch the orphan later. The happy-path tests pin the quiet side (VM
-    gone, no warning)."""
+class TestUnremovedVMIsRetained:
+    """A rollback that cannot show the VMID gone hands it to core as
+    ``RetainedProvisioningError``, after a warning naming it, so the row
+    survives for ``vm delete`` to retry: Proxmox has no azure-style tag
+    sweep to find an orphan later, and nothing else would target it."""
 
-    def test_interrupt_path_warns_when_the_vm_survives_the_delete(
+    def test_interrupt_path_retains_a_vm_that_survives_the_delete(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:
         platform, fake = _platform_with_fake(monkeypatch)
-        interrupt = _interrupt_the_bootstrap(monkeypatch)
+        _interrupt_the_bootstrap(monkeypatch)
         fake.delete_error = ProxmoxAPIError(f"VM {NEWID} is locked (clone)")
 
-        with pytest.raises(KeyboardInterrupt) as exc:
+        with pytest.raises(RetainedProvisioningError) as exc:
             platform.create(_request(tailscale=True), RunContext())
 
-        assert exc.value is interrupt
+        assert exc.value.platform_metadata == {"vmid": str(NEWID), "node": "pve1"}
         (remains,) = [w for w in captured_output.warnings if "may remain" in w]
         assert f"VM {NEWID}" in remains
         assert "node 'pve1'" in remains
-        # The teardown itself completed (the failed delete was
-        # suppressed inside it), so this is the backstop, not the
-        # abandon path.
-        assert not any("Cleanup abandoned" in w for w in captured_output.warnings)
 
-    def test_failure_path_warns_when_the_vm_survives_the_delete(
+    def test_failure_path_retains_a_vm_that_survives_the_delete_and_keeps_the_failure(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:
         platform, fake = _platform_with_fake(monkeypatch)
-        failure = ProxmoxAPIError("config exploded")
-        fake.configure_error = failure
+        fake.configure_error = ProxmoxAPIError("config exploded")
         fake.delete_error = ProxmoxAPIError(f"VM {NEWID} is locked (clone)")
 
-        with pytest.raises(ProxmoxAPIError) as exc:
+        with pytest.raises(RetainedProvisioningError, match="config exploded") as exc:
             platform.create(_request(tailscale=False), RunContext())
 
-        assert exc.value is failure
+        assert exc.value.platform_metadata == {"vmid": str(NEWID), "node": "pve1"}
         (remains,) = [w for w in captured_output.warnings if "may remain" in w]
         assert f"VM {NEWID}" in remains
         assert "node 'pve1'" in remains
-        # The teardown itself completed, so this is the backstop, not
-        # the rollback-incomplete containment.
-        assert not any("Rollback incomplete" in w for w in captured_output.warnings)
 
-
-class TestTransportFailureDuringRollback:
-    """Even an unexpected raw transport failure from a fake API must be
-    contained by rollback, never replacing the original interrupt or
-    masking the original error. The real API normalizes these failures."""
-
-    def test_interrupt_path_absorbs_it_with_the_abandon_warning(
-        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    @pytest.mark.parametrize("path", ["failure", "interrupt"])
+    def test_an_api_outage_during_the_rollback_retains_the_vm(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, path: str
     ) -> None:
+        """The live case: the API stops answering while a bootstrap fails, so no call can show the VM gone."""
         platform, fake = _platform_with_fake(monkeypatch)
-        interrupt = _interrupt_the_bootstrap(monkeypatch)
-        fake.status_errors = [OSError("connection refused")]
+        if path == "failure":
+            fake.guest = FakeGuest(lambda payload, seen: Answer(status=None))
+        else:
+            _interrupt_the_bootstrap(monkeypatch)
+        outage = ProxmoxAPIError("Proxmox API failed: connection refused")
+        fake.status_errors = [outage]
+        fake.delete_error = outage
+        fake.list_error = outage
 
-        with pytest.raises(KeyboardInterrupt) as exc:
+        with pytest.raises(RetainedProvisioningError) as exc:
             platform.create(_request(tailscale=True), RunContext())
 
-        assert exc.value is interrupt
-        (abandoned,) = [w for w in captured_output.warnings if "Cleanup abandoned" in w]
-        assert f"VM {NEWID}" in abandoned
-        assert "node 'pve1'" in abandoned
+        assert exc.value.platform_metadata == {"vmid": str(NEWID), "node": "pve1"}
+        assert any(f"VM {NEWID}" in w and "may remain" in w for w in captured_output.warnings)
 
-    def test_failure_path_warns_and_reraises_the_original_error(
-        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    @pytest.mark.parametrize("path", ["failure", "interrupt"])
+    def test_a_raw_transport_failure_during_the_rollback_retains_the_vm(
+        self, monkeypatch: pytest.MonkeyPatch, path: str
     ) -> None:
+        """The real API wraps transport failures; one that escapes unwrapped is still never a silent orphan."""
         platform, fake = _platform_with_fake(monkeypatch)
-        failure = ProxmoxAPIError("config exploded")
-        fake.configure_error = failure
+        if path == "failure":
+            fake.configure_error = ProxmoxAPIError("config exploded")
+        else:
+            _interrupt_the_bootstrap(monkeypatch)
         fake.status_errors = [OSError("connection refused")]
 
-        with pytest.raises(ProxmoxAPIError) as exc:
-            platform.create(_request(tailscale=False), RunContext())
+        with pytest.raises(RetainedProvisioningError) as exc:
+            platform.create(_request(tailscale=path == "interrupt"), RunContext())
 
-        assert exc.value is failure
-        assert any("Rollback incomplete" in w and "node 'pve1'" in w for w in captured_output.warnings)
-
-    # The two tests above inject at the FIRST status call, inside
-    # stop_and_delete_vm, short-circuiting before the orphan-backstop
-    # probe. The two below target the PROBE itself (the second status
-    # call): the delete has already failed silently as a suppressed
-    # ProxmoxAPIError, so if the probe's transport failure were
-    # swallowed in the helper, this scenario would produce ZERO warning
-    # and the silent orphan would just have moved one layer up.
-
-    def test_failure_path_probe_blip_still_warns_via_containment(
-        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
-    ) -> None:
-        platform, fake = _platform_with_fake(monkeypatch)
-        failure = ProxmoxAPIError("config exploded")
-        fake.configure_error = failure
-        fake.delete_error = ProxmoxAPIError(f"VM {NEWID} is locked (clone)")
-        # First status call (teardown) succeeds; the probe hits the blip.
-        fake.status_errors = [None, OSError("network blip")]
-
-        with pytest.raises(ProxmoxAPIError) as exc:
-            platform.create(_request(tailscale=False), RunContext())
-
-        assert exc.value is failure
-        assert any("Rollback incomplete" in w and "node 'pve1'" in w for w in captured_output.warnings)
-
-    def test_interrupt_path_probe_blip_still_warns_via_containment(
-        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
-    ) -> None:
-        platform, fake = _platform_with_fake(monkeypatch)
-        interrupt = _interrupt_the_bootstrap(monkeypatch)
-        fake.delete_error = ProxmoxAPIError(f"VM {NEWID} is locked (clone)")
-        # First status call (teardown) succeeds; the probe hits the blip.
-        fake.status_errors = [None, OSError("network blip")]
-
-        with pytest.raises(KeyboardInterrupt) as exc:
-            platform.create(_request(tailscale=True), RunContext())
-
-        assert exc.value is interrupt
-        (abandoned,) = [w for w in captured_output.warnings if "Cleanup abandoned" in w]
-        assert f"VM {NEWID}" in abandoned
-        assert "node 'pve1'" in abandoned
+        assert exc.value.platform_metadata == {"vmid": str(NEWID), "node": "pve1"}
 
 
 class TestPlainFailure:
@@ -485,9 +436,8 @@ class TestPlainFailure:
             assert op not in fake.ops()
 
 
-class TestDeleteOpUnchanged:
-    """The delete op now composes the shared teardown; its observable
-    behavior is byte-for-byte the pre-#340 sequence."""
+class TestDeleteOp:
+    """The delete op composes the shared teardown, and returns only once the VMID is gone (incident row I18)."""
 
     @staticmethod
     def _vm_row() -> VMRow:
@@ -498,6 +448,7 @@ class TestDeleteOpUnchanged:
 
     def test_running_vm_is_stopped_then_deleted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         platform, fake = _platform_with_fake(monkeypatch)
+        fake.present = True
         fake.running = True
 
         platform.delete(self._vm_row(), RunContext())
@@ -507,9 +458,8 @@ class TestDeleteOpUnchanged:
         assert fake.ops().index("stop_vm") < fake.ops().index("delete_vm")
         assert "stop_task" not in fake.ops()
 
-    def test_already_gone_vm_deletes_best_effort_without_raising(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The idempotency contract: a status read that fails (VM gone)
-        skips the stop, and the delete is still attempted best-effort."""
+    def test_an_already_gone_vm_counts_as_deleted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The idempotency contract: a VMID the node no longer lists is gone, whatever the delete said."""
         platform, fake = _platform_with_fake(monkeypatch)
         fake.status_errors = [ProxmoxAPIError("does not exist")]
         fake.delete_error = ProxmoxAPIError("does not exist")
@@ -517,3 +467,24 @@ class TestDeleteOpUnchanged:
         platform.delete(self._vm_row(), RunContext())  # no raise
 
         assert "stop_vm" not in fake.ops()
+        assert ("list_vms", "pve1") in fake.calls
+
+    def test_a_locked_vm_that_survives_the_delete_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        platform, fake = _platform_with_fake(monkeypatch)
+        fake.present = True
+        fake.delete_error = ProxmoxAPIError(f"VM {NEWID} is locked (backup)")
+
+        with pytest.raises(ProxmoxAPIError, match="locked"):
+            platform.delete(self._vm_row(), RunContext())
+
+    def test_a_delete_while_the_api_is_down_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No call answers, so nothing shows the VMID gone."""
+        platform, fake = _platform_with_fake(monkeypatch)
+        outage = ProxmoxAPIError("Proxmox API failed: connection refused")
+        fake.present = True
+        fake.status_errors = [outage]
+        fake.delete_error = outage
+        fake.list_error = outage
+
+        with pytest.raises(ProxmoxAPIError, match="connection refused"):
+            platform.delete(self._vm_row(), RunContext())

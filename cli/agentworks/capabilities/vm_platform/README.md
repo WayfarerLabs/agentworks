@@ -178,8 +178,8 @@ and DB migration.
   treats a failed collision query as absence
   ([#719](https://github.com/WayfarerLabs/agentworks/issues/719)). A create that cannot confirm
   rollback raises `RetainedProvisioningError` with addressable platform metadata; core persists that
-  metadata and retains the provisional row so `vm delete` can finish cleanup. EC2 currently
-  implements this retained-cleanup handoff; the other platforms are tracked in
+  metadata and retains the provisional row so `vm delete` can finish cleanup. EC2, Proxmox and Lima
+  implement this retained-cleanup handoff; Azure, GCE and WSL2 are tracked in
   [#718](https://github.com/WayfarerLabs/agentworks/issues/718).
 - `start(vm, ctx)`, `stop(vm, ctx)`, `delete(vm, ctx)` are flagged `@idempotent_op` and must land in
   the same place run twice as run once. The marker is inherited through the MRO, so an override does
@@ -192,8 +192,9 @@ and DB migration.
   an account-bound row; an ambiguous legacy `NotFound` retains the row. A delete that cannot remove
   the backend VM must raise because core drops the row only on success (#329). Azure confirms VM
   absence, GCE confirms instance absence before removing its lifetime deny, and EC2 verifies account
-  and ownership before terminating, waiting, and deleting its security group. Lima, WSL2, and
-  Proxmox remain fire-and-forget (#356).
+  and ownership before terminating, waiting, and deleting its security group. Proxmox confirms that
+  the node no longer lists the VMID, and Lima relies on `limactl delete --force`, which fails unless
+  the instance is gone or was never there. WSL2 remains fire-and-forget (#356).
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
 - `run_as_root(vm, ctx, script, deadline) -> RawRun` **MUST** run `/bin/bash -s` as root through the
@@ -698,11 +699,14 @@ VNet / disk creation and calls `cleanup_vm_resources` on any exception). The sam
 an operator interrupt (`KeyboardInterrupt`) across the whole create span, including any inline
 readiness or bootstrap wait: warn with "Ctrl-C again to abandon" guidance, tear down what this
 create made, and re-raise the ORIGINAL interrupt; a second Ctrl-C abandons the cleanup loudly,
-naming the exact manual removal (Azure's `rollback_create_on_interrupt`; Proxmox, Lima, WSL2, and
-EC2 do the same over their single VM / instance / distro). That is distinct from, and composes
-under, the orchestrator's DB-row unwind (ADR 0019's `RealizationLog` / node `teardown`), which rolls
-back the persisted VM row. The platform's sweep undoes backend-side resources created inside
-`create()`; the orchestrator undoes the Agentworks-side record on top of it.
+naming the exact manual removal (Azure's `rollback_create_on_interrupt`; WSL2 does the same over its
+distro). A platform that implements the retained-cleanup handoff (EC2, Proxmox and Lima) raises
+`RetainedProvisioningError` instead whenever its cleanup, after a failure or an interrupt, is
+abandoned or cannot show the backend clean, so core keeps the row for `vm delete` to finish. That is
+distinct from, and composes under, the orchestrator's DB-row unwind (ADR 0019's `RealizationLog` /
+node `teardown`), which rolls back the persisted VM row. The platform's sweep undoes backend-side
+resources created inside `create()`; the orchestrator undoes the Agentworks-side record on top of
+it.
 
 #### Quoting and Escaping in Embedded Scripts
 
