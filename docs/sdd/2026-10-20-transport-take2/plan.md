@@ -383,7 +383,7 @@ no platform's private access imports a legacy module.
 
 ## Slice 5: Files and capability delivery (HLA D6, D12; PR C)
 
-- [ ] Write `files-lld.md`. It covers:
+- [ ] Write [`files-lld.md`](./files-lld.md). It covers:
   - each operation's Python program and its use of stdin and stdout;
   - the `flock` protocol;
   - the symlink policy;
