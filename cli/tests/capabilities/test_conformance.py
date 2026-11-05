@@ -184,6 +184,36 @@ def test_a_capability_name_that_is_not_a_registry_key_is_refused(name: str) -> N
     assert "'name' class attribute" in reason
 
 
+@pytest.mark.parametrize("retired", ["post_tailscale_ready", "secure_failed_vm"])
+def test_a_platform_that_still_defines_a_retired_hook_is_refused_naming_its_replacement(retired: str) -> None:
+    """Nothing calls version 1's hooks, so such a platform would register and leave its bootstrap allow open."""
+    platform = type(
+        "_OldPlatform",
+        (ConformingVMPlatform,),
+        {"name": "old-platform", "description": "a version 1 platform", retired: lambda self, vm, ctx: None},
+    )
+
+    reason = conformance_error(VM_PLATFORM, platform)
+
+    assert reason is not None
+    assert retired in reason
+    assert "close_provisioning_access" in reason
+
+
+def test_a_platform_that_implements_the_merged_hook_conforms() -> None:
+    platform = type(
+        "_NewPlatform",
+        (ConformingVMPlatform,),
+        {
+            "name": "new-platform",
+            "description": "a version 2 platform",
+            "close_provisioning_access": lambda self, vm, ctx: None,
+        },
+    )
+
+    assert conformance_error(VM_PLATFORM, platform) is None
+
+
 # -- The config model has to be buildable ------------------------------------
 
 

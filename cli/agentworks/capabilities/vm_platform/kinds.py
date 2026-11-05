@@ -140,6 +140,11 @@ VM_PLATFORM_DESCRIPTOR = CapabilityKindDescriptor(
     ),
     # VMPlatform supplies every other non-operation member a subclass needs.
     required_attributes=frozenset({"recovery_needs_guest_sshd"}),
+    # Version 2 merged version 1's two Phase A hooks into one.
+    retired_members=(
+        ("post_tailscale_ready", "close_provisioning_access"),
+        ("secure_failed_vm", "close_provisioning_access"),
+    ),
     entry_factory=_entry,
     readiness=_readiness,
     publisher_source="agentworks.capabilities.vm_platform",

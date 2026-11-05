@@ -335,6 +335,8 @@ state the full contract, and the
   contract passes, when Phase A fails, and when it is interrupted. A platform that opens
   provisioning access in `create`, such as a bootstrap firewall allow, closes it there. Rename an
   override of either old hook; a platform that overrode both with the same body keeps one.
+  Registration refuses a platform that still defines either old name, naming
+  `close_provisioning_access`, since nothing calls them any more.
 - **`generate_bootstrap_script()` no longer takes `tailscale_auth_key`.** The script it generates
   holds no secret and stops once Tailscale is installed, so a provider may retain it.
   `run_bootstrap()` runs it through a root channel, and `parse_bootstrap_steps()` replaces

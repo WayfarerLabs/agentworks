@@ -577,7 +577,9 @@ implementation of it:
   models.**
 - **`implementation_contract`, `required_operations`, `required_attributes`**, what an
   implementation must satisfy. All four kinds declare nominal bases, and every registered
-  implementation must derive from its kind's contract.
+  implementation must derive from its kind's contract. **`retired_members`** pairs the members an
+  earlier contract version had with their replacements; registration refuses an implementation that
+  still defines one, since nothing calls it.
 - **`registry`, `entry_factory`, `readiness`, `publisher_source`**, how the kind's implementations
   are stored, published as read-only rows, and asked whether this host supports them.
 - **`manifest_sections`** (a sequence of `HostSurface` records), which declarable fields select this
