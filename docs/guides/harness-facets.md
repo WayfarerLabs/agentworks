@@ -239,6 +239,13 @@ owner and supported repair operation; it does not block descendant setup or sess
 routing uses available captures and explicit known deferrals without guessing unknown handling or
 refreshing ancestors.
 
+A confirmed empty set of deferrals is a usable routing result, even when the ancestor has an
+unfinished native entry. It does not hold a descendant's own updates or removals. Uncertainty at an
+ancestor is reported separately from a receiving facet's actual skipped or held work; it does not
+permanently fail a newly created workspace whose applicable local setup completed. Saved incomplete
+evidence that cannot establish whether routing finished remains unknown; use the reported owning
+operation to confirm it.
+
 Workspace setup runs only at creation. There is no workspace reinit, and workspace repair does not
 refresh artifacts. An existing workspace cannot adopt changed workspace-routed inputs in place;
 recreation is a separate lifecycle decision. Setup warns about deferred application without scanning
@@ -295,18 +302,30 @@ collected. Inspect the session before retrying. An explicit required prerequisit
 no session while keeping the newly created ancestors. Reuse those owners with `--agent <name>` or
 `--workspace <name>`, rather than repeating `--new-agent` or `--new-workspace`. Agent and VM setup
 can be retried with their reinit commands. Workspaces have no integration retry command:
-`workspace repair` handles access and Git identity only. Preserve uncommitted work and review the
-normal deletion/recreation lifecycle before choosing to recreate one; recreation is destructive.
+`workspace repair` handles access and Git identity only. Before destructive recreation, preserve
+tracked edits, untracked files, commits not yet pushed and stashes outside the workspace. Correct
+the configured source first: push needed repository changes, fix the workstation settings source, or
+choose the intended template as applicable. Editing only the guest checkout does not change what a
+fresh clone will receive.
 
 Confirmed deferrals survive failed setup attempts. If a recorded input is no longer readable from
-its owner's capture, descendant setup reports the unknown route and preserves prior placements,
+its owner's capture, owning setup reports the unknown route and preserves affected prior placements,
 including shared generated sections and related packages. Independent native setup and new
 independent paths can still apply. Repair the source owner's capture/setup before retrying the
 affected descendant; unknown content is never substituted with a current revision or treated as an
 empty declaration authorizing cleanup.
 
-Failure reasons and hints are redacted, restricted to one terminal-safe line and bounded to 2 KiB
-each. Human inspection also bounds older saved diagnostics without rewriting the recorded state.
+At session launch, content that cannot be reconstructed from the available captures is explicitly
+unhandled. A known route reports its recorded input identity and owner; unknown routing without an
+input identity reports the owner without inventing content. Launch continues with available inputs,
+while the session's artifact evidence remains incomplete. A later restart after the owning repair
+can resolve that evidence. New-run preparation leaves the old runtime and its files intact until
+teardown; obsolete private-run files retire after the old runtime is removed.
+
+Harness setup and artifact-delivery diagnostics redact known secrets and remove guest terminal
+controls. Each diagnostic reason or hint is bounded to one line of at most 2 KiB; output can add
+owner and retry context. Human inspection also bounds older saved diagnostics without rewriting the
+recorded state.
 
 Use the existing owning inspection commands, such as `agw agent describe worker`,
 `agw workspace describe project`, or `agw vm describe dev`, to inspect the `harness-native-setup`

@@ -82,6 +82,8 @@ session and be published in its private artifact directory. Inactive workspace f
 their applicable inputs to session. Recorded session deferrals resolve against the original owner's
 capture, even if an upstream facet later changes its routing. If that content is no longer readable,
 Agentworks reports the unresolved route and its owning repair action without inventing content.
+Confirmed empty deferrals remain a known result even when the ancestor has incomplete native setup;
+they do not prevent descendants from applying their own content.
 
 Use `agw artifact show --agent <agent-name> --integration shell` to inspect the captured input and
 recorded handling. The templates themselves do not create instances. See `agw vm create --help`,
@@ -94,9 +96,10 @@ or cleanup. Native-only incomplete setup also carries its recorded entry-specifi
 the retained conflict before rerunning the owning setup. A stale ancestor reports changed
 integration config keys, declared environment variable names by scope, or prepared artifact names,
 without their values. Each owner's status is independent; the session row describes its own recorded
-application. Ancestor problems are reported at managed start without blocking launch. An inactive
-session integration has no setup obligation for that facet. Inspection reports recorded application,
-not a fresh check of native files or model context.
+application. Missing session payloads or unknown session routing remain explicitly incomplete, with
+recorded unhandled input identities where available. Ancestor problems are reported at managed start
+without blocking launch. An inactive session integration has no setup obligation for that facet.
+Inspection reports recorded application, not a fresh check of native files or model context.
 
 ## Composition and names
 
@@ -233,6 +236,12 @@ an automatic response to an artifact update. Setup warns about the delayed appli
 inputs without inspecting or modifying downstream owners. This timing also matters when inputs are
 removed: updating an ancestor alone does not retire effects previously applied by a descendant.
 
+Recreation is destructive. Preserve tracked edits, untracked files, commits not yet pushed and
+stashes outside the workspace first. Correct and push the repository content the next clone needs,
+or correct the configured workstation source/template. Editing only the old guest checkout does not
+update the next workspace's inputs. A newly created workspace whose own applicable setup completed
+does not acquire a permanent setup failure solely from an ancestor's uncertainty.
+
 Applied config records identify files and registrations owned by the integration. Refresh removes
 obsolete owned effects where supported. Retired skill files also prune empty parents up to their
 recorded package root. The renderer supplies that exact boundary for every skill member; cleanup
@@ -308,14 +317,14 @@ inventory checks existing entries in known machine, user and direct workspace di
 reads native metadata names, including Codex configuration registrations, rather than assuming
 filenames are names. Conflicts identify the native name and competing paths. During setup,
 conflicting artifacts are deferred individually to the next supported facet while independent
-artifacts continue. When inherited routes cannot be resolved, prior placements and related packages
-are retained against replacement and removal until their source evidence is available. New
-independent paths can still apply. Ordinary safe retirement removes prior owned placements no longer
-in that plan; modified or unowned files remain protected. If session delivery still has a
-native-name conflict, the affected inputs are reported as unhandled and excluded from both files and
-launch arguments; independent delivery and launch continue. A non-conflicting native namespace can
-allow a later facet to handle a previously deferred input. Problems solely in existing ancestor
-placement also warn without blocking launch.
+artifacts continue. During VM, user and workspace setup, unresolved inherited routes protect
+affected prior placements and related packages against replacement and removal until their source
+evidence is available. New independent paths can still apply. Ordinary safe retirement removes prior
+owned placements no longer in that plan; modified or unowned files remain protected. If session
+delivery still has a native-name conflict, the affected inputs are reported as unhandled and
+excluded from both files and launch arguments; independent delivery and launch continue. A
+non-conflicting native namespace can allow a later facet to handle a previously deferred input.
+Problems solely in existing ancestor placement also warn without blocking launch.
 
 Inventory covers selected skill/persona types, with at most 512 directory entries, YAML headers up
 to 32 KiB each and 1 MiB combined, and an Agentworks rendered-TOML budget for Codex personas of 32
@@ -343,12 +352,16 @@ content to other workspace users, but sessions sharing that Linux user share its
 managed run uses a new directory; reusable session names do not reuse another session's identity.
 Native harness session delivery is disabled by default; shell publishes its private files directly.
 Inputs left unhandled, including deferrals from ancestors, produce warnings with their original
-owner, type, name and reason. They do not prevent launch and are not reported as successfully
-delivered. Malformed input, transport failures and unsafe publication remain errors. A differing
-whole file in the prospective session directory is preserved and refuses the new run before teardown
-of an existing runtime. Differing unowned file content during setup is preserved and recorded as a
-skip, leaving that setup incomplete. Incomplete native-only facets are also reported; neither case
-creates a blanket descendant launch prerequisite.
+owner, type, name and reason when that content is known. An unavailable payload instead names its
+owner and recorded input identity where available; unknown routing without recoverable identities
+reports the owner without inventing artifact names or content. These unavailable inputs remain
+unhandled in the session evidence, which stays incomplete until a later managed restart can resolve
+them. They do not prevent launch and are not reported as successfully delivered. Malformed input,
+transport failures and unsafe publication remain errors. A differing whole file in the prospective
+session directory is preserved and refuses the new run before teardown of an existing runtime.
+Differing unowned file content during setup is preserved and recorded as a skip, leaving that setup
+incomplete. Incomplete native-only facets are also reported; neither case creates a blanket
+descendant launch prerequisite.
 
 Selecting a native persona and delivering its definition are separate operations. If a managed
 persona definition remains unhandled, an explicit integration `agent` selection still applies. The
@@ -361,6 +374,10 @@ Cleanup retires owned files and explicit skill package roots. Empty session/run 
 remain; they grant no ownership over their parents and do not retain artifact content. Shell's guest
 index retains applicability and revision metadata without workstation acquisition paths; workstation
 inspection still shows source provenance.
+
+A managed restart prepares the next run before replacing the old runtime. Old private-run files
+remain available through failed preparation and retire only after the old runtime is torn down. If a
+later run omits an unavailable input, its incomplete/unhandled evidence reports that omission.
 
 This delivery includes declared bundles and harness handling. Core hint emission, features, hooks,
 and MCP artifacts are later work.

@@ -41,6 +41,10 @@ When `--update-template` and `--spec` are supplied together, Agentworks validate
 template binding and instance layer as one desired-state change before convergence. A later plain
 reinit reads both stored inputs again.
 
+Source capture can fail after those desired inputs have been saved, even before guest mutation.
+Inspect the recorded template and instance spec, then correct the source or explicitly restore the
+intended binding/layer before retrying. The stored declaration remains the desired state for retry.
+
 ## VM reinit
 
 `vm reinit` re-runs initialization using the current config. Many core installation steps collect
@@ -142,6 +146,18 @@ access was restored.
 | ----------------------- | ------------------------------------------------------------------------ |
 | Dotfiles (local source) | Overwritten, not merged. Side effects from previous installs may linger. |
 
+## Workspace creation and interruption
+
+Workspace creation reserves its destination exclusively. Repository clones run in private, unique
+attempt directories beside that destination; only a confirmed successful clone is published into the
+workspace. An old guest clone may survive a controller timeout or cancellation, but its attempt path
+is separate from any later workspace using the same name.
+
+Cleanup removes confirmed resources. A lost reservation or publication response can leave a named
+path for inspection; cleanup also preserves a reservation that gained other content. Inspect and
+preserve any valuable contents before manual cleanup or choosing another name. An absent database
+row does not establish that a leftover directory is empty or safe to remove.
+
 ## Workspace repair
 
 `workspace repair` reconciles the on-VM workspace's access mechanics with its database grants and
@@ -167,6 +183,11 @@ Activated workspace integration facets run after workspace directory and reposit
 explicit workspace recreation. Session create, start, and restart inspect declared prerequisites
 without implicitly running any ancestor setup.
 
+Before recreating a workspace, preserve tracked edits, untracked files, commits not yet pushed and
+stashes outside that workspace. Correct and push any repository content needed by the next clone,
+and correct workstation mapping sources as applicable. A change made only inside the old guest
+checkout does not change the next workspace's inputs.
+
 Owning setup receives both the effective activation map and prior applied state. It reconciles
 matching owned effects, retires removed associations where ownership can be established, and
 preserves incomplete or pending cleanup evidence on failure. Removing an activation from config
@@ -174,6 +195,13 @@ therefore takes effect at the next owning setup operation, not at configuration 
 map or supplying `{}` inherits existing activations. Entries merge by integration name, with each
 configuration following its facet's merge rules. A null entry, such as `codex: null`, disables that
 integration while preserving the others; a later layer can reactivate it with fresh configuration.
+
+A confirmed empty routing result remains usable even when the ancestor has an incomplete native
+entry. Unrelated descendant setup can still update or retire its own content. Truly unresolved
+inputs protect affected prior setup placements; a fresh workspace's completed local work does not
+become permanently incomplete merely because an ancestor needs repair. Session launch reports and
+records unavailable delivery as unhandled/incomplete while continuing with known inputs. Repair the
+owning ancestor and restart the session to reconsider those inputs.
 
 Cleanup is deliberately bounded. Settings mappings retain their native document when removed and
 have no separate ownership claims; they do not restore overwritten values. Native plugins and

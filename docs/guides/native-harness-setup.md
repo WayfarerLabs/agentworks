@@ -57,7 +57,9 @@ contents and native command output are transferred privately and are not stored 
 records or logs. Removing a mapping retains the native file and its current values. Settings
 mappings do not create ownership claims; the setup record tracks completion and the requested
 policy. It does not restore overwritten values. Workspace mapping changes follow workspace creation;
-applying a new mapping requires workspace recreation.
+applying a new mapping requires workspace recreation. Correct the source before recreating and
+preserve work outside the workspace first; see the
+[workspace recovery guidance](harness-facets.md#inspecting-and-reconciling-setup).
 
 ## Marketplaces and plugins
 
@@ -67,6 +69,10 @@ guest filesystem; relative paths resolve against the actual user's home. Plugin 
 against the native catalog; qualify ambiguous names as `plugin@marketplace`. An ambiguous
 unqualified selection is retained and reported without retiring its prior associations. A name
 absent from the catalog is a configuration error.
+
+Claude marketplace paths can select a directory or its `marketplace.json` file. A named entry with a
+source form Agentworks cannot establish is preserved and reported locally rather than invalidating
+unrelated marketplace entries. Malformed overall inventory still fails that facet.
 
 Tool discovery reads the actual user's login-shell PATH once per setup invocation. An explicit PATH
 in the prepared setup environment takes precedence. Native commands use that resolved executable and
@@ -114,7 +120,10 @@ Restore a valid native association before retrying setup. Marketplace retirement
 retains dependent plugins when the user declaration needed for removal is absent. Agentworks does
 not broaden user-scoped removal to all scopes or write a guessed source. Explicitly protected named
 operator entries are retained through unrelated native rewrites and mapped-settings publication;
-other incomplete placeholders can follow the native CLI's own normalization.
+other incomplete placeholders can follow the native CLI's own normalization. Entry preservation
+respects native registrations and removals confirmed earlier in the same operation. For example, an
+ambiguous plugin selection does not undo a newly registered marketplace; qualify the plugin name
+before retrying.
 
 Current-attempt incomplete reasons are retained with setup evidence. `agw artifact show` and managed
 session-start warnings identify the retained entry and its reason. Resolve that native or file

@@ -8,10 +8,10 @@ secrets, opens no gate, and re-checks nothing its caller already
 validated (name shape, existence, VM anchoring). The calling
 orchestrator owns all of that; this body owns only the mutation and
 the mutation's own partial-state cleanup (files or a VS Code stub
-written before the failure), which it unwinds itself before
-re-raising. Rollback of a COMPLETED workspace is not this function's
-job either: that is the pending workspace node's ``teardown``, driven
-by the orchestrator's realization log.
+written before the failure), which it attempts before re-raising.
+The backend reports unconfirmed remote work or residual paths for inspection.
+Rollback of a COMPLETED workspace belongs to the pending workspace node's
+``teardown``, driven by the orchestrator's realization log.
 
 Parity oracle: the mutation slice of the imperative ``workspaces
 .manager.create_workspace``, exactly as ``session create
@@ -72,9 +72,10 @@ def realize_workspace(
 
     Returns the VS Code workspace stub path, for callers with an
     open-in-VS-Code tail; callers without one ignore it. Core failures raise
-    AFTER unwinding its own partial state; the caller's
-    realization log never sees a half-made workspace. Native setup failures
-    join ``setup_failures`` while the row and setup progress are committed.
+    after attempting cleanup of confirmed partial state. Unconfirmed remote
+    mutations can leave reported residue; the caller's realization log never
+    marks a half-made workspace complete. Native setup failures join
+    ``setup_failures`` while the row and setup progress are committed.
     """
     from agentworks.agents.grants import materialize_grant_all_agents, workspace_group
     from agentworks.ssh import SSHLogger
@@ -94,11 +95,10 @@ def realize_workspace(
         # create_vm_workspace RETURNS. So it covers failures AFTER a
         # successful create (the VS Code stub, the row insert), the same
         # window the directory cleanup already covered; the group teardown
-        # rides along on exactly that window. A failure mid-create (e.g. the
-        # git clone) leaves workspace_path unset here, but is NOT a leak:
-        # create_vm_workspace self-cleans its own group and directory before
-        # re-raising (issue #262), so the two teardowns never overlap and
-        # each partial-create window is reclaimed exactly once.
+        # rides along on exactly that window. The backend owns cleanup before
+        # it returns, including unique clone attempts. It preserves and reports
+        # unconfirmed or occupied reservations. With workspace_path unset here,
+        # this layer must not guess a path and remove that unexplained residue.
         if workspace_path:
             delete_vm_workspace(vm, config, name, workspace_path, workspace_group(name), logger=ssh_logger)
         if vscode_path:
