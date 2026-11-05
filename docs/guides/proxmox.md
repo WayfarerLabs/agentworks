@@ -209,7 +209,9 @@ Agentworks uses QEMU Guest Agent as the root channel that works without Tailscal
 bootstrap and Tailscale join, `agw vm recover`, `vm rekey` and the logout during deletion run their
 root scripts through it. Before each script, Agentworks waits up to about two minutes for the guest
 agent to answer, since a VM that has just started has none running yet; a VM whose agent never
-answers fails with nothing dispatched. A started VM that does not answer over Tailscale SSH fails
+answers fails with nothing dispatched. Create's wait for cloud-init asks again for about seven
+minutes in all, since cloud-init can restart the agent, so a create from a template without the
+agent fails after about seven minutes. A started VM that does not answer over Tailscale SSH fails
 `vm start` with a hint to run `agw vm recover`, which can also restart a broken SSH server here,
 since the guest agent does not depend on it.
 
@@ -238,13 +240,22 @@ After provisioning, normal operations use Tailscale SSH, as they do on Lima and 
 
 ### The guest agent does not answer
 
-A root script, including create's wait for cloud-init, fails with
+A root script fails with
 `the QEMU guest agent of Proxmox VM <vmid>@<node> did not answer, so no script was dispatched` when
-the agent does not answer within about two minutes. Check:
+the agent does not answer within about two minutes; create's wait for cloud-init asks again until
+about seven minutes have passed. Check:
 
 - The guest agent is installed in the template (the setup script handles this via `virt-customize`)
 - The guest agent is enabled in the VM config (`qm set <vmid> --agent enabled=1`)
 - The VM has finished booting: connect with `qm terminal <vmid>` to check
+
+### Create fails with `QGA status failed` during the bootstrap
+
+A template whose `qemu-guest-agent` package has an upgrade pending fails every create: the bootstrap
+upgrades the package, the agent restarts mid-script and forgets the script, and the next status poll
+fails with the agent's own reason (`Agent error: PID <pid> does not exist`). Keep the template's
+cloud-init `ciupgrade` option on, as it is by default, so the upgrade happens during cloud-init,
+whose wait survives the restart, or build the template with its packages already upgraded.
 
 ### The token secret won't resolve
 

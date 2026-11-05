@@ -90,10 +90,9 @@ def test_the_deadline_returns_empty_streams_without_dispatching_again(monkeypatc
     "api",
     [
         FakeAPI([], dispatch=ProxmoxAPIError(f"POST failed for {SCRIPT.decode()}")),
-        FakeAPI([ProxmoxAPIError(f"status failed for {SCRIPT.decode()}")]),
         FakeAPI([RuntimeError(f"socket error near {SCRIPT.decode()}")]),
     ],
-    ids=["dispatch", "status", "unexpected"],
+    ids=["dispatch", "unexpected"],
 )
 def test_a_failed_call_raises_without_the_script_anywhere(api: FakeAPI) -> None:
     with pytest.raises(ConnectivityError) as caught:
@@ -105,6 +104,21 @@ def test_a_failed_call_raises_without_the_script_anywhere(api: FakeAPI) -> None:
     assert error.__cause__ is None
     assert error.__context__ is None
     assert len(api.execs) == 1
+
+
+def test_a_failed_status_poll_says_why_without_chaining() -> None:
+    """The status request carries only the PID, so the API's own reason is safe to show, and it is the useful part."""
+    reason = (
+        "Proxmox API GET /nodes/pve1/qemu/101/agent/exec-status?pid=41 failed (500): Agent error: PID 41 does not exist"
+    )
+    api = FakeAPI([ProxmoxAPIError(reason)])
+
+    with pytest.raises(ConnectivityError) as caught:
+        run(api)
+
+    assert reason in str(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_an_agent_that_answers_on_the_third_ping_gets_the_script_once() -> None:

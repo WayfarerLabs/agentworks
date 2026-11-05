@@ -10,7 +10,11 @@ characters), with whatever remains of the deadline, then
 ``exec-status`` is polled every two seconds until the guest reports an exit
 or the deadline passes. QGA has no cancellation endpoint: at the deadline the
 result is empty, so the outcome is unknown, and nothing is dispatched again.
-No message holds the script, because it can carry a secret.
+No message holds the script, because it can carry a secret: a failed
+dispatch, whose request carries the script, says nothing of the provider's
+error, while a failed status poll, whose request carries only the PID,
+quotes it, since it says why (a guest agent that restarted mid-script no
+longer knows the PID).
 """
 
 from __future__ import annotations
@@ -36,7 +40,8 @@ def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: 
 
     A dispatch or status failure raises ``ConnectivityError`` saying how far
     the request got, and never chains the original error, whose request could
-    quote the script. The API refusing the site's token (401 or 403) is a
+    quote the script. A status failure from the API adds the API's own error
+    text, since that request carries only the PID. The API refusing the site's token (401 or 403) is a
     ``TokenRejectedError`` instead, since no connection problem explains it.
     A guest agent that does not answer its ping by the deadline raises
     ``ConnectivityError`` before anything is dispatched.
@@ -71,12 +76,13 @@ def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: 
                 f"Proxmox QGA reported that the script on VM {where} (PID {pid}) exited, with its output cut short"
             )
         except Exception as error:
+            reason = f": {error}" if isinstance(error, ProxmoxAPIError) else ""
             failure = _token_rejected(
                 error,
                 f"Proxmox rejected the API token while polling the root script on VM {where} (PID {pid});"
                 " the script may still be running",
             ) or ConnectivityError(
-                f"Proxmox QGA status failed for VM {where} (PID {pid}); the script may still be running"
+                f"Proxmox QGA status failed for VM {where} (PID {pid}); the script may still be running{reason}"
             )
         if failure is not None:
             raise failure
