@@ -335,7 +335,6 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
 ):
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
-    from tests.conftest import _FakeTarget
 
     module = __import__(implementation.__module__, fromlist=["probe_native"])
     monkeypatch.setattr(module, "probe_native", lambda *args, **kwargs: "/home/alice/.native")
@@ -360,7 +359,7 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
     method = "_transcript_exists" if implementation is ClaudeCodeIntegration else "_session_exists"
     monkeypatch.setattr(integration, method, lambda *_args: resume)
     result = integration.start(
-        RunContext(admin_target=_FakeTarget(), admin_access=RecordingVMAccess([], Admin())),
+        RunContext(admin_access=RecordingVMAccess([], Admin())),
         intent=HarnessLaunchIntent.RESUME_OR_NEW if resume else HarnessLaunchIntent.CREATE,
     )
     assert "{{" not in result.command

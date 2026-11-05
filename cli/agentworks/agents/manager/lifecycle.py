@@ -37,7 +37,6 @@ if TYPE_CHECKING:
     from agentworks.execution.access import VMAccess
     from agentworks.instance_specs import InstanceOverlay
     from agentworks.secrets.policy import TtyInteractionPolicy
-    from agentworks.transports import Transport
     from agentworks.vms.nodes import LiveVMNode
 
 # ``_mgr`` binds this module's own package object (safe: by the time
@@ -218,16 +217,12 @@ def create_agent(
         def scoped_ctx(
             secret_names: tuple[str, ...],
             *,
-            admin_target: Transport | None = None,
-            agent_target: Transport | None = None,
             admin_access: VMAccess | None = None,
             agent_access: VMAccess | None = None,
         ) -> RunContext:
             return RunContext(
                 config=config,
                 operation_scope=scope,
-                admin_target=admin_target,
-                agent_target=agent_target,
                 admin_access=admin_access,
                 agent_access=agent_access,
                 secrets=ScopedSecrets(resolver.values, secret_names),
@@ -664,16 +659,12 @@ def reinit_agent(
             def scoped_ctx(
                 secret_names: tuple[str, ...],
                 *,
-                admin_target: Transport | None = None,
-                agent_target: Transport | None = None,
                 admin_access: VMAccess | None = None,
                 agent_access: VMAccess | None = None,
             ) -> RunContext:
                 return RunContext(
                     config=config,
                     operation_scope=scope,
-                    admin_target=admin_target,
-                    agent_target=agent_target,
                     admin_access=admin_access,
                     agent_access=agent_access,
                     secrets=ScopedSecrets(resolver.values, secret_names),

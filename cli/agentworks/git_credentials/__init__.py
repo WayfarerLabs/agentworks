@@ -43,8 +43,6 @@ class ScopedContextFactory(Protocol):
         self,
         secret_names: tuple[str, ...],
         *,
-        admin_target: Transport | None = None,
-        agent_target: Transport | None = None,
         admin_access: VMAccess | None = None,
         agent_access: VMAccess | None = None,
     ) -> RunContext: ...
@@ -69,16 +67,12 @@ class CredentialRequest:
     def context(
         self,
         *,
-        admin_target: Transport | None = None,
-        agent_target: Transport | None = None,
         admin_access: VMAccess | None = None,
         agent_access: VMAccess | None = None,
     ) -> RunContext:
         """Assemble a fresh provider-scoped context for one lifecycle stage."""
         return self.scoped_context(
             self.node.secret_refs(),
-            admin_target=admin_target,
-            agent_target=agent_target,
             admin_access=admin_access,
             agent_access=agent_access,
         )
@@ -113,7 +107,6 @@ def announce_git_credentials(nodes: Iterable[GitCredentialNode]) -> None:
 
 def materialize_credential_state(
     requests: Iterable[CredentialRequest],
-    target: Transport,
     access: VMAccess,
     target_role: Literal["admin", "agent"],
     config: Config,
@@ -126,9 +119,7 @@ def materialize_credential_state(
     for request in requests:
         if config.defaults.runup_git_credentials:
             runup_context = (
-                request.context(admin_target=target, admin_access=access)
-                if target_role == "admin"
-                else request.context(agent_target=target, agent_access=access)
+                request.context(admin_access=access) if target_role == "admin" else request.context(agent_access=access)
             )
             output.detail(f"Performing runup test for git-credential/{request.name}...")
             try:
@@ -170,7 +161,7 @@ def configure_user_git_credentials(
 
     logger.step("Git credentials")
     output.info("Reconciling git credentials...")
-    state = materialize_credential_state(requests, target, access, target_role, config, logger)
+    state = materialize_credential_state(requests, access, target_role, config, logger)
     try:
         reconcile_user_git_credentials(target, state)
     except SSHError as exc:

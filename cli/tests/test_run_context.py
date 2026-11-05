@@ -23,20 +23,6 @@ class _Reader:
         return self._values[name]
 
 
-def test_targets_pass_through_unchanged() -> None:
-    admin = object()
-    agent = object()
-    ctx = RunContext(admin_target=admin, agent_target=agent)  # type: ignore[arg-type]
-    assert ctx.admin_target() is admin
-    assert ctx.agent_target() is agent
-
-
-def test_absent_targets_read_as_none() -> None:
-    ctx = RunContext()
-    assert ctx.admin_target() is None
-    assert ctx.agent_target() is None
-
-
 def test_accesses_pass_through_unchanged() -> None:
     admin = RecordingVMAccess([], Admin())
     agent = RecordingVMAccess([], Agent("worker", "agent-worker"))

@@ -748,8 +748,6 @@ def _launch_existing_session(
                 RunContext(
                     config=config,
                     operation_scope=scope,
-                    admin_target=admin_target,
-                    agent_target=None if is_admin else session_target,
                     admin_access=admin_access,
                     agent_access=None if is_admin else session_access,
                 ),
@@ -884,8 +882,6 @@ def _launch_existing_session(
         start_ctx = RunContext(
             config=config,
             operation_scope=scope,
-            admin_target=admin_target,
-            agent_target=None if is_admin else session_target,
             admin_access=admin_access,
             agent_access=None if is_admin else session_access,
             secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),

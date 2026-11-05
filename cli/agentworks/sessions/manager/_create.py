@@ -204,8 +204,6 @@ def _preflight_and_resolve(
             RunContext(
                 config=config,
                 operation_scope=graph.scope,
-                admin_target=target,
-                agent_target=agent_target,
                 admin_access=_mgr._identity_access(vm, config, None, logger=logger),
                 agent_access=(
                     None

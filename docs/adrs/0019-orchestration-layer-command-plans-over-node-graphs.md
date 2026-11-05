@@ -14,6 +14,11 @@ name `agw vm recover`, whose own boundary resolves the auth key with the site's 
 resolves anything after its boundary and the batch gate serves only the boundary's cache. The gate's
 description below reflects the amended behavior; the decision stands.
 
+Amended: the run context's execution accessors are `ctx.admin_access()` and `ctx.agent_access()`,
+each returning that identity's `VMAccess` from `agentworks.execution`, in place of the transports
+`ctx.admin_target()` and `ctx.agent_target()` returned. They stay pass-through accessor methods, so
+the decision stands; the layer description below names the current accessors.
+
 ## Context
 
 Every service-layer command used to hand-wire its own world. Each command bound its VM platform
@@ -82,8 +87,8 @@ object, so the pending-to-realized flip is observed everywhere without rewiring.
   node reads the LEVEL (the skip/defer/probe/error fork; a SYSTEM-scoped doctor scan legitimately
   skips session-only checks) and treats the names as error framing. A node addresses through its own
   layer-1 identity, never through scope names.
-- The power-granting world (execution targets, resolved secrets) is reached through plain accessor
-  methods on the run context (`ctx.admin_target()`, `ctx.agent_target()`, `ctx.secret(name)`),
+- The power-granting world (execution accesses, resolved secrets) is reached through plain accessor
+  methods on the run context (`ctx.admin_access()`, `ctx.agent_access()`, `ctx.secret(name)`),
   pass-through today, shaped so a later permission model can gate them without changing the
   node-facing signature.
 

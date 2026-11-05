@@ -61,16 +61,12 @@ def _realize_ephemerals(
     def scoped_ctx(
         secret_names: tuple[str, ...],
         *,
-        admin_target: Transport | None = None,
-        agent_target: Transport | None = None,
         admin_access: VMAccess | None = None,
         agent_access: VMAccess | None = None,
     ) -> RunContext:
         return RunContext(
             config=config,
             operation_scope=graph.scope,
-            admin_target=admin_target,
-            agent_target=agent_target,
             admin_access=admin_access,
             agent_access=agent_access,
             secrets=ScopedSecrets(secret_values, secret_names),
@@ -231,8 +227,6 @@ def _start_session_slice(
         RunContext(
             config=config,
             operation_scope=scope,
-            admin_target=target,
-            agent_target=agent_target,
             admin_access=admin_access,
             agent_access=agent_access,
         )
@@ -341,8 +335,6 @@ def _start_session_slice(
             start_ctx = RunContext(
                 config=config,
                 operation_scope=scope,
-                admin_target=target,
-                agent_target=agent_target,
                 admin_access=admin_access,
                 agent_access=agent_access,
                 secrets=ScopedSecrets(secret_values, session_node.secret_refs()),

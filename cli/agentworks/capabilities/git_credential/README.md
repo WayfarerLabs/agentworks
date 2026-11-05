@@ -167,11 +167,11 @@ def credential_material(self, ctx: RunContext) -> CredentialPayload: ...
 ```
 
 Static scopes come only from provider configuration. Before VM or agent creation mutation, core
-validates all declarations together and calls `validate_inputs` with a fresh context without a
-target containing the provider's scoped resolved inputs. At user initialization it constructs
-another fresh context with the same scoped inputs and exactly the current admin or agent target for
-runup, then a third fresh context without a target for materialization. The later payload is either
-`StoredCredential(username, password)` or
+validates all declarations together and calls `validate_inputs` with a fresh context without an
+access containing the provider's scoped resolved inputs. At user initialization it constructs
+another fresh context with the same scoped inputs and exactly the current admin's or agent's access
+for runup, then a third fresh context without an access for materialization. The later payload is
+either `StoredCredential(username, password)` or
 `ManagedHelper(provider_authored_program, fixed_failure_hint)`.
 
 The result carries no echoed credential name. Provider inputs and outputs are orthogonal: secret

@@ -355,7 +355,7 @@ author most needs to get right.
 `RunContext` (`../base.py`) is a frozen dataclass, rebuilt fresh per stage (never mutated, never
 `replace()`'d). It carries `config` and `operation_scope` as plain fields, and grants power through
 accessor methods rather than bare fields so a future permission model can gate them without changing
-signatures: `admin_target()` / `agent_target()` return execution `Transport`s, and `secret(name)`
+signatures: `admin_access()` / `agent_access()` return that user's `VMAccess`, and `secret(name)`
 returns a resolved secret value. `ctx.secret(name)` raises a typed `ConfigError` if the context was
 assembled without a resolve pass, and it is scoped: an op can read only the names its config model
 marked.
