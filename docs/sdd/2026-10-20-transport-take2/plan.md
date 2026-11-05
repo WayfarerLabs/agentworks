@@ -399,6 +399,15 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
   - `vm rekey` with a dead public sshd on a cloud: one wait, no node-removal advice;
   - a closed terminal during a cloud `vm create`, and Ctrl-Break during a cloud command on Windows;
   - the current-directory decoys for `tailscale` and PowerShell on Windows;
+  - I18: a failed backend delete keeps the row and the store record on Proxmox PVE 8 and 9 (a locked
+    VM, the API down) and on Remote Lima with its host unreachable;
+  - a failed create rollback keeping the row on Proxmox, Lima and WSL2, and `vm delete --force`
+    clearing the row a killed create left;
+  - a closed terminal during `vm create` on Remote Lima and Proxmox as well as the clouds;
+  - `vm recover` of a python3 that was removed but not purged;
+  - cloud-init's recoverable status 2 on AWS and Azure;
+  - that `wsl --list` on a workstation with no distro prints `WSL_E_DEFAULT_DISTRO_NOT_FOUND`, the
+    token WSL2's delete and rollback read as an empty listing;
   - recovery of a lost store record on one cloud and on Remote Lima;
   - the V cells of vectors W1 and W3 to W9.
 
