@@ -389,27 +389,33 @@ no platform's private access imports a legacy module.
   - the symlink policy;
   - mode and ownership;
   - cleanup.
-- [ ] Implement `PythonProgram`, `files.py` and the file program, finite stdin for `run` with
-      `Bytes(data, sensitive=)`, and `RunContext.admin_access()` and `agent_access()`.
-- [ ] Make the operation log keep the streams of a request with a sensitive stdin out entirely (HLA
-      D13), now that `Bytes(data, sensitive=)` gives it a first caller.
+- [ ] Implement `PythonProgram`, `Script.interactive`, finite stdin for `run` with `Bytes(data)`,
+      the `log_streams` option, the `CaptureOutput` and `DiscardOutput` sinks, `files.py` and the
+      file program, and `RunContext.admin_access()` and `agent_access()`.
+- [ ] Make the operation log keep both streams of a request with `log_streams=False` out entirely
+      (HLA D13), with its first callers, the file program's reads and the native CLI.
 - [ ] Migrate:
   - artifact publication and session artifacts;
   - native probing;
   - the harness-native settings merge and CLI transcript reads;
   - the codex and claude artifact reads;
   - harness integrations' readiness and start stages;
-  - the git-credential providers.
+  - the git-credential providers;
+  - `command_checks.py`;
+  - the harness setup dispatch, readiness and lifecycle, with `SetupInvocation.access`.
+- [ ] Delete `admin_target()`, `agent_target()`, `SetupInvocation.runner`, `SetupRunner` and
+      `native_files.py` with their last readers, after re-proving their incident rows, and bump the
+      harness-integration contract to 8 and git-credential to 4.
 - [ ] Tests:
-  - `write` applies mode and owner before the rename;
-  - `write_if` and `remove_if` detect a concurrent writer, including a tree upload replacing the
-    directory above the target;
+  - `write_if` and `remove_if` detect a concurrent writer;
+  - a truncated stdin publishes nothing;
   - JSON null survives an update;
   - a malformed destination is refused;
   - a symlinked destination is refused;
   - cleanup touches only what the operation created;
   - `preserve_metadata=True` keeps the existing file's owner, group, mode and ACLs;
-  - a sensitive stdin is absent from logs and exceptions (a conformance vector).
+  - a request's stdin is absent from logs and exceptions, and `log_streams=False` keeps its streams
+    out (a conformance vector).
 - [ ] Amend ADR 0019.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
@@ -418,18 +424,20 @@ no platform's private access imports a legacy module.
 - [ ] Live evidence: harness setup and a session start with artifacts, on Remote Lima from macOS and
       on one cloud from Windows.
 
-Definition of done: `native_files.py` has no remaining callers.
+Definition of done: `native_files.py` and `harness_setup/runner.py` are deleted, and no capability
+reads a legacy transport.
 
 ## Slice 6: Initialization (PR C)
 
 - [ ] Migrate:
   - `vms/initializer/`, `vms/hardening.py` and `vms/tailscale_dns.py`;
-  - `sources.py` (with `upload_tree`), `command_checks.py` and `git_config.py`;
+  - `sources.py` (with `upload_tree`) and `git_config.py`;
   - `git_credentials/`;
-  - the agent initializer and grants;
-  - the harness setup runners. The `SetupRunner` environment rules become request environment.
+  - the agent initializer and grants.
 - [ ] Replace hand-written `printf | sudo tee`, `tee -a` and `write_file` plus `chmod` sequences
       with `files.write` and `files.update`.
+- [ ] Tests: `write` applies mode and owner before the rename, and a tree upload replacing the
+      directory above a `write_if` target is detected.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
 - [ ] Collateral: guides or reference pages whose described init behavior changes.
@@ -493,15 +501,13 @@ Definition of done: no workspace, session or backup module imports a legacy modu
       `ProvisionRequest`, so `join_tailscale`'s `root_script.run` records `tailscale up`'s redacted
       stderr, and have a failed join's error name the log. Deferred from slice 4's port, where it
       would have widened the `BootstrapProgress` protocol every plugin implements.
-- [ ] Delete the remaining legacy modules with their tests (slice 4 deletes the sixth,
-      `agentworks.plugins.proxmox.transport`):
+- [ ] Delete the remaining legacy modules with their tests (slice 4 deletes
+      `agentworks.plugins.proxmox.transport`, and slice 5 `agentworks.harness_setup.runner` and
+      `agentworks.native_files`):
   - `agentworks.transports`
   - `agentworks.ssh`
   - `agentworks.remote_exec`
-  - `agentworks.harness_setup.runner`
-  - `agentworks.native_files`
-- [ ] Delete `RunContext.admin_target()` and `agent_target()`, and the `SSHError` special case in
-      `cli/_entry.py`.
+- [ ] Delete the `SSHError` special case in `cli/_entry.py`.
 - [ ] Delete doctor's `ssh` and `scp` `PATH` presence rows, which the resolver's verdict replaces.
 - [ ] Delete the independence guards that can no longer fail once the legacy modules are gone: the
       fresh-interpreter guard, the conftest blocker and the static legacy-import check.

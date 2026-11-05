@@ -507,7 +507,7 @@ module. Today's timeouts become `deadline=` with the same value; the last column
 | Harness start stages: claude `:324-420`, `:495-537`; codex `:558-625`, `:707-830`, `:900-930`, `:1148-1340`; grok `:224-290`, `:363-396` | `ctx.admin_target()` or `agent_target()`; transcript, rollout, recorder and session probes as `"$SHELL" -lic '<inner>'`, reading exit codes; codex parses uuid lines (`:1191-1193`) and rollout paths from stdout                                                                                                                  | `ctx.admin_access()` or `agent_access()`; each probe is `Script(inner, Shell.USER_DEFAULT, login=True, interactive=True)` with its exit-code protocol unchanged, built by one named function per probe. Codex's line parsers run on the decoded stdout, still skipping login-shell noise. `require_completed` raises the typed transport error where today's 255 became the probe's own `StateError`                                                                                                                                                                                                                                                               | no deadline today or now                                            |
 | Harness readiness, `capabilities/harness_integration/base.py:130-191`, `:462`, `:483-532`; `shell.py:154`; each `_probe_target`          | Reads the targets; `require_commands(commands, transport)`                                                                                                                                                                                                                                                                         | Reads the accesses; `_probe_target(access)` and `require_commands(commands, access)`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | no deadline today or now                                            |
 | Command checks, `command_checks.py:15-77`                                                                                                | `"$SHELL" -lic` with a status line on descriptor 3 and `discard_output`; `SSHError` when indeterminate                                                                                                                                                                                                                             | `run_user_shell_command(command, access, *, deadline=None)` runs `Script(probe, Shell.USER_DEFAULT, login=True, interactive=True)` where `probe` is `( command ) >/dev/null 2>&1`, then `printf 'agentworks-command-status:%s\n' "$?"`. Only the last stdout line matching that form is read, so the command's own output is suppressed as `capabilities/git_credential/README.md:96-99` promises and startup noise cannot forge a status; stderr is `DiscardOutput`. A missing line or a non-`Completed` outcome is indeterminate: `ExternalError`, or the typed transport error                                                                                  | the callers' (below)                                                |
-| Git-credential providers, `capabilities/git_credential/github.py:156-186`, `plugins/azure/azdo.py:138-166`                               | `ctx.admin_target() or ctx.agent_target()`, `timeout=10`; `except SSHError` warns                                                                                                                                                                                                                                                  | `ctx.admin_access() or ctx.agent_access()`, `deadline=10`; `except (ConnectivityError, ExternalError)` warns as today. A `StateError` such as `VMNotReady` now propagates: runup runs right before the operations that need that VM. `_GH_AUTH_CHECK` and `_AZ_AUTH_CHECK` unchanged                                                                                                                                                                                                                                                                                                                                                                               | "Could not determine ... readiness", as today                       |
+| Git-credential providers, `capabilities/git_credential/github.py:156-186`, `plugins/azure/azdo.py:138-166`                               | `ctx.admin_target() or ctx.agent_target()`, `timeout=10`; `except SSHError` warns                                                                                                                                                                                                                                                  | `ctx.admin_access() or ctx.agent_access()`, `deadline=10`; `except (ConnectivityError, ExternalError, StateError)` warns as today, so a VM without python3 (`VMNotReady`) still warns rather than failing runup. `_GH_AUTH_CHECK` and `_AZ_AUTH_CHECK` unchanged                                                                                                                                                                                                                                                                                                                                                                                                   | "Could not determine ... readiness", as today                       |
 | `RunContext` construction sites (above)                                                                                                  | Pass targets                                                                                                                                                                                                                                                                                                                       | Pass accesses instead                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | none                                                                |
 
 **The native CLI's scratch directory stays.** It is made with
@@ -546,7 +546,7 @@ to I43, I47, I50 and I51) are re-proved (R10). With them:
 - `cli/tests/test_native_file_boundaries.py`, `test_native_path_failures.py` and
   `tests/artifacts/test_generated_sections.py:226-247` move to `file_program.py`, patching
   `files.program_source` where they patched `_FILE_PROGRAM`;
-- HLA migration item 8 and plan slice 8 stop listing them (Amendments).
+- HLA migration item 8 and plan slice 8 no longer list them.
 
 **The package guard.** The plugins stay on the static check because importing one loads the plugin
 index (`cli/tests/test_execution_import_boundary.py:44-45`). Batch C checks whether the index then
@@ -694,9 +694,8 @@ requirement, and every request is `VMNotReady` without it.
   `Script.interactive`, `files` and the lock, and `:197-198`'s module list;
   `cli/tests/execution/README.md`: the F vectors and the sudo lane.
 - **`docs/guides/upgrading-to-0.20.md` and release notes:** the probe runs `/usr/bin/python3`;
-  settings conflicts are retried; a `VMNotReady` VM now fails a gh or az runup; the contract
-  versions.
-- **The HLA's inventory** gains rows I35 to I53.
+  settings conflicts are retried; the contract versions.
+- **The HLA's inventory** carries rows I35 to I53.
 - **Completions and sample config:** no command, option or setting changes.
 
 ## Live evidence
@@ -749,115 +748,6 @@ fails under `zsh -i` and `zsh -l -i` whenever the startup's last command fails, 
 
 ## Amendments
 
-The HLA and the plan need these changes; this LLD does not edit them. Quoted text is current.
-
-**HLA D5.**
-
-- Table row "Common options": `` `env`, `cwd`, `elevated`, `deadline` (not `LoginShell`) `` becomes
-  `` `env`, `cwd`, `elevated`, `deadline`, `log_streams` (not `LoginShell`) ``.
-- Table row "Input": `` `NoInput`, `Bytes(data, sensitive=)`, `FromFile(path)` `` becomes
-  `` `NoInput`, `Bytes(data)`, `FromFile(path)` ``.
-- Table row "Output sink (buffered)":
-  `` `Capture(limit)`, `Discard`, `ToFile(path, on_progress=)` `` becomes
-  `` `CaptureOutput(limit)`, `DiscardOutput`, `ToFile(path, on_progress=)` ``, and its consumers
-  `` `Discard`: `command_checks.py`, native CLI `` become
-  `` `DiscardOutput`: `command_checks.py`, native CLI ``.
-- "That is how the native probe and the native CLI's login resolution keep seeing the native
-  workload's login and interactive environment, as they do today through `"$SHELL" -lic`
-  (`probe.py:402-410`)." becomes "That is how the native probe keeps seeing the native workload's
-  login and interactive environment, as it does today through `"$SHELL" -lic` (`probe.py:402-410`),
-  and the native CLI's login resolution its login environment (`native_cli.py:44`)."
-- Bullet "Sensitive inputs": "Retained output has the request's secret values redacted (D13), and an
-  explicitly sensitive stdin marks the streams as not retained at all." becomes "Retained output has
-  the request's secret values redacted (D13), and a request with `log_streams=False` keeps both
-  streams out of the log. Stdin is never formatted into a record or an error."
-
-**HLA D6.**
-
-- Table row `write`: "A temporary file in the destination directory, filled from stdin with owner
-  and mode set and `fsync`ed without the lock, then renamed into place under it." becomes "Content
-  read whole from stdin and checked against its size and digest, then, under the lock, a temporary
-  file in the destination directory with owner and mode set, `fsync`ed and renamed into place." Its
-  consumers "(5, 6)" become "(6)".
-- A new row after `read`: `` `stat(path) -> Absent | Directory | RegularFile(digest, mode)` `` |
-  "`lstat` relative to the parent; only a regular file is opened, without following links, and
-  hashed on the guest" | "artifact publication, native settings (5)".
-- "the file program opens it read-only without following symlinks" becomes "the file program opens
-  it read-only, without following symlinks or blocking".
-- "A tree upload extracts into a temporary directory beside its destination without the lock and
-  takes it only to move the result into place (the old tree aside and the new one in), and a `write`
-  likewise stages its temporary file first, so every hold is short, and a lock wait has a deadline."
-  becomes "A tree upload extracts into a temporary directory beside its destination without the lock
-  and takes it only to move the result into place (the old tree aside and the new one in), and a
-  `write` reads its content whole before it takes the lock and then holds it from its walk to its
-  rename, so every hold is short, and a lock wait has a deadline."
-
-**HLA D13.**
-
-- "A sensitive stdin keeps the streams out of the log entirely; that rule lands with
-  `Bytes(data, sensitive=)` in slice 5, the first request to carry one." becomes "A request with
-  `log_streams=False` keeps both streams out of the log entirely; the option lands in slice 5 with
-  its first callers, the file program's reads and the native CLI."
-- The error table gains `FileConflict`, `PathRefused` and `FileLockTimeout`, each `StateError`.
-
-**HLA migration.**
-
-- Item 5: "`files.py`, the `RunContext` accessors, and finite stdin with `Bytes(data, sensitive=)`
-  and its conformance vector. Consumers: harness, artifact, native-file and git-credential." becomes
-  "`files.py`, the `RunContext` accessors, and finite stdin with `Bytes(data)` and `log_streams`,
-  with their conformance vectors. Consumers: harness, artifact, native-file, command-check and
-  git-credential. `native_files`, `harness_setup.runner`, `admin_target()` and `agent_target()` are
-  deleted."
-- Item 6: "VM and agent initializers, hardening, DNS, sources and the setup runners." becomes "VM
-  and agent initializers, hardening, DNS and sources."
-- Item 8: "Delete the remaining legacy modules (slice 4 deletes the Proxmox transport),
-  `admin_target()` and `agent_target()`, doctor's" becomes "Delete the remaining legacy modules
-  (slice 4 deletes the Proxmox transport, and slice 5 `native_files` and `harness_setup.runner`),
-  doctor's".
-- The incident inventory gains rows I35 to I53 from this LLD.
-
-**Plan slice 5.**
-
-- The first box: "Write [`files-lld.md`](./files-lld.md). It covers:" is ticked once this revision
-  passes review.
-- "Implement `PythonProgram`, `files.py` and the file program, finite stdin for `run` with
-  `Bytes(data, sensitive=)`, and `RunContext.admin_access()` and `agent_access()`." becomes
-  "Implement `PythonProgram`, `Script.interactive`, finite stdin for `run` with `Bytes(data)`, the
-  `log_streams` option, the `CaptureOutput` and `DiscardOutput` sinks, `files.py` and the file
-  program, and `RunContext.admin_access()` and `agent_access()`."
-- "Make the operation log keep the streams of a request with a sensitive stdin out entirely (HLA
-  D13), now that `Bytes(data, sensitive=)` gives it a first caller." becomes "Make the operation log
-  keep both streams of a request with `log_streams=False` out entirely (HLA D13), with its first
-  callers, the file program's reads and the native CLI."
-- The Migrate list gains "`command_checks.py`;" and "the harness setup dispatch, readiness and
-  lifecycle, with `SetupInvocation.access`;".
-- A new box after Migrate: "Delete `admin_target()`, `agent_target()`, `SetupInvocation.runner`,
-  `SetupRunner` and `native_files.py` with their last readers, after re-proving their incident rows,
-  and bump the harness-integration contract to 8 and git-credential to 4."
-- Tests: "`write` applies mode and owner before the rename;" moves to slice 6. "`write_if` and
-  `remove_if` detect a concurrent writer, including a tree upload replacing the directory above the
-  target;" becomes "`write_if` and `remove_if` detect a concurrent writer;", with "a tree upload
-  replacing the directory above a target is detected" moving to slice 6. "a truncated stdin
-  publishes nothing;" is added. "a sensitive stdin is absent from logs and exceptions (a conformance
-  vector)." becomes "a request's stdin is absent from logs and exceptions, and `log_streams=False`
-  keeps its streams out (a conformance vector)."
-- Definition of done: "`native_files.py` has no remaining callers." becomes "`native_files.py` and
-  `harness_setup/runner.py` are deleted, and no capability reads a legacy transport."
-
-**Plan slice 6.**
-
-- Migrate: "`sources.py` (with `upload_tree`), `command_checks.py` and `git_config.py`;" becomes
-  "`sources.py` (with `upload_tree`) and `git_config.py`;", and "the harness setup runners. The
-  `SetupRunner` environment rules become request environment." is removed (slice 5 does it).
-- A new Tests box: "`write` applies mode and owner before the rename, and a tree upload replacing
-  the directory above a `write_if` target is detected."
-
-**Plan slice 8.**
-
-- "Delete the remaining legacy modules with their tests (slice 4 deletes the sixth,
-  `agentworks.plugins.proxmox.transport`):" becomes "Delete the remaining legacy modules with their
-  tests (slice 4 deletes `agentworks.plugins.proxmox.transport`, and slice 5
-  `agentworks.harness_setup.runner` and `agentworks.native_files`):", and its list loses those two
-  bullets.
-- "Delete `RunContext.admin_target()` and `agent_target()`, and the `SSHError` special case in
-  `cli/_entry.py`." becomes "Delete the `SSHError` special case in `cli/_entry.py`."
+The HLA and the plan carry the changes this LLD needed: the `log_streams` option, the renamed sinks,
+`stat`, the lock and hold wording, the new errors, the migration and slice lists, the tests moved to
+slice 6, and incident rows I35 to I53.
