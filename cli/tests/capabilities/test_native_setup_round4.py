@@ -299,7 +299,9 @@ def test_changed_capture_failure_cannot_erase_placements_or_unresolved_deferrals
         )
         record = next(item for item in state.records if item.component == component)
         assert not record.complete and record.incomplete_reasons and record.skipped
-        assert set(record.artifact_inputs) == old_ids and record.deferred == before.deferred
+        assert set(record.artifact_inputs) == old_ids
+        assert {item.input_id for item in record.deferred} == old_ids
+        assert {item.destination for item in record.deferred} == {"session"}
         assert record.artifact_files == before.artifact_files
         assert (Path(call.home) / "AGENTS.md").read_bytes() == case.placements[component]
         assert failures == []
