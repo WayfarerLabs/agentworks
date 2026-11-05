@@ -13,7 +13,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import agentworks.execution as execution
 from agentworks import output
+from agentworks.execution.access import Agent
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.transports import transport
 
@@ -282,6 +284,7 @@ def create_agent_on_vm(
 
     configure_user_git_credentials(
         agent_target,
+        execution.vm_access(vm, config, Agent(agent_name, linux_user), log=logger.record),
         credential_requests,
         config,
         logger,

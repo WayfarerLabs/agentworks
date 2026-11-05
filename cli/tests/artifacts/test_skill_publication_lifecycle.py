@@ -20,6 +20,7 @@ from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_probe import probe
 from tests.conftest import requires_posix_shell
 from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 pytestmark = requires_posix_shell
 
@@ -64,6 +65,7 @@ def large_skill_setup(tmp_path, db, monkeypatch):
     integration = ClaudeCodeIntegration.for_setup(owner_kind="agent", owner_name="worker", facet="user", config={})
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "lima", "vm"),
+        access=RecordingVMAccess([], Admin()),
         runner=target,
         prior=None,
         checkpoint=lambda claims: None,

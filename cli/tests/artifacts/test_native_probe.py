@@ -16,6 +16,7 @@ from agentworks.artifacts.native.probe import _PROBE, _inventory_problems
 from agentworks.package_sources import CaptureLimits
 from tests.artifacts.test_native_delivery import artifact
 from tests.conftest import requires_posix_shell
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 pytestmark = requires_posix_shell
 
@@ -692,6 +693,7 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
     integration = ClaudeCodeIntegration.for_setup(owner_kind="agent", owner_name="worker", facet="user", config={})
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "lima", "vm"),
+        access=RecordingVMAccess([], Admin()),
         runner=target,
         prior=None,
         checkpoint=lambda claims: None,

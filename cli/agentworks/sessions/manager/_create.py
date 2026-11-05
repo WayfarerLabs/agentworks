@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.template import SessionTemplate
     from agentworks.sessions.tmux import RunCommand
+    from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
     from agentworks.workspaces.template import WorkspaceTemplate
 
@@ -129,14 +130,14 @@ def _reload_vm(db: Database, target_vm_name: str) -> VMRow:
     return refreshed_vm
 
 
-def _build_live_transport(vm: VMRow, config: Config) -> tuple[Transport, RunCommand]:
-    """Build the admin SSH transport for the live VM and its run command."""
+def _build_live_transport(vm: VMRow, config: Config) -> tuple[Transport, RunCommand, SSHLogger]:
+    """Build the admin SSH transport for the live VM, its run command and the operation log they share."""
     from agentworks.ssh import SSHLogger
 
     logger = SSHLogger(vm.name, "session-create")
     target = _mgr.transport(vm, config, logger=logger)
     run_command: RunCommand = target.run
-    return target, run_command
+    return target, run_command, logger
 
 
 def _preflight_and_resolve(
@@ -147,6 +148,7 @@ def _preflight_and_resolve(
     graph: SessionGraph,
     vm: VMRow,
     target: Transport,
+    logger: SSHLogger,
     interaction: TtyInteractionPolicy,
 ) -> tuple[dict[str, str], Transport | None]:
     """Run the Preflight sweep and the Resolving-Secrets boundary resolve.
@@ -204,6 +206,12 @@ def _preflight_and_resolve(
                 operation_scope=graph.scope,
                 admin_target=target,
                 agent_target=agent_target,
+                admin_access=_mgr._identity_access(vm, config, None, logger=logger),
+                agent_access=(
+                    None
+                    if plan.existing_agent is None or agent_target is None
+                    else _mgr._identity_access(vm, config, plan.existing_agent, logger=logger)
+                ),
             ),
             registry=graph.registry,
             interaction=interaction,
@@ -418,7 +426,7 @@ def create_session(
     require_vm_ssh_boundary(db, config, graph.vm_node.row)
     with activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)):
         vm = _reload_vm(db, plan.target_vm_name)
-        target, run_command = _build_live_transport(vm, config)
+        target, run_command, logger = _build_live_transport(vm, config)
 
         secret_values, agent_target = _preflight_and_resolve(
             db,
@@ -427,6 +435,7 @@ def create_session(
             graph=graph,
             vm=vm,
             target=target,
+            logger=logger,
             interaction=interaction,
         )
 
@@ -444,6 +453,7 @@ def create_session(
             graph=graph,
             vm=vm,
             target=target,
+            logger=logger,
             run_command=run_command,
             agent_target=agent_target,
             secret_values=secret_values,

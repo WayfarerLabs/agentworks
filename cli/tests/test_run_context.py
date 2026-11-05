@@ -10,6 +10,7 @@ import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.errors import ConfigError
+from tests.vm_access_support import Admin, Agent, RecordingVMAccess
 
 
 class _Reader:
@@ -34,6 +35,20 @@ def test_absent_targets_read_as_none() -> None:
     ctx = RunContext()
     assert ctx.admin_target() is None
     assert ctx.agent_target() is None
+
+
+def test_accesses_pass_through_unchanged() -> None:
+    admin = RecordingVMAccess([], Admin())
+    agent = RecordingVMAccess([], Agent("worker", "agent-worker"))
+    ctx = RunContext(admin_access=admin, agent_access=agent)
+    assert ctx.admin_access() is admin
+    assert ctx.agent_access() is agent
+
+
+def test_absent_accesses_read_as_none() -> None:
+    ctx = RunContext()
+    assert ctx.admin_access() is None
+    assert ctx.agent_access() is None
 
 
 def test_secret_delegates_to_the_reader() -> None:

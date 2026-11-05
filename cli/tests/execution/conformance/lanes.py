@@ -32,9 +32,9 @@ import pytest
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, ssh_process, trust
 from agentworks.execution.access import Admin, VMAccess
-from agentworks.execution.client import SSHClient
 from agentworks.execution.requests import Command, RunRequest, Script, Shell
 from agentworks.execution.results import Completed, Result
+from tests.vm_access_support import local_remote_argv, rewrite_launcher, run_requests_locally
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -154,10 +154,7 @@ class Lane:
 
     def rewrite_launcher(self, old: bytes, new: bytes) -> None:
         """Send a launcher whose source has ``old`` replaced by ``new``, to make the guest behave as a fault would."""
-        source = envelope.launcher_source()
-        rewritten = source.replace(old, new)
-        assert rewritten != source
-        self.monkeypatch.setattr(envelope, "launcher_source", lambda: rewritten)
+        rewrite_launcher(self.monkeypatch, old, new)
 
     def access_with_identity(self, identity_file: Path) -> VMAccess:
         """The lane's access to the same account with another key, for a vector about the key itself."""
@@ -271,8 +268,7 @@ class LocalLane(LocalFilesystem):
         self.home.mkdir()
         self.workdir = str(tmp_path)
         self.access = self.access_with_log(None)
-        monkeypatch.setattr(client, "resolve_ssh", lambda: SSHClient("/nonexistent/ssh", (9, 9)))
-        monkeypatch.setattr(ssh_process, "build_argv", self._argv)
+        run_requests_locally(monkeypatch, self._remote_argv)
         if python != ssh_process.DEFAULT_PYTHON:
             # The guest's python3 is this interpreter for the payload's Python programs too.
             self.rewrite_launcher(
@@ -301,33 +297,8 @@ class LocalLane(LocalFilesystem):
         """Write an account startup file (``.zshenv``, ``.bashrc``) read by the account shell."""
         (self.home / name).write_text(content)
 
-    def _argv(
-        self,
-        client: SSHClient,
-        policy: object,
-        destination: object,
-        mode: object,
-        remote_command: str | None = None,
-        forwards: object = (),
-        *,
-        client_log: Path | None = None,
-        verbose: bool = False,
-    ) -> list[str]:
-        assert remote_command is not None
-        user = getpass.getuser()
-        environment = [
-            f"HOME={self.home}",
-            "PATH=/usr/bin:/bin",
-            f"USER={user}",
-            f"LOGNAME={user}",
-            f"SHELL={self.shell}",
-            "LANG=C.UTF-8",
-            # sshd exports these, and Debian's bash reads ~/.bashrc when it sees them.
-            "SSH_CLIENT=203.0.113.5 52000 22",
-            "SSH_CONNECTION=203.0.113.5 52000 10.0.0.2 22",
-        ]
-        command = remote_command.replace(ssh_process.DEFAULT_PYTHON, self.python, 1)
-        return ["/usr/bin/env", "-i", *environment, self.shell, "-c", command]
+    def _remote_argv(self, remote_command: str) -> list[str]:
+        return local_remote_argv(remote_command, home=self.home, shell=self.shell, python=self.python)
 
 
 # -- S ----------------------------------------------------------------------------------

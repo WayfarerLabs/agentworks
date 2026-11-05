@@ -31,6 +31,9 @@ from ._session_ephemeral_support import (
 )
 from .conftest import empty_secret_target, stub_vm_gates
 
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = pytest.mark.usefixtures("vm_access_recorder")
+
 __all__ = ["_non_interactive", "_stub_build_registry"]
 
 

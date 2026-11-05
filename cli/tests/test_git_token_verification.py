@@ -26,6 +26,7 @@ from agentworks.plugins.azure.azdo import _AZ_AUTH_CHECK, AzDOCredentialProvider
 from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
 from agentworks.ssh import SSHError, SSHResult
 from tests.conftest import requires_posix_shell
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 if TYPE_CHECKING:
     from agentworks.git_credentials.nodes import GitCredentialNode
@@ -68,11 +69,15 @@ def _request(
         *,
         admin_target=None,  # noqa: ANN001
         agent_target=None,  # noqa: ANN001
+        admin_access=None,  # noqa: ANN001
+        agent_access=None,  # noqa: ANN001
     ) -> RunContext:
         assert names == allowed
         return RunContext(
             admin_target=admin_target,
             agent_target=agent_target,
+            admin_access=admin_access,
+            agent_access=agent_access,
             secrets=ScopedSecrets(values, names),
         )
 
@@ -275,6 +280,7 @@ def test_cli_runup_warning_keeps_managed_helper(tmp_path: Path) -> None:
     state = materialize_credential_state(
         (request,),
         cast("Transport", _ShellTarget(bin_dir, tmp_path / "args", 1)),
+        RecordingVMAccess([], Admin()),
         "agent",
         _config(),
     )
@@ -287,6 +293,7 @@ def test_disabled_runup_skips_cli_readiness_but_keeps_managed_helper() -> None:
     state = materialize_credential_state(
         (_request(provider, {}, ()),),
         cast("Transport", target),
+        RecordingVMAccess([], Admin()),
         "admin",
         _config(runup=False),
     )
@@ -395,7 +402,9 @@ def test_materialization_skip_policy_reconciles_zero_survivors(monkeypatch: pyte
     provider = GitHubCredentialProvider("gh", {"source": {"mode": "secret"}})
     request = _request(provider, {"git-token-gh": "rejected"}, ("git-token-gh",))
     logger = MagicMock()
-    state = materialize_credential_state((request,), MagicMock(), "admin", _config(), logger)
+    state = materialize_credential_state(
+        (request,), MagicMock(), RecordingVMAccess([], Admin()), "admin", _config(), logger
+    )
     assert not state.has_credentials
     logger.warning.assert_called_once()
 
@@ -407,5 +416,7 @@ def test_disabled_runup_still_materializes_final_stored_credential(monkeypatch: 
     monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", explode)
     provider = GitHubCredentialProvider("gh", {"source": {"mode": "secret"}})
     request = _request(provider, {"git-token-gh": "value"}, ("git-token-gh",))
-    state = materialize_credential_state((request,), MagicMock(), "admin", _config(runup=False))
+    state = materialize_credential_state(
+        (request,), MagicMock(), RecordingVMAccess([], Admin()), "admin", _config(runup=False)
+    )
     assert state.has_credentials

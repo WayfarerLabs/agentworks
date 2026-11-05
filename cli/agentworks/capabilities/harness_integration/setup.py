@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from agentworks.db import VMRow
+    from agentworks.execution.access import VMAccess
     from agentworks.harness_setup.model import NativeClaim, SetupFacet, SetupRecord
     from agentworks.transports import Transport
 
@@ -19,12 +20,15 @@ if TYPE_CHECKING:
 class SetupInvocation:
     """Core supplies execution and acknowledges confirmed ownership changes.
 
-    Checkpoint the complete remaining claim set after each ownership change. Returning
-    from the callback means persistence succeeded; an exception stops further
-    writes. Initial creation may buffer until the owning row is inserted.
+    ``access`` runs requests as the identity being set up (the admin for VM,
+    admin and workspace setup, the agent for its own). Checkpoint the complete
+    remaining claim set after each ownership change. Returning from the
+    callback means persistence succeeded; an exception stops further writes.
+    Initial creation may buffer until the owning row is inserted.
     """
 
     vm: VMRow
+    access: VMAccess
     runner: Transport
     prior: SetupRecord | None
     checkpoint: Callable[[tuple[NativeClaim, ...]], None]

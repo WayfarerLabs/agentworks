@@ -33,8 +33,13 @@ from agentworks.workspaces.realize import realize_workspace
 from agentworks.workspaces.templates import ResolvedTemplate
 from tests.conftest import _StubRegistry
 from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.vm_access_support import Admin, RecordingVMAccess
 
-pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem execution")
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = [
+    pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem execution"),
+    pytest.mark.usefixtures("vm_access_recorder"),
+]
 
 
 @pytest.fixture
@@ -60,6 +65,7 @@ def owner(db, tmp_path):
 def user_call(owner: SimpleNamespace) -> UserSetupInvocation:
     return UserSetupInvocation(
         vm=owner.vm,
+        access=RecordingVMAccess([], Admin()),
         runner=owner.target,
         prior=None,
         checkpoint=lambda claims: None,
@@ -80,7 +86,13 @@ def test_common_capture_without_activation_and_vm_admin_separation(owner):
     assert not read_captures(owner.db, "vm", "vm")
     for inputs in prepared:
         invocation = (
-            VMSetupInvocation(vm=owner.vm, runner=owner.target, prior=None, checkpoint=lambda claims: None)
+            VMSetupInvocation(
+                vm=owner.vm,
+                access=RecordingVMAccess([], Admin()),
+                runner=owner.target,
+                prior=None,
+                checkpoint=lambda claims: None,
+            )
             if inputs.component == "vm"
             else user_call(owner)
         )
@@ -364,6 +376,7 @@ def test_user_setup_publishes_vm_inputs_without_vm_activation(db, tmp_path):
     target = LocalFixtureTransport(tmp_path / "native")
     invocation = UserSetupInvocation(
         vm=fixture.vm,
+        access=RecordingVMAccess([], Admin()),
         runner=target,
         prior=None,
         checkpoint=lambda claims: None,

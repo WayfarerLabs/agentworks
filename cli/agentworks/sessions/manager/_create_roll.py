@@ -32,9 +32,11 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow
+    from agentworks.execution.access import VMAccess
     from agentworks.orchestration.unwind import RealizationLog
     from agentworks.resources.registry import Registry
     from agentworks.sessions.tmux import RunCommand
+    from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
 
     from ._create_types import SessionGraph, SessionPlan
@@ -61,12 +63,16 @@ def _realize_ephemerals(
         *,
         admin_target: Transport | None = None,
         agent_target: Transport | None = None,
+        admin_access: VMAccess | None = None,
+        agent_access: VMAccess | None = None,
     ) -> RunContext:
         return RunContext(
             config=config,
             operation_scope=graph.scope,
             admin_target=admin_target,
             agent_target=agent_target,
+            admin_access=admin_access,
+            agent_access=agent_access,
             secrets=ScopedSecrets(secret_values, secret_names),
         )
 
@@ -142,6 +148,7 @@ def _start_session_slice(
     graph: SessionGraph,
     vm: VMRow,
     target: Transport,
+    logger: SSHLogger,
     run_command: RunCommand,
     agent_target: Transport | None,
     secret_values: dict[str, str],
@@ -212,6 +219,8 @@ def _start_session_slice(
     else:
         mode = SessionMode.ADMIN
         linux_user = vm.admin_username
+    admin_access = _mgr._identity_access(vm, config, None, logger=logger)
+    agent_access = None if agent_row is None else _mgr._identity_access(vm, config, agent_row, logger=logger)
 
     # Op-start runup: the required-commands check probes a
     # just-realized ephemeral agent here (it deferred at
@@ -224,6 +233,8 @@ def _start_session_slice(
             operation_scope=scope,
             admin_target=target,
             agent_target=agent_target,
+            admin_access=admin_access,
+            agent_access=agent_access,
         )
     )
 
@@ -332,6 +343,8 @@ def _start_session_slice(
                 operation_scope=scope,
                 admin_target=target,
                 agent_target=agent_target,
+                admin_access=admin_access,
+                agent_access=agent_access,
                 secrets=ScopedSecrets(secret_values, session_node.secret_refs()),
             )
             harness_start = require_implemented_start(
@@ -514,6 +527,7 @@ def _roll_forward(
     graph: SessionGraph,
     vm: VMRow,
     target: Transport,
+    logger: SSHLogger,
     run_command: RunCommand,
     agent_target: Transport | None,
     secret_values: dict[str, str],
@@ -548,6 +562,7 @@ def _roll_forward(
             graph=graph,
             vm=vm,
             target=target,
+            logger=logger,
             run_command=run_command,
             agent_target=agent_target,
             secret_values=secret_values,

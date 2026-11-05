@@ -725,6 +725,8 @@ def _launch_existing_session(
                     admin_target=admin_target,
                 )
             session_run_command: RunCommand = session_target.run
+            session_access = _mgr._session_access(session, vm=vm, config=config, db=db, logger=logger)
+            admin_access = session_access if is_admin else _mgr._identity_access(vm, config, None, logger=logger)
 
             if status == SessionStatus.BROKEN and not force:
                 raise BrokenStateError(
@@ -748,6 +750,8 @@ def _launch_existing_session(
                     operation_scope=scope,
                     admin_target=admin_target,
                     agent_target=None if is_admin else session_target,
+                    admin_access=admin_access,
+                    agent_access=None if is_admin else session_access,
                 ),
                 registry=registry,
                 interaction=interaction,
@@ -882,6 +886,8 @@ def _launch_existing_session(
             operation_scope=scope,
             admin_target=admin_target,
             agent_target=None if is_admin else session_target,
+            admin_access=admin_access,
+            agent_access=None if is_admin else session_access,
             secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
         )
         harness_start = require_implemented_start(

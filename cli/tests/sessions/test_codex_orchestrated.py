@@ -42,6 +42,10 @@ from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gate
 if TYPE_CHECKING:
     from pathlib import Path
 
+
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = pytest.mark.usefixtures("vm_access_recorder")
+
 _SID = "939b1597-7c61-4ace-80f4-14617b7b4257"
 _OTHER_SID = "22222222-3333-4444-8555-666666666666"
 _ROLLOUT = f"/home/me/.codex/sessions/2026/08/01/rollout-2026-08-01T12-00-00-{_SID}.jsonl"

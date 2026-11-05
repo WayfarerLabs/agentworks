@@ -50,6 +50,7 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.descriptor import Facet
     from agentworks.config import Config
+    from agentworks.execution.access import VMAccess
     from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ConfigReference
     from agentworks.topics import TopicProse
@@ -197,6 +198,8 @@ class RunContext:
     operation_scope: OperationScope | None
     _admin_target: Transport | None
     _agent_target: Transport | None
+    _admin_access: VMAccess | None
+    _agent_access: VMAccess | None
     _secrets: SecretReader | None
 
     def __init__(
@@ -206,6 +209,8 @@ class RunContext:
         operation_scope: OperationScope | None = None,
         admin_target: Transport | None = None,
         agent_target: Transport | None = None,
+        admin_access: VMAccess | None = None,
+        agent_access: VMAccess | None = None,
         secrets: SecretReader | None = None,
     ) -> None:
         # Hand-written only to store the power-granting inputs under
@@ -221,6 +226,8 @@ class RunContext:
         object.__setattr__(self, "operation_scope", operation_scope)
         object.__setattr__(self, "_admin_target", admin_target)
         object.__setattr__(self, "_agent_target", agent_target)
+        object.__setattr__(self, "_admin_access", admin_access)
+        object.__setattr__(self, "_agent_access", agent_access)
         object.__setattr__(self, "_secrets", secrets)
 
     def admin_target(self) -> Transport | None:
@@ -232,6 +239,18 @@ class RunContext:
         """The agent execution target, when one exists at this stage's
         timing. Plain pass-through in v1."""
         return self._agent_target
+
+    def admin_access(self) -> VMAccess | None:
+        """The admin's ``VMAccess``, when the admin exists at this stage's
+        timing. Holding one connects to nothing; each operation on it does.
+        Plain pass-through in v1."""
+        return self._admin_access
+
+    def agent_access(self) -> VMAccess | None:
+        """The agent's ``VMAccess``, when the agent exists at this stage's
+        timing. It refuses an elevated request before dispatch. Plain
+        pass-through in v1."""
+        return self._agent_access
 
     def secret(self, name: str) -> str:
         """A resolved secret value, from the operation's boundary

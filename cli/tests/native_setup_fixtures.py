@@ -12,10 +12,12 @@ import pytest
 
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
 from agentworks.db import VMRow
+from agentworks.execution.access import VMAccess
 from agentworks.harness_setup.model import NativeClaim, SetupRecord
 from agentworks.plugins._harness_native.native_cli import NativeTool
 from agentworks.ssh import SSHResult
 from agentworks.transports import Transport
+from tests.vm_access_support import Admin, RecordingVMAccess, account_shell, local_vm_access
 
 
 class LocalFixtureTransport(Transport):
@@ -95,9 +97,22 @@ class LocalFixtureTransport(Transport):
         raise AssertionError("streaming operations are outside fixture scope")
 
 
-def invocation(transport: LocalFixtureTransport, claims: list[tuple[NativeClaim, ...]], *, prior=None, env=None):
+def fixture_access(monkeypatch: pytest.MonkeyPatch, transport: LocalFixtureTransport) -> VMAccess:
+    """A real ``VMAccess`` to the fixture's account: its home, and a login shell that reads only its ``.profile``."""
+    return local_vm_access(monkeypatch, home=transport.home, shell=account_shell(transport.root))
+
+
+def invocation(
+    transport: LocalFixtureTransport,
+    claims: list[tuple[NativeClaim, ...]],
+    *,
+    prior=None,
+    env=None,
+    access: VMAccess | None = None,
+):
     return UserSetupInvocation(
         vm=cast(VMRow, object()),
+        access=access or RecordingVMAccess([], Admin()),
         runner=transport,
         prior=prior,
         checkpoint=claims.append,

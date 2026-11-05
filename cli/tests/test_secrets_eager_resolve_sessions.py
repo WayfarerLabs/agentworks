@@ -25,6 +25,9 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from ._secrets_eager_support import _seed_basic_db, _stub_build_registry, _stub_session_prep
 from .conftest import stub_vm_gates
 
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = pytest.mark.usefixtures("vm_access_recorder")
+
 __all__ = ["_stub_build_registry"]
 
 

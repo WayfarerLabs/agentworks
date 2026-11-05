@@ -17,6 +17,7 @@ from agentworks.git_credentials import credential_requests, materialize_credenti
 from agentworks.git_credentials.nodes import git_credential_node
 from agentworks.orchestration.secrets import ScopedSecrets, secret_union
 from tests.conftest import ManifestDoc, write_manifests
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 if TYPE_CHECKING:
     from agentworks.transports import Transport
@@ -106,10 +107,14 @@ def test_request_context_is_scoped_to_each_provider_declaration(tmp_path: Path) 
         *,
         admin_target=None,  # noqa: ANN001
         agent_target=None,  # noqa: ANN001
+        admin_access=None,  # noqa: ANN001
+        agent_access=None,  # noqa: ANN001
     ) -> RunContext:
         context = RunContext(
             admin_target=admin_target,
             agent_target=agent_target,
+            admin_access=admin_access,
+            agent_access=agent_access,
             secrets=ScopedSecrets(values, names),
         )
         contexts.append(context)
@@ -154,21 +159,27 @@ def test_materialization_reassembles_current_target_context(
         *,
         admin_target=None,  # noqa: ANN001
         agent_target=None,  # noqa: ANN001
+        admin_access=None,  # noqa: ANN001
+        agent_access=None,  # noqa: ANN001
     ) -> RunContext:
         context = RunContext(
             config=config,
             operation_scope=scope,
             admin_target=admin_target,
             agent_target=agent_target,
+            admin_access=admin_access,
+            agent_access=agent_access,
             secrets=ScopedSecrets({"input": "value"}, names),
         )
         contexts.append(context)
         return context
 
     requests = credential_requests((node,), scoped)
+    access = RecordingVMAccess([], Admin())
     state = materialize_credential_state(
         requests,
         target,
+        access,
         target_role,
         config,
     )
@@ -183,8 +194,11 @@ def test_materialization_reassembles_current_target_context(
     expected_agent = target if target_role == "agent" else None
     assert runup_context.admin_target() is expected_admin
     assert runup_context.agent_target() is expected_agent
+    assert runup_context.admin_access() is (access if target_role == "admin" else None)
+    assert runup_context.agent_access() is (access if target_role == "agent" else None)
     assert material_context.admin_target() is None
     assert material_context.agent_target() is None
+    assert material_context.admin_access() is material_context.agent_access() is None
     assert validation_context.config is runup_context.config is material_context.config is config
     assert (
         validation_context.operation_scope is runup_context.operation_scope is material_context.operation_scope is scope

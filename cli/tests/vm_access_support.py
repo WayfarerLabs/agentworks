@@ -1,4 +1,4 @@
-"""A recording ``VMAccess`` for manager tests, which need no ssh.
+"""``VMAccess`` stand-ins for tests: a recording fake, and a real access whose guest is this machine.
 
 ``RecordingVMAccess`` subclasses ``VMAccess``, overrides its four operations to
 record what was asked and return a canned outcome, and spawns nothing. The
@@ -7,15 +7,21 @@ record what was asked and return a canned outcome, and spawns nothing. The
 identity (and one for enrollment) and one ordered call list, so a test can
 assert both what each identity was asked and in what order. Manager tests built
 on it run on every CI host.
+
+``local_vm_access`` is the conformance suite's L lane for a caller's own
+tests: the real ``VMAccess``, pump and launcher, with the account shell run
+locally instead of over ssh, so a probe's or a program's real request runs
+against files the test controls. It needs a POSIX host.
 """
 
 from __future__ import annotations
 
+import getpass
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from agentworks.execution import trust
+from agentworks.execution import client, envelope, ssh_process, trust
 from agentworks.execution.access import Admin, Agent, Identity, VMAccess
 from agentworks.execution.client import SSHClient
 from agentworks.execution.requests import CaptureOutput, DiscardOutput
@@ -24,8 +30,10 @@ from agentworks.execution.trust import TrustMode
 from tests.ssh_fixtures import fake_host_key
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from typing import BinaryIO
+
+    import pytest
 
     from agentworks.execution.requests import Forward, LoginShell, OutputSink, RunRequest
 
@@ -167,10 +175,128 @@ class AccessRecorder:
         return [call.request for call in self.calls if call.operation == operation]
 
 
+# -- A real access whose guest is this machine ------------------------------------------
+
+ACCOUNT_SHELL = """#!/bin/bash
+# A test account's login shell. Login startup reads only $HOME/.profile; nothing else is read.
+login=
+while :; do
+  case "$1" in
+    -l) login=1; shift ;;
+    -i) shift ;;
+    *) break ;;
+  esac
+done
+if [ -n "$login" ] && [ -f "$HOME/.profile" ]; then . "$HOME/.profile"; fi
+exec /bin/bash --noprofile --norc "$@"
+"""
+
+
+def account_shell(directory: Path) -> Path:
+    """Write :data:`ACCOUNT_SHELL` into ``directory``: a login shell that reads only the test's own ``.profile``."""
+    path = directory / "account-shell"
+    path.write_text(ACCOUNT_SHELL)
+    path.chmod(0o755)
+    return path
+
+
+def local_remote_argv(remote_command: str, *, home: Path, shell: str, python: str) -> list[str]:
+    """What runs in place of ``ssh``: the account ``shell`` given the remote command, as sshd gives it.
+
+    The environment is the one sshd starts the account shell with, ``SSH_CLIENT``
+    included (Debian's bash reads ``~/.bashrc`` when it sees it), and
+    ``python`` stands in for the guest's ``/usr/bin/python3`` in stage 0.
+    """
+    user = getpass.getuser()
+    environment = [
+        f"HOME={home}",
+        "PATH=/usr/bin:/bin",
+        f"USER={user}",
+        f"LOGNAME={user}",
+        f"SHELL={shell}",
+        "LANG=C.UTF-8",
+        "SSH_CLIENT=203.0.113.5 52000 22",
+        "SSH_CONNECTION=203.0.113.5 52000 10.0.0.2 22",
+    ]
+    command = remote_command.replace(ssh_process.DEFAULT_PYTHON, python, 1)
+    return ["/usr/bin/env", "-i", *environment, shell, "-c", command]
+
+
+def run_requests_locally(monkeypatch: pytest.MonkeyPatch, remote_argv: Callable[[str], list[str]]) -> None:
+    """Make every ``VMAccess`` in the test spawn ``remote_argv(remote_command)`` instead of ``ssh``."""
+
+    def build_argv(
+        _client: object,
+        _policy: object,
+        _destination: object,
+        _mode: object,
+        remote_command: str | None = None,
+        *_args: object,
+        **_kwargs: object,
+    ) -> list[str]:
+        assert remote_command is not None
+        return remote_argv(remote_command)
+
+    monkeypatch.setattr(client, "resolve_ssh", lambda: SSHClient("/nonexistent/ssh", (9, 9)))
+    monkeypatch.setattr(ssh_process, "build_argv", build_argv)
+
+
+def rewrite_launcher(monkeypatch: pytest.MonkeyPatch, old: bytes, new: bytes) -> None:
+    """Send a launcher whose source has ``old`` replaced by ``new``; the replacement must apply."""
+    source = envelope.launcher_source()
+    rewritten = source.replace(old, new)
+    assert rewritten != source
+    monkeypatch.setattr(envelope, "launcher_source", lambda: rewritten)
+
+
+def local_vm_access(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    home: Path,
+    shell: Path,
+    identity: Identity | None = None,
+    log: Callable[[RunRequest, Result], None] | None = None,
+) -> VMAccess:
+    """A real ``VMAccess`` to this machine as an account whose passwd entry has ``home`` and ``shell``.
+
+    The launcher is sent with that home and shell in place of the runner's own
+    passwd entry, so the payload's ``HOME``, its default shell and every
+    startup file it reads are the test's. The guest's python3 is
+    ``/usr/bin/python3``. The access never elevates: root's passwd entry would
+    get the same home and shell.
+    """
+    run_requests_locally(
+        monkeypatch,
+        lambda command: local_remote_argv(command, home=home, shell=str(shell), python=ssh_process.DEFAULT_PYTHON),
+    )
+    rewrite_launcher(monkeypatch, b"home = entry.pw_dir", b"home = " + repr(str(home)).encode())
+    rewrite_launcher(monkeypatch, b'shell = entry.pw_shell or "/bin/sh"', b"shell = " + repr(str(shell)).encode())
+    user = getpass.getuser()
+    return VMAccess(
+        vm_name="local",
+        host="127.0.0.1",
+        user=user,
+        identity=identity or Admin(),
+        identity_file=Path("/nonexistent/identity"),
+        log=log,
+    )
+
+
 def _label(call: Call) -> str:
     if call.enrolling:
         return "enroll"
     return "admin" if isinstance(call.identity, Admin) else call.identity.name
 
 
-__all__ = ["AccessRecorder", "Admin", "Agent", "Call", "RecordingVMAccess"]
+__all__ = [
+    "AccessRecorder",
+    "Admin",
+    "Agent",
+    "Call",
+    "RecordingVMAccess",
+    "account_shell",
+    "local_remote_argv",
+    "local_vm_access",
+    "rewrite_launcher",
+    "run_requests_locally",
+]

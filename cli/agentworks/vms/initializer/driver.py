@@ -22,10 +22,12 @@ import shlex
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+import agentworks.execution as execution
 from agentworks import output
 from agentworks.db import InitStatus
 from agentworks.env import ResourceContext, vm_stable_identity_env
 from agentworks.execution import trust
+from agentworks.execution.access import Admin
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.git_credentials import configure_user_git_credentials
 from agentworks.ssh import SSHError, SSHLogger
@@ -208,11 +210,13 @@ def run_initialization(
                 assert vm is not None
                 apply_vm_setup(
                     db,
+                    config,
                     registry,
                     inputs=setup_inputs,
                     vm=vm,
                     target=ts_target,
                     values=setup_values or {},
+                    logger=logger,
                     held=guard,
                     operation=operation.value,
                 )
@@ -543,6 +547,7 @@ def _phase_b_setup(
         # Non-fatal: git credentials (before dotfiles and mise lockfile for private repos)
         configure_user_git_credentials(
             ts_target,
+            execution.vm_access(vm_row, config, Admin(), log=logger.record),
             credential_requests,
             config,
             logger,

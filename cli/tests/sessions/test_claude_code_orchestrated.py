@@ -42,6 +42,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = pytest.mark.usefixtures("vm_access_recorder")
+
+
 @pytest.fixture(autouse=True)
 def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_build_registry(monkeypatch)

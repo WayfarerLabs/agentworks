@@ -23,6 +23,7 @@ from agentworks.plugins import Plugin, seated_plugin
 from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 from tests.plugins._fixtures import ConformingHarnessIntegration
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 
 @pytest.fixture
@@ -35,7 +36,7 @@ def facet_case(db, monkeypatch, component):
         activations={},
         target=SecretTarget(vm={}),
     )
-    common = dict(vm=vm, runner=Mock(), prior=None, checkpoint=Mock())
+    common = dict(vm=vm, access=RecordingVMAccess([], Admin()), runner=Mock(), prior=None, checkpoint=Mock())
     invocation: SetupInvocation
     if component == "vm":
         invocation = VMSetupInvocation(**common)
@@ -149,7 +150,13 @@ def setup_case(tmp_path, monkeypatch):
         target=SecretTarget(vm={}, agent={}),
     )
     invocation = UserSetupInvocation(
-        vm=vm, runner=Mock(), prior=None, checkpoint=lambda claims: None, username="user", home="/home/user"
+        vm=vm,
+        access=RecordingVMAccess([], Admin()),
+        runner=Mock(),
+        prior=None,
+        checkpoint=lambda claims: None,
+        username="user",
+        home="/home/user",
     )
     monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *args, **kwargs: "a" * 64)
     monkeypatch.setattr(

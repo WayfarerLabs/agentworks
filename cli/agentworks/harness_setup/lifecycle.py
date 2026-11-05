@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import agentworks.execution as execution
 from agentworks.artifacts.state import capture_owner, read_captures
 from agentworks.capabilities.harness_integration.setup import (
     SetupInvocation,
@@ -18,6 +19,7 @@ from agentworks.capabilities.harness_integration.setup import (
 )
 from agentworks.env import ResourceContext
 from agentworks.errors import StateError
+from agentworks.execution.access import Admin, Agent
 from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.runner import SetupRunner
@@ -161,16 +163,19 @@ def prepare_workspace_setup(
 
 def apply_vm_setup(
     db: Database,
+    config: Config,
     registry: Registry,
     *,
     inputs: tuple[SetupInputs, ...],
     vm: VMRow,
     target: Transport,
     values: Mapping[str, str],
+    logger: SSHLogger,
     held: NativeMutationGuard,
     operation: str,
 ) -> None:
     """Apply VM then admin setup on the already-established admin transport."""
+    access = execution.vm_access(vm, config, Admin(), log=logger.record)
     for item in inputs:
         context = ResourceContext(
             vm_name=vm.name, platform=site_platform_name(vm.site, registry), site=vm.site, user=vm.admin_username
@@ -180,6 +185,7 @@ def apply_vm_setup(
         if item.component == "vm":
             invocation: SetupInvocation = VMSetupInvocation(
                 vm=vm,
+                access=access,
                 runner=runner,
                 environment=environment,
                 secrets=values,
@@ -189,6 +195,7 @@ def apply_vm_setup(
         else:
             invocation = UserSetupInvocation(
                 vm=vm,
+                access=access,
                 runner=runner,
                 environment=environment,
                 secrets=values,
@@ -228,6 +235,7 @@ def apply_agent_setup(
     runner = SetupRunner(transport_for_user(vm, config, user=username, logger=logger), environment)
     invocation = UserSetupInvocation(
         vm=vm,
+        access=execution.vm_access(vm, config, Agent(inputs.name, username), log=logger.record),
         runner=runner,
         environment=environment,
         secrets=values,
@@ -269,6 +277,7 @@ def apply_workspace_setup(
     runner = SetupRunner(transport(vm, config, logger=logger), environment)
     invocation = WorkspaceSetupInvocation(
         vm=vm,
+        access=execution.vm_access(vm, config, Admin(), log=logger.record),
         runner=runner,
         environment=environment,
         secrets=values,

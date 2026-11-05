@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.execution.access import VMAccess
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.transports import Transport
 
@@ -320,12 +321,16 @@ def create_vm(
         *,
         admin_target: Transport | None = None,
         agent_target: Transport | None = None,
+        admin_access: VMAccess | None = None,
+        agent_access: VMAccess | None = None,
     ) -> RunContext:
         return RunContext(
             config=config,
             operation_scope=scope,
             admin_target=admin_target,
             agent_target=agent_target,
+            admin_access=admin_access,
+            agent_access=agent_access,
             secrets=ScopedSecrets(resolver.values, secret_names),
         )
 

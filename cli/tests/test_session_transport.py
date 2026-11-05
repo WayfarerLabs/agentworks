@@ -43,6 +43,10 @@ if TYPE_CHECKING:
     pass
 
 
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = pytest.mark.usefixtures("vm_access_recorder")
+
+
 class _Result:
     ok = True
     returncode = 0

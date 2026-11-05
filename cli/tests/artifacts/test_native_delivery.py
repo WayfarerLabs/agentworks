@@ -39,6 +39,7 @@ from agentworks.plugins.codex.harness_integration import CodexIntegration
 from agentworks.plugins.grok import artifacts as grok
 from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
 from tests.artifacts._fixtures import received
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 
 def enabled(render: Callable[..., NativeSessionArtifacts]) -> list[str]:
@@ -518,6 +519,7 @@ def test_user_native_home_boundary_precedes_other_setup(db, monkeypatch, impleme
     integration = implementation.for_setup(owner_kind="agent", owner_name="alice", facet="user", config={})
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "lima", "vm"),
+        access=RecordingVMAccess([], Admin()),
         runner=SimpleNamespace(),
         prior=None,
         checkpoint=lambda claims: None,
@@ -545,6 +547,7 @@ def test_codex_external_home_does_not_block_home_owned_skills(db, monkeypatch):
     result = integration.user_init(
         UserSetupInvocation(
             vm=db.insert_vm("vm", "lima", "vm"),
+            access=RecordingVMAccess([], Admin()),
             runner=SimpleNamespace(),
             prior=None,
             checkpoint=lambda claims: None,

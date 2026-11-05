@@ -15,7 +15,9 @@ from agentworks.errors import (
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database, SessionRow, VMRow
+    from agentworks.db import AgentRow, Database, SessionRow, VMRow
+    from agentworks.execution.access import VMAccess
+    from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
 
 
@@ -82,6 +84,35 @@ def _build_session_target(
     agent_target = agent_transport(vm, config, agent)
     _assert_agent_ssh_works(agent_target, agent)
     return agent_target
+
+
+def _identity_access(vm: VMRow, config: Config, agent: AgentRow | None, *, logger: SSHLogger | None) -> VMAccess:
+    """The admin's ``VMAccess``, or ``agent``'s, logging to the operation's own ``logger``.
+
+    Building it connects to nothing, so it adds no probe to what the
+    operation's transports already do.
+    """
+    import agentworks.execution as execution
+    from agentworks.execution.access import Admin, Agent
+
+    identity = Admin() if agent is None else Agent(agent.name, agent.linux_user)
+    return execution.vm_access(vm, config, identity, log=None if logger is None else logger.record)
+
+
+def _session_access(
+    session: SessionRow, *, vm: VMRow, config: Config, db: Database, logger: SSHLogger | None
+) -> VMAccess:
+    """The ``VMAccess`` of the session's owning identity: the admin for an admin-mode session, else its agent."""
+    if session.mode == SessionMode.ADMIN.value:
+        return _identity_access(vm, config, None, logger=logger)
+    agent = db.get_agent(session.agent_name) if session.agent_name is not None else None
+    if agent is None:
+        raise NotFoundError(
+            f"agent '{session.agent_name}' (referenced by session '{session.name}') not found",
+            entity_kind="agent",
+            entity_name=session.agent_name,
+        )
+    return _identity_access(vm, config, agent, logger=logger)
 
 
 def _repair_session_pid(

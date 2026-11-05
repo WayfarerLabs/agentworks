@@ -32,7 +32,11 @@ from tests.conftest import stub_build_registry
 from tests.native_setup_fixtures import LocalFixtureTransport
 from tests.sessions.test_create_start_restart_orchestrated import _patch_transports, _restart_fixture
 
-pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem execution")
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = [
+    pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem execution"),
+    pytest.mark.usefixtures("vm_access_recorder"),
+]
 
 
 @dataclass

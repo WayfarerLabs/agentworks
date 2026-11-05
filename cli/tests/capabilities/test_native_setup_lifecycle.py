@@ -29,6 +29,9 @@ from agentworks.vms.templates import resolve_from_dict as resolve_vm
 from agentworks.workspaces.realize import realize_workspace
 from agentworks.workspaces.templates import ResolvedTemplate
 
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = pytest.mark.usefixtures("vm_access_recorder")
+
 
 def _env(**values: str) -> dict[str, EnvEntry]:
     return {key: EnvEntry.model_validate(value) for key, value in values.items()}
@@ -130,6 +133,9 @@ def native(monkeypatch, tmp_path):
 
         def close(self):
             self.closed = True
+
+        def record(self, request, result):
+            pass
 
     monkeypatch.setattr("agentworks.ssh.SSHLogger", Logger)
     return SimpleNamespace(target=target, loggers=loggers, removed_agent=removed_agent, removed_project=removed_project)
