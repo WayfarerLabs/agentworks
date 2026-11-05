@@ -782,8 +782,9 @@ naming `agw vm recover`, as `vm start` does; the new address is recorded either 
 message shows what will be deleted. Pass `--yes` to skip the prompt. Delete logs the VM's node out
 of the tailnet through the platform's own channel and reports the outcome; when the logout fails or
 cannot be confirmed, it names the node to remove in the Tailscale admin console. A VM that is
-stopped or deallocated is not logged out, since nothing reaches it, and neither is a cloud VM whose
-host key was never recorded, since nothing could verify the VM that answered; delete names the node
+stopped or deallocated is not logged out, since nothing reaches it (a stopped WSL2 distro is usually
+booted by the hold delete keeps on it, and is then logged out), and neither is a cloud VM whose host
+key was never recorded, since nothing could verify the VM that answered; delete names the node
 instead. The backend VM is deleted either way.
 
 `vm backup` exports the VM row and exact owner tree of agents, workspaces, sessions, events, grants,

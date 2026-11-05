@@ -267,9 +267,9 @@ the agent, as for every VM connection.
   rather than 200 do not trip sshd's `PerSourcePenalties` (Debian 13), and a refusal still standing
   at the bound then raises itself, with no firewall warning. So does a probe with no start marker
   whose channel tail has a line starting `sudo:` (sudo's prefix when `-n` refuses), which
-  `root_script.run` otherwise reports as an unknown outcome: it raises `StateError` saying the VM
-  answered but its admin lacks passwordless sudo, rather than retrying and warning the firewall
-  hint.
+  `root_script.run` otherwise reports as an unknown outcome: it raises `SudoRefused`, a `StateError`
+  saying the VM answered but its admin lacks passwordless sudo, rather than retrying and warning the
+  firewall hint.
 - `shell() -> int` runs the `TERMINAL` argv with no remote command (a login shell) and returns its
   status.
 
@@ -344,7 +344,9 @@ takes a `run_as_root`:
   `target.wait_until_answering(seconds=READINESS_WAIT_SECONDS, retry_refused_key=True)` (600 s), so
   `PublicSSH`'s `Permission denied (publickey` refusal is retried during create. That covers a guest
   agent that writes the key after sshd starts, as GCP's may (an inference, not measured). A
-  `sudo -n` refusal or a host-key mismatch ends it at once. When the wait runs out, the
+  `sudo -n` refusal or a host-key mismatch ends it at once; the refusal becomes a
+  `ProvisioningError` saying the image's admin needs passwordless sudo, with the refusal's own VM
+  advice left unchained, since the rollback removes the VM. When the wait runs out, the
   `ProvisioningError` carries the wait's error's hint (a standing refusal's `agent_load_hint` for an
   encrypted key not loaded in the agent), and a readiness command whose channel raises keeps that
   error's hint too. Then the readiness command runs once (600 s), and the bootstrap joins and
@@ -447,13 +449,14 @@ which raises `TokenRejectedError`; a status failure of either kind says the scri
 running. A `_TruncatedQGAOutput` report raises `ConnectivityError` saying the script exited with its
 output cut short. No failure chains the API error, whose request quotes the script. `create` waits
 for cloud-init through it (`cloud-init status --wait`, 420 s, which covers the agent ping's 120 and
-cloud-init's 300, status 2 a warning), with no separate wait for a guest IP, then runs the bootstrap
-through it with `run_bootstrap` and today's 600-second deadline (`platform.py:600`), then joins and
-settles; `guest_agent_exec_wait` and `guest_agent_network` leave the API client. `out-data` and
-`err-data` are encoded with `errors="replace"`, since the API's JSON can carry a lone surrogate, and
-`_request` types `http.client.HTTPException` as `ProxmoxAPIError` like any transport failure.
-`_run_bootstrap_via_agent` (`platform.py:566-636`), `native_transport` (`:488-502`) and
-`transport.py` go. No `native_shell` override. `recovery_needs_guest_sshd = False`.
+cloud-init's 300, status 2 a warning; a channel failure is asked again within that budget, since
+cloud-init can restart the guest agent and the command changes nothing), with no separate wait for a
+guest IP, then runs the bootstrap through it with `run_bootstrap` and today's 600-second deadline
+(`platform.py:600`), then joins and settles; `guest_agent_exec_wait` and `guest_agent_network` leave
+the API client. `out-data` and `err-data` are encoded with `errors="replace"`, since the API's JSON
+can carry a lone surrogate, and `_request` types `http.client.HTTPException` as `ProxmoxAPIError`
+like any transport failure. `_run_bootstrap_via_agent` (`platform.py:566-636`), `native_transport`
+(`:488-502`) and `transport.py` go. No `native_shell` override. `recovery_needs_guest_sshd = False`.
 
 ### AWS, Azure and GCP
 
@@ -471,13 +474,14 @@ incident row I32); GCP's read raises `GCEError` itself instead. It then builds
 `ctx.config.operator.ssh_private_key` (every operation's context carries the configuration), runs
 `wait_until_answering()`, and yields it for as long as the route is open, all inside
 `termination_as_interrupt()`, so `SIGTERM` and `SIGHUP` unwind like Ctrl-C while a route may be
-open, for every cloud command, not only the shell. Once one arrives, both are ignored until the
-outermost block exits, so a second cannot cut the route's close short; a block nested in another, or
-off the main thread, changes nothing, and a signal already ignored (`nohup`) stays ignored. Each
-cloud's close deletes its allow before printing, since a hangup's terminal can fail a write, and
-Azure's poke removes a rule whose create was interrupted, by the name it chose. `_transient_route`
-is an abstract member of the base, which each cloud supplies and nothing outside the cloud calls.
-Then:
+open, for every cloud command, not only the shell; `create_vm` opens the same block around its own
+stack, so a cloud create's bootstrap allow is removed by its interrupt rollback too. Once one
+arrives, both are ignored until the outermost block exits, so a second cannot cut the route's close
+short; a block nested in another, or off the main thread, changes nothing, and a signal already
+ignored (`nohup`) stays ignored. Each cloud's close deletes its allow before printing, since a
+hangup's terminal can fail a write, and Azure's poke removes a rule whose create was interrupted, by
+the name it chose. `_transient_route` is an abstract member of the base, which each cloud supplies
+and nothing outside the cloud calls. Then:
 
 - `run_as_root`: `trust.require_record(vm.name)` first, so a VM with no record opens no firewall
   rule, then `run_as_root(script, deadline)` inside `_public_ssh` under VM trust.
