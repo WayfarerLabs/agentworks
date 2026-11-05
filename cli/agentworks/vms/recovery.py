@@ -7,7 +7,7 @@ server:
 
 - :func:`repair`, ``agw vm recover``'s one script: restore the admin's
   authorized key, restart a broken sshd where the channel does not depend on
-  it, install python3, start ``tailscaled`` if it is not running and wait
+  it, install python3 when agw-launch's interpreter does not run, start ``tailscaled`` if it is not running and wait
   for its state to settle, and join Tailscale only when the node needs a
   login.
 - :func:`rekey`, ``vm rekey``'s logout and rejoin with a new auth key.
@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT
 from agentworks.errors import ConnectivityError, StateError
-from agentworks.execution import root_script
+from agentworks.execution import root_script, ssh_process
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -101,13 +101,17 @@ if [ "$repair_sshd" = 1 ]; then
     systemctl restart ssh.service
 fi
 
-# Debian's python3 package depends on its standard library, so this also
-# catches a VM with only python3-minimal. Package output goes to stderr,
-# which the operation log keeps, so stdout carries only the joined line.
-# The lock timeout waits out an unattended upgrade instead of failing.
-if ! dpkg -s python3 >/dev/null 2>&1; then
+# The interpreter agw-launch runs is what is tested, not the package: dpkg
+# still reports a removed but not purged python3, and python3-minimal alone
+# runs but has no json. Debian's python3 package depends on its standard
+# library. Package output goes to stderr, which the operation log keeps, so
+# stdout carries only the joined line. The lock timeout waits out an
+# unattended upgrade instead of failing.
+python_runs() {{ {python} -I -S -c 'import json' >/dev/null 2>&1; }}
+if ! python_runs; then
     apt-get -o DPkg::Lock::Timeout=120 update >&2
     DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y python3 >&2
+    python_runs || {{ echo "{python} does not run with its standard library after installing python3" >&2; exit 1; }}
 fi
 
 command -v tailscale >/dev/null || {{ echo "Tailscale is not installed" >&2; exit 1; }}
@@ -186,6 +190,7 @@ def repair(
         admin=shlex.quote(vm.admin_username),
         key=shlex.quote(public_key),
         repair_sshd=0 if platform.recovery_needs_guest_sshd else 1,
+        python=shlex.quote(ssh_process.DEFAULT_PYTHON),
         backend_state=BACKEND_STATE_FRAGMENT,
         state_reads=SETTLING_STATE_READS,
         state_interval=SETTLING_STATE_INTERVAL_SECONDS,

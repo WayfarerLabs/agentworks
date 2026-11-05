@@ -1,8 +1,9 @@
 """Core's recovery scripts, run for real by a local ``/bin/bash -s`` against stub system commands.
 
 Every command the scripts reach that would touch the system (``getent``,
-``dpkg``, ``apt-get``, ``install``, ``sshd``, ``systemctl``, ``tailscale``,
-``sleep``) is a stub first on ``PATH`` that records its arguments, so each
+``apt-get``, ``install``, ``sshd``, ``systemctl``, ``tailscale``, ``sleep``)
+is a stub first on ``PATH``, and agw-launch's interpreter, which the repair
+names by absolute path, is one too. Each records its arguments, so each
 test asserts what the script did, and its status, without root. The admin is
 the current user, with a scratch home.
 """
@@ -22,7 +23,7 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.tailscale_join import log_out
-from agentworks.execution import root_script
+from agentworks.execution import root_script, ssh_process
 from agentworks.vms import recovery
 
 if TYPE_CHECKING:
@@ -44,7 +45,8 @@ name=$(basename "$0")
 printf '%s %s\\n' "$name" "$*" >> "{root}/calls"
 case "$name" in
     getent) [ "$2" = "{admin}" ] && printf '%s:x:1000:1000::{root}/home:/bin/bash\\n' "$2" && exit 0; exit 2 ;;
-    dpkg) exit "$(cat {root}/dpkg-status)" ;;
+    python3) exit "$(cat {root}/python-status)" ;;
+    apt-get) case "$*" in *" install "*) cat {root}/python-after-install > {root}/python-status ;; esac ;;
     sshd) exit "$(cat {root}/sshd-status)" ;;
     systemctl) [ "$1" = is-active ] && exit "$(cat {root}/tailscaled-active)" ;;
     tailscale)
@@ -99,19 +101,28 @@ class _Platform:
 
 
 @pytest.fixture
-def guest(tmp_path: Path) -> Guest:
+def guest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Guest:
     admin = getpass.getuser()
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     stub = _STUB.format(root=tmp_path, admin=admin)
-    for name in ("getent", "dpkg", "apt-get", "install", "sshd", "systemctl", "tailscale", "sleep"):
-        path = bin_dir / name
+    # The interpreter stub is off PATH: the scripts' own python3 reads Tailscale's JSON for real.
+    interpreter_dir = tmp_path / "interpreter"
+    interpreter_dir.mkdir()
+    for path in [
+        bin_dir / name for name in ("getent", "apt-get", "install", "sshd", "systemctl", "tailscale", "sleep")
+    ]:
         path.write_text(stub)
         path.chmod(stat.S_IRWXU)
+    interpreter = interpreter_dir / "python3"
+    interpreter.write_text(stub)
+    interpreter.chmod(stat.S_IRWXU)
+    monkeypatch.setattr(ssh_process, "DEFAULT_PYTHON", str(interpreter))
     (tmp_path / "home").mkdir()
     made = Guest(tmp_path)
     for knob, value in (
-        ("dpkg-status", "0"),
+        ("python-status", "0"),
+        ("python-after-install", "0"),
         ("sshd-status", "0"),
         ("state", "Running"),
         ("logout-status", "0"),
@@ -192,15 +203,27 @@ def test_any_other_state_fails_without_a_join(guest: Guest) -> None:
     assert guest.called("tailscale") == ["tailscale status --json"]
 
 
-@pytest.mark.parametrize("installed", [True, False])
-def test_python3_is_installed_only_when_dpkg_does_not_report_it(guest: Guest, installed: bool) -> None:
-    guest.set("dpkg-status", "0" if installed else "1")
+@pytest.mark.parametrize("runs", [True, False])
+def test_python3_is_installed_only_when_the_launchers_interpreter_does_not_run(guest: Guest, runs: bool) -> None:
+    """Whatever dpkg says: a removed but unpurged python3 is still reported as installed."""
+    guest.set("python-status", "0" if runs else "1")
 
     assert _repair(guest).status == 0
 
-    assert guest.called("dpkg") == ["dpkg -s python3"]
+    assert guest.called("python3")[0] == "python3 -I -S -c import json"
     installs = [call for call in guest.called("apt-get") if call.endswith(" install -y python3")]
-    assert len(installs) == (0 if installed else 1)
+    assert len(installs) == (0 if runs else 1)
+    assert len(guest.called("python3")) == (1 if runs else 2)
+
+
+def test_an_install_that_leaves_the_interpreter_unrunnable_fails_the_repair(guest: Guest) -> None:
+    guest.set("python-status", "1")
+    guest.set("python-after-install", "1")
+
+    result = _repair(guest)
+
+    assert result.status == 1
+    assert guest.called("tailscale") == []
 
 
 def test_sshd_is_repaired_only_where_the_channel_does_not_use_it(guest: Guest) -> None:
@@ -215,7 +238,7 @@ def test_sshd_is_repaired_only_where_the_channel_does_not_use_it(guest: Guest) -
 
 def test_sshd_is_repaired_before_python3_is_installed(guest: Guest) -> None:
     """A broken sshd gets SSH access back before an install that can take minutes."""
-    guest.set("dpkg-status", "1")
+    guest.set("python-status", "1")
 
     assert _repair(guest, needs_guest_sshd=False).status == 0
 
