@@ -95,7 +95,7 @@ class _EnvVarContext(AbstractContextManager[SecretSourceClient]):
 class EnvVarBackend(SecretBackend):
     """Resolve secrets from operator-side environment variables."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 3
     config_model: ClassVar[type[AgwModel]] = EnvVarSourceConfig
     mapping_model: ClassVar[type[AgwRootModel[Any]]] = EnvVarMapping
     name: ClassVar[str] = "env-var"

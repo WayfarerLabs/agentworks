@@ -182,7 +182,7 @@ def transcript_probe(sid: str) -> Script:
 class ClaudeCodeIntegration(HarnessIntegration):
     """Runs Claude Code, resuming or launching fresh per on-disk state."""
 
-    contract_version: ClassVar[int] = 7
+    contract_version: ClassVar[int] = 8
     name: ClassVar[str] = "claude-code"
     description: ClassVar[str] = "Run Claude Code, resuming its session when one exists"
     config_model: ClassVar[type[ClaudeCodeConfig]] = ClaudeCodeConfig

@@ -102,7 +102,7 @@ exit 22
 class GitHubCredentialProvider(GitCredentialProvider):
     """Produces stored or GitHub-CLI-backed credentials for github.com."""
 
-    contract_version: ClassVar[int] = 3
+    contract_version: ClassVar[int] = 4
     name: ClassVar[str] = "github"
     description: ClassVar[str] = "GitHub HTTPS credentials from a secret or GitHub CLI"
     config_model: ClassVar[type[GitHubConfig]] = GitHubConfig

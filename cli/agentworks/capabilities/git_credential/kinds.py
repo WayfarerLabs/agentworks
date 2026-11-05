@@ -167,7 +167,7 @@ def _readiness(name: str, impl: Any) -> Readiness:
 
 GIT_CREDENTIAL_PROVIDER_DESCRIPTOR = CapabilityKindDescriptor(
     kind="git-credential-provider",
-    contract_version=3,
+    contract_version=4,
     implementation_contract=GitCredentialProvider,
     registry=_registry,
     required_operations=frozenset({"credential_material", "credential_scopes"}),

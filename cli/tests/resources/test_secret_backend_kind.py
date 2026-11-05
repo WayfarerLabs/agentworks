@@ -42,7 +42,7 @@ def test_descriptor_declares_the_nominal_version_one_backend_contract() -> None:
     from agentworks.capabilities.secret_backend.kinds import SECRET_BACKEND_DESCRIPTOR as descriptor
 
     assert descriptor.implementation_contract is SecretBackend
-    assert descriptor.contract_version == 1
+    assert descriptor.contract_version == 3
     assert descriptor.required_operations == {
         "backend_readiness",
         "describe_lookup",

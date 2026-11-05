@@ -71,7 +71,7 @@ class ShellSetupConfig(AgwModel):
 class ShellIntegration(HarnessIntegration):
     """Runs an operator command (or a login shell) as the session."""
 
-    contract_version: ClassVar[int] = 7
+    contract_version: ClassVar[int] = 8
     name: ClassVar[str] = "shell"
     description: ClassVar[str] = "Run an operator command or a login shell"
     prose: ClassVar[TopicProse | None] = TopicProse(

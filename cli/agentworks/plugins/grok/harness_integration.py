@@ -150,7 +150,7 @@ def session_probe(sid: str) -> Script:
 class GrokBuildIntegration(HarnessIntegration):
     """Run Grok Build, resuming its persisted session when one exists."""
 
-    contract_version: ClassVar[int] = 7
+    contract_version: ClassVar[int] = 8
     name: ClassVar[str] = "grok-build"
     description: ClassVar[str] = "Run Grok Build, resuming its session when one exists"
     config_model: ClassVar[type[GrokBuildConfig]] = GrokBuildConfig

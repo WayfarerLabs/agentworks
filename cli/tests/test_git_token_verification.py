@@ -355,7 +355,7 @@ class _ExchangeConfig(AgwModel):
 
 
 class _ExchangeProvider(GitCredentialProvider):
-    contract_version: ClassVar[int] = 3
+    contract_version: ClassVar[int] = 4
     name: ClassVar[str] = "exchange"
     description: ClassVar[str] = "test exchange provider"
     config_model: ClassVar[type[_ExchangeConfig]] = _ExchangeConfig

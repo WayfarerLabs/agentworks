@@ -3,7 +3,9 @@
 Agentworks 0.20 verifies every connection to a VM against a host-key store of its own instead of
 trusting whatever it sees first. Existing VMs need a one-time import before most commands will
 connect to them. Third-party VM platform plugins must move to vm-platform contract version 2 (see
-[Third-party VM platforms](#third-party-vm-platforms)).
+[Third-party VM platforms](#third-party-vm-platforms)), and third-party harness integrations, Git
+credential providers and secret backends to new contract versions as well (see
+[their section](#third-party-harness-integrations-git-credential-providers-and-secret-backends)).
 
 ## Import existing host keys
 
@@ -272,6 +274,34 @@ before they resolve the auth key.
 Artifact discovery for Claude Code, Codex and Grok Build runs the VM's `/usr/bin/python3` after the
 account's login and interactive startup files. It no longer runs the first `python3` on the login
 `PATH`, so an interpreter a version manager puts first is not used for it.
+
+## Third-party harness integrations, Git credential providers and secret backends
+
+Every capability's stages receive a `RunContext`, whose execution accessors changed: a stage that
+needs to reach the VM reads `ctx.admin_access()` or `ctx.agent_access()`, each that identity's
+`VMAccess` from `agentworks.execution` or `None`, and `ctx.admin_target()` and `ctx.agent_target()`
+are gone. Registration matches contract versions exactly, so each kind's version moved and an
+implementation that still declares the old one is refused. Every shipped implementation already
+declares the new one.
+
+| Kind                | Old version | New version |
+| ------------------- | ----------- | ----------- |
+| harness-integration | 7           | 8           |
+| git-credential      | 3           | 4           |
+| secret-backend      | 1           | 3           |
+
+Secret-backend skips 2, the number of the incompatible 0.14 contract, so no implementation written
+for it can register. Beyond the version and the accessors:
+
+- **Harness integrations.** `_probe_target(access)` receives the launch target's `VMAccess` and
+  passes it to `require_commands(commands, access, ...)`. A setup facet's invocation carries
+  `access` beside `runner`. `probe_native` takes a `VMAccess` first. `check_required_commands` and
+  `run_user_shell_command` take a `VMAccess` and an optional `deadline` in seconds, and
+  `run_user_shell_command` returns the command's exit status.
+- **Git credential providers.** A provider's runup check reads the access the same way.
+- **Secret backends.** Nothing else changes.
+
+The capability READMEs under `cli/agentworks/capabilities/` describe each contract in full.
 
 ## Third-party VM platforms
 

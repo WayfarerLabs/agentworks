@@ -159,7 +159,7 @@ def test_public_registration_refuses_bad_facet_contracts(failure: str) -> None:
     if failure == "noncallable":
         Bad.config_for = None  # type: ignore[assignment]
     if failure == "old-contract":
-        Bad.contract_version = 6
+        Bad.contract_version = 7
     with (
         pytest.raises(PluginError),
         seated_plugin(Plugin(name="bad-facets", capabilities={"harness-integration": (Bad,)})),

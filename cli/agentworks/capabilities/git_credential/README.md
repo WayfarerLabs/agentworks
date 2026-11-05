@@ -154,9 +154,9 @@ The generated include resets earlier helpers only for hosts Agentworks manages, 
 Agentworks launcher, and enables `credential.useHttpPath`. Unrelated hosts and operator Git settings
 remain untouched.
 
-## Provider contract version 3
+## Provider contract version 4
 
-A provider subclasses `GitCredentialProvider`, declares `contract_version = 3`, and supplies a
+A provider subclasses `GitCredentialProvider`, declares `contract_version = 4`, and supplies a
 closed provider-local `AgwModel` with its literal `name` tag. It implements two required operations
 and may override one side-effect-free hook:
 

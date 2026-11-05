@@ -129,7 +129,7 @@ class ConformingHarnessIntegration(HarnessIntegration):
     """A concrete ``HarnessIntegration``. Subclasses add ``name`` /
     ``description``."""
 
-    contract_version = 7
+    contract_version = 8
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
@@ -151,7 +151,7 @@ class ConformingGitCredentialProvider(GitCredentialProvider):
     """A concrete ``GitCredentialProvider``. Subclasses add ``name`` /
     ``description``."""
 
-    contract_version = 3
+    contract_version = 4
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
@@ -178,7 +178,7 @@ class ConformingSecretBackend(SecretBackend):
     config_model: ClassVar[type[AgwModel]] = AgwModel
     mapping_model: ClassVar[type[AgwRootModel[Any]]] = AgwRootModel[str]
 
-    contract_version = 1
+    contract_version = 3
     supports_tty_interaction = False
 
     def __init_subclass__(cls, **kwargs: object) -> None:

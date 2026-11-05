@@ -92,7 +92,7 @@ printf 'username={org}\\npassword=%s\\n\\n' "$token"
 class AzDOCredentialProvider(GitCredentialProvider):
     """Produces stored or Azure-CLI-backed Azure DevOps credentials."""
 
-    contract_version: ClassVar[int] = 3
+    contract_version: ClassVar[int] = 4
     name: ClassVar[str] = "azdo"
     description: ClassVar[str] = "Azure DevOps HTTPS credentials from a secret or Azure CLI"
     config_model: ClassVar[type[AzDOConfig]] = AzDOConfig
