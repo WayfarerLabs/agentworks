@@ -1543,6 +1543,9 @@ main `c8d4dfb` and return to draft. The separate full live report was not publis
 - [x] Add a raw-before-normalized redaction regression with a failing deletion control. Keep the
       necessary pass; do not add a shared deferral abstraction or change missing-route logic merely
       for optional reason-text or counting differences.
+- [ ] Correct the related tmux liveness probe to target the exact pane and accept only valid native
+      observations. Exercise an actual private server alive then dead at status 23; malformed
+      successful output remains unverified rather than falsely alive.
 - [ ] Complete the three independent private lanes and required integrated gates on the corrected
       head, and update permanent collateral wherever the correction changes an operator contract.
 - [ ] Publish the exact green ready handoff without `review-requested`, reporting the exhausted
@@ -1572,3 +1575,10 @@ codec/routing/diagnostic selection passed 72. The new raw-redaction case passes 
 fails after removing that pass; the original source was restored. Root mypy passed 906 files before
 the runtime integration. These are scoped local checks; integrated gates and all three private lanes
 remain required, and no final live acceptance is claimed.
+
+The first integrated run at `295a6181` passed 10,858 tests with 11 skips and one stale legacy
+fixture failure. The fixture labeled the earlier premature-ID writer as the now-current version 3;
+`3baba4ae` uses released version 2 instead, preserving every file/ownership assertion. Its 28-case
+selection passes. Private correctness review also proved a preexisting real tmux liveness target/
+parser error that bypasses the corrected workload-failure path. The bounded prerequisite fix stays
+in the same round; integrated gates and all three lanes will review the corrected head again.
