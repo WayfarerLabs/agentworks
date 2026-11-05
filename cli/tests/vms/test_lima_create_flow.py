@@ -28,7 +28,7 @@ from agentworks.capabilities.vm_platform.lima import (
     LimaPlatform,
 )
 from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed, LimaHost
-from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT
+from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT, LOGOUT_SCRIPT
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConnectivityError, ProvisioningError
 from tests._root_channel_fakes import ADDRESS, Answer, FakeGuest, answer_by_payload, install_at_run_process
@@ -226,7 +226,7 @@ def test_an_address_that_cannot_be_read_logs_the_node_out_and_removes_the_instan
         )
 
     assert guest.joins == 1
-    assert guest.count("tailscale logout") == 1
+    assert guest.count(LOGOUT_SCRIPT) == 1
     assert "limactl delete --force myvm" in ran
 
 

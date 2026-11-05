@@ -39,6 +39,18 @@ READINESS_WAIT_SECONDS = 600
 """How long a cloud VM being created gets to answer over SSH: it boots, and its guest agent may install the key."""
 READINESS_COMMAND_DEADLINE_SECONDS = 600
 
+LOGOUT_SCRIPT = "\n".join(
+    (
+        "trap '' HUP PIPE",
+        "s=0",
+        "out=$(tailscale logout 2>&1) || s=$?",
+        """printf '%s\\n' "$out" || true""",
+        'exit "$s"',
+    )
+)
+"""The one logout: a logout can take the network away from its own channel (Azure's did), so it ignores ``SIGHUP``
+and ``SIGPIPE`` and writes nothing until ``tailscale logout`` is done, then reports its output and status."""
+
 CREATE_RERUN_HINT = "The join spent the auth key: replace a single-use key before running the create again."
 """The settle's guidance after a create's node was logged out.
 
@@ -154,8 +166,8 @@ def settle_tailnet_address(
 def log_out(
     run_as_root: Callable[[bytes, float], RawRun], *, log: Callable[[RunRequest, Result], None] | None = None
 ) -> RootScriptResult:
-    """Run ``tailscale logout`` once, carrying no secret; the caller reads the status and reports it."""
-    return root_script.run(run_as_root, "tailscale logout", deadline=LOGOUT_DEADLINE_SECONDS, log=log)
+    """Run :data:`LOGOUT_SCRIPT` once, carrying no secret; the caller reads the status and reports it."""
+    return root_script.run(run_as_root, LOGOUT_SCRIPT, deadline=LOGOUT_DEADLINE_SECONDS, log=log)
 
 
 def complete_cloud_bootstrap(

@@ -28,7 +28,7 @@ from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure, 
 from agentworks.capabilities.vm_platform.bootstrap_script import REBOOT_SENTINEL_PATH
 from agentworks.capabilities.vm_platform.lima import _REBOOT_CLEAR_MARKER, LimaPlatform
 from agentworks.capabilities.vm_platform.lima_host import LimaHost
-from agentworks.capabilities.vm_platform.tailscale_join import CREATE_RERUN_HINT, JOIN_FRAGMENT
+from agentworks.capabilities.vm_platform.tailscale_join import CREATE_RERUN_HINT, JOIN_FRAGMENT, LOGOUT_SCRIPT
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.debian import DebianRelease
 from agentworks.errors import AgentworksError
@@ -257,7 +257,7 @@ def test_the_key_reaches_only_the_join_script(
 
 @pytest.mark.parametrize(
     ("failing", "last"),
-    [(READ, "tailscale logout"), (JOIN_FRAGMENT, JOIN_FRAGMENT)],
+    [(READ, LOGOUT_SCRIPT), (JOIN_FRAGMENT, JOIN_FRAGMENT)],
     ids=["address-unread", "join-unknown"],
 )
 @pytest.mark.parametrize("name", PLATFORMS)

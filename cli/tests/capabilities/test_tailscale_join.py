@@ -13,6 +13,7 @@ from agentworks.capabilities.vm_platform.public_ssh import KeyRefused, PublicSSH
 from agentworks.capabilities.vm_platform.tailscale_join import (
     ADDRESS_READS,
     JOIN_FRAGMENT,
+    LOGOUT_SCRIPT,
     READINESS_WAIT_SECONDS,
     complete_cloud_bootstrap,
     join_tailscale,
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
 KEY = "tskey-auth-join-'swordfish"
 NODE = "lab-vm1"
 READ = "tailscale ip -4"
-LOGOUT = "tailscale logout"
+LOGOUT = LOGOUT_SCRIPT
 HINT = "Run it again."
 
 

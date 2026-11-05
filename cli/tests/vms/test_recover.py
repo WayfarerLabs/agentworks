@@ -180,7 +180,7 @@ def test_a_join_selects_the_settle_and_the_reconnect_wording(
     with pytest.raises(ConnectivityError):
         _recover(db, make_config())
 
-    assert guest.count("tailscale logout") == 1
+    assert guest.count(tailscale_join.LOGOUT_SCRIPT) == 1
     assert waits == []
 
     db.delete_vm("box")
@@ -205,7 +205,7 @@ def test_without_a_join_reads_that_run_out_never_log_the_node_out(
         _recover(db, make_config())
 
     assert guest.count("tailscale ip -4") == tailscale_join.ADDRESS_READS
-    assert guest.count("tailscale logout") == 0
+    assert guest.count(tailscale_join.LOGOUT_SCRIPT) == 0
 
 
 def test_a_read_alone_that_runs_out_points_at_the_log_that_recorded_every_read(
