@@ -53,7 +53,7 @@ address settle, so slice 3's `settle_on_transport` and its callback form are nev
 | `capabilities/vm_platform/bootstrap_script.py`                    | `run_bootstrap`, the key-free bootstrap run through a `run_as_root`; `parse_bootstrap_steps`                     |
 | `capabilities/vm_platform/wsl2.py`                                | The `wsl.exe` `run_as_root` and shell                                                                            |
 | `plugins/proxmox/guest_agent.py` (new)                            | `run_as_root`: QGA exec of `/bin/bash -s` with `input-data`, polled to the deadline                              |
-| `vms/recovery.py` (new)                                           | Core's three scripts and one function each: `repair`, `rekey`, `logout`                                          |
+| `vms/recovery.py` (new)                                           | Core's two scripts and one function each: `repair`, `rekey`                                                      |
 | `vms/manager/recover.py` (new)                                    | `recover_vm`, the `agw vm recover` service                                                                       |
 | `vms/manager/tailscale.py`, `power.py`, `exec.py`, `vms/nodes.py` | `_await_tailnet`; rekey and delete on the scripts; `vm shell --platform` on `native_shell`; the gate's wait      |
 
@@ -193,20 +193,20 @@ resolved client that cannot start raises `ConnectivityError` naming it, the prec
 ### A channel that drops
 
 `trap '' HUP PIPE` is not in the wrapper; it is set only by the two scripts whose own commands can
-take the network away, logout and rekey (below). Measured locally with Bash 5.2.15: with the
-channel's read ends closed mid-payload, a payload that then wrote died of `SIGPIPE` and its effect
-never happened. The trap alone is not enough under `set -e`: the next write fails with `EPIPE`, and
-`set -e` ends the script before its remaining steps. So those two scripts write nothing until they
-are done. Each step runs as `out=$(command 2>&1) || s=$?`, since a bare `out=$(...)` under `set -e`
-exits on failure, and its output is appended to one buffer. The script stops at the first failed
-step and prints the buffer once, at the very end, with `|| true`, then exits with that step's
-status. Measured: a rekey-shaped script whose channel closed after its first step still ran its
-later steps; the same script printing after each step stopped before the join. No external program,
-Tailscale's Go binary included, writes to the channel at all. This replaces the `nohup ... &` delete
-uses today because "logout was disrupting the network stack and thus not completing" on Azure
-(`21bb259f9`, `vms/manager/tailscale.py:177-181`), and keeps the logout's status observable when the
-channel survives. Other scripts keep default dispositions: the bootstrap's `curl | sh`
-(`bootstrap_script.py:232`) relies on them.
+take the network away: rekey (below) and the one logout, `tailscale_join.LOGOUT_SCRIPT`. Measured
+locally with Bash 5.2.15: with the channel's read ends closed mid-payload, a payload that then wrote
+died of `SIGPIPE` and its effect never happened. The trap alone is not enough under `set -e`: the
+next write fails with `EPIPE`, and `set -e` ends the script before its remaining steps. So those two
+scripts write nothing until they are done. Each step runs as `out=$(command 2>&1) || s=$?`, since a
+bare `out=$(...)` under `set -e` exits on failure, and its output is appended to one buffer. The
+script stops at the first failed step and prints the buffer once, at the very end, with `|| true`,
+then exits with that step's status. Measured: a rekey-shaped script whose channel closed after its
+first step still ran its later steps; the same script printing after each step stopped before the
+join. No external program, Tailscale's Go binary included, writes to the channel at all. This
+replaces the `nohup ... &` delete uses today because "logout was disrupting the network stack and
+thus not completing" on Azure (`21bb259f9`, `vms/manager/tailscale.py:177-181`), and keeps the
+logout's status observable when the channel survives. Other scripts keep default dispositions: the
+bootstrap's `curl | sh` (`bootstrap_script.py:232`) relies on them.
 
 What holds depends on the channel (incident row I30):
 
@@ -244,14 +244,15 @@ blocks port 22, say) stops applying to recovery and provisioning, and an encrypt
 the agent, as for every VM connection.
 
 - `run_as_root(script, deadline) -> RawRun` is `run_process` over that argv. The remote command is a
-  constant that the admin's login shell (one of the four D4 allows) parses unchanged. After the run,
-  the client log's `Host key verification failed` raises `TrustMismatch`, and its
-  `Permission denied (publickey` raises `ConnectivityError` whose hint names the provider console:
-  recover logs in with the same key it would repair, so a cloud VM that refuses it needs the
-  provider's own access (serial console, EC2 Instance Connect) or recreation. When the key is
-  encrypted and the agent does not hold it, the hint leads with the passphrase hint from
-  `client.agent_load_hint`, the check `VMAccess.passphrase_hint` makes, since it is given only when
-  it is the likely cause.
+  constant that the admin's login shell (one of the four D4 allows) parses unchanged. After a run
+  whose stderr holds no start marker (ssh's log also holds the server's banner, and a script that
+  started has connected and logged in), the client log's `Host key verification failed` raises
+  `TrustMismatch`, and its `Permission denied (publickey` raises `KeyRefused`, a `ConnectivityError`
+  whose hint names the provider console: recover logs in with the same key it would repair, so a
+  cloud VM that refuses it needs the provider's own access (serial console, EC2 Instance Connect) or
+  recreation. When the key is encrypted and the agent does not hold it, the hint leads with the
+  passphrase hint from `client.agent_load_hint`, the check `VMAccess.passphrase_hint` makes, since
+  it is given only when it is the likely cause.
 - `wait_until_answering(*, seconds=PROBE_WAIT_SECONDS, retry_refused_key=False)` probes with
   `root_script.run(self.run_as_root, "true", deadline=10)` three seconds apart until one completes
   or `seconds` (120 s by default) have passed, then warns `PROBE_FAILURE_HINT`, the module's
@@ -316,14 +317,19 @@ takes a `run_as_root`:
   cannot change it. Exhaustion raises `ConnectivityError` naming the node. `log` records each read
   in the caller's operation log (recover and rekey pass theirs); recover's read alone, on
   exhaustion, adds a hint naming `agw vm logs NAME`.
-- `settle_tailnet_address(run_as_root, *, node, rerun_hint, log=None) -> str` is that read plus
-  slice 3's logout, both recorded through `log`: on exhaustion it runs one `tailscale logout` (30 s)
-  and raises `ConnectivityError` from the read's error. When the logout returned status 0, the
-  message says so and the hint is `rerun_hint`; otherwise the hint names the node for removal in the
-  admin console. Create passes `CREATE_RERUN_HINT`, which says the join spent the auth key, so a
-  single-use key needs replacing before the create runs again (the rollback reports for itself
-  whether the backend was removed), and rekey passes `agw vm recover NAME`: a node whose address
-  cannot be read is unusable, and the next recover's repair reads `NeedsLogin` and rejoins it.
+- `settle_tailnet_address(run_as_root, *, node, rerun_hint, log=None) -> str` is that read plus the
+  one logout, both recorded through `log`: on exhaustion it runs `log_out` once (30 s) and raises
+  `ConnectivityError` from the read's error. When the logout returned status 0, the message says so
+  and the hint is `rerun_hint`; otherwise the hint names the node for removal in the admin console,
+  then gives `rerun_hint`. Create passes `CREATE_RERUN_HINT`, which says the join spent the auth
+  key, so a single-use key needs replacing before the create runs again (the rollback reports for
+  itself whether the backend was removed), and rekey passes `agw vm recover NAME`: a node whose
+  address cannot be read is unusable, and the next recover's repair reads `NeedsLogin` and rejoins
+  it.
+- `log_out(run_as_root, *, log=None) -> RootScriptResult` runs `LOGOUT_SCRIPT` once (30 s), the one
+  logout for the settle and for `vm delete`. It is the trapped form in "A channel that drops":
+  `trap '' HUP PIPE`, `out=$(tailscale logout 2>&1) || s=$?`, then `printf` the output with
+  `|| true` and exit with `s`.
 - `ConnectivityError` rather than slice 3's `ProvisioningError`, because it is true for all three
   callers (the VM did not report an address over its root channel). Create still reports a
   `ProvisioningError`: the manager wraps any untyped failure of `create` in one
@@ -437,11 +443,15 @@ seconds until it reports exit or the deadline passes. Dispatch and status failur
 `ConnectivityError` with no stdin in the message (`transport.py:69-123`), except an HTTP 401 or 403,
 which raises `TokenRejectedError`; a status failure of either kind says the script may still be
 running. A `_TruncatedQGAOutput` report raises `ConnectivityError` saying the script exited with its
-output cut short. No failure chains the API error, whose request quotes the script. `create` runs
-the bootstrap through it with `run_bootstrap` and today's 600-second deadline (`platform.py:600`),
-then joins and settles, deleting `_run_bootstrap_via_agent` (`platform.py:566-636`);
-`native_transport` (`:488-502`) and `transport.py` go. No `native_shell` override.
-`recovery_needs_guest_sshd = False`.
+output cut short. No failure chains the API error, whose request quotes the script. `create` waits
+for cloud-init through it (`cloud-init status --wait`, 300 s, status 2 a warning), with no separate
+wait for a guest IP, then runs the bootstrap through it with `run_bootstrap` and today's 600-second
+deadline (`platform.py:600`), then joins and settles; `guest_agent_exec_wait` and
+`guest_agent_network` leave the API client. `out-data` and `err-data` are encoded with
+`errors="replace"`, since the API's JSON can carry a lone surrogate, and `_request` types
+`http.client.HTTPException` as `ProxmoxAPIError` like any transport failure.
+`_run_bootstrap_via_agent` (`platform.py:566-636`), `native_transport` (`:488-502`) and
+`transport.py` go. No `native_shell` override. `recovery_needs_guest_sshd = False`.
 
 ### AWS, Azure and GCP
 
@@ -459,8 +469,13 @@ incident row I32); GCP's read raises `GCEError` itself instead. It then builds
 `ctx.config.operator.ssh_private_key` (every operation's context carries the configuration), runs
 `wait_until_answering()`, and yields it for as long as the route is open, all inside
 `termination_as_interrupt()`, so `SIGTERM` and `SIGHUP` unwind like Ctrl-C while a route may be
-open. `_transient_route` is an abstract member of the base, which each cloud supplies and nothing
-outside the cloud calls. Then:
+open, for every cloud command, not only the shell. Once one arrives, both are ignored until the
+outermost block exits, so a second cannot cut the route's close short; a block nested in another, or
+off the main thread, changes nothing, and a signal already ignored (`nohup`) stays ignored. Each
+cloud's close deletes its allow before printing, since a hangup's terminal can fail a write, and
+Azure's poke removes a rule whose create was interrupted, by the name it chose. `_transient_route`
+is an abstract member of the base, which each cloud supplies and nothing outside the cloud calls.
+Then:
 
 - `run_as_root`: `trust.require_record(vm.name)` first, so a VM with no record opens no firewall
   rule, then `run_as_root(script, deadline)` inside `_public_ssh` under VM trust.
@@ -492,7 +507,6 @@ zero or non-zero; a failed check prints its reason on stderr and exits 1.
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | -------- |
 | Repair | Append `/usr/sbin:/sbin` to `PATH` (`dpkg` needs `ldconfig` and `start-stop-daemon` on it). Fail if the admin account is missing. Append the configured public key to the admin's `authorized_keys` unless the exact line is there, first adding a newline when the file's last byte is not one, with today's modes (`bootstrap_script.py:143-155`). When `REPAIR_SSHD=1`, create `/run/sshd`, fail if `sshd -t` fails, then `systemctl unmask`, `enable` and `restart ssh.service`, before the package install. Unless `dpkg -s python3` succeeds, `apt-get update` and `DEBIAN_FRONTEND=noninteractive apt-get install -y python3`, both with `-o DPkg::Lock::Timeout=120` and their output on stderr. Fail if `tailscale` is missing, start `tailscaled` unless `systemctl is-active` says it runs, then read `BackendState` from `tailscale status --json` with python3, reading it again up to 15 times two seconds apart while it is `NoState` or `Starting` (a daemon just started reads those before it settles): `Running` does nothing, `NeedsLogin` runs `JOIN_FRAGMENT` and prints `joined`, anything else fails naming the state | 600 s    | auth key |
 | Rekey  | `trap '' HUP PIPE`; today's sequence (`vms/manager/power.py:499-518`): restart `tailscaled`, logout, `JOIN_FRAGMENT`, restart, each followed by 15 s, the logout under `timeout 60`. Each step's output is captured with its status, the first failure stops the sequence, and the buffer is printed once at the end (A channel that drops)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | 180 s    | auth key |
-| Logout | `trap '' HUP PIPE`; `out=$(tailscale logout 2>&1) \|\| s=$?`, then `printf` the output with `\|\| true` and exit with `s`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | 30 s     | none     |
 
 - `dpkg -s python3` covers both of agw-launch's `VMNotReady` causes: Debian's `python3` package
   depends on its standard library, so a VM with only `python3-minimal`, the `STDLIB_MISSING` case
@@ -527,22 +541,24 @@ over SSH at ADDRESS") whose hint is `Run 'agw vm recover x'.`; the wait's own ra
 (`TrustMismatch`, `Unknown(AUTH_FAILED)`, `VMNotReady`) propagate with their hints.
 
 - `start_vm` replaces the rejoin block and its auth-key resolution (`vms/manager/power.py:85-120`)
-  with `_await_tailnet` inside the same `hold_active()`. The `trust.require_record` before the
-  boundary goes (`:53-56`): a stopped VM with no record must still start, so that its wait raises
-  `TrustMissing` naming recover, which starts a stopped VM itself (below). A start that booted the
-  VM says so before the wait, so a failed wait still reads as a running VM. Otherwise an
+  with `_await_tailnet` inside the same `hold_active()`. Before anything resolves it runs
+  `verify_tailscale_available()` and `execution.resolve_ssh()`, as rekey and recover do, since its
+  wait reaches the VM over the tailnet with the OpenSSH client. The `trust.require_record` before
+  the boundary goes (`:53-56`): a stopped VM with no record must still start, so that its wait
+  raises `TrustMissing` naming recover, which starts a stopped VM itself (below). A start that
+  booted the VM says so before the wait, so a failed wait still reads as a running VM. Otherwise an
   idle-stopped VM from before the host-key store could neither start nor be recovered.
   `LiveVMNode.auto_start` keeps its check, since the gating commands' own boundary refuses such a VM
   earlier.
 - `LiveVMNode.auto_start` replaces `_tailscale_rejoin_required` and `_ensure_tailscale`
   (`vms/nodes.py:265-282`) with `_await_tailnet(..., already_running=False)` inside `vm_active`.
-- `_ensure_tailscale`, `_tailscale_rejoin_required` and `_tailscale_logout` are deleted
-  (`tailscale.py:69-191`), and `TailscaleWait` and `wait_for_reconnect`
-  (`transports/__init__.py:248-318`) go with their last callers. `rejoin_tailscale` and
-  `_join_tailscale` are deleted (`vms/initializer/credentials.py:43-99`), with their exports
-  (`vms/initializer/__init__.py:34-35`; `vms/manager/__init__.py:26`, `:67`, `:70`, `:78`, `:83`,
-  `:107`, and its docstring's mention of `_ensure_tailscale` at `:13`); `verify_tailscale_available`
-  stays.
+- `_ensure_tailscale` and `_tailscale_rejoin_required` are deleted (`tailscale.py:69-191`);
+  `_tailscale_logout` stays as delete's reporter over `tailscale_join.log_out` (below), and
+  `TailscaleWait` and `wait_for_reconnect` (`transports/__init__.py:248-318`) go with their last
+  callers. `rejoin_tailscale` and `_join_tailscale` are deleted
+  (`vms/initializer/credentials.py:43-99`), with their exports (`vms/initializer/__init__.py:34-35`;
+  `vms/manager/__init__.py:26`, `:67`, `:70`, `:78`, `:83`, `:107`, and its docstring's mention of
+  `_ensure_tailscale` at `:13`); `verify_tailscale_available` stays.
 
 `vm shell --platform` opens the same gate. On a stopped VM whose Tailscale is broken, the gate now
 fails after starting it; the VM is left running, so the same command run again goes straight to the
@@ -561,9 +577,15 @@ start failure is the signal. The README and ADR 0003 are updated to say so (Coll
 
 1. `_require_vm`; `_guard_incomplete_vm(vm, allow_failed_init=True)`, which still refuses a VM whose
    provisioning failed (`vms/manager/_helpers.py:229-235`): a create retained as failed before
-   enrolling is deleted and recreated, not recovered. Then `verify_tailscale_available()`.
+   enrolling is deleted and recreated, not recovered. A VM with no host-key record is refused
+   without a terminal, since recording its keys needs the operator's confirmation; the hint names an
+   interactive recover or `agw vm import-host-keys NAME --known-hosts FILE`. Then
+   `verify_tailscale_available()` and `execution.resolve_ssh()`, so a workstation off Tailscale or
+   an unsupported client is refused before any secret resolves.
 2. The boundary, as rekey builds it (`power.py:421-441`): the VM-template node with the live VM
    node, one preflight and one resolve, so the auth key resolves up front with the site's secrets.
+   `require_tailscale_auth_key`, the check create and rekey share, refuses a key that is blank or
+   not one line.
 3. The power state, read as rekey does (`power.py:458`). `UNKNOWN` raises `StateError`: the platform
    could not report the VM's state, so check it in the provider or with `agw vm describe NAME`.
    `STOPPED` or `DEALLOCATED` is started in step 5, before the hold as `start_vm` starts before its
@@ -594,15 +616,17 @@ start failure is the signal. The README and ADR 0003 are updated to say so (Coll
 
 When the repair fails or its outcome is unknown, the message names the script and its status (or
 "unknown") and points at `agw vm logs NAME`; on a platform whose recovery goes through sshd it adds
-that a broken SSH server there needs the provider console or recreation.
+that a broken SSH server there needs a way in that does not use it (a cloud provider's serial
+console) or recreation.
 
 ### `vm rekey`
 
 The boundary and the running check stay (`power.py:401-464`), and rekey gains an operation log built
 the same way (the `rekey` stem). Before the boundary it runs `verify_tailscale_available()`, as
 recover does: its final wait reaches the VM over the tailnet, so a workstation off Tailscale is
-refused before the key is spent. The native transport and the per-step commands (`:480-528`) become
-the rekey script under the existing gate, then `settle_tailnet_address`, which replaces today's own
+refused before the key is spent. Its boundary refuses a blank auth key with
+`require_tailscale_auth_key`. The native transport and the per-step commands (`:480-528`) become the
+rekey script under the existing gate, then `settle_tailnet_address`, which replaces today's own
 `tailscale ip -4` read (`:520-527`). Then, as today, the address is recorded, the SSH config synced
 and the `rekey` event written (`:532-534`), then `wait_for_share` and `reachability.wait` on the
 updated row with `RECONNECT`, replacing the in-place repointing of a legacy transport (`:544-550`).
@@ -611,15 +635,19 @@ updated row with `RECONNECT`, replacing the in-place repointing of a legacy tran
   which rejoins it.
 - A failed or unknown script raises naming the script, its status and the log, with the hint
   `agw vm recover NAME`.
-- A final wait that returns `False` keeps today's outcome, a warning and exit 0 (`:552-556`), since
-  the new address is recorded; the warning names tailnet sharing and `agw vm recover NAME`.
+- A final wait that returns `False` raises `VMNotAnswering`, whose hint names `agw vm recover NAME`,
+  as `vm start` does; the new address is recorded first, since the old one died with the logout.
 - The per-step progress lines become one line before the call ("about a minute").
 
 ### `vm delete`'s logout
 
-Inside the existing best-effort hold (`power.py:278-310`), `_tailscale_logout` becomes
-`recovery.logout(...)` with no log, and the result is reported as R7 states, never checked over SSH:
+Inside the existing best-effort hold (`power.py:278-310`), `_tailscale_logout` reads the VM's power
+state and calls `tailscale_join.log_out(...)` with no log, and the result is reported as R7 states,
+never checked over SSH:
 
+- stopped or deallocated (a failed status read counts as unknown and asks): no logout, since no
+  channel reaches the VM, and a warning naming the node for the admin console; a WSL2 distro the
+  hold has booted reports running;
 - status 0: "Tailscale node HOSTNAME logged out";
 - non-zero: a warning with the status and the admin-console removal pointer naming `vm.hostname`;
 - unknown, or a raise: a warning that the logout could not be confirmed, with the same pointer;
@@ -678,7 +706,7 @@ operation log, and the error names the script, its status and `agw vm logs NAME`
 | Repair or rekey: unknown, or the platform raised       | `ConnectivityError`, or the raise                                    | The log, the sshd note where it applies; never re-dispatched                    |
 | Recover: no answer after the repair                    | `ConnectivityError`                                                  | Tailnet sharing and ACLs, then recreate                                         |
 | Address read or settle exhausted                       | `ConnectivityError` naming the node; create's wrappers keep its hint | Hint: after a logout, `rerun_hint`; else the admin console; read alone, the log |
-| Cloud: the VM refuses the key at its public address    | `ConnectivityError` from `PublicSSH`                                 | The provider console, or recreate                                               |
+| Cloud: the VM refuses the key at its public address    | `KeyRefused` from `PublicSSH`                                        | The provider console, or recreate                                               |
 | A cloud VM with no store record                        | `TrustMissing` from `run_as_root`, before the route                  | Recover re-establishes; delete warns naming the node                            |
 | Provisioning join or bootstrap: not status 0           | `ProvisioningError`, inside the platform's rollback                  | An unknown join names the node                                                  |
 | `python3` missing, or without its standard library     | `VMNotReady`                                                         | Now `agw vm recover NAME` (`execution/errors.py:77`)                            |
@@ -743,19 +771,22 @@ test of its own: the generic required-attribute check (`conformance.py:152`) cov
   script, the join's. The join runs once when the address reads fail, and once when it is unknown.
 - **Address.** A platform `ConnectivityError` counts as a failed read and `TrustMismatch` propagates
   from the first; `read_tailnet_address` never logs out, and `settle_tailnet_address` logs out once
-  on exhaustion; the readiness loop retries a `ConnectivityError` and stops at its bound. This
+  on exhaustion; create's readiness wait retries a `KeyRefused` and stops at its time bound. This
   extends `tests/test_cloud_bootstrap_secret_boundaries.py`.
 - **Commands** (fakes for the platform, the database and `VMAccess`):
   - start and the gate, on a VM that does not answer: the recover hint, no auth key resolved, no
-    script dispatched;
+    script dispatched; start off Tailscale or with an unsupported client refuses before any secret
+    resolves;
   - recover: keys written only after confirmation, then the SSH config synced; a failed repair stops
     before the address read; `joined` selects the settle and the reconnect wording, and without it
     no logout runs; a stopped VM started before the hold and then repaired, and an unknown power
-    state refused before any script; a provisioning-failed VM refused;
+    state refused before any script; a provisioning-failed VM refused; a blank auth key refused
+    before any script;
   - rekey: one script, then the settle, the address recorded; a failed script names recover; a
-    `False` wait warns and exits 0;
-  - delete: each logout outcome reported with no `VMAccess` call after it; `TrustMissing` warns
-    naming the node; the backend delete runs in every case, a teardown failure included;
+    `False` wait raises `VMNotAnswering`;
+  - delete: each logout outcome reported with no `VMAccess` call after it; `TrustMissing`, and a
+    stopped or deallocated VM, warn naming the node with nothing dispatched; the backend delete runs
+    in every case, a teardown failure included;
   - `vm shell --platform`: Proxmox refuses before the boundary resolves anything; `--workspace` is
     refused; a 255 prints the notice after the guard.
 
@@ -845,7 +876,7 @@ the live half of each proof is the slice's Live evidence.
 | Row | Where it holds now                                                                                                                                                                               | Proof                                                                                                   |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
 | I29 | The rekey script: restart, logout under `timeout 60`, join, restart, 15 s after each (`vms/recovery.py:155-168`)                                                                                 | `test_rekey_restarts_logs_out_joins_and_restarts_with_a_pause_after_each`; the rekey cells              |
-| I30 | Rekey and logout share the `trap '' HUP PIPE` prologue that writes nothing until `finish` (`vms/recovery.py:138-153`)                                                                            | Vector W4 (`conformance/root_vectors.py:128`, `:267`): L on CI, V on Lima, Remote Lima and Azure        |
+| I30 | Rekey's prologue and `tailscale_join.LOGOUT_SCRIPT` set `trap '' HUP PIPE` and write nothing until done                                                                                          | Vector W4 (`conformance/root_vectors.py:128`, `:267`): L on CI, V on Lima, Remote Lima and Azure        |
 | I31 | `root_script.run` redacts the secret from every field and record (`execution/root_script.py:142`); `_operation_log` registers the key before the first write (`vms/manager/_helpers.py:215-223`) | The wrapper tests                                                                                       |
 | I32 | `PublicAddressPlatform._public_ssh` raises `StateError` with `public_address_hint` before any connection (`capabilities/vm_platform/public_ssh.py:209-219`); GCP's read raises `GCEError` itself | `test_a_cloud_vm_with_no_public_address_is_a_state_error`                                               |
 | I33 | Teardown and logout are best-effort spans that re-raise only `UserAbort`; `platform.delete` follows them (`vms/manager/power.py:246-269`)                                                        | `tests/vms/test_delete_logout.py`                                                                       |

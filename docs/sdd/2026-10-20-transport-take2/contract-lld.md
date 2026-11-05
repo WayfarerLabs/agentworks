@@ -374,7 +374,9 @@ includes the hold entered before `bootstrap_vm` (`lifecycle.py:643`). An interru
 leaves `COMPLETE` and takes `_warn_init_cancel`. A post-ready wait that raises (`HOST_KEY`,
 `AUTH_FAILED`, anything else the table raises) is outside the span like the wait itself and
 propagates out of `bootstrap_vm` to `_raise_init_failure`: the row stays `COMPLETE`, the VM was
-attested seconds earlier, and the operator is told to `vm reinit`.
+attested seconds earlier, and the operator is told to `vm reinit`. A failure that leaves the row
+never complete gets `_raise_init_failure`'s delete guidance alone: a `VMNotReady` or `TrustMissing`
+cause, whose own hint names `agw vm recover`, is not chained, since recover refuses that VM.
 
 **Enroll covers more than one connection.** The first-contact wait can make up to 17 connections
 (sixteen attempts and the confirming probe), all in Enroll mode. `accept-new` records a key only
@@ -713,6 +715,22 @@ the first contact now over SSH while the hold is the only thing keeping the dist
 Re-proving I24 here does not re-prove I10 (the key out of command lines, logs and exceptions), which
 stays slice 4's with the port off `ExecTransport`; this slice leaves the key-bearing code as it was.
 
+### Result
+
+Audited at PR B's final-review code. The unit half of each proof is below; no live cell has yet run
+against PR B's Phase A, so I25's live half (a WSL2 create whose hold is all that keeps the distro up
+through Phase A) has no evidence. It belongs to slice 3's open live-evidence box.
+
+| Row | Where it holds now                                                                                                                                                                                        | Proof                                                                                                                                                                                                                                             |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| I22 | Phase A's `except BaseException` arm runs `_secure`, then re-raises (`vms/initializer/phase_a.py:127-131`)                                                                                                | `test_an_interrupt_before_the_contract_passes_secures_and_leaves_the_vm_gated`, `test_a_secure_hook_failure_does_not_mask_the_interrupt`                                                                                                          |
+| I23 | After the first contact, a store with no record raises `ProvisioningError` with delete guidance (`vms/initializer/phase_a.py:98-106`)                                                                     | `test_a_failure_before_the_contract_passes_marks_failed_and_secures` (its `_no_key_recorded` case)                                                                                                                                                |
+| I24 | `join_tailscale` runs once and never retries; the settle reads the address, and when the reads run out logs the node out and never joins again (`capabilities/vm_platform/tailscale_join.py:52`, `:120`)  | `test_a_failed_join_raises_once_without_the_key`, `test_exhaustion_logs_out_once_and_gives_the_rerun_hint`, `test_exhausted_reads_after_the_join_log_out_without_joining_again`, `test_a_failed_join_or_address_rolls_back_without_a_second_join` |
+| I25 | The hold enters `init_stack` just before Phase A, and the stack closes after Phase B (`vms/manager/lifecycle.py:364`, `:612`)                                                                             | `test_create_keeps_a_vm_whose_phase_a_did_not_complete_out_of_every_command` (the hold precedes Phase A); the span through Phase B is by construction, with no test of its own; the live half has no evidence                                     |
+| I26 | The release is the contract's first request, recorded from the guest's answer and enforced before `COMPLETE` (`vms/initializer/phase_a.py:107-111`)                                                       | `test_the_sequence_records_enrolls_checks_then_completes`, `test_a_failure_before_the_contract_passes_marks_failed_and_secures` (its `_release_mismatch` case), `test_a_failed_release_check_records_no_release`                                  |
+| I27 | `reconcile_release` raises `StateError` on live drift, and `confirm_vm_release` is the explicit adoption (`vms/manager/release.py:23-42`)                                                                 | `test_reconcile_release_refuses_recorded_live_drift`, the `test_confirm_release_*` tests in `tests/test_vm_release.py`                                                                                                                            |
+| I28 | `SSHLogger` takes its redactions at construction, before any write (`ssh.py:117-132`); `_operation_log` passes them (`vms/manager/_helpers.py:215-223`); `root_script.run` redacts every field it returns | `test_redactions_cannot_be_registered_after_writes`, `test_shell_quoted_secret_is_redacted_from_command`, `test_record_redacts_a_registered_secret_in_the_argv_the_streams_and_the_diagnostics`, `test_the_operation_log_never_holds_the_key`     |
+
 ## Collateral
 
 - **ADR 0025.** An "Amended" paragraph in the status block, as ADR 0014 does for slice 2: core
@@ -817,9 +835,9 @@ probes (its first callers) are, not slice 5 as the first draft of this list said
     joining the static check; the `release.py` split and deleting `probe_debian_release`;
     `parse_tailnet_address`, `settle_tailnet_address` and the `parse_bootstrap_output` change;
     narrowing the provisioning trust file's lifetime; the `contract_version` bump to 2; `COMPLETE`
-    written after the contract passes and `FAILED` on a Phase A interrupt; the test and vector lists
-    above. Withdraw the test "each diagnosis names reinit or recreation" (`plan.md:221`): every FAIL
-    names recreation, so it asserts nothing.
+    written only after the contract passes, so a Phase A interrupt leaves the row never complete,
+    which the gate refuses; the test and vector lists above. Withdraw the test "each diagnosis names
+    reinit or recreation" (`plan.md:221`): every FAIL names recreation, so it asserts nothing.
   - Add: slice 3 does not merge without slice 4, with no stopgap hint wording in between.
   - Slice 4 deletes the legacy `TailscaleWait` and `wait_for_reconnect` with their last callers.
   - Slice 5 adds the operation log's handling of a sensitive stdin; slice 7 adds the `observation`
