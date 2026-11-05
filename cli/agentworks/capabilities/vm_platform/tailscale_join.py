@@ -75,12 +75,16 @@ def join_tailscale(run_as_root: Callable[[bytes, float], RawRun], auth_key: str,
     A non-zero status raises ``ProvisioningError`` quoting the last lines of
     ``tailscale up``'s stderr, its reason (an invalid auth key, say), with
     the key redacted as from every stream; the error reaches the create's
-    operation log as its outcome. An outcome that cannot
-    be established, a channel that raised ``ConnectivityError`` included,
-    raises naming ``node``, since the node may have joined. Neither retries.
+    operation log as its outcome. A channel that raised
+    :class:`ChannelUnreachable` dispatched nothing, so the node did not join,
+    and that raises with the channel's own hint. Any other outcome that
+    cannot be established, another ``ConnectivityError`` included, raises
+    naming ``node``, since the node may have joined. None retries.
     """
     try:
         result = root_script.run(run_as_root, JOIN_FRAGMENT, deadline=JOIN_DEADLINE_SECONDS, secret=auth_key)
+    except ChannelUnreachable as error:
+        raise ProvisioningError(f"node '{node}' did not join the tailnet: {error}", hint=error.hint) from error
     except ConnectivityError as error:
         raise _join_unknown(node) from error
     if result.status is None:

@@ -253,6 +253,29 @@ def test_a_settle_over_an_unreachable_channel_neither_logs_out_nor_advises_remov
 # -- The join --------------------------------------------------------------------------------
 
 
+def test_a_join_whose_channel_never_reached_the_vm_did_not_join() -> None:
+    """Nothing was dispatched, so there is no node to remove: the channel's own guidance stands."""
+    unreachable = ChannelUnreachable("the VM did not answer, so no script was dispatched", hint="Start the VM.")
+    guest = FakeGuest(lambda payload, seen: Answer(raises=unreachable))
+
+    with pytest.raises(ProvisioningError) as caught:
+        join_tailscale(guest.run_as_root, KEY, node=NODE)
+
+    assert caught.value.__cause__ is unreachable
+    assert caught.value.hint == unreachable.hint
+    assert_key_free(caught.value)
+
+
+def test_a_join_whose_channel_failed_after_dispatch_may_have_joined() -> None:
+    guest = FakeGuest(lambda payload, seen: Answer(raises=ConnectivityError("the connection dropped")))
+
+    with pytest.raises(ProvisioningError) as caught:
+        join_tailscale(guest.run_as_root, KEY, node=NODE)
+
+    assert NODE in (caught.value.hint or "")
+    assert_key_free(caught.value)
+
+
 def test_the_key_reaches_only_the_join_script() -> None:
     guest = FakeGuest()
 

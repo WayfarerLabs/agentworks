@@ -214,8 +214,10 @@ class ExecutionIncomplete(ConnectivityError):
         elif getattr(completion, "reason", None) is UnknownReason.AUTH_FAILED:
             summary = f"VM '{vm_name}' did not accept the configured SSH key, so nothing ran"
             hint = (
-                "Check that operator.ssh_private_key is the key authorized for this account on the VM; "
-                f"for the VM's admin, 'agw vm recover {vm_name}' restores it through the platform's own channel."
+                "Check that operator.ssh_private_key is the key authorized for this account on the VM. "
+                f"If the admin account refused it, 'agw vm recover {vm_name}' restores the admin's key through "
+                "the platform's own channel; on a cloud that channel uses the same key and sshd, so use the "
+                "provider's console there."
             )
         else:
             reason = getattr(completion, "reason", None)
@@ -226,7 +228,8 @@ class ExecutionIncomplete(ConnectivityError):
                 # with the connection, so only the repair is named.
                 hint += (
                     f" If the VM does not answer, 'agw vm recover {vm_name}' repairs its SSH server and"
-                    " Tailscale node through the platform's own channel."
+                    " Tailscale node through the platform's own channel; on a cloud that channel uses the"
+                    " same key and sshd, so if they are what fails, use the provider's console."
                 )
         super().__init__(
             _with_tail(summary, result.client_log_tail),
