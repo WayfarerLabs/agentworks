@@ -24,6 +24,7 @@ from agentworks.plugins.aws.platform import EC2Platform
 from agentworks.ssh import SSHError
 from agentworks.transports import SSHTransport
 from tests._aws_fakes import Controls, client_error, install_fakes, stub_egress, unreachable
+from tests.conftest import provisioning_trust_for_tests
 
 if TYPE_CHECKING:
     from tests._aws_fakes import Recorder
@@ -88,6 +89,7 @@ def _request(
         admin_username="agw",
         ssh_public_key=ssh_key,
         ssh_private_key=None,
+        provisioning_trust=provisioning_trust_for_tests("dev"),
         tailscale_auth_key=tailscale,
         progress=MagicMock(),
         cpus=cpus,

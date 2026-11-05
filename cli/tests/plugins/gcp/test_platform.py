@@ -27,6 +27,7 @@ from agentworks.plugins.gcp.errors import (
 from agentworks.plugins.gcp.network import FirewallState
 from agentworks.plugins.gcp.platform import GCEPlatform
 from agentworks.ssh import SSHError, SSHResult
+from tests.conftest import provisioning_trust_for_tests
 
 _TAILSCALE_SENTINEL = "tskey-hostile-'\"$()"
 _SERVICE_SENTINEL = '{"private_key":"service-hostile-\'\\"$()"}'
@@ -319,6 +320,7 @@ def _request(progress: BootstrapProgress | None = None) -> ProvisionRequest:
         admin_username="agentworks",
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=None,
+        provisioning_trust=provisioning_trust_for_tests("a"),
         tailscale_auth_key=_TAILSCALE_SENTINEL,
         progress=progress or MagicMock(),
         cpus=2,

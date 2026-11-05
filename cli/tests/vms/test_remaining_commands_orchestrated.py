@@ -17,22 +17,28 @@ SSH/subprocess transports are the fakes.
 
 from __future__ import annotations
 
+import os
+import signal
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
 from agentworks.db import VMStatus
+from agentworks.execution.requests import Forward
+from agentworks.execution.trust import HOST_TRUST
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.ssh import SSHResult
 from agentworks.vms import manager as vm_manager
-from tests.conftest import stub_vm_ssh_identity
+from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
 from tests.native_exec_support import ExecCall, ExecutionOnlyTransport
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.db import Database
+    from tests.vm_access_support import AccessRecorder
 
 
 @pytest.fixture(autouse=True)
@@ -43,6 +49,7 @@ def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
 def _seed_vm(db: Database, *, operator_stopped: bool = False) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    seed_vm_trust("box")
     if operator_stopped:
         db.set_operator_stopped("box", True)
 
@@ -246,6 +253,32 @@ def test_rekey_running_check_runs_after_the_resolve_boundary(
     assert order == ["preflight", "resolve", "status"]
 
 
+def test_rekey_without_a_host_key_record_raises_before_resolving_or_touching_the_vm(
+    db: Database,
+    make_config,  # noqa: ANN001
+    _ts_key: None,
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rekeying would spend the new key and record the new address before its
+    reconnect check raised."""
+    from agentworks.execution import trust
+    from agentworks.execution.errors import TrustMissing
+
+    config = make_config()
+    _seed_vm(db)
+    trust.remove("box")
+    events = _fake_status(monkeypatch, VMStatus.RUNNING)
+
+    with pytest.raises(TrustMissing):
+        vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert resolve_counter == []
+    assert events == []
+    row = db.get_vm("box")
+    assert row is not None and row.tailscale_host == "100.64.0.9"
+
+
 def test_rekey_missing_key_fails_at_the_one_resolve_before_status(
     db: Database,
     make_config,  # noqa: ANN001
@@ -312,7 +345,7 @@ def _fake_rekey_transports(
     )
     monkeypatch.setattr(
         "agentworks.transports.transport",
-        lambda vm, config, **kwargs: SSHTransport(host="100.64.0.9"),
+        lambda vm, config, **kwargs: SSHTransport(trust=HOST_TRUST, host="100.64.0.9"),
     )
     monkeypatch.setattr("agentworks.transports.wait_for_reconnect", lambda target: True)
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda config, db: None)
@@ -452,40 +485,17 @@ def test_rekey_wraps_steps_in_a_section(
 # == port_forward_vm: a gated command =========================================
 
 
-class _FakeTunnel:
-    def __init__(self) -> None:
-        self.argv: list[list[str]] = []
-        self.terminated = False
-
-    def __call__(self, cmd: list[str]) -> _FakeTunnel:
-        self.argv.append(cmd)
-        return self
-
-    def wait(self) -> int:
-        return 0
-
-    def terminate(self) -> None:
-        self.terminated = True
-
-
-@pytest.fixture
-def tunnel(monkeypatch: pytest.MonkeyPatch) -> _FakeTunnel:
-    fake = _FakeTunnel()
-    monkeypatch.setattr("subprocess.Popen", fake)
-    return fake
-
-
 def test_port_forward_reachable_vm_is_one_boundary_burst(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    tunnel: _FakeTunnel,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
     """port-forward on a reachable VM: the gate's fast path costs
-    nothing, the site secret rides ONE boundary burst, and the SSH
-    tunnel carries the -L specs inside the held span."""
+    nothing, the site secret rides ONE boundary burst, and the forward
+    carries the port specs inside the held span."""
     config = make_config()
     _seed_vm(db)
     _reachable(monkeypatch, True)
@@ -498,16 +508,15 @@ def test_port_forward_reachable_vm_is_one_boundary_burst(
     )
 
     assert resolve_counter == [["proxmox-token"]]
-    (argv,) = tunnel.argv
-    assert "localhost:8080:localhost:8080" in " ".join(argv)
-    assert "localhost:9000:localhost:3000" in " ".join(argv)
+    (forwards,) = vm_access_recorder.requests("forward")
+    assert forwards == (Forward(8080, 8080, "localhost"), Forward(9000, 3000, "localhost"))
 
 
 def test_port_forward_stopped_vm_gates_then_forwards(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    tunnel: _FakeTunnel,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -531,14 +540,14 @@ def test_port_forward_stopped_vm_gates_then_forwards(
 
     assert events == ["status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
-    assert len(tunnel.argv) == 1
+    assert len(vm_access_recorder.requests("forward")) == 1
 
 
 def test_port_forward_bad_spec_fails_with_zero_resolves_and_zero_gate(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    tunnel: _FakeTunnel,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agentworks.errors import ValidationError
@@ -555,13 +564,72 @@ def test_port_forward_bad_spec_fails_with_zero_resolves_and_zero_gate(
 
     assert resolve_counter == []
     assert events == []
-    assert tunnel.argv == []
+    assert vm_access_recorder.requests("forward") == []
+
+
+def test_port_forward_returns_zero_when_the_operator_stops_it(
+    db: Database,
+    make_config,  # noqa: ANN001
+    vm_access_recorder: AccessRecorder,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    vm_access_recorder.access().forward_status = KeyboardInterrupt()
+
+    assert vm_manager.port_forward_vm(db, config, "box", ["8080"], interaction=TtyInteractionPolicy.REFUSE) == 0
+
+
+def test_port_forward_returns_the_clients_status_for_any_other_end(
+    db: Database,
+    make_config,  # noqa: ANN001
+    vm_access_recorder: AccessRecorder,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    vm_access_recorder.access().forward_status = 255
+
+    assert vm_manager.port_forward_vm(db, config, "box", ["8080"], interaction=TtyInteractionPolicy.REFUSE) == 255
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal handlers")
+def test_port_forward_turns_sigterm_into_an_operator_stop_and_restores_the_handler(
+    db: Database,
+    make_config,  # noqa: ANN001
+    vm_access_recorder: AccessRecorder,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    before = signal.getsignal(signal.SIGTERM)
+    access = vm_access_recorder.access()
+
+    def terminated(forwards, *, verbose=False) -> int:  # noqa: ANN001
+        os.kill(os.getpid(), signal.SIGTERM)
+        raise AssertionError("SIGTERM was not delivered as an interrupt")
+
+    access.forward = terminated  # type: ignore[method-assign]
+
+    assert vm_manager.port_forward_vm(db, config, "box", ["8080"], interaction=TtyInteractionPolicy.REFUSE) == 0
+    assert signal.getsignal(signal.SIGTERM) == before
+
+    access.forward = lambda forwards, *, verbose=False: (_ for _ in ()).throw(RuntimeError("boom"))  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="boom"):
+        vm_manager.port_forward_vm(db, config, "box", ["8080"], interaction=TtyInteractionPolicy.REFUSE)
+    assert signal.getsignal(signal.SIGTERM) == before
 
 
 def test_port_forward_scope_reaches_node_readiness(
     db: Database,
     make_config,  # noqa: ANN001
-    tunnel: _FakeTunnel,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -604,7 +672,7 @@ def backup_env(
     from agentworks.transports import SSHTransport
 
     monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
-    target = SSHTransport(host="100.64.0.9")
+    target = SSHTransport(trust=HOST_TRUST, host="100.64.0.9")
     target.run = lambda *a, **k: SimpleNamespace(stdout="", ok=True)  # type: ignore[method-assign, assignment]
     monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: target)
     return make_config(f'[paths]\nbackups = "{tmp_path.as_posix()}/backups"\n')

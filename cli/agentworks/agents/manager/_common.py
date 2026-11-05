@@ -237,6 +237,9 @@ def _resolve_workspace_for_agent(
 def _assert_agent_ssh_works(target: Transport, agent: AgentRow) -> None:
     """Probe direct agent SSH; raise an actionable error on auth rejection.
 
+    Probe over the legacy transport, kept for the session paths. Its successor
+    on the execution core is ``_assert_agent_access_works`` in ``access.py``.
+
     The direct-target-user-SSH rollout populates each agent's
     ``~/.ssh/authorized_keys`` with the operator's key set at agent create /
     reinit. Agents that existed before this rollout have a home directory

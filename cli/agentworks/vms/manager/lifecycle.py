@@ -39,10 +39,12 @@ from agentworks.errors import (
     TokenRejectedError,
     UserAbort,
 )
+from agentworks.execution import trust
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
 
 from ._helpers import _require_vm
 from .boundary import _warn_legacy_release
+from .pam_env import warn_pam_env_settings
 
 if TYPE_CHECKING:
     from typing import NoReturn
@@ -437,6 +439,17 @@ def create_vm(
             log = RealizationLog()
             log.mark_realized(pending_vm)
 
+            # Reset the host-key store file now that the name is ours, so a
+            # reused name never inherits a key: it is left empty and private,
+            # and Phase A's first connection writes the VM's key into it.
+            # Nothing else writes it before then, so the unwinds below need no
+            # store cleanup.
+            try:
+                trust.begin_enrollment(vm_name)
+            except BaseException:
+                log.unwind()
+                raise
+
             # The platform instance was bound (and preflighted, and its secrets
             # resolved) at the composition root above; dispatch is just ops now.
             platform_obj = site_node.platform
@@ -496,6 +509,11 @@ def create_vm(
                     admin_username=resolved_admin_username,
                     ssh_public_key=prepared_ssh.public_text,
                     ssh_private_key=config.operator.ssh_private_key,
+                    # Cloud provisioning reaches the VM at its public address,
+                    # before it is in the store. The file is deleted when the
+                    # stack unwinds, after Phase B, because core keeps using
+                    # the create-time transport until Phase A.
+                    provisioning_trust=init_stack.enter_context(trust.provisioning_binding(vm_name)),
                     tailscale_auth_key=tailscale_auth_key,
                     progress=logger,
                     cpus=resolved_cpus,
@@ -945,6 +963,7 @@ def reinit_vm(
             try:
                 verified_release = _mgr.verified_vm_release(db, vm, ts_target)
                 _warn_newly_observed_legacy(vm, verified_release)
+                warn_pam_env_settings(ts_target, name)
                 _mgr.run_initialization(
                     db,
                     config,

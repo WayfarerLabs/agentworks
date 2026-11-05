@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.requests import AccountShell
     from agentworks.git_credentials import CredentialRequest
     from agentworks.install_commands import UserInstallCommandEntry
     from agentworks.resources import Registry
@@ -33,7 +34,7 @@ def create_new_agent_user(
     config: Config,
     linux_user: str,
     *,
-    shell: str,
+    shell: AccountShell,
     logger: SSHLogger,
 ) -> None:
     """Establish fresh ownership before the caller may arm user rollback.
@@ -62,8 +63,7 @@ def create_new_agent_user(
             entity_name=linux_user,
             hint="Choose another agent name or remove the unowned native account and home first.",
         )
-    shell_path = f"/bin/{shell}" if "/" not in shell else shell
-    target.run(f"useradd -m -U -s {shlex.quote(shell_path)} {shlex.quote(linux_user)}", sudo=True)
+    target.run(f"useradd -m -U -s {shlex.quote(f'/bin/{shell}')} {shlex.quote(linux_user)}", sudo=True)
 
 
 def create_agent_on_vm(

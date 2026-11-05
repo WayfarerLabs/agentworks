@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agentworks.execution.trust import HOST_TRUST
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import SSHTransport
 from tests.transports.conftest import fail_completed as _fail_completed
@@ -22,7 +23,7 @@ from tests.transports.conftest import ok_completed as _ok_completed
 
 
 def test_run_builds_ssh_argv_with_user_host() -> None:
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _ok_completed()
         t.run("echo hi")
@@ -34,7 +35,7 @@ def test_run_builds_ssh_argv_with_user_host() -> None:
 
 
 def test_run_maps_process_launch_failure_to_transport_error() -> None:
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with (
         patch("agentworks.transports.ssh.subprocess.run", side_effect=FileNotFoundError("ssh")),
         pytest.raises(SSHError),
@@ -43,7 +44,7 @@ def test_run_maps_process_launch_failure_to_transport_error() -> None:
 
 
 def test_run_sudo_wraps_with_bash_c() -> None:
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _ok_completed()
         t.run("cmd1 && cmd2", sudo=True)
@@ -52,7 +53,7 @@ def test_run_sudo_wraps_with_bash_c() -> None:
 
 
 def test_run_login_shell_wraps_with_dollar_shell_lc() -> None:
-    t = SSHTransport(host="vm1", user="agentworks", login_shell=True)
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks", login_shell=True)
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _ok_completed()
         t.run("echo hi")
@@ -64,7 +65,7 @@ def test_run_env_coalesces_into_one_set_env_arg() -> None:
     """``-o SetEnv=`` is emitted once with all pairs coalesced (ssh_config(5)
     takes only the first SetEnv occurrence, so a per-pair option drops
     later pairs silently)."""
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _ok_completed()
         t.run("echo hi", env={"A": "1", "B": "two words"})
@@ -80,7 +81,7 @@ def test_run_default_closes_stdin_with_dash_n_and_no_tt() -> None:
     ssh's own ``-n``: a stdin-reading remote command then cannot hang and
     ssh cannot pull from the operator's console. ``-tt`` (which corrupts
     output and fakes a remote TTY) is never forced by default."""
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _ok_completed()
         t.run("echo hi")
@@ -93,7 +94,7 @@ def test_run_tty_true_forces_tt_and_omits_dash_n() -> None:
     """An explicit ``run(tty=True)`` allocates a pty with ``-tt``. ``-n``
     and ``-tt`` are mutually exclusive: ``-tt`` already attaches stdin to
     the pty, so the stdin-closing ``-n`` must not appear."""
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _ok_completed()
         t.run("echo hi", tty=True)
@@ -105,7 +106,7 @@ def test_run_tty_true_forces_tt_and_omits_dash_n() -> None:
 def test_run_tty_false_still_closes_stdin_with_dash_n() -> None:
     """``tty=False`` is "no forced TTY", the same as the default, so it
     still gets ``-n`` and no ``-tt``."""
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _ok_completed()
         t.run("echo hi", tty=False)
@@ -121,7 +122,7 @@ def test_run_default_forces_no_tty_over_operator_ssh_config() -> None:
     operator's ``RequestTTY force`` cannot inject a pty (and its CRLF, merged
     streams, fake ``isatty``) into our output. Only an explicit ``tty=True``
     allocates one."""
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _ok_completed()
         t.run("echo hi")
@@ -131,7 +132,7 @@ def test_run_default_forces_no_tty_over_operator_ssh_config() -> None:
 
 
 def test_run_check_true_raises_on_nonzero() -> None:
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _fail_completed(returncode=42, stderr="nope")
         with pytest.raises(SSHError, match="exit 42"):
@@ -139,7 +140,7 @@ def test_run_check_true_raises_on_nonzero() -> None:
 
 
 def test_run_check_false_returns_nonzero_result() -> None:
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _fail_completed(returncode=42)
         result = t.run("false", check=False)
@@ -148,7 +149,7 @@ def test_run_check_false_returns_nonzero_result() -> None:
 
 
 def test_run_default_timeout_applies_when_call_omits_timeout() -> None:
-    t = SSHTransport(host="vm1", user="agentworks", default_timeout=99)
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks", default_timeout=99)
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _ok_completed()
         t.run("echo hi")
@@ -156,7 +157,7 @@ def test_run_default_timeout_applies_when_call_omits_timeout() -> None:
 
 
 def test_run_per_call_timeout_overrides_default() -> None:
-    t = SSHTransport(host="vm1", user="agentworks", default_timeout=99)
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks", default_timeout=99)
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _ok_completed()
         t.run("echo hi", timeout=5)
@@ -170,7 +171,7 @@ def test_run_per_call_retries_overrides_constructor() -> None:
     """
     import subprocess as _subprocess
 
-    t = SSHTransport(host="vm1", user="agentworks", retries=1)
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks", retries=1)
     call_count = 0
 
     def raise_timeout(*_a: object, **_kw: object) -> MagicMock:
@@ -193,7 +194,7 @@ def test_run_per_call_retries_overrides_constructor() -> None:
 
 
 def test_interactive_omits_command_when_empty() -> None:
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
         mock_call.return_value = 0
         t.interactive("")
@@ -202,7 +203,7 @@ def test_interactive_omits_command_when_empty() -> None:
 
 
 def test_interactive_appends_command_when_provided() -> None:
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
         mock_call.return_value = 0
         t.interactive("tmux attach -t s1")
@@ -211,7 +212,7 @@ def test_interactive_appends_command_when_provided() -> None:
 
 
 def test_interactive_uses_minus_t_flag() -> None:
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
         mock_call.return_value = 0
         t.interactive("")
@@ -231,7 +232,7 @@ def test_interactive_sets_client_keepalives() -> None:
     retransmit budget lasts, and the terminal guard cannot run until it
     returns.
     """
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
         mock_call.return_value = 0
         t.interactive("")
@@ -246,7 +247,7 @@ def test_interactive_sets_client_keepalives() -> None:
 
 
 def test_copy_to_uses_scp() -> None:
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _ok_completed()
         t.copy_to("/local/foo", "/remote/bar")
@@ -257,7 +258,7 @@ def test_copy_to_uses_scp() -> None:
 
 
 def test_copy_from_uses_scp_with_reversed_source_dest() -> None:
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _ok_completed()
         t.copy_from("/remote/bar", "/local/foo")
@@ -270,7 +271,7 @@ def test_copy_from_uses_scp_with_reversed_source_dest() -> None:
 
 
 def test_copy_to_raises_on_scp_failure() -> None:
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _fail_completed(stderr="permission denied")
         with pytest.raises(SSHError, match="scp failed"):
@@ -286,7 +287,7 @@ def test_call_streaming_uses_minus_T_no_batchmode_violation() -> None:
     """``call_streaming`` must request no TTY (``-T``) and use
     ``BatchMode=yes`` so output streams to inherited stdio rather than
     waiting on prompts."""
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
         mock_call.return_value = 0
         t.call_streaming("echo hi")
@@ -313,7 +314,7 @@ def test_call_streaming_uses_minus_T_no_batchmode_violation() -> None:
 
 
 def test_run_fences_remote_command_with_double_dash() -> None:
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _ok_completed()
         t.run("--anything-starting-with-dashes")
@@ -330,7 +331,7 @@ def test_call_streaming_fences_remote_command_with_double_dash() -> None:
     `--workspace` isn't consumed by Click and flows through into the
     remote-command string, the ssh argv must fence it with ``--`` so the
     local ssh client doesn't parse it as a client option."""
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
         mock_call.return_value = 0
         t.call_streaming("--workspace ws1 pwd")
@@ -344,7 +345,7 @@ def test_interactive_fences_remote_command_with_double_dash() -> None:
     """Interactive shells get the same fence treatment when a remote
     command is supplied (e.g. the ``cd <ws> && exec $SHELL -l`` wrap
     used by ``shell_vm --workspace``)."""
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
         mock_call.return_value = 0
         t.interactive("cd /ws1 && exec $SHELL -l")
@@ -356,7 +357,7 @@ def test_interactive_fences_remote_command_with_double_dash() -> None:
 def test_interactive_omits_fence_for_empty_command() -> None:
     """No command → no fence. The destination remains the last argv
     element so ssh opens a plain login shell."""
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
         mock_call.return_value = 0
         t.interactive("")
@@ -370,7 +371,7 @@ def test_run_login_shell_still_emits_fence() -> None:
     ``$SHELL -lc <quoted>`` -- the ``--`` fence must still go between
     the destination and that wrapped command. Different argv branch
     from the plain ``run`` case above, so worth pinning."""
-    t = SSHTransport(host="vm1", user="agentworks", login_shell=True)
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks", login_shell=True)
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _ok_completed()
         t.run("echo hi")
@@ -390,7 +391,7 @@ def test_write_file_uses_copy_to_under_the_hood(tmp_path: Path) -> None:
     """``write_file`` must funnel through ``copy_to`` (which is scp) rather
     than embedding multi-line content in command argv -- the Windows CRLF
     trap that motivated the helper."""
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     staged: list[Path] = []
 
     def inspect_copy(local_path: str | Path, remote_path: str) -> None:
@@ -407,7 +408,7 @@ def test_write_file_uses_copy_to_under_the_hood(tmp_path: Path) -> None:
 
 
 def test_write_file_chmods_when_mode_supplied(tmp_path: Path) -> None:
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch.object(t, "copy_to"), patch.object(t, "run") as mock_run:
         mock_run.return_value = SSHResult(returncode=0, stdout="", stderr="")
         t.write_file("/remote path/$(false)", "x", mode="0644")
@@ -426,7 +427,7 @@ def test_interactive_reports_a_dropped_connection(captured_output) -> None:  # n
     operator's side: the CLI exits with the code and prints nothing, and
     ssh's own diagnostic went to the alternate screen that the terminal
     guard has since discarded."""
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
         mock_call.return_value = 255
         assert t.interactive("tmux attach -t s1") == 255
@@ -436,7 +437,7 @@ def test_interactive_reports_a_dropped_connection(captured_output) -> None:  # n
 
 def test_interactive_says_nothing_on_a_clean_detach(captured_output) -> None:  # noqa: ANN001
     """Detaching is the common case and needs no commentary."""
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
         mock_call.return_value = 0
         t.interactive("tmux attach -t s1")
@@ -447,7 +448,7 @@ def test_interactive_says_nothing_for_a_remote_command_failure(captured_output) 
     """255 is ssh's transport-failure code. Any other non-zero exit is
     the remote command's own status (``exit 3`` in a login shell), which
     is not a connection problem and not ours to narrate."""
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
         mock_call.return_value = 3
         t.interactive("")
@@ -475,7 +476,7 @@ def test_dropped_connection_notice_is_written_after_the_terminal_guard(
         lambda message: events.append(f"warn:{message}"),
     )
 
-    t = SSHTransport(host="vm1", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
         mock_call.return_value = 255
         t.interactive("")

@@ -29,6 +29,7 @@ from agentworks.errors import StateError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
+from tests.conftest import seed_vm_trust
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -55,6 +56,7 @@ class _AuthKeys:
 def _seed_vm(db: Database) -> VMRow:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    seed_vm_trust("box")
     vm = db.get_vm("box")
     assert vm is not None
     return vm

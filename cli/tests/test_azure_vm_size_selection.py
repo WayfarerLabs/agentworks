@@ -25,6 +25,7 @@ from agentworks.plugins.azure.config import (
 )
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from agentworks.schema import RefOwner
+from tests.conftest import provisioning_trust_for_tests
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
@@ -185,6 +186,7 @@ class TestCreateProvisioningOutput:
             admin_username="agw",
             ssh_public_key="ssh-ed25519 AAAA test",
             ssh_private_key=None,
+            provisioning_trust=provisioning_trust_for_tests("dev"),
             tailscale_auth_key="tskey-test",
             progress=MagicMock(),
             cpus=cpus,
@@ -302,6 +304,7 @@ class TestCreateOSDiskClamp:
             admin_username="agw",
             ssh_public_key="ssh-ed25519 AAAA test",
             ssh_private_key=None,
+            provisioning_trust=provisioning_trust_for_tests("dev"),
             tailscale_auth_key="tskey-test",
             progress=MagicMock(),
             cpus=2,

@@ -16,10 +16,13 @@ import pytest
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, StateError, ValidationError
+from agentworks.execution import trust
+from agentworks.execution.errors import TrustMissing
 from agentworks.orchestration.activation import activation_gate, ensure_active
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from agentworks.vms.nodes import LiveVMNode, VMSiteNode
+from tests.conftest import seed_vm_trust
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -134,6 +137,7 @@ def _seed(db: Database, *, tailscale: str | None = "100.64.0.9") -> VMRow:
     db.insert_vm("gvm", site="stub", hostname="gvm")
     if tailscale:
         db.update_vm_tailscale("gvm", tailscale)
+    seed_vm_trust("gvm")
     vm = db.get_vm("gvm")
     assert vm is not None
     return vm
@@ -182,6 +186,30 @@ def test_auto_resume_starts_and_holds_through_tailscale(
         "tailscale",
         "hold-close",
     ]
+
+
+def test_auto_start_without_a_host_key_record_raises_before_starting_or_resolving(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A VM with no record could only fail its reconnect check, and that
+    failure would send the repair path to spend a Tailscale auth key."""
+    vm = _seed(db)
+    trust.remove("gvm")
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
+    platform = _GatePlatform(status=VMStatus.STOPPED)
+    node, _ = _node(db, platform, vm)
+    resolved: list[str] = []
+
+    def _resolve(name: str) -> str:
+        resolved.append(name)
+        return "ts-key"
+
+    with pytest.raises(TrustMissing):
+        ensure_active(node, _resolve)
+
+    assert platform.start_calls == 0
+    assert platform.holds == 0
+    assert resolved == []
 
 
 def test_auto_resume_healthy_probe_releases_without_auth_reader_access(

@@ -113,7 +113,7 @@ def copy_workspace(
             output.info(f"Packing workspace '{source_name}' from VM '{src_vm.name}'...")
 
             # Stream tar from VM to local temp file
-            ssh_args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+            ssh_args = ["ssh", *src_exec.host_key_options(), "-o", "BatchMode=yes"]
             if src_exec.identity_file is not None:
                 ssh_args.extend(["-i", str(src_exec.identity_file)])
             ssh_args.append(f"{src_exec.user}@{src_exec.host}")

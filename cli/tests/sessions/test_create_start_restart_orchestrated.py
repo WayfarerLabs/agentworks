@@ -40,6 +40,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.manager._scope import _regenerate_tmuxinator as _real_regenerate_tmuxinator
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from agentworks.vms import manager as vm_manager
+from tests.conftest import seed_vm_trust
 
 from ..conftest import (
     ManifestDoc,
@@ -1660,6 +1661,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
 def _seed_stopped_proxmox_vm(db: Database) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    seed_vm_trust("box")
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
         "VALUES ('ws1', 'box', '/home/me/ws1', 'ws-ws1')"

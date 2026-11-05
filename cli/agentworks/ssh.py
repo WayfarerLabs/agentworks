@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import shlex
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -41,6 +41,11 @@ class SSHTarget:
     Set user=None to defer to SSH config (used for VM host connections
     where the host is defined in ~/.ssh/config). Explicit user is set
     for VM connections where we control the username.
+
+    ``host_key_options`` are the ``-o`` arguments that choose how the peer's
+    host key is trusted, already resolved by the caller (see
+    :mod:`agentworks.execution.trust`). There is no default, so every
+    construction site chooses.
     """
 
     host: str
@@ -49,6 +54,7 @@ class SSHTarget:
     identity_file: Path | None = None
     proxy_jump: str | None = None
     login_shell: bool = False
+    host_key_options: tuple[str, ...] = field(kw_only=True)
 
 
 # SSH transport failure exit code (connection refused, host unreachable, etc.)
@@ -333,7 +339,7 @@ def _ssh_base_args(
     ``input_text`` payload is written, so callers set ``close_stdin`` only for
     the no-stdin-payload case.
     """
-    args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+    args = ["ssh", *target.host_key_options, "-o", "BatchMode=yes"]
     if tty:
         args.insert(1, "-tt")
     else:
@@ -476,7 +482,7 @@ def run(
 
 def _scp_base_args(target: SSHTarget) -> list[str]:
     """Build the base scp argument list (flags and options, no paths)."""
-    args = ["scp", "-q", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+    args = ["scp", "-q", *target.host_key_options, "-o", "BatchMode=yes"]
     if target.port is not None:
         args.extend(["-P", str(target.port)])
     if target.identity_file is not None:
