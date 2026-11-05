@@ -71,6 +71,23 @@ def test_a_hangup_leaves_the_unwind_writing_to_the_null_device() -> None:
 
 @posix_only
 @pytest.mark.usefixtures("standard_streams")
+def test_an_ignored_hangup_stays_ignored_inside_the_block() -> None:
+    """``nohup`` ignores SIGHUP so the command outlives its terminal; the block must not undo that."""
+    before = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    try:
+        with termination_as_interrupt():
+            assert signal.getsignal(signal.SIGHUP) is signal.SIG_IGN
+            try:
+                os.kill(os.getpid(), signal.SIGHUP)
+            except KeyboardInterrupt:
+                pytest.fail("an ignored SIGHUP interrupted the block")
+        assert signal.getsignal(signal.SIGHUP) is signal.SIG_IGN
+    finally:
+        signal.signal(signal.SIGHUP, before)
+
+
+@posix_only
+@pytest.mark.usefixtures("standard_streams")
 def test_a_second_termination_does_not_cut_the_unwind_short() -> None:
     """The cleanup a first signal starts (closing a cloud route, say) runs to the end through a second one."""
     before = {number: signal.getsignal(number) for number in (signal.SIGTERM, signal.SIGHUP)}
