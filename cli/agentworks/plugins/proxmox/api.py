@@ -291,58 +291,6 @@ class ProxmoxAPI:
 
     # -- Guest agent -----------------------------------------------------------
 
-    def guest_agent_network(self, node: str, vmid: int) -> list[dict[str, Any]]:
-        """Get network interfaces from the QEMU guest agent."""
-        result = self._request("GET", f"/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces")
-        if result and "result" in result:
-            data = result["result"]
-            if isinstance(data, list):
-                return data
-            raise ProxmoxAPIError(f"unexpected network-get-interfaces shape: {type(data).__name__}")
-        return []
-
-    def guest_agent_exec_wait(
-        self,
-        node: str,
-        vmid: int,
-        command: str,
-        args: list[str] | None = None,
-        *,
-        timeout: float = 60,
-    ) -> dict[str, Any] | None:
-        """Run a command via the guest agent and wait for completion.
-
-        Uses exec then polls exec-status until finished or timeout.
-        Returns a validated completion status, or ``None`` at the deadline.
-
-        Proxmox 8 requires the command as a JSON array sent with
-        Content-Type: application/json.
-        """
-        deadline = time.monotonic() + timeout
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return None
-        pid = self.guest_agent_exec(
-            node,
-            vmid,
-            command=[command, *(args or [])],
-            timeout=remaining,
-        )
-        while (remaining := deadline - time.monotonic()) > 0:
-            status = self.guest_agent_exec_status(
-                node,
-                vmid,
-                pid=pid,
-                timeout=remaining,
-            )
-            if status.get("exited") is True:
-                return status
-            remaining = deadline - time.monotonic()
-            if remaining > 0:
-                time.sleep(min(2, remaining))
-
-        return None
-
     def guest_agent_ping(self, node: str, vmid: int, *, timeout: float | None = None) -> None:
         """Ask the VM's guest agent to answer; raises ``ProxmoxAPIError`` while it does not."""
         self._request("POST", f"/nodes/{node}/qemu/{vmid}/agent/ping", timeout=timeout)

@@ -125,19 +125,6 @@ class FakeProxmoxAPI:
 
     # -- guest agent (immediate readiness: no polling sleeps) ------------------
 
-    def guest_agent_network(self, node: str, vmid: int) -> list[dict[str, Any]]:
-        return [
-            {"name": "lo", "ip-addresses": [{"ip-address": "127.0.0.1", "ip-address-type": "ipv4"}]},
-            {"name": "eth0", "ip-addresses": [{"ip-address": "10.0.0.5", "ip-address-type": "ipv4"}]},
-        ]
-
-    def guest_agent_exec_wait(
-        self, node: str, vmid: int, command: str, args: list[str] | None = None, *, timeout: float = 60
-    ) -> dict[str, Any] | None:
-        argv = tuple(args or ())
-        self.calls.append(("guest_agent_exec_wait", node, vmid, command, argv, timeout))
-        return {"exitcode": 0, "out-data": ""}
-
     def guest_agent_ping(self, node: str, vmid: int, *, timeout: float) -> None:
         return None
 

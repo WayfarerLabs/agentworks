@@ -4,7 +4,6 @@ via the Proxmox REST API."""
 from __future__ import annotations
 
 import functools
-import time
 import urllib.parse
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
@@ -24,6 +23,7 @@ from agentworks.capabilities.vm_platform.tailscale_join import (
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
+from agentworks.execution import root_script
 from agentworks.plugins.proxmox import guest_agent
 from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.plugins.proxmox.teardown import (
@@ -35,13 +35,14 @@ from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow
     from agentworks.execution.root_script import RawRun
 
 BOOTSTRAP_DEADLINE_SECONDS = 600
+CLOUD_INIT_DEADLINE_SECONDS = 300
 
 
 class ProxmoxConfig(AgwModel):
@@ -384,18 +385,12 @@ class ProxmoxPlatform(VMPlatform):
                 self._api(ctx).wait_for_task(node, pending_upid)
                 pending_upid = None
 
-                # 6. Wait for guest agent and get VM IP
-                output.detail("Waiting for guest agent...")
-                ip = self._wait_for_guest_ip(node, newid, ctx)
-                output.detail(f"VM IP: {ip}")
-
-                # 7. Wait for cloud-init to finish (releases apt lock)
-                output.detail("Waiting for cloud-init...")
-                self._wait_for_cloud_init(node, newid, ctx)
-
-                # 8. Run the bootstrap, join and read the address through the
-                # guest agent, the VM's root channel
+                # 6. Wait for cloud-init to finish (releases apt lock), then run the
+                # bootstrap, join and read the address through the guest agent,
+                # the VM's root channel
                 run_as_root = functools.partial(guest_agent.run_as_root, self._api(ctx), node, newid)
+                output.detail("Waiting for cloud-init...")
+                _wait_for_cloud_init(run_as_root, newid)
                 run_bootstrap(
                     run_as_root,
                     admin_username=request.admin_username,
@@ -482,62 +477,12 @@ class ProxmoxPlatform(VMPlatform):
 
     # -- Helpers ---------------------------------------------------------------
 
-    def _wait_for_cloud_init(self, node: str, vmid: int, ctx: RunContext, *, timeout: float = 300) -> None:
-        """Wait for cloud-init to finish inside the VM."""
-        deadline = time.monotonic() + timeout
-        last_provider_error: ProxmoxAPIError | None = None
-        while (remaining := deadline - time.monotonic()) > 0:
-            try:
-                result = self._api(ctx).guest_agent_exec_wait(
-                    node,
-                    vmid,
-                    "/usr/bin/cloud-init",
-                    ["status", "--wait"],
-                    timeout=min(60, remaining),
-                )
-                if result is not None:
-                    exitcode = result.get("exitcode")
-                    if exitcode == 0:
-                        return
-                    if exitcode == 2:
-                        output.warn(
-                            f"cloud-init completed with recoverable warnings on Proxmox VMID {vmid}; continuing"
-                        )
-                        return
 
-                    status = f"exit {exitcode}" if exitcode is not None else f"signal {result.get('signal')}"
-                    raise ProvisioningError(f"cloud-init failed on Proxmox VMID {vmid} ({status})")
-            except ProxmoxAPIError as exc:
-                last_provider_error = exc
-            remaining = deadline - time.monotonic()
-            if remaining > 0:
-                time.sleep(min(5, remaining))
-        message = (
-            f"Timed out waiting for cloud-init on Proxmox VMID {vmid}; "
-            "the template must have cloud-init and the QEMU guest agent installed and enabled"
-        )
-        if last_provider_error is not None:
-            message = f"{message}; last Proxmox error: {last_provider_error}"
-        raise ProvisioningError(message) from last_provider_error
-
-    def _wait_for_guest_ip(self, node: str, vmid: int, ctx: RunContext, *, timeout: int = 120) -> str:
-        """Poll the guest agent until it reports a non-loopback IPv4 address."""
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            try:
-                interfaces = self._api(ctx).guest_agent_network(node, vmid)
-                for iface in interfaces:
-                    if iface.get("name") == "lo":
-                        continue
-                    for addr in iface.get("ip-addresses", []):
-                        if addr.get("ip-address-type") == "ipv4":
-                            ip = addr["ip-address"]
-                            if not ip.startswith("127."):
-                                return str(ip)
-            except ProxmoxAPIError:
-                pass  # guest agent not ready yet
-            time.sleep(3)
-        # ProvisioningError, not ProxmoxAPIError: every API call above
-        # succeeded (or was tolerated), so this is the backend VM failing
-        # to reach readiness during provisioning, not an API failure.
-        raise ProvisioningError(f"Timed out waiting for guest agent IP on VMID {vmid}")
+def _wait_for_cloud_init(run_as_root: Callable[[bytes, float], RawRun], vmid: int) -> None:
+    """Wait for cloud-init to finish inside the VM; status 2 is recoverable warnings."""
+    result = root_script.run(run_as_root, "cloud-init status --wait", deadline=CLOUD_INIT_DEADLINE_SECONDS)
+    if result.status == 2:
+        output.warn(f"cloud-init completed with recoverable warnings on Proxmox VMID {vmid}; continuing")
+    elif result.status != 0:
+        outcome = "an unknown outcome" if result.status is None else f"exit {result.status}"
+        raise ProvisioningError(f"cloud-init did not complete on Proxmox VMID {vmid} ({outcome})")

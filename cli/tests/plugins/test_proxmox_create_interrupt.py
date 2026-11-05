@@ -161,25 +161,18 @@ class TestInterruptDuringBootstrapWait:
 
 
 class TestFailClosedBootstrap:
-    def test_cloud_init_timeout_rolls_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_cloud_init_that_does_not_complete_rolls_back_before_the_bootstrap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         platform, fake = _platform_with_fake(monkeypatch)
-        wait_for_cloud_init = ProxmoxPlatform._wait_for_cloud_init
-
-        def _immediate_timeout(self: ProxmoxPlatform, node: str, vmid: int, ctx: RunContext) -> None:
-            wait_for_cloud_init(self, node, vmid, ctx, timeout=0)
-
-        monkeypatch.setattr(ProxmoxPlatform, "_wait_for_cloud_init", _immediate_timeout)
+        fake.guest = FakeGuest(lambda payload, seen: Answer(status=None))
 
         with pytest.raises(ProvisioningError) as caught:
             platform.create(_request(tailscale=True), RunContext())
 
-        assert str(caught.value) == (
-            f"Timed out waiting for cloud-init on Proxmox VMID {NEWID}; "
-            "the template must have cloud-init and the QEMU guest agent installed and enabled"
-        )
         assert ("stop_vm", "pve1", NEWID) in fake.calls
         assert ("delete_vm", "pve1", NEWID) in fake.calls
-        assert fake.guest.scripts == []
+        assert fake.guest.payloads == ["cloud-init status --wait"]
         _assert_exception_graph_is_value_free(caught.value)
 
     @pytest.mark.parametrize(
