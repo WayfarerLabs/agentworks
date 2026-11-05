@@ -1,9 +1,12 @@
-"""VM workspace backend -- operations via SSH to a VM."""
+"""VM workspace backend using SSH to a VM."""
 
 from __future__ import annotations
 
 import json
+import shlex
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from agentworks import output
 from agentworks.errors import AlreadyExistsError
@@ -42,13 +45,12 @@ def create_vm_workspace(
 
     Errors if the workspace directory already exists on the VM.
 
-    Self-cleaning: the group and directory are created early, then the
-    clone and configuration follow. A failure or cancellation after those
-    resources exist (most often the git clone) tears down exactly what
-    this function made and re-raises the ORIGINAL error, so a failed
-    create leaves no residue on the VM (issue #262). ``realize._cleanup``
-    is gated on this function RETURNING, so it never covers a mid-create
-    failure; this teardown is the only one for that window.
+    Reserve the final directory before creating its group. Clone into a private,
+    unique sibling directory and publish only a confirmed successful clone, so
+    an interrupted guest Git process cannot affect a later use of the name.
+    Failures reclaim confirmed resources and preserve the original error.
+    An unconfirmed reservation/publication or newly occupied reservation can
+    leave residue for inspection; retry never adopts it implicitly.
     """
     from agentworks.agents.grants import workspace_group
 
@@ -56,31 +58,43 @@ def create_vm_workspace(
     target = transport(vm, config, logger=logger)
 
     workspace_path = default_workspace_path(config, ws_name)
+    quoted_workspace = shlex.quote(workspace_path)
     ws_group = workspace_group(ws_name)
 
     # Refuse to create if directory already exists
-    exists = target.run(f"test -d {workspace_path}", check=False, timeout=10)
+    exists = target.run(
+        f"test -d {quoted_workspace} || test -e {quoted_workspace} || test -L {quoted_workspace}",
+        check=False,
+        timeout=10,
+    )
     if exists.ok:
         raise AlreadyExistsError(
-            f"directory {workspace_path} already exists on the VM.",
+            f"workspace path {workspace_path!r} already exists on the VM.",
             entity_kind="workspace",
             entity_name=ws_name,
-            hint=(f"Remove it manually (ssh to the VM and 'sudo rm -rf {workspace_path}') or choose a different name."),
+            hint="Inspect and preserve its contents before removing it, or choose a different workspace name.",
         )
 
-    # Everything below creates on-VM resources (the group, then the
-    # directory and its contents). If any step fails, tear down exactly
-    # what was made and re-raise the ORIGINAL error so a failed create
-    # leaves no residue (issue #262). The existence precheck above is
-    # deliberately outside this block: an AlreadyExistsError means the
-    # directory is NOT ours, so it must never be swept up by the teardown.
+    # Reserve exclusively before the cleanup region: a raced-in path or a lost
+    # response is not confirmation that the directory belongs to this attempt.
+    parent = shlex.quote(str(PurePosixPath(workspace_path).parent))
+    target.run(f"mkdir -p -- {parent}", sudo=True)
+    try:
+        target.run(f"mkdir -- {quoted_workspace}", sudo=True)
+    except BaseException:
+        output.warn(
+            f"Workspace directory reservation at {workspace_path!r} was not confirmed. "
+            "Any remaining path was left untouched; inspect and preserve its contents before retrying."
+        )
+        raise
+    attempt: str | None = None
+    clone_published = False
     try:
         # Create workspace group (idempotent), add admin, and set up directory with setgid
         target.run(f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'", sudo=True)
         target.run(f"usermod -aG {ws_group} {vm.admin_username}", sudo=True)
-        target.run(f"mkdir -p {workspace_path}", sudo=True)
-        target.run(f"chown {vm.admin_username}:{ws_group} {workspace_path}", sudo=True)
-        target.run(f"chmod 2770 {workspace_path}", sudo=True)
+        target.run(f"chown {vm.admin_username}:{ws_group} {quoted_workspace}", sudo=True)
+        target.run(f"chmod 2770 {quoted_workspace}", sudo=True)
         # The canonical workspace ACL is applied at the end (apply_workspace_acls),
         # after any clone and other content is placed, so existing entries are
         # covered too. This is the same recursive spec workspace repair applies,
@@ -89,50 +103,51 @@ def create_vm_workspace(
         # Git clone if repo is set
         if template.repo:
             output.info(f"Cloning {template.repo}...")
+            candidate = f"{workspace_path}.agentworks-clone-{uuid4().hex}"
+            quoted_attempt = shlex.quote(candidate)
             try:
-                import shlex
-
-                # `--` stops option parsing so a repo URL beginning with `-` can
-                # never be read as a git flag; both operands are quoted for spaces.
-                target.run(
-                    f"git clone -- {shlex.quote(template.repo)} {shlex.quote(workspace_path)}",
-                    timeout=300,
+                target.run(f"mkdir -m 700 -- {quoted_attempt}", sudo=True)
+            except BaseException:
+                output.warn(
+                    f"Private clone directory reservation at {candidate!r} was not confirmed. "
+                    "Any remaining path was left untouched for inspection."
                 )
-
-                # Stamp the checkout with its configured git identity so commits
-                # made here are attributed correctly. This is repo-local config
-                # (the checkout's own .git/config), so it is actor-agnostic: any
-                # agent, the admin, or a human over VS Code Remote picks it up,
-                # and it overrides any per-user global identity. Identity is only
-                # meaningful for a repo-backed workspace, so it rides the clone.
-                for git_key, value in (
-                    ("user.name", template.git_user_name),
-                    ("user.email", template.git_user_email),
-                ):
-                    if value:
-                        # --local is explicit so the write can only ever land in
-                        # the checkout's .git/config, never the admin's global
-                        # ~/.gitconfig (git config defaults to global outside a repo).
-                        target.run(
-                            f"git -C {shlex.quote(workspace_path)} config --local {git_key} {shlex.quote(value)}"
-                        )
-
-                # Ensure cloned files inherit the workspace group and subdirectories
-                # have SGID so new files (including atomic writes) get the right group
-                target.run(f"chgrp -R {ws_group} {shlex.quote(workspace_path)}", sudo=True)
-                sgid_cmd = f"find {shlex.quote(workspace_path)} -type d -exec chmod g+s {{}} +"
-                target.run(sgid_cmd, sudo=True, timeout=120)
-            except Exception:
-                if template.repo.startswith("git@"):
-                    output.warn(
-                        "Hint: SSH repo URLs are not supported. Use HTTPS URLs "
-                        "and declare the needed git credential on this user template, then reinit."
-                    )
-                else:
-                    output.warn(
-                        "Hint: for private repos, declare the needed git credential on this user template, then reinit."
-                    )
                 raise
+            attempt = candidate
+            target.run(f"chown {vm.admin_username}:{ws_group} {quoted_attempt}", sudo=True)
+            checkout = shlex.quote(f"{candidate}/checkout")
+            # `--` stops option parsing so a repo URL beginning with `-` can
+            # never be read as a git flag; both operands are quoted for spaces.
+            target.run(
+                f"git clone -- {shlex.quote(template.repo)} {checkout}",
+                timeout=300,
+            )
+            target.run(f"chgrp -R {ws_group} {checkout}", sudo=True)
+            target.run(f"find {checkout} -type d -exec chmod g+s {{}} +", sudo=True, timeout=120)
+            target.run(f"chmod 2770 {checkout}", sudo=True)
+            # -T never follows a destination symlink or merges with a newly
+            # populated directory. Both paths share a filesystem; a failed
+            # or unconfirmed rename does not establish final ownership.
+            target.run(f"mv -T -- {checkout} {quoted_workspace}", sudo=True)
+            clone_published = True
+            target.run(f"rmdir -- {quoted_attempt}", sudo=True)
+            attempt = None
+
+            # Stamp the checkout with its configured git identity so commits
+            # made here are attributed correctly. This is repo-local config
+            # (the checkout's own .git/config), so it is actor-agnostic: any
+            # agent, the admin, or a human over VS Code Remote picks it up,
+            # and it overrides any per-user global identity. Identity is only
+            # meaningful for a repo-backed workspace, so it rides the clone.
+            for git_key, value in (
+                ("user.name", template.git_user_name),
+                ("user.email", template.git_user_email),
+            ):
+                if value:
+                    # --local is explicit so the write can only ever land in
+                    # the checkout's .git/config, never the admin's global
+                    # ~/.gitconfig (git config defaults to global outside a repo).
+                    target.run(f"git -C {quoted_workspace} config --local {git_key} {shlex.quote(value)}")
 
         # Tmuxinator config (no tasks yet at workspace creation time)
         if template.tmuxinator:
@@ -152,15 +167,21 @@ def create_vm_workspace(
         # a first repair of this workspace is a no-op.
         apply_workspace_acls(target, workspace_path)
     except BaseException:
-        # Best-effort teardown of exactly what was created above: the same
-        # primitives the delete path uses (rm -rf the directory, groupdel the
-        # group), so partially-created state is tolerated (a failure at
-        # groupadd itself means the directory does not exist yet; rm -rf and
-        # groupdel check=False both no-op on the missing pieces). A cleanup
-        # failure must never mask the original create error, so it is caught
-        # and surfaced as a warning while the original propagates.
+        # A guest clone may survive the controller's cancellation or timeout.
+        # Only its unique attempt path is recursively removed until publication
+        # is confirmed. Preserve an occupied or unconfirmed final directory.
         try:
-            delete_vm_workspace(vm, config, ws_name, workspace_path, ws_group, logger=logger)
+            if attempt is not None:
+                target.run(f"rm -rf -- {shlex.quote(attempt)}", sudo=True, timeout=30)
+            delete_vm_workspace(
+                vm,
+                config,
+                ws_name,
+                workspace_path,
+                ws_group,
+                logger=logger,
+                empty_only=bool(template.repo) and not clone_published,
+            )
         except BaseException as cleanup_err:
             output.warn(
                 f"cleanup after failed workspace create '{ws_name}' failed: {cleanup_err}. "
@@ -179,6 +200,7 @@ def delete_vm_workspace(
     linux_group: str,
     *,
     logger: SSHLogger | None = None,
+    empty_only: bool = False,
 ) -> None:
     """Delete a workspace from a VM.
 
@@ -190,19 +212,35 @@ def delete_vm_workspace(
     legacy workspaces (older ``ws--`` prefix) drop the group they
     actually own.
 
+    ``empty_only`` removes only a failed create's empty reservation; an occupied
+    or unconfirmed directory and its group stay available for inspection.
     Group removal runs last, once the directory is gone and after the
     caller has removed the agent members; ``groupdel`` removes the group
     regardless of remaining supplementary members (the admin's included).
     """
-    import shlex
-
     from agentworks.ssh import SSHError
 
     assert vm.tailscale_host is not None
     target = transport(vm, config, logger=logger)
 
     try:
-        target.run(f"rm -rf {shlex.quote(workspace_path)}", sudo=True, timeout=30)
+        quoted = shlex.quote(workspace_path)
+        if empty_only:
+            removed = target.run(
+                f"if test -e {quoted} || test -L {quoted}; then rmdir -- {quoted}; fi",
+                sudo=True,
+                check=False,
+                timeout=30,
+            )
+            if not removed.ok:
+                output.warn(
+                    f"Workspace directory {workspace_path!r} and group {linux_group!r} were retained because "
+                    "the clone's publication was not confirmed and the path could not be confirmed empty. "
+                    "Inspect and preserve its contents before retrying."
+                )
+                return
+        else:
+            target.run(f"rm -rf {quoted}", sudo=True, timeout=30)
         session = console_session_name(ws_name)
         target.run(f"rm -f ~/.config/tmuxinator/{session}.yml", check=False, timeout=10)
         # Remove the workspace's Linux group. check=False so a group that
