@@ -62,6 +62,5 @@ Amended 2026-11-04: this ADR said ephemeral-key VMs rejoin the tailnet automatic
 that native-transport sessions opened the per-operation allows. `vm start` and the automatic start
 now only wait for the VM to answer over SSH and name `agw vm recover` when it does not; recover runs
 one repair script through the platform's own channel, which rejoins a node that needs a login. The
-per-operation allows now open for each such script and each `vm shell --platform` session (see the
-[transport take 2 SDD](../sdd/2026-10-20-transport-take2/)). The consequences above reflect the
-amended behavior; the decision stands.
+per-operation allows now open for each such script and each `vm shell --platform` session. The
+consequences above reflect the amended behavior; the decision stands.
