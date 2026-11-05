@@ -372,10 +372,12 @@ class _SpyRunCommand:
         env: dict[str, str] | None = None,
     ) -> _SpyResult:
         self.calls.append((command, env))
-        # Default the test-friendly results: socket probe says no existing socket,
-        # display-message returns a PID.
+        # Default the test-friendly results: no existing socket, an explicitly
+        # live workload, and a PID from its separate display-message query.
         if command.startswith("test -e "):
             return _SpyResult(ok=False)
+        if "#{pane_dead}" in command:
+            return _SpyResult(ok=True, stdout="0 \n")
         if "display-message" in command:
             return _SpyResult(ok=True, stdout="12345\n")
         return _SpyResult(ok=True)
@@ -744,6 +746,23 @@ def test_probe_transient_blip_retries_and_succeeds(
     assert sock == "/run/agentworks/agent-tmux-sockets/aw-claude/s1.sock"
     assert pid == 12345
     assert not any("kill-server" in c for c in spy_run.calls)
+
+
+@pytest.mark.parametrize("observation", ["", "unknown", "0 junk", "1 23\n0"])
+def test_invalid_pane_observation_never_authorizes_capture_or_cleanup(
+    spy_target: _SpyTarget,
+    stub_agent_socket_setup: None,
+    observation: str,
+) -> None:
+    spy_run = _ScriptedRunCommand(probe_answers=[observation, observation])
+
+    with pytest.raises(StateError) as caught:
+        _agent_create(spy_run, spy_target)
+
+    assert caught.value.entity_kind == "session" and caught.value.entity_name == "s1"
+    assert sum("#{pane_dead}" in command for command in spy_run.calls) == 2
+    assert not any("capture-pane" in command or "kill-server" in command for command in spy_run.calls)
+    assert not any("server-access" in command for command in spy_run.calls)
 
 
 def test_dead_pane_no_main_output_falls_back_to_alternate_screen(

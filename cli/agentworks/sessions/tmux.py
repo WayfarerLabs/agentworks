@@ -575,9 +575,9 @@ def _probe_pane_liveness(
     - ``("dead", status)``: the probe ran and tmux reported a dead pane;
       ``status`` carries ``#{pane_dead_status}`` (may be empty, e.g. for a
       signal death).
-    - ``("alive", "")``: the probe ran and tmux reported anything else.
-    - ``("unverified", "")``: the probe itself failed twice. This is NOT
-      proof of death: a transient transport failure against a healthy
+    - ``("alive", "")``: tmux explicitly reported a live pane.
+    - ``("unverified", "")``: neither attempt produced a valid observation.
+      This is NOT proof of death: a transient transport failure against a healthy
       workload lands here too, so callers must neither kill nor diagnose on
       this answer (the same unreachable-is-not-dead stance as
       ``stop_session``'s BrokenStateError path).
@@ -585,7 +585,7 @@ def _probe_pane_liveness(
     Both facts ride one round trip: ``#{pane_dead}`` and
     ``#{pane_dead_status}`` in a single display-message.
     """
-    q_session = exact_tmux_target(session_name)
+    q_session = exact_tmux_target(session_name + ":")
     cmd = (
         tmux_cmd(f"display-message -p -t {q_session} '#{{pane_dead}} #{{pane_dead_status}}'", socket_path)
         + " 2>/dev/null"
@@ -593,9 +593,12 @@ def _probe_pane_liveness(
     for _attempt in range(2):  # retry once: a single blip must not condemn the create
         result = run_command(cmd, check=False)
         if getattr(result, "ok", False):
-            flag, _sep, status = (getattr(result, "stdout", "") or "").strip().partition(" ")
+            observed = re.fullmatch(r"([01])(?: ([0-9]+))?", (getattr(result, "stdout", "") or "").strip())
+            if observed is None:
+                continue
+            flag, status = observed.groups()
             if flag == "1":
-                return ("dead", status.strip())
+                return ("dead", status or "")
             return ("alive", "")
     return ("unverified", "")
 
@@ -648,16 +651,14 @@ def _raise_workload_died(
 
 
 def _raise_workload_unverified(session_name: str, *, socket_path: str) -> NoReturn:
-    """Raise for a liveness probe that could not run at all.
+    """Raise when liveness probes produced no valid pane observation.
 
-    Deliberately kills nothing and captures nothing: an unreachable server
-    is not a dead workload (a transport blip against a healthy session
-    lands here), and killing on suspicion would turn a transient failure
-    into a real outage. The message must not blame the template.
+    Deliberately kills nothing and captures nothing: a failed or ambiguous
+    probe is not a dead workload. Killing on suspicion could turn a temporary
+    observation failure into a real outage. The message must not blame the template.
     """
     raise StateError(
-        "could not verify the session workload's state after launch "
-        "(transport failure probing the new tmux session); the session may still be running",
+        "could not verify the session workload's state after launch; the session may still be running",
         entity_kind="session",
         entity_name=session_name,
         hint=(
