@@ -548,6 +548,8 @@ def error(message: str) -> None:
 
 def confirm(message: str, default: bool = False) -> bool:
     """Present a yes/no question. Returns True for yes, False for no."""
+    if non_interactive():
+        return False
     return _handler.confirm(message, _current_level(), default)
 
 
