@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import urllib.error
 from io import BytesIO
@@ -324,6 +325,16 @@ class TestErrorHandling:
     @patch("urllib.request.urlopen")
     def test_transport_error_is_typed(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
         source = urllib.error.URLError("provider unavailable")
+        mock_urlopen.side_effect = source
+
+        with pytest.raises(ProxmoxAPIError) as caught:
+            api.next_id()
+
+        assert caught.value.__cause__ is source
+
+    @patch("urllib.request.urlopen")
+    def test_a_malformed_http_response_is_typed(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        source = http.client.IncompleteRead(b"partial")
         mock_urlopen.side_effect = source
 
         with pytest.raises(ProxmoxAPIError) as caught:

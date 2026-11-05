@@ -149,6 +149,14 @@ def test_a_rejected_token_on_the_ping_raises_at_once() -> None:
     assert caught.value.__context__ is None
 
 
+def test_a_lone_surrogate_in_the_output_is_replaced_rather_than_raised() -> None:
+    api = FakeAPI([{"exited": True, "exitcode": 0, "out-data": "a\ud800b", "err-data": "\udfff"}])
+
+    raw = run(api)
+
+    assert (raw.stdout, raw.stderr) == (b"a?b", b"?")
+
+
 def test_a_client_bug_on_the_ping_surfaces_at_once() -> None:
     """Only the API's own failures mean the agent is not answering yet."""
     api = FakeAPI([], pings=[TypeError("a bug in the client"), None])

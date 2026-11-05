@@ -83,9 +83,10 @@ def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: 
         if failure is not None:
             raise failure
         if cast("bool", status["exited"]):
+            # The API's JSON can carry a lone surrogate, which UTF-8 cannot encode.
             return RawRun(
-                cast("str", status.get("out-data", "")).encode("utf-8"),
-                cast("str", status.get("err-data", "")).encode("utf-8"),
+                cast("str", status.get("out-data", "")).encode("utf-8", errors="replace"),
+                cast("str", status.get("err-data", "")).encode("utf-8", errors="replace"),
             )
         time.sleep(min(POLL_INTERVAL_SECONDS, max(0.0, expires - time.monotonic())))
 

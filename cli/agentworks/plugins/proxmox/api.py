@@ -6,6 +6,7 @@ is via PVEAPIToken (token ID + secret), not session cookies.
 
 from __future__ import annotations
 
+import http.client
 import json
 import ssl
 import time
@@ -175,7 +176,7 @@ class ProxmoxAPI:
             err = ProxmoxAPIError(f"Proxmox API {method} {path} failed ({e.code}): {err_body}")
             err.code = e.code
             raise err from e
-        except (OSError, UnicodeError) as e:
+        except (OSError, UnicodeError, http.client.HTTPException) as e:
             raise ProxmoxAPIError(f"Proxmox API {method} {path} failed: {e}") from e
 
         if not resp_body:
