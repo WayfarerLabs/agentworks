@@ -1,7 +1,4 @@
-"""The workstation's Tailscale preflight: commands that reach a VM at its tailnet address need it.
-
-This module imports nothing from the legacy transport stack.
-"""
+"""The workstation's Tailscale preflight: commands that reach a VM at its tailnet address need it."""
 
 from __future__ import annotations
 

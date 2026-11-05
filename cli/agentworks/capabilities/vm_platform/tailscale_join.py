@@ -7,8 +7,6 @@ hands it to Tailscale on stdin, so it is in no argument on the workstation
 or the guest. The address read and the logout carry no key, so retrying a
 read never sends the key twice. :func:`log_out` is the one logout, for the
 settle here and for ``vm delete``.
-
-This module imports nothing from the legacy transport stack.
 """
 
 from __future__ import annotations

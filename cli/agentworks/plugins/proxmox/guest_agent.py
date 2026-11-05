@@ -11,8 +11,6 @@ characters), with whatever remains of the deadline, then
 or the deadline passes. QGA has no cancellation endpoint: at the deadline the
 result is empty, so the outcome is unknown, and nothing is dispatched again.
 No message holds the script, because it can carry a secret.
-
-This module imports nothing from the legacy transport stack.
 """
 
 from __future__ import annotations

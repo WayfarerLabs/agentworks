@@ -6,8 +6,6 @@ the detached create that must survive the workstation's connection. A remote
 command runs under the host user's login shell (``$SHELL -lc``), which is
 what puts Homebrew's ``limactl`` on its ``PATH``, through the host policy
 argv, so the operator's SSH configuration for the host applies.
-
-This module imports nothing from the legacy transport stack.
 """
 
 from __future__ import annotations

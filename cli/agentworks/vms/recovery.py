@@ -25,8 +25,6 @@ step's output is captured with its status, the first failure stops the
 sequence, and the buffer is printed once at the end with ``|| true``. A
 channel that drops mid-script therefore leaves the remaining steps running
 on the guest, and the outcome unknown.
-
-This module imports nothing from the legacy transport stack.
 """
 
 from __future__ import annotations

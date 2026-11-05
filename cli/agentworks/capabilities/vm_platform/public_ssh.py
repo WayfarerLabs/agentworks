@@ -12,8 +12,6 @@ read has no record to verify against.
 :class:`PublicAddressPlatform` is the clouds' shared base: it implements
 ``run_as_root``, ``read_host_keys`` and ``native_shell`` over one route-scoped connection,
 and each cloud supplies only how to read its live public address.
-
-This module imports nothing from the legacy transport stack.
 """
 
 from __future__ import annotations

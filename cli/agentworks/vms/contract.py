@@ -19,8 +19,6 @@ request runs them, and ``require_completed`` types their absence as
 ``VMNotReady``), the admin account (the connection authenticated as it), and
 Tailscale at the recorded address (the connection reached the VM there and
 verified its host key).
-
-This module imports nothing from the legacy transport stack.
 """
 
 from __future__ import annotations

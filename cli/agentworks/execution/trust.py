@@ -14,9 +14,6 @@ connection to a VM chooses one of three modes explicitly:
 
 Connections to hosts, such as Remote Lima's, are not VM trust and select
 :data:`HOST_TRUST`.
-
-This module imports nothing from the legacy transport stack; legacy code calls
-it, never the reverse.
 """
 
 from __future__ import annotations

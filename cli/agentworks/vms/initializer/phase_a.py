@@ -21,8 +21,7 @@ contract passed, and every ordinary command refuses a VM that is not
 complete. After the span come the platform's post-ready hook and a wait for
 the VM to answer again.
 
-The log is typed as the small protocol below, never as ``SSHLogger``: this
-module imports nothing from the legacy transport stack.
+The log is typed as the small protocol below, which ``SSHLogger`` satisfies.
 """
 
 from __future__ import annotations

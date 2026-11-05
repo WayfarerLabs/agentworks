@@ -7,8 +7,6 @@ or a refused key is neither waited out nor repeated against the VM's sshd
 (Debian 13's ``PerSourcePenalties`` penalizes repeated authentication
 failures). The caller owns what an exhausted wait means: whether to warn and
 proceed, or to fail.
-
-This module imports nothing from the legacy transport stack.
 """
 
 from __future__ import annotations

@@ -4,8 +4,6 @@ Each subclasses the ``agentworks.errors`` kind the failure belongs to. No
 message, ``repr`` or hint holds a stream, an environment value or script text:
 the only transcript an error may show is the last lines of ssh's own
 diagnostics, which the client keeps apart from the payload's output.
-
-This module imports nothing from the legacy transport stack.
 """
 
 from __future__ import annotations

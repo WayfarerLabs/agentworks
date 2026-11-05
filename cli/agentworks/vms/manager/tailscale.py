@@ -1,7 +1,4 @@
-"""Tailscale around a VM's power state: the reachability fast path, the wait after a start, delete's logout.
-
-This module imports nothing from the legacy transport stack.
-"""
+"""Tailscale around a VM's power state: the reachability fast path, the wait after a start, delete's logout."""
 
 from __future__ import annotations
 

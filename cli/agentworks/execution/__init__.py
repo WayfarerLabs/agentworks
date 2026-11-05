@@ -7,8 +7,6 @@ first contact only, :func:`enrollment_access`) and call its ``run``,
 their modules on first use: ``trust`` pulls in ``config``, about 250 ms, which
 a command that never connects should not pay. A test reaches every caller by
 patching the one attribute on this package.
-
-This package imports nothing from the legacy transport stack (HLA D14).
 """
 
 from __future__ import annotations

@@ -5,9 +5,6 @@ record when it is missing, under the operator's confirmation; run the repair
 script; read the tailnet address, settling it (and logging the node out when
 it cannot be read) only when the repair joined; then wait once for the VM to
 answer over SSH.
-
-This module imports nothing from the legacy transport stack: its operation
-log comes from a factory in ``_helpers``.
 """
 
 from __future__ import annotations
