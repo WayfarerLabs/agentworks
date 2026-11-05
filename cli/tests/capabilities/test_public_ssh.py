@@ -267,6 +267,24 @@ def test_a_create_s_wait_retries_a_refused_key_while_the_guest_agent_installs_it
     assert captured_output.warnings == []
 
 
+def test_a_refused_key_is_retried_at_the_longer_interval(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fast retries of a refused key would trip sshd's per-source penalties; other probes keep the short interval."""
+    clock = _Clock(monkeypatch)
+    sleeps: list[float] = []
+    advance = clock.sleep
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        advance(seconds)
+
+    monkeypatch.setattr("agentworks.capabilities.vm_platform.public_ssh.time.sleep", sleep)
+    _refusing_the_key_until(monkeypatch, clock, 30)
+
+    target().wait_until_answering(seconds=600, retry_refused_key=True)
+
+    assert sleeps == [public_ssh.REFUSED_KEY_INTERVAL_SECONDS] * 3
+
+
 def test_a_refusal_standing_at_the_bound_is_what_raises(
     monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
 ) -> None:

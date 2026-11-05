@@ -57,6 +57,9 @@ PROBE_WAIT_SECONDS = 120
 """How long a VM gets to answer at its public address: a fresh allow, or a VM that has just started, needs time."""
 PROBE_DEADLINE_SECONDS = 10
 PROBE_INTERVAL_SECONDS = 3
+REFUSED_KEY_INTERVAL_SECONDS = 10
+"""The pause after a refused key, when the wait retries it: sshd's PerSourcePenalties (Debian 13) penalizes an
+address that fails to authenticate often, after which every probe's outcome is unknown."""
 
 PROBE_FAILURE_HINT = (
     "The temporary SSH allow is scoped to your detected public IP; if your SSH traffic leaves through "
@@ -135,7 +138,8 @@ class PublicSSH:
         script raises at once: the VM answered, and waiting cannot change
         either. So does a refused key, unless ``retry_refused_key`` (a VM
         being created, whose guest agent may install the key after sshd
-        starts); then a refusal still standing at the bound is what raises.
+        starts); then the next probe waits :data:`REFUSED_KEY_INTERVAL_SECONDS`,
+        and a refusal still standing at the bound is what raises.
         When no probe completes, :data:`PROBE_FAILURE_HINT` is warned before
         the error.
         """
@@ -160,7 +164,8 @@ class PublicSSH:
             if not waited:
                 output.detail("Waiting for the VM to answer at its public address...")
                 waited = True
-            time.sleep(min(PROBE_INTERVAL_SECONDS, remaining))
+            interval = PROBE_INTERVAL_SECONDS if refused is None else REFUSED_KEY_INTERVAL_SECONDS
+            time.sleep(min(interval, remaining))
         if refused is not None:
             raise refused
         output.warn(PROBE_FAILURE_HINT)

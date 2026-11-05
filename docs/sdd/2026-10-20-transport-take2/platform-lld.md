@@ -262,12 +262,14 @@ the agent, as for every VM connection.
   runs, and a booting sshd refuses fast, so the bound is time rather than a count of probes. `true`
   reads nothing, so retrying it is allowed. A key refusal (`KeyRefused`, a `ConnectivityError`) or
   `TrustMismatch` raises at once: on an enrolled VM, waiting cannot change either. Create passes
-  `retry_refused_key=True`, since a cloud's guest agent may install the key after sshd starts; a
-  refusal still standing at the bound then raises itself, with no firewall warning. So does a probe
-  with no start marker whose channel tail has a line starting `sudo:` (sudo's prefix when `-n`
-  refuses), which `root_script.run` otherwise reports as an unknown outcome: it raises `StateError`
-  saying the VM answered but its admin lacks passwordless sudo, rather than retrying and warning the
-  firewall hint.
+  `retry_refused_key=True`, since a cloud's guest agent may install the key after sshd starts; after
+  a refusal the next probe waits 10 s (`REFUSED_KEY_INTERVAL_SECONDS`), so about 60 failed logins
+  rather than 200 do not trip sshd's `PerSourcePenalties` (Debian 13), and a refusal still standing
+  at the bound then raises itself, with no firewall warning. So does a probe with no start marker
+  whose channel tail has a line starting `sudo:` (sudo's prefix when `-n` refuses), which
+  `root_script.run` otherwise reports as an unknown outcome: it raises `StateError` saying the VM
+  answered but its admin lacks passwordless sudo, rather than retrying and warning the firewall
+  hint.
 - `shell() -> int` runs the `TERMINAL` argv with no remote command (a login shell) and returns its
   status.
 
